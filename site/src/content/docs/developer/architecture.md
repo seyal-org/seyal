@@ -3,7 +3,7 @@ title: Architecture Orientation
 description: A map of Seyal's architecture and the authoritative documents behind it.
 ---
 
-Seyal is an agent-native terminal workspace, but terminal execution never depends synchronously on agents, cloud services, licensing, persistence, or semantic processing.
+Seyal is an agent-native terminal workspace, but terminal execution never depends synchronously on agents, cloud services, persistence, or semantic processing.
 
 ![Seyal architecture layers](/images/seyal-architecture.svg)
 
@@ -25,7 +25,7 @@ PTY
 
 ## State ownership
 
-The runtime is authoritative. A terminal execution owns one terminal endpoint/PTY and one canonical terminal state. GUI views, Blocks, persistence, agents, and other presentations must not create competing VT/grid authorities.
+The runtime is authoritative for execution orchestration. A terminal execution owns one terminal endpoint/PTY and uses one canonical terminal state authority. GUI views, Blocks, persistence, agents, and other presentations must not create competing VT/grid authorities.
 
 ## Blocks
 
@@ -35,14 +35,9 @@ Blocks represent real terminal execution. They do not create another PTY, own an
 
 GUI detach and runtime survival are separate from crash recovery, scrollback persistence, and reboot recovery. Journaling cannot reconstruct a live PTY.
 
-## OSS and commercial boundary
+## Repository isolation
 
-```text
-seyal-commercial → pinned Seyal OSS
-Seyal OSS        ↛ proprietary code
-```
-
-Terminal fundamentals live in OSS. Proprietary Pro/Teams/Enterprise capabilities compose above the pinned public foundation.
+Seyal OSS is the canonical public foundation and must remain independently cloneable, buildable, testable and useful. External/private consumers may depend on public Seyal capabilities; Seyal OSS must not depend on non-OSS/private implementation details.
 
 ## Authoritative reading order
 
