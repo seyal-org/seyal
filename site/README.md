@@ -1,6 +1,6 @@
 # Seyal documentation site
 
-This directory is the public documentation product for Seyal.
+This directory is the public documentation product for Seyal OSS.
 
 ## Audiences
 
@@ -28,10 +28,10 @@ Direct `npm` commands inside `site/` remain implementation details of these Make
 
 ## Media policy
 
-Images are encouraged when they improve understanding. Prefer diagrams and real screenshots. A screenshot must match a real current UI and must not expose credentials, customer data, tokens, private paths, or other sensitive material.
+Images are encouraged when they improve understanding. Prefer diagrams and real screenshots. A screenshot must match a real current UI and must not expose credentials, private/customer data, tokens, private paths, signing identities, or other sensitive material.
 
 Do not use generated concept UI as evidence that a workflow exists. Tutorial videos should be created only after the relevant UI/flow is stable; record the demonstrated Seyal version or commit and retire stale videos deliberately.
 
-## Commercial documentation
+## Scope
 
-Public OSS user and contributor documentation lives here. Proprietary Pro/Teams/Enterprise administration, governance, billing, hosted services, or private deployment documentation belongs to `seyal-commercial` or a later publishing composition that consumes this public site. OSS must not depend on private documentation.
+This site documents the public Seyal OSS product and contributor experience. Do not publish private implementation, account, infrastructure, customer, pricing, entitlement, or internal service details here.
