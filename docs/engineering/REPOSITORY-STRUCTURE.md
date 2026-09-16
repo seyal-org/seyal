@@ -86,9 +86,9 @@ A second native implementation language requires concrete evidence that Swift pl
 └─ scripts/
 ```
 
-Names may be adjusted during M001 only if evidence shows a smaller correct layout, but authority/dependency rules below may not be silently changed.
+Names may be adjusted during active milestones only if evidence shows a smaller correct layout, but authority/dependency rules below may not be silently changed.
 
-Do not create speculative `headless/`, `lite/`, `full/`, `agent/`, `pro/` or `enterprise/` crates merely to mirror product names. Composition roots should be introduced only when a real binary/application boundary exists.
+Do not create speculative composition-specific crates merely to mirror future product names. Composition roots should be introduced only when a real binary/application boundary exists.
 
 ## OSS variants
 
@@ -108,7 +108,7 @@ The exact binaries/packages are decided by active milestones. The architectural 
 ## Ownership
 
 - `seyal-core`: stable identity/value types only. No PTY, VT, Runtime, transport or UI ownership.
-- `seyal-terminal`: canonical terminal semantics only. No GUI, licensing, cloud, workspace Blocks or process ownership.
+- `seyal-terminal`: canonical terminal semantics only. No GUI, cloud, workspace Blocks or process ownership.
 - `seyal-exec`: terminal endpoint/PTY, child lifecycle, `TerminalExecution`, and the macOS safe readiness-composition seam; consumes terminal semantics. Reactor registration never owns the execution.
 - `seyal-workspace` (logical): Block/workspace metadata keyed by stable execution/history identities; no PTY/VT ownership. M001 keeps this composition inside `seyal-runtime`.
 - `seyal-protocol`: versioned messages/projection types and validation; no authoritative terminal state.
@@ -142,27 +142,27 @@ Avoid circular dependencies. If `seyal-core` becomes a dumping ground, split or 
 
 The current Cargo workspace is acyclic by construction under `scripts/check-layering.py`. Forbidden production edges include `seyal-client → seyal-runtime` and `seyal-protocol → seyal-runtime`. The public `Foundation Quality` `repository-policy` job runs this check on every PR and `scripts/test-ci-validators.py` proves controlled forbidden dependencies are rejected. Dev-dependencies are intentionally excluded so integration tests can compose the real Runtime without contaminating production architecture.
 
-## Commercial repository boundary
+## Repository isolation
 
-`seyal-commercial` is outside this repository and consumes a pinned Seyal OSS revision as a Git submodule once the canonical public repository identity is finalized.
+External/private consumers may depend on public Seyal OSS capabilities, but the dependency direction must never reverse:
 
 ```text
-seyal-commercial/private → Seyal OSS
-Seyal OSS                ↛ proprietary code
+external/private consumer → Seyal OSS
+Seyal OSS                 ↛ non-OSS/private implementation
 ```
 
-The public repo does not contain private implementations, private SKU modules or license-aware branches. A public extension seam is acceptable only when it is a coherent capability useful to any OSS user and required by a real milestone.
+The public repository does not contain private implementation details or entitlement-aware branches. A public extension seam is acceptable only when it is a coherent capability useful to any OSS user and required by a real milestone.
 
 ## Forbidden dependencies
 
-- terminal → workspace/Blocks, agents, cloud, licensing, telemetry, UI/native frameworks
-- exec → renderer/UI/licensing/cloud/runtime ownership
-- runtime readiness → GUI/Swift, renderer, agents, licensing, cloud or commercial code
+- terminal → workspace/Blocks, agents, cloud, telemetry, UI/native frameworks
+- exec → renderer/UI/cloud/runtime ownership
+- runtime readiness → GUI/Swift, renderer, agents, cloud or non-OSS/private implementation
 - workspace → PTY ownership or canonical VT mutation
 - render → mutable Runtime/TerminalState internals
 - client → Runtime production dependency
 - macOS app → a second VT/grid implementation
-- OSS production code → proprietary/commercial packages or commercial entitlement state
+- OSS production code → non-OSS/private packages or private entitlement state
 
 Enforce these with Cargo workspace layering checks/lints or a small dependency-graph CI script as physical crates are introduced.
 
