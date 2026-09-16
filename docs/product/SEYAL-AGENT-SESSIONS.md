@@ -7,17 +7,9 @@
 
 ## Purpose
 
-Seyal has two distinct concepts that must never be conflated:
+**Seyal Agent Sessions** means understanding and managing agent sessions running in the execution workspace without making those agents terminal authority.
 
-```text
-Seyal Agent Sessions
-= understand and manage agent sessions running in the execution workspace
-
-Seyal AI Agent
-= Seyal's separate first-party AI agent product/composition
-```
-
-This document defines **Seyal Agent Sessions** only. It refines the existing OSS capabilities around `SY-006`, `F-011`, `F-037` and the agent lifecycle/Attention contracts; it does not create a second agent domain model or authorize implementation ahead of the owning milestone.
+This document defines only the public OSS session-management capability. It refines existing capabilities around `SY-006`, `F-011`, `F-037` and the agent lifecycle/Attention contracts; it does not create a second agent domain model or authorize implementation ahead of the owning milestone.
 
 ## Product contract
 
@@ -97,38 +89,15 @@ structured adapter
     > low-confidence terminal heuristics
 ```
 
-Low-confidence terminal heuristics may improve presentation only. They may not become authentication, authorization, approval, audit or billing truth.
+Low-confidence terminal heuristics may improve presentation only. They may not become authentication, authorization, approval, audit or cost truth.
 
-## Relationship to Seyal AI Agent
+## OSS independence
 
-The separate first-party **Seyal AI Agent** may use the same canonical `WorkItem` / `Attempt` / `AgentRun` / `Attention` / execution model and therefore appear in the same Agent Sessions UI.
-
-```text
-Claude Code ───┐
-Codex ─────────┤
-Cursor Agent ──┤
-OpenCode ──────┼──> Seyal Agent Sessions UX
-Seyal AI Agent ┘        │
-                         └─ same canonical AgentRun/session projection
-```
-
-This does **not** make external agents part of the Seyal AI Agent product, and it does not give the Seyal AI Agent a competing session model.
-
-## OSS/commercial boundary
-
-Seyal Agent Sessions is an OSS workspace capability. It must remain useful without:
-
-- a Seyal AI subscription;
-- managed inference or bundled model credits;
-- a Seyal account;
-- hosted/cloud agents;
-- proprietary routing;
-- a Seyal-trained model;
-- commercial entitlement checks.
+Seyal Agent Sessions must remain useful with ordinary locally installed agents and without requiring a Seyal-hosted service.
 
 OSS may own generic local primitives and capability seams that are independently useful to external agents and OSS consumers, including `AgentRun` identity, harness capability protocols, Attention integration, local context/evaluation/routing/workflow primitives and terminal-safe control seams.
 
-First-party subscription packaging, managed inference, proprietary first-party agent policy, hosted execution, learned/managed routing, commercial entitlements and future proprietary Seyal-model IP belong above the OSS boundary in `seyal-commercial` when justified by commercial milestones.
+Provider/service implementation details outside the public repository are not part of this product contract.
 
 ## Performance and authority invariants
 
@@ -147,11 +116,9 @@ It must never:
 
 This document does not define:
 
-- the Seyal AI Agent subscription or pricing model;
-- managed model-provider contracts;
-- proprietary harness policy;
-- cloud worker architecture;
+- provider pricing or account terms;
+- private service architecture;
 - model training;
 - provider-specific feature promises.
 
-Those belong to their owning commercial/product R&D and implementation gates.
+Those concerns are outside this OSS product contract.
