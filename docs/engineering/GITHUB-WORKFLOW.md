@@ -26,7 +26,7 @@ Recommended Project views once enabled:
 - Ready queue: `Status = Ready`, grouped by milestone/parent.
 - Active: In Progress + In Review + Validation.
 - Blocked: Status = Blocked with dependency fields visible.
-- M001: filtered to the M001 milestone/parent hierarchy.
+- Milestone views filtered to the applicable milestone/parent hierarchy.
 
 ## Issue hierarchy and dependencies
 
@@ -34,34 +34,28 @@ Native sub-issues and native blocked-by/blocking relationships are preferred whe
 
 Until those controls are available, the approved temporary fallback is explicit parent/dependency text in the Issue body. The relationship must be unambiguous and kept current; do not create a second spreadsheet or planning database merely to emulate GitHub-native relationships.
 
-This fallback is sufficient for current M001 work and must not block terminal implementation. Migrate to native relationships when the repository moves to an organization/control plane that supports them cleanly.
-
 ## Issue types
 
 Preferred native types once the repository is organization-owned:
 
 ```text
-Epic     # custom organization issue type
-Feature  # native/default organization issue type
-Task     # native/default organization issue type
-Bug      # native/default organization issue type
+Epic
+Feature
+Task
+Bug
 ```
 
-GitHub manages native Issue Types at the organization level. While Seyal remains under a personal account, Issue Forms plus clear titles are the approved temporary fallback. Organization transfer is recommended before contributor/team scale, but lack of native Issue Types is not an M001 implementation blocker.
+While Seyal remains under a personal account, Issue Forms plus clear titles are the approved temporary fallback. Organization transfer is recommended before contributor/team scale, but lack of native Issue Types is not an implementation blocker.
 
 ## Labels
 
-Keep labels orthogonal to native type. Recommended small set:
+Keep labels orthogonal to native type.
 
-### Area
+Area labels include `area:terminal`, `area:vt`, `area:exec`, `area:runtime`, `area:render`, `area:macos`, `area:blocks`, `area:protocol`, `area:workspace`, and `area:agents`.
 
-`area:terminal`, `area:vt`, `area:exec`, `area:runtime`, `area:render`, `area:macos`, `area:blocks`, `area:protocol`, `area:workspace`, `area:agents`
+Special state/risk labels include `blocked`, `needs-spec`, `needs-adr`, `performance-sensitive`, `security-sensitive`, and `breaking-change`.
 
-### Special state/risk
-
-`blocked`, `needs-spec`, `needs-adr`, `performance-sensitive`, `security-sensitive`, `breaking-change`
-
-Use `type:architecture`, `type:performance`, `type:security`, or `type:spike` only where native types do not express the distinction. Avoid duplicating Feature/Bug/Task as labels after organization Issue Types are available.
+Use `type:architecture`, `type:performance`, `type:security`, or `type:spike` only where native types do not express the distinction.
 
 ## Branch / pull-request protection
 
@@ -73,93 +67,54 @@ The policy is fixed even when repository settings cannot be inspected or configu
 - core/high-risk changes require independent review when an independent reviewer is available;
 - stale approvals must not be treated as valid after a material head change.
 
-A GitHub ruleset/branch-protection configuration should enforce these rules when available. Lack of platform-level enforcement is a governance-hardening item, not permission to bypass the policy and not a blocker for the current owner-controlled M001 work.
+A GitHub ruleset/branch-protection configuration should enforce these rules when available. Lack of platform-level enforcement is not permission to bypass policy.
 
-### Residual risk (AUD-P2-004) — closed
+### Required ruleset status
 
-As of the foundation P2/P3 closure (#811), the live `master` ruleset **requires**
-status checks `repository-policy`, `rust-and-harness-quality`, and
-`native-macos-smoke` with `strict_required_status_checks_policy: true`. Pull
-requests remain mandatory. Independent review stays a process gate while the
-repository is solo-owned (`required_approving_review_count: 0`); requiring a
-numeric review count without a second trusted reviewer identity is weak.
-Foundation Quality therefore runs on `pull_request` only; a post-merge
-`push` re-run would duplicate those required jobs without adding merge
-protection. Renaming any required job must update this document and the
-ruleset together.
+The live `master` ruleset requires status checks `repository-policy`, `rust-and-harness-quality`, and `native-macos-smoke` with strict required status checks. Pull requests remain mandatory. Independent review stays a process gate while the repository is solo-owned; requiring a numeric review count without a second trusted reviewer identity would be weak.
 
-**AUD-P2-003** (scroll path keep-as-is after measurement) remains closed: no
-scroll algorithm rewrite; see `crates/seyal-terminal/benches/vt_scroll_state.rs`.
+Renaming any required job must update this document and the ruleset together.
 
 ## Public OSS repository CI
 
-The canonical public Seyal repository owns the authoritative GitHub Actions quality gates. The `Foundation Quality` workflow uses minimal `contents: read` permissions, pins external actions by reviewed full commit SHA, cancels superseded runs on the same ref, and keeps fast PR responsibilities explicit.
+The canonical public Seyal repository owns the authoritative GitHub Actions quality gates. The `Foundation Quality` workflow uses minimal permissions, pins external actions by reviewed full commit SHA, cancels superseded runs on the same ref, and keeps fast PR responsibilities explicit.
 
-### Required Foundation Quality jobs (every PR)
-
-These stable job names are the Pass-1 required checks on `master`. Foundation Quality runs on `pull_request` only; post-merge `push` to `master` is intentionally omitted so merge does not re-spend the full suite after the same jobs already gated the PR. A renamed/replaced job must update this document and the ruleset together; a missing check must never be interpreted as a pass.
+### Required Foundation Quality jobs
 
 - **`repository-policy`** (ubuntu) — shell syntax, governance structure, local documentation links, architecture layering, hot-path/benchmark/UI-test contracts, harness contracts, fuzz-registry smoke, and controlled negative fixtures proving repository validators reject invalid inputs.
-- **`rust-and-harness-quality`** (ubuntu) — pinned Rust bootstrap, production Rust workspace build, `make check` (format, Clippy with warnings denied, unit tests, layering and harness checks), and `make bench` as a **portable harness smoke** (macOS-only native benches are skipped; no performance claim).
-- **`native-macos-smoke`** (macos-15 + Xcode 16.4) — pinned Rust plus native toolchain bootstrap; Rust workspace `make build` (no headed `Seyal.app` until #883); `make check`; `make test` (Rust unit/PTY; native XCTest/XCUIAutomation skipped while `macos/Seyal` is absent); and `make bench` with:
-  - `SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=0` — hosted runners may be headless and cannot deliver `CAMetalDisplayLink` callbacks; presentation-proxy samples are recorded as `PLATFORM_LIMITED` rather than failing the job;
-  - `SEYAL_CODESIGN_IDENTITY=-` — unsigned CI artifact only, not a release/signing proof.
+- **`rust-and-harness-quality`** (ubuntu) — pinned Rust bootstrap, production Rust workspace build, `make check`, and `make bench` as a portable harness smoke. macOS-only native benches are skipped and no performance claim is made.
+- **`native-macos-smoke`** (macOS) — pinned Rust plus native toolchain bootstrap; Rust/native build/test/check surfaces and the hosted-runner benchmark mode defined by repository scripts.
 
-`SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=0` is an honesty contract, not a weakened threshold. Interactive/local acceptance and Pass 6/10 headed presentation evidence must run with `SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=1` (or an equivalent headed host that produces presentation-proxy samples). **Green Foundation CI with display-link off is not Pass 6 presentation proof and must not be cited as such in Pass 10 evidence.**
+Hosted-runner display-link-off evidence is not headed presentation proof. Interactive/local acceptance and milestone headed presentation evidence require a controlled headed host according to the owning milestone/specification.
 
 ### Path-filtered and non-Foundation workflows
 
-These are **not** Foundation required checks. A green Foundation run can therefore succeed without them:
+These are not Foundation required checks, so a green Foundation run may succeed without them:
 
 | Workflow / gate | Trigger | What it proves | What it does **not** prove |
 |---|---|---|---|
-| `Docs` (`.github/workflows/docs.yml`) | path-filtered to `site/**`, docs skills, and itself | Astro docs build with SHA-pinned actions and `npm ci` against `site/package-lock.json` | product/runtime correctness |
-| `Pass 5 Production Fuzz` (`.github/workflows/pass5-fuzz.yml`) | path-filtered to runtime/exec/protocol/fuzz surfaces (plus `workflow_dispatch`) | short libFuzzer campaigns (~30s) against locked fuzz workspace deps | continuous / milestone-length fuzz campaigns; Foundation already green without this workflow |
-| Fuzz registry smoke inside `repository-policy` | every Foundation run | registry/corpus/adapter smoke via `scripts/fuzz-smoke.py` | libFuzzer campaign coverage or “fuzz clean” Pass 10 evidence |
+| `Docs` | path-filtered to site/docs tooling | static documentation validation | product/runtime correctness |
+| production fuzz workflow | path-filtered to affected runtime/exec/protocol/fuzz surfaces | short libFuzzer campaigns | milestone-length continuous fuzz evidence |
+| fuzz registry smoke inside `repository-policy` | every Foundation run | registry/corpus/adapter smoke | full fuzz campaign coverage |
 
-Pass 10 continuous fuzz expectations: registry smoke is continuous on Foundation; path-filtered libFuzzer campaigns are targeted PR evidence only. Milestone “fuzz clean” / long-running campaign evidence is **controlled-host or explicit campaign evidence**, never inferred from a green Foundation run alone. Fuzz workspace dependencies are pinned in `fuzz/Cargo.lock`; the path-filtered workflow verifies `--locked` metadata before building.
+Long-running fuzz, headed presentation, absolute latency/CPU/RSS, GPU and reconnect/cleanup sign-off remain controlled-host or explicit campaign evidence where the owning milestone requires them.
 
-### Controlled-host-only gates (not CI proof)
+### Host/image nondeterminism
 
-Shared CI absolute latency/CPU/RSS and headless display-link-off benches are diagnostic at best. The following remain controlled-host (or otherwise non-CI) evidence by design:
-
-- headed Pass 6 presentation-proxy / `CAMetalDisplayLink` budgets (`SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=1`);
-- Pass 9 five-cohort production budget artifacts validated by `scripts/check-pass9-production-budget.py` (CI/`make check` only runs the validator `--self-test`);
-- absolute performance, RSS, thread, GPU, and reconnect/cleanup sign-off tables used for Pass 10 criterion `PASS`;
-- long-running or corpus-expanding fuzz campaigns beyond the short path-filtered PR jobs.
-
-### Host/image nondeterminism (classified, not silently claimed fixed)
-
-`native-macos-smoke` and `production-macos-state-fuzz` pin `macos-15` and select `/Applications/Xcode_16.4.app` (#764) so Metal/terminfo smoke is less sensitive to silent GitHub image drift. That pin reduces host nondeterminism; it still does **not** make shared CI a substitute for controlled same-host Pass 10 measurements, and it must not be cited as bit-reproducible Metal/presentation evidence or absolute latency/RSS proof. Keep `SEYAL_REQUIRE_DISPLAY_LINK_BENCHMARK=0` on hosted runners; headed Pass 6/10 presentation evidence remains controlled-host only.
+Hosted macOS CI pins the repository-selected runner/toolchain configuration to reduce host nondeterminism. This still does not make shared CI a substitute for controlled same-host performance/presentation measurements, and it must not be cited as bit-reproducible Metal/presentation evidence or absolute latency/RSS proof.
 
 ### Action pinning and docs supply chain
 
-External GitHub Actions must be pinned by reviewed full commit SHA (with a human-readable version comment). Floating tags such as `@v4` are forbidden in repository workflows. The Docs workflow pins `actions/checkout` and `actions/setup-node` the same way Foundation does, and installs docs dependencies with `npm ci` against the committed `site/package-lock.json`.
+External GitHub Actions must be pinned by reviewed full commit SHA with a human-readable version comment. Floating tags are forbidden in repository workflows. Documentation dependencies are installed against the committed lockfile.
 
-Repository-owned validators are self-tested through safe temporary negative fixtures. The negative suite proves governance, local-link, architecture-layering, workspace and harness validators fail for controlled violations and for the expected reason. Rust compiler/formatter/Clippy and Xcode/native build failures are enforced by their own non-zero tool exits rather than fake production code.
+Repository-owned validators are self-tested through safe temporary negative fixtures. Compiler/formatter/Clippy and native build failures are enforced by their own non-zero tool exits rather than fake production code.
 
-Deeper scheduled/release or targeted gates are added only as their real production surfaces exist:
+Deeper scheduled/release or targeted gates are added only as their real production surfaces exist, including retained VT conformance, deeper fuzz/sanitizer campaigns, renderer/native validation, broad PTY/runtime failure matrices, controlled-host resource regression suites, and dependency/security scanning.
 
-- retained VT conformance corpus;
-- active fuzz campaigns and sanitizers beyond registry smoke / short path-filtered PR campaigns;
-- deeper renderer/native validation;
-- broad PTY/runtime failure matrix;
-- performance/RSS/thread/GPU regression suites on controlled hosts;
-- dependency/security scanning.
+## Repository isolation
 
-Pass 1 does not claim these deferred gates are active merely because their harness locations exist. Expensive/noisy checks should be targeted rather than making every PR unusable. Green Foundation CI is incomplete Pass 10 proof; see `docs/engineering/M001-PASS10-VALIDATION.md` for CI vs controlled-host vs `PLATFORM_LIMITED` provenance rules.
-
-
-## Private `seyal-commercial` CI policy
-
-`seyal-commercial` is a private superproject that consumes a pinned Seyal OSS revision at `oss/seyal`.
-
-For now, do **not** add GitHub-hosted Actions workflows to the private repository because of private-repository CI cost. This is a temporary execution-cost decision, not permission to lower engineering standards.
-
-Commercial PRs must still record the canonical local build/test/check/integration evidence relevant to the change. When commercial code becomes substantial, introduce private CI using self-hosted runners or paid hosted capacity rather than relying indefinitely on manual validation.
-
-The public OSS workflow must never be moved into the private repository or made dependent on the private repository.
+This public repository owns its own CI and quality authority. External/private consumers may validate their own composition separately, but this repository must not depend on or disclose their repositories, infrastructure, CI configuration, access model, or implementation details.
 
 ## Repository ownership note
 
-The OSS repository is currently public under a personal GitHub account. Moving Seyal to an organization remains recommended before external contributor/team scale so native Issue Types, Projects, team reviewers, rulesets and future enterprise administration can be configured cleanly. That migration is governance hardening and does not block M001 under the temporary fallbacks above.
+The OSS repository is currently public under a personal GitHub account. Moving Seyal to an organization remains recommended before external contributor/team scale so native Issue Types, Projects, team reviewers and rulesets can be configured cleanly. That migration is governance hardening and does not block current milestone work under the temporary fallbacks above.
