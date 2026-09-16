@@ -108,8 +108,6 @@ The agent bootstrap materializes the reviewed AI-SDLC pin and configures the app
 
 The agent bootstrap may provision only the approved project-required tooling above and may mutate supported coding-agent configuration. It must not be required for `make build`, `make test`, `make check`, `make bench`, CI, or terminal/runtime operation. It must not write credentials to the repository.
 
-When `seyal-commercial` invokes the pinned OSS `bootstrap-agents` target from its own bootstrap, the same minimal tooling policy applies.
-
 ## Project-context use
 
 Seyal's tracked `.sdlc/graph/context-index.json` is a compact derived navigation index. It never overrides accepted architecture, ADRs, specifications, milestone contracts, code, tests, or approved decisions.
