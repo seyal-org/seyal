@@ -12,7 +12,7 @@
 - **Topology:** Debug `RustDisplayBridge` + `RuntimeLifecycleRecoveryCoordinator` + `MetalTerminalRenderer` prepare/release (same boundary as merge-acceptance; not full AppKit present)
 - **Abrupt fault:** `socket_shutdown_owned_disconnect`
 - **Fresh Runtime:** one Runtime helper process per cohort
-- **Validator:** `python3 scripts/check-pass9-production-budget.py --expected-head 21e8e6976c3445ca582bcfe6dd157109cfccdfd1 /Users/mahboob/Developer/seyal-commercial/oss/seyal/docs/evidence/pass9-release-qualification-21e8e6976c34.json`
+- **Validator:** `python3 scripts/check-pass9-production-budget.py --expected-head 21e8e6976c3445ca582bcfe6dd157109cfccdfd1 <workspace>/docs/evidence/pass9-release-qualification-21e8e6976c34.json`
 - **Dry run:** 0
 
 Independent reviews remain required. This report does not self-certify release qualification.
