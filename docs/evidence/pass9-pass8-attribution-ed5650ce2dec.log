@@ -1,13 +1,13 @@
    Compiling libc v0.2.189
-   Compiling seyal-core v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-core)
-   Compiling seyal-terminal v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-terminal)
-   Compiling seyal-runtime v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-runtime)
-   Compiling seyal-render v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-render)
-   Compiling seyal-protocol v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-protocol)
-   Compiling seyal-exec v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-exec)
-   Compiling seyal-client v0.0.0 (/Users/mahboob/Developer/seyal-commercial/oss/seyal/crates/seyal-client)
+   Compiling seyal-core v0.0.0 (<workspace>/crates/seyal-core)
+   Compiling seyal-terminal v0.0.0 (<workspace>/crates/seyal-terminal)
+   Compiling seyal-runtime v0.0.0 (<workspace>/crates/seyal-runtime)
+   Compiling seyal-render v0.0.0 (<workspace>/crates/seyal-render)
+   Compiling seyal-protocol v0.0.0 (<workspace>/crates/seyal-protocol)
+   Compiling seyal-exec v0.0.0 (<workspace>/crates/seyal-exec)
+   Compiling seyal-client v0.0.0 (<workspace>/crates/seyal-client)
     Finished `bench` profile [optimized] target(s) in 2.85s
-     Running benches/pass7_input_resize.rs (/var/folders/jg/42_krzk50wx37y55whwswcpc0000gn/T/cursor-sandbox-cache/35eff5fcaba809c0366c1f5fe57878f7/cargo-target/release/deps/pass7_input_resize-2932ebe34b281e6c)
+     Running benches/pass7_input_resize.rs (<temporary-cargo-target>/release/deps/pass7_input_resize-2932ebe34b281e6c)
 pass7_input_resize architecture=production_client_UDS_Runtime_PTY performance_claim=false percentile_method=nearest_rank repetitions=120 pass6_baseline_reference=docs/engineering/M001-PASS6-METAL-RENDERER.md
 pass7_host macos_version=26.5.2 macos_build=25F84 model="Mac17,9" hardware="Apple M5 Pro" arch=aarch64 rust="rustc 1.98.0 (88d9e12ae 2026-08-18)" build_mode=release commit=ed5650ce2dec4b278562fe00dcc73e41bc6e227d repetitions=120 percentile_method=nearest_rank cpu_rss_sources=ps_and_usr_bin_time performance_claim=false
 pass7_latency boundary=controlled_native_callback_to_client_admission classification=MEASURED sample_count=120 p50_us=0.125 p95_us=0.292 p99_us=1.000 max_us=1.208 performance_claim=false
