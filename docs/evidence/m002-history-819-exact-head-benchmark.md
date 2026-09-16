@@ -118,7 +118,7 @@ attribution, or release performance acceptance.
 The retained parser-state mutation seed also passed:
 
 ```text
-SEYAL_FUZZ_INPUT=/Users/mahboob/Developer/seyal-commercial/oss/.worktrees/issue-819-history-store/fuzz/corpus/parser-state-mutation/seed-history-unicode-resize.txt \
+SEYAL_FUZZ_INPUT=<workspace>/fuzz/corpus/parser-state-mutation/seed-history-unicode-resize.txt \
 cargo test -p seyal-terminal --test fuzz_smoke parser_state_mutation_seed -- --ignored --exact --nocapture
 1 passed; 0 failed
 ```
