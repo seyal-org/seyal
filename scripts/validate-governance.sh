@@ -16,10 +16,10 @@ required=(
   docs/engineering/PERFORMANCE.md
   docs/engineering/SECURITY.md
   docs/engineering/REPOSITORY-STRUCTURE.md
-  docs/engineering/OSS-COMMERCIAL-BOUNDARY.md
+  docs/engineering/OSS-REPOSITORY-ISOLATION.md
   docs/engineering/M001-DISTRIBUTION.md
   docs/engineering/GITHUB-WORKFLOW.md
-  docs/architecture/ADR-003-OSS-COMMERCIAL-REPOSITORY-BOUNDARY.md
+  docs/architecture/ADR-003-OSS-REPOSITORY-ISOLATION.md
   .github/pull_request_template.md
 )
 
@@ -38,13 +38,13 @@ production_paths=()
 [[ -d crates ]] && production_paths+=(crates)
 [[ -d macos ]] && production_paths+=(macos)
 
-# OSS production code must not know about proprietary SKUs or entitlement state.
-# Public extension seams, when required by a milestone, must be generic capabilities
-# usable by any OSS consumer rather than hidden commercial hooks.
+# OSS production code must not depend on private/non-OSS entitlement state.
+# Extension seams, when required by a milestone, must be generic capabilities
+# usable by any OSS consumer rather than hidden private hooks.
 if [[ ${#production_paths[@]} -gt 0 ]] && grep -R -nE \
-  'enterprise_license|pro_license|teams_license|commercial_license|commercial_entitlement|seyal_commercial' \
+  'private_entitlement|non_oss_entitlement|license_entitlement|private_product_gate|non_oss_product_gate' \
   "${production_paths[@]}" 2>/dev/null; then
-  echo "forbidden commercial SKU/license coupling found in OSS production code" >&2
+  echo "forbidden private/non-OSS entitlement coupling found in OSS production code" >&2
   fail=1
 fi
 
