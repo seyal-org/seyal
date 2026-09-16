@@ -3,7 +3,7 @@
 **Status:** Canonical product feature inventory  
 **Scope:** Product capabilities and explicit rejected/superseded decisions. Architecture/ADR/spec/milestone documents remain implementation authority.
 
-This file is the single product feature registry for Seyal OSS and the stable OSS seams consumed by higher editions. It is deliberately broader than the current implementation. A feature appearing here does **not** authorize implementation or bypass Issue → R&D/ADR/spec → milestone → tests/benchmarks/security review.
+This file is the single product feature registry for Seyal OSS and its stable public extension seams. It is deliberately broader than the current implementation. A feature appearing here does **not** authorize implementation or bypass Issue → R&D/ADR/spec → milestone → tests/benchmarks/security review.
 
 Legacy state is evidence only. A RILL/terminal issue being closed, merged or previously implemented never means the capability is implemented in the current Seyal architecture.
 
@@ -45,7 +45,7 @@ These capabilities were accepted/refined during Seyal architecture and product r
 | SY-016 | Selective local-first sync | Accepted direction | Optional sync for settings/themes/keybindings/commands/runbooks/preferences/selected metadata; raw history, secrets, SSH credentials and sensitive artifacts are excluded by default. |
 | SY-017 | Key-to-photon latency contract | Accepted direction | Measure p50/p95/p99 input-to-display latency and compare on identical hardware; no reactive/agent/persistence/cloud work on the keystroke path. |
 | SY-018 | Local Context Engine | Accepted direction | OSS local repository/docs/git/artifact retrieval with provenance, freshness, sensitivity, dedupe, token budgets and inspectable context. |
-| SY-019 | Local capability/rule router | Accepted direction | Deterministic capability/provider/model routing with user rules, budgets, fallback chains and explainable decisions; learned organization routing may live above OSS. |
+| SY-019 | Local capability/rule router | Accepted direction | Deterministic capability/provider/model routing with user rules, budgets, fallback chains and explainable decisions; learned/service-operated routing is outside this OSS contract unless separately accepted. |
 | SY-020 | Durable local workflow DAG + effect/replay safety | Accepted direction | WorkflowRun/NodeRun DAG, bounded scheduling, typed handoffs, approvals, retries and reconciliation; ambiguous external side effects are never blindly retried. |
 | SY-021 | Multi-agent orchestration + writer isolation | Accepted direction | Parallel agent runs, dedicated worktrees for concurrent writers, conflict/duplicate detection, independent evaluation and explicit reconciliation. |
 | SY-022 | DevOps execution workspace | Accepted direction | Processes, agents, remotes, logs, results and typed operational actions compose around the same Runtime; Seyal does not become an IDE or a second terminal engine. |
@@ -232,11 +232,11 @@ The original RILL competitive catalog contains **216** inventory rows. All 216 a
 | F-151 | Integrations install | Accepted direction | Install/configure official agent integrations/hooks explicitly. |
 | F-152 | Custom labels / metadata | Accepted direction | Human labels plus provider-reported metadata such as tokens/cost/status. |
 | F-153 | Worktrees for parallel tasks | Accepted direction | Parallel agent writers use dedicated worktrees; read-only work may share safe views. |
-| F-154 | Model picker / BYOK / local providers | Accepted direction | Provider/model selection supports BYOK cloud models, local/private endpoints and generic compatible endpoints without requiring Seyal cloud; routing remains off terminal hot paths. |
+| F-154 | Model picker / BYOK / local providers | Accepted direction | Provider/model selection supports user-configured cloud models, local/private endpoints and generic compatible endpoints without requiring a Seyal-operated service; routing remains off terminal hot paths. |
 | F-155 | Voice input | Deferred / decision required | Voice input is optional and outside terminal foundation. |
 | F-156 | Computer / browser use | Deferred / decision required | Browser/computer use may be capability-gated later; never terminal hot-path authority. |
-| F-157 | Cloud agents / hosted orchestration | Accepted direction | Optional hosted/background agent execution may be provided above OSS seams; local use needs no account. |
-| F-158 | Cloud-synced conversations | Accepted direction | Optional account/team conversation sync; complete local operation remains possible without it. |
+| F-157 | Remote/background agent execution | Accepted direction | Optional external/background agent execution may integrate through public seams; local use needs no account. |
+| F-158 | Optional conversation sync | Accepted direction | Optional conversation synchronization may exist; complete local operation remains possible without it. |
 | F-159 | Agent session sharing | Accepted direction | Explicit, revocable, authorization-checked agent/session sharing and teammate handoff. |
 | F-160 | Vendor terminal UI lock-in | Rejected | Seyal will not clone a vendor terminal/agent UI as its core architecture. |
 | F-161 | HITL feed cards | Superseded | Folded into typed Attention Stack/HITL actions bound to WorkItem/AgentRun. |
@@ -330,7 +330,7 @@ The original RILL competitive catalog contains **216** inventory rows. All 216 a
 - Blocks, raw terminal and TUI are presentations of the same TerminalExecution and canonical TerminalState. No second PTY/grid is created for Blocks.
 - Seyal supports a bounded first-class editor, optional/lazy LSP, focused SCM/preview surfaces and agent interaction as additive capabilities; none may become terminal authority or require IDE-scale always-resident infrastructure. Debugger/DAP ownership remains a separate explicit decision.
 - GUI close/detach is distinct from terminating a process. Persistence metadata never claims to resurrect a dead PTY.
-- Agent and workflow features are additive. Terminal input/output/rendering never synchronously wait on agent, semantic, persistence, editor/LSP, SCM, preview, cloud, licensing, telemetry or collaboration work.
+- Agent and workflow features are additive. Terminal input/output/rendering never synchronously wait on agent, semantic, persistence, editor/LSP, SCM, preview, cloud or telemetry work.
 - Raw terminal text is untrusted. It may support low-confidence detection/notifications but cannot become permission, approval, policy or audit authority.
 - Stable navigation is the default. Attention uses badges and the global Attention Stack rather than constantly reordering the user's workspace list.
 - Local use, local configuration and useful local agent/workflow capabilities do not require a Seyal account.
@@ -355,6 +355,6 @@ Imported Issues/comments do not preserve Git commit objects, PR diffs/reviews, r
 1. Add/update this file when a product capability or rejection is accepted.
 2. Link/refine the owning R&D/ADR/spec in the same change when implementation behavior is being fixed.
 3. Never mark a feature Implemented from a legacy issue state or a design document.
-4. Competitive analysis, positioning and broader product rationale belong in `seyal-commercial`; when a capability is accepted, record only its OSS product contract/disposition here.
-5. New features must state whether they alter terminal hot paths, trust boundaries, persistence semantics or OSS/commercial seams.
+4. Keep competitive analysis, positioning and private product rationale outside this repository; record only the OSS product contract/disposition here.
+5. New features must state whether they alter terminal hot paths, trust boundaries, persistence semantics, repository isolation or public extension seams.
 6. Do not create a second competing product feature list; source-disposition/audit files may exist only as traceability ledgers pointing back here.
