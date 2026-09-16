@@ -13,7 +13,7 @@
 - **Issue relationship:** Refs #736 until independent maintainer review confirms DoD; packaging uses Team-identity Release when not dry-run.
 - **Abrupt fault:** `socket_shutdown_owned_disconnect`
 - **Fresh Runtime:** one Runtime helper process per cohort
-- **Validator:** `python3 scripts/check-pass9-production-budget.py --expected-head 5f8108ac6ea1464e5645a00770b163aa524ee6b2 /Users/mahboob/Developer/seyal-commercial/oss/seyal/docs/evidence/pass9-release-qualification-5f8108ac6ea1.json`
+- **Validator:** `python3 scripts/check-pass9-production-budget.py --expected-head 5f8108ac6ea1464e5645a00770b163aa524ee6b2 <workspace>/docs/evidence/pass9-release-qualification-5f8108ac6ea1.json`
 - **Dry run:** 0
 
 Independent reviews remain required. This report does not self-certify release qualification.
