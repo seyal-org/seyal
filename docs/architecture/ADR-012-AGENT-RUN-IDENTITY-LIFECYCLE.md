@@ -13,7 +13,7 @@ ADR-007 established that future agent work must outlive GUI/chat/provider-sessio
 
 The agent R&D program and the independently reviewed architecture refinement in #838/#840 established the stable decisions now required before M005 implementation can become Ready:
 
-- universal external Agent Sessions and the first-party Seyal AI Agent must compose over one durable identity model;
+- external Agent Sessions and first-party agent integrations must compose over one durable identity model;
 - an Agent Session is a user-facing projection, not a second durable state machine;
 - external harness/session/provider identifiers cannot become Seyal identity authority;
 - reconnect/resume, retry, fork and recovery need deterministic identity semantics;
@@ -128,15 +128,15 @@ Structured integration is additive. If an adapter/hook disappears while the CLI 
 
 External integration may range from process/PTY presence through official hooks to a structured AgentAdapter protocol. Unsupported capabilities are explicit.
 
-### 6. First-party Seyal AI Agent uses the same AgentRun authority
+### 6. First-party harnesses use the same AgentRun authority
 
-The first-party `SeyalAgentHarness` is not a privileged second runtime or second identity model.
+A first-party `SeyalAgentHarness` is not a privileged second runtime or second identity model.
 
 It consumes the same `WorkItem -> Attempt -> AgentRun` authority and projects through the same artifact/attention/evaluation/action relationships as external agents.
 
-A first-party API-driven run may use a supervised non-terminal worker. Commands/tools requiring a terminal use normal Runtime-owned `TerminalExecution` objects rather than creating another PTY implementation.
+An API-driven run may use a supervised non-terminal worker. Commands/tools requiring a terminal use normal Runtime-owned `TerminalExecution` objects rather than creating another PTY implementation.
 
-The first-party worker/process topology remains an implementation ADR/spec detail only if it changes a separately governed process/IPC/security boundary. This ADR does not require thread-per-run, process-per-run, or any particular provider SDK.
+The worker/process topology remains an implementation ADR/spec detail only if it changes a separately governed process/IPC/security boundary. This ADR does not require thread-per-run, process-per-run, or any particular provider SDK.
 
 ### 7. GUI lifetime never owns AgentRun lifetime
 
@@ -252,7 +252,7 @@ Duplicate/out-of-order/stale events are handled explicitly and idempotently wher
 
 No expensive global total-order clock is required across all runs. Ordering guarantees are scoped to the entity/source semantics actually available.
 
-Raw terminal text is never sufficient authority for approval, security, billing/audit truth or accepted outcome.
+Raw terminal text is never sufficient authority for approval, security, audit/cost truth or accepted outcome.
 
 ### 14. Terminal hot-path isolation remains absolute
 
@@ -271,7 +271,7 @@ This prohibition includes:
 - evaluation/routing;
 - approval/action persistence;
 - cloud/network work;
-- licensing/telemetry;
+- telemetry;
 - GUI session projection.
 
 Agent work may consume CPU, memory and disk asynchronously, so implementation still requires resource bounds and representative active/failure-load measurements proving no material terminal regression.
@@ -280,26 +280,26 @@ Agent work may consume CPU, memory and disk asynchronously, so implementation st
 
 The identities, lifecycle authority, Agent Session projection model, adapter-capability semantics and local recovery rules in this ADR are OSS foundation.
 
-Commercial code may consume them for learned routing, managed orchestration, shared/team services, hosted execution or governance, but:
+External/private consumers may build on these public capabilities, but the dependency direction must remain one-way:
 
 ```text
-seyal-commercial -> pinned Seyal OSS
-Seyal OSS        -/-> commercial code
+external/private consumer -> public Seyal OSS
+Seyal OSS                 -/-> non-OSS/private implementation
 ```
 
-No commercial entitlement may be required for the canonical AgentRun/Agent Session identity or terminal-safe external-agent integration.
+No external entitlement or service may be required for the canonical AgentRun/Agent Session identity or terminal-safe external-agent integration.
 
 ## Consequences
 
 Positive:
 
-- external agents and the first-party Seyal AI Agent compose without duplicate durable state;
+- external agents and first-party agent integrations compose without duplicate durable state;
 - GUI/client failure is separated from agent/process lifetime;
 - provider/harness switching cannot destroy Seyal work identity;
 - retry/evaluation accounting is deterministic;
 - stale workers/adapters cannot retain control after rebinding;
 - future multi-agent orchestration can build on stable run/attempt identities;
-- commercial orchestration can consume OSS authority without reverse dependency;
+- external consumers can use public authority without creating a reverse dependency;
 - terminal correctness/performance remains architecturally independent of agent features.
 
 Costs:
@@ -369,8 +369,8 @@ The following are intentionally not decided here:
 - exact adapter wire encoding;
 - exact provider SDK or model portfolio;
 - multi-agent workflow scheduling/DAG semantics;
-- learned/commercial routing algorithms;
-- cloud/fleet/team/enterprise services.
+- service-specific routing algorithms;
+- external hosted/fleet/service architecture.
 
 ## Revisit conditions
 
@@ -383,4 +383,4 @@ Reopen this ADR only with concrete evidence that one of these accepted invariant
 - a future Runtime/PTY-keeper architecture changes execution liveness ownership while preserving one authoritative TerminalState;
 - measured resource constraints require a different agent-runtime boundary.
 
-Adding a new external harness, adding provider/model adapters, changing UI presentation, changing persistence tables, or adding commercial learned routing does not by itself reopen this ADR.
+Adding a new external harness, adding provider/model adapters, changing UI presentation, changing persistence tables, or adding service-specific routing does not by itself reopen this ADR.
