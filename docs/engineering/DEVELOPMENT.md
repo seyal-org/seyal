@@ -15,7 +15,7 @@ Product & Engineering Constitution
 
 Issues and PRs cannot override higher authority. If implementation evidence contradicts an accepted architectural decision: stop implementation, record evidence, run architecture review/ADR, update affected specification and Issue, then resume.
 
-For M002+ engineering expectations (ownership, unsafe/FFI, concurrency, hot-path, Metal, testing/fuzz, security, CI evidence classes, OSS↛commercial), start from the thin index `docs/engineering/ENGINEERING-QUALITY-BASELINE.md`. It points at existing authorities and records M001 carry-forward honesty rules; it does not replace this workflow or the Constitution.
+For M002+ engineering expectations (ownership, unsafe/FFI, concurrency, hot-path, Metal, testing/fuzz, security, CI evidence classes, OSS repository isolation), start from the thin index `docs/engineering/ENGINEERING-QUALITY-BASELINE.md`. It points at existing authorities and records M001 carry-forward honesty rules; it does not replace this workflow or the Constitution.
 
 The `.sdlc` context layer is deliberately **not** inserted into the authority chain. It is a compact navigation/provenance layer that helps agents find the relevant authoritative artifacts without rereading the repository.
 
@@ -212,7 +212,7 @@ Block reconciliation. In Flow mode also assert full-width, aligned Blocks and
 `flow-paint=ok`; the right-edge black strip is a separate Block/Metal clipping
 failure, not evidence that Return itself was dropped.
 
-There are no required private repositories, `seyal-commercial` dependencies, shell-profile assumptions, Homebrew assumptions or hidden environment variables for this canonical product flow. AI-SDLC is an optional public developer-framework dependency materialized only by `make bootstrap-agents`.
+The canonical product flow has no required non-OSS/private implementation dependencies, shell-profile assumptions, Homebrew assumptions or hidden environment variables. AI-SDLC is an optional public developer-framework dependency materialized only by `make bootstrap-agents`.
 
 ## Generated and fixture data
 
