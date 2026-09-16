@@ -3,10 +3,11 @@
 - **Commit:** `88e274bd36aae78ee6460758fa602692fe78dc38`
 - **Helper path:** `Seyal.app/Contents/Helpers/seyal-runtime`
 - **Direct no-shell launch:** exercised by this orchestrator
+- **Redaction:** local workspace path is intentionally redacted; packaging evidence is preserved.
 
 ## codesign -dv --verbose=4 (helper)
 ```
-Executable=/Users/mahboob/Developer/seyal-commercial/oss/seyal/target/macos-derived-data/Build/Products/Debug/Seyal.app/Contents/Helpers/seyal-runtime
+Executable=<workspace>/target/macos-derived-data/Build/Products/Debug/Seyal.app/Contents/Helpers/seyal-runtime
 Identifier=dev.seyal.Seyal.runtime
 Format=Mach-O thin (arm64)
 CodeDirectory v=20400 size=5552 flags=0x2(adhoc) hashes=168+2 location=embedded
@@ -33,7 +34,7 @@ Internal requirements count=0 size=12
 
 ## codesign --display --entitlements - (helper)
 ```
-Executable=/Users/mahboob/Developer/seyal-commercial/oss/seyal/target/macos-derived-data/Build/Products/Debug/Seyal.app/Contents/Helpers/seyal-runtime
+Executable=<workspace>/target/macos-derived-data/Build/Products/Debug/Seyal.app/Contents/Helpers/seyal-runtime
 warning: Specifying ':' in the path is deprecated and will not work in a future release
 ```
 
