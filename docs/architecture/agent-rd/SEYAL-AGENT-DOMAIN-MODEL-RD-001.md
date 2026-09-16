@@ -42,10 +42,10 @@ The accepted terminal architecture remains unchanged.
 | `RunEvent` | Versioned event envelope describing lifecycle, tool/approval/artifact/usage observations. | No single global total order is required. |
 | `EvaluationObservation` | Evidence from an evaluator, test, CI, reviewer, process or provider with provenance/trust. | Agent self-report is not authoritative success. |
 | `Evaluation` | Verdict over one or more observations, allowed to be inconclusive. | Not identical to run completion or WorkItem acceptance. |
-| `Outcome` | Final durable state of a WorkItem after acceptance policy, for example `accepted`, `rejected`, `unresolved`, or `abandoned`, with references to decisive Attempts/Evaluations where applicable. | An individual Attempt does not own a WorkItem Outcome; `completed` process state is not automatically `accepted`. |
+| `Outcome` | Final durable state of a WorkItem after acceptance policy, with references to decisive Attempts/Evaluations where applicable. | Process completion is not automatically acceptance. |
 | `CostEvent` | Factual resource/usage record such as tokens, cache tokens, compute duration or provider-reported cost. | Not a marketing ROI estimate. |
 | `RoutingDecision` | Candidate set, hard filters, precedence, scores/reasons, chosen route and fallback chain. | Not necessarily ML/LLM based. |
-| `Workflow` | Versioned local DAG definition. | Not an organization fleet service. |
+| `Workflow` | Versioned local DAG definition. | Not a remote fleet service. |
 | `WorkflowRun` | Durable instance of a Workflow. | Does not restore a dead PTY from metadata. |
 | `WorkflowNode` / `NodeRun` | Definition/runtime state of one DAG step. | A node need not be an agent; it may evaluate, approve or transform. |
 | `Handoff` | Typed references/claims/artifacts/context selected between runs/nodes. | Not a copied full transcript by default. |
@@ -61,11 +61,11 @@ Current coding harnesses disagree about what an "agent" is: a CLI process, a res
 
 ```text
 WorkItem
-  ├─ Outcome 0..1                 # final durable WorkItem state
+  ├─ Outcome 0..1
   └─ Attempt 1..N
-       ├─ AttemptDisposition      # per-attempt disposition; never overwrites siblings
+       ├─ AttemptDisposition
        └─ RoutingDecision
-            └─ AgentRun 1..N      # N permits deliberate parallel candidates
+            └─ AgentRun 1..N
                  ├─ HarnessSessionRef
                  ├─ ExecutionRef 0..N
                  ├─ RunEvent*
@@ -86,7 +86,7 @@ Rules:
 3. Retry creates a new `Attempt`; reconnect/resume of the same upstream work does not create a retry merely because a client process restarted.
 4. Parallel candidate runs are explicit and budgeted; they are not hidden retries.
 5. Run termination, Evaluation, AttemptDisposition and WorkItem Outcome are separate state dimensions.
-6. Only the WorkItem owns the final `Outcome`. An Attempt may become an `accepted_candidate`, but WorkItem acceptance policy decides whether/when the durable WorkItem becomes `accepted` and records the decisive Attempt/Evaluation references.
+6. Only the WorkItem owns the final `Outcome`. An Attempt may become an `accepted_candidate`, but WorkItem acceptance policy decides whether/when the durable WorkItem becomes accepted and records decisive references.
 7. A later retry or parallel candidate never rewrites the evidence or disposition of an earlier Attempt.
 8. Event ordering is idempotent and monotonic per run/entity where supported; there is no expensive global serializing clock.
 
@@ -101,9 +101,9 @@ entity_ref
 run_id? / attempt_id? / work_item_id?
 source { adapter, evaluator, system, human }
 source_version
-sequence?                 # source-local monotonic when available
-emitted_at?               # upstream claim
-observed_at               # local observation
+sequence?
+emitted_at?
+observed_at
 trust_class
 payload_type
 payload
@@ -152,33 +152,18 @@ local deterministic process/test evidence
 
 This is evidence trust, not context-content authority. Repository instructions/ADRs/specifications retain their existing project authority independently of semantic relevance ranking.
 
-## OSS/commercial boundary
+## OSS repository isolation
 
-### OSS owns
+The public foundation owns the identities, event envelopes, harness capability protocol, local adapters, context/provenance model, local cache/evaluation/routing/workflow primitives, artifacts, handoffs, Attention integration, local persistence/recovery metadata and public extension interfaces described here.
 
-- all identities and event envelopes above;
-- harness capability protocol and local adapters;
-- local ContextItem/Bundle/provenance model;
-- local cache, evaluation, routing and workflow primitives;
-- local artifacts, handoffs, AttentionItem integration;
-- local persistence/recovery metadata;
-- extension interfaces usable by any OSS consumer.
-
-### External/commercial consumers may own
-
-- organization identities/permissions and synchronized shared state;
-- proprietary learned ranking/routing/evaluation;
-- managed fleet scheduling and reliability service;
-- hosted workers/cloud execution;
-- organization ROI aggregation;
-- billing/entitlements/SSO/SCIM/policy/audit operations.
-
-The dependency remains:
+External/private consumers may use these public capabilities, but must not become an OSS dependency:
 
 ```text
-seyal-commercial → versioned/pinned Seyal OSS
-Seyal OSS        ↛ commercial code
+external/private consumer → versioned public Seyal OSS
+Seyal OSS                 ↛ non-OSS/private implementation
 ```
+
+Private service architecture, entitlement state and outside-product implementation details are not part of this R&D document.
 
 ## Parallel R&D dependency graph
 
@@ -221,7 +206,7 @@ This shared model passes R&D when:
 - TerminalExecution remains the only terminal-bearing authority;
 - adapter-specific session IDs remain opaque;
 - event schemas can preserve vendor-specific optional information;
-- commercial services can consume the OSS model without reverse dependency;
+- external consumers can use the public model without creating a reverse dependency;
 - retry/parallel-run evidence remains immutable while one final WorkItem Outcome is derived from explicit acceptance policy.
 
 Rework the model if a child study requires duplicate authoritative state, cannot represent resume/retry/parallel-run distinction, conflates per-Attempt disposition with WorkItem acceptance, or requires provider-specific fields in core identities.
