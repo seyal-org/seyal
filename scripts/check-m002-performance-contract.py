@@ -12,6 +12,8 @@ import subprocess
 ROOT = Path(os.environ.get("SEYAL_VALIDATION_ROOT", Path(__file__).resolve().parents[1])).resolve()
 CONTRACT = ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md"
 SCHEMA = ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml"
+INVENTORY = ROOT / "docs/evidence/m002-673-family-inventory.toml"
+RETAINED_ACTIVE_MD = ROOT / "docs/evidence/m002-673-history-reflow-20260916T171837Z.md"
 
 REQUIRED = ("Status: proposed contract for Issue #673", "exact production SHA", "baseline SHA", "nearest-rank")
 CLASSES = {"CI", "SYNTHETIC", "NATIVE_HEADED", "PHYSICAL_ARM64"}
@@ -148,6 +150,7 @@ def validate_contract_shape(text: str, schema: dict, schema_text: str) -> None:
         raise SystemExit("M002 performance matrix is incomplete")
     if "performance_claim=true" in text or "performance_claim=true" in schema_text:
         raise SystemExit("M002 performance contract must not claim a gate passed")
+    validate_family_inventory(schema)
     result_schema = schema.get("result_schema", {})
     required_result_fields = set(result_schema.get("required", []))
     expected_result_fields = {
@@ -159,6 +162,41 @@ def validate_contract_shape(text: str, schema: dict, schema_text: str) -> None:
     }
     if required_result_fields != expected_result_fields:
         raise SystemExit("M002 performance result schema is incomplete")
+
+
+def validate_family_inventory(schema: dict) -> None:
+    """Lock the finite #673 family map when the real-repo inventory is present.
+
+    Negative contract fixtures omit this file and must keep working.
+    """
+    if not INVENTORY.is_file():
+        return
+    try:
+        inventory = tomllib.loads(INVENTORY.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"invalid M002 family inventory: {error}") from error
+    if inventory.get("schema") != "seyal.m002.performance-family-inventory":
+        raise SystemExit("M002 family inventory has unsupported identity")
+    if inventory.get("physical_arm64_valid") is True:
+        raise SystemExit("M002 family inventory must not claim PHYSICAL_ARM64 VALID")
+    if inventory.get("host_class_this_session") != "uncontrolled-developer-host":
+        raise SystemExit("M002 family inventory must keep an uncontrolled host class until a controlled slot exists")
+    families = inventory.get("families", {})
+    if set(families) != REQUIRED_GATES:
+        raise SystemExit("M002 family inventory gate set is incomplete")
+    active = families.get("history_active_reflow_ms", {})
+    if active.get("numeric_status") != "FAIL":
+        raise SystemExit("M002 family inventory must retain the f105364 history_active_reflow_ms FAIL")
+    if RETAINED_ACTIVE_MD.is_file() and "**FAIL**" not in RETAINED_ACTIVE_MD.read_text(encoding="utf-8"):
+        raise SystemExit("M002 retained HistoryStore ledger must keep the active-reflow FAIL")
+    for name, family in families.items():
+        if family.get("environment") != "PLATFORM_LIMITED":
+            raise SystemExit(f"M002 family {name} must stay PLATFORM_LIMITED until a controlled host exists")
+        gate = schema.get("gates", {}).get(name, {})
+        if family.get("evidence_class") != gate.get("evidence_class"):
+            raise SystemExit(f"M002 family {name} evidence class does not match the contract")
+        if family.get("boundary") != gate.get("boundary"):
+            raise SystemExit(f"M002 family {name} boundary does not match the contract")
 
 
 def self_test() -> None:

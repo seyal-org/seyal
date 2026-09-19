@@ -17,9 +17,14 @@ required=(
   docs/engineering/SECURITY.md
   docs/engineering/REPOSITORY-STRUCTURE.md
   docs/engineering/OSS-COMMERCIAL-BOUNDARY.md
+  docs/engineering/OSS-REPOSITORY-ISOLATION.md
+  docs/engineering/COMPATIBILITY.md
+  docs/engineering/RELEASES.md
   docs/engineering/M001-DISTRIBUTION.md
   docs/engineering/GITHUB-WORKFLOW.md
   docs/architecture/ADR-003-OSS-COMMERCIAL-REPOSITORY-BOUNDARY.md
+  GOVERNANCE.md
+  SUPPORT.md
   .github/pull_request_template.md
 )
 

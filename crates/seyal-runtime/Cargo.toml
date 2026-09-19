@@ -14,6 +14,8 @@ default = []
 test-fault-injection = ["seyal-exec/test-fault-injection"]
 benchmark-shared-projection = []
 benchmark-instrumentation = []
+# Contract cohorts disable the process-wide StatsAlloc wrapper.
+m002-contract = []
 
 [dependencies]
 seyal-core = { path = "../seyal-core" }

@@ -42,14 +42,87 @@ fn main() {
     let _contract_clock = Instant::now();
 
     #[cfg(not(target_os = "macos"))]
-    println!("pass7_input_resize PLATFORM_LIMITED target_os!=macos {PERFORMANCE_CLAIM}");
+    {
+        if std::env::var("SEYAL_M002_CONTRACT_GATE")
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        {
+            eprintln!(
+                "pass7_input_resize PLATFORM_LIMITED target_os!=macos gate=input_visible_proxy"
+            );
+            std::process::exit(1);
+        }
+        println!("pass7_input_resize PLATFORM_LIMITED target_os!=macos {PERFORMANCE_CLAIM}");
+    }
 
     #[cfg(target_os = "macos")]
     run_macos();
 }
 
 #[cfg(target_os = "macos")]
+include!("../../../benches/m002_contract_support.rs");
+
+#[cfg(target_os = "macos")]
+fn sample_input_visible_proxy(client: &mut LocalDisplayClient) -> f64 {
+    settle_client(client);
+    let before = client.cache().generation;
+    let started = Instant::now();
+    client
+        .submit_committed_text("x")
+        .expect("M002 visible-proxy input");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if client.wants_write() {
+            client.flush_control_write().expect("visible-proxy flush");
+        }
+        match client.poll_prepare() {
+            Ok(_) => {}
+            Err(error) => panic!("visible-proxy poll failed: {error:?}"),
+        }
+        if client.cache().generation > before {
+            return started.elapsed().as_secs_f64() * 1_000.0;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "input_visible_proxy cache advance timed out"
+        );
+        thread::yield_now();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_m002_contract_cohort() {
+    let gate = m002_contract_gate().expect("contract gate");
+    if gate != "input_visible_proxy" {
+        panic!("unsupported M002 contract gate {gate:?}");
+    }
+    let cohort = m002_parse_usize_env("SEYAL_M002_COHORT", 1);
+    let warmups = m002_parse_usize_env("SEYAL_M002_WARMUPS", 20);
+    let samples = m002_parse_usize_env("SEYAL_M002_SAMPLES", 100);
+    let out = std::env::var("SEYAL_M002_COHORT_OUT").expect("SEYAL_M002_COHORT_OUT");
+    let runtime = RuntimeHarness::start();
+    let mut client = runtime.connect_controller();
+    for _ in 0..warmups {
+        let _ = sample_input_visible_proxy(&mut client);
+    }
+    let mut retained = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        retained.push(sample_input_visible_proxy(&mut client));
+    }
+    drop(client);
+    runtime.finish();
+    m002_write_cohort_file(&out, cohort, &retained);
+    println!(
+        "pass7_input_resize m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} out={out} boundary=native_input_admission_to_client_display_cache_proxy {PERFORMANCE_CLAIM}"
+    );
+}
+
+#[cfg(target_os = "macos")]
 fn run_macos() {
+    if m002_contract_gate().is_some() {
+        run_m002_contract_cohort();
+        return;
+    }
     let mut args = std::env::args();
     let _ = args.next();
     if args.next().as_deref() == Some("--worker") {

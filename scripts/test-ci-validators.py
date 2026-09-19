@@ -632,6 +632,30 @@ def main() -> None:
             "missing M002 metrics cannot PASS",
         )
 
+        rewritten_fail = base / "m002-family-inventory-rewritten-fail"
+        write(
+            rewritten_fail / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
+            (ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md").read_text(encoding="utf-8"),
+        )
+        shutil.copy(
+            ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml",
+            rewritten_fail / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml",
+        )
+        inventory = (ROOT / "docs/evidence/m002-673-family-inventory.toml").read_text(encoding="utf-8")
+        write(
+            rewritten_fail / "docs/evidence/m002-673-family-inventory.toml",
+            inventory.replace(
+                'numeric_status = "FAIL"',
+                'numeric_status = "PASS"',
+                1,
+            ),
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py")],
+            rewritten_fail,
+            "must retain the f105364 history_active_reflow_ms FAIL",
+        )
+
 
         unicode_benchmark = base / "unicode-benchmark-contract"
         write(

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import XCTest
 
 @testable import Seyal
@@ -553,6 +554,47 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertEqual(interactive.accessibilityIdentifier(), "terminal-input")
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
+    }
+
+    /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
+    /// path must write a five-cohort TOML file for the named Metal-submit
+    /// boundary. This is not scanout / key-to-photon.
+    @MainActor
+    func testM002RendererPrepareSubmissionContractWritesCohort() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let validation = try String(
+            contentsOf: sourceRoot.appendingPathComponent("RendererValidation.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(validation.contains("SEYAL_M002_CONTRACT_GATE"))
+        XCTAssertTrue(validation.contains("renderer_prepare_submission"))
+        XCTAssertTrue(validation.contains("runM002ContractCohort"))
+        XCTAssertTrue(validation.contains("renderOffscreenAndMeasureSubmission"))
+
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("m002-renderer-\(UUID().uuidString).toml")
+        setenv("SEYAL_M002_CONTRACT_GATE", "renderer_prepare_submission", 1)
+        setenv("SEYAL_M002_COHORT", "1", 1)
+        setenv("SEYAL_M002_WARMUPS", "1", 1)
+        setenv("SEYAL_M002_SAMPLES", "2", 1)
+        setenv("SEYAL_M002_COHORT_OUT", out.path, 1)
+        defer {
+            unsetenv("SEYAL_M002_CONTRACT_GATE")
+            unsetenv("SEYAL_M002_COHORT")
+            unsetenv("SEYAL_M002_WARMUPS")
+            unsetenv("SEYAL_M002_SAMPLES")
+            unsetenv("SEYAL_M002_COHORT_OUT")
+            try? FileManager.default.removeItem(at: out)
+        }
+        XCTAssertTrue(RendererValidation.runBenchmark())
+        let body = try String(contentsOf: out, encoding: .utf8)
+        XCTAssertTrue(body.contains("cohort = 1"))
+        XCTAssertTrue(body.contains("samples = ["))
+        XCTAssertEqual(body.split(separator: ",").count, 2)
     }
 
     func testTranscriptFrameRejectsZeroBlockIdentity() {

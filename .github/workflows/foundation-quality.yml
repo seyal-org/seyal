@@ -47,6 +47,7 @@ jobs:
         run: |
           python3 scripts/check-m002-performance-contract.py
           python3 scripts/check-m002-performance-contract.py --self-test
+          python3 scripts/run-m002-performance-contract.py --self-test
       - name: Native UI test policy
         run: python3 scripts/check-ui-test-policy.py
       - name: Host product-fixture fence

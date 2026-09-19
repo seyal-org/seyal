@@ -1,8 +1,11 @@
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "m002-contract")))]
 use stats_alloc::Region;
+#[cfg(not(feature = "m002-contract"))]
 use stats_alloc::{StatsAlloc, INSTRUMENTED_SYSTEM};
+#[cfg(not(feature = "m002-contract"))]
 use std::alloc::System;
 
+#[cfg(not(feature = "m002-contract"))]
 #[global_allocator]
 static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 
@@ -26,12 +29,22 @@ use seyal_runtime::{
     local_ipc::{
         fd_transfer::{benchmark_syscall_counters, reset_benchmark_syscall_counters},
         framing::{
-            encode_frame, Attach, Attached, ClientHello, FrameHeader, InputRef, MessageType, Role,
-            ServerHello, HEADER_LEN,
+            encode_frame, Attach, Attached, ClientHello, FrameHeader, InputRef, MessageType,
+            Resize, Role, ServerHello, HEADER_LEN,
         },
     },
     ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
 };
+
+#[cfg(target_os = "macos")]
+include!("../../../benches/m002_contract_support.rs");
+
+#[cfg(all(target_os = "macos", feature = "m002-contract"))]
+struct ContractAllocStats {
+    allocations: usize,
+    reallocations: usize,
+    bytes_allocated: usize,
+}
 
 fn main() {
     #[cfg(not(target_os = "macos"))]
@@ -97,7 +110,206 @@ struct Case {
 }
 
 #[cfg(target_os = "macos")]
+struct ContractSession {
+    runtime: Runtime,
+    runtime_dir: std::path::PathBuf,
+    clients: Vec<BenchClient>,
+    controller_attachment: seyal_runtime::AttachmentId,
+}
+
+#[cfg(target_os = "macos")]
+fn start_contract_session(workload: Workload, columns: u16, rows: u16) -> ContractSession {
+    let suffix = format!("{:x}", process::id());
+    let mut config = RuntimeConfig::m001().expect("M001 config");
+    config.singleton_path = env::temp_dir().join(format!("s5c-{suffix}.lock"));
+    let runtime_dir = env::temp_dir().join(format!("s5c-{suffix}"));
+    config.local_ipc = LocalIpcMode::Enabled {
+        runtime_dir_override: Some(runtime_dir.clone()),
+    };
+    config.max_executions = 1;
+    config.graceful_termination = Duration::from_millis(100);
+    config.forced_reap = Duration::from_millis(500);
+    config.final_drain = Duration::from_millis(150);
+    let mut runtime = Runtime::new(config).expect("Runtime");
+    let socket_path = runtime
+        .local_ipc_socket_path()
+        .expect("production local IPC")
+        .to_path_buf();
+    let execution_id = runtime
+        .create_execution(
+            workload_command(workload),
+            WindowSize::new(columns, rows, 0, 0).expect("valid geometry"),
+        )
+        .expect("create contract execution");
+    let mut clients = vec![BenchClient::connect_and_attach(
+        &mut runtime,
+        &socket_path,
+        execution_id,
+        Role::Controller,
+    )];
+    let controller_attachment = clients[0].attachment_id;
+    clients[0].reset_measurement_counters();
+    ContractSession {
+        runtime,
+        runtime_dir,
+        clients,
+        controller_attachment,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn finish_contract_session(mut session: ContractSession) {
+    drop(session.clients);
+    let _ = session.runtime.begin_shutdown();
+    let _ = session
+        .runtime
+        .run_until_empty(Instant::now() + Duration::from_secs(10));
+    drop(session.runtime);
+    let _ = fs::remove_dir_all(session.runtime_dir);
+}
+
+#[cfg(target_os = "macos")]
+fn wait_cache_advance(session: &mut ContractSession, before: u64, deadline: Instant) {
+    loop {
+        session
+            .runtime
+            .poll_once(Some(Duration::from_millis(1)))
+            .expect("Runtime poll");
+        session.clients[0].drain_available().expect("client drain");
+        if session.clients[0].cache.generation > before {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "contract cache advance timed out"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sample_damage_to_client_cache(session: &mut ContractSession) -> f64 {
+    let before = session.clients[0].cache.generation;
+    let started = Instant::now();
+    send_client_frame(
+        &mut session.runtime,
+        &mut session.clients[0],
+        MessageType::Input,
+        &InputRef {
+            attachment_id: session.controller_attachment,
+            bytes: b"x",
+        }
+        .encode(),
+    );
+    wait_cache_advance(session, before, Instant::now() + Duration::from_secs(2));
+    started.elapsed().as_secs_f64() * 1_000.0
+}
+
+#[cfg(target_os = "macos")]
+fn start_sustained_stream(session: &mut ContractSession) {
+    let before = session.clients[0].cache.generation;
+    send_client_frame(
+        &mut session.runtime,
+        &mut session.clients[0],
+        MessageType::Input,
+        &InputRef {
+            attachment_id: session.controller_attachment,
+            bytes: b"\n",
+        }
+        .encode(),
+    );
+    wait_cache_advance(session, before, Instant::now() + Duration::from_secs(2));
+}
+
+#[cfg(target_os = "macos")]
+fn activate_resize_and_scroll(session: &mut ContractSession, columns: u16, rows: u16) {
+    send_client_frame(
+        &mut session.runtime,
+        &mut session.clients[0],
+        MessageType::Resize,
+        &Resize {
+            attachment_id: session.controller_attachment,
+            rows,
+            columns,
+        }
+        .encode(),
+    );
+    send_client_frame(
+        &mut session.runtime,
+        &mut session.clients[0],
+        MessageType::Input,
+        &InputRef {
+            attachment_id: session.controller_attachment,
+            bytes: b"\x1b[5S",
+        }
+        .encode(),
+    );
+}
+
+#[cfg(target_os = "macos")]
+fn sample_high_output_responsiveness(session: &mut ContractSession, flip: bool) -> f64 {
+    if flip {
+        activate_resize_and_scroll(session, 100, 30);
+    } else {
+        activate_resize_and_scroll(session, 80, 24);
+    }
+    sample_damage_to_client_cache(session)
+}
+
+#[cfg(target_os = "macos")]
+fn run_m002_contract_cohort() {
+    let gate = m002_contract_gate().expect("contract gate");
+    let cohort = m002_parse_usize_env("SEYAL_M002_COHORT", 1);
+    let warmups = m002_parse_usize_env("SEYAL_M002_WARMUPS", 20);
+    let samples = m002_parse_usize_env("SEYAL_M002_SAMPLES", 100);
+    let out = env::var("SEYAL_M002_COHORT_OUT").expect("SEYAL_M002_COHORT_OUT");
+    let mut retained = Vec::with_capacity(samples);
+    match gate.as_str() {
+        "damage_to_client_cache" => {
+            let mut session = start_contract_session(Workload::Interactive, 80, 24);
+            for _ in 0..warmups {
+                let _ = sample_damage_to_client_cache(&mut session);
+            }
+            for _ in 0..samples {
+                retained.push(sample_damage_to_client_cache(&mut session));
+            }
+            finish_contract_session(session);
+        }
+        "high_output_responsiveness" => {
+            let mut session = start_contract_session(Workload::Sustained, 80, 24);
+            start_sustained_stream(&mut session);
+            let stream_started = Instant::now();
+            for _ in 0..warmups {
+                let _ = sample_high_output_responsiveness(&mut session, false);
+            }
+            for index in 0..samples {
+                retained.push(sample_high_output_responsiveness(
+                    &mut session,
+                    index % 8 == 0,
+                ));
+            }
+            while stream_started.elapsed() < Duration::from_secs(2) {
+                session
+                    .runtime
+                    .poll_once(Some(Duration::from_millis(10)))
+                    .expect("keep stream alive");
+                let _ = session.clients[0].drain_available();
+            }
+            finish_contract_session(session);
+        }
+        other => panic!("unsupported M002 contract gate {other:?}"),
+    }
+    m002_write_cohort_file(&out, cohort, &retained);
+    println!(
+        "[seyal pass5] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} out={out} performance_claim=false"
+    );
+}
+
+#[cfg(target_os = "macos")]
 fn run_macos() {
+    if m002_contract_gate().is_some() {
+        run_m002_contract_cohort();
+        return;
+    }
     if env::args().nth(1).as_deref() == Some("--worker") {
         worker();
         return;
@@ -297,6 +509,7 @@ fn worker() {
     reset_benchmark_display_counters();
     reset_benchmark_syscall_counters();
 
+    #[cfg(not(feature = "m002-contract"))]
     let allocation_region = Region::new(GLOBAL);
     let measurement = if workload == Workload::Interactive {
         measure_interactive(
@@ -315,7 +528,14 @@ fn worker() {
             &mut latency_samples,
         )
     };
+    #[cfg(not(feature = "m002-contract"))]
     let allocation_stats = allocation_region.change();
+    #[cfg(feature = "m002-contract")]
+    let allocation_stats = ContractAllocStats {
+        allocations: 0,
+        reallocations: 0,
+        bytes_allocated: 0,
+    };
     let syscall_counters = benchmark_syscall_counters();
     let display_counters = benchmark_display_counters();
     let runtime_diagnostics = runtime.benchmark_runtime_diagnostics(execution_id);

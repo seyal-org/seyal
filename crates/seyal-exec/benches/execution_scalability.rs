@@ -35,12 +35,130 @@ mod macos {
         threads: u64,
     }
 
+    include!("../../../benches/m002_contract_support.rs");
+
     pub(super) fn run() {
         if std::env::var_os("SEYAL_SCALABILITY_WORKER").is_some() {
             worker();
+        } else if m002_contract_gate().is_some() {
+            run_contract_cohort();
         } else {
             controller();
         }
+    }
+
+    fn ready_idle_command() -> CommandSpec {
+        CommandSpec::new("/bin/sh")
+            .args(["-c", "printf ready; while IFS= read -r line; do :; done"])
+    }
+
+    fn wait_ready(execution: &mut TerminalExecution) {
+        let mut buffer = [0; 128];
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut ready = Vec::new();
+        while Instant::now() < deadline {
+            match execution.read_output(&mut buffer).expect("ready read") {
+                ReadOutcome::Bytes(count) => {
+                    ready.extend_from_slice(&buffer[..count]);
+                    if ready.windows(5).any(|window| window == b"ready") {
+                        return;
+                    }
+                }
+                ReadOutcome::WouldBlock => {
+                    execution
+                        .wait_readable(Duration::from_millis(100))
+                        .expect("ready wait");
+                }
+                ReadOutcome::Eof => panic!("contract child closed before ready"),
+            }
+        }
+        panic!("contract ready timeout");
+    }
+
+    fn terminate_all(executions: &mut [TerminalExecution]) {
+        for execution in executions {
+            let _ = execution.terminate(TerminationPolicy::new(
+                Duration::from_millis(100),
+                Duration::from_secs(5),
+            ));
+        }
+    }
+
+    fn sample_contract(gate: &str, population: usize) -> f64 {
+        let size = WindowSize::cells(80, 24).expect("valid size");
+        match gate {
+            "startup" => {
+                let started = Instant::now();
+                let mut execution =
+                    TerminalExecution::spawn(&ready_idle_command(), size).expect("startup spawn");
+                wait_ready(&mut execution);
+                let ms = started.elapsed().as_secs_f64() * 1_000.0;
+                terminate_all(std::slice::from_mut(&mut execution));
+                ms
+            }
+            "teardown_recovery" => {
+                let mut execution =
+                    TerminalExecution::spawn(&ready_idle_command(), size).expect("teardown spawn");
+                wait_ready(&mut execution);
+                let started = Instant::now();
+                execution
+                    .terminate(TerminationPolicy::new(
+                        Duration::from_millis(100),
+                        Duration::from_secs(5),
+                    ))
+                    .expect("teardown terminate");
+                started.elapsed().as_secs_f64() * 1_000.0
+            }
+            "idle_cpu"
+            | "resource_scaling_rss"
+            | "resource_scaling_fds"
+            | "resource_scaling_threads" => {
+                let mut executions = Vec::with_capacity(population);
+                for _ in 0..population {
+                    let mut execution = match TerminalExecution::spawn(&ready_idle_command(), size)
+                    {
+                        Ok(execution) => execution,
+                        Err(error) => panic!("PLATFORM_LIMITED contract spawn failed: {error}"),
+                    };
+                    wait_ready(&mut execution);
+                    executions.push(execution);
+                }
+                if gate == "idle_cpu" {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                let metrics = ps_metrics(std::process::id()).expect("contract metrics");
+                let fds = open_file_count(std::process::id()).expect("contract fds") as f64;
+                terminate_all(&mut executions);
+                match gate {
+                    "idle_cpu" => metrics.cpu_percent,
+                    "resource_scaling_rss" => (metrics.rss_kib as f64) * 1024.0,
+                    "resource_scaling_fds" => fds,
+                    "resource_scaling_threads" => metrics.threads as f64,
+                    _ => unreachable!(),
+                }
+            }
+            other => panic!("unsupported M002 contract gate {other:?}"),
+        }
+    }
+
+    fn run_contract_cohort() {
+        let gate = m002_contract_gate().expect("contract gate");
+        let cohort = m002_parse_usize_env("SEYAL_M002_COHORT", 1);
+        let warmups = m002_parse_usize_env("SEYAL_M002_WARMUPS", 20);
+        let samples = m002_parse_usize_env("SEYAL_M002_SAMPLES", 100);
+        let population = m002_parse_usize_env("SEYAL_M002_POPULATION", 1);
+        let out = std::env::var("SEYAL_M002_COHORT_OUT").expect("SEYAL_M002_COHORT_OUT");
+        for _ in 0..warmups {
+            let _ = sample_contract(&gate, population);
+        }
+        let mut retained = Vec::with_capacity(samples);
+        for _ in 0..samples {
+            retained.push(sample_contract(&gate, population));
+        }
+        m002_write_cohort_file(&out, cohort, &retained);
+        println!(
+            "[seyal scalability] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} population={population} out={out} performance_claim=false"
+        );
     }
 
     fn controller() {
@@ -423,5 +541,14 @@ fn main() {
     macos::run();
 
     #[cfg(not(target_os = "macos"))]
-    println!("[seyal scalability benchmark] skipped: macOS-only PTY implementation");
+    {
+        if std::env::var("SEYAL_M002_CONTRACT_GATE")
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        {
+            eprintln!("[seyal scalability] PLATFORM_LIMITED target_os!=macos");
+            std::process::exit(1);
+        }
+        println!("[seyal scalability benchmark] skipped: macOS-only PTY implementation");
+    }
 }
