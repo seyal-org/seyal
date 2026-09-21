@@ -813,22 +813,22 @@ timeline must encode within the frame limit for both schemas. A later encode
 failure is an invariant failure: fail the affected group closed and do not
 silently leave it with a stale timeline.
 
-New clients use a bounded ClientHello downgrade sequence when an older Runtime
-rejects a capability set. Retry only after a decoded Error has
-`error_code=MalformedPayload` and `offending_message_type=ClientHello` for a
-ClientHello the client itself encoded and validated. Each retry uses a fresh
-connection and removes the next requested capability in this fixed order:
-`CAP_COMMAND_BLOCK_DURATION`, `CAP_EXTENDED_TERMINAL_KEY`,
-`CAP_BLOCK_METADATA`, `CAP_COMMAND_BLOCKS`, then
-`CAP_GRAPHEME_DISPLAY`. Each bit is removed at most once; thus there are at
-most six ClientHello attempts, including the initial request. Removing
-`CAP_COMMAND_BLOCKS` also removes the dependent duration bit; block metadata
-remains an independent capability. If command Blocks are not negotiated, use
-the existing Unsupported/Raw behavior. If grapheme display is not negotiated,
-use the existing scalar compatibility rules. Propagate all other protocol and
-transport failures without retry; if the bounded sequence is exhausted,
-return the final error. Never append a field under the existing schema and
-assume older decoders ignore it.
+When a Runtime rejects a ClientHello that requested duration, the client may
+make one duration-specific compatibility retry. Retry only after a decoded
+Error has `error_code=MalformedPayload` and
+`offending_message_type=ClientHello` for a ClientHello the client itself
+encoded and validated. The retry uses a fresh connection and removes only
+`CAP_COMMAND_BLOCK_DURATION`. If that ClientHello is still rejected and it
+requested `CAP_EXTENDED_TERMINAL_KEY`, the existing one-reconnect compatibility
+fallback may then remove that bit once, also on a fresh connection. Thus the
+duration fallback composes with the existing extended-key fallback in the
+fixed order duration, then extended key, for at most three ClientHello attempts
+including the initial request. This amendment does not change fallback or
+negotiation behavior for `CAP_BLOCK_METADATA`, `CAP_COMMAND_BLOCKS`, or
+`CAP_GRAPHEME_DISPLAY`. Propagate unrelated protocol and transport failures
+without retry; if these bounded retries are exhausted, return the final error.
+Never append a field under the existing schema and assume older decoders ignore
+it.
 
 SPEC-008 and the implementation Issue must define the exact byte layout and
 display rounding after this ADR is accepted.
@@ -846,10 +846,14 @@ Before product implementation, the implementation Issue must also require:
   worst-case timeline capacity for both schemas, rejected admission without
   timeline mutation, and mixed-client fan-out where only one client negotiates
   duration;
-- ClientHello fallback tests for duration-only rejection, duration plus
-  extended-key rejection, each downgrade step, unrelated-error/transport
-  non-retry, exhaustion after at most six attempts, and Unsupported/Raw
-  fallback when command Blocks are unavailable;
+- ClientHello fallback tests proving duration-only rejection removes only the
+  duration bit, duration plus extended-key rejection composes with the existing
+  one-shot fallback in at most three attempts, unrelated-error/transport
+  non-retry, and bounded exhaustion; preserve the existing extended-key
+  fallback behavior;
+- the separate implementation Issue must carry the same-read `C`/`D` live-PTY
+  case as an explicit required acceptance test: duration is unknown, never a
+  misleading near-zero value;
 - hot-path/performance evidence showing that timing and per-capability encoding
   never block PTY/VT/output progress or allocate a frame per attached client.
 
