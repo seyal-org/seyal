@@ -140,7 +140,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
 | Trusted shell-integration / semantic command boundaries | #686 | **Open Refinement**; #991 proposes a duration decision |
-| Flow compositor Block-region drawing | #865 | **Ready** |
+| Flow compositor Block-region drawing | #865 | **Technically ready; claim blocked by stale `issue/865` branch from closed PR #874** |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
 | Headed Flow/Raw/TUI workload matrix | #868 | **Blocked on #867** |
@@ -159,7 +159,7 @@ Hierarchy lane
                                  └→ provisioning implementation → #936
 
 Presentation lane
-  #865 Ready → #866 → #867 → #868 → #869
+  clear/explicitly hand off stale #865 branch → #865 → #866 → #867 → #868 → #869
 
 Configuration lane
   #993 Ready
@@ -169,7 +169,7 @@ Shell-metadata decision
   #686 / PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
-#865 and #993 are independent Ready pickups now. They must not edit M002 terminal-state/VT/Unicode/reflow authorities. #923 remains blocked until #922 actually merges. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is an independent Ready production pickup now. #994 is an independent refinement lane. #865 is technically ready but cannot be freely claimed until its stale deterministic branch from closed PR #874 is explicitly resolved under the current Issue protocol. None of these lanes may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 remains blocked until #922 actually merges. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
 PR #990 changes the contributor claim protocol but is not a product dependency. Until it is accepted and merged, contributors follow the currently merged assignee-based `ISSUE-PROTOCOL.md`.
 
@@ -211,7 +211,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
-Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865 is Ready now because its compositor work is pane-local and its corrected Rust presentation dependency #861 is complete; it does not require #923. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
+Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865's technical scope is ready because its compositor work is pane-local and its corrected Rust presentation dependency #861 is complete; it does not require #923. However, the old `issue/865` branch from closed/unmerged PR #874 must be explicitly cleared or handed off before a new implementation claim. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
 
 ### 6.6 #676 / #993 — configuration frontier
 
