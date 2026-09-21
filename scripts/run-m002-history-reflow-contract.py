@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -90,6 +91,71 @@ def probe_ac_power_confirmed() -> tuple[bool, str]:
     if "Battery Power" in output:
         return False, "host is running on battery power, not AC"
     return False, f"pmset output did not confirm AC power: {output.strip()!r}"
+
+
+def probe_thermal_stability_confirmed() -> tuple[bool, str]:
+    """Probe the real host thermal state; AC power alone does not prove a
+    controlled measurement environment.
+
+    A host can be on AC power and still be thermally throttled (e.g. a
+    laptop under load on a warm desk), which would silently distort
+    PHYSICAL_ARM64 timing evidence the same way an uncontrolled host would.
+    Returns (confirmed, detail).
+
+    `pmset -g therm` reports differently by platform: Intel Macs report
+    numeric `CPU_Speed_Limit`/`CPU_Scheduler_Limit` keys (100 = unthrottled,
+    lower = throttled); Apple Silicon macOS -- the only platform this
+    collection host guard (require_apple_silicon_collection_host) ever
+    allows -- reports no numeric limits at all when thermally nominal, only
+    "No ... warning level has been recorded" notes (verified against a real
+    Apple Silicon host). Either a confirmed-unthrottled numeric reading or
+    that no-warning-recorded state counts as confirmed; anything else
+    (command failure, an actual reported throttle, or unrecognized output)
+    invalidates the probe.
+    """
+    if sys.platform != "darwin":
+        return False, "pmset thermal probe requires macOS"
+    result = run(["pmset", "-g", "therm"])
+    if result.returncode != 0:
+        return False, f"pmset -g therm failed: {result.stdout.strip()}"
+    output = result.stdout
+    limits = {key: int(value) for key, value in re.findall(r"(CPU_Speed_Limit|CPU_Scheduler_Limit)\s*=\s*(\d+)", output)}
+    if any(value != 100 for value in limits.values()):
+        return False, f"host is thermally throttled: {limits}"
+    if limits:
+        return True, "; ".join(f"{key}={value}" for key, value in limits.items())
+    no_warning_recorded = (
+        "No thermal warning level has been recorded" in output
+        and "No performance warning level has been recorded" in output
+    )
+    if no_warning_recorded:
+        return True, "no thermal warning level recorded"
+    return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
+
+
+def require_baseline_cohort_provenance(directory: Path, baseline_sha: str) -> None:
+    """Verify every pre-collected baseline cohort file actually carries the
+    declared --baseline-sha, rather than trusting the CLI argument alone.
+
+    `--baseline-cohorts-dir` accepts a bundle collected outside this process
+    (from a prior isolated checkout at that exact SHA). Without this check,
+    an arbitrary five-cohort bundle with no real relationship to
+    --baseline-sha could be silently accepted as that SHA's evidence; the
+    cohort files themselves must be stamped with the SHA they were
+    collected at (via SEYAL_BENCH_COMMIT) and that stamp must match.
+    """
+    for cohort_file in sorted(directory.glob("*.toml")):
+        try:
+            cohort = tomllib.loads(cohort_file.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as error:
+            raise SystemExit(f"invalid baseline cohort file {cohort_file}: {error}") from error
+        commit = cohort.get("commit")
+        if commit != baseline_sha:
+            raise SystemExit(
+                f"--baseline-cohorts-dir cohort {cohort_file} is not bound to --baseline-sha "
+                f"{baseline_sha} (commit={commit!r}); collect baseline cohorts with "
+                "SEYAL_BENCH_COMMIT set to the exact baseline SHA"
+            )
 
 
 def require_apple_silicon_collection_host() -> None:
@@ -293,6 +359,7 @@ def main() -> None:
     controlled_reasons: list[str] = []
     baseline_source: Path | None = None
     ac_detail = "uncontrolled-developer-host"
+    thermal_detail = "uncontrolled-developer-host"
     if args.controlled:
         if args.baseline_sha is None:
             controlled_reasons.append("no --baseline-sha supplied")
@@ -309,6 +376,11 @@ def main() -> None:
         ac_confirmed, ac_detail = probe_ac_power_confirmed()
         if not ac_confirmed:
             controlled_reasons.append(f"AC power not confirmed: {ac_detail}")
+        # AC power alone does not prove a controlled measurement environment:
+        # a throttled/hot host on AC must still fail closed to PLATFORM_LIMITED.
+        thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
+        if not thermal_confirmed:
+            controlled_reasons.append(f"thermal stability not confirmed: {thermal_detail}")
 
     controlled_valid = args.controlled and not controlled_reasons
 
@@ -324,6 +396,8 @@ def main() -> None:
             if not baseline_gate_dir.is_dir():
                 raise SystemExit(f"--baseline-cohorts-dir is missing a {gate} subdirectory: {baseline_gate_dir}")
             shutil.copytree(baseline_gate_dir, baseline)
+            assert args.baseline_sha is not None
+            require_baseline_cohort_provenance(baseline, args.baseline_sha)
             baseline_log = f"[controlled] reused pre-collected baseline cohorts from {baseline_gate_dir}\n"
         else:
             baseline_log = collect_cohorts(gate, baseline, sha)
@@ -332,7 +406,7 @@ def main() -> None:
         if controlled_valid:
             environment_status = "VALID"
             platform_limit_reason = ""
-            power_thermal_state = ac_detail
+            power_thermal_state = f"{ac_detail}; {thermal_detail}"
             baseline_sha_value = args.baseline_sha
         else:
             environment_status = "PLATFORM_LIMITED"

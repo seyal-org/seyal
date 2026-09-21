@@ -207,14 +207,49 @@ def required_matrix_point_count(schema: dict) -> int:
     return count
 
 
+def _normalize_workload(value: object) -> str:
+    # The accepted contract's [matrix].workloads table spells two of its four
+    # entries as display-style acronyms ("ASCII", "CJK"); the real bench
+    # harness (crates/seyal-terminal/benches/history_reflow.rs
+    # workload_names()) emits the same identifiers lowercase ("ascii",
+    # "cjk"). Casefold so identity comparison isn't defeated by that
+    # pre-existing casing mismatch between the two.
+    return str(value).casefold()
+
+
+def expected_matrix_configurations(schema: dict) -> set[tuple]:
+    """Every (lines, columns, workload, executions) tuple the accepted
+    matrix actually requires, built as the real Cartesian product of the
+    CONTRACT's own `[matrix]` dimensions -- not just a count."""
+    matrix = schema.get("matrix", {})
+    dimension_values: dict[str, list] = {}
+    for dimension in MATRIX_DIMENSIONS:
+        values = matrix.get(dimension)
+        if not values:
+            raise SystemExit(f"M002 performance matrix is missing dimension {dimension}")
+        dimension_values[dimension] = values
+    return {
+        (lines, columns, _normalize_workload(workload), executions)
+        for lines in dimension_values["retained_content"]
+        for executions in dimension_values["execution_populations"]
+        for columns in dimension_values["columns"]
+        for workload in dimension_values["workloads"]
+    }
+
+
 def check_matrix_completeness_claim(manifest: dict, schema: dict) -> None:
     """Reject a submission that CLAIMS full accepted-matrix coverage without
-    actually carrying that many distinct tagged (lines, columns, workload,
-    executions) configurations. A single-point diagnostic record is fine as
-    long as it does not claim completeness -- the claim is a distinct
-    explicit field (`claim`), never inferred from row count alone, so a
-    small diagnostic run is never mistaken for full-matrix evidence and a
-    genuinely complete run cannot be faked by a short manifest.
+    actually carrying every required distinct (lines, columns, workload,
+    executions) configuration -- cardinality alone is not enough, since a
+    manifest could carry the right COUNT of entirely wrong tuples. A
+    single-point diagnostic record is fine as long as it does not claim
+    completeness -- the claim is a distinct explicit field (`claim`), never
+    inferred from row count alone, so a small diagnostic run is never
+    mistaken for full-matrix evidence and a genuinely complete run cannot be
+    faked by a short or invalid manifest. Any claim (complete, partial, or
+    single-point) is rejected outright if it names a configuration outside
+    the accepted matrix -- that can never be honest evidence for this
+    contract, whatever it claims to cover.
     """
     if manifest.get("schema") != MATRIX_MANIFEST_SCHEMA:
         raise SystemExit("M002 matrix manifest has unsupported identity")
@@ -230,15 +265,29 @@ def check_matrix_completeness_claim(manifest: dict, schema: dict) -> None:
     for entry in configurations:
         if not isinstance(entry, dict):
             raise SystemExit("M002 matrix manifest configuration entries must be tables")
-        key = (entry.get("lines"), entry.get("columns"), entry.get("workload"), entry.get("executions"))
-        if any(value is None for value in key):
+        lines, columns, workload, executions = (
+            entry.get("lines"),
+            entry.get("columns"),
+            entry.get("workload"),
+            entry.get("executions"),
+        )
+        if any(value is None for value in (lines, columns, workload, executions)):
             raise SystemExit("M002 matrix manifest configuration is missing lines/columns/workload/executions")
-        distinct.add(key)
-    required = required_matrix_point_count(schema)
-    if claim == "complete" and len(distinct) < required:
+        distinct.add((lines, columns, _normalize_workload(workload), executions))
+    expected = expected_matrix_configurations(schema)
+    out_of_contract = distinct - expected
+    if out_of_contract:
+        example = sorted(out_of_contract)[0]
         raise SystemExit(
-            f"M002 matrix manifest claims complete coverage with only {len(distinct)} distinct "
-            f"configurations; the accepted matrix requires {required}"
+            f"M002 matrix manifest contains {len(out_of_contract)} configuration(s) outside the "
+            f"accepted matrix (e.g. lines={example[0]} columns={example[1]} workload={example[2]!r} "
+            f"executions={example[3]}); wrong/invalid tuples cannot count toward any claim"
+        )
+    if claim == "complete" and distinct != expected:
+        missing = len(expected - distinct)
+        raise SystemExit(
+            f"M002 matrix manifest claims complete coverage but is missing {missing} of "
+            f"{len(expected)} required configurations"
         )
 
 
@@ -410,10 +459,73 @@ def self_test() -> None:
         "configurations": full_configurations,
     }
     check_matrix_completeness_claim(full_manifest, schema)  # must not raise
+
+    # Cardinality is not enough: a manifest with exactly `required_points`
+    # distinct tuples, all outside the accepted matrix, must still be
+    # rejected -- proving the guard checks tuple VALIDITY, not just count.
+    invalid_but_right_count = [
+        {"lines": lines, "columns": 999, "workload": workload, "executions": executions}
+        for lines in schema["matrix"]["retained_content"]
+        for executions in schema["matrix"]["execution_populations"]
+        for columns in schema["matrix"]["columns"]
+        for workload in schema["matrix"]["workloads"]
+    ]
+    if len(invalid_but_right_count) != required_points:
+        raise SystemExit("M002 self-test: constructed invalid-but-right-count matrix has the wrong length")
+    invalid_but_right_count_manifest = {
+        "schema": MATRIX_MANIFEST_SCHEMA,
+        "version": 1,
+        "claim": "complete",
+        "gate": "history_active_reflow_ms",
+        "configurations": invalid_but_right_count,
+    }
+    try:
+        check_matrix_completeness_claim(invalid_but_right_count_manifest, schema)
+    except SystemExit:
+        pass
+    else:
+        raise SystemExit(
+            "M002 self-test: a manifest with the right point COUNT but wrong (out-of-contract) "
+            "tuples was wrongly accepted as complete"
+        )
+
+    # A single out-of-contract tuple is rejected for every claim, not just
+    # "complete" -- a partial/single-point claim cannot smuggle in an
+    # invalid configuration either.
+    out_of_contract_single_point = dict(
+        single_row_manifest,
+        claim="single-point",
+        configurations=[{"lines": 10000, "columns": 999, "workload": "ascii", "executions": 1}],
+    )
+    try:
+        check_matrix_completeness_claim(out_of_contract_single_point, schema)
+    except SystemExit:
+        pass
+    else:
+        raise SystemExit(
+            "M002 self-test: a single-point claim naming an out-of-contract configuration was "
+            "wrongly accepted"
+        )
+
+    # The contract's own [matrix].workloads spells two entries as display
+    # acronyms ("ASCII", "CJK"); the real bench harness emits them lowercase
+    # ("ascii", "cjk"). A manifest using the harness's own casing must still
+    # be accepted as in-contract (this is a casing difference, not a wrong
+    # tuple) -- single_row_manifest above already exercises this for
+    # "ascii"; also prove "CJK" round-trips through the harness's "cjk".
+    cjk_diagnostic = dict(
+        single_row_manifest,
+        claim="single-point",
+        configurations=[{"lines": 10000, "columns": 80, "workload": "cjk", "executions": 1}],
+    )
+    check_matrix_completeness_claim(cjk_diagnostic, schema)  # must not raise
+
     print(
         f"M002 performance contract self-test: matrix-completeness guard verified "
         f"({required_points} required points; rejected a 1-row complete claim, "
-        f"accepted a 1-row single-point claim, accepted a {len(full_configurations)}-row complete claim)."
+        f"accepted a 1-row single-point claim, accepted a {len(full_configurations)}-row complete claim, "
+        "rejected a right-count/wrong-tuple complete claim, rejected an out-of-contract single-point "
+        "claim, accepted the harness's lowercase workload casing)."
     )
 
     if nearest_rank([1.0, 2.0, 3.0, 4.0], 50) != 2.0:
@@ -536,7 +648,16 @@ def evaluate_record(path: Path, schema: dict, *, require_head: bool = False) -> 
         if not artifact.exists():
             raise SystemExit(f"M002 performance result {field} does not exist")
 
-    def load_raw_cohorts(field: str) -> list[float]:
+    # A PHYSICAL_ARM64 VALID result is the one case where evidence provenance
+    # actually matters for the SHA it claims: a --baseline-cohorts-dir (or a
+    # raw_cohorts directory) can originate from outside this validation run,
+    # so require each cohort file to be stamped with the SHA it was
+    # collected at (see history_reflow.rs's write_cohort_file) and match it
+    # against the record's own claimed SHA. PLATFORM_LIMITED/other evidence
+    # classes make no such provenance claim and are unaffected.
+    bind_cohort_provenance = record["evidence_class"] == "PHYSICAL_ARM64" and record["environment_status"] == "VALID"
+
+    def load_raw_cohorts(field: str, *, expected_commit: str | None) -> list[float]:
         raw_cohorts = (ROOT / record[field]).resolve()
         if not raw_cohorts.is_dir():
             raise SystemExit(f"M002 performance result {field} must be a directory")
@@ -556,6 +677,12 @@ def evaluate_record(path: Path, schema: dict, *, require_head: bool = False) -> 
                 raise SystemExit(f"M002 raw cohort {cohort_file.name} has an invalid sample count")
             if any(not is_non_negative_number(value) for value in samples):
                 raise SystemExit(f"M002 raw cohort {cohort_file.name} contains invalid samples")
+            if expected_commit is not None and cohort.get("commit") != expected_commit:
+                raise SystemExit(
+                    f"M002 raw cohort {cohort_file.name} is not bound to {expected_commit} "
+                    f"(commit={cohort.get('commit')!r}); a PHYSICAL_ARM64 VALID result's evidence "
+                    "must prove which SHA it was collected at"
+                )
             cohort_numbers.append(number)
             raw_values.extend(float(value) for value in samples)
         if len(cohort_files) != schema["raw_cohorts"]["file_count"] or sorted(cohort_numbers) != list(range(1, 6)):
@@ -564,8 +691,12 @@ def evaluate_record(path: Path, schema: dict, *, require_head: bool = False) -> 
             raise SystemExit(f"M002 {field} observations do not match sample_count")
         return raw_values
 
-    raw_values = load_raw_cohorts("raw_cohorts")
-    baseline_raw_values = load_raw_cohorts("baseline_raw_cohorts")
+    raw_values = load_raw_cohorts(
+        "raw_cohorts", expected_commit=record["production_sha"] if bind_cohort_provenance else None
+    )
+    baseline_raw_values = load_raw_cohorts(
+        "baseline_raw_cohorts", expected_commit=record["baseline_sha"] if bind_cohort_provenance else None
+    )
     values = [record[key] for key in percentile_keys]
     baseline = [record[key] for key in baseline_keys]
     if any(not is_non_negative_number(value) for value in values + baseline):

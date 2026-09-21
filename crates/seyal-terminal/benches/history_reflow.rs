@@ -108,9 +108,15 @@ struct MatrixPoint {
     executions: usize,
 }
 
-fn write_cohort_file(path: &str, cohort: usize, point: &MatrixPoint, samples: &[f64]) {
+fn write_cohort_file(
+    path: &str,
+    cohort: usize,
+    point: &MatrixPoint,
+    commit: &str,
+    samples: &[f64],
+) {
     let mut body = format!(
-        "cohort = {cohort}\nlines = {}\ncolumns = {}\nworkload = \"{}\"\nexecutions = {}\nsamples = [",
+        "cohort = {cohort}\ncommit = \"{commit}\"\nlines = {}\ncolumns = {}\nworkload = \"{}\"\nexecutions = {}\nsamples = [",
         point.lines, point.columns, point.workload, point.executions,
     );
     for (index, value) in samples.iter().enumerate() {
@@ -146,7 +152,8 @@ fn run_contract_cohort() {
     for _ in 0..samples {
         retained.push(sample_ms(&gate, &mut terminal, columns));
     }
-    write_cohort_file(&out, cohort, &point, &retained);
+    let commit = benchmark_commit();
+    write_cohort_file(&out, cohort, &point, &commit, &retained);
     println!(
         "[seyal history benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} lines={lines} columns={columns} workload={workload} out={out}"
     );

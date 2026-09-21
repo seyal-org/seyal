@@ -48,7 +48,7 @@ def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
-def pin_exact_head(root: Path, record_path: Path) -> None:
+def pin_exact_head(root: Path) -> str:
     subprocess.run(
         ["git", "init"],
         cwd=root,
@@ -74,12 +74,17 @@ def pin_exact_head(root: Path, record_path: Path) -> None:
         stdout=subprocess.DEVNULL,
     )
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    record_path.write_text(
-        record_path.read_text(encoding="utf-8").replace(
-            "1111111111111111111111111111111111111111", sha
-        ),
-        encoding="utf-8",
-    )
+    # Cohort fixture files also stamp the placeholder production SHA (as
+    # `commit = '1111...1'`) so the commit-provenance-binding check can
+    # verify against it; rewrite every fixture .toml under root, not just
+    # record.toml, so that stamp stays consistent with the pinned HEAD.
+    for toml_file in root.rglob("*.toml"):
+        text = toml_file.read_text(encoding="utf-8")
+        if "1111111111111111111111111111111111111111" in text:
+            toml_file.write_text(
+                text.replace("1111111111111111111111111111111111111111", sha), encoding="utf-8"
+            )
+    return sha
 
 
 
@@ -382,16 +387,16 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 invalid_percentiles / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(['2'] * 100)}]\n",
+                f"cohort = {cohort}\ncommit = '1111111111111111111111111111111111111111'\nsamples = [{', '.join(['2'] * 100)}]\n",
             )
         (invalid_percentiles / "baseline-cohorts").mkdir()
         baseline_samples = [2] * 250 + [4] * 225 + [8] * 25
         for cohort in range(1, 6):
             write(
                 invalid_percentiles / "baseline-cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '3333333333333333333333333333333333333333'\nsamples = [{', '.join(map(str, baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
-        pin_exact_head(invalid_percentiles, invalid_percentiles / "record.toml")
+        pinned_sha = pin_exact_head(invalid_percentiles)
         run_negative(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
             invalid_percentiles,
@@ -417,7 +422,7 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 absolute_fail / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, absolute_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '{pinned_sha}'\nsamples = [{', '.join(map(str, absolute_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
         result = subprocess.run(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -437,13 +442,13 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 relative_fail / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, relative_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '{pinned_sha}'\nsamples = [{', '.join(map(str, relative_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
         relative_baseline_samples = [1] * 250 + [2] * 225 + [4] * 25
         for cohort in range(1, 6):
             write(
                 relative_fail / "baseline-cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, relative_baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '3333333333333333333333333333333333333333'\nsamples = [{', '.join(map(str, relative_baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
         result = subprocess.run(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -538,7 +543,7 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 accepted_pass / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(['2'] * 50 + ['4'] * 45 + ['8'] * 5)}]\n",
+                f"cohort = {cohort}\ncommit = '{pinned_sha}'\nsamples = [{', '.join(['2'] * 50 + ['4'] * 45 + ['8'] * 5)}]\n",
             )
         result = subprocess.run(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -549,6 +554,54 @@ def main() -> None:
             result.returncode == 0 and "M002 performance result: PASS" in result.stdout,
             "accepted-ceiling in-policy record was not evaluated as PASS",
         )
+
+        # Blocking-review fix: a PHYSICAL_ARM64 VALID result's raw/baseline
+        # cohorts must be bound to the SHA the record claims for them, not
+        # merely trusted. accepted_pass's cohorts/baseline-cohorts already
+        # carry correct `commit` stamps (proven above); mutate the baseline
+        # cohorts' commit to an unrelated SHA and confirm evaluate_record
+        # rejects it instead of silently evaluating unverified evidence.
+        forged_baseline_provenance = base / "m002-performance-forged-baseline-provenance"
+        shutil.copytree(accepted_pass, forged_baseline_provenance)
+        for cohort in range(1, 6):
+            path = forged_baseline_provenance / "baseline-cohorts" / f"cohort-{cohort}.toml"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "commit = '3333333333333333333333333333333333333333'",
+                    "commit = '9999999999999999999999999999999999999999'",
+                ),
+                encoding="utf-8",
+            )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            forged_baseline_provenance,
+            "is not bound to",
+        )
+
+        # Same check, but the cohort file carries no `commit` field at all
+        # (e.g. collected by a harness predating this fix) -- must also be
+        # rejected, not silently treated as unverifiable-but-acceptable.
+        missing_baseline_provenance = base / "m002-performance-missing-baseline-provenance"
+        shutil.copytree(accepted_pass, missing_baseline_provenance)
+        for cohort in range(1, 6):
+            path = missing_baseline_provenance / "baseline-cohorts" / f"cohort-{cohort}.toml"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "commit = '3333333333333333333333333333333333333333'\n", ""
+                ),
+                encoding="utf-8",
+            )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            missing_baseline_provenance,
+            "is not bound to",
+        )
+
+        # A PLATFORM_LIMITED record makes no provenance claim, so cohorts
+        # with no `commit` field at all remain acceptable -- already proven
+        # by platform_limited_missing_reason/platform_limited_ok/
+        # uncontrolled_limited below, whose cohort fixtures carry no commit
+        # field and are still accepted; this check must not regress them.
 
         unordered_cohort_names = base / "m002-performance-unordered-cohort-names"
         shutil.copytree(accepted_pass, unordered_cohort_names)

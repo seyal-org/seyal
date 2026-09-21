@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tomllib
@@ -279,11 +280,40 @@ def app_identity_matches(requested_sha: str, requested_configuration: str) -> bo
     return True
 
 
+def require_clean_source_tree() -> None:
+    """Refuse to build/stamp the app-identity manifest from a dirty checkout.
+
+    The build consumes the current working tree's contents, not just the
+    commit `git rev-parse HEAD` names. A dirty checkout (staged, unstaged,
+    or untracked changes) can therefore produce a binary that does not
+    actually match what the identity manifest would claim, defeating the
+    manifest's whole purpose. Factored out (like the other collection-host
+    guards in this file) so a test can monkeypatch this one function without
+    weakening the real guard for an actual collection run.
+    """
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise SystemExit("cannot verify a clean source tree for M002 app-identity collection")
+    if status.stdout.strip():
+        raise SystemExit(
+            "refusing to build/stamp the M002 app-identity manifest from a dirty working tree; "
+            "commit or stash changes, or collect from an isolated exact-SHA checkout"
+        )
+
+
 def ensure_seyal_app() -> Path:
     requested_sha = git_sha()
     requested_configuration = SEYAL_APP_CONFIGURATION
     if app_identity_matches(requested_sha, requested_configuration):
         return SEYAL_APP
+    require_clean_source_tree()
     env = os.environ.copy()
     # An env-var override for THIS collection run only, not a change to
     # build-macos.sh's own Debug default (other callers may legitimately
@@ -370,6 +400,46 @@ def probe_ac_power_confirmed() -> tuple[bool, str]:
     return False, f"pmset output did not confirm AC power: {output.strip()!r}"
 
 
+def probe_thermal_stability_confirmed() -> tuple[bool, str]:
+    """Probe the real host thermal state; AC power alone does not prove a
+    controlled measurement environment.
+
+    A host can be on AC power and still be thermally throttled (e.g. a
+    laptop under load on a warm desk), which would silently distort
+    PHYSICAL_ARM64 timing evidence the same way an uncontrolled host would.
+    Returns (confirmed, detail).
+
+    `pmset -g therm` reports differently by platform: Intel Macs report
+    numeric `CPU_Speed_Limit`/`CPU_Scheduler_Limit` keys (100 = unthrottled,
+    lower = throttled); Apple Silicon macOS -- the only platform this
+    collection host guard (require_apple_silicon_collection_host) ever
+    allows -- reports no numeric limits at all when thermally nominal, only
+    "No ... warning level has been recorded" notes (verified against a real
+    Apple Silicon host). Either a confirmed-unthrottled numeric reading or
+    that no-warning-recorded state counts as confirmed; anything else
+    (command failure, an actual reported throttle, or unrecognized output)
+    invalidates the probe.
+    """
+    if sys.platform != "darwin":
+        return False, "pmset thermal probe requires macOS"
+    result = run(["pmset", "-g", "therm"])
+    if result.returncode != 0:
+        return False, f"pmset -g therm failed: {result.stdout.strip()}"
+    output = result.stdout
+    limits = {key: int(value) for key, value in re.findall(r"(CPU_Speed_Limit|CPU_Scheduler_Limit)\s*=\s*(\d+)", output)}
+    if any(value != 100 for value in limits.values()):
+        return False, f"host is thermally throttled: {limits}"
+    if limits:
+        return True, "; ".join(f"{key}={value}" for key, value in limits.items())
+    no_warning_recorded = (
+        "No thermal warning level has been recorded" in output
+        and "No performance warning level has been recorded" in output
+    )
+    if no_warning_recorded:
+        return True, "no thermal warning level recorded"
+    return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
+
+
 def require_apple_silicon_collection_host(gate: str) -> None:
     """Refuse real cohort collection off Apple Silicon macOS.
 
@@ -389,6 +459,7 @@ def collect_gate(
     allow_history: bool,
     controlled: bool = False,
     baseline_sha: str | None = None,
+    baseline_cohorts_dir: str | None = None,
 ) -> None:
     inventory = load_inventory()
     require_uncontrolled_honesty(inventory)
@@ -406,7 +477,18 @@ def collect_gate(
             f"{family.get('platform_limit_reason')}"
         )
     if gate in HISTORY_GATES:
-        result = run([sys.executable, str(HISTORY_RUNNER)])
+        # Forward controlled/baseline arguments to the history runner rather
+        # than silently delegating to its uncontrolled-only default: without
+        # this, `--gate <history> --controlled ...` would drop every
+        # controlled/baseline flag on the floor.
+        command = [sys.executable, str(HISTORY_RUNNER)]
+        if controlled:
+            command.append("--controlled")
+        if baseline_sha is not None:
+            command.extend(["--baseline-sha", baseline_sha])
+        if baseline_cohorts_dir is not None:
+            command.extend(["--baseline-cohorts-dir", baseline_cohorts_dir])
+        result = run(command)
         sys.stdout.write(result.stdout)
         if result.returncode != 0:
             raise SystemExit(result.returncode)
@@ -460,6 +542,11 @@ def collect_gate(
     ac_confirmed, ac_detail = probe_ac_power_confirmed()
     if not ac_confirmed:
         reasons.append(f"AC power not confirmed: {ac_detail}")
+    # AC power alone does not prove a controlled measurement environment: a
+    # throttled/hot host on AC must still fail closed to PLATFORM_LIMITED.
+    thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
+    if not thermal_confirmed:
+        reasons.append(f"thermal stability not confirmed: {thermal_detail}")
 
     if reasons:
         note = evidence_root / "PLATFORM_LIMITED.txt"
@@ -494,6 +581,7 @@ def collect_gate(
                 "gate_status=proposed",
                 f"baseline_sha={baseline_sha}",
                 f"ac_power_detail={ac_detail}",
+                f"thermal_detail={thermal_detail}",
                 f"production_sha={sha}",
                 "",
             ]
@@ -522,6 +610,11 @@ def main() -> None:
         "--baseline-sha",
         help="baseline production SHA for --controlled mode; must differ from the candidate HEAD SHA",
     )
+    parser.add_argument(
+        "--baseline-cohorts-dir",
+        help="directory of pre-collected baseline cohorts for --baseline-sha; forwarded as-is to the "
+        "HistoryStore runner for history gates (--gate history_active_reflow_ms/history_sealed_segment_reflow_ms)",
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -532,6 +625,7 @@ def main() -> None:
             allow_history=args.allow_history_remasure,
             controlled=args.controlled,
             baseline_sha=args.baseline_sha,
+            baseline_cohorts_dir=args.baseline_cohorts_dir,
         )
         return
     print_inventory(load_inventory())

@@ -22,6 +22,7 @@ import importlib.util
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,10 +105,12 @@ def test_performance_contract_runner(base: Path) -> None:
         require("distinct" in str(error), f"expected a distinct-baseline rejection message, got: {error}")
     require(raised, "--controlled with baseline_sha == candidate sha must raise")
 
-    # (c) --controlled with a distinct baseline AND a mocked AC-confirmed
-    # probe can produce environment_status=VALID (something other than
-    # PLATFORM_LIMITED).
+    # (c) --controlled with a distinct baseline AND mocked AC-confirmed AND
+    # thermal-confirmed probes can produce environment_status=VALID
+    # (something other than PLATFORM_LIMITED). AC power alone is not enough
+    # (see the thermal-not-confirmed case below).
     module.probe_ac_power_confirmed = lambda: (True, "AC Power")
+    module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
     module.collect_gate(
         "idle_cpu",
         allow_history=False,
@@ -139,6 +142,56 @@ def test_performance_contract_runner(base: Path) -> None:
     battery_note = (battery_evidence[-1] / "PLATFORM_LIMITED.txt").read_text(encoding="utf-8")
     require("AC power not confirmed" in battery_note, f"expected an AC-power-not-confirmed reason, got: {battery_note!r}")
 
+    # Blocking-review fix: AC power alone must not be treated as a
+    # controlled environment. With AC confirmed and a distinct baseline, but
+    # thermal stability NOT confirmed (e.g. a throttled host on AC), the
+    # collection must still fail closed to PLATFORM_LIMITED.
+    module.probe_ac_power_confirmed = lambda: (True, "AC Power")
+    module.probe_thermal_stability_confirmed = lambda: (False, "host is thermally throttled: {'CPU_Speed_Limit': 60}")
+    module.collect_gate(
+        "idle_cpu",
+        allow_history=False,
+        controlled=True,
+        baseline_sha="2222222222222222222222222222222222222222",
+    )
+    throttled_evidence = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-idle_cpu-*"))
+    require(len(throttled_evidence) == 6, "thermally-throttled controlled path did not write a new evidence directory")
+    throttled_note = (throttled_evidence[-1] / "PLATFORM_LIMITED.txt").read_text(encoding="utf-8")
+    require(
+        "thermal stability not confirmed" in throttled_note,
+        f"expected a thermal-stability-not-confirmed reason, got: {throttled_note!r}",
+    )
+
+    # Blocking-review-summary fix: `--gate <history-gate> --controlled ...`
+    # must forward --controlled/--baseline-sha/--baseline-cohorts-dir to the
+    # HistoryStore runner subprocess rather than silently dropping them (the
+    # wrapper previously delegated with a bare, argument-less command).
+    captured_commands: list[list[str]] = []
+
+    def capturing_run(command, *, env=None):
+        captured_commands.append(command)
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    module.run = capturing_run
+    module.collect_gate(
+        "history_active_reflow_ms",
+        allow_history=True,
+        controlled=True,
+        baseline_sha="6666666666666666666666666666666666666666",
+        baseline_cohorts_dir="/tmp/some-baseline-dir",
+    )
+    require(len(captured_commands) == 1, "controlled history-gate delegation did not shell out exactly once")
+    delegated = captured_commands[0]
+    require("--controlled" in delegated, f"controlled flag was not forwarded to the history runner: {delegated}")
+    require(
+        "--baseline-sha" in delegated and "6666666666666666666666666666666666666666" in delegated,
+        f"--baseline-sha was not forwarded to the history runner: {delegated}",
+    )
+    require(
+        "--baseline-cohorts-dir" in delegated and "/tmp/some-baseline-dir" in delegated,
+        f"--baseline-cohorts-dir was not forwarded to the history runner: {delegated}",
+    )
+
     print("[seyal m002 controlled-mode test] run-m002-performance-contract.py --controlled verified.")
 
 
@@ -157,8 +210,6 @@ def test_history_reflow_runner(base: Path) -> None:
     # real validator's exact acceptance path for a fabricated baseline SHA
     # that has no real git checkout; the point of this fixture is the
     # --controlled branch selection logic in main(), not the validator.
-    import types
-
     def fake_run(command, *, env=None):
         if command[0] == "python3" and "check-m002-performance-contract.py" in command[1]:
             record_path = Path(command[3])
@@ -173,12 +224,18 @@ def test_history_reflow_runner(base: Path) -> None:
     module._real_run = module.run
     module.run = fake_run
 
+    # commit is stamped for the (c) distinct-baseline case below, which is
+    # the only case that actually reaches require_baseline_cohort_provenance
+    # (case (b) is rejected earlier for baseline_sha == candidate sha).
     baseline_dir = base / "baseline-cohorts-source"
     for gate in module.GATES:
         gate_dir = baseline_dir / gate
         gate_dir.mkdir(parents=True)
         for cohort in range(1, 6):
-            (gate_dir / f"{cohort}.toml").write_text(f"cohort = {cohort}\nsamples = [1.0]\n", encoding="utf-8")
+            (gate_dir / f"{cohort}.toml").write_text(
+                f"cohort = {cohort}\ncommit = \"4444444444444444444444444444444444444444\"\nsamples = [1.0]\n",
+                encoding="utf-8",
+            )
 
     original_argv = sys.argv
     try:
@@ -186,6 +243,7 @@ def test_history_reflow_runner(base: Path) -> None:
         # byte-for-byte the pre-existing always-PLATFORM_LIMITED, same-SHA
         # self-baseline path.
         module.probe_ac_power_confirmed = lambda: (True, "AC Power")
+        module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
         sys.argv = ["run-m002-history-reflow-contract.py"]
         module.main()
         default_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
@@ -242,6 +300,57 @@ def test_history_reflow_runner(base: Path) -> None:
             'baseline_sha = "4444444444444444444444444444444444444444"' in controlled_record,
             "controlled record must carry the distinct baseline sha",
         )
+
+        # Blocking-review fix: AC power alone must not be treated as a
+        # controlled environment. With AC confirmed but thermal stability
+        # NOT confirmed, the run must still fail closed to PLATFORM_LIMITED.
+        time.sleep(1.1)
+        module.probe_thermal_stability_confirmed = lambda: (
+            False,
+            "host is thermally throttled: {'CPU_Speed_Limit': 60}",
+        )
+        module.main()
+        throttled_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
+        require(len(throttled_roots) == 5, "thermally-throttled controlled run did not write a new evidence root")
+        throttled_record = (throttled_roots[-1] / "history_active_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        require(
+            "environment_status = 'PLATFORM_LIMITED'" in throttled_record,
+            "thermally-throttled controlled run must stay PLATFORM_LIMITED",
+        )
+        require(
+            "thermal stability not confirmed" in throttled_record,
+            f"expected a thermal-stability-not-confirmed reason, got: {throttled_record!r}",
+        )
+
+        # Blocking-review fix: a pre-collected baseline cohort bundle whose
+        # `commit` stamp does not match --baseline-sha must be rejected
+        # rather than silently trusted.
+        time.sleep(1.1)
+        module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+        forged_baseline_dir = base / "forged-baseline-cohorts-source"
+        for gate in module.GATES:
+            gate_dir = forged_baseline_dir / gate
+            gate_dir.mkdir(parents=True)
+            for cohort in range(1, 6):
+                (gate_dir / f"{cohort}.toml").write_text(
+                    f"cohort = {cohort}\ncommit = \"5555555555555555555555555555555555555555\"\nsamples = [1.0]\n",
+                    encoding="utf-8",
+                )
+        sys.argv = [
+            "run-m002-history-reflow-contract.py",
+            "--controlled",
+            "--baseline-sha",
+            "4444444444444444444444444444444444444444",
+            "--baseline-cohorts-dir",
+            str(forged_baseline_dir),
+        ]
+        provenance_raised = False
+        try:
+            module.main()
+        except SystemExit as error:
+            provenance_raised = True
+            require("is not bound to" in str(error), f"expected a provenance-binding rejection, got: {error}")
+        require(provenance_raised, "a baseline cohort bundle stamped with the wrong SHA must be rejected")
     finally:
         sys.argv = original_argv
 
