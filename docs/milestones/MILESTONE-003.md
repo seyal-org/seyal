@@ -89,9 +89,8 @@ Linux/Windows GUI, remote-product attach (M007)
 plugins, collaboration, enterprise, cloud
 second terminal model, per-Block PTY, or popup/untracked PTYs
 implementing umbrella #674 as one PR
-stealing assigned issues (#686, #865, #890, #904, #824, …)
-creating issue/922 or issue/923 while cursor/issue-922-* or cursor/issue-923-* exist
-  without an explicit resume or abandon decision
+stealing actively claimed/assigned work (for example #922 or M002 #673)
+reviving superseded historical Cursor branches as production evidence or creating a second branch for the same active Issue
 reopening merged #932 / #933 / #935
 ```
 
@@ -101,7 +100,7 @@ A FAIL or INCONCLUSIVE **mandatory** criterion on a remaining §5 issue may crea
 
 ## 5. Finding-set freeze and remaining chain
 
-Approved umbrellas are **#674 / #675 / #676**, plus spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-16** (live GitHub is authority over stale issue-body prose, including #937 merge-order text).
+Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-21** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
 
 ### 5.1 Already on `master` (do not reopen)
 
@@ -118,54 +117,61 @@ Approved umbrellas are **#674 / #675 / #676**, plus spike **#686**. Headed lefto
 
 These landings are **foundation**, not M003 Done. The headed host is still a one-live-Metal-leaf adapter until #923 / #936.
 
-### 5.2 Remaining headed leftovers (under M003 after #878 closed)
+### 5.2 Workspace/hierarchy frontier
 
 | Slice | Issue | Status |
 |---|---|---|
-| Workspace chrome (left / tabs / inspector) | #922 (duplicate title #921) | **Open**; Cursor branch `cursor/issue-922-workspace-chrome-c6e6` exists |
-| Split-tree projection; one live Metal leaf | #923 | **Open**; Cursor branch `cursor/issue-923-multipane-c6e6` exists |
-| Split drag-resize ratios | #928 | **Open** — after #923 |
-| Attention bell + popover | #926 | **Open**; Cursor branch `cursor/issue-926-attention-popover-c6e6` exists |
-| Left Workspaces agents inventory | #927 | **Open** |
-| Agents center view | #930 | **Open** — after #927 |
-| Adaptive Depth chrome fidelity | #934 | **Open** |
-| Multiple live Metal surfaces per Tab | #936 | **Open — Blocked** on #674 and #923 |
-| Sessions center | #929 | **Open — Blocked** on session inventory authority |
-| Resources center | #931 | **Open — Blocked** on resource inventory authority |
-| Chrome merge-order map | #937 | **Open** orchestration; stale vs merged #932/#933/#935 |
+| Workspace chrome (left / tabs / inspector) | #922 | **Active** — owned by @crdileep82; do not duplicate |
+| Split-tree projection; one live Metal leaf | #923 | **Blocked on #922 merge**; historical Cursor branch explicitly abandoned/superseded |
+| Split drag-resize ratios | #928 | **Blocked on #923** |
+| Pane/tab execution provisioning contract | #994 | **Refinement** — defines the missing product→Runtime execution-creation seam |
+| Multiple live Metal surfaces per Tab | #936 | **Blocked** on #923 plus accepted provisioning work derived from #994 |
+| Adaptive Depth chrome fidelity | #934 | **Open**; presentation-only, prefer after the active hierarchy/chrome frontier |
 
-Do **not** create `issue/922` or `issue/923` while those Cursor branches exist unless the owner explicitly resumes or abandons them.
+Historical `cursor/issue-922-*` / `cursor/issue-923-*` branches are not current production authority. #923 has an explicit 2026-09-21 product-owner disposition that its old Cursor branch is abandoned/superseded. Do not resume old branches implicitly.
 
-### 5.3 Umbrellas, presentation, and spike
+Agent inventory/Agents-center/attention product work (#926/#927/#930) is not part of the M003 critical path; roadmap ownership remains M005 where applicable. Sessions/Resources center candidates (#929/#931) are likewise not M003 close blockers unless their owning roadmap authority explicitly promotes a bounded generic hierarchy requirement. #937 is historical orchestration, not an implementation pickup.
+
+### 5.3 Umbrellas and executable parallel lanes
 
 | Slice | Issue | Status |
 |---|---|---|
-| Native hierarchy / windows / tabs / splits / navigation | #674 | **Open** umbrella — **not** one Ready implementation PR |
-| Pane input, Blocks, selection, same-execution presentation | #675 | **Open** — needs #674 pane/focus model; #686 where semantic boundaries are required |
-| Local config / themes / fonts / keybindings / launch policy | #676 | **Open** |
-| Trusted shell-integration / semantic command boundaries | #686 | **Open** spike; assignee **@mahboobmonnamd** — do not steal |
-| Flow compositor Block-region drawing | #865 | **Open**; assignee **@mahboobmonnamd** — do not steal |
-| Flow composer input/IME/focus fence | #866 | **Open** |
-| Raw/TUI full-Pane takeover | #867 | **Open** |
-| Headed Flow/Raw/TUI workload matrix | #868 | **Open** — after presentation slices |
-| Renderer qualification / regression | #869 | **Open** — after presentation slices |
+| Native hierarchy / windows / tabs / splits / navigation | #674 | **Open umbrella** — not a pickup |
+| Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
+| Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
+| Trusted shell-integration / semantic command boundaries | #686 | **Open Refinement**; #991 proposes a duration decision |
+| Flow compositor Block-region drawing | #865 | **Ready** |
+| Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
+| Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
+| Headed Flow/Raw/TUI workload matrix | #868 | **Blocked on #867** |
+| Renderer qualification / regression | #869 | **Refinement / after #868** |
+| Production startup config realization | #993 | **Ready** |
+| Pane/tab execution provisioning contract | #994 | **Refinement** |
 
-**Start order (mandatory for new pickups):**
+**Executable frontier (2026-09-21):**
 
 ```text
-this freeze (#971)
-  → settle Cursor-branch resume-or-abandon for #922/#923
-  → #923 split-tree projection (one live Metal leaf)
-  → decompose #674 into Ready children (do not implement the umbrella)
-  → #936 multi-live Metal only after that decomposition and #923
-  → #675 / #866 / #867 behind the pane model and #686 where required
-  → #676 config/themes/keybindings
-  → #868 / #869 headed acceptance
-  → milestone-validation on one freeze SHA
-  → mark epic #665 Done
+Hierarchy lane
+  #922 active
+    → #923
+      → #928
+  #994 refinement ───────────────┐
+                                 └→ provisioning implementation → #936
+
+Presentation lane
+  #865 Ready → #866 → #867 → #868 → #869
+
+Configuration lane
+  #993 Ready
+    → later bounded #676 children for keybindings and launch shell/CWD policy
+
+Shell-metadata decision
+  #686 / PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
-#928, #926, #927, #934 may proceed only when they do not collide with an active #922/#923 claim and do not mutate terminal-state contracts.
+#865 and #993 are independent Ready pickups now. They must not edit M002 terminal-state/VT/Unicode/reflow authorities. #923 remains blocked until #922 actually merges. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+
+PR #990 changes the contributor claim protocol but is not a product dependency. Until it is accepted and merged, contributors follow the currently merged assignee-based `ISSUE-PROTOCOL.md`.
 
 After this freeze, **do not create new M003 implementation Issues** except:
 
@@ -195,21 +201,29 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 #674 remains the hierarchy/navigation parent. It is too large for one production PR (windows, tabs, nested splits, move/reparent, zoom, resource addressing, palette richness already partly landed). Mark children **Ready** only after `docs/engineering/ISSUE-PROTOCOL.md` checkboxes pass. If a child needs a reusable windows/tabs/splits behavioral contract that SPEC-008 does not own, stop and refine a specification **before** coding; do not invent that spec in an implementation PR.
 
-### 6.3 #923 — first headed slice after branch resolution
+### 6.3 #923 — split-tree projection after #922
 
-Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. Resume the existing Cursor branch only with an explicit resume request and sole assignee; otherwise abandon that branch before creating `issue/923`.
+Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. The historical Cursor branch has been explicitly abandoned/superseded; after #922 merges, refresh the exact-head interface and claim a fresh `issue/923` branch under the currently merged Issue protocol.
 
-### 6.4 #686 — spike, assigned
+### 6.4 #686 — shell-metadata refinement
 
-#686 answers how trusted prompt/CWD/command-start/end signals work for zsh/bash/fish without Warpify-style injection. It unblocks #675 semantic Block boundaries. It is a spike/ADR-or-spec output, not a silent production hook. Keep the current assignee.
+#686 is an unassigned decision/refinement issue. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. PR #991 proposes the remaining duration boundary. Do not block unrelated Flow compositor or config work on #686. Only behavior that requires the proposed duration/trust expansion waits for its accepted ADR/spec update.
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
 Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. Prefer the existing presentation Issues (#865–#867) once the pane/focus model exists. Do not steal #865.
 
-### 6.6 #890 / #904 — not M003 product slices
+### 6.6 #676 / #993 — configuration frontier
 
-These remain M001.1 recovery/architecture Issues assigned to **@mahboobmonnamd**. This freeze does not implement, close, or reassign them.
+#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is Ready: wire those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. General keybinding/chord behavior and launch shell/CWD policy remain separate bounded children to refine after #993; do not implement #676 wholesale.
+
+### 6.7 #994 — execution provisioning before #936
+
+Current production `ShellState` deliberately keeps tab creation and pane splitting fail-closed until a distinct execution route exists. Runtime can create multiple executions internally, but the headed product lacks an accepted client→Runtime provisioning contract. #994 owns that refinement. If a new IPC/public protocol shape is required, its ADR/spec must land separately before production work. #936 must consume the accepted seam; it must not invent execution creation inside renderer/AppKit code.
+
+### 6.8 Closed M001.1 corrective work
+
+#890 and #904 are closed. They are historical corrective authority/evidence, not remaining M003 work and not implementation pickups.
 
 ---
 
@@ -241,11 +255,11 @@ Label every performance/presentation claim: `CI` | `controlled-host` | `PLATFORM
 
 **Workspace**
 
-- #674 children covering windows/tabs/nested splits/focus are Done or explicitly classified
+- #674 children covering windows/tabs/nested splits/focus and the #994-derived execution-provisioning seam are Done or explicitly classified
 - #675 / #865–#867 presentation rows are usable with real shell/TUI workloads, or classified
-- #676 config/themes/fonts/keybindings/launch policy are usable without an account
-- #686 decision output is accepted before #675 semantic-boundary claims depend on it
-- #936 multi-live Metal is Done or explicitly deferred with an owning follow-up
+- #676 children, beginning with #993, prove config/themes/fonts/keybindings/launch policy are usable without an account
+- #686 decision output is accepted before any #675 semantic-boundary claim that actually depends on its proposed expansion
+- #936 multi-live Metal uses distinct Runtime-owned executions through the accepted provisioning seam and is Done or explicitly deferred with an owning follow-up
 
 **Performance / resources**
 
