@@ -211,7 +211,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
-Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. Prefer the existing presentation Issues (#865–#867) once the pane/focus model exists. Do not steal #865.
+Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865 is Ready now because its compositor work is pane-local and its corrected Rust presentation dependency #861 is complete; it does not require #923. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
 
 ### 6.6 #676 / #993 — configuration frontier
 
