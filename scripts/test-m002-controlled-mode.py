@@ -244,6 +244,7 @@ def test_history_reflow_runner(base: Path) -> None:
         # self-baseline path.
         module.probe_ac_power_confirmed = lambda: (True, "AC Power")
         module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
         sys.argv = ["run-m002-history-reflow-contract.py"]
         module.main()
         default_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
@@ -322,11 +323,32 @@ def test_history_reflow_runner(base: Path) -> None:
             f"expected a thermal-stability-not-confirmed reason, got: {throttled_record!r}",
         )
 
+        # Blocking-review fix: a dirty working tree can produce measured
+        # behavior that does not actually match the SHA cohort files get
+        # stamped with, so even with AC power and thermal stability
+        # confirmed and a distinct baseline supplied, an unconfirmed clean
+        # source tree must still fail closed to PLATFORM_LIMITED.
+        time.sleep(1.1)
+        module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+        module.probe_clean_source_tree_confirmed = lambda: (False, "working tree has uncommitted or untracked changes")
+        module.main()
+        dirty_tree_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
+        require(len(dirty_tree_roots) == 6, "dirty-tree controlled run did not write a new evidence root")
+        dirty_tree_record = (dirty_tree_roots[-1] / "history_active_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        require(
+            "environment_status = 'PLATFORM_LIMITED'" in dirty_tree_record,
+            "dirty-tree controlled run must stay PLATFORM_LIMITED",
+        )
+        require(
+            "clean source tree not confirmed" in dirty_tree_record,
+            f"expected a clean-source-tree-not-confirmed reason, got: {dirty_tree_record!r}",
+        )
+
         # Blocking-review fix: a pre-collected baseline cohort bundle whose
         # `commit` stamp does not match --baseline-sha must be rejected
         # rather than silently trusted.
         time.sleep(1.1)
-        module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
         forged_baseline_dir = base / "forged-baseline-cohorts-source"
         for gate in module.GATES:
             gate_dir = forged_baseline_dir / gate

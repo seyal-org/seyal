@@ -133,6 +133,29 @@ def probe_thermal_stability_confirmed() -> tuple[bool, str]:
     return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
 
 
+def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
+    """Probe whether the source tree is clean before trusting a SHA-stamped
+    controlled-mode collection.
+
+    `collect_cohorts()` stamps every cohort file with `git rev-parse HEAD`
+    (via SEYAL_BENCH_COMMIT), but the `cargo bench` invocation that produces
+    those samples actually measures the working tree's real contents, not
+    just that recorded commit. A dirty checkout (staged, unstaged, or
+    untracked changes) can therefore produce PHYSICAL_ARM64 VALID evidence
+    permanently mislabeled as the clean HEAD SHA -- the same integrity gap
+    `require_clean_source_tree()` closes on the Seyal.app identity-manifest
+    path in run-m002-performance-contract.py. Returns (confirmed, detail);
+    any inability to prove a clean tree invalidates the probe
+    (confirmed=False), so VALID evidence fails closed to PLATFORM_LIMITED.
+    """
+    status = run(["git", "status", "--porcelain"])
+    if status.returncode != 0:
+        return False, "cannot verify a clean source tree"
+    if status.stdout.strip():
+        return False, "working tree has uncommitted or untracked changes"
+    return True, "clean source tree"
+
+
 def require_baseline_cohort_provenance(directory: Path, baseline_sha: str) -> None:
     """Verify every pre-collected baseline cohort file actually carries the
     declared --baseline-sha, rather than trusting the CLI argument alone.
@@ -381,6 +404,13 @@ def main() -> None:
         thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
         if not thermal_confirmed:
             controlled_reasons.append(f"thermal stability not confirmed: {thermal_detail}")
+        # A dirty working tree can produce measured behavior that does not
+        # actually match the SHA cohort files get stamped with below; VALID
+        # evidence must fail closed rather than silently claim a
+        # clean-checkout guarantee it cannot prove (blocking review finding).
+        clean_tree_confirmed, clean_tree_detail = probe_clean_source_tree_confirmed()
+        if not clean_tree_confirmed:
+            controlled_reasons.append(f"clean source tree not confirmed: {clean_tree_detail}")
 
     controlled_valid = args.controlled and not controlled_reasons
 
