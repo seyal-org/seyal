@@ -174,17 +174,20 @@ PR #990 changes the contributor claim protocol but is not a product dependency. 
 
 ### 5.4 Development-capacity rule
 
-For the active M003 milestone, planning must maintain a rolling execution buffer instead of creating work only when a developer becomes idle.
+For the active M003 milestone, planning must maintain a continuously groomed **open-source contributor pool** instead of preparing work only when a known developer becomes idle.
 
-- With four active contributors, target **6–8 startable items** across production and bounded refinement/R&D.
+- Do **not** size the Ready queue to a fixed team count. Seyal must be able to absorb additional contributors without waiting for maintainers to invent work after they arrive.
+- Maintain a healthy surplus of startable Issues across production, testing, performance, documentation/tooling, and bounded refinement/R&D. The queue should be replenished before it becomes scarce, based on observed contributor demand and completion rate rather than a fixed developer number.
 - Distinguish **start dependency** from **merge dependency**. A stable upstream branch/PR may be consumed by a stacked downstream PR; merge order is preserved without forcing idle time.
 - Use **Blocked** only for a real missing contract/authority, conflicting ownership, or unavailable required interface — not merely because an upstream PR has not merged.
 - Umbrella Issues (#674/#675/#676) are planning parents, never execution locks.
 - Ready-for-Refinement is valid active work when its output is the accepted contract required for a later production slice; it must not contain production implementation.
-- Keep at least one Ready item in each independent active lane where architecture permits: hierarchy, presentation, configuration, and architecture/refinement.
+- Keep multiple startable items in each independent active lane where architecture permits: hierarchy, presentation, configuration, validation/performance, documentation/tooling, and architecture/refinement.
+- Classify contributor suitability explicitly: **starter**, **standard**, **advanced/core**. Core terminal/runtime authority changes remain advanced and tightly reviewed; OSS contributors should still have meaningful production work outside those protected seams.
+- A contributor-facing issue must be self-contained enough that a new contributor can understand scope, dependencies, tests, and success criteria without private context.
 - A stale historical branch or closed PR must receive an explicit handoff/disposition; it must not silently reserve a ticket forever.
 
-This buffer is limited to the current M003 frontier. It does not authorize beginning M004 implementation before M003 passes.
+This contributor pool is limited to work whose architecture/dependency entry conditions are already satisfied. It does not authorize beginning blocked future-milestone implementation merely to manufacture tickets.
 
 After this freeze, **do not create new M003 implementation Issues** except:
 
