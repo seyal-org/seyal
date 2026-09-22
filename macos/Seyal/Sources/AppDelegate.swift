@@ -17,7 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
-        window.appearance = NSAppearance(named: .darkAqua)
+        // Appearance comes from Rust-resolved visual preference at host apply.
+        let platform = NSApp.effectiveAppearance
+        let resolved = NativeThemeRealization.theme(for: platform)
+        window.appearance = resolved.appearance
         window.contentView = host
         window.center()
         window.makeKeyAndOrderFront(nil)

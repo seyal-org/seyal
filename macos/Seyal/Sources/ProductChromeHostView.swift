@@ -718,8 +718,7 @@ final class ProductChromeHostView: NSView {
     }
 
     private func applyTheme() {
-        let theme = NativeThemeRealization.theme(for: effectiveAppearance)
-        NativeThemeRealization.apply(
+        let theme = NativeThemeRealization.apply(
             to: self,
             material: material,
             appearance: effectiveAppearance
@@ -730,6 +729,14 @@ final class ProductChromeHostView: NSView {
         centerColumn.layer?.backgroundColor = theme.canvas.cgColor
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
+        tabTitle.font = .systemFont(ofSize: theme.uiFontSize, weight: .semibold)
+        recoveryLabel.font = .systemFont(ofSize: max(theme.uiFontSize - 1, 10), weight: .regular)
+        blocks.edgeInsets = NSEdgeInsets(
+            top: theme.terminalPadding,
+            left: theme.windowPadding,
+            bottom: theme.terminalPadding,
+            right: theme.windowPadding
+        )
         composer.apply(theme: theme)
         historyOverlay.apply(theme: theme)
         commandPalette.apply(theme: theme)
@@ -1106,6 +1113,9 @@ private final class CommandBlockView: NSView {
         self.theme = theme
         body.layer?.isOpaque = false
         body.layer?.backgroundColor = NSColor.clear.cgColor
+        prompt.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .medium)
+        command.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .medium)
+        status.font = .monospacedSystemFont(ofSize: max(theme.terminalFontSize - 2, 9), weight: .regular)
         prompt.textColor = theme.accent
         command.textColor = theme.accent
         header.layer?.backgroundColor = isSelected

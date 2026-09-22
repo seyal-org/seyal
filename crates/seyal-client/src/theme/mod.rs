@@ -1,11 +1,16 @@
 //! Portable headed theme/config: TOML, typed settings, overlay patch, and
 //! resolved visual tokens. AppKit/NSFont/NSColor stay in the native host.
 
+mod cold;
 mod config;
 mod resolve;
 mod tokens;
 mod toml;
 
+pub use cold::{
+    collect_process_ui_env, process_ui_configuration, reload_process_ui_configuration_for_test,
+    ui_config_path, ui_config_path_from, ProcessUiConfiguration,
+};
 pub use config::{
     load_ui_configuration, load_ui_configuration_from_path, AppearancePreference, ColdOverlay,
     ConfigPatch, ConfigurationDiagnostics, LoadedUiConfiguration, UserUiSettings, ENV_APPEARANCE,

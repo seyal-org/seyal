@@ -23,7 +23,7 @@ As implementation lands, this section will expand into guides for:
 - shells and terminal compatibility,
 - tabs, panes and workspaces,
 - Blocks,
-- configuration and themes (**under development**: a local TOML file at `~/.config/seyal/config.toml` can set appearance, fonts, padding, and material preference; there is no settings UI or Lua runtime yet),
+- configuration and themes (local TOML at `SEYAL_CONFIG` or `~/.config/seyal/config.toml` sets appearance, fonts, padding, and material preference at cold startup; there is no settings UI or Lua runtime yet),
 - SSH and remote execution,
 - persistent/detached execution,
 - agent workflows and approvals,

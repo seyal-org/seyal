@@ -1033,6 +1033,63 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
     }
 
+    func testColdConfigTomlDrivesAppearanceFontsAndPadding() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-993-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            let missing = dir.appendingPathComponent("restore-missing.toml")
+            reloadUiConfig(path: missing.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+
+        let configured = dir.appendingPathComponent("config.toml")
+        try """
+        [ui]
+        appearance = "light"
+        window-padding = 12
+        [ui.font]
+        size = 16
+        [terminal]
+        padding = 14
+        [terminal.font]
+        size = 18
+        """.write(to: configured, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(reloadUiConfig(path: configured.path), 0)
+
+        let visual = seyal_app_visual(0) // platform dark; preference light → resolved light
+        XCTAssertEqual(visual.appearance, 1)
+        XCTAssertEqual(visual.preference, 1)
+        XCTAssertEqual(visual.ui_font_size, 16, accuracy: 0.01)
+        XCTAssertEqual(visual.terminal_font_size, 18, accuracy: 0.01)
+        XCTAssertEqual(visual.window_padding, 12, accuracy: 0.01)
+        XCTAssertEqual(visual.terminal_padding, 14, accuracy: 0.01)
+
+        let theme = NativeThemeRealization.theme(from: visual)
+        XCTAssertEqual(theme.appearance.name, NSAppearance.Name.aqua)
+        XCTAssertEqual(theme.uiFontSize, 16, accuracy: 0.01)
+        XCTAssertEqual(theme.terminalFontSize, 18, accuracy: 0.01)
+        XCTAssertEqual(theme.windowPadding, 12, accuracy: 0.01)
+        XCTAssertEqual(theme.terminalPadding, 14, accuracy: 0.01)
+
+        let invalid = dir.appendingPathComponent("bad.toml")
+        try "this is not = toml [".write(to: invalid, atomically: true, encoding: .utf8)
+        XCTAssertEqual(reloadUiConfig(path: invalid.path), 0)
+        let fallback = seyal_app_visual(0)
+        XCTAssertEqual(fallback.flags & 2, 2, "full-default fallback flag")
+        XCTAssertEqual(fallback.ui_font_size, 12, accuracy: 0.01)
+        XCTAssertGreaterThan(fallback.warning_count, 0)
+    }
+
+}
+
+@discardableResult
+private func reloadUiConfig(path: String) -> Int32 {
+    let bytes = Array(path.utf8)
+    return bytes.withUnsafeBufferPointer { buffer in
+        seyal_app_test_reload_ui_configuration(buffer.baseAddress, bytes.count)
+    }
 }
 
 private func utf8(_ row: SeyalAppRow) -> String {

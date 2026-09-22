@@ -15,18 +15,36 @@ struct NativeTheme {
     let warning: NSColor
     let danger: NSColor
     let appearance: NSAppearance
+    let uiFontSize: CGFloat
+    let terminalFontSize: CGFloat
+    let windowPadding: CGFloat
+    let terminalPadding: CGFloat
+    let reduceMaterial: Bool
 }
 
 enum NativeThemeRealization {
+    /// Platform appearance input for Rust resolve: 0 dark, 1 light.
+    static func platformAppearanceCode(for appearance: NSAppearance) -> UInt16 {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua ? 1 : 0
+    }
+
+    static func visual(for appearance: NSAppearance) -> SeyalAppVisual {
+        seyal_app_visual(platformAppearanceCode(for: appearance))
+    }
+
     static func theme(for appearance: NSAppearance) -> NativeTheme {
-        let light = appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
-        let packed = seyal_app_theme(light ? 1 : 0)
+        theme(from: visual(for: appearance))
+    }
+
+    static func theme(from packed: SeyalAppVisual) -> NativeTheme {
         let canvas = color(packed.canvas)
         let text = color(packed.text)
         let accent = color(packed.accent)
+        let container = color(packed.container)
+        let resolvedLight = packed.appearance == 1
         return NativeTheme(
             canvas: canvas,
-            container: mix(canvas, text, 0.04),
+            container: container,
             utility: mix(canvas, text, 0.08),
             elevated: mix(canvas, text, 0.12),
             text: text,
@@ -37,13 +55,22 @@ enum NativeThemeRealization {
             success: NSColor(srgbRed: 0.22, green: 0.83, blue: 0.62, alpha: 1),
             warning: NSColor(srgbRed: 0.96, green: 0.65, blue: 0.14, alpha: 1),
             danger: NSColor(srgbRed: 0.98, green: 0.44, blue: 0.40, alpha: 1),
-            appearance: light ? NSAppearance(named: .aqua)! : NSAppearance(named: .darkAqua)!
+            appearance: resolvedLight
+                ? NSAppearance(named: .aqua)!
+                : NSAppearance(named: .darkAqua)!,
+            uiFontSize: CGFloat(packed.ui_font_size),
+            terminalFontSize: CGFloat(packed.terminal_font_size),
+            windowPadding: CGFloat(packed.window_padding),
+            terminalPadding: CGFloat(packed.terminal_padding),
+            reduceMaterial: (packed.flags & 1) != 0
         )
     }
 
     @MainActor
-    static func apply(to view: NSView, material: NSVisualEffectView, appearance: NSAppearance) {
-        let theme = theme(for: appearance)
+    @discardableResult
+    static func apply(to view: NSView, material: NSVisualEffectView, appearance: NSAppearance) -> NativeTheme {
+        let packed = visual(for: appearance)
+        let theme = theme(from: packed)
         view.window?.backgroundColor = theme.canvas
         view.window?.appearance = theme.appearance
         view.appearance = theme.appearance
@@ -51,6 +78,36 @@ enum NativeThemeRealization {
         view.layer?.backgroundColor = theme.canvas.cgColor
         material.isHidden = true
         applyColors(in: view, theme: theme)
+        surfaceDiagnosticsIfNeeded(from: packed)
+        return theme
+    }
+
+    static func utf8String(_ pointer: UnsafePointer<UInt8>?, length: UInt32) -> String {
+        guard let pointer, length > 0 else { return "" }
+        let buffer = UnsafeBufferPointer(start: pointer, count: Int(length))
+        return String(bytes: buffer, encoding: .utf8) ?? ""
+    }
+
+    static func diagnosticMessages(from visual: SeyalAppVisual) -> [String] {
+        guard visual.warning_count > 0 else { return [] }
+        return (0..<visual.warning_count).compactMap { index in
+            let warning = seyal_app_visual_warning(UInt32(index))
+            let text = utf8String(warning.text, length: warning.text_len)
+            return text.isEmpty ? nil : text
+        }
+    }
+
+    static func surfaceDiagnosticsIfNeeded(from visual: SeyalAppVisual) {
+        let messages = diagnosticMessages(from: visual)
+        guard !messages.isEmpty || (visual.flags & 2) != 0 else { return }
+        var lines = messages
+        if (visual.flags & 2) != 0 {
+            lines.insert("configuration used full default fallback", at: 0)
+        }
+        // Non-secret bounded diagnostics only — never log file contents.
+        for line in lines.prefix(16) {
+            NSLog("Seyal config: %@", line)
+        }
     }
 
     @MainActor
@@ -62,7 +119,7 @@ enum NativeThemeRealization {
         }
         if let textView = view as? NSTextView {
             textView.textColor = theme.text
-            textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+            textView.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .regular)
             textView.backgroundColor = .clear
             textView.insertionPointColor = theme.accent
         }
