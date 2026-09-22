@@ -100,7 +100,7 @@ grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metada
 grep -Fq 'Status never overrides the **human-owner rule**' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must preserve the external-owner fallback"
 grep -Fq 'single human owner record prevents two people from owning the same implementation Issue at once' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must make the owner record authoritative across contributors"
 grep -Fq 'branch is only that owner' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define human-namespaced branches as audit/resume backstops"
-grep -Fq 'unique human owner record' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document the human owner record"
+grep -Fq 'Exactly one human owns an implementation Issue at a time' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document single-human ownership"
 grep -Fq 'branch is only an audit/resume backstop for that human' site/src/content/docs/developer/index.mdx || fail "Developer Guide must not make the branch the ownership authority"
 
 # Regression guards for the pre-human-owner wording that caused contradictory
