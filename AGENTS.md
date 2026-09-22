@@ -77,16 +77,7 @@ fresh Ready Issue
 
 If another human already owns the Issue, assignment/owner-claim records conflict, the human owner identity cannot be established, or `<human-login>/issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They may be credited as co-authors/tooling provenance, but must not replace the human assignee, branch owner, PR owner, durable handoff identity, or independent reviewer. Project status fields are lifecycle metadata, not an ownership lock.
 
-## Human ownership and agent attribution
-
-Seyal treats coding agents as delegated engineering tools, not repository owners.
-
-- Every active implementation Issue has exactly one **human GitHub account** as owner. Prefer the sole assignee when GitHub allows assignment; for an external contributor who is not assignable, use a maintainer-acknowledged `Owner: @login` Issue claim.
-- New implementation branches are named `<human-login>/issue/<number>`. Do not create new `cursor/`, `codex/`, `claude/`, `copilot/`, bot-named, or anonymous agent branches.
-- GitHub mutations for implementation/review should be performed under the responsible human account. If a platform can only emit a bot-authored comment/review, that artifact is supplemental agent evidence and does not replace the human owner/reviewer record.
-- Agent assistance may be credited in the PR body and/or a standard `Co-authored-by:` trailer when a real attribution identity is available. Do not invent an email or identity merely to create a trailer.
-- Handoffs are human-to-human. The branch stays with the Issue and is renamed only when the documented workflow explicitly requires it; an agent switch does not change ownership.
-- Legacy agent-named branches are historical/unresolved claims until a human owner or maintainer explicitly resumes, migrates, or abandons them.
+New implementation branches are named `<human-login>/issue/<number>`; agent/vendor namespaces are forbidden. Agent assistance may be credited as tooling provenance or valid co-authorship, but required owner/reviewer records stay human. See `ISSUE-PROTOCOL.md` for external-contributor owner claims, handoff, legacy-branch disposition, and attribution details.
 
 ## Before changing code
 
