@@ -218,6 +218,45 @@ def test_performance_contract_runner(base: Path) -> None:
     print("[seyal m002 controlled-mode test] run-m002-performance-contract.py --controlled verified.")
 
 
+def test_host_identity_token() -> None:
+    """host_identity_confirmed() must never return the raw IOPlatformUUID.
+
+    Evidence directories under docs/evidence are retained/reviewed; a raw
+    per-Mac hardware identifier has no reason to be exposed there. Same-host
+    comparison only needs equality, so this asserts the function returns a
+    non-reversible, deterministic, domain-separated token instead (blocking
+    review finding).
+    """
+    module = load_module("scripts/run-m002-history-reflow-contract.py", "seyal_run_m002_history_host_identity_unit")
+
+    raw_uuid = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+    other_uuid = "11111111-2222-3333-4444-555555555555"
+    active_uuid = {"value": raw_uuid}
+
+    def fake_run(command, *, env=None):
+        if command[:1] == ["ioreg"]:
+            return types.SimpleNamespace(
+                returncode=0, stdout=f'"IOPlatformUUID" = "{active_uuid["value"]}"\n'
+            )
+        raise AssertionError(f"unexpected command in host-identity test: {command}")
+
+    module.run = fake_run
+
+    confirmed, token = module.host_identity_confirmed()
+    require(confirmed, "host_identity_confirmed() must confirm on a well-formed ioreg reading")
+    require(raw_uuid not in token, "host identity token must not contain the raw IOPlatformUUID")
+    require(len(token) == 64 and all(c in "0123456789abcdef" for c in token), "host identity token must be a sha256 hex digest")
+
+    confirmed_again, token_again = module.host_identity_confirmed()
+    require(confirmed_again and token_again == token, "host identity token must be deterministic for the same raw UUID")
+
+    active_uuid["value"] = other_uuid
+    _, other_token = module.host_identity_confirmed()
+    require(other_token != token, "different physical hosts must produce different host identity tokens")
+
+    print("[seyal m002 controlled-mode test] host_identity_confirmed() token derivation verified.")
+
+
 def test_history_reflow_runner(base: Path) -> None:
     module = load_module("scripts/run-m002-history-reflow-contract.py", "seyal_run_m002_history_unit")
     module.ROOT = base / "history-reflow-root"
@@ -479,6 +518,65 @@ def test_history_reflow_runner(base: Path) -> None:
                 f"expected a host-mismatch rejection, got: {error}",
             )
         require(host_mismatch_raised, "a baseline bundle collected on a different host must be rejected")
+
+        # Blocking-review fix (round 3): a host that is thermally stable
+        # BEFORE a gate's collection but becomes throttled DURING it must not
+        # be certified controlled for that gate -- a single upfront thermal
+        # reading stamped into a manifest written after the fact would miss
+        # exactly this drift. Only the second (post-collection) probe call
+        # for the first gate reports throttled; every other call reports
+        # stable, so this also proves the check is per-gate: the first gate
+        # must fail closed while the second gate (unaffected by the
+        # transient throttle) still reaches VALID.
+        time.sleep(1.1)
+        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
+        thermal_calls = {"count": 0}
+
+        def alternating_thermal():
+            thermal_calls["count"] += 1
+            if thermal_calls["count"] == 2:
+                return (False, "host is thermally throttled: {'CPU_Speed_Limit': 60}")
+            return (True, "CPU_Speed_Limit=100")
+
+        module.probe_thermal_stability_confirmed = alternating_thermal
+        sys.argv = [
+            "run-m002-history-reflow-contract.py",
+            "--controlled",
+            "--baseline-sha",
+            "4444444444444444444444444444444444444444",
+            "--baseline-cohorts-dir",
+            str(baseline_dir),
+        ]
+        module.main()
+        drift_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
+        drift_root = drift_roots[-1]
+        active_record = (drift_root / "history_active_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        sealed_record = (drift_root / "history_sealed_segment_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        require(
+            "environment_status = 'PLATFORM_LIMITED'" in active_record,
+            f"a gate that throttled mid-collection must fail closed to PLATFORM_LIMITED, got: {active_record!r}",
+        )
+        require(
+            "thermal stability not confirmed across collection" in active_record,
+            f"expected an across-collection thermal reason, got: {active_record!r}",
+        )
+        require(
+            "environment_status = 'VALID'" in sealed_record,
+            f"a gate unaffected by the transient throttle must still reach VALID, got: {sealed_record!r}",
+        )
+        active_manifest = json.loads(
+            (drift_root / "history_active_reflow_ms" / "cohorts" / "controlled-provenance-manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        require(
+            active_manifest["thermal_stability_confirmed"] is False,
+            "the throttled gate's own manifest must record thermal_stability_confirmed=false",
+        )
+        require(
+            "pre:" in active_manifest["thermal_stability_detail"] and "post:" in active_manifest["thermal_stability_detail"],
+            f"manifest thermal detail must record both pre and post readings, got: {active_manifest['thermal_stability_detail']!r}",
+        )
     finally:
         sys.argv = original_argv
 
@@ -486,6 +584,7 @@ def test_history_reflow_runner(base: Path) -> None:
 
 
 def main() -> None:
+    test_host_identity_token()
     with tempfile.TemporaryDirectory(prefix="seyal-m002-controlled-mode-") as tmp:
         base = Path(tmp)
         test_performance_contract_runner(base)
