@@ -35,7 +35,7 @@ one Ready Issue
 
 One Issue should produce one coherent outcome that can normally be tested, reviewed and merged independently. Large or cross-authority work is refined before implementation. Two active Issues must not mutate the same authoritative subsystem unless independence is explicit and reviewable.
 
-The Issue has exactly one **human owner**. The sole assignee is the preferred owner record when GitHub permits it; otherwise an external contributor uses a maintainer-acknowledged `Owner: @login` Issue claim. The exact `<human-login>/issue/<number>` branch is the collision backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy plain `issue/<number>`, issue-only/slugged, or agent-named branches require explicit human-owner disposition before they continue.
+The Issue has exactly one **human owner**. The sole assignee is the preferred owner record when GitHub permits it; otherwise an external contributor uses a maintainer-acknowledged `Owner: @login` Issue claim. This unique owner record is the cross-human exclusive claim. The exact `<human-login>/issue/<number>` branch is that owner's deterministic audit/resume backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy plain `issue/<number>`, issue-only/slugged, or agent-named branches require explicit human-owner disposition before they continue.
 
 ## Mandatory flow
 
@@ -55,7 +55,7 @@ The Issue has exactly one **human owner**. The sole assignee is the preferred ow
 14. Move to Validation where milestone/demo/performance evidence is required.
 15. Merge only after required gates pass. Do not start a dependent milestone early.
 
-Ownership handoff is explicit and human-to-human. The current owner stops editing, records branch/PR/check state, and GitHub assignment is explicitly transferred. The new human owner re-runs the full claim/readiness preflight; if the deterministic branch must move to the new owner's namespace, migrate the exact head and record both refs before deleting/retiring the old one. Switching coding agents alone never changes ownership. An agent must never self-clear or steal a claim because it appears stale.
+Ownership handoff is explicit and human-to-human. The current owner stops editing and records branch/PR/check state. Transfer the **human owner record** explicitly: change the GitHub assignee when the recipient is assignable, otherwise replace the maintainer-acknowledged `Owner: @login` claim. The new human owner re-runs the full claim/readiness preflight; if the deterministic branch must move to the new owner's namespace, migrate the exact head and record both refs before deleting/retiring the old one. Switching coding agents alone never changes ownership. An agent must never self-clear or steal a claim because it appears stale.
 
 ## Human owner, agent assistance and attribution
 
