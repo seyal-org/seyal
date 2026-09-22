@@ -38,7 +38,7 @@ fresh open Ready Issue
 → exactly one human owner = sole assignee when assignable, otherwise acknowledged `Owner: @login`
 → plan confirmed
 → create exact branch <human-login>/issue/<number>
-→ re-read Issue and verify the same sole human assignee
+→ re-read Issue and verify the same unique human owner record
 → coding agent may act only on behalf of that human owner
 → create isolated worktree
 → implementation may begin
@@ -55,9 +55,13 @@ Rules:
 - If implementer identity, assignment write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the assignee rule.
 - For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the sole human owner. It may be in upstream or the contributor's fork. Do not create alternative agent prefixes or short-name branches to escape a collision.
-- Branch creation happens only after the implementation plan is confirmed. If `<human-login>/issue/<number>` already exists, stop by default. Resume it only when explicitly asked to continue/resume that existing work and the same human owner is still the sole assignee.
+- Branch creation happens only after the implementation plan is confirmed. If the human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim.
 - If concurrent assignment/branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid claim to win a race.
 - Legacy `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
+
+### Parent and child ownership
+
+A planning/umbrella parent is not an ownership lock for independently scoped child Issues. Different humans may own different Ready children in parallel. Block only when parent and child represent the same implementation slice or an explicit parent-level implementation claim overlaps the child.
 
 ### Human owner and agent attribution
 
@@ -75,7 +79,7 @@ Seyal's durable ownership identity is always a human GitHub account.
 A handoff is explicit, never inferred from inactivity.
 
 - The current owner stops editing and records the exact branch/PR/check state.
-- GitHub assignee is explicitly changed to the new implementer.
+- Transfer the human owner record explicitly: change the GitHub assignee when the contributor is assignable, otherwise replace the acknowledged `Owner: @login` claim through a maintainer-recorded handoff.
 - The new **human** implementer re-runs the full Ready/ownership preflight. Ownership handoff uses the recipient's human identity; migrate the deterministic branch to `<new-human-login>/issue/<number>` only as part of that explicit handoff, preserving the exact prior head and recording the old/new refs. No parallel implementation branch is created.
 - If work was abandoned before implementation, remove an unused claim branch before clearing/reassigning ownership.
 - An agent that merely suspects a stale claim must report it and stop; it must not self-unassign another contributor.
