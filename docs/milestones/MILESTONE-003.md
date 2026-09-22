@@ -100,7 +100,7 @@ A FAIL or INCONCLUSIVE **mandatory** criterion on a remaining §5 issue may crea
 
 ## 5. Finding-set freeze and remaining chain
 
-Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-21** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
+Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-22** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
 
 ### 5.1 Already on `master` (do not reopen)
 
@@ -168,7 +168,7 @@ Shell-metadata decision
   #686 active under @mahboobmonnamd; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
-#993 is an independent Ready production pickup now. #994/#686 and #1000–#1004 provide independent Ready-for-Refinement lanes. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is an independent Ready production pickup now. #994 and #1000–#1004 provide independent Ready-for-Refinement lanes; #686 is already active under @mahboobmonnamd. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
 Contributor ownership is being corrected by #997 / PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. Until #998 lands, contributors follow the currently merged `ISSUE-PROTOCOL.md`; after it lands, new branches use the human owner's namespace.
 
