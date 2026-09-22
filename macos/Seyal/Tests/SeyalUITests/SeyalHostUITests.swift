@@ -111,6 +111,49 @@ final class SeyalHostUITests: XCTestCase {
         waitForUsablePty(in: app)
     }
 
+    /// #993: cold `SEYAL_CONFIG` TOML must drive Rust-resolved appearance /
+    /// font / padding into the headed host (thin AppKit realization only).
+    func testColdConfigTomlDrivesVisibleAppearanceFontsAndPadding() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-993-ui-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = dir.appendingPathComponent("config.toml")
+        try """
+        [ui]
+        appearance = "light"
+        window-padding = 12
+        [ui.font]
+        size = 16
+        [terminal]
+        padding = 14
+        [terminal.font]
+        size = 18
+        """.write(to: config, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchIsolatedHost(environment: ["SEYAL_CONFIG": config.path])
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let chrome = app.descendants(matching: .any)["seyal-product-chrome"]
+        XCTAssertTrue(chrome.waitForExistence(timeout: 10))
+        // Probe format: appearance|uiFont|terminalFont|windowPad|terminalPad
+        let expected = "light|16|18|12|14"
+        let deadline = Date().addingTimeInterval(8)
+        var observed = ""
+        while Date() < deadline {
+            observed = (chrome.firstMatch.value as? String) ?? ""
+            if observed == expected { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(
+            observed,
+            expected,
+            "headed host must realize Rust cold-config visual snapshot"
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// Hygiene #962: after removing orphaned Metal self-test scaffolding, the
     /// headed host still exposes the interactive terminal input surface.
     func testInteractiveMetalSurfaceRemainsAvailableWithoutSelfTestScaffolding() throws {

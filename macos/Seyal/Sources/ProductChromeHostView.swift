@@ -737,6 +737,12 @@ final class ProductChromeHostView: NSView {
             bottom: theme.terminalPadding,
             right: theme.windowPadding
         )
+        let appearanceToken = theme.appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? "light"
+            : "dark"
+        setAccessibilityValue(
+            "\(appearanceToken)|\(Int(theme.uiFontSize))|\(Int(theme.terminalFontSize))|\(Int(theme.windowPadding))|\(Int(theme.terminalPadding))"
+        )
         composer.apply(theme: theme)
         historyOverlay.apply(theme: theme)
         commandPalette.apply(theme: theme)
