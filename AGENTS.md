@@ -66,7 +66,7 @@ Seyal uses an exclusive active-work claim:
 ```text
 fresh Ready Issue
 → authenticated **human** GitHub owner
-→ exactly one assignee = that human owner
+→ exactly one human owner (sole assignee when assignable; otherwise maintainer-acknowledged `Owner: @login` claim)
 → confirmed implementation plan
 → deterministic remote branch <human-login>/issue/<number>
 → coding agent may act only as delegated tool/co-author
@@ -75,13 +75,13 @@ fresh Ready Issue
 → one scoped PR owned by the human
 ```
 
-If the Issue is assigned to another human GitHub login, has multiple assignees, the human owner identity cannot be established, or `<human-login>/issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They may be credited as co-authors/tooling provenance, but must not replace the human assignee, branch owner, PR owner, durable handoff identity, or independent reviewer. Project status fields are lifecycle metadata, not an ownership lock.
+If another human already owns the Issue, assignment/owner-claim records conflict, the human owner identity cannot be established, or `<human-login>/issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They may be credited as co-authors/tooling provenance, but must not replace the human assignee, branch owner, PR owner, durable handoff identity, or independent reviewer. Project status fields are lifecycle metadata, not an ownership lock.
 
 ## Human ownership and agent attribution
 
 Seyal treats coding agents as delegated engineering tools, not repository owners.
 
-- Every active implementation Issue has exactly one **human GitHub account** as owner/assignee.
+- Every active implementation Issue has exactly one **human GitHub account** as owner. Prefer the sole assignee when GitHub allows assignment; for an external contributor who is not assignable, use a maintainer-acknowledged `Owner: @login` Issue claim.
 - New implementation branches are named `<human-login>/issue/<number>`. Do not create new `cursor/`, `codex/`, `claude/`, `copilot/`, bot-named, or anonymous agent branches.
 - GitHub mutations for implementation/review should be performed under the responsible human account. If a platform can only emit a bot-authored comment/review, that artifact is supplemental agent evidence and does not replace the human owner/reviewer record.
 - Agent assistance may be credited in the PR body and/or a standard `Co-authored-by:` trailer when a real attribution identity is available. Do not invent an email or identity merely to create a trailer.
@@ -97,7 +97,7 @@ Seyal treats coding agents as delegated engineering tools, not repository owners
 5. Verify dependencies are complete and ownership/module boundary is explicit.
 6. If architecture is missing or contradictory: **STOP** and use the `architecture-change` skill. Do not invent a workaround. Never amend an ADR inside an implementation PR; ADR create/amendment is always a separate PR.
 7. Confirm the requested work is production implementation rather than a spike/POC. If it is exploratory, isolate it on a non-mergeable path and do not open a mergeable production PR from that code.
-8. Use one Issue → one sole **human GitHub owner/assignee** → one isolated worktree → one deterministic `<human-login>/issue/<number>` branch → one PR. Coding agents may implement on that human owner's behalf and may be credited as co-authors; they never become the ownership identity.
+8. Use one Issue → one sole **human GitHub owner** → one isolated worktree → one deterministic `<human-login>/issue/<number>` branch → one PR. Use the sole assignee when assignable; otherwise use a maintainer-acknowledged human owner claim for external contributors. Coding agents may implement on that human owner's behalf and may be credited as co-authors; they never become the ownership identity.
 9. Core behavior is test-first. Do not weaken tests to make code pass.
 10. Do not refactor unrelated code. Create/link another Issue instead.
 11. If an approved screenshot/mockup is visual authority for native UI, run the `image-to-code` skill before implementation. Complete its forensic design/component inventory and issue plan first; split the work into multiple Issues when the visual spans independently reviewable boundaries.
