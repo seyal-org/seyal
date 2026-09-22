@@ -130,7 +130,7 @@ These landings are **foundation**, not M003 Done. The headed host is still a one
 
 Historical `cursor/issue-922-*` / `cursor/issue-923-*` branches are not current production authority. #923 has an explicit 2026-09-21 product-owner disposition that its old Cursor branch is abandoned/superseded. Do not resume old branches implicitly.
 
-Agent inventory/Agents-center/attention product work (#926/#927/#930) is not part of the M003 critical path; roadmap ownership remains M005 where applicable. Sessions/Resources center candidates (#929/#931) are likewise not M003 close blockers unless their owning roadmap authority explicitly promotes a bounded generic hierarchy requirement. #937 is historical orchestration, not an implementation pickup.
+Agent inventory/Agents-center/attention product work (#926/#927/#930) is not part of the M003 critical path; `docs/product/ROADMAP.md` assigns the agent-native local substrate and Attention foundations to M005 (#667/#680). The specific Sessions/Resources **center views** (#929/#931) are likewise not M003 close blockers. This does **not** defer #674's required stable local `Session` identity or hierarchy semantics; it only avoids making those optional center surfaces a prerequisite. #937 is historical orchestration, not an implementation pickup.
 
 ### 5.3 Umbrellas and executable parallel lanes
 
@@ -158,7 +158,7 @@ Hierarchy lane
                                  └→ provisioning implementation → #936
 
 Presentation lane
-  #865 Ready → #866 → #867 → #868 → #869
+  #865 technically Ready / human-ownership migration → #866 → #867 → #868 → #869
 
 Configuration lane
   #993 Ready
@@ -174,10 +174,13 @@ Contributor ownership is being corrected by #997 / PR #998: work remains human-o
 
 ### 5.4 Groomed contributor frontier
 
-Current contributor-ready M003 work is maintained in #999.
+Current contributor-ready M003 work is maintained in #999. Repeated references below are summaries of the same Issues, not duplicate pickup authority.
 
 **Production — start now**
 - #993 — standard — production config/theme/font startup wiring.
+
+**Starter/test infrastructure — start now**
+- #1005 — starter — retained deterministic Flow/long-output/TUI workload fixtures with bounded self-test.
 
 **Refinement/R&D — start now**
 - #1001 — standard — pane move/reparent/zoom/equalize/focus-history contract.
