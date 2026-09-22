@@ -57,7 +57,7 @@ Rules:
 - For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the sole human owner. It may be in upstream or the contributor's fork. Do not create alternative agent prefixes or short-name branches to escape a collision.
 - Branch creation happens only after the implementation plan is confirmed. If the human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim.
 - If concurrent assignment/branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid claim to win a race.
-- Legacy `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
+- Legacy `issue/<number>`, `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other pre-policy/agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
 
 ### Parent and child ownership
 
