@@ -35,7 +35,7 @@ one Ready Issue
 
 One Issue should produce one coherent outcome that can normally be tested, reviewed and merged independently. Large or cross-authority work is refined before implementation. Two active Issues must not mutate the same authoritative subsystem unless independence is explicit and reviewable.
 
-The Issue has exactly one **human owner**. The sole assignee is the preferred owner record when GitHub permits it; otherwise an external contributor uses a maintainer-acknowledged `Owner: @login` Issue claim. The exact `<human-login>/issue/<number>` branch is the collision backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy issue-only or agent-named branches require explicit human-owner disposition before they continue.
+The Issue has exactly one **human owner**. The sole assignee is the preferred owner record when GitHub permits it; otherwise an external contributor uses a maintainer-acknowledged `Owner: @login` Issue claim. The exact `<human-login>/issue/<number>` branch is the collision backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy plain `issue/<number>`, issue-only/slugged, or agent-named branches require explicit human-owner disposition before they continue.
 
 ## Mandatory flow
 
