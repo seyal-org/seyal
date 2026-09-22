@@ -26,7 +26,7 @@ Claiming the Issue is a coordination preflight, not implementation permission. P
 6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. A **planning/umbrella parent is not an ownership lock** for an independently scoped child. Stop with `BLOCKED` only when parent and child overlap the same implementation slice or the parent explicitly owns/releases that slice. After the child claim write and again after creating `<human-login>/issue/<number>`, re-fetch both parent and child and verify there is no duplicate ownership of the same slice.
 7. Do not clear, replace, or steal another implementer's assignment. Ownership transfer requires an explicit handoff/reassignment under `ISSUE-PROTOCOL.md`.
 
-The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the human assignee. Project status such as `In Progress` is lifecycle metadata and must never substitute for the assignee check.
+The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the human assignee. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
 
 ## Human owner and agent delegation
 
@@ -107,7 +107,7 @@ Then apply only these Seyal-specific rules on top of the generic procedure:
 
 ## Claim handoff and release
 
-- **Normal completion:** keep the sole assignee through review/validation so ownership remains visible; the Issue closes through the verified closing PR.
+- **Normal completion:** keep the same unique human owner record through review/validation — sole assignee when assignable, otherwise the maintainer-acknowledged external-owner claim — so ownership remains visible; the Issue closes through the verified closing PR.
 - **Explicit mid-work handoff:** current human owner stops editing, records the exact branch/PR/check state, and ownership is explicitly transferred to the new human GitHub login through reassignment when possible or a maintainer-acknowledged owner-claim handoff for an external contributor. The new owner re-runs the full claim/readiness preflight. If branch namespace migration is required, copy the exact current head to `<new-human-login>/issue/<number>`, record the handoff, then retire the old ref; no parallel implementation branch is created.
 - **Abandoned before implementation:** remove the unused deterministic branch if it was created, then explicitly unassign/reassign the Issue. Do not leave an assignee or branch that falsely advertises active work.
 - **Stale claim suspected:** never self-clear it. Report the assignee/branch and require explicit ownership resolution.
