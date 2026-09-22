@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -48,6 +49,33 @@ def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
+
+def write_controlled_provenance_manifest(
+    directory: Path,
+    *,
+    sha: str,
+    host: str = "TESTHOST-0001",
+    clean: bool = True,
+    ac: bool = True,
+    thermal: bool = True,
+    host_confirmed: bool = True,
+) -> None:
+    manifest = {
+        "schema": "seyal.m002.controlled-provenance-manifest",
+        "version": 1,
+        "sha": sha,
+        "clean_source_tree_confirmed": clean,
+        "clean_source_tree_detail": "clean source tree" if clean else "working tree has uncommitted changes",
+        "ac_power_confirmed": ac,
+        "ac_power_detail": "AC Power" if ac else "host is running on battery power, not AC",
+        "thermal_stability_confirmed": thermal,
+        "thermal_stability_detail": "CPU_Speed_Limit=100" if thermal else "host is thermally throttled",
+        "host_identity_confirmed": host_confirmed,
+        "host_identity": host,
+        "collected_at": "2026-09-22T00:00:00+00:00",
+    }
+    write(directory / "controlled-provenance-manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
 def pin_exact_head(root: Path) -> str:
     subprocess.run(
         ["git", "init"],
@@ -76,12 +104,13 @@ def pin_exact_head(root: Path) -> str:
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     # Cohort fixture files also stamp the placeholder production SHA (as
     # `commit = '1111...1'`) so the commit-provenance-binding check can
-    # verify against it; rewrite every fixture .toml under root, not just
-    # record.toml, so that stamp stays consistent with the pinned HEAD.
-    for toml_file in root.rglob("*.toml"):
-        text = toml_file.read_text(encoding="utf-8")
+    # verify against it; rewrite every fixture .toml AND
+    # controlled-provenance-manifest.json under root, not just record.toml,
+    # so that stamp stays consistent with the pinned HEAD.
+    for fixture_file in list(root.rglob("*.toml")) + list(root.rglob("*.json")):
+        text = fixture_file.read_text(encoding="utf-8")
         if "1111111111111111111111111111111111111111" in text:
-            toml_file.write_text(
+            fixture_file.write_text(
                 text.replace("1111111111111111111111111111111111111111", sha), encoding="utf-8"
             )
     return sha
@@ -396,6 +425,19 @@ def main() -> None:
                 invalid_percentiles / "baseline-cohorts" / f"cohort-{cohort}.toml",
                 f"cohort = {cohort}\ncommit = '3333333333333333333333333333333333333333'\nsamples = [{', '.join(map(str, baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
+        # Blocking-review fix (round 2): a PHYSICAL_ARM64 VALID result's
+        # raw_cohorts/baseline_raw_cohorts must each carry a
+        # controlled-provenance-manifest.json proving clean/AC/thermal/host
+        # provenance, not just a matching `commit` stamp. Every fixture
+        # below derives (via shutil.copytree) from this one, so stamping
+        # matching-host manifests here covers them all; the dedicated
+        # negative fixtures further down mutate copies of these manifests.
+        write_controlled_provenance_manifest(
+            invalid_percentiles / "cohorts", sha="1111111111111111111111111111111111111111"
+        )
+        write_controlled_provenance_manifest(
+            invalid_percentiles / "baseline-cohorts", sha="3333333333333333333333333333333333333333"
+        )
         pinned_sha = pin_exact_head(invalid_percentiles)
         run_negative(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -602,6 +644,66 @@ def main() -> None:
         # by platform_limited_missing_reason/platform_limited_ok/
         # uncontrolled_limited below, whose cohort fixtures carry no commit
         # field and are still accepted; this check must not regress them.
+
+        # Blocking-review fix (round 2): a SHA-correct baseline bundle is
+        # not enough -- it must also carry a controlled-provenance-manifest
+        # proving it was itself collected clean/AC/thermal-confirmed on the
+        # same host as the candidate. Each of the four cases below starts
+        # from accepted_pass (whose manifests are already valid and
+        # host-matched) and breaks exactly one property.
+
+        def mutate_manifest(directory: Path, **overrides: object) -> None:
+            manifest_path = directory / "controlled-provenance-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.update(overrides)
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        missing_baseline_manifest = base / "m002-performance-missing-baseline-manifest"
+        shutil.copytree(accepted_pass, missing_baseline_manifest)
+        (missing_baseline_manifest / "baseline-cohorts" / "controlled-provenance-manifest.json").unlink()
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            missing_baseline_manifest,
+            "has no controlled-provenance-manifest.json",
+        )
+
+        dirty_baseline_manifest = base / "m002-performance-dirty-baseline-manifest"
+        shutil.copytree(accepted_pass, dirty_baseline_manifest)
+        mutate_manifest(
+            dirty_baseline_manifest / "baseline-cohorts",
+            clean_source_tree_confirmed=False,
+            clean_source_tree_detail="working tree has uncommitted changes",
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            dirty_baseline_manifest,
+            "was not collected with a clean source tree",
+        )
+
+        uncontrolled_baseline_manifest = base / "m002-performance-uncontrolled-baseline-manifest"
+        shutil.copytree(accepted_pass, uncontrolled_baseline_manifest)
+        mutate_manifest(
+            uncontrolled_baseline_manifest / "baseline-cohorts",
+            thermal_stability_confirmed=False,
+            thermal_stability_detail="host is thermally throttled",
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            uncontrolled_baseline_manifest,
+            "was not collected with confirmed thermal stability",
+        )
+
+        host_mismatched_baseline_manifest = base / "m002-performance-host-mismatched-baseline-manifest"
+        shutil.copytree(accepted_pass, host_mismatched_baseline_manifest)
+        mutate_manifest(
+            host_mismatched_baseline_manifest / "baseline-cohorts",
+            host_identity="TESTHOST-0002",
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            host_mismatched_baseline_manifest,
+            "collected on different hosts",
+        )
 
         unordered_cohort_names = base / "m002-performance-unordered-cohort-names"
         shutil.copytree(accepted_pass, unordered_cohort_names)

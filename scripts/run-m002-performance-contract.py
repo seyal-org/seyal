@@ -440,6 +440,38 @@ def probe_thermal_stability_confirmed() -> tuple[bool, str]:
     return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
 
 
+def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
+    """Probe whether the source tree is clean before trusting a SHA-stamped
+    --controlled collection for a non-history family.
+
+    Mirrors probe_clean_source_tree_confirmed() in run-m002-history-reflow-
+    contract.py (consistency-debt follow-up from PR review): collect_cohorts()
+    stamps every cohort file with `git rev-parse HEAD` via SEYAL_BENCH_COMMIT,
+    but a dirty checkout can produce measured behavior that does not actually
+    match that recorded commit. Unlike the history runner, no non-history
+    family here ever reaches evaluate_record's PASS/FAIL path (proposed
+    gates only, physical_arm64_valid always stays false) or an accepted
+    ceiling comparison, so this is defense-in-depth rather than a currently
+    exploitable gap; it keeps the two runners' controlled-mode fail-closed
+    behavior aligned before any non-history family is ever promoted to
+    accepted. Returns (confirmed, detail); any inability to prove a clean
+    tree invalidates the probe (confirmed=False).
+    """
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if status.returncode != 0:
+        return False, "cannot verify a clean source tree"
+    if status.stdout.strip():
+        return False, "working tree has uncommitted or untracked changes"
+    return True, "clean source tree"
+
+
 def require_apple_silicon_collection_host(gate: str) -> None:
     """Refuse real cohort collection off Apple Silicon macOS.
 
@@ -547,6 +579,12 @@ def collect_gate(
     thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
     if not thermal_confirmed:
         reasons.append(f"thermal stability not confirmed: {thermal_detail}")
+    # Consistency-debt fix (non-blocking review follow-up): align with the
+    # history runner's clean-tree probe before this path ever writes a
+    # PHYSICAL_ARM64 VALID record.
+    clean_tree_confirmed, clean_tree_detail = probe_clean_source_tree_confirmed()
+    if not clean_tree_confirmed:
+        reasons.append(f"clean source tree not confirmed: {clean_tree_detail}")
 
     if reasons:
         note = evidence_root / "PLATFORM_LIMITED.txt"
@@ -582,6 +620,7 @@ def collect_gate(
                 f"baseline_sha={baseline_sha}",
                 f"ac_power_detail={ac_detail}",
                 f"thermal_detail={thermal_detail}",
+                f"clean_tree_detail={clean_tree_detail}",
                 f"production_sha={sha}",
                 "",
             ]

@@ -19,6 +19,8 @@ tempdir so no evidence is written into the real repository tree.
 from __future__ import annotations
 
 import importlib.util
+import json
+import shutil
 import sys
 import tempfile
 import time
@@ -111,6 +113,7 @@ def test_performance_contract_runner(base: Path) -> None:
     # (see the thermal-not-confirmed case below).
     module.probe_ac_power_confirmed = lambda: (True, "AC Power")
     module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+    module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
     module.collect_gate(
         "idle_cpu",
         allow_history=False,
@@ -161,6 +164,26 @@ def test_performance_contract_runner(base: Path) -> None:
         "thermal stability not confirmed" in throttled_note,
         f"expected a thermal-stability-not-confirmed reason, got: {throttled_note!r}",
     )
+
+    # Consistency-debt fix (non-blocking review follow-up): a dirty working
+    # tree must still fail closed to PLATFORM_LIMITED here too, aligning
+    # with the history runner's clean-tree probe.
+    module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+    module.probe_clean_source_tree_confirmed = lambda: (False, "working tree has uncommitted or untracked changes")
+    module.collect_gate(
+        "idle_cpu",
+        allow_history=False,
+        controlled=True,
+        baseline_sha="2222222222222222222222222222222222222222",
+    )
+    dirty_tree_evidence = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-idle_cpu-*"))
+    require(len(dirty_tree_evidence) == 7, "dirty-tree controlled path did not write a new evidence directory")
+    dirty_tree_note = (dirty_tree_evidence[-1] / "PLATFORM_LIMITED.txt").read_text(encoding="utf-8")
+    require(
+        "clean source tree not confirmed" in dirty_tree_note,
+        f"expected a clean-source-tree-not-confirmed reason, got: {dirty_tree_note!r}",
+    )
+    module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
 
     # Blocking-review-summary fix: `--gate <history-gate> --controlled ...`
     # must forward --controlled/--baseline-sha/--baseline-cohorts-dir to the
@@ -225,8 +248,32 @@ def test_history_reflow_runner(base: Path) -> None:
     module.run = fake_run
 
     # commit is stamped for the (c) distinct-baseline case below, which is
-    # the only case that actually reaches require_baseline_cohort_provenance
+    # the only case that actually reaches require_baseline_controlled_provenance
     # (case (b) is rejected earlier for baseline_sha == candidate sha).
+    # Blocking-review fix (round 2): a SHA-correct baseline is not enough --
+    # it must also carry a controlled-provenance-manifest.json proving it
+    # was itself collected clean/AC/thermal-confirmed on the same host, so
+    # every gate directory gets one alongside its cohort files.
+    def write_baseline_manifest(directory: Path, *, sha: str, host: str = "TESTHOST-0001", **overrides: object) -> None:
+        manifest = {
+            "schema": "seyal.m002.controlled-provenance-manifest",
+            "version": 1,
+            "sha": sha,
+            "clean_source_tree_confirmed": True,
+            "clean_source_tree_detail": "clean source tree",
+            "ac_power_confirmed": True,
+            "ac_power_detail": "AC Power",
+            "thermal_stability_confirmed": True,
+            "thermal_stability_detail": "CPU_Speed_Limit=100",
+            "host_identity_confirmed": True,
+            "host_identity": host,
+            "collected_at": "2026-09-22T00:00:00+00:00",
+        }
+        manifest.update(overrides)
+        (directory / "controlled-provenance-manifest.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
     baseline_dir = base / "baseline-cohorts-source"
     for gate in module.GATES:
         gate_dir = baseline_dir / gate
@@ -236,6 +283,7 @@ def test_history_reflow_runner(base: Path) -> None:
                 f"cohort = {cohort}\ncommit = \"4444444444444444444444444444444444444444\"\nsamples = [1.0]\n",
                 encoding="utf-8",
             )
+        write_baseline_manifest(gate_dir, sha="4444444444444444444444444444444444444444")
 
     original_argv = sys.argv
     try:
@@ -245,6 +293,7 @@ def test_history_reflow_runner(base: Path) -> None:
         module.probe_ac_power_confirmed = lambda: (True, "AC Power")
         module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
         module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
+        module.host_identity_confirmed = lambda: (True, "TESTHOST-0001")
         sys.argv = ["run-m002-history-reflow-contract.py"]
         module.main()
         default_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
@@ -373,6 +422,63 @@ def test_history_reflow_runner(base: Path) -> None:
             provenance_raised = True
             require("is not bound to" in str(error), f"expected a provenance-binding rejection, got: {error}")
         require(provenance_raised, "a baseline cohort bundle stamped with the wrong SHA must be rejected")
+
+        # Blocking-review fix (round 2): a SHA-correct baseline bundle with
+        # no controlled-provenance-manifest.json at all (e.g. collected by a
+        # version of this script predating this fix) must be rejected, not
+        # silently treated as unverifiable-but-acceptable.
+        missing_manifest_dir = base / "missing-manifest-baseline-cohorts-source"
+        shutil.copytree(baseline_dir, missing_manifest_dir)
+        for gate in module.GATES:
+            (missing_manifest_dir / gate / "controlled-provenance-manifest.json").unlink()
+        sys.argv = [
+            "run-m002-history-reflow-contract.py",
+            "--controlled",
+            "--baseline-sha",
+            "4444444444444444444444444444444444444444",
+            "--baseline-cohorts-dir",
+            str(missing_manifest_dir),
+        ]
+        missing_manifest_raised = False
+        try:
+            module.main()
+        except SystemExit as error:
+            missing_manifest_raised = True
+            require(
+                "has no controlled-provenance-manifest.json" in str(error),
+                f"expected a missing-manifest rejection, got: {error}",
+            )
+        require(missing_manifest_raised, "a baseline bundle with no controlled-provenance manifest must be rejected")
+
+        # Blocking-review fix (round 2): a SHA-correct, clean/AC/thermal-
+        # confirmed baseline collected on a DIFFERENT physical host must
+        # still be rejected -- the contract's noise_policy invalidates
+        # host-change runs even when every other probe is confirmed.
+        host_mismatch_dir = base / "host-mismatch-baseline-cohorts-source"
+        shutil.copytree(baseline_dir, host_mismatch_dir)
+        for gate in module.GATES:
+            manifest_path = host_mismatch_dir / gate / "controlled-provenance-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["host_identity"] = "TESTHOST-0002"
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        sys.argv = [
+            "run-m002-history-reflow-contract.py",
+            "--controlled",
+            "--baseline-sha",
+            "4444444444444444444444444444444444444444",
+            "--baseline-cohorts-dir",
+            str(host_mismatch_dir),
+        ]
+        host_mismatch_raised = False
+        try:
+            module.main()
+        except SystemExit as error:
+            host_mismatch_raised = True
+            require(
+                "collected on a different host" in str(error),
+                f"expected a host-mismatch rejection, got: {error}",
+            )
+        require(host_mismatch_raised, "a baseline bundle collected on a different host must be rejected")
     finally:
         sys.argv = original_argv
 

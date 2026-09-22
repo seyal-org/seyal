@@ -156,16 +156,90 @@ def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
     return True, "clean source tree"
 
 
-def require_baseline_cohort_provenance(directory: Path, baseline_sha: str) -> None:
-    """Verify every pre-collected baseline cohort file actually carries the
-    declared --baseline-sha, rather than trusting the CLI argument alone.
+def host_identity_confirmed() -> tuple[bool, str]:
+    """Probe a stable per-physical-host identifier.
 
-    `--baseline-cohorts-dir` accepts a bundle collected outside this process
-    (from a prior isolated checkout at that exact SHA). Without this check,
-    an arbitrary five-cohort bundle with no real relationship to
-    --baseline-sha could be silently accepted as that SHA's evidence; the
-    cohort files themselves must be stamped with the SHA they were
-    collected at (via SEYAL_BENCH_COMMIT) and that stamp must match.
+    The accepted contract's `noise_policy` invalidates "host-change" runs: a
+    baseline collected on one machine compared against candidate evidence
+    collected on a different one is not a valid PHYSICAL_ARM64 comparison
+    even when both otherwise probe as clean/AC/thermally-stable.
+    `IOPlatformUUID` is a stable per-Mac identifier readable without
+    elevated privileges -- unlike `hardware()`'s model string, which is
+    identical across every unit of the same Mac model. Returns
+    (confirmed, identity-or-detail); an inability to read it invalidates
+    the probe.
+    """
+    if sys.platform != "darwin":
+        return False, "host identity probe requires macOS"
+    result = run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
+    if result.returncode != 0:
+        return False, f"ioreg IOPlatformExpertDevice probe failed: {result.stdout.strip()}"
+    match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
+    if not match:
+        return False, "could not read IOPlatformUUID from ioreg output"
+    return True, match.group(1)
+
+
+CONTROLLED_PROVENANCE_MANIFEST_NAME = "controlled-provenance-manifest.json"
+CONTROLLED_PROVENANCE_MANIFEST_SCHEMA = "seyal.m002.controlled-provenance-manifest"
+
+
+def write_controlled_provenance_manifest(
+    directory: Path,
+    *,
+    sha: str,
+    clean_tree: tuple[bool, str],
+    ac_power: tuple[bool, str],
+    thermal: tuple[bool, str],
+    host: tuple[bool, str],
+) -> None:
+    """Stamp this collection's own environment-quality probes alongside its
+    cohort files.
+
+    Any collection performed by this script -- default or --controlled --
+    may later be reused by someone else as `--baseline-cohorts-dir`. Writing
+    this manifest at collection time means a later reuse can mechanically
+    verify the baseline was itself collected from a clean source tree,
+    AC-confirmed, thermally stable, and on an identified host, rather than
+    trusting a caller-supplied label after the fact.
+    """
+    manifest = {
+        "schema": CONTROLLED_PROVENANCE_MANIFEST_SCHEMA,
+        "version": 1,
+        "sha": sha,
+        "clean_source_tree_confirmed": clean_tree[0],
+        "clean_source_tree_detail": clean_tree[1],
+        "ac_power_confirmed": ac_power[0],
+        "ac_power_detail": ac_power[1],
+        "thermal_stability_confirmed": thermal[0],
+        "thermal_stability_detail": thermal[1],
+        "host_identity_confirmed": host[0],
+        "host_identity": host[1],
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    (directory / CONTROLLED_PROVENANCE_MANIFEST_NAME).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def require_baseline_controlled_provenance(
+    directory: Path, baseline_sha: str, candidate_host: tuple[bool, str]
+) -> None:
+    """Verify a pre-collected --baseline-cohorts-dir bundle is a genuine
+    controlled-evidence artifact, not just SHA-labeled data.
+
+    A prior version of this check (require_baseline_cohort_provenance) only
+    verified each cohort file's `commit` stamp matched --baseline-sha. That
+    is not sufficient: a SHA-correct baseline bundle collected from a dirty
+    tree, an uncontrolled/thermally-throttled host, or a different physical
+    machine must not silently participate in a VALID PHYSICAL_ARM64
+    comparison -- the accepted contract's `noise_policy` explicitly
+    invalidates thermal and host-change runs. This additionally requires and
+    verifies the write_controlled_provenance_manifest() manifest this same
+    script stamps into every collection's cohorts directory, and fails
+    closed (raises) rather than silently downgrading, since a supplied but
+    unqualified baseline was an explicit ask for a controlled comparison
+    that cannot be honestly satisfied.
     """
     for cohort_file in sorted(directory.glob("*.toml")):
         try:
@@ -179,6 +253,54 @@ def require_baseline_cohort_provenance(directory: Path, baseline_sha: str) -> No
                 f"{baseline_sha} (commit={commit!r}); collect baseline cohorts with "
                 "SEYAL_BENCH_COMMIT set to the exact baseline SHA"
             )
+
+    manifest_path = directory / CONTROLLED_PROVENANCE_MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise SystemExit(
+            f"--baseline-cohorts-dir {directory} has no {CONTROLLED_PROVENANCE_MANIFEST_NAME}; "
+            "collect baseline cohorts with a version of this script that stamps controlled "
+            "provenance, or the bundle cannot participate in a VALID comparison"
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"invalid {manifest_path}: {error}") from error
+    if (
+        manifest.get("schema") != CONTROLLED_PROVENANCE_MANIFEST_SCHEMA
+        or manifest.get("version") != 1
+    ):
+        raise SystemExit(f"{manifest_path} has an unsupported controlled-provenance-manifest identity")
+    if manifest.get("sha") != baseline_sha:
+        raise SystemExit(
+            f"{manifest_path} sha={manifest.get('sha')!r} does not match --baseline-sha {baseline_sha}"
+        )
+    if not manifest.get("clean_source_tree_confirmed"):
+        raise SystemExit(
+            f"baseline cohorts at {directory} were not collected from a clean source tree "
+            f"({manifest.get('clean_source_tree_detail')!r}); cannot participate in a VALID comparison"
+        )
+    if not manifest.get("ac_power_confirmed"):
+        raise SystemExit(
+            f"baseline cohorts at {directory} were not collected under confirmed AC power "
+            f"({manifest.get('ac_power_detail')!r}); cannot participate in a VALID comparison"
+        )
+    if not manifest.get("thermal_stability_confirmed"):
+        raise SystemExit(
+            f"baseline cohorts at {directory} were not collected under confirmed thermal stability "
+            f"({manifest.get('thermal_stability_detail')!r}); cannot participate in a VALID comparison"
+        )
+    candidate_host_confirmed, candidate_host_id = candidate_host
+    if not candidate_host_confirmed or not manifest.get("host_identity_confirmed"):
+        raise SystemExit(
+            f"cannot confirm host identity for baseline cohorts at {directory}; same-host "
+            "continuity is required by the contract's noise_policy"
+        )
+    if manifest.get("host_identity") != candidate_host_id:
+        raise SystemExit(
+            f"baseline cohorts at {directory} were collected on a different host "
+            f"({manifest.get('host_identity')!r} != {candidate_host_id!r}); the contract's "
+            "noise_policy invalidates host-change runs"
+        )
 
 
 def require_apple_silicon_collection_host() -> None:
@@ -376,13 +498,24 @@ def main() -> None:
         "workload=ascii executions=1 warmups=20 samples=100 cohorts=5"
     )
 
-    # --controlled is additive and opt-in: when absent, every line below this
-    # block is unreachable and behavior is byte-for-byte the pre-existing
-    # always-diagnostic default.
+    # Probed unconditionally (not gated on --controlled): any collection this
+    # script performs -- default or --controlled -- may later be reused by
+    # someone else as --baseline-cohorts-dir, and write_controlled_provenance_
+    # manifest() below stamps these results into the candidate cohorts dir so
+    # that a later reuse can mechanically verify them rather than trust a
+    # caller-supplied label.
+    ac_probe = probe_ac_power_confirmed()
+    thermal_probe = probe_thermal_stability_confirmed()
+    clean_tree_probe = probe_clean_source_tree_confirmed()
+    host_probe = host_identity_confirmed()
+    ac_detail = ac_probe[1]
+    thermal_detail = thermal_probe[1]
+
+    # --controlled is additive and opt-in: when absent, controlled_reasons
+    # stays empty and controlled_valid is False, so behavior is byte-for-byte
+    # the pre-existing always-diagnostic default.
     controlled_reasons: list[str] = []
     baseline_source: Path | None = None
-    ac_detail = "uncontrolled-developer-host"
-    thermal_detail = "uncontrolled-developer-host"
     if args.controlled:
         if args.baseline_sha is None:
             controlled_reasons.append("no --baseline-sha supplied")
@@ -396,21 +529,18 @@ def main() -> None:
             baseline_source = Path(args.baseline_cohorts_dir)
             if not baseline_source.is_dir():
                 controlled_reasons.append(f"--baseline-cohorts-dir does not exist: {baseline_source}")
-        ac_confirmed, ac_detail = probe_ac_power_confirmed()
-        if not ac_confirmed:
-            controlled_reasons.append(f"AC power not confirmed: {ac_detail}")
+        if not ac_probe[0]:
+            controlled_reasons.append(f"AC power not confirmed: {ac_probe[1]}")
         # AC power alone does not prove a controlled measurement environment:
         # a throttled/hot host on AC must still fail closed to PLATFORM_LIMITED.
-        thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
-        if not thermal_confirmed:
-            controlled_reasons.append(f"thermal stability not confirmed: {thermal_detail}")
+        if not thermal_probe[0]:
+            controlled_reasons.append(f"thermal stability not confirmed: {thermal_probe[1]}")
         # A dirty working tree can produce measured behavior that does not
         # actually match the SHA cohort files get stamped with below; VALID
         # evidence must fail closed rather than silently claim a
         # clean-checkout guarantee it cannot prove (blocking review finding).
-        clean_tree_confirmed, clean_tree_detail = probe_clean_source_tree_confirmed()
-        if not clean_tree_confirmed:
-            controlled_reasons.append(f"clean source tree not confirmed: {clean_tree_detail}")
+        if not clean_tree_probe[0]:
+            controlled_reasons.append(f"clean source tree not confirmed: {clean_tree_probe[1]}")
 
     controlled_valid = args.controlled and not controlled_reasons
 
@@ -420,6 +550,14 @@ def main() -> None:
         baseline = gate_root / "baseline-cohorts"
         log = gate_root / "raw-output.txt"
         candidate_log = collect_cohorts(gate, candidate, sha)
+        write_controlled_provenance_manifest(
+            candidate,
+            sha=sha,
+            clean_tree=clean_tree_probe,
+            ac_power=ac_probe,
+            thermal=thermal_probe,
+            host=host_probe,
+        )
         if controlled_valid:
             assert baseline_source is not None
             baseline_gate_dir = baseline_source / gate
@@ -427,7 +565,10 @@ def main() -> None:
                 raise SystemExit(f"--baseline-cohorts-dir is missing a {gate} subdirectory: {baseline_gate_dir}")
             shutil.copytree(baseline_gate_dir, baseline)
             assert args.baseline_sha is not None
-            require_baseline_cohort_provenance(baseline, args.baseline_sha)
+            # blocking-review fix (round 2): a SHA-correct baseline bundle is
+            # not enough -- it must also mechanically prove it was itself
+            # collected clean/AC/thermal-confirmed on this same host.
+            require_baseline_controlled_provenance(baseline, args.baseline_sha, host_probe)
             baseline_log = f"[controlled] reused pre-collected baseline cohorts from {baseline_gate_dir}\n"
         else:
             baseline_log = collect_cohorts(gate, baseline, sha)

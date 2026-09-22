@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import tomllib
@@ -28,6 +29,8 @@ ACCEPTED_GATE_CEILINGS = {
     "history_active_reflow_ms": {"p50": 2, "p95": 4, "p99": 8},
     "history_sealed_segment_reflow_ms": {"p50": 1, "p95": 2, "p99": 4},
 }
+CONTROLLED_PROVENANCE_MANIFEST_NAME = "controlled-provenance-manifest.json"
+CONTROLLED_PROVENANCE_MANIFEST_SCHEMA = "seyal.m002.controlled-provenance-manifest"
 
 
 def check_accepted_gate_ceilings(gates: dict, registry: dict) -> None:
@@ -82,6 +85,42 @@ def is_missing_metric(value: object) -> bool:
 
 def is_uncontrolled_power_thermal(value: object) -> bool:
     return "uncontrolled" in str(value).casefold()
+
+
+def load_controlled_provenance_manifest(directory: Path, expected_sha: str, *, field: str) -> dict:
+    """Independently re-verify the controlled-provenance-manifest.json a
+    collection run stamps into its cohorts directory (see
+    write_controlled_provenance_manifest() in run-m002-history-reflow-
+    contract.py), rather than trusting that the runner script enforced it --
+    a hand-crafted record.toml plus raw cohort directories submitted
+    straight to this validator must be held to the same standard. Only ever
+    called for a PHYSICAL_ARM64 VALID record, the one case where the claim
+    matters; other evidence classes/statuses make no controlled-evidence
+    claim and are unaffected.
+    """
+    manifest_path = directory / CONTROLLED_PROVENANCE_MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise SystemExit(
+            f"M002 {field} has no {CONTROLLED_PROVENANCE_MANIFEST_NAME}; a PHYSICAL_ARM64 VALID "
+            "result's evidence must carry controlled-collection provenance"
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"invalid {manifest_path}: {error}") from error
+    if manifest.get("schema") != CONTROLLED_PROVENANCE_MANIFEST_SCHEMA or manifest.get("version") != 1:
+        raise SystemExit(f"{manifest_path} has an unsupported controlled-provenance-manifest identity")
+    if manifest.get("sha") != expected_sha:
+        raise SystemExit(f"{manifest_path} sha={manifest.get('sha')!r} does not match expected {expected_sha}")
+    for key, label in (
+        ("clean_source_tree_confirmed", "a clean source tree"),
+        ("ac_power_confirmed", "confirmed AC power"),
+        ("thermal_stability_confirmed", "confirmed thermal stability"),
+        ("host_identity_confirmed", "a confirmed host identity"),
+    ):
+        if not manifest.get(key):
+            raise SystemExit(f"M002 {field} was not collected with {label} (see {manifest_path})")
+    return manifest
 
 
 def require_exact_head(production_sha: str) -> None:
@@ -657,10 +696,16 @@ def evaluate_record(path: Path, schema: dict, *, require_head: bool = False) -> 
     # classes make no such provenance claim and are unaffected.
     bind_cohort_provenance = record["evidence_class"] == "PHYSICAL_ARM64" and record["environment_status"] == "VALID"
 
+    manifest_hosts: dict[str, str] = {}
+
     def load_raw_cohorts(field: str, *, expected_commit: str | None) -> list[float]:
         raw_cohorts = (ROOT / record[field]).resolve()
         if not raw_cohorts.is_dir():
             raise SystemExit(f"M002 performance result {field} must be a directory")
+        if bind_cohort_provenance:
+            assert expected_commit is not None
+            manifest = load_controlled_provenance_manifest(raw_cohorts, expected_commit, field=field)
+            manifest_hosts[field] = manifest["host_identity"]
         cohort_files = sorted(raw_cohorts.glob("*.toml"))
         raw_values: list[float] = []
         cohort_numbers: list[int] = []
@@ -697,6 +742,12 @@ def evaluate_record(path: Path, schema: dict, *, require_head: bool = False) -> 
     baseline_raw_values = load_raw_cohorts(
         "baseline_raw_cohorts", expected_commit=record["baseline_sha"] if bind_cohort_provenance else None
     )
+    if bind_cohort_provenance and manifest_hosts["raw_cohorts"] != manifest_hosts["baseline_raw_cohorts"]:
+        raise SystemExit(
+            "M002 raw_cohorts and baseline_raw_cohorts were collected on different hosts "
+            f"({manifest_hosts['raw_cohorts']!r} != {manifest_hosts['baseline_raw_cohorts']!r}); "
+            "the contract's noise_policy invalidates host-change runs"
+        )
     values = [record[key] for key in percentile_keys]
     baseline = [record[key] for key in baseline_keys]
     if any(not is_non_negative_number(value) for value in values + baseline):
