@@ -122,7 +122,7 @@ These landings are **foundation**, not M003 Done. The headed host is still a one
 | Slice | Issue | Status |
 |---|---|---|
 | Workspace chrome (left / tabs / inspector) | #922 | **Active** — owned by @crdileep82; do not duplicate |
-| Split-tree projection; one live Metal leaf | #923 | **Blocked on #922 merge**; historical Cursor branch explicitly abandoned/superseded |
+| Split-tree projection; one live Metal leaf | #923 | **Blocked only on consumable #922 head**; may develop stacked before #922 merge |
 | Split drag-resize ratios | #928 | **Blocked on #923** |
 | Pane/tab execution provisioning contract | #994 | **Refinement** — defines the missing product→Runtime execution-creation seam |
 | Multiple live Metal surfaces per Tab | #936 | **Blocked** on #923 plus accepted provisioning work derived from #994 |
@@ -139,39 +139,52 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Native hierarchy / windows / tabs / splits / navigation | #674 | **Open umbrella** — not a pickup |
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
-| Trusted shell-integration / semantic command boundaries | #686 | **Open Refinement**; #991 proposes a duration decision |
-| Flow compositor Block-region drawing | #865 | **Technically ready; claim blocked by stale `issue/865` branch from closed PR #874** |
+| Trusted shell-integration / semantic command boundaries | #686 | **Ready for Refinement/R&D**; no production code in this Issue |
+| Flow compositor Block-region drawing | #865 | **Ready** — explicit product-owner handoff authorizes next sole assignee to reuse/refesh `issue/865`; PR #874 remains historical only |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
 | Headed Flow/Raw/TUI workload matrix | #868 | **Blocked on #867** |
 | Renderer qualification / regression | #869 | **Refinement / after #868** |
 | Production startup config realization | #993 | **Ready** |
-| Pane/tab execution provisioning contract | #994 | **Refinement** |
+| Pane/tab execution provisioning contract | #994 | **Ready for Refinement/R&D** |
 
 **Executable frontier (2026-09-21):**
 
 ```text
 Hierarchy lane
-  #922 active
-    → #923
-      → #928
-  #994 refinement ───────────────┐
+  #922 active → publish refreshed consumable head/PR
+       └─ #923 may develop stacked before #922 merge → #928
+  #994 Ready-for-Refinement ─────┐
                                  └→ provisioning implementation → #936
 
 Presentation lane
-  clear/explicitly hand off stale #865 branch → #865 → #866 → #867 → #868 → #869
+  #865 Ready → #866 → #867 → #868 → #869
 
 Configuration lane
   #993 Ready
     → later bounded #676 children for keybindings and launch shell/CWD policy
 
 Shell-metadata decision
-  #686 / PR #991 only gates behavior that actually needs the proposed duration/trust expansion
+  #686 Ready-for-Refinement; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
-#993 is an independent Ready production pickup now. #994 is an independent refinement lane. #865 is technically ready but cannot be freely claimed until its stale deterministic branch from closed PR #874 is explicitly resolved under the current Issue protocol. None of these lanes may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 remains blocked until #922 actually merges. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 and #865 are independent Ready production pickups now. #994 and #686 are independent Ready-for-Refinement lanes. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
 PR #990 changes the contributor claim protocol but is not a product dependency. Until it is accepted and merged, contributors follow the currently merged assignee-based `ISSUE-PROTOCOL.md`.
+
+### 5.4 Development-capacity rule
+
+For the active M003 milestone, planning must maintain a rolling execution buffer instead of creating work only when a developer becomes idle.
+
+- With four active contributors, target **6–8 startable items** across production and bounded refinement/R&D.
+- Distinguish **start dependency** from **merge dependency**. A stable upstream branch/PR may be consumed by a stacked downstream PR; merge order is preserved without forcing idle time.
+- Use **Blocked** only for a real missing contract/authority, conflicting ownership, or unavailable required interface — not merely because an upstream PR has not merged.
+- Umbrella Issues (#674/#675/#676) are planning parents, never execution locks.
+- Ready-for-Refinement is valid active work when its output is the accepted contract required for a later production slice; it must not contain production implementation.
+- Keep at least one Ready item in each independent active lane where architecture permits: hierarchy, presentation, configuration, and architecture/refinement.
+- A stale historical branch or closed PR must receive an explicit handoff/disposition; it must not silently reserve a ticket forever.
+
+This buffer is limited to the current M003 frontier. It does not authorize beginning M004 implementation before M003 passes.
 
 After this freeze, **do not create new M003 implementation Issues** except:
 
@@ -203,7 +216,7 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 ### 6.3 #923 — split-tree projection after #922
 
-Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. The historical Cursor branch has been explicitly abandoned/superseded; after #922 merges, refresh the exact-head interface and claim a fresh `issue/923` branch under the currently merged Issue protocol.
+Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. The historical Cursor branch has been explicitly abandoned/superseded. #923 does **not** require #922 to merge: once #922 publishes a refreshed/current consumable branch or PR with stable action/snapshot fields, #923 may start stacked on that head and rebase after #922 lands.
 
 ### 6.4 #686 — shell-metadata refinement
 
@@ -211,7 +224,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
-Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865's technical scope is ready because its compositor work is pane-local and its corrected Rust presentation dependency #861 is complete; it does not require #923. However, the old `issue/865` branch from closed/unmerged PR #874 must be explicitly cleared or handed off before a new implementation claim. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
+Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865 is Ready because its compositor work is pane-local and its corrected Rust presentation dependency #861 is complete; it does not require #923. Product-owner handoff explicitly authorizes the next sole assignee to reuse/refesh the existing deterministic `issue/865` branch from current `master`; closed PR #874 is historical only. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
 
 ### 6.6 #676 / #993 — configuration frontier
 
