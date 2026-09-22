@@ -1032,8 +1032,16 @@ pub extern "C" fn seyal_app_visual_warning(index: u32) -> SeyalAppVisualWarning 
 
 /// Test/native harness: reload process cold UI configuration from `path`.
 /// `path_len == 0` reloads via the default path selection rule.
+///
+/// # Safety
+/// - When `path_len != 0`, `path` must be non-null and address `path_len`
+///   readable UTF-8 bytes for the full duration of this call.
+/// - The path is copied synchronously; nothing is retained after return.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_reload_ui_configuration(path: *const u8, path_len: usize) -> i32 {
+pub unsafe extern "C" fn seyal_app_test_reload_ui_configuration(
+    path: *const u8,
+    path_len: usize,
+) -> i32 {
     use crate::theme::reload_process_ui_configuration_for_test;
     if path.is_null() && path_len != 0 {
         return -1;
@@ -1041,6 +1049,7 @@ pub extern "C" fn seyal_app_test_reload_ui_configuration(path: *const u8, path_l
     let selected = if path_len == 0 {
         None
     } else {
+        // SAFETY: caller contract above guarantees a readable UTF-8 range.
         let bytes = unsafe { std::slice::from_raw_parts(path, path_len) };
         let Ok(text) = std::str::from_utf8(bytes) else {
             return -2;
