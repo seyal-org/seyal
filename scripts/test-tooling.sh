@@ -68,7 +68,7 @@ grep -Fq 'mandatory entrypoint for production implementation of a Seyal GitHub I
 grep -Fq 'authenticated GitHub login' "$claim_skill" || fail "implement-issue must resolve authenticated GitHub identity"
 grep -Fq 'Issue #N is already taken by @login' "$claim_skill" || fail "implement-issue must report the existing assignee and stop"
 grep -Fq 'Multiple assignees' "$claim_skill" || fail "implement-issue must fail closed on multiple assignees"
-grep -Fq 'exact remote branch name `issue/<number>`' "$claim_skill" || fail "implement-issue must use the deterministic issue branch collision backstop"
+grep -Fq 'exact remote branch name `<human-login>/issue/<number>`' "$claim_skill" || fail "implement-issue must use the human-owned deterministic issue branch collision backstop"
 grep -Fq 'never overwrite another valid claim to win a race' "$claim_skill" || fail "implement-issue must not steal a concurrent claim"
 grep -Fq 'If the work item is a GitHub sub-issue, fetch its parent immediately' "$claim_skill" || fail "implement-issue must inspect the parent claim before a child slice"
 grep -Fq 'stop with `BLOCKED` unless an explicit parent/slice handoff' "$claim_skill" || fail "implement-issue must fail closed when another implementer owns the parent"
@@ -79,11 +79,16 @@ refine_skill=.agents/skills/issue-refinement/SKILL.md
 grep -Fq 'recommend GitHub sub-issues (one per slice)' "$refine_skill" || fail "issue-refinement must recommend one GitHub sub-issue per slice"
 grep -Fq 'do not assign both parent and child to different implementers for the same slice' "$refine_skill" || fail "issue-refinement must forbid split parent/child assignees for one slice"
 grep -Fq 'Any request to **implement, fix, finish, code, or complete a specific GitHub Issue** must enter through' AGENTS.md || fail "AGENTS.md must route implementation requests through implement-issue"
-grep -Fq 'one deterministic issue/<number> branch' docs/engineering/DEVELOPMENT.md || fail "development workflow must use the deterministic issue branch"
-if grep -Fq '→ issue/<number>-<short-name>' docs/engineering/DEVELOPMENT.md; then
-  fail "new development workflow must not retain the legacy non-deterministic branch convention"
+grep -Fq 'one deterministic <human-login>/issue/<number> branch' docs/engineering/DEVELOPMENT.md || fail "development workflow must use the human-owned deterministic issue branch"
+if grep -Eq '→ (issue/<number>-<short-name>|cursor/|codex/|claude/|copilot/)' docs/engineering/DEVELOPMENT.md; then
+  fail "new development workflow must not use legacy or agent-owned branch conventions"
 fi
-grep -Fq 'GitHub assignee state is the human-visible claim' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define assignee ownership authority"
+grep -Fq 'sole **human assignee** is the active-work owner' docs/engineering/DEVELOPMENT.md || fail "development workflow must make the human assignee authoritative"
+grep -Fq 'durable ownership identity is always a human GitHub account' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must require human ownership"
+grep -Fq 'Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners.' AGENTS.md || fail "AGENTS.md must reject agent ownership"
+grep -Fq 'New implementation branches are named `<human-login>/issue/<number>`' AGENTS.md || fail "AGENTS.md must human-namespace branches"
+grep -Fq 'Agent assistance may be credited' AGENTS.md || fail "AGENTS.md must allow agent co-authorship/provenance"
+grep -Fq 'A bot-authored review/comment is supplemental analysis only.' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must not count bot review as human independent review"
 grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not use Project status as the ownership lock"
 
 [[ -f .sdlc/context/_meta.yaml ]] || fail "Seyal SDLC context metadata is missing"
