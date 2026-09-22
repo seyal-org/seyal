@@ -140,7 +140,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
 | Trusted shell-integration / semantic command boundaries | #686 | **Ready for Refinement/R&D**; no production code in this Issue |
-| Flow compositor Block-region drawing | #865 | **Ready** — explicit product-owner handoff authorizes next sole assignee to reuse/refesh `issue/865`; PR #874 remains historical only |
+| Flow compositor Block-region drawing | #865 | **Technically Ready; ownership migration needed** — legacy `issue/865` / `cursor/live-tail-865-c8cd` require human disposition under #997 before pickup |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
 | Headed Flow/Raw/TUI workload matrix | #868 | **Blocked on #867** |
@@ -168,11 +168,36 @@ Shell-metadata decision
   #686 Ready-for-Refinement; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
-#993 and #865 are independent Ready production pickups now. #994 and #686 are independent Ready-for-Refinement lanes. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is an independent Ready production pickup now. #994/#686 and #1000–#1004 provide independent Ready-for-Refinement lanes. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
-PR #990 changes the contributor claim protocol but is not a product dependency. Until it is accepted and merged, contributors follow the currently merged assignee-based `ISSUE-PROTOCOL.md`.
+Contributor ownership is being corrected by #997 / PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. Until #998 lands, contributors follow the currently merged `ISSUE-PROTOCOL.md`; after it lands, new branches use the human owner's namespace.
 
-### 5.4 Development-capacity rule
+### 5.4 Groomed contributor frontier
+
+Current contributor-ready M003 work is maintained in #999.
+
+**Production — start now**
+- #993 — standard — production config/theme/font startup wiring.
+
+**Refinement/R&D — start now**
+- #1001 — standard — pane move/reparent/zoom/equalize/focus-history contract.
+- #1002 — standard — keybinding/chord schema, conflicts and routing.
+- #1004 — standard — local resource addressing/goto/focus-history semantics.
+- #1000 — advanced/core — native window/tab lifecycle contract.
+- #1003 — advanced/core — startup shell/environment/CWD launch policy.
+- #686 — advanced/core — trusted shell metadata decision.
+- #994 — advanced/core — TerminalExecution provisioning contract.
+
+**Near-ready stacked work**
+- #923 / #934 after a refreshed consumable #922 head; merge need not wait for #922.
+- #928 after a consumable #923 head; merge need not wait for #923.
+
+**Not active M003 contributor work**
+- #926/#927/#930 agent product surfaces are deferred to M005.
+- #931 resource center is deferred until resource authority exists.
+- #921 duplicate and #937 stale orchestration are closed.
+
+### 5.5 Development-capacity rule
 
 For the active M003 milestone, planning must maintain a continuously groomed **open-source contributor pool** instead of preparing work only when a known developer becomes idle.
 
@@ -227,7 +252,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
-Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865 is Ready because its compositor work is pane-local and its corrected Rust presentation dependency #861 is complete; it does not require #923. Product-owner handoff explicitly authorizes the next sole assignee to reuse/refesh the existing deterministic `issue/865` branch from current `master`; closed PR #874 is historical only. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
+Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865's technical scope is Ready because its compositor work is pane-local and #861 is complete; it does not require #923. Legacy `issue/865` and `cursor/live-tail-865-c8cd` are pre-#997 ownership artifacts. A human maintainer must disposition/migrate them before a new owner starts; closed PR #874 is historical only. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
 
 ### 6.6 #676 / #993 — configuration frontier
 
