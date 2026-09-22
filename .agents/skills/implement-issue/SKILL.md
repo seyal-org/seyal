@@ -16,17 +16,17 @@ Claiming the Issue is a coordination preflight, not implementation permission. P
 1. Resolve the responsible **human GitHub owner** using the project-approved GitHub tooling and the fresh Issue assignee state. Coding-agent/bot identities are not valid Seyal owners. Do not guess from git author name, OS username, chat name, agent/vendor identity, or repository ownership. If the human owner cannot be resolved uniquely, stop with `BLOCKED: human implementation owner unavailable` and do not claim or edit the Issue.
 2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for assignee state.
 3. Verify the Issue is still open and **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Readiness and ownership are separate gates.
-4. Inspect the complete assignee list:
-   - **No assignee:** if the human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login` and require a maintainer acknowledgement before continuing.
-   - **Exactly the current human owner:** treat this only as a potential resume; continue the collision checks below.
+4. Inspect the complete **human owner-record state**: assignees plus maintainer-acknowledged `Owner: @login` claims.
+   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login` and require a maintainer acknowledgement before continuing.
+   - **Exactly the current human owner:** treat this only as a potential resume; continue the deterministic-branch checks below.
    - **Exactly another human owner:** stop before planning or edits and report `Issue #N is already taken by @login` with the Issue URL.
-   - **Agent/bot assignee:** stop as `BLOCKED`; Seyal work ownership must be transferred to a human before implementation.
-   - **Multiple assignees:** stop as an ownership collision. Seyal implementation Issues have exactly one active human owner.
+   - **Agent/bot owner record:** stop as `BLOCKED`; Seyal work ownership must be transferred to a human before implementation.
+   - **Conflicting records:** multiple assignees, multiple acknowledged owner claims, or disagreement between assignee and acknowledged claim is an ownership collision. Seyal implementation Issues have exactly one active human owner.
 5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and a maintainer-acknowledged `Owner: @login` claim names that human. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
 6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. A **planning/umbrella parent is not an ownership lock** for an independently scoped child. Stop with `BLOCKED` only when parent and child overlap the same implementation slice or the parent explicitly owns/releases that slice. After the child claim write and again after creating `<human-login>/issue/<number>`, re-fetch both parent and child and verify there is no duplicate ownership of the same slice.
-7. Do not clear, replace, or steal another implementer's assignment. Ownership transfer requires an explicit handoff/reassignment under `ISSUE-PROTOCOL.md`.
+7. Do not clear, replace, or steal another human's owner record. Ownership transfer requires an explicit human-to-human handoff under `ISSUE-PROTOCOL.md`.
 
-The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the human assignee. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
+The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
 
 ## Human owner and agent delegation
 
@@ -75,15 +75,15 @@ Anything that can reach `master` must be production-grade for its intended repos
 - Do not copy exploratory implementation wholesale into a production branch. Re-implement the accepted production solution cleanly so review can establish that every merged path is intentional and supportable.
 - If a requested feature cannot yet be implemented production-grade because architecture or dependencies are unresolved, stop and route the uncertainty instead of creating a temporary production path.
 
-## Deterministic branch collision backstop
+## Deterministic branch audit/resume backstop
 
-After the plan is confirmed but before creating the worktree or editing production files, use the exact remote branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the fresh sole human owner.
+After the plan is confirmed but before creating the worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record is the cross-human exclusive lock**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
 
 1. Fetch remote refs immediately before branch creation.
 2. If the human owner's deterministic `<human-login>/issue/<number>` branch already exists in the canonical repository or the contributor's declared fork, **do not create another implementation worktree or alternate branch**. Stop and report that the Issue has active/resumable work. Resume only when the human owner explicitly asked to continue/resume and the fresh Issue read still proves that same human is the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim.
-3. If the branch does not exist, create `<human-login>/issue/<number>` from the current accepted `master`. Branch creation is the collision backstop: failure because the ref appeared concurrently means another pickup won the race; stop rather than selecting a different branch name.
+3. If the branch does not exist, create `<human-login>/issue/<number>` from the current accepted `master`. If that same human-namespaced ref appears concurrently, stop and re-run owner/branch preflight rather than selecting a different branch name. Do **not** treat branch creation as a cross-human lock: two different human namespaces can both be created, so the owner record must already have excluded that race.
 4. Immediately after successfully creating the branch, fetch the Issue again and require the same human to remain the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim. If ownership and branch state disagree, stop before production edits and surface the collision for explicit resolution.
-5. Create the isolated worktree from that exact branch only after both the assignee claim and deterministic branch checks pass.
+5. Create the isolated worktree from that exact branch only after both the **unique human owner-record check** and deterministic branch audit/resume check pass.
 
 Legacy implementation branches already created as `issue/<number>`, `issue/<number>-<short-name>`, or under agent/vendor namespaces such as `cursor/`, `codex/`, `claude/`, or `copilot/` require explicit human-owner disposition before they continue. Do not create new branches in those legacy forms after this rule is merged.
 
