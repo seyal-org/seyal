@@ -65,7 +65,7 @@ grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/verificati
 # verified GitHub claim before any production branch/worktree/edit path.
 claim_skill=.agents/skills/implement-issue/SKILL.md
 grep -Fq 'mandatory entrypoint for production implementation of a Seyal GitHub Issue' "$claim_skill" || fail "implement-issue must be the mandatory production entrypoint"
-grep -Fq 'authenticated GitHub login' "$claim_skill" || fail "implement-issue must resolve authenticated GitHub identity"
+grep -Fq 'responsible **human GitHub owner**' "$claim_skill" || fail "implement-issue must resolve a human GitHub owner"
 grep -Fq 'Issue #N is already taken by @login' "$claim_skill" || fail "implement-issue must report the existing assignee and stop"
 grep -Fq 'Multiple assignees' "$claim_skill" || fail "implement-issue must fail closed on multiple assignees"
 grep -Fq 'exact remote branch name `<human-login>/issue/<number>`' "$claim_skill" || fail "implement-issue must use the human-owned deterministic issue branch collision backstop"
@@ -77,7 +77,7 @@ grep -Fq 'claim and branch that sub-issue only after the parent/slice handoff ch
 grep -Fq 'do not steal the parent' "$claim_skill" || fail "implement-issue must not steal a parent claim"
 refine_skill=.agents/skills/issue-refinement/SKILL.md
 grep -Fq 'recommend GitHub sub-issues (one per slice)' "$refine_skill" || fail "issue-refinement must recommend one GitHub sub-issue per slice"
-grep -Fq 'do not assign both parent and child to different implementers for the same slice' "$refine_skill" || fail "issue-refinement must forbid split parent/child assignees for one slice"
+grep -Fq 'parent and child must not represent the same implementation slice concurrently' "$refine_skill" || fail "issue-refinement must prevent duplicate parent/child implementation ownership"
 grep -Fq 'Any request to **implement, fix, finish, code, or complete a specific GitHub Issue** must enter through' AGENTS.md || fail "AGENTS.md must route implementation requests through implement-issue"
 grep -Fq 'one deterministic <human-login>/issue/<number> branch' docs/engineering/DEVELOPMENT.md || fail "development workflow must use the human-owned deterministic issue branch"
 if grep -Eq '→ (issue/<number>-<short-name>|cursor/|codex/|claude/|copilot/)' docs/engineering/DEVELOPMENT.md; then
