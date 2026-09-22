@@ -68,8 +68,11 @@ grep -Fq 'mandatory entrypoint for production implementation of a Seyal GitHub I
 grep -Fq 'responsible **human GitHub owner**' "$claim_skill" || fail "implement-issue must resolve a human GitHub owner"
 grep -Fq 'Issue #N is already taken by @login' "$claim_skill" || fail "implement-issue must report the existing assignee and stop"
 grep -Fq 'Multiple assignees' "$claim_skill" || fail "implement-issue must fail closed on multiple assignees"
-grep -Fq 'exact remote branch name `<human-login>/issue/<number>`' "$claim_skill" || fail "implement-issue must use the human-owned deterministic issue branch collision backstop"
+grep -Fq 'exact branch name `<human-login>/issue/<number>`' "$claim_skill" || fail "implement-issue must use the human-owned deterministic issue branch"
 grep -Fq 'unique owner through either sole assignment' "$claim_skill" || fail "implement-issue must keep external-owner fallback valid after branch creation"
+grep -Fq 'unique human owner record is the cross-human exclusive lock' "$claim_skill" || fail "implement-issue must make the owner record, not branch creation, the cross-human lock"
+grep -Fq 'Do **not** treat branch creation as a cross-human lock' "$claim_skill" || fail "implement-issue must scope branch collision to the same human namespace"
+grep -Fq 'unique human owner-record check' "$claim_skill" || fail "implement-issue worktree gate must accept assignee or acknowledged external-owner records"
 grep -Fq 'never overwrite another valid claim to win a race' "$claim_skill" || fail "implement-issue must not steal a concurrent claim"
 grep -Fq 'If the work item is a GitHub sub-issue, fetch its parent immediately' "$claim_skill" || fail "implement-issue must inspect the parent claim before a child slice"
 grep -Fq 'planning/umbrella parent is not an ownership lock' "$claim_skill" || fail "implement-issue must allow independent child ownership under planning parents"
@@ -85,6 +88,8 @@ if grep -Eq '→ (issue/<number>-<short-name>|cursor/|codex/|claude/|copilot/)' 
   fail "new development workflow must not use legacy or agent-owned branch conventions"
 fi
 grep -Fq 'Issue has exactly one **human owner**' docs/engineering/DEVELOPMENT.md || fail "development workflow must make human ownership authoritative"
+grep -Fq 'unique owner record is the cross-human exclusive claim' docs/engineering/DEVELOPMENT.md || fail "development workflow must make owner records the exclusive claim"
+grep -Fq 'Transfer the **human owner record** explicitly' docs/engineering/DEVELOPMENT.md || fail "development workflow must support assignee and external-owner handoff"
 grep -Fq 'record `Owner: @login` in an Issue comment and require a maintainer acknowledgement' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must support non-assignable external human contributors"
 grep -Fq 'durable ownership identity is always a human GitHub account' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must require human ownership"
 grep -Fq 'Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners.' AGENTS.md || fail "AGENTS.md must reject agent ownership"
@@ -92,6 +97,20 @@ grep -Fq 'New implementation branches are named `<human-login>/issue/<number>`' 
 grep -Fq 'Agent assistance may be credited' AGENTS.md || fail "AGENTS.md must allow agent co-authorship/provenance"
 grep -Fq 'A bot-authored review/comment is supplemental analysis only.' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must not count bot review as human independent review"
 grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not use Project status as the ownership lock"
+grep -Fq 'Status never overrides the **human-owner rule**' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must preserve the external-owner fallback"
+grep -Fq 'owner record is the cross-human exclusive lock' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must make owner records the cross-human lock"
+grep -Fq 'branch is only that owner' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define human-namespaced branches as audit/resume backstops"
+grep -Fq 'unique human owner record' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document the human owner record"
+grep -Fq 'branch is an audit/resume backstop for that human' site/src/content/docs/developer/index.mdx || fail "Developer Guide must not overclaim the branch as a cross-human lock"
+
+# Regression guards for the pre-human-owner wording that caused contradictory
+# external-contributor and collision semantics.
+for stale in   'Status never overrides the assignee rule'   'Branch creation is the collision backstop'   'both the assignee claim and deterministic branch checks pass'   'may never substitute for the human assignee'   'GitHub assignment is explicitly transferred'
+do
+  if grep -Fq "$stale" docs/engineering/ISSUE-PROTOCOL.md     || grep -Fq "$stale" "$claim_skill"     || grep -Fq "$stale" docs/engineering/DEVELOPMENT.md     || grep -Fq "$stale" site/src/content/docs/developer/index.mdx; then
+    fail "stale assignee-era ownership wording remains: $stale"
+  fi
+done
 
 [[ -f .sdlc/context/_meta.yaml ]] || fail "Seyal SDLC context metadata is missing"
 [[ -f .sdlc/graph/context-index.json ]] || fail "Seyal derived context index is missing"
