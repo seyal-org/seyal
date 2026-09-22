@@ -159,6 +159,13 @@ def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
 HOST_IDENTITY_TOKEN_DOMAIN = "seyal.m002.host-identity.v1"
 
 
+def derive_host_identity_token(raw_uuid: str) -> str:
+    """Derive the non-reversible, domain-separated comparison token stored
+    in place of a raw IOPlatformUUID. Pure and platform-independent so it
+    can be unit-tested directly, without probing real hardware."""
+    return hashlib.sha256(f"{HOST_IDENTITY_TOKEN_DOMAIN}:{raw_uuid}".encode("utf-8")).hexdigest()
+
+
 def host_identity_confirmed() -> tuple[bool, str]:
     """Probe a stable per-physical-host identifier.
 
@@ -187,9 +194,7 @@ def host_identity_confirmed() -> tuple[bool, str]:
     match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
     if not match:
         return False, "could not read IOPlatformUUID from ioreg output"
-    raw_uuid = match.group(1)
-    token = hashlib.sha256(f"{HOST_IDENTITY_TOKEN_DOMAIN}:{raw_uuid}".encode("utf-8")).hexdigest()
-    return True, token
+    return True, derive_host_identity_token(match.group(1))
 
 
 CONTROLLED_PROVENANCE_MANIFEST_NAME = "controlled-provenance-manifest.json"
