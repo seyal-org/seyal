@@ -85,7 +85,7 @@ After the plan is confirmed but before creating the worktree or editing producti
 4. Immediately after successfully creating the branch, fetch the Issue again and require the same human to remain the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim. If ownership and branch state disagree, stop before production edits and surface the collision for explicit resolution.
 5. Create the isolated worktree from that exact branch only after both the assignee claim and deterministic branch checks pass.
 
-Legacy implementation branches already created as `issue/<number>-<short-name>` or under agent/vendor namespaces such as `cursor/`, `codex/`, `claude/`, or `copilot/` require explicit human-owner disposition before they continue. Do not create new branches in those legacy forms after this rule is merged.
+Legacy implementation branches already created as `issue/<number>`, `issue/<number>-<short-name>`, or under agent/vendor namespaces such as `cursor/`, `codex/`, `claude/`, or `copilot/` require explicit human-owner disposition before they continue. Do not create new branches in those legacy forms after this rule is merged.
 
 Then apply only these Seyal-specific rules on top of the generic procedure:
 
