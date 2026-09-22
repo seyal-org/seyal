@@ -35,7 +35,7 @@ The pickup contract is:
 ```text
 fresh open Ready Issue
 → resolve authenticated **human** GitHub owner
-→ exactly one assignee = that human owner
+→ exactly one human owner = sole assignee when assignable, otherwise acknowledged `Owner: @login`
 → plan confirmed
 → create exact branch <human-login>/issue/<number>
 → re-read Issue and verify the same sole human assignee
@@ -49,12 +49,12 @@ Rules:
 - Production implementation of a GitHub Issue must enter through `.agents/skills/implement-issue/SKILL.md`.
 - Resolve the authenticated **human GitHub owner** from project-approved GitHub tooling and the fresh Issue assignee state. Never infer ownership from git author configuration, local username, chat name, an agent/bot account, or repository ownership.
 - Fetch assignee state fresh immediately before pickup. Cached context is not ownership authority.
-- An unassigned Ready Issue may be assigned only to the current authenticated **human** contributor. Re-fetch after assignment; continue only if that human is now the sole assignee. A coding-agent/bot identity must never be assigned as Seyal work owner.
+- For an assignable contributor, assign the Ready Issue only to the authenticated **human** owner and re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning, record `Owner: @login` in an Issue comment and require a maintainer acknowledgement before branch/worktree creation. A coding-agent/bot identity must never be the owner record.
 - If exactly one different assignee exists, the Issue is already taken. Report the assignee and stop before planning, worktree/branch creation, or production edits.
 - Multiple assignees are an ownership collision for an implementation Issue. Stop and require explicit resolution.
 - If implementer identity, assignment write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the assignee rule.
-- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the sole human assignee. Do not create alternative agent prefixes or short-name branches to escape a collision.
+- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the sole human owner. It may be in upstream or the contributor's fork. Do not create alternative agent prefixes or short-name branches to escape a collision.
 - Branch creation happens only after the implementation plan is confirmed. If `<human-login>/issue/<number>` already exists, stop by default. Resume it only when explicitly asked to continue/resume that existing work and the same human owner is still the sole assignee.
 - If concurrent assignment/branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid claim to win a race.
 - Legacy `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
@@ -64,7 +64,7 @@ Rules:
 Seyal's durable ownership identity is always a human GitHub account.
 
 - Coding agents (Cursor, Codex, Claude Code, Copilot, or similar) are delegated tools. They may write code, tests, documentation, and review analysis on behalf of a human owner, but they do not own Issues.
-- Agent/bot identities must not be the sole assignee, branch namespace, PR owner of record, durable handoff identity, or independent reviewer used to satisfy a required review gate.
+- Agent/bot identities must not be the owner record, branch namespace, PR owner of record, durable handoff identity, or independent reviewer used to satisfy a required review gate.
 - New branches use `<human-login>/issue/<number>`; switching agents does not rename or transfer the branch.
 - Agent assistance may be recorded as PR tooling provenance and/or a standard `Co-authored-by:` trailer when a real attribution identity exists. Never invent an identity/email for attribution.
 - If tooling can only post a bot-authored review/comment, treat it as supplemental evidence. Required independent review remains attached to a human reviewer account.
