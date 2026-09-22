@@ -123,7 +123,7 @@ These landings are **foundation**, not M003 Done. The headed host is still a one
 |---|---|---|
 | Workspace chrome (left / tabs / inspector) | #922 | **Active** — owned by @crdileep82; do not duplicate |
 | Split-tree projection; one live Metal leaf | #923 | **Blocked only on consumable #922 head**; may develop stacked before #922 merge |
-| Split drag-resize ratios | #928 | **Blocked on #923** |
+| Split drag-resize ratios | #928 | **Blocked only on a consumable #923 head**; may develop stacked before #923 merges |
 | Pane/tab execution provisioning contract | #994 | **Refinement** — defines the missing product→Runtime execution-creation seam |
 | Multiple live Metal surfaces per Tab | #936 | **Blocked** on #923 plus accepted provisioning work derived from #994 |
 | Adaptive Depth chrome fidelity | #934 | **Open**; presentation-only, prefer after the active hierarchy/chrome frontier |
@@ -139,7 +139,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Native hierarchy / windows / tabs / splits / navigation | #674 | **Open umbrella** — not a pickup |
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
-| Trusted shell-integration / semantic command boundaries | #686 | **Ready for Refinement/R&D**; no production code in this Issue |
+| Trusted shell-integration / semantic command boundaries | #686 | **In Progress** — human owner @mahboobmonnamd; decision/ADR work in PR #991, no production code |
 | Flow compositor Block-region drawing | #865 | **Technically Ready; ownership migration needed** — legacy `issue/865` / `cursor/live-tail-865-c8cd` require human disposition under #997 before pickup |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
@@ -165,7 +165,7 @@ Configuration lane
     → later bounded #676 children for keybindings and launch shell/CWD policy
 
 Shell-metadata decision
-  #686 Ready-for-Refinement; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
+  #686 active under @mahboobmonnamd; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
 #993 is an independent Ready production pickup now. #994/#686 and #1000–#1004 provide independent Ready-for-Refinement lanes. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
@@ -188,8 +188,10 @@ Current contributor-ready M003 work is maintained in #999. Repeated references b
 - #1004 — standard — local resource addressing/goto/focus-history semantics.
 - #1000 — advanced/core — native window/tab lifecycle contract.
 - #1003 — advanced/core — startup shell/environment/CWD launch policy.
-- #686 — advanced/core — trusted shell metadata decision.
 - #994 — advanced/core — TerminalExecution provisioning contract.
+
+**Active / already owned**
+- #686 — advanced/core — human owner @mahboobmonnamd; duration/trust decision in PR #991, not available for pickup.
 
 **Near-ready stacked work**
 - #923 / #934 after a refreshed consumable #922 head; merge need not wait for #922.
@@ -197,6 +199,7 @@ Current contributor-ready M003 work is maintained in #999. Repeated references b
 
 **Not active M003 contributor work**
 - #926/#927/#930 agent product surfaces are deferred to M005.
+- #929 Sessions center is blocked on authoritative Runtime session/execution inventory and is not an active contributor pickup.
 - #931 resource center is deferred until resource authority exists.
 - #921 duplicate and #937 stale orchestration are closed.
 
@@ -251,7 +254,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.4 #686 — shell-metadata refinement
 
-#686 is an unassigned decision/refinement issue. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. PR #991 proposes the remaining duration boundary. Do not block unrelated Flow compositor or config work on #686. Only behavior that requires the proposed duration/trust expansion waits for its accepted ADR/spec update.
+#686 is active decision/refinement work owned by @mahboobmonnamd through PR #991. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. PR #991 proposes the remaining duration boundary. Do not block unrelated Flow compositor or config work on #686. Only behavior that requires the proposed duration/trust expansion waits for its accepted ADR/spec update.
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
