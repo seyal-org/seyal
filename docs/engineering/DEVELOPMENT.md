@@ -25,25 +25,26 @@ Default distributed-development unit:
 
 ```text
 one Ready Issue
-→ one authenticated GitHub assignee/implementer
+→ one authenticated **human** GitHub owner/assignee
 → one confirmed implementation plan
-→ one deterministic issue/<number> branch
+→ one deterministic <human-login>/issue/<number> branch
+→ coding agent may act only as delegated tool/co-author
 → one isolated worktree
-→ one scoped PR
+→ one scoped PR owned by the human
 ```
 
 One Issue should produce one coherent outcome that can normally be tested, reviewed and merged independently. Large or cross-authority work is refined before implementation. Two active Issues must not mutate the same authoritative subsystem unless independence is explicit and reviewable.
 
-The Issue assignee is the human-visible active-work claim. The exact `issue/<number>` branch is the collision backstop. New implementation branches do not add a short-name suffix; deterministic naming is deliberate so concurrent agents cannot evade a collision by choosing different slugs. Legacy `issue/<number>-<short-name>` branches that already existed before this rule may finish normally.
+The Issue's sole **human assignee** is the active-work owner. The exact `<human-login>/issue/<number>` branch is the collision backstop and makes ownership visible in Git history. New implementation branches do not use agent/vendor prefixes or short-name suffixes. Coding agents may contribute under the human-owned branch and be credited as co-authors/tooling provenance. Legacy issue-only or agent-named branches require explicit human-owner disposition before they continue.
 
 ## Mandatory flow
 
 1. When project context beyond the Issue links is needed, use `project-context` to retrieve the smallest relevant node/relationship set, validate the derived index, and read the returned authoritative sources. A stale/no-match index routes to targeted source search; it never authorizes guessing.
 2. Refine the Issue using `.agents/skills/issue-refinement/SKILL.md`.
 3. Set Project status to **Ready** only after the readiness checklist in `ISSUE-PROTOCOL.md` passes.
-4. Any request to implement/fix/finish/code a specific GitHub Issue must enter `.agents/skills/implement-issue/SKILL.md`. Resolve the authenticated GitHub login, fresh-read assignees, and acquire/verify sole assignment before planning or production work. Assigned-to-other, multiple-assignee, or identity-unavailable cases stop as `BLOCKED`.
+4. Any request to implement/fix/finish/code a specific GitHub Issue must enter `.agents/skills/implement-issue/SKILL.md`. Resolve the authenticated **human GitHub owner**, fresh-read assignees, and acquire/verify sole human assignment before planning or production work. A Cursor/Codex/Claude/Copilot/bot identity is never the work owner. Assigned-to-other, multiple-assignee, bot-owned, or identity-unavailable cases stop as `BLOCKED`.
 5. Confirm the implementation plan in chat. Claim/Ready state is not permission to skip plan-first review.
-6. After plan confirmation, create the exact remote branch `issue/<number>` from current accepted `master`. If that branch already exists, stop unless the user explicitly requested resume/continue of that existing work. Re-read the Issue after branch creation and require the current implementer to remain the sole assignee before creating the worktree or editing production files.
+6. After plan confirmation, create the exact remote branch `<human-login>/issue/<number>` from current accepted `master`, where the login is the sole human assignee. If that branch already exists, stop unless the human owner explicitly requested resume/continue of that existing work. Re-read the Issue after branch creation and require the same human owner to remain sole assignee before creating the worktree or editing production files.
 7. Create one isolated worktree from the deterministic Issue branch.
 8. Use tests/fixtures first for core behavior.
 9. Implement only the Issue scope.
@@ -54,7 +55,17 @@ The Issue assignee is the human-visible active-work claim. The exact `issue/<num
 14. Move to Validation where milestone/demo/performance evidence is required.
 15. Merge only after required gates pass. Do not start a dependent milestone early.
 
-Ownership handoff is explicit. The current owner stops editing, records branch/PR/check state, and GitHub assignment is explicitly transferred. The new implementer re-runs the full claim/readiness preflight and resumes the existing Issue branch. An agent must never self-clear or steal a claim because it appears stale.
+Ownership handoff is explicit and human-to-human. The current owner stops editing, records branch/PR/check state, and GitHub assignment is explicitly transferred. The new human owner re-runs the full claim/readiness preflight; if the deterministic branch must move to the new owner's namespace, migrate the exact head and record both refs before deleting/retiring the old one. Switching coding agents alone never changes ownership. An agent must never self-clear or steal a claim because it appears stale.
+
+## Human owner, agent assistance and attribution
+
+Seyal accepts AI-assisted development, but repository ownership remains human.
+
+- The sole Issue assignee and branch namespace identify the responsible human GitHub contributor.
+- New implementation branches are `<human-login>/issue/<number>`; `cursor/`, `codex/`, `claude/`, `copilot/` and other agent/vendor namespaces are forbidden for new work.
+- Agents may implement, test, draft documentation, and assist reviews on behalf of the human owner.
+- Agent contribution may be acknowledged in the PR body and/or with a real standard `Co-authored-by:` trailer. Do not fabricate attribution identities.
+- Bot-authored reviews/comments are supplemental evidence only. Required independent review must be owned by a human GitHub reviewer and must not be represented as Cursor/Codex/etc. ownership.
 
 ## Documentation lifecycle
 
