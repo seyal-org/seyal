@@ -60,6 +60,10 @@ pub enum ShellIntegrationEvent {
         token: ShellIntegrationToken,
         line: LineId,
     },
+    /// `line` is the last line of the command's own output: when output
+    /// ends with a trailing newline, the cursor's row at recognition time is
+    /// still empty (about to be overwritten by the next prompt), so `line`
+    /// is the row before it; otherwise the cursor's row is used as-is.
     CommandFinished {
         token: ShellIntegrationToken,
         exit_status: i32,
@@ -1107,6 +1111,28 @@ impl TerminalCore {
         self.current().line_id(cursor.row).unwrap_or(LineId(1))
     }
 
+    /// The line where a command's real output ends, at the moment the
+    /// trusted `D` marker is recognized. When output ends with a trailing
+    /// newline (the common case), the cursor sits on a fresh row that has
+    /// no content yet -- that row is not the command's output, it is simply
+    /// where the shell's own next prompt will shortly be drawn, onto the
+    /// same row a caller would otherwise capture as this Block's last line.
+    /// The previous row is the true last output line in that case; a row
+    /// that already has content (no trailing newline) is used as-is.
+    fn completion_line(&self) -> LineId {
+        let cursor = self.current().cursor(self.modes.cursor_visible);
+        let screen = self.current();
+        let row_is_empty = screen
+            .cell_row(cursor.row)
+            .is_none_or(|cells| cells.iter().all(|cell| cell.role == CellRole::Empty));
+        let row = if row_is_empty && cursor.row > 0 {
+            cursor.row - 1
+        } else {
+            cursor.row
+        };
+        screen.line_id(row).unwrap_or(LineId(1))
+    }
+
     fn current_mut(&mut self) -> &mut Screen {
         if self.modes.alternate_screen
             && let Some(screen) = &mut self.alternate
@@ -2071,7 +2097,7 @@ impl Actions for TerminalCore {
                                 .map(|exit_status| ShellIntegrationEvent::CommandFinished {
                                     token,
                                     exit_status,
-                                    line: self.current_line(),
+                                    line: self.completion_line(),
                                 })
                         })
                     }
@@ -2208,6 +2234,78 @@ mod tests {
             })
         );
         assert_eq!(terminal.take_shell_integration_event(), None);
+    }
+
+    #[test]
+    fn command_finished_line_is_the_last_output_row_not_the_next_empty_one() {
+        // Regression: output ending with a trailing newline leaves the
+        // cursor on a fresh, still-empty row when `D` fires. That row is
+        // about to be overwritten by the shell's own next prompt, not part
+        // of the command's output, so `line` must back up to the row that
+        // actually holds the output.
+        let mut terminal = TerminalState::new(80, 24).unwrap();
+        let token_bytes = [
+            0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff,
+        ];
+        let token = ShellIntegrationToken::from_bytes(token_bytes);
+        terminal
+            .feed(b"\x1b]133;C;00112233445566778899aabbccddeeff\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandStarted {
+                token,
+                line: LineId(1)
+            })
+        );
+        // Real output on row 1, ending with a newline: cursor moves to a
+        // fresh, empty row 2 before the `D` marker is even parsed.
+        terminal.feed(b"output-line\r\n").unwrap();
+        terminal
+            .feed(b"\x1b]133;D;00112233445566778899aabbccddeeff;0\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandFinished {
+                token,
+                exit_status: 0,
+                line: LineId(1),
+            }),
+            "line must be the row holding the real output, not the empty row after it"
+        );
+    }
+
+    #[test]
+    fn command_finished_line_stays_on_the_output_row_without_a_trailing_newline() {
+        let mut terminal = TerminalState::new(80, 24).unwrap();
+        let token = ShellIntegrationToken::from_bytes([
+            0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff,
+        ]);
+        terminal
+            .feed(b"\x1b]133;C;00112233445566778899aabbccddeeff\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandStarted {
+                token,
+                line: LineId(1)
+            })
+        );
+        // No trailing newline: cursor stays on the same row as the output.
+        terminal.feed(b"no-newline-output").unwrap();
+        terminal
+            .feed(b"\x1b]133;D;00112233445566778899aabbccddeeff;0\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandFinished {
+                token,
+                exit_status: 0,
+                line: LineId(1),
+            })
+        );
     }
 
     #[test]
