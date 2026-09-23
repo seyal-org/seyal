@@ -433,7 +433,7 @@ Physical cleanup state and logical eligibility remain distinct.
 
 A failure that is authoritatively proven to occur **before** the durable revocation commit boundary leaves the request in `RevocationRequested`; no authoritative revocation has committed. Retry is permitted only within a finite attempt/deadline budget, after which the request becomes `RevocationRequestDegraded`.
 
-A timeout/crash/persistence error for which the system cannot prove whether the durable commit boundary was crossed becomes `RevocationCommitUnknown`. Do not infer “not committed” from missing acknowledgement. Affected material fails closed while the Runtime/owning revocation authority reconciles the current durable generation/vector. If reconciliation proves the event committed, enter `RevocationCommitted`; if it proves it did not commit, return to `RevocationRequested` only when retry budget remains, otherwise `RevocationRequestDegraded`. No duplicate semantic revocation decision is created merely because an acknowledgement was lost.
+A timeout/crash/persistence error for which the system cannot prove whether the durable commit boundary was crossed becomes `RevocationCommitUnknown`. Do not infer “not committed” from missing acknowledgement. Affected material fails closed while the Agent Backend/owning revocation authority reconciles the current durable generation/vector. If reconciliation proves the event committed, enter `RevocationCommitted`; if it proves it did not commit, return to `RevocationRequested` only when retry budget remains, otherwise `RevocationRequestDegraded`. No duplicate semantic revocation decision is created merely because an acknowledgement was lost.
 
 ### After revocation commit
 
@@ -549,7 +549,7 @@ SPEC-015 is acceptable only when:
 - revocation authority and scope mutation are authenticated and explicit;
 - complete applicable revocation-generation vectors are canonical and fail closed when incomplete;
 - logical denial is immediate after known commit, and unknown commit outcomes fail closed pending reconciliation;
-- provider handoff has a deterministic serializable race/linearization contract owned by Runtime/privacy authority;
+- provider handoff has a deterministic serializable race/linearization contract owned by the Agent Backend privacy authority;
 - effectful tools cannot bypass ADR-014;
 - continuations are exact-AgentRun-bound by default and safely re-attested after revocation only with authoritative provider evidence;
 - unsafe late continuation payload cannot survive through ordinary quarantine;
