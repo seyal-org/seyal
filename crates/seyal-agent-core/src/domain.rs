@@ -181,6 +181,22 @@ impl AgentDomain {
         self.agent_runs.get(&id)
     }
 
+    pub fn validate_binding_generation(
+        &self,
+        agent_run_id: AgentRunId,
+        presented: BindingGeneration,
+    ) -> Result<(), DomainError> {
+        let current = self
+            .agent_runs
+            .get(&agent_run_id)
+            .ok_or(DomainError::UnknownAgentRun(agent_run_id))?
+            .binding_generation;
+        if current != presented {
+            return Err(DomainError::StaleBindingGeneration { current, presented });
+        }
+        Ok(())
+    }
+
     pub fn advance_binding_generation(
         &mut self,
         agent_run_id: AgentRunId,
@@ -197,6 +213,22 @@ impl AgentDomain {
         let next = current.next().ok_or(DomainError::GenerationExhausted)?;
         run.binding_generation = next;
         Ok(next)
+    }
+
+    pub fn validate_control_generation(
+        &self,
+        agent_run_id: AgentRunId,
+        presented: ControlGeneration,
+    ) -> Result<(), DomainError> {
+        let current = self
+            .agent_runs
+            .get(&agent_run_id)
+            .ok_or(DomainError::UnknownAgentRun(agent_run_id))?
+            .control_generation;
+        if current != presented {
+            return Err(DomainError::StaleControlGeneration { current, presented });
+        }
+        Ok(())
     }
 
     pub fn advance_control_generation(
@@ -290,7 +322,7 @@ mod tests {
             .unwrap();
         assert!(binding_second > binding_first);
         assert_eq!(
-            domain.advance_binding_generation(run, binding_first),
+            domain.validate_binding_generation(run, binding_first),
             Err(DomainError::StaleBindingGeneration {
                 current: binding_second,
                 presented: binding_first,
@@ -303,7 +335,7 @@ mod tests {
             .unwrap();
         assert!(control_second > control_first);
         assert_eq!(
-            domain.advance_control_generation(run, control_first),
+            domain.validate_control_generation(run, control_first),
             Err(DomainError::StaleControlGeneration {
                 current: control_second,
                 presented: control_first,
