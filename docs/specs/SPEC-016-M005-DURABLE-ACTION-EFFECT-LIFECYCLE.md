@@ -38,7 +38,7 @@ resource/executor                      owns the actual resource operation
 
 Rules:
 
-1. Under ADR-016, Agent Backend/domain is the sole durable Action transition writer for agent-originated Actions.
+1. Under ADR-016, Agent Backend/domain is the sole durable Action transition writer for backend-controlled Actions.
 2. SPEC-015 remains the sole privacy/revocation/forgetting and `RevocationFence` authority; this specification only consumes its current eligibility/fence contract at Action authorization and dispatch boundaries.
 3. Resource executors perform effects and return typed evidence; they do not own Action lifecycle.
 4. Harnesses, UI, MCP, CLI/SDK and workflows submit typed intents/requests but do not create competing state machines.
