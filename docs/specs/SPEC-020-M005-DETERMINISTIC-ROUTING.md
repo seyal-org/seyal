@@ -66,11 +66,11 @@ Hard constraints are binary and never weighted:
 - hard budget;
 - auth/connection eligibility.
 
-Each security-sensitive property carries an enforcement class. A hard constraint may require a minimum enforcement class.
+Each security-sensitive property carries an enforcement class. A hard constraint declares the accepted enforcement classes/evidence level for that specific dimension; enforcement classes are not one global strength ordering.
 
 Declared/Observed/Unknown guarantees cannot silently satisfy stronger requirements.
 
-Conflict or inability to prove a required guarantee => explicit NoRoute.
+Conflict or inability to prove a required guarantee => explicit NoRoute. If a hard cost/latency bound cannot be conservatively established from current evidence, the route is ineligible unless the policy explicitly defines an allowed unknown/degraded mode.
 
 ## 6. Adequacy floors
 
@@ -170,10 +170,12 @@ Use the bounded allowed fallback chain:
 ```text
 E(route_i) =
   DirectExpectedCost(route_i)
-  + P(requires_fallback_i) * E(next_allowed_route)
+  + sum over fallback-causing failure classes f [
+      P(f | route_i) * E(next_allowed_route(route_i, f))
+    ]
 ```
 
-The recursion is bounded by explicit retry/fallback budget and typed failure transitions.
+The recursion is bounded by explicit retry/fallback budget and typed failure transitions. Failure classes with no allowed next route are terminal branches and remain explicit rather than being treated as successful or free.
 
 Unknown failure/acceptance probability uses conservative prior/confidence handling.
 
