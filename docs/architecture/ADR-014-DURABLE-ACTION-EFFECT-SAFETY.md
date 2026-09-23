@@ -67,7 +67,7 @@ ActionId
 
 `AgentRun` remains the durable agent-session authority under ADR-012. The Action authority owns only the lifecycle of the requested effect. It does not become a second AgentRun, PTY, process, resource or terminal-state authority.
 
-Under ADR-016, the Agent Backend/domain layer owns the durable Action transition authority for agent-originated Action state. Existing resource authorities execute their own operations and return typed evidence/results. Examples include filesystem/Git/process/remote-service authorities. `TerminalExecution` remains the sole owner of its PTY/process/`TerminalState` semantics.
+Under ADR-016, the Agent Backend/domain layer owns the durable Action transition authority for backend-controlled Action state. Existing resource authorities execute their own operations and return typed evidence/results. Examples include filesystem/Git/process/remote-service authorities. `TerminalExecution` remains the sole owner of its PTY/process/`TerminalState` semantics.
 
 Harnesses, adapters, provider clients, UI components and future CLI/SDK/MCP projections submit typed action intents or observations. They may not directly mutate durable Action state.
 
