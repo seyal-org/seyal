@@ -93,16 +93,19 @@ It does not implement a production metadata database, production history storage
 
 ### 5. Agent work is durable independently of chat/provider session
 
-Future agent continuity is anchored by:
+For Seyal-hosted agent work, the product association is:
 
 ```text
 Workspace
+→ WorkScope host binding
 → WorkItem
 → Attempt
 → AgentRun
 → Execution(s)
 → Artifact / Evaluation / Outcome / Attention
 ```
+
+ADR-016 owns the portable `WorkScope -> WorkItem -> Attempt -> AgentRun` identity used by the independent Agent Backend. A non-Seyal client does not require a Seyal `WorkspaceId`; the host binding preserves this ADR's Workspace ownership without making it universal backend identity.
 
 A chat/conversation is a presentation/interactions surface, not durable work authority.
 
@@ -129,7 +132,7 @@ Context does not cross Workspace boundaries automatically because the same provi
 
 ### 7. Routing is WorkItem-based, not active-chat based
 
-Future routing consumes WorkItem requirements, Workspace policy/context, budgets, available capabilities and prior attempt evidence.
+Future routing consumes WorkItem requirements, portable WorkScope policy/context plus any authorized host-Workspace policy/context, budgets, available capabilities and prior attempt evidence.
 
 Changing provider/model/harness creates routing/attempt/run state without changing the WorkItem's durable identity.
 
