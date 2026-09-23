@@ -58,6 +58,58 @@ def stub_collect_cohorts(gate: str, dest: Path, sha: str) -> str:
     return f"[stub] collected {gate} at {sha}\n"
 
 
+def test_history_clean_source_probe_ignores_only_current_evidence(base: Path) -> None:
+    """Regression for the controlled-run clean-tree interval proof.
+
+    The history runner must not invalidate itself merely because it has
+    written the current run's untracked cohort/evidence files under
+    docs/evidence. At the same time, excluding that one runner-owned root
+    must not hide unrelated source edits.
+    """
+    module = load_module(
+        "scripts/run-m002-history-reflow-contract.py",
+        "seyal_run_m002_history_clean_tree_unit",
+    )
+    repo_root = base / "clean-source-probe-root"
+    repo_root.mkdir()
+    module.ROOT = repo_root
+
+    def git(*args: str) -> None:
+        result = module.run(["git", *args])
+        require(result.returncode == 0, f"git {' '.join(args)} failed: {result.stdout}")
+
+    git("init")
+    git("config", "user.email", "seyal-ci@example.invalid")
+    git("config", "user.name", "Seyal CI")
+
+    source = repo_root / "tracked-source.txt"
+    source.write_text("clean\n", encoding="utf-8")
+    git("add", "tracked-source.txt")
+    git("commit", "-m", "fixture baseline")
+
+    evidence_root = repo_root / "docs" / "evidence" / "m002-673-history-reflow-test"
+    cohort_dir = evidence_root / "history_active_reflow_ms" / "cohorts"
+    cohort_dir.mkdir(parents=True)
+    (cohort_dir / "1.toml").write_text("cohort = 1\n", encoding="utf-8")
+
+    clean, detail = module.probe_clean_source_tree_confirmed(evidence_root)
+    require(clean, f"runner-owned evidence must not dirty its own interval proof: {detail}")
+
+    source.write_text("edited during collection\n", encoding="utf-8")
+    dirty, detail = module.probe_clean_source_tree_confirmed(evidence_root)
+    require(not dirty, "an unrelated tracked source edit must still invalidate the clean-tree proof")
+    require(
+        "uncommitted or untracked changes" in detail,
+        f"expected dirty-tree detail for unrelated source edit, got: {detail!r}",
+    )
+
+    source.write_text("clean\n", encoding="utf-8")
+    unrelated = repo_root / "unrelated-untracked.txt"
+    unrelated.write_text("must remain visible\n", encoding="utf-8")
+    dirty, _ = module.probe_clean_source_tree_confirmed(evidence_root)
+    require(not dirty, "an unrelated untracked file must not be hidden by the evidence exclusion")
+
+
 def test_performance_contract_runner(base: Path) -> None:
     module = load_module("scripts/run-m002-performance-contract.py", "seyal_run_m002_perf_unit")
     module.ROOT = base / "perf-contract-root"
@@ -376,7 +428,7 @@ def test_history_reflow_runner(base: Path) -> None:
         # self-baseline path.
         module.probe_ac_power_confirmed = lambda: (True, "AC Power")
         module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
-        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
+        module.probe_clean_source_tree_confirmed = lambda ignored_evidence_root=None: (True, "clean source tree")
         module.host_identity_confirmed = lambda: (True, "TESTHOST-0001")
         sys.argv = ["run-m002-history-reflow-contract.py"]
         module.main()
@@ -463,7 +515,7 @@ def test_history_reflow_runner(base: Path) -> None:
         # source tree must still fail closed to PLATFORM_LIMITED.
         time.sleep(1.1)
         module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
-        module.probe_clean_source_tree_confirmed = lambda: (False, "working tree has uncommitted or untracked changes")
+        module.probe_clean_source_tree_confirmed = lambda ignored_evidence_root=None: (False, "working tree has uncommitted or untracked changes")
         module.main()
         dirty_tree_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
         require(len(dirty_tree_roots) == 6, "dirty-tree controlled run did not write a new evidence root")
@@ -481,7 +533,7 @@ def test_history_reflow_runner(base: Path) -> None:
         # `commit` stamp does not match --baseline-sha must be rejected
         # rather than silently trusted.
         time.sleep(1.1)
-        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
+        module.probe_clean_source_tree_confirmed = lambda ignored_evidence_root=None: (True, "clean source tree")
         forged_baseline_dir = base / "forged-baseline-cohorts-source"
         for gate in module.GATES:
             gate_dir = forged_baseline_dir / gate
@@ -574,7 +626,7 @@ def test_history_reflow_runner(base: Path) -> None:
         # must fail closed while the second gate (unaffected by the
         # transient throttle) still reaches VALID.
         time.sleep(1.1)
-        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
+        module.probe_clean_source_tree_confirmed = lambda ignored_evidence_root=None: (True, "clean source tree")
         thermal_calls = {"count": 0}
 
         def alternating_thermal():
@@ -678,7 +730,7 @@ def test_history_reflow_runner(base: Path) -> None:
         module.probe_ac_power_confirmed = lambda: (True, "AC Power")
         clean_tree_calls = {"count": 0}
 
-        def alternating_clean_tree():
+        def alternating_clean_tree(ignored_evidence_root=None):
             clean_tree_calls["count"] += 1
             if clean_tree_calls["count"] == 2:
                 return (False, "working tree has uncommitted or untracked changes")
@@ -710,7 +762,7 @@ def test_history_reflow_runner(base: Path) -> None:
             "environment_status = 'VALID'" in tree_sealed_record,
             f"a gate unaffected by the transient dirty tree must still reach VALID, got: {tree_sealed_record!r}",
         )
-        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
+        module.probe_clean_source_tree_confirmed = lambda ignored_evidence_root=None: (True, "clean source tree")
     finally:
         sys.argv = original_argv
 
@@ -721,6 +773,7 @@ def main() -> None:
     test_host_identity_token()
     with tempfile.TemporaryDirectory(prefix="seyal-m002-controlled-mode-") as tmp:
         base = Path(tmp)
+        test_history_clean_source_probe_ignores_only_current_evidence(base)
         test_performance_contract_runner(base)
         test_host_identity_failure_does_not_leak(base)
         test_history_reflow_runner(base)
