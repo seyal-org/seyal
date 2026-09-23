@@ -50,7 +50,7 @@ Ownership semantics:
 - `WorkScope` owns the portable agent-domain scope under ADR-016. When hosted by Seyal, a WorkScope may bind to ADR-007 `WorkspaceId`; that host binding does not transfer terminal/layout/execution ownership.
 - `WorkItem` owns one durable intended outcome and the final accepted `Outcome`.
 - `Attempt` owns one bounded try to satisfy the WorkItem under one accepted routing/retry-budget decision.
-- `AgentRun` owns one Seyal-observed execution history of an agent/harness within an Attempt.
+- `AgentRun` owns one backend-observed provider-neutral execution history of an agent/harness within an Attempt.
 - `HarnessSessionRef` is an opaque adapter-scoped upstream session/thread/conversation reference only.
 - `ExecutionRef` references existing Seyal execution resources. `AgentRun` does not own terminal state.
 
@@ -111,7 +111,7 @@ A stale generation may contribute explicitly marked late observational evidence 
 
 PID, executable path, cwd, terminal contents, provider session ID or harness session ID is never sufficient proof of current binding authority.
 
-### 5. External agents remain ordinary terminal workloads
+### 5. External agents hosted by Seyal remain ordinary terminal workloads
 
 An external CLI agent running inside Seyal remains an ordinary `TerminalExecution` workload.
 
