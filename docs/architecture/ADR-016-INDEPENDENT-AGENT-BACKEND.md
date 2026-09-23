@@ -79,6 +79,8 @@ A TerminalExecution-related Action is dispatched through the Terminal Runtime/re
 
 For agent-context revocation and provider/effect handoff, the Agent Backend also owns the single privacy serialization domain defined by SPEC-015. Standalone provider/API dispatch therefore does not depend on Terminal Runtime. When Terminal Runtime or another executor is involved, it consumes an authenticated generation-bound backend fence and returns executor evidence; it does not establish an independent revocation/handoff gate.
 
+The same ownership applies to recovery/reconciliation control: only the Agent Backend/domain may issue replacement AgentRun/Action generations or recovery/reconciliation credentials after fencing prior generations and revalidating current policy/privacy/action preconditions. The owning ExecutionHost/provider/resource authority supplies authenticated liveness, cancellation, idempotency and effect evidence. Terminal Runtime supplies that evidence only for SeyalTerminalExecutionHost; it never becomes the issuer of backend recovery authority. Unknown liveness/effects remain reconciliation-required, and a cancellation request alone is never proof that execution or effects stopped.
+
 ### 5. Terminal Runtime keeps terminal truth
 
 Inside Seyal:
