@@ -1,8 +1,10 @@
 //! Independent Agent Backend process/domain composition boundary.
 //!
-//! AB-0.2 adds the per-user Unix-domain daemon and Hello/HelloAck handshake.
-//! `AgentDomain` remains the only lifecycle transition authority.
+//! AB-0.2 owns the per-user Unix-domain daemon and Hello/HelloAck handshake.
+//! AB-0.4 adds the in-memory authorization authority for principal/session
+//! fencing. `AgentDomain` remains the only lifecycle transition authority.
 
+mod auth;
 #[cfg(unix)]
 mod daemon;
 #[cfg(unix)]
@@ -11,6 +13,9 @@ mod endpoint;
 #[allow(unsafe_code)]
 mod peer;
 
+pub use auth::{
+    AuthorizationError, AuthorizationRepository, ClientScope, PrincipalKind, PrincipalStatus,
+};
 #[cfg(unix)]
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};
 pub use seyal_agent_core::{AgentDomain, DomainError};
