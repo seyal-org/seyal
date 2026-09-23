@@ -10,11 +10,12 @@
 ## 1. Separation of facts
 
 ```text
-RunTermination
-  -> EvaluationObservation*
+AcceptanceContract
+  -> constrains EvaluationObservation/Evaluation eligibility
+
+RunTermination + EvaluationObservation*
   -> Evaluation
   -> AttemptDisposition
-  -> AcceptanceContract
   -> WorkItemOutcome
 ```
 
