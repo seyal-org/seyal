@@ -152,6 +152,8 @@ This ADR does not implement routing.
 
 Full history, agent transcripts, context bundles and completed event logs must not remain hot merely because an execution/Workspace is persistent.
 
+Under ADR-016, AgentRun/work/context indexes and caches belong to the independent Agent Backend's resource budget rather than Runtime-shared terminal memory merely because a WorkScope is host-bound to a Workspace.
+
 ### 9. Existing memory targets get fixed measurement profiles
 
 The existing `<= 256 KiB` hidden/detached execution target is compared against:
