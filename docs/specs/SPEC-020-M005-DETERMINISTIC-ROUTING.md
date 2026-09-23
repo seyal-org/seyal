@@ -4,7 +4,7 @@
 - **Issue:** #838
 - **Research:** #55
 - **Architecture:** ADR-016
-- **Consumes:** SPEC-017, SPEC-018, SPEC-019, SPEC-013–015
+- **Consumes:** SPEC-017, SPEC-018, SPEC-019, SPEC-021, SPEC-013–015
 - **Consumer:** #681
 
 ## 1. Goal
@@ -62,6 +62,33 @@ It captures:
 - evidence refs.
 
 Task classes include architecture/design, implementation/refactor, debugging, testing/QA, review, security, performance/reliability, database/data migration, CI/CD/release, IaC/cloud/Kubernetes/container work, observability/incidents, docs/specification, SCM and governance/policy.
+
+### 3.1 Pre-routing requirement assessment
+
+A short prompt is not itself sufficient evidence that a task is simple or text-only. Before route eligibility/scoring, the Agent Backend performs a bounded requirement assessment over the authorized current work scope.
+
+The assessment preserves:
+- original user intent/ref;
+- explicit attachment, terminal selection, artifact and resource bindings;
+- repository/worktree identity and relevant source state;
+- current diagnostic/test/build/log/CI evidence when applicable;
+- original image/screenshot/media evidence and permitted derivatives when applicable;
+- evidence refs and source/policy generations;
+- required/preferred capabilities and context fidelity;
+- uncertainty and missing-required-context state;
+- assessment/compiler version.
+
+The Local Context Engine / SoftwareEngineeringGraphSource may be queried only within the already-authorized scope and with bounded traversal/retrieval. Repository text, logs, screenshots, OCR and other derived content remain evidence, not instruction authority.
+
+Deterministic/local extraction is the V1 default. Any optional model-assisted classification/enrichment is itself a policy-governed billable operation: its route, egress, privacy, capability and budget constraints are checked before that call and its output remains derived evidence rather than authority.
+
+If material evidence required to establish capabilities/context fidelity is missing or ambiguous, the router must not silently classify the task as ordinary text-only work. It must choose one of:
+- bounded authorized discovery/retrieval;
+- explicit clarification/attention when the user must decide;
+- a conservative route only when that route satisfies every known hard requirement, can deliver all bound raw evidence, and the unknown does not concern a policy/security/effect requirement;
+- explicit NoRoute/undispatchable state when safe adequacy cannot be established.
+
+A material evidence-generation change creates a new versioned assessment and, when routing changes, a new immutable RoutingDecision. Historical assessment/decision records are never rewritten.
 
 ## 4. RouteOffering only
 
@@ -197,6 +224,27 @@ The recursion is bounded by explicit retry/fallback budget and typed failure tra
 
 Unknown failure/acceptance probability uses conservative prior/confidence handling.
 
+### 10.1 Cumulative hard budget and deadline
+
+Expected cost is a ranking input, not a spending ceiling.
+
+When policy declares a hard routed-work cap, the Agent Backend owns a durable budget scope, normally bound to the WorkItem unless policy explicitly defines a narrower scope. A new Attempt, RoutingDecision, fallback or backend restart does not replenish that scope.
+
+Before every billable assessment/enrichment, model/provider invocation, billable tool/harness operation, evaluation invocation or retry/fallback admission:
+
+```text
+settled spend
++ outstanding conservative reservations
++ conservative upper bound for the proposed invocation
+<= hard cap
+```
+
+Admission/reservation is atomic across concurrent consumers of the same budget scope. Unknown/unsettled provider charges retain a conservative reservation until reconciled; they are never treated as zero. A route without an enforceable conservative per-invocation upper bound is ineligible when the hard cap requires one.
+
+If policy promises a hard end-to-end deadline, the same scope carries a shared monotonic deadline. Retries, enrichment and fallback consume the remaining deadline; a new decision/Attempt does not reset it.
+
+Expected fallback-chain cost remains useful for ranking but cannot authorize spending beyond the durable hard scope.
+
 ## 11. Policy profiles
 
 Profiles adjust soft weights only; hard constraints/floors never change.
@@ -273,14 +321,22 @@ Every material reroute creates a new immutable RoutingDecision.
 
 ## 16. Cold start and evidence aging
 
-With no local evidence, route deterministically from:
-- hard constraints;
-- capability metadata;
-- versioned priors;
-- static provider/model metadata;
-- conservative unknown handling.
+With no local evidence, routing uses a versioned **BaselineCalibrationArtifact** rather than unsupported quality constants.
 
-Evidence is partitioned/aged after model/harness/provider/version or environment changes. Incompatible generations are not silently mixed.
+The artifact is:
+- integrity-verified and versioned;
+- distributable with the OSS router for offline use;
+- derived only from rights-cleared, reproducible evaluation evidence;
+- explicit about task/route cohorts, model/provider/harness versions, context/request-compiler versions, sample counts, uncertainty, coverage and known exclusions;
+- explicit Unknown for unsupported cohorts rather than inventing quality.
+
+A clean installation and an installation with local routing learning disabled use the same qualified baseline for equal frozen inputs. No private user/project upload or mandatory global learning service is required for V1.
+
+Capability metadata and static provider/model metadata may establish eligibility facts, but they are not substitutes for task-quality evidence. Held-out cold-start evaluation must include short context-dependent tasks and multimodal/visual tasks where those cohorts are claimed.
+
+Permitted local adaptation is calibration against this baseline, not an unqualified replacement for it. Local evidence must pass applicability/freshness/confidence checks; sparse or incompatible evidence shrinks toward the baseline. A local learned/calibrated artifact that demonstrates regression against its qualified validation criteria is rolled back/disabled for that cohort.
+
+Evidence is partitioned/aged after model/harness/provider/context-pipeline/version or environment changes. Incompatible generations are not silently mixed.
 
 ## 17. Explainability
 
@@ -316,7 +372,11 @@ For every candidate record:
 13. EvaluationRejected creates new Attempt when allowed;
 14. EffectUnknown never duplicates external mutation;
 15. no-network hard policy rejects unenforced harness;
-16. same frozen fixture reproduces the same canonical decision fields.
+16. same frozen fixture reproduces the same canonical decision fields;
+17. identical short prompts bound to a compiler diagnostic, deployment log and layout screenshot produce different evidence-backed requirements;
+18. missing required evidence cannot silently produce a normal text-only dispatch;
+19. a 6-unit attempt plus proposed 6-unit fallback under a 10-unit hard cap blocks the fallback, including under concurrent reservations;
+20. clean install and local-learning-disabled install use the same integrity-verified qualified baseline for equal inputs.
 
 ## 19. Routing-strategy evolution
 
