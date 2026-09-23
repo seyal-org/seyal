@@ -56,7 +56,7 @@ Only an authenticated, currently authorized authority may commit revocation for 
 - an authorized user action;
 - current policy/security authority;
 - the owning `MemoryStore` transition authority;
-- the Runtime/domain authority acting on an accepted typed request.
+- the Agent Backend/domain authority acting on an accepted typed request under ADR-016.
 
 A model, provider, tool, terminal stream, stale worker or adapter may report an observation or request, but cannot directly mutate revocation authority.
 
