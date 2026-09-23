@@ -7,9 +7,7 @@
 mod domain;
 mod identity;
 
-pub use domain::{
-    AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind,
-};
+pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
 pub use identity::{
     AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
     ClientSessionId, ControlGeneration, WorkItemId, WorkScopeId,
