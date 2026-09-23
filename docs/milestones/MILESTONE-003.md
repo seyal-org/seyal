@@ -145,7 +145,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
 | Headed Flow/Raw/TUI workload matrix | #868 | **Blocked on #867** |
 | Renderer qualification / regression | #869 | **Refinement / after #868** |
-| Production startup config realization | #993 | **Ready** |
+| Production startup config realization | #993 | **Active** — owned by @anulalbs; implementation PR #1006 open; do not duplicate |
 | Pane/tab execution provisioning contract | #994 | **Ready for Refinement/R&D** |
 
 **Executable frontier (2026-09-21):**
@@ -161,23 +161,20 @@ Presentation lane
   #865 technically Ready / human-ownership migration → #866 → #867 → #868 → #869
 
 Configuration lane
-  #993 Ready
+  #993 active under @anulalbs / PR #1006
     → later bounded #676 children for keybindings and launch shell/CWD policy
 
 Shell-metadata decision
   #686 active under @mahboobmonnamd; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
-#993 is an independent Ready production pickup now. #994 and #1000–#1004 provide independent Ready-for-Refinement lanes; #686 is already active under @mahboobmonnamd. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #994 and #1000–#1004 provide independent Ready-for-Refinement lanes; #686 is already active under @mahboobmonnamd. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
 Contributor ownership is being corrected by #997 / PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. Until #998 lands, contributors follow the currently merged `ISSUE-PROTOCOL.md`; after it lands, new branches use the human owner's namespace.
 
 ### 5.4 Groomed contributor frontier
 
 Current contributor-ready M003 work is maintained in #999. Repeated references below are summaries of the same Issues, not duplicate pickup authority.
-
-**Production — start now**
-- #993 — standard — production config/theme/font startup wiring.
 
 **Starter/test infrastructure — start now**
 - #1005 — starter — retained deterministic Flow/long-output/TUI workload fixtures with bounded self-test.
@@ -191,6 +188,7 @@ Current contributor-ready M003 work is maintained in #999. Repeated references b
 - #994 — advanced/core — TerminalExecution provisioning contract.
 
 **Active / already owned**
+- #993 — standard — human owner @anulalbs; production config/theme/font startup implementation in PR #1006, not available for pickup.
 - #686 — advanced/core — human owner @mahboobmonnamd; duration/trust decision in PR #991, not available for pickup.
 
 **Near-ready stacked work**
@@ -262,7 +260,7 @@ Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do no
 
 ### 6.6 #676 / #993 — configuration frontier
 
-#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is Ready: wire those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. General keybinding/chord behavior and launch shell/CWD policy remain separate bounded children to refine after #993; do not implement #676 wholesale.
+#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is now active under @anulalbs / PR #1006: it wires those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. General keybinding/chord behavior and launch shell/CWD policy remain separate bounded children to refine after #993; do not implement #676 wholesale.
 
 ### 6.7 #994 — execution provisioning before #936
 
