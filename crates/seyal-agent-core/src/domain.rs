@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    AgentRunId, AttemptId, BindingGeneration, ControlGeneration, WorkItemId, WorkScopeId,
-};
+use crate::{AgentRunId, AttemptId, BindingGeneration, ControlGeneration, WorkItemId, WorkScopeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkScopeKind {
@@ -262,7 +260,10 @@ mod tests {
         let item = domain.create_work_item(first_scope).unwrap();
 
         assert_eq!(domain.work_item(item).unwrap().work_scope_id(), first_scope);
-        assert_ne!(domain.work_item(item).unwrap().work_scope_id(), second_scope);
+        assert_ne!(
+            domain.work_item(item).unwrap().work_scope_id(),
+            second_scope
+        );
 
         let foreign_scope = WorkScopeId::new();
         assert_eq!(
