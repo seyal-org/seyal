@@ -121,7 +121,7 @@ These landings are **foundation**, not M003 Done. The headed host is still a one
 
 | Slice | Issue | Status |
 |---|---|---|
-| Workspace chrome (left / tabs / inspector) | #922 | **Active** — owned by @crdileep82; do not duplicate |
+| Workspace chrome (left / tabs / inspector) | #922 | **Active** — owned by @crdileep82; implementation PR #1017 open; do not duplicate |
 | Split-tree projection; one live Metal leaf | #923 | **Blocked only on consumable #922 head**; may develop stacked before #922 merge |
 | Split drag-resize ratios | #928 | **Blocked only on a consumable #923 head**; may develop stacked before #923 merges |
 | Pane/tab execution provisioning contract | #994 | **Refinement** — defines the missing product→Runtime execution-creation seam |
