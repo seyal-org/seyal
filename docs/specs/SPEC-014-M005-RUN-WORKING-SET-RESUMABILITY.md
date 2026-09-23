@@ -192,7 +192,7 @@ Availability is evaluated from current authority at use/recovery time, not infer
 
 A working set exposes a deterministic retention-availability summary covering every prerequisite class needed for the next safe continuation step.
 
-Requiredness is not invented by RunWorkingSet or a model. The Runtime/domain authority supplies a typed, versioned `ContinuationPlan` derived from the currently accepted consumer/harness capability contract. The plan is advisory input to resume classification and does not create a second AgentRun transition authority.
+Requiredness is not invented by RunWorkingSet or a model. The Agent Backend/domain authority supplies a typed, versioned `ContinuationPlan` derived from the currently accepted consumer/harness capability contract. The plan is advisory input to resume classification and does not create a second AgentRun transition authority.
 
 A valid `ContinuationPlan` contains at least:
 
@@ -216,7 +216,7 @@ dependencies[] {
 
 Validation rules:
 
-- the issuer must be the current Runtime/domain authority or an explicitly accepted authority delegated by it; model/provider text cannot issue a plan;
+- the issuer must be the current Agent Backend/domain authority or an explicitly accepted authority delegated by it; model/provider text cannot issue a plan;
 - schema, issuer, WorkItem/Attempt/AgentRun, binding generation, consumer contract, policy/privacy generations and expiry must all be recognized/current;
 - unknown dependency class, unknown requiredness/satisfaction mode, missing dependency identity, missing/stale/expired plan or generation mismatch is fail-closed and yields `ReconciliationRequired` until Runtime supplies a valid current plan;
 - optional dependencies may be absent only when the plan explicitly marks them optional;
@@ -293,7 +293,7 @@ If safe compaction cannot fit the configured bound without losing a required res
 
 ## 9. Behavioral resume classification
 
-Behavioral resume is an explicit advisory classification, separate from AgentRun identity and execution liveness. It does not commit an AgentRun recovery-state transition; only the Runtime/domain transition authority under ADR-012 §3 may commit durable AgentRun recovery state.
+Behavioral resume is an explicit advisory classification, separate from AgentRun identity and execution liveness. It does not commit an AgentRun recovery-state transition; only the Agent Backend/domain transition authority under ADR-012 §3 may commit durable AgentRun recovery state.
 
 At minimum the recovery decision is one of:
 
@@ -303,7 +303,7 @@ ReconciliationRequired
 ResumeUnavailable
 ```
 
-Classification follows this deterministic precedence after current Runtime liveness/binding and `ContinuationPlan` validation:
+Classification follows this deterministic precedence after current Agent Backend binding plus authoritative ExecutionHost liveness and `ContinuationPlan` validation:
 
 1. **ReconciliationRequired first** when the plan is missing/stale/unknown, execution liveness is unknown, an external effect is ambiguous, authoritative dependencies conflict, current validity cannot yet be established, or any required dependency is in a state whose safe satisfaction/reconstructability is unknown.
 2. Otherwise **ResumeUnavailable** when at least one `Required` dependency is `RevokedOrForbidden`, `Expired`, `Unavailable`, irrecoverably `Stale`, or `ReferenceOnly` while its plan mode is `PayloadRequired`, and the plan/owning source contract provides no safe current reconstruction path.
@@ -361,11 +361,11 @@ The following events are distinct:
 
 A GUI reconnect that does not interrupt the authoritative Runtime/worker does not itself require behavioral reconstruction. Existing live state remains authoritative. Reconnect metadata never creates a new AgentRun or Attempt by itself.
 
-### 10.2 Runtime restart
+### 10.2 Agent Backend restart
 
 Persisted metadata does not prove a PTY, worker, provider stream or external process remains live.
 
-After Runtime restart, Seyal reconciles:
+After Agent Backend restart, the backend reconciles:
 
 ```text
 persisted AgentRun identity/evidence
@@ -561,7 +561,7 @@ At minimum:
 10. derived summary never increases authority or decreases sensitivity;
 11. compaction preserves unresolved conflict/provenance required for continuation;
 12. compaction unable to retain required resume information reduces availability instead of claiming full resume;
-13. GUI reconnect with live Runtime/worker does not create new Attempt/AgentRun;
+13. GUI reconnect with live backend/worker does not create new Attempt/AgentRun;
 14. Runtime restart does not treat persisted metadata as proof of live PTY/worker/provider state;
 15. replacement worker generation can resume same AgentRun only after safe revalidation;
 16. stale worker generation cannot mutate current working state;
