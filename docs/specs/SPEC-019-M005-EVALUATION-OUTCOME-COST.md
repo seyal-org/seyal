@@ -208,17 +208,34 @@ Required metric definitions include explicit numerator/denominator/missing-data 
 
 Costs from failed/rejected/interrupted/superseded Attempts remain attributed to their WorkItem/cohort.
 
-## 15. Router evidence export
+## 15. Router evidence, learning eligibility and export
 
-Routing quality evidence must preserve:
-- task class;
+Operational/audit evidence, local routing adaptation and cross-user/organization/global learning/export are distinct purposes. Authorization for task execution or audit retention never implies authorization for another purpose.
+
+Every retained routing-quality observation records at least:
+- exact RoutingDecision and eligible candidate-set refs;
+- selection-policy/router version;
+- pre-decision TaskProfile/requirement feature snapshot;
 - route/model/harness/provider attribution;
+- actual ContextDeliveryPlan/request-compiler/context generation identity, or explicit Unknown where opaque;
+- Attempt/AgentRun ancestry and fallback position;
 - acceptance criterion/evaluator provenance;
-- sample count;
-- time window;
+- relevant human intervention/repair/censoring state;
+- retry/cost/latency outcome and missing/unobserved/cancelled outcome state;
 - environment/language/context class where relevant;
-- uncertainty/confidence;
-- retry/cost outcome.
+- sample count/time window/uncertainty;
+- source-lineage, policy generation, retention/revocation dependencies;
+- purpose eligibility: operational-only, local-adaptation-eligible, and export/training eligibility.
+
+For randomized experiment mode, record the selected-action probability/propensity and experiment identity. For deterministic selection, record deterministic/zero-support status. Outcomes from routes that were never eligible/selected are not counterfactual observations.
+
+Easy tasks selected by one route and hard fallback tasks selected by another must not be presented as an unbiased route comparison. Matched isolated starting states, randomized supported evidence, or another accepted off-policy method is required for comparative claims; otherwise the system explicitly abstains from the unsupported counterfactual.
+
+Changing the context builder/compiler, tool availability, human repair or evaluator contract remains distinguishable from changing model/route quality.
+
+Local adaptation may consume only evidence whose current user/admin/source policy explicitly allows that purpose. Cross-user, organization or global export/training requires a separately explicit applicable policy/consent contract; task execution authorization never grants it. If such export is unsupported, it remains prohibited until a separate accepted contract defines consent, minimization, retention, deletion and destination.
+
+Derived features, embeddings, TaskProfiles and route traces remain source-derived for retention/revocation purposes even when raw prompt/file bytes are absent. Revocation/deletion makes affected learning examples ineligible and requires invalidation/rebuild of dependent local learned/calibration artifacts before reuse.
 
 Do not collapse all outcomes into one global model score.
 
@@ -243,7 +260,12 @@ SCM/CI evidence must bind to the exact repository/commit/check identity.
 9. reviewer independence violation is detected;
 10. attention wait is not counted as active human work;
 11. missing usage remains Unknown;
-12. same task evaluated across multiple routes for router evidence.
+12. same task evaluated across multiple routes for router evidence;
+13. operational audit retention remains allowed while local learning/export is disabled;
+14. revocation prevents reuse of protected derived routing-training features and invalidates dependent local calibration;
+15. easy-first-route vs hard-fallback data is not reported as an unbiased route comparison;
+16. changing context compiler versus changing model remains separately attributable;
+17. randomized experiment evidence records selection probability; deterministic zero-support evidence cannot fabricate counterfactual support.
 
 ## 18. Terminal isolation
 
