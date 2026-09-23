@@ -124,7 +124,7 @@ Agent store
   routing/evaluation evidence
   event/replay metadata
   context/memory references
-  Action/workflow metadata
+  Action metadata / future workflow metadata only after M006 authority is accepted
 ```
 
 A shared embedded storage library is permitted, but migrations, transactions and ownership remain separate. There is no required cross-store transaction.
@@ -135,7 +135,7 @@ Cross-domain references use stable IDs and reconciliation. Persisted AgentRun me
 
 Connection profiles carry credential references, not raw provider/harness secrets.
 
-Raw credentials belong behind an OS/local secure credential-store abstraction. They do not enter ordinary AgentEvents/RunEvents, SelectionTrace, routing evidence, logs or normal frontend IPC.
+Raw credentials belong behind an OS/local secure credential-store abstraction. They do not enter ordinary aggregate events/RunEvents, SelectionTrace, routing evidence, logs or normal frontend IPC.
 
 ### 9. Local IPC is a security boundary
 
@@ -156,7 +156,7 @@ Backend restart invalidates old ClientSessions.
 A RouteOffering may report region, egress, filesystem scope, permissions, model identity or provider identity only with an explicit enforcement/evidence class.
 
 ```text
-SeyalEnforced
+BackendEnforced
 UpstreamEnforced
 PlatformEnforced
 Observed
@@ -164,9 +164,9 @@ Declared
 Unknown
 ```
 
-Hard policy is satisfied only when the route meets the minimum required enforcement class.
+Hard policy is satisfied only when the route's enforcement source is in the constraint's explicitly accepted set for that dimension. Enforcement classes are not globally ordered: for example, UpstreamEnforced may be acceptable for provider residency while a no-egress local-execution policy may require BackendEnforced or PlatformEnforced.
 
-The absence of a Seyal tool does not prove an external harness process lacks equivalent OS/network access.
+The absence of a backend-exposed tool does not prove an external harness process lacks equivalent OS/network access.
 
 ### 11. Request assembly authority is explicit
 
