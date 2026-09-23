@@ -110,6 +110,17 @@ def main() -> None:
         write(protocol_layering / "crates/seyal-protocol/Cargo.toml", '[package]\nname = "seyal-protocol"\nversion = "0.0.0"\n\n[dependencies]\nseyal-runtime = { path = "../seyal-runtime" }\n')
         run_negative(["python3", str(ROOT / "scripts/check-layering.py")], protocol_layering, "seyal-protocol has forbidden dependencies: seyal-runtime")
 
+        agent_layering = base / "layering-agent"
+        write(
+            agent_layering / "crates/seyal-agent-core/Cargo.toml",
+            '[package]\nname = "seyal-agent-core"\nversion = "0.0.0"\n\n[dependencies]\nseyal-runtime = { path = "../seyal-runtime" }\n',
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-layering.py")],
+            agent_layering,
+            "seyal-agent-core has forbidden dependencies: seyal-runtime",
+        )
+
         unknown_layering = base / "layering-unknown"
         write(unknown_layering / "crates/seyal-mystery/Cargo.toml", '[package]\nname = "seyal-mystery"\nversion = "0.0.0"\n')
         run_negative(["python3", str(ROOT / "scripts/check-layering.py")], unknown_layering, "seyal-mystery has no architecture layering rule")
