@@ -73,7 +73,7 @@ Binding-generation/fencing requirements from ADR-012 remain unchanged.
 
 ADR-014 and SPEC-016 remain the only Seyal-controlled Action/effect authority.
 
-For agent-originated local work, the Agent Backend/domain owns durable Action lifecycle transitions. Resource executors still own the actual resource operation.
+For backend-controlled local Actions, the Agent Backend/domain owns durable Action lifecycle transitions. Resource executors still own the actual resource operation.
 
 A TerminalExecution-related Action is dispatched through the Terminal Runtime/resource authority; this does not give the Agent Backend PTY/VT/grid ownership.
 
