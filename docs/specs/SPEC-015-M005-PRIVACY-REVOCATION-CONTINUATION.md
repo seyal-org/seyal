@@ -177,7 +177,9 @@ complete RevocationFence vector is current
 provider continuation checkpoint is eligible, if used
 ```
 
-The Runtime/privacy authority owns one serializable provider-handoff gate for revocable payload. Implementations may realize it with a lock, generation lease, one-shot fence token or equivalent, but semantics are mandatory:
+Under ADR-016, the **Agent Backend privacy authority** owns one serializable provider-handoff gate for revocable agent-context payload. Provider/API dispatch must not depend on a Terminal Runtime being present. A Terminal Runtime or other resource executor that participates in a handoff consumes the same backend-owned fence through an authenticated, generation-bound bridge; it does not create a second privacy gate. If that bridge cannot enforce the same serialization order, the handoff fails closed.
+
+Implementations may realize the backend serialization domain with a lock, generation lease, one-shot fence token or equivalent, but semantics are mandatory:
 
 1. under the same serialization domain used by revocation commit, validate the exact current `RevocationFence` and acquire a one-shot handoff fence bound to the exact AgentRun binding, bundle/payload identity, provider adapter identity/version, vector and finite expiry;
 2. the adapter must cross the irreversible local transport boundary only while that fence is current; it must not release bytes using a detached check-then-send path after the fence is released;
