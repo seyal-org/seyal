@@ -227,11 +227,14 @@ Purpose: pane-scoped multiline command editing.
 
 This component is **identical in every terminal screen**.
 
+Detailed authority and interaction rules are defined by `SEYAL-COMPOSER-COMPONENT-SPEC.md`.
+
 Fixed placement: bottom edge of its owning available terminal Pane.
 
 Fixed anatomy:
 
 ```text
+[optional cwd] [optional git branch ▼]          [compact context/state]
 [input/editor]                                 [contextual actions] [execute]
 ```
 
@@ -241,15 +244,22 @@ Contract:
 - restrained frost/transparency is allowed;
 - modest radius; not a floating oversized pill/card;
 - same horizontal padding, height rhythm and icon placement everywhere;
+- shell prompt rendering remains shell/terminal truth and is never reconstructed by Composer;
+- optional cwd/Git affordances are Seyal UI, not a second prompt;
+- cwd/Git chips appear only from reliable pane/execution-scoped metadata; never by parsing arbitrary prompt text;
+- Git branch chip may open a keyboard-first branch helper and explicitly execute a safe `git switch` through the same Pane execution context after revalidation;
+- no auto-stash/reset/force checkout behavior;
+- shell-aware completion may be surfaced only by delegating to a supported shell/completion integration; history/Agents/Actions remain separate Seyal suggestion modes;
 - auto-expands vertically for multiline editing;
 - only composer editor may internally scroll when draft is very tall;
 - retracts/disables while shell foreground execution owns input;
 - hidden during full-screen TUI takeover;
-- helper surface opens above this same component.
+- helper surfaces open above this same component;
+- context discovery/completion/Git work remains outside PTY/VT/render hot paths.
 
-Allowed content variation: draft text, disabled/running guidance, enabled actions backed by capability.
+Allowed content variation: draft text, cwd/Git availability, dirty/read-only state, disabled/running guidance, helper mode, and enabled actions backed by capability.
 
-Forbidden variation: different composer design per screen/pane.
+Forbidden variation: different composer design per screen/pane, fake prompt reconstruction, prompt scraping as authority, or local Git state presented as remote execution truth.
 
 ## 14. C10 — Inspector
 
