@@ -196,6 +196,11 @@ pub struct ShellSnapshot {
     pub tree: PaneTree,
     pub layout: LayoutDescription,
     pub last_error: Option<ShellError>,
+    /// Whether `CreateTab`/`SplitFocused` would currently be accepted.
+    /// Hosts use this to omit the control rather than show one that always
+    /// fails closed (mirrors the palette's own omission of "New Tab").
+    pub allows_tab_creation: bool,
+    pub allows_pane_splitting: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -385,6 +390,8 @@ impl ShellState {
             tree: tab.root.clone(),
             layout: tab.root.layout_description(),
             last_error: self.last_error,
+            allows_tab_creation: self.allows_tab_creation,
+            allows_pane_splitting: self.allows_pane_splitting,
         }
     }
 

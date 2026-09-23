@@ -25,7 +25,7 @@ use crate::presentation::{
 use crate::recovery::{
     AttemptOutcome, LaunchResult, RecoveryCoordinator, RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::LocalDisplayClient;
@@ -64,6 +64,8 @@ pub enum AppError {
     PaletteNoSelection,
     TabCreationUnavailable,
     PaneSplitUnavailable,
+    CannotCloseLastTab,
+    CannotCloseLastPane,
     UnknownBlock,
 }
 
@@ -181,6 +183,16 @@ pub enum AppAction {
     },
     SelectTab {
         id: TabId,
+    },
+    CreateTab,
+    CloseTab {
+        id: TabId,
+    },
+    SplitFocused {
+        axis: SplitAxis,
+    },
+    ClosePane {
+        id: PaneId,
     },
     FocusPane {
         id: PaneId,
@@ -519,6 +531,10 @@ impl ApplicationRoot {
             }
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::SelectTab { id } => self.select_tab(id),
+            AppAction::CreateTab => self.create_tab(),
+            AppAction::CloseTab { id } => self.close_tab(id),
+            AppAction::SplitFocused { axis } => self.split_focused(axis),
+            AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
             AppAction::SetShellVisibility {
                 left,
@@ -854,6 +870,26 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
+        self.shell
+            .apply(ShellAction::CloseTab { id })
+            .map_err(close_tab_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
+        self.shell
+            .apply(ShellAction::ClosePane { id })
+            .map_err(close_pane_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
     fn open_palette(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
         self.palette
@@ -1147,6 +1183,20 @@ fn chrome_error(error: ChromeError) -> AppError {
     }
 }
 
+fn close_tab_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
+        _ => AppError::UnknownChromeTab,
+    }
+}
+
+fn close_pane_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
+        _ => AppError::UnknownPane,
+    }
+}
+
 fn palette_error(error: PaletteError) -> AppError {
     match error {
         PaletteError::NotOpen => AppError::PaletteNotOpen,
@@ -1350,9 +1400,66 @@ mod tests {
         assert!(!snap.composer_eligible);
         assert_eq!(snap.generation, 1);
         assert_eq!(root.snapshot(), root.snapshot());
-        assert!(!snap.chrome.left_visible);
-        assert!(!snap.chrome.inspector_visible);
-        assert!(!snap.chrome.tab_strip_visible);
+        assert!(snap.chrome.left_visible);
+        assert!(snap.chrome.inspector_visible);
+        assert!(snap.chrome.tab_strip_visible);
+    }
+
+    #[test]
+    fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
+        // AppAction::CreateTab/SplitFocused (#922) route straight to the same
+        // ShellState that already disallows composition growth until a
+        // distinct execution route exists; the direct action must fail the
+        // same way the palette-mediated path already does, not silently
+        // no-op.
+        let mut root = ApplicationRoot::new();
+        assert_eq!(
+            root.apply(AppAction::CreateTab),
+            Err(AppError::TabCreationUnavailable)
+        );
+        assert_eq!(
+            root.apply(AppAction::SplitFocused {
+                axis: SplitAxis::Right,
+            }),
+            Err(AppError::PaneSplitUnavailable)
+        );
+    }
+
+    #[test]
+    fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
+        // The M001 production shell starts with exactly one Tab and one
+        // Pane, so ShellState's "cannot close last" guard rejects CloseTab/
+        // ClosePane before an id is even looked up (shell.rs close_tab/
+        // close_pane), whether the id is real or not. This exercises the
+        // new close_tab_error/close_pane_error mapping surfaces that
+        // distinct cause rather than collapsing it to an unknown-id error.
+        let mut root = ApplicationRoot::new();
+        let snap = root.snapshot();
+        let only_tab = snap.shell.tabs[0].id;
+        let only_pane = snap.shell.panes[0].id;
+
+        assert_eq!(
+            root.apply(AppAction::CloseTab { id: TabId::new() }),
+            Err(AppError::CannotCloseLastTab)
+        );
+        assert_eq!(
+            root.apply(AppAction::ClosePane { id: PaneId::new() }),
+            Err(AppError::CannotCloseLastPane)
+        );
+        assert_eq!(
+            root.apply(AppAction::CloseTab { id: only_tab }),
+            Err(AppError::CannotCloseLastTab)
+        );
+        assert_eq!(
+            root.apply(AppAction::ClosePane { id: only_pane }),
+            Err(AppError::CannotCloseLastPane)
+        );
+        // A rejected mutation does not remove the only Tab/Pane.
+        let after = root.snapshot();
+        assert_eq!(after.shell.tabs.len(), 1);
+        assert_eq!(after.shell.panes.len(), 1);
+        assert_eq!(after.shell.tabs[0].id, only_tab);
+        assert_eq!(after.shell.panes[0].id, only_pane);
     }
 
     #[test]
@@ -1859,16 +1966,17 @@ mod tests {
 
         // Filter to exactly one row and run it: the resolved command applies
         // through the same path as a direct SetShellVisibility action, and
-        // the palette closes itself afterward.
+        // the palette closes itself afterward. Core Terminal chrome is
+        // visible by default, so the available toggle command is "Hide".
         root.apply(AppAction::SetPaletteQuery {
             fence: root.fence(),
-            query: "Show Inspector".into(),
+            query: "Hide Inspector".into(),
         })
         .unwrap();
         let filtered = root.snapshot().palette;
         assert_eq!(filtered.rows.len(), 1);
-        assert_eq!(filtered.rows[0].label, "Show Inspector");
-        assert!(!root.snapshot().chrome.inspector_visible);
+        assert_eq!(filtered.rows[0].label, "Hide Inspector");
+        assert!(root.snapshot().chrome.inspector_visible);
         root.apply(AppAction::RunPalette {
             fence: root.fence(),
         })
@@ -1877,7 +1985,7 @@ mod tests {
         assert!(!after.palette.open, "Run closes the palette");
         assert_eq!(after.palette.query, "");
         assert!(
-            after.chrome.inspector_visible,
+            !after.chrome.inspector_visible,
             "the resolved command actually ran"
         );
     }

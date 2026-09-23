@@ -1,6 +1,8 @@
 //! Portable shell chrome: agents, inspector, attention, left-panel mode, and
-//! which shell regions are visible. M001 first UI recedes sidebar/inspector/tab
-//! strip (`docs/architecture/ui/M001-FIRST-UI-DESIGN.md`).
+//! which shell regions are visible. Left panel, tab strip, and inspector are
+//! visible by default per the frozen Core Terminal reference
+//! (`docs/architecture/ui/M001-CORE-TERMINAL-REFERENCE-SCREEN.md`); the
+//! earlier receded-by-default first UI is superseded.
 //!
 //! This module derives inspector/attention projections from authoritative
 //! [`crate::shell::ShellSnapshot`], the composer's Runtime-projected Block
@@ -165,7 +167,7 @@ pub enum ChromeAction {
     },
     /// Return the inspector to focused-Pane context and the previous mode.
     ClearBlockSelection,
-    /// Shell-region visibility. Receded is the M001 first-UI default.
+    /// Shell-region visibility. Visible is the Core Terminal default.
     SetShellVisibility {
         left: bool,
         inspector: bool,
@@ -218,9 +220,9 @@ impl Default for ChromeState {
         Self {
             left_panel: LeftPanelMode::Workspaces,
             inspector_mode: InspectorMode::Context,
-            left_visible: false,
-            inspector_visible: false,
-            tab_strip_visible: false,
+            left_visible: true,
+            inspector_visible: true,
+            tab_strip_visible: true,
             selected_agent: None,
             selected_block: None,
             mode_before_block: None,
@@ -813,28 +815,28 @@ mod tests {
     }
 
     #[test]
-    fn first_ui_recedes_shell_chrome_until_an_action_shows_it() {
+    fn core_terminal_shell_chrome_is_visible_by_default_and_can_be_hidden() {
         let shell = seed_shell();
         let snap = shell.snapshot();
         let mut chrome = ChromeState::new();
         let initial = chrome.snapshot(&snap, &[]);
-        assert!(!initial.left_visible);
-        assert!(!initial.inspector_visible);
-        assert!(!initial.tab_strip_visible);
+        assert!(initial.left_visible);
+        assert!(initial.inspector_visible);
+        assert!(initial.tab_strip_visible);
         chrome
             .apply(
                 ChromeAction::SetShellVisibility {
-                    left: true,
-                    inspector: true,
-                    tab_strip: true,
+                    left: false,
+                    inspector: false,
+                    tab_strip: false,
                 },
                 &snap,
             )
             .unwrap();
-        let shown = chrome.snapshot(&snap, &[]);
-        assert!(shown.left_visible);
-        assert!(shown.inspector_visible);
-        assert!(shown.tab_strip_visible);
+        let hidden = chrome.snapshot(&snap, &[]);
+        assert!(!hidden.left_visible);
+        assert!(!hidden.inspector_visible);
+        assert!(!hidden.tab_strip_visible);
     }
 
     #[test]

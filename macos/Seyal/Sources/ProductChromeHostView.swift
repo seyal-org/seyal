@@ -7,6 +7,13 @@ final class ProductChromeHostView: NSView {
     private let material = NSVisualEffectView()
     private let tabStrip = NSView()
     private let tabTitle = NSTextField(labelWithString: "Terminal")
+    /// Layout-chrome cluster (#922): apply to the active Tab/focused Pane,
+    /// never duplicated per-Pane (M001-CORE-TERMINAL-REFERENCE-SCREEN.md §4.3).
+    private let newTabButton = NSButton(title: "+", target: nil, action: nil)
+    private let closeTabButton = IdentityButton(title: "Close Tab", target: nil, action: nil)
+    private let splitRightButton = NSButton(title: "Split Right", target: nil, action: nil)
+    private let splitDownButton = NSButton(title: "Split Down", target: nil, action: nil)
+    private let closePaneButton = IdentityButton(title: "Close Pane", target: nil, action: nil)
     private let left = NSView()
     private let inspector = NSStackView()
     private let attention = NSStackView()
@@ -73,6 +80,13 @@ final class ProductChromeHostView: NSView {
         tabTitle.font = .systemFont(ofSize: 13, weight: .semibold)
         tabTitle.translatesAutoresizingMaskIntoConstraints = false
         tabStrip.addSubview(tabTitle)
+        for button in [newTabButton, closeTabButton, splitRightButton, splitDownButton, closePaneButton] {
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 11, weight: .regular)
+            tabStrip.addSubview(button)
+        }
 
         left.translatesAutoresizingMaskIntoConstraints = false
         left.wantsLayer = true
@@ -182,6 +196,17 @@ final class ProductChromeHostView: NSView {
             tabStrip.heightAnchor.constraint(equalToConstant: 48),
             tabTitle.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor, constant: 236),
             tabTitle.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+
+            newTabButton.leadingAnchor.constraint(equalTo: tabTitle.trailingAnchor, constant: 12),
+            newTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            closeTabButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 8),
+            closeTabButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            closePaneButton.trailingAnchor.constraint(equalTo: tabStrip.trailingAnchor, constant: -12),
+            closePaneButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            splitDownButton.trailingAnchor.constraint(equalTo: closePaneButton.leadingAnchor, constant: -8),
+            splitDownButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            splitRightButton.trailingAnchor.constraint(equalTo: splitDownButton.leadingAnchor, constant: -8),
+            splitRightButton.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
 
             left.leadingAnchor.constraint(equalTo: leadingAnchor),
             left.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
@@ -419,6 +444,18 @@ final class ProductChromeHostView: NSView {
             let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), 0)
             tabTitle.stringValue = copyUTF8(row.title, row.title_len) ?? "Terminal"
         }
+        // Omit rather than disable (mirrors the command palette's own
+        // omission of "New Tab"/"Split" when the M001 shell policy
+        // disallows them; see build_commands).
+        newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
+        splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
+        splitDownButton.isHidden = splitRightButton.isHidden
+        closeTabButton.isHidden = shell.tab_count <= 1
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
+        closePaneButton.isHidden = shell.pane_count <= 1
+        closePaneButton.idLo = shell.focused_pane_lo
+        closePaneButton.idHi = shell.focused_pane_hi
     }
 
     private func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
@@ -857,6 +894,26 @@ final class ProductChromeHostView: NSView {
         applyIdentity(UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue), button: sender)
     }
 
+    @objc private func createTab() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
+    }
+
+    @objc private func closeActiveTab(_ sender: NSButton) {
+        applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue), button: sender)
+    }
+
+    @objc private func splitFocusedRight() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 0)
+    }
+
+    @objc private func splitFocusedDown() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 1)
+    }
+
+    @objc private func closeFocusedPane(_ sender: NSButton) {
+        applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue), button: sender)
+    }
+
     @objc private func openAttention(_ sender: NSButton) {
         applyPayload(UInt16(SEYAL_APP_ACTION_OPEN_ATTENTION.rawValue), text: sender.identifier?.rawValue ?? "")
     }
@@ -927,6 +984,21 @@ final class ProductChromeHostView: NSView {
     private func configureChromeButtons() {
         styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
+        newTabButton.setAccessibilityIdentifier("seyal-new-tab")
+        newTabButton.target = self
+        newTabButton.action = #selector(createTab)
+        closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
+        closeTabButton.target = self
+        closeTabButton.action = #selector(closeActiveTab(_:))
+        splitRightButton.setAccessibilityIdentifier("seyal-split-right")
+        splitRightButton.target = self
+        splitRightButton.action = #selector(splitFocusedRight)
+        splitDownButton.setAccessibilityIdentifier("seyal-split-down")
+        splitDownButton.target = self
+        splitDownButton.action = #selector(splitFocusedDown)
+        closePaneButton.setAccessibilityIdentifier("seyal-close-pane")
+        closePaneButton.target = self
+        closePaneButton.action = #selector(closeFocusedPane(_:))
     }
 
     private func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {
