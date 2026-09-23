@@ -3,6 +3,8 @@
 //! Runtime admission events and returns the state plus bounded effects; it
 //! never touches the PTY, the parser, or Block storage.
 
+use seyal_exec::LineId;
+
 use crate::command_block_timeline::CommandBlockId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,10 +25,12 @@ pub(crate) enum IntegrationState {
 pub(crate) enum IntegrationEvent {
     /// Trusted `A;<nonce>`.
     PromptStarted,
-    /// Trusted `C;<nonce>`.
-    CommandStarted,
-    /// Trusted `D;<nonce>;<status>`.
-    CommandFinished { exit_status: i32 },
+    /// Trusted `C;<nonce>`. `line` is the cursor's logical line stamped by
+    /// the parser when it recognized the marker (never re-sampled later —
+    /// see `ShellIntegrationEvent::CommandStarted`).
+    CommandStarted { line: LineId },
+    /// Trusted `D;<nonce>;<status>`. `line` is likewise parser-stamped.
+    CommandFinished { exit_status: i32, line: LineId },
     /// Runtime admitted bytes that did not come from the composer.
     DirectInputAdmitted,
     /// Canonical state entered the alternate screen.
@@ -44,12 +48,17 @@ pub(crate) enum BlockExit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Effect {
-    /// Start the Block for the pending composer submission.
-    StartPendingBlock,
+    /// Start the Block for the pending composer submission, at the given
+    /// parser-stamped line.
+    StartPendingBlock { line: LineId },
     /// Forget the pending composer submission; no Block is created.
     DropPending,
-    /// Complete the given Block.
-    Complete(CommandBlockId, BlockExit),
+    /// Complete the given Block. `line` is the parser-stamped line from a
+    /// trusted `D` marker when one triggered this completion; `None` for a
+    /// recovery/fallback completion (lost `D`, or execution ended) that has
+    /// no trusted marker to stamp a line from — the caller then falls back
+    /// to sampling the current cursor itself.
+    Complete(CommandBlockId, BlockExit, Option<LineId>),
 }
 
 /// Result of one transition: the new state and at most two ordered effects.
@@ -96,7 +105,7 @@ impl IntegrationState {
             (S::Terminated, _) => Transition::to(S::Terminated),
 
             (S::Running { block: Some(b) }, E::ExecutionEnded) => {
-                Transition::with(S::Terminated, Effect::Complete(b, BlockExit::Unknown))
+                Transition::with(S::Terminated, Effect::Complete(b, BlockExit::Unknown, None))
             }
             (S::Pending, E::ExecutionEnded) => Transition::with(S::Terminated, Effect::DropPending),
             (_, E::ExecutionEnded) => Transition::to(S::Terminated),
@@ -108,14 +117,17 @@ impl IntegrationState {
             (S::AtPrompt, E::CommandFinished { .. }) => Transition::to(S::AtPrompt),
             (
                 S::AtPrompt,
-                E::CommandStarted | E::DirectInputAdmitted | E::AlternateScreenEntered,
+                E::CommandStarted { .. } | E::DirectInputAdmitted | E::AlternateScreenEntered,
             ) => Transition::to(S::Running { block: None }),
 
-            (S::Pending, E::CommandStarted) => {
+            (S::Pending, E::CommandStarted { line }) => {
                 // The pending Block id is supplied by the caller when it
                 // applies `StartPendingBlock`; state carries the running Block
                 // once the caller reports it via `block_started`.
-                Transition::with(S::Running { block: None }, Effect::StartPendingBlock)
+                Transition::with(
+                    S::Running { block: None },
+                    Effect::StartPendingBlock { line },
+                )
             }
             (S::Pending, E::PromptStarted) => Transition::with(S::AtPrompt, Effect::DropPending),
             (S::Pending, E::AlternateScreenEntered) => {
@@ -125,18 +137,18 @@ impl IntegrationState {
                 Transition::to(S::Pending)
             }
 
-            (S::Running { block: Some(b) }, E::CommandFinished { exit_status }) => {
+            (S::Running { block: Some(b) }, E::CommandFinished { exit_status, line }) => {
                 Transition::with(
                     S::Running { block: None },
-                    Effect::Complete(b, BlockExit::Code(exit_status)),
+                    Effect::Complete(b, BlockExit::Code(exit_status), Some(line)),
                 )
             }
             (S::Running { block: Some(b) }, E::PromptStarted) => {
-                Transition::with(S::AtPrompt, Effect::Complete(b, BlockExit::Unknown))
+                Transition::with(S::AtPrompt, Effect::Complete(b, BlockExit::Unknown, None))
             }
-            (S::Running { block: Some(b) }, E::CommandStarted) => Transition::with(
+            (S::Running { block: Some(b) }, E::CommandStarted { .. }) => Transition::with(
                 S::Running { block: None },
-                Effect::Complete(b, BlockExit::Unknown),
+                Effect::Complete(b, BlockExit::Unknown, None),
             ),
             (S::Running { block: Some(_) }, E::DirectInputAdmitted | E::AlternateScreenEntered) => {
                 Transition::to(self)
@@ -164,14 +176,21 @@ mod tests {
         CommandBlockId::from_raw(raw)
     }
 
+    fn line(raw: u64) -> LineId {
+        LineId(raw)
+    }
+
     use IntegrationEvent as E;
     use IntegrationState as S;
 
     #[test]
     fn unproven_only_prompt_start_promotes() {
         for event in [
-            E::CommandStarted,
-            E::CommandFinished { exit_status: 0 },
+            E::CommandStarted { line: line(1) },
+            E::CommandFinished {
+                exit_status: 0,
+                line: line(1),
+            },
             E::DirectInputAdmitted,
             E::AlternateScreenEntered,
         ] {
@@ -196,7 +215,7 @@ mod tests {
             Transition::to(S::Running { block: None })
         );
         assert_eq!(
-            S::AtPrompt.on(E::CommandStarted),
+            S::AtPrompt.on(E::CommandStarted { line: line(1) }),
             Transition::to(S::Running { block: None })
         );
         assert_eq!(
@@ -208,7 +227,10 @@ mod tests {
             Transition::to(S::AtPrompt)
         );
         assert_eq!(
-            S::AtPrompt.on(E::CommandFinished { exit_status: 3 }),
+            S::AtPrompt.on(E::CommandFinished {
+                exit_status: 3,
+                line: line(1)
+            }),
             Transition::to(S::AtPrompt)
         );
         assert_eq!(S::AtPrompt.submitted(), S::Pending);
@@ -217,15 +239,21 @@ mod tests {
     #[test]
     fn pending_resolves_only_through_c_or_a() {
         assert_eq!(
-            S::Pending.on(E::CommandStarted),
-            Transition::with(S::Running { block: None }, Effect::StartPendingBlock)
+            S::Pending.on(E::CommandStarted { line: line(5) }),
+            Transition::with(
+                S::Running { block: None },
+                Effect::StartPendingBlock { line: line(5) }
+            )
         );
         assert_eq!(
             S::Pending.on(E::PromptStarted),
             Transition::with(S::AtPrompt, Effect::DropPending)
         );
         assert_eq!(
-            S::Pending.on(E::CommandFinished { exit_status: 0 }),
+            S::Pending.on(E::CommandFinished {
+                exit_status: 0,
+                line: line(1)
+            }),
             Transition::to(S::Pending)
         );
         // The Raw escape for an unmatched quote: direct input keeps Pending.
@@ -252,23 +280,28 @@ mod tests {
             block: Some(block(9)),
         };
         assert_eq!(
-            running.on(E::CommandFinished { exit_status: 17 }),
+            running.on(E::CommandFinished {
+                exit_status: 17,
+                line: line(12)
+            }),
             Transition::with(
                 S::Running { block: None },
-                Effect::Complete(block(9), BlockExit::Code(17))
+                Effect::Complete(block(9), BlockExit::Code(17), Some(line(12)))
             )
         );
-        // Lost D: the next prompt completes with an unknown status.
+        // Lost D: the next prompt completes with an unknown status and no
+        // trusted line (no D marker was observed to stamp one from).
         assert_eq!(
             running.on(E::PromptStarted),
-            Transition::with(S::AtPrompt, Effect::Complete(block(9), BlockExit::Unknown))
+            Transition::with(S::AtPrompt, Effect::Complete(block(9), BlockExit::Unknown, None))
         );
-        // Lost D and A: the next command completes the previous Block first.
+        // Lost D and A: the next command completes the previous Block first,
+        // again with no trusted line for that completion.
         assert_eq!(
-            running.on(E::CommandStarted),
+            running.on(E::CommandStarted { line: line(20) }),
             Transition::with(
                 S::Running { block: None },
-                Effect::Complete(block(9), BlockExit::Unknown)
+                Effect::Complete(block(9), BlockExit::Unknown, None)
             )
         );
         assert_eq!(running.on(E::DirectInputAdmitted), Transition::to(running));
@@ -284,8 +317,11 @@ mod tests {
         let idle = S::Running { block: None };
         assert_eq!(idle.on(E::PromptStarted), Transition::to(S::AtPrompt));
         for event in [
-            E::CommandStarted,
-            E::CommandFinished { exit_status: 0 },
+            E::CommandStarted { line: line(1) },
+            E::CommandFinished {
+                exit_status: 0,
+                line: line(1),
+            },
             E::DirectInputAdmitted,
             E::AlternateScreenEntered,
         ] {
@@ -302,7 +338,7 @@ mod tests {
             .on(E::ExecutionEnded),
             Transition::with(
                 S::Terminated,
-                Effect::Complete(block(2), BlockExit::Unknown)
+                Effect::Complete(block(2), BlockExit::Unknown, None)
             )
         );
         assert_eq!(
@@ -314,8 +350,11 @@ mod tests {
         }
         for event in [
             E::PromptStarted,
-            E::CommandStarted,
-            E::CommandFinished { exit_status: 0 },
+            E::CommandStarted { line: line(1) },
+            E::CommandFinished {
+                exit_status: 0,
+                line: line(1),
+            },
             E::DirectInputAdmitted,
             E::AlternateScreenEntered,
             E::ExecutionEnded,
@@ -333,7 +372,7 @@ mod tests {
         assert!(!after_raw.composer_eligible());
         // `C` for python arrives later and changes nothing.
         assert_eq!(
-            after_raw.on(E::CommandStarted).next,
+            after_raw.on(E::CommandStarted { line: line(1) }).next,
             S::Running { block: None }
         );
     }

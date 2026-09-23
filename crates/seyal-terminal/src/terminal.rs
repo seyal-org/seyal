@@ -51,12 +51,19 @@ pub enum ShellIntegrationEvent {
     PromptStarted {
         token: ShellIntegrationToken,
     },
+    /// `line` is the cursor's logical line at the moment this marker was
+    /// recognized, before any later bytes in the same feed are applied. A
+    /// caller sampling "the current cursor" instead, after draining a whole
+    /// batch of queued events, would observe the position after every later
+    /// marker/output in that same batch, not the position at this marker.
     CommandStarted {
         token: ShellIntegrationToken,
+        line: LineId,
     },
     CommandFinished {
         token: ShellIntegrationToken,
         exit_status: i32,
+        line: LineId,
     },
 }
 
@@ -1090,6 +1097,16 @@ impl TerminalCore {
         }
     }
 
+    /// The cursor's logical line right now. Used to stamp a shell-integration
+    /// marker's line at the moment it is recognized (see
+    /// `ShellIntegrationEvent`), never as a later re-sample: a caller that
+    /// re-samples after draining a whole batch of queued events would
+    /// observe the position after every later marker/output in that batch.
+    fn current_line(&self) -> LineId {
+        let cursor = self.current().cursor(self.modes.cursor_visible);
+        self.current().line_id(cursor.row).unwrap_or(LineId(1))
+    }
+
     fn current_mut(&mut self) -> &mut Screen {
         if self.modes.alternate_screen
             && let Some(screen) = &mut self.alternate
@@ -2042,7 +2059,10 @@ impl Actions for TerminalCore {
                     (Some(b"A"), Some(token), None) => ShellIntegrationToken::from_hex(token)
                         .map(|token| ShellIntegrationEvent::PromptStarted { token }),
                     (Some(b"C"), Some(token), None) => ShellIntegrationToken::from_hex(token)
-                        .map(|token| ShellIntegrationEvent::CommandStarted { token }),
+                        .map(|token| ShellIntegrationEvent::CommandStarted {
+                            token,
+                            line: self.current_line(),
+                        }),
                     (Some(b"D"), Some(token), Some(status)) => {
                         ShellIntegrationToken::from_hex(token).and_then(|token| {
                             std::str::from_utf8(status)
@@ -2051,6 +2071,7 @@ impl Actions for TerminalCore {
                                 .map(|exit_status| ShellIntegrationEvent::CommandFinished {
                                     token,
                                     exit_status,
+                                    line: self.current_line(),
                                 })
                         })
                     }
@@ -2173,13 +2194,17 @@ mod tests {
 
         assert_eq!(
             terminal.take_shell_integration_event(),
-            Some(ShellIntegrationEvent::CommandStarted { token })
+            Some(ShellIntegrationEvent::CommandStarted {
+                token,
+                line: LineId(1),
+            })
         );
         assert_eq!(
             terminal.take_shell_integration_event(),
             Some(ShellIntegrationEvent::CommandFinished {
                 token,
                 exit_status: 17,
+                line: LineId(1),
             })
         );
         assert_eq!(terminal.take_shell_integration_event(), None);

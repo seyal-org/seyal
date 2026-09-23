@@ -177,6 +177,33 @@ impl Harness {
         self.records()[index].1
     }
 
+    /// Exact `[start_line, end_line]` body text Runtime recorded for one
+    /// completed Block, the same range a client requests to render its body.
+    fn block_body(&self, index: usize) -> String {
+        let record = self.runtime.entries[&self.id]
+            .block_timeline
+            .records()
+            .nth(index)
+            .expect("record exists");
+        let start = LineId(record.start_line);
+        let end = LineId(record.end_line.expect("Block must be completed"));
+        let terminal = self.runtime.entries[&self.id].execution.terminal();
+        terminal
+            .primary_history_range(start, end, 4096)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, cells)| {
+                cells
+                    .into_iter()
+                    .map(|cell| cell.character)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// All canonical primary text, scrollback included.
     fn text(&self) -> String {
         let terminal = self.runtime.entries[&self.id].execution.terminal();
@@ -318,6 +345,38 @@ fn composer_pwd_shows_only_command_and_output_on_first_and_second_submission() {
     assert!(
         !history.contains("_seyal") && !history.contains("133;"),
         "{history}"
+    );
+}
+
+#[test]
+fn block_body_range_excludes_the_prompt_and_echoed_command_row() {
+    // Regression: the Block's start_line used to be sampled at submission
+    // time (the prompt row, before the shell echoed the command), so the
+    // client-requested [start_line, end_line] body range included that row.
+    // start_line must instead come from the parser-stamped line the trusted
+    // `C` marker carries, taken at the moment the parser recognized it, not
+    // resampled later by Runtime after draining a whole batch of events.
+    let mut h = spawn("body-range", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("printf 'BLOCK_BODY_MARKER\\n'"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    h.wait_at_prompt();
+    let body = h.block_body(0);
+    assert!(
+        body.contains("BLOCK_BODY_MARKER"),
+        "expected the real command output in the Block body:\n{body}"
+    );
+    assert!(
+        !body.contains("printf") && !body.contains("T% "),
+        "Block body must exclude the shell's own echoed-command/prompt row:\n{body}"
     );
 }
 
