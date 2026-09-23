@@ -251,7 +251,7 @@ Agent DB logically owns:
 - routing/evaluation evidence;
 - aggregate events/snapshots;
 - agent context/memory references;
-- Action/workflow metadata as governed by their owning specs.
+- Action metadata under ADR-014/SPEC-016; future workflow metadata only after M006 workflow authority is accepted.
 
 Terminal/workspace layout/history persistence remains separate.
 
