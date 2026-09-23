@@ -234,16 +234,16 @@ Each exposed behavior also carries an enforcement class:
 
 ```text
 Observed
-  Seyal can observe/report only.
+  the Agent Backend can observe/report only.
 
 UpstreamRequestable
-  Seyal can request the upstream behavior but cannot claim local enforcement.
+  the Agent Backend can request the upstream behavior but cannot claim local enforcement.
 
-SeyalEnforced
-  the operation passes through a Seyal-owned typed authority boundary where policy is enforceable.
+BackendEnforced
+  the operation passes through a backend-owned typed authority boundary where policy is enforceable.
 ```
 
-Seyal must never claim it paused, denied, approved, accounted for or selected an upstream model unless the integration actually supports that guarantee.
+The Agent Backend and its clients must never claim they paused, denied, approved, accounted for or selected an upstream model unless the integration actually supports that guarantee.
 
 ### 13. Agent events preserve provenance and do not require a global serializing clock
 
