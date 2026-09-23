@@ -189,12 +189,12 @@ The privacy check cannot be a detached check immediately before a later call. Fo
 
 After durable `Dispatching` and before the irreversible effect boundary, the executor path must do one of:
 
-1. hold/consume a one-shot privacy/effect fence issued by the Runtime/privacy authority under the same serialization domain as SPEC-015 revocation commit, bound to the exact ActionId, dispatch generation, AgentRun binding, payload/subject dependency identity, complete current `RevocationFence`, executor identity/version and finite expiry; or
+1. hold/consume a one-shot privacy/effect fence issued by the Agent Backend privacy authority under the same serialization domain as SPEC-015 revocation commit, bound to the exact ActionId, dispatch generation, AgentRun binding, payload/subject dependency identity, complete current `RevocationFence`, executor identity/version and finite expiry; a Terminal Runtime/resource executor receives and consumes that fence only through an authenticated generation-bound bridge and never becomes a second privacy authority; or
 2. use an executor-side credential/primitive that authoritatively rejects invocation when any bound privacy or dispatch fence becomes stale, with equivalent ordering semantics.
 
 A detached check-then-call is insufficient.
 
-If revocation linearizes first, the invocation must not cross the effect boundary. Because the local Action may already be durably `Dispatching`, the Runtime records authenticated `known-not-dispatched` evidence from this boundary, invalidates the old dispatch generation, and follows `Dispatching -> Prepared` with stale authorization removed. If the effect boundary cannot prove no invocation/effect occurred, recover conservatively to `EffectUnknown` instead.
+If revocation linearizes first, the invocation must not cross the effect boundary. Because the local Action may already be durably `Dispatching`, the executor returns authenticated `known-not-dispatched` evidence to the Agent Backend/domain; the backend Action authority records it, invalidates the old dispatch generation, and follows `Dispatching -> Prepared` with stale authorization removed. If the effect boundary cannot prove no invocation/effect occurred, recover conservatively to `EffectUnknown` instead.
 
 If the irreversible effect boundary linearizes first, a later revocation cannot unsend, roll back or relabel the operation as prevented. The Action continues through normal result/reconciliation semantics while retained payload follows SPEC-015 cleanup policy.
 
