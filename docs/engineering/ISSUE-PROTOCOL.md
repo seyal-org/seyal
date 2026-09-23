@@ -28,7 +28,7 @@ Only **Ready** items may be picked up by implementation agents.
 
 ## Active implementation claim
 
-Seyal implementation work is exclusively owned while active. GitHub assignee state is the human-visible claim; the deterministic implementation branch is the collision backstop.
+Seyal implementation work is exclusively owned while active. The single human owner record — sole GitHub assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` claim — is the human-visible cross-contributor ownership lock. The deterministic human-namespaced implementation branch is only that owner's audit/resume backstop.
 
 The pickup contract is:
 
