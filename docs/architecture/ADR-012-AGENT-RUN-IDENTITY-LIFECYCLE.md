@@ -17,7 +17,7 @@ The agent R&D program and the independently reviewed architecture refinement in 
 - an Agent Session is a user-facing projection, not a second durable state machine;
 - external harness/session/provider identifiers cannot become Seyal identity authority;
 - reconnect/resume, retry, fork and recovery need deterministic identity semantics;
-- only one Runtime/domain authority may commit AgentRun lifecycle/control transitions;
+- only one Agent Backend/domain authority may commit AgentRun lifecycle/control transitions;
 - stale adapter/worker instances need generation fencing;
 - GUI lifetime cannot own agent lifetime;
 - agent work must remain additive and must never synchronously gate terminal progress.
@@ -33,7 +33,7 @@ This ADR accepts only the identity/lifecycle/authority decisions. Memory/context
 The OSS agent-domain identity graph is:
 
 ```text
-Workspace
+WorkScope
   -> WorkItem
       -> Attempt 1..N
           -> AgentRun 1..N
@@ -47,7 +47,7 @@ Workspace
 
 Ownership semantics:
 
-- `Workspace` owns the durable local product/security/context scope already established by ADR-007.
+- `WorkScope` owns the portable agent-domain scope under ADR-016. When hosted by Seyal, a WorkScope may bind to ADR-007 `WorkspaceId`; that host binding does not transfer terminal/layout/execution ownership.
 - `WorkItem` owns one durable intended outcome and the final accepted `Outcome`.
 - `Attempt` owns one bounded try to satisfy the WorkItem under one accepted routing/retry-budget decision.
 - `AgentRun` owns one Seyal-observed execution history of an agent/harness within an Attempt.
@@ -76,9 +76,9 @@ AgentRun authority
 
 Presentation may group, filter, rename or decorate sessions, but it cannot become a second lifecycle or identity authority.
 
-### 3. Runtime/domain layer is the single AgentRun transition writer
+### 3. Agent Backend/domain layer is the single AgentRun transition writer
 
-The Runtime/domain layer is the sole authority allowed to commit durable AgentRun lifecycle/control transitions.
+Under ADR-016, the independent Agent Backend/domain layer is the sole authority allowed to commit durable AgentRun lifecycle/control transitions.
 
 External adapters, first-party harness workers, provider clients, evaluators and UI components may submit typed observations or control intents. They do not directly mutate durable AgentRun lifecycle state.
 
@@ -128,6 +128,9 @@ Structured integration is additive. If an adapter/hook disappears while the CLI 
 
 External integration may range from process/PTY presence through official hooks to a structured AgentAdapter protocol. Unsupported capabilities are explicit.
 
+
+When the same harness is used outside Seyal Terminal, ADR-016 permits provider/API or standalone process execution without a Seyal `TerminalExecution`. That extension does not change this section's rule for harnesses hosted by Seyal: Seyal-hosted terminal workloads remain Runtime-owned `TerminalExecution`s, and the Agent Backend references them through a typed ExecutionHost seam.
+
 ### 6. First-party Seyal AI Agent uses the same AgentRun authority
 
 The first-party `SeyalAgentHarness` is not a privileged second runtime or second identity model.
@@ -143,9 +146,9 @@ The first-party worker/process topology remains an implementation ADR/spec detai
 The GUI is presentation/control attachment only.
 
 - GUI close/detach does not terminate a live external CLI agent or first-party AgentRun.
-- GUI reconnect rebinds presentation to the existing durable identity through current Runtime/domain authority.
+- GUI reconnect rebinds presentation to the existing durable identity through the current Agent Backend/domain authority.
 - an external agent survives according to the underlying TerminalExecution/runtime persistence contract;
-- a first-party non-terminal worker must be owned by the durable Runtime/execution layer rather than AppKit/Swift presentation state.
+- a first-party non-terminal worker must be owned/supervised by the Agent Backend through its accepted ExecutionHost/provider boundary rather than AppKit/Swift presentation state.
 
 This extends ADR-007's presentation independence to concrete AgentRun lifecycle semantics.
 
@@ -214,7 +217,7 @@ Implementations and behavior specs must preserve at least the following outcomes
 | genuine retry from scratch | new Attempt + new AgentRun; prior Attempt/evidence preserved |
 | explicit cooperative/parallel candidate within one bounded try | additional AgentRun may share the current Attempt only when the governing workflow contract explicitly permits it |
 | fork | new AgentRun with explicit lineage; pending approvals/actions are not inherited |
-| Runtime restart | reconcile durable metadata with actual execution/binding/action liveness; persisted metadata alone proves no PTY/process is live |
+| Agent Backend restart | reconcile durable metadata with adapter/provider/ExecutionRef/Action liveness; persisted metadata alone proves no PTY/process is live; terminal Runtime liveness remains separately authoritative |
 | replacement terminal after old execution is gone | new `ExecutionId`; an old persisted ExecutionId is never resurrected as a live PTY |
 
 Execution liveness, observation availability, behavioral resumability and work outcome remain orthogonal facts. Implementations must not collapse them into one enum merely for convenience.
@@ -304,7 +307,7 @@ Positive:
 
 Costs:
 
-- Runtime/domain code must own an explicit AgentRun transition path rather than allowing adapters to mutate state directly;
+- Agent Backend/domain code must own an explicit AgentRun transition path rather than allowing adapters to mutate state directly;
 - adapters/workers need binding-generation/fencing semantics;
 - retry/recovery implementation must preserve more explicit evidence/state dimensions;
 - external integrations expose heterogeneous capability levels instead of pretending feature parity;
@@ -379,7 +382,7 @@ Reopen this ADR only with concrete evidence that one of these accepted invariant
 - important harnesses require a durable actor identity that cannot be represented by AgentRun + adapter-scoped references without duplicating authority;
 - multiple independent AgentRun mutation writers can be proven safer/simpler without split-brain semantics;
 - retry/evaluation evidence requires a different Attempt boundary and the evaluation/workflow contracts are reconciled together;
-- first-party agent lifetime must move outside Runtime/execution ownership while still remaining presentation-independent;
+- evidence requires moving AgentRun authority away from the independent Agent Backend while still preserving presentation independence and one logical writer;
 - a future Runtime/PTY-keeper architecture changes execution liveness ownership while preserving one authoritative TerminalState;
 - measured resource constraints require a different agent-runtime boundary.
 
