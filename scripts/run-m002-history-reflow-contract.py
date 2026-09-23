@@ -133,7 +133,7 @@ def probe_thermal_stability_confirmed() -> tuple[bool, str]:
     return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
 
 
-def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
+def probe_clean_source_tree_confirmed(ignored_evidence_root: Path | None = None) -> tuple[bool, str]:
     """Probe whether the source tree is clean before trusting a SHA-stamped
     controlled-mode collection.
 
@@ -142,13 +142,38 @@ def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
     those samples actually measures the working tree's real contents, not
     just that recorded commit. A dirty checkout (staged, unstaged, or
     untracked changes) can therefore produce PHYSICAL_ARM64 VALID evidence
-    permanently mislabeled as the clean HEAD SHA -- the same integrity gap
-    `require_clean_source_tree()` closes on the Seyal.app identity-manifest
-    path in run-m002-performance-contract.py. Returns (confirmed, detail);
-    any inability to prove a clean tree invalidates the probe
-    (confirmed=False), so VALID evidence fails closed to PLATFORM_LIMITED.
+    permanently mislabeled as the clean HEAD SHA.
+
+    The history runner itself writes retained evidence under `docs/evidence`
+    while the collection is in progress. When `ignored_evidence_root` is
+    supplied, exclude only that current run's evidence root from `git
+    status`; otherwise the runner would make its own post-collection probe
+    dirty. The path must resolve inside ROOT. All other staged, unstaged, and
+    untracked paths remain part of the cleanliness proof.
+
+    Returns (confirmed, detail); any inability to prove a clean tree
+    invalidates the probe (confirmed=False), so VALID evidence fails closed
+    to PLATFORM_LIMITED.
     """
-    status = run(["git", "status", "--porcelain"])
+    command = ["git", "status", "--porcelain", "--untracked-files=all"]
+    if ignored_evidence_root is not None:
+        try:
+            relative = ignored_evidence_root.resolve().relative_to(ROOT.resolve())
+        except ValueError:
+            return False, "runner evidence exclusion is outside the source tree"
+        if relative == Path("."):
+            return False, "refusing to exclude the whole source tree from cleanliness checks"
+        relative_posix = relative.as_posix()
+        command.extend(
+            [
+                "--",
+                ".",
+                f":(top,exclude){relative_posix}",
+                f":(top,exclude){relative_posix}/**",
+            ]
+        )
+
+    status = run(command)
     if status.returncode != 0:
         return False, "cannot verify a clean source tree"
     if status.stdout.strip():
@@ -567,11 +592,11 @@ def main() -> None:
         # the actual collect_cohorts() call with pre/post probes and require
         # both to confirm (blocking review finding).
         ac_pre = probe_ac_power_confirmed()
-        clean_tree_pre = probe_clean_source_tree_confirmed()
+        clean_tree_pre = probe_clean_source_tree_confirmed(evidence_root)
         thermal_pre = probe_thermal_stability_confirmed()
         candidate_log = collect_cohorts(gate, candidate, sha)
         ac_post = probe_ac_power_confirmed()
-        clean_tree_post = probe_clean_source_tree_confirmed()
+        clean_tree_post = probe_clean_source_tree_confirmed(evidence_root)
         thermal_post = probe_thermal_stability_confirmed()
 
         ac_ok = ac_pre[0] and ac_post[0]
