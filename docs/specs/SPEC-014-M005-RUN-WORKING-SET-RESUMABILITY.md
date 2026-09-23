@@ -199,7 +199,7 @@ A valid `ContinuationPlan` contains at least:
 ```text
 ContinuationPlanId + schema_version
 plan_generation
-issuer/runtime authority identity + version
+issuer Agent Backend/domain authority identity + version
 WorkItemId / AttemptId / AgentRunId
 AgentRun binding generation
 consumer/harness capability contract identity + version
@@ -340,7 +340,7 @@ Reconciliation cannot fabricate missing payload.
 
 Used only after the higher-precedence reconciliation conditions above are resolved and at least one required prerequisite is definitively unusable under its plan mode: `Unavailable`, `RevokedOrForbidden`, `Expired`, irrecoverably `Stale`, or `ReferenceOnly` for a `PayloadRequired` dependency with no safe current reconstruction path.
 
-`ResumeUnavailable` does not establish that the prior execution has ended. A fresh retry may begin only after Runtime-authoritative proof that the previous execution terminated or was explicitly cancelled. If execution liveness is unknown, the classification is `ReconciliationRequired`; if it is known live, preserve the current Attempt/AgentRun and recover or reconcile it rather than starting a fresh retry.
+`ResumeUnavailable` does not establish that the prior execution has ended. A fresh retry may begin only after the Agent Backend/domain accepts authenticated authoritative liveness evidence from the owning ExecutionHost/provider/resource authority proving that the previous execution terminated or that cancellation reached a terminal stopped state. A cancellation request/acknowledgement alone is not proof that execution or effects stopped. Terminal Runtime supplies this evidence only for `SeyalTerminalExecutionHost`; standalone provider/process hosts use their own accepted authority. If execution liveness is unknown, the classification is `ReconciliationRequired`; if it is known live, preserve the current Attempt/AgentRun and recover or reconcile it rather than starting a fresh retry.
 
 The product must not present this as a successful resume merely because:
 
@@ -462,7 +462,7 @@ Required behavior:
 - stale dependency -> revalidate/rebuild or become reconciliation/unavailable under §9;
 - invalid/revoked dependency -> remove from eligibility and rebuild/reconcile as allowed;
 - provider continuation unavailable -> local rebuild if sufficient, otherwise classify from local required prerequisites; provider state cannot compensate;
-- adapter/observation loss while execution is live does not change retention availability or permit `ResumeUnavailable`/fresh retry; unknown liveness is `ReconciliationRequired` until Runtime establishes termination or explicit cancellation;
+- adapter/observation loss while execution is live does not change retention availability or permit `ResumeUnavailable`/fresh retry; unknown liveness is `ReconciliationRequired` until the Agent Backend/domain accepts authoritative terminal-state evidence from the owning ExecutionHost/provider/resource authority; a cancellation request alone is insufficient;
 - compaction failure -> keep prior current valid generation if policy/limits permit, otherwise reduce availability explicitly;
 - persistence corruption -> quarantine affected derived generation, preserve independent source/memory/run authorities;
 - repeated failure -> retry only within a finite policy-defined attempt and/or deadline budget with bounded queued work; on exhaustion automatic retry stops and an explicit `WorkingSetDegraded` operational status is exposed without creating a new AgentRun lifecycle state. A new relevant source/policy/plan generation or an explicit permitted retry starts a fresh bounded budget; exhaustion never extends itself indefinitely;
@@ -568,7 +568,7 @@ At minimum:
 17. provider continuation loss + sufficient local prerequisites permits same-run continuation when ADR-012 allows;
 18. provider continuation cannot compensate for a missing local/source-owned required prerequisite;
 19. live execution plus adapter/observation loss preserves retention availability and never starts a fresh retry;
-20. unknown execution liveness after observation loss yields `ReconciliationRequired`; a fresh retry requires Runtime proof of termination or explicit cancellation;
+20. unknown execution liveness after observation loss yields `ReconciliationRequired`; a fresh retry requires Agent Backend acceptance of authoritative terminal-state evidence from the owning ExecutionHost/provider/resource authority, and a cancellation request alone is insufficient;
 21. missing/stale/expired/unknown `ContinuationPlan`, unknown dependency class, or unknown requiredness/satisfaction metadata yields `ReconciliationRequired` and cannot be omitted by default;
 22. expired required prerequisite is never treated as retained/current merely because bytes/reference remain;
 23. `ReferenceOnly` + `PayloadRequired` with no reconstruction yields `ResumeUnavailable` after higher-precedence reconciliation conditions are resolved;
@@ -598,7 +598,7 @@ SPEC-014 is acceptable when independent review establishes that:
 - RunWorkingSet is explicitly derived and cannot become a second MemoryStore/source/event authority;
 - sibling run/worktree/workspace payload cannot be read or resumed through path, task, provider or identifier coincidence;
 - AgentRun identity, historical explainability and behavioral resumability are separate facts;
-- `ContinuationPlan` requiredness/satisfaction semantics are Runtime-issued, versioned, fenced and fail closed when missing/stale/unknown;
+- `ContinuationPlan` requiredness/satisfaction semantics are Agent Backend/domain-issued, versioned, fenced and fail closed when missing/stale/unknown;
 - retention availability including `Expired`, `ReferenceOnly` and overlapping denial conditions is explicit and deterministic;
 - behavioral-resume outcomes use the defined precedence and cannot fall through to multiple classifications;
 - hashes/provider IDs/summaries and provider continuation cannot falsely reconstruct or substitute for erased/unavailable required payload;
