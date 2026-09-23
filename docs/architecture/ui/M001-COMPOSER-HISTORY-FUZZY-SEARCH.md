@@ -4,6 +4,8 @@
 **Parent:** `M001-CORE-TERMINAL-REFERENCE-SCREEN.md`  
 **Scope:** Pane-scoped multiline composer and history discovery
 
+**Component authority:** `SEYAL-COMPOSER-COMPONENT-SPEC.md`
+
 ## 1. Purpose
 
 The Pane composer is a keyboard-first multiline command editor. History fuzzy search lets power users recall and reuse commands without leaving the focused Pane.
@@ -51,6 +53,10 @@ Visible controls should exist only where actionable, such as:
 - context/shell selector only if it truly changes the target context.
 
 Do not permanently display redundant cwd/shell/utility controls when Pane context already communicates them.
+
+The user's shell prompt remains terminal truth. Composer must not reconstruct or parse arbitrary zsh/bash/fish prompt text to create a replacement prompt.
+
+Composer may show compact Seyal-owned cwd and Git branch affordances when reliable Pane/execution-scoped metadata exists. These affordances are separate UI context, not terminal output. The Git branch affordance may open the branch-switch helper defined by `SEYAL-COMPOSER-COMPONENT-SPEC.md`.
 
 ## 5. Busy foreground process / TUI
 
@@ -121,11 +127,15 @@ Possible ranking inputs:
 
 Search/indexing must remain asynchronous/bounded and must not enter PTY/VT/render hot paths.
 
+Cwd/Git discovery, branch enumeration and shell-completion integration are subject to the same rule. Git context for remote/SSH panes must come from the remote execution authority/adapter, never a local filesystem lookup.
+
 ## 11. Agents and Actions sibling modes
 
 The same anchored helper surface may expose clearly separated modes:
 
 - History;
+- Shell Completion, only through a supported shell/completion integration;
+- Branches, when reliable Git capability exists for the Pane's execution location;
 - Agents;
 - Actions.
 
