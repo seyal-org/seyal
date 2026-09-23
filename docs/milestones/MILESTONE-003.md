@@ -100,7 +100,7 @@ A FAIL or INCONCLUSIVE **mandatory** criterion on a remaining §5 issue may crea
 
 ## 5. Finding-set freeze and remaining chain
 
-Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-22** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
+Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-23** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
 
 ### 5.1 Already on `master` (do not reopen)
 
@@ -148,7 +148,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Production startup config realization | #993 | **Active** — owned by @anulalbs; implementation PR #1006 open; do not duplicate |
 | Pane/tab execution provisioning contract | #994 | **Ready for Refinement/R&D** |
 
-**Executable frontier (2026-09-21):**
+**Executable frontier (2026-09-23):**
 
 ```text
 Hierarchy lane
