@@ -105,12 +105,18 @@ grep -Fq 'branch is only an audit/resume backstop for that human' site/src/conte
 
 # Regression guards for the pre-human-owner wording that caused contradictory
 # external-contributor and collision semantics.
-for stale in   'Status never overrides the assignee rule'   'Branch creation is the collision backstop'   'both the assignee claim and deterministic branch checks pass'   'may never substitute for the human assignee'   'GitHub assignment is explicitly transferred'
+for stale in   'Status never overrides the assignee rule'   'Branch creation is the collision backstop'   'both the assignee claim and deterministic branch checks pass'   'may never substitute for the human assignee'   'GitHub assignment is explicitly transferred'   'assignee state is the human-visible claim'   'deterministic implementation branch is the collision backstop'
 do
   if grep -Fq "$stale" docs/engineering/ISSUE-PROTOCOL.md     || grep -Fq "$stale" "$claim_skill"     || grep -Fq "$stale" docs/engineering/DEVELOPMENT.md     || grep -Fq "$stale" site/src/content/docs/developer/index.mdx; then
     fail "stale assignee-era ownership wording remains: $stale"
   fi
 done
+
+# AGENTS must preserve the same dual human-owner record terminology.
+if grep -Fq 'must not replace the human assignee' AGENTS.md; then
+  fail "AGENTS.md drops the acknowledged external-owner path"
+fi
+grep -Fq 'must not replace the human owner record' AGENTS.md || fail "AGENTS.md must preserve the human owner-record authority"
 
 [[ -f .sdlc/context/_meta.yaml ]] || fail "Seyal SDLC context metadata is missing"
 [[ -f .sdlc/graph/context-index.json ]] || fail "Seyal derived context index is missing"
