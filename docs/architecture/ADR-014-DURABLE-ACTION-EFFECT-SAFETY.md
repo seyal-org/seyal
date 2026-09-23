@@ -125,14 +125,14 @@ ADR-012 distinguishes:
 ```text
 Observed
 UpstreamRequestable
-SeyalEnforced
+BackendEnforced
 ```
 
-This Action authority applies only where Seyal actually controls the dispatch boundary.
+This Action authority applies only where the Agent Backend actually controls the dispatch boundary.
 
-If an external CLI agent performs an operation directly through its own process, shell, network client or upstream harness, Seyal may observe or request behavior according to negotiated capability, but it must not claim that this Action authority enforced or prevented that external effect.
+If an external CLI agent performs an operation directly through its own process, shell, network client or upstream harness, The Agent Backend may observe or request behavior according to negotiated capability, but it must not claim that this Action authority enforced or prevented that external effect.
 
-No implementation may convert raw terminal text, OSC content, heuristics, provider narration or an observed tool call into authoritative `SeyalEnforced` action evidence.
+No implementation may convert raw terminal text, OSC content, heuristics, provider narration or an observed tool call into authoritative `BackendEnforced` action evidence.
 
 ### 5. Canonical Action lifecycle
 
@@ -442,7 +442,7 @@ The implementation specification/tests must cover at least:
 - repeated disk-full/persistence failure and bounded recovery;
 - action payload privacy revocation/deletion before dispatch;
 - secret-bearing arguments/result metadata and redaction;
-- external-agent observed action incorrectly presented as `SeyalEnforced`;
+- external-agent observed action incorrectly presented as `BackendEnforced`;
 - terminal-isolation regression while many Actions are active/reconciling/failing.
 
 Property/state-machine tests and deterministic fault injection are required for this boundary.
