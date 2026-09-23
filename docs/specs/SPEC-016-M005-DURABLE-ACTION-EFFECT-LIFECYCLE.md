@@ -256,7 +256,7 @@ When proven:
 
 Allowed only under a validated executor idempotency/reconciliation contract.
 
-The Action remains an unresolved dispatched Action while reconciliation establishes a safe continuation. A new dispatch generation may be acquired only through Runtime-issued recovery/reconciliation authority after old-generation fencing and revalidation of:
+The Action remains an unresolved dispatched Action while reconciliation establishes a safe continuation. A new dispatch generation may be acquired only through Agent Backend/domain recovery/reconciliation authority after old-generation fencing and revalidation of:
 
 - intent expiry;
 - exact current AgentRun binding and capability;
@@ -310,7 +310,7 @@ Authoritative result evidence binds:
 ```text
 ActionId
 Action dispatch generation
-AgentRun binding generation, or a Runtime-issued recovery credential/generation proving the old binding and dispatch generation were fenced
+AgentRun binding generation, or an Agent Backend/domain-issued recovery credential/generation proving the old binding and dispatch generation were fenced
 executor identity/version
 executor-origin authentication/attestation bound to the exact result payload
 operation/result identity
