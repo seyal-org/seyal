@@ -9,7 +9,7 @@
 
 ## 1. Purpose and scope
 
-Define the observable M005 contract for `RunWorkingSet`: the bounded, derived run-context state that Seyal may retain for one AgentRun/Attempt, compact over time, and consult when deciding whether the same AgentRun can safely continue after GUI reconnect, Runtime restart, worker/provider loss, or provider-continuation loss.
+Define the observable M005 contract for `RunWorkingSet`: the bounded, derived run-context state that Seyal may retain for one AgentRun/Attempt, compact over time, and consult when deciding whether the same AgentRun can safely continue after GUI reconnect, Agent Backend restart, Terminal Runtime/ExecutionHost loss, worker/provider loss, or provider-continuation loss.
 
 This specification is subordinate to ADR-012 and ADR-013. It does not create another source authority, MemoryStore, AgentRun authority, transcript authority, provider identity, or Action/effect state machine.
 
@@ -218,7 +218,7 @@ Validation rules:
 
 - the issuer must be the current Agent Backend/domain authority or an explicitly accepted authority delegated by it; model/provider text cannot issue a plan;
 - schema, issuer, WorkItem/Attempt/AgentRun, binding generation, consumer contract, policy/privacy generations and expiry must all be recognized/current;
-- unknown dependency class, unknown requiredness/satisfaction mode, missing dependency identity, missing/stale/expired plan or generation mismatch is fail-closed and yields `ReconciliationRequired` until Runtime supplies a valid current plan;
+- unknown dependency class, unknown requiredness/satisfaction mode, missing dependency identity, missing/stale/expired plan or generation mismatch is fail-closed and yields `ReconciliationRequired` until the Agent Backend supplies a valid current plan;
 - optional dependencies may be absent only when the plan explicitly marks them optional;
 - a changed requiredness/satisfaction contract produces a new plan generation and invalidates a prior resume classification.
 
@@ -359,7 +359,7 @@ The following events are distinct:
 
 ### 10.1 GUI/client reconnect
 
-A GUI reconnect that does not interrupt the authoritative Runtime/worker does not itself require behavioral reconstruction. Existing live state remains authoritative. Reconnect metadata never creates a new AgentRun or Attempt by itself.
+A GUI reconnect that does not interrupt the authoritative Agent Backend/worker does not itself require behavioral reconstruction. Existing live state remains authoritative. Reconnect metadata never creates a new AgentRun or Attempt by itself.
 
 ### 10.2 Agent Backend restart
 
@@ -562,7 +562,7 @@ At minimum:
 11. compaction preserves unresolved conflict/provenance required for continuation;
 12. compaction unable to retain required resume information reduces availability instead of claiming full resume;
 13. GUI reconnect with live backend/worker does not create new Attempt/AgentRun;
-14. Runtime restart does not treat persisted metadata as proof of live PTY/worker/provider state;
+14. Agent Backend restart does not treat persisted metadata as proof of live PTY/worker/provider state;
 15. replacement worker generation can resume same AgentRun only after safe revalidation;
 16. stale worker generation cannot mutate current working state;
 17. provider continuation loss + sufficient local prerequisites permits same-run continuation when ADR-012 allows;
