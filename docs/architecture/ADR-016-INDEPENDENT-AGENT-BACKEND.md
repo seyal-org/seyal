@@ -77,6 +77,8 @@ For backend-controlled local Actions, the Agent Backend/domain owns durable Acti
 
 A TerminalExecution-related Action is dispatched through the Terminal Runtime/resource authority; this does not give the Agent Backend PTY/VT/grid ownership.
 
+For agent-context revocation and provider/effect handoff, the Agent Backend also owns the single privacy serialization domain defined by SPEC-015. Standalone provider/API dispatch therefore does not depend on Terminal Runtime. When Terminal Runtime or another executor is involved, it consumes an authenticated generation-bound backend fence and returns executor evidence; it does not establish an independent revocation/handoff gate.
+
 ### 5. Terminal Runtime keeps terminal truth
 
 Inside Seyal:
