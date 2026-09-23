@@ -93,7 +93,7 @@ Backend owns logical request assembly; adapter performs provider-specific syntax
 
 ### HarnessCompiledDeclaredInputs
 
-Backend supplies typed inputs, but harness may add/reorder/compact. Seyal records supplied inputs and declared behavior, not a false exact-final-prompt claim.
+Backend supplies typed inputs, but harness may add/reorder/compact. The Agent Backend records supplied inputs and declared behavior, not a false exact-final-prompt claim.
 
 ### OpaqueHarnessCompiled
 
@@ -106,7 +106,7 @@ Security-sensitive RouteOffering properties carry:
 ```text
 RouteGuarantee<T> {
   value
-  enforcement: SeyalEnforced | UpstreamEnforced | PlatformEnforced
+  enforcement: BackendEnforced | UpstreamEnforced | PlatformEnforced
              | Observed | Declared | Unknown
   evidence_ref
   generation/version
@@ -115,9 +115,9 @@ RouteGuarantee<T> {
 
 Use for region/residency, egress, filesystem/resource scope, permissions, model/provider identity where applicable.
 
-Hard policy declares the minimum acceptable enforcement class.
+Hard policy declares the accepted enforcement classes for each constraint dimension. There is no universal ordering across BackendEnforced, PlatformEnforced and UpstreamEnforced; acceptability depends on what is being guaranteed.
 
-No-network policy is not satisfied merely because Seyal exposed no network tool to an unsandboxed external harness.
+No-network policy is not satisfied merely because the backend exposed no network tool to an unsandboxed external harness.
 
 ## 7. Adapter observations
 
