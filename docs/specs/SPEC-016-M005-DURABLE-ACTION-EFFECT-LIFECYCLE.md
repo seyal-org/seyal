@@ -29,7 +29,7 @@ It does not create a second AgentRun, PTY, resource, privacy/revocation, approva
 ## 2. Authority boundaries
 
 ```text
-WorkItem -> Attempt -> AgentRun       ADR-012 Runtime/domain authority
+WorkItem -> Attempt -> AgentRun       ADR-012 + ADR-016 Agent Backend/domain authority
 Attention / human Approval            #680 human-decision authority
 Context/privacy eligibility            ADR-013 + SPEC-015 privacy authority
 ActionId / ActionIntent / effect state ADR-014 Action authority
@@ -38,11 +38,11 @@ resource/executor                      owns the actual resource operation
 
 Rules:
 
-1. Runtime/domain layer is the sole durable Action transition writer.
+1. Under ADR-016, Agent Backend/domain is the sole durable Action transition writer for backend-controlled Actions.
 2. SPEC-015 remains the sole privacy/revocation/forgetting and `RevocationFence` authority; this specification only consumes its current eligibility/fence contract at Action authorization and dispatch boundaries.
 3. Resource executors perform effects and return typed evidence; they do not own Action lifecycle.
 4. Harnesses, UI, MCP, CLI/SDK and workflows submit typed intents/requests but do not create competing state machines.
-5. External CLI-agent effects that bypass Seyal's dispatch boundary are never labeled `SeyalEnforced`.
+5. External CLI-agent effects that bypass the Agent Backend dispatch boundary are never labeled `BackendEnforced`.
 6. No Action persistence/executor/model/privacy work synchronously gates terminal I/O/rendering.
 
 ## 3. Action identity and immutable intent
@@ -189,16 +189,16 @@ The privacy check cannot be a detached check immediately before a later call. Fo
 
 After durable `Dispatching` and before the irreversible effect boundary, the executor path must do one of:
 
-1. hold/consume a one-shot privacy/effect fence issued by the Runtime/privacy authority under the same serialization domain as SPEC-015 revocation commit, bound to the exact ActionId, dispatch generation, AgentRun binding, payload/subject dependency identity, complete current `RevocationFence`, executor identity/version and finite expiry; or
+1. hold/consume a one-shot privacy/effect fence issued by the Agent Backend privacy authority under the same serialization domain as SPEC-015 revocation commit, bound to the exact ActionId, dispatch generation, AgentRun binding, payload/subject dependency identity, complete current `RevocationFence`, executor identity/version and finite expiry; a Terminal Runtime/resource executor receives and consumes that fence only through an authenticated generation-bound bridge and never becomes a second privacy authority; or
 2. use an executor-side credential/primitive that authoritatively rejects invocation when any bound privacy or dispatch fence becomes stale, with equivalent ordering semantics.
 
 A detached check-then-call is insufficient.
 
-If revocation linearizes first, the invocation must not cross the effect boundary. Because the local Action may already be durably `Dispatching`, the Runtime records authenticated `known-not-dispatched` evidence from this boundary, invalidates the old dispatch generation, and follows `Dispatching -> Prepared` with stale authorization removed. If the effect boundary cannot prove no invocation/effect occurred, recover conservatively to `EffectUnknown` instead.
+If revocation linearizes first, the invocation must not cross the effect boundary. Because the local Action may already be durably `Dispatching`, the executor returns authenticated `known-not-dispatched` evidence to the Agent Backend/domain; the backend Action authority records it, invalidates the old dispatch generation, and follows `Dispatching -> Prepared` with stale authorization removed. If the effect boundary cannot prove no invocation/effect occurred, recover conservatively to `EffectUnknown` instead.
 
 If the irreversible effect boundary linearizes first, a later revocation cannot unsend, roll back or relabel the operation as prevented. The Action continues through normal result/reconciliation semantics while retained payload follows SPEC-015 cleanup policy.
 
-If the complete current `RevocationFence` cannot be established or the executor cannot enforce the required local privacy/effect ordering, fail closed before invocation; that executor cannot be treated as safely `SeyalEnforced` for the operation.
+If the complete current `RevocationFence` cannot be established or the executor cannot enforce the required local privacy/effect ordering, fail closed before invocation; that executor cannot be treated as safely `BackendEnforced` for the operation.
 
 A stale worker/dispatcher may submit observational evidence, but cannot cross the effect boundary or commit current Action state.
 
@@ -256,7 +256,7 @@ When proven:
 
 Allowed only under a validated executor idempotency/reconciliation contract.
 
-The Action remains an unresolved dispatched Action while reconciliation establishes a safe continuation. A new dispatch generation may be acquired only through Runtime-issued recovery/reconciliation authority after old-generation fencing and revalidation of:
+The Action remains an unresolved dispatched Action while reconciliation establishes a safe continuation. A new dispatch generation may be acquired only through Agent Backend/domain recovery/reconciliation authority after old-generation fencing and revalidation of:
 
 - intent expiry;
 - exact current AgentRun binding and capability;
@@ -310,7 +310,7 @@ Authoritative result evidence binds:
 ```text
 ActionId
 Action dispatch generation
-AgentRun binding generation, or a Runtime-issued recovery credential/generation proving the old binding and dispatch generation were fenced
+AgentRun binding generation, or an Agent Backend/domain-issued recovery credential/generation proving the old binding and dispatch generation were fenced
 executor identity/version
 executor-origin authentication/attestation bound to the exact result payload
 operation/result identity
@@ -409,13 +409,13 @@ Action-specific composition rules are:
 6. Revocation after the irreversible effect boundary cannot be described as unsent, prevented or rolled back.
 7. Action payload/evidence retention and local cleanup follow SPEC-015/ADR-013 policy. Hashes/fingerprints do not reconstruct erased payload.
 8. If required payload is deleted before safe reconciliation, that prerequisite is reported unavailable; effect evidence is never fabricated.
-9. Provider deletion initiated or authorized by Seyal is itself an effect and therefore uses this same Action authority, while SPEC-015 remains authoritative for provider-deletion truthfulness and forgetting status.
+9. Provider deletion initiated through the Agent Backend is itself an effect and therefore uses this same Action authority, while SPEC-015 remains authoritative for provider-deletion truthfulness and forgetting status.
 
 ## 19. External-agent enforcement truthfulness
 
-Only operations crossing this Seyal-controlled Action boundary may be labeled `SeyalEnforced`.
+Only operations crossing this backend-controlled Action boundary may be labeled `BackendEnforced`.
 
-An independent external CLI agent may perform shell/network/tool effects outside this boundary. Seyal may observe/request those according to capabilities, but cannot claim this contract prevented or authorized them.
+An independent external CLI agent may perform shell/network/tool effects outside this boundary. The Agent Backend may observe/request those according to capabilities, but cannot claim this contract prevented or authorized them.
 
 ## 20. Duplicate/replay behavior
 
@@ -579,7 +579,7 @@ Concrete budgets are calibrated under #841/#680/#839 consumers before implementa
 
 ### External-agent truthfulness
 
-- direct external CLI effect bypassing Seyal Action -> never labeled `SeyalEnforced`.
+- direct external CLI effect bypassing Seyal Action -> never labeled `BackendEnforced`.
 
 ### Failure/resource
 
