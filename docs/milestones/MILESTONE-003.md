@@ -143,7 +143,7 @@ Do **not** create `issue/922` or `issue/923` while those Cursor branches exist u
 | Native hierarchy / windows / tabs / splits / navigation | #674 | **Open** umbrella — **not** one Ready implementation PR |
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open** — needs #674 pane/focus model; #686 where semantic boundaries are required |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open** |
-| Trusted shell-integration / semantic command boundaries | #686 | **Open**, unassigned refinement/spike; not Ready |
+| Trusted shell-integration / semantic command boundaries | #686 | **Open** spike; assignee **@mahboobmonnamd** — do not steal |
 | Flow compositor Block-region drawing | #865 | **Open**; assignee **@mahboobmonnamd** — do not steal |
 | Flow composer input/IME/focus fence | #866 | **Open** |
 | Raw/TUI full-Pane takeover | #867 | **Open** |
@@ -199,9 +199,9 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. Resume the existing Cursor branch only with an explicit resume request and sole assignee; otherwise abandon that branch before creating `issue/923`.
 
-### 6.4 #686 — unassigned refinement/spike
+### 6.4 #686 — spike, assigned
 
-#686 answers how trusted prompt/CWD/command-start/end signals work for zsh/bash/fish without Warpify-style injection. It unblocks only #675 behaviors that need guarantees not already present in the accepted zsh/Unsupported contract. The live Issue remains unassigned and in Refinement, not Ready for production pickup. It is a decision/evidence and ADR-or-spec output, not a silent production hook; follow the Issue's current readiness and ownership state.
+#686 answers how trusted prompt/CWD/command-start/end signals work for zsh/bash/fish without Warpify-style injection. It unblocks #675 semantic Block boundaries. It is a spike/ADR-or-spec output, not a silent production hook. Keep the current assignee.
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
