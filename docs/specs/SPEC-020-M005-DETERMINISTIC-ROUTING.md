@@ -13,6 +13,24 @@ For identical immutable routing inputs and router version, produce the same elig
 
 The router selects the best valid route for the current task and constraints, not a universal best model.
 
+**V1 is a deterministic policy/enforcement and calibration baseline, not Seyal's permanent ranking strategy.**
+
+The architectural invariant is:
+
+```text
+hard policy / security / capability constraints
+        ↓
+eligible RouteOfferings
+        ↓
+replaceable ranking strategy
+        ↓
+RoutingDecision
+        ↓
+deterministic dispatch/fallback enforcement
+```
+
+V1 uses transparent deterministic scoring so Seyal can collect trustworthy outcome, cost, latency and retry evidence before introducing learned ranking. Future learned estimators or ranking policies may replace the soft-ranking stage without replacing hard constraints, provenance, explanation, immutable RoutingDecision history or failure/effect safety.
+
 ## 2. Routing input snapshot
 
 A decision freezes:
@@ -300,11 +318,83 @@ For every candidate record:
 15. no-network hard policy rejects unenforced harness;
 16. same frozen fixture reproduces the same canonical decision fields.
 
-## 19. Future learned/Jev-like scorer
+## 19. Routing-strategy evolution
 
-A future learned/fast decision model may estimate task class or soft factors only after benchmark evidence.
+The weighted V1 scorer is intentionally replaceable.
+
+Recommended evolution:
+
+```text
+V1
+deterministic rules + evidence/confidence scoring
+        ↓
+collect trustworthy task/route/outcome/cost/latency/retry evidence
+
+V2
+learned quality / retry / cost / latency estimators
+inside the deterministic policy envelope
+        ↓
+
+V3
+contextual bandit or learning-to-rank
+over already-eligible RouteOfferings
+        ↓
+
+future
+user/org-adaptive ranking where policy allows
+```
+
+The following remain deterministic authority across all phases:
+- policy/security precedence;
+- allow/deny/pin constraints;
+- residency/egress/permission enforcement requirements;
+- capability/context hard requirements;
+- hard budget ceilings;
+- immutable RoutingDecision provenance;
+- dispatch-time revalidation;
+- typed failure/effect handling;
+- no-blind-retry guarantees.
+
+### 19.1 Learned estimators
+
+A learned/fast decision model may estimate:
+- task class/complexity;
+- task-quality probability;
+- retry/fallback probability;
+- cost/latency priors;
+- ranking residuals.
+
+Its output is provenance-bound evidence with model/version/confidence. It cannot self-authorize a route.
+
+### 19.2 Contextual bandit / learning-to-rank
+
+A future bandit/ranker may choose among the already-valid candidate set using observed outcomes such as:
+- accepted result;
+- first-attempt acceptance;
+- total cost;
+- latency;
+- retry/fallback behavior.
+
+Exploration is explicit experiment mode only, bounded by policy, and recorded in RoutingDecision. Security/privacy constraints are never exploration dimensions.
+
+### 19.3 Jev-like decision models
+
+A Jev-like fast decision model is a possible implementation of the learned-estimator/ranker stage, not a special architectural dependency.
+
+Adoption requires benchmark evidence showing materially better accepted-outcome/cost/latency performance after including the router model's own inference and operational cost.
 
 It never bypasses hard constraints/floors, policy precedence, enforcement requirements or deterministic fallback, and its version/confidence/provenance must be visible.
+
+### 19.4 Compatibility requirement
+
+Changing ranking strategy must not require changing:
+- RouteRequest;
+- RouteOffering capability/enforcement contracts;
+- Evaluation/Outcome evidence authority;
+- RoutingDecision provenance/explanation contract;
+- failure-class fallback semantics.
+
+This keeps V1 data useful for later learned routing instead of making the deterministic implementation a dead end.
 
 ## 20. Calibration gate
 
