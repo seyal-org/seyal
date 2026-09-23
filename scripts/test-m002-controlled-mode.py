@@ -246,6 +246,62 @@ def test_host_identity_token() -> None:
     print("[seyal m002 controlled-mode test] derive_host_identity_token() token derivation verified.")
 
 
+def test_host_identity_failure_does_not_leak(base: Path) -> None:
+    """A failing ioreg probe must never let raw platform-identification
+    output reach host_identity_confirmed()'s return value or a written
+    controlled-provenance manifest.
+
+    Blocking review finding: host_identity_confirmed() previously returned
+    `result.stdout.strip()` as the failure detail, and
+    write_controlled_provenance_manifest() wrote that detail into
+    `host_identity` even when host_identity_confirmed=false. A failing
+    `ioreg` call can still emit platform-identification-shaped stdout (e.g.
+    a partial/malformed IOPlatformUUID line), so that raw output could flow
+    straight into retained docs/evidence data.
+    """
+    module = load_module("scripts/run-m002-history-reflow-contract.py", "seyal_run_m002_history_host_identity_leak_unit")
+
+    fake_raw_uuid = "LEAKED-RAW-UUID-DEADBEEF-0000"
+
+    def failing_run(command, *, env=None):
+        if command[:3] == ["ioreg", "-rd1", "-c"]:
+            return types.SimpleNamespace(returncode=1, stdout=f'ioreg: could not match "IOPlatformUUID" = "{fake_raw_uuid}"\n')
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    module.run = failing_run
+    # host_identity_confirmed() short-circuits to unconfirmed on non-macOS
+    # before ever reaching the mocked ioreg call (same reason
+    # test_host_identity_token() above tests derive_host_identity_token()
+    # directly rather than this function). module.sys is the process-global
+    # `sys` module, so the override is scoped with try/finally to avoid
+    # leaking a fake platform to any other test running in this process.
+    original_platform = module.sys.platform
+    module.sys.platform = "darwin"
+    try:
+        confirmed, detail = module.host_identity_confirmed()
+    finally:
+        module.sys.platform = original_platform
+    require(confirmed is False, "a failing ioreg call must not confirm host identity")
+    require(fake_raw_uuid not in detail, f"host_identity_confirmed() failure detail must not carry raw ioreg stdout, got: {detail!r}")
+
+    manifest_dir = base / "host-identity-leak-manifest"
+    manifest_dir.mkdir()
+    module.write_controlled_provenance_manifest(
+        manifest_dir,
+        sha="7777777777777777777777777777777777777777",
+        clean_tree=(True, "clean source tree"),
+        ac_power=(True, "AC Power"),
+        thermal=(True, "CPU_Speed_Limit=100"),
+        host=(confirmed, detail),
+    )
+    manifest = json.loads((manifest_dir / "controlled-provenance-manifest.json").read_text(encoding="utf-8"))
+    require(manifest["host_identity_confirmed"] is False, "manifest must record the failed host-identity confirmation")
+    require(manifest["host_identity"] is None, f"manifest must not persist any host_identity value on a failed probe, got: {manifest['host_identity']!r}")
+    require(fake_raw_uuid not in json.dumps(manifest), "manifest bytes must never contain the raw (fake) UUID from a failed probe")
+
+    print("[seyal m002 controlled-mode test] host_identity_confirmed() failure path does not leak raw probe output.")
+
+
 def test_history_reflow_runner(base: Path) -> None:
     module = load_module("scripts/run-m002-history-reflow-contract.py", "seyal_run_m002_history_unit")
     module.ROOT = base / "history-reflow-root"
@@ -566,6 +622,95 @@ def test_history_reflow_runner(base: Path) -> None:
             "pre:" in active_manifest["thermal_stability_detail"] and "post:" in active_manifest["thermal_stability_detail"],
             f"manifest thermal detail must record both pre and post readings, got: {active_manifest['thermal_stability_detail']!r}",
         )
+
+        # Blocking-review fix (round 4): AC power was previously probed once
+        # before the gate loop and reused for every gate, so a host that
+        # lost AC power partway through a multi-gate run would still certify
+        # every later gate as AC-confirmed from a single stale early
+        # reading. Only the second (post-collection) probe call for the
+        # first gate reports on-battery; every other call reports AC, so
+        # this also proves the check is per-gate the same way the thermal
+        # case above does.
+        time.sleep(1.1)
+        module.probe_thermal_stability_confirmed = lambda: (True, "CPU_Speed_Limit=100")
+        ac_calls = {"count": 0}
+
+        def alternating_ac_power():
+            ac_calls["count"] += 1
+            if ac_calls["count"] == 2:
+                return (False, "host is running on battery power, not AC")
+            return (True, "AC Power")
+
+        module.probe_ac_power_confirmed = alternating_ac_power
+        sys.argv = [
+            "run-m002-history-reflow-contract.py",
+            "--controlled",
+            "--baseline-sha",
+            "4444444444444444444444444444444444444444",
+            "--baseline-cohorts-dir",
+            str(baseline_dir),
+        ]
+        module.main()
+        ac_drift_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
+        ac_drift_root = ac_drift_roots[-1]
+        ac_active_record = (ac_drift_root / "history_active_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        ac_sealed_record = (ac_drift_root / "history_sealed_segment_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        require(
+            "environment_status = 'PLATFORM_LIMITED'" in ac_active_record,
+            f"a gate that lost AC power mid-collection must fail closed to PLATFORM_LIMITED, got: {ac_active_record!r}",
+        )
+        require(
+            "AC power not confirmed across collection" in ac_active_record,
+            f"expected an across-collection AC-power reason, got: {ac_active_record!r}",
+        )
+        require(
+            "environment_status = 'VALID'" in ac_sealed_record,
+            f"a gate unaffected by the transient AC loss must still reach VALID, got: {ac_sealed_record!r}",
+        )
+
+        # Blocking-review fix (round 4): clean-source-tree was likewise
+        # probed once before the gate loop and reused for every gate, so a
+        # tree that became dirty partway through a multi-gate run (e.g. an
+        # earlier gate's own collection writing scratch files) would still
+        # certify every later gate as clean from a single stale early
+        # reading. Same alternating-on-the-second-call shape as above.
+        time.sleep(1.1)
+        module.probe_ac_power_confirmed = lambda: (True, "AC Power")
+        clean_tree_calls = {"count": 0}
+
+        def alternating_clean_tree():
+            clean_tree_calls["count"] += 1
+            if clean_tree_calls["count"] == 2:
+                return (False, "working tree has uncommitted or untracked changes")
+            return (True, "clean source tree")
+
+        module.probe_clean_source_tree_confirmed = alternating_clean_tree
+        sys.argv = [
+            "run-m002-history-reflow-contract.py",
+            "--controlled",
+            "--baseline-sha",
+            "4444444444444444444444444444444444444444",
+            "--baseline-cohorts-dir",
+            str(baseline_dir),
+        ]
+        module.main()
+        tree_drift_roots = sorted((module.ROOT / "docs" / "evidence").glob("m002-673-history-reflow-*"))
+        tree_drift_root = tree_drift_roots[-1]
+        tree_active_record = (tree_drift_root / "history_active_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        tree_sealed_record = (tree_drift_root / "history_sealed_segment_reflow_ms" / "record.toml").read_text(encoding="utf-8")
+        require(
+            "environment_status = 'PLATFORM_LIMITED'" in tree_active_record,
+            f"a gate whose tree went dirty mid-collection must fail closed to PLATFORM_LIMITED, got: {tree_active_record!r}",
+        )
+        require(
+            "clean source tree not confirmed across collection" in tree_active_record,
+            f"expected an across-collection clean-tree reason, got: {tree_active_record!r}",
+        )
+        require(
+            "environment_status = 'VALID'" in tree_sealed_record,
+            f"a gate unaffected by the transient dirty tree must still reach VALID, got: {tree_sealed_record!r}",
+        )
+        module.probe_clean_source_tree_confirmed = lambda: (True, "clean source tree")
     finally:
         sys.argv = original_argv
 
@@ -577,6 +722,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="seyal-m002-controlled-mode-") as tmp:
         base = Path(tmp)
         test_performance_contract_runner(base)
+        test_host_identity_failure_does_not_leak(base)
         test_history_reflow_runner(base)
     print("[seyal m002 controlled-mode test] all --controlled fixtures passed for both runners.")
 

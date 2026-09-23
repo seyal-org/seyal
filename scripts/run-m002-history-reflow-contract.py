@@ -190,7 +190,13 @@ def host_identity_confirmed() -> tuple[bool, str]:
         return False, "host identity probe requires macOS"
     result = run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
     if result.returncode != 0:
-        return False, f"ioreg IOPlatformExpertDevice probe failed: {result.stdout.strip()}"
+        # Do not fold `result.stdout` into the detail: even on failure,
+        # ioreg's stdout can contain raw platform-identification output, and
+        # this detail string is what write_controlled_provenance_manifest()
+        # and require_baseline_controlled_provenance() surface into retained
+        # evidence under docs/evidence and validator error output (blocking
+        # review finding).
+        return False, "ioreg IOPlatformExpertDevice probe failed"
     match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
     if not match:
         return False, "could not read IOPlatformUUID from ioreg output"
@@ -231,7 +237,12 @@ def write_controlled_provenance_manifest(
         "thermal_stability_confirmed": thermal[0],
         "thermal_stability_detail": thermal[1],
         "host_identity_confirmed": host[0],
-        "host_identity": host[1],
+        # Only a confirmed probe's value is a derived token
+        # (derive_host_identity_token()); on failure host[1] is a plain
+        # detail string that may itself be a probe-failure message, so it is
+        # never written here -- confirmation=False always pairs with a null
+        # token, never a stray "identity" value (blocking review finding).
+        "host_identity": host[1] if host[0] else None,
         "collected_at": datetime.now(timezone.utc).isoformat(),
     }
     (directory / CONTROLLED_PROVENANCE_MANIFEST_NAME).write_text(
@@ -515,22 +526,16 @@ def main() -> None:
         "workload=ascii executions=1 warmups=20 samples=100 cohorts=5"
     )
 
-    # Probed unconditionally (not gated on --controlled): any collection this
-    # script performs -- default or --controlled -- may later be reused by
-    # someone else as --baseline-cohorts-dir, and write_controlled_provenance_
-    # manifest() below stamps these results into the candidate cohorts dir so
-    # that a later reuse can mechanically verify them rather than trust a
-    # caller-supplied label. Thermal stability is deliberately NOT probed
-    # here: a host can become thermally constrained partway through a
+    # Host identity is a static per-physical-machine property (IOPlatformUUID
+    # does not change mid-run), so it is fine to probe once here. AC power
+    # and clean-source-tree are NOT probed here: like thermal stability, a
+    # host can lose AC power or have its tree edited partway through a
     # multi-minute cargo-bench collection, and a single reading taken before
     # any collection started would then be stamped -- stale -- into a
-    # manifest written after the fact. It is instead probed per gate,
+    # manifest written after the fact. Those are instead probed per gate,
     # immediately before and after that gate's own collect_cohorts() call,
     # inside the loop below (blocking review finding).
-    ac_probe = probe_ac_power_confirmed()
-    clean_tree_probe = probe_clean_source_tree_confirmed()
     host_probe = host_identity_confirmed()
-    ac_detail = ac_probe[1]
 
     # --controlled is additive and opt-in: when absent, controlled_reasons
     # stays empty and controlled_valid is False, so behavior is byte-for-byte
@@ -550,33 +555,43 @@ def main() -> None:
             baseline_source = Path(args.baseline_cohorts_dir)
             if not baseline_source.is_dir():
                 controlled_reasons.append(f"--baseline-cohorts-dir does not exist: {baseline_source}")
-        if not ac_probe[0]:
-            controlled_reasons.append(f"AC power not confirmed: {ac_probe[1]}")
-        # A dirty working tree can produce measured behavior that does not
-        # actually match the SHA cohort files get stamped with below; VALID
-        # evidence must fail closed rather than silently claim a
-        # clean-checkout guarantee it cannot prove (blocking review finding).
-        if not clean_tree_probe[0]:
-            controlled_reasons.append(f"clean source tree not confirmed: {clean_tree_probe[1]}")
-
     for gate in GATES:
         gate_root = evidence_root / gate
         candidate = gate_root / "cohorts"
         baseline = gate_root / "baseline-cohorts"
         log = gate_root / "raw-output.txt"
 
-        # AC power alone does not prove a controlled measurement environment,
-        # and a reading taken only once before this gate's collection cannot
-        # prove the host stayed thermally stable for its whole duration:
-        # bracket the actual collect_cohorts() call with pre/post thermal
-        # probes and require both to confirm (blocking review finding).
+        # AC power, clean-source-tree, and thermal stability each only prove
+        # a controlled measurement environment if they hold for the whole
+        # collection window, not just at a moment before it starts: bracket
+        # the actual collect_cohorts() call with pre/post probes and require
+        # both to confirm (blocking review finding).
+        ac_pre = probe_ac_power_confirmed()
+        clean_tree_pre = probe_clean_source_tree_confirmed()
         thermal_pre = probe_thermal_stability_confirmed()
         candidate_log = collect_cohorts(gate, candidate, sha)
+        ac_post = probe_ac_power_confirmed()
+        clean_tree_post = probe_clean_source_tree_confirmed()
         thermal_post = probe_thermal_stability_confirmed()
+
+        ac_ok = ac_pre[0] and ac_post[0]
+        ac_detail = f"pre: {ac_pre[1]}; post: {ac_post[1]}"
+
+        # A dirty working tree can produce measured behavior that does not
+        # actually match the SHA cohort files get stamped with below; VALID
+        # evidence must fail closed rather than silently claim a
+        # clean-checkout guarantee it cannot prove (blocking review finding).
+        clean_tree_ok = clean_tree_pre[0] and clean_tree_post[0]
+        clean_tree_detail = f"pre: {clean_tree_pre[1]}; post: {clean_tree_post[1]}"
+
         thermal_ok = thermal_pre[0] and thermal_post[0]
         thermal_detail = f"pre: {thermal_pre[1]}; post: {thermal_post[1]}"
 
         gate_reasons = list(controlled_reasons)
+        if args.controlled and not ac_ok:
+            gate_reasons.append(f"AC power not confirmed across collection: {ac_detail}")
+        if args.controlled and not clean_tree_ok:
+            gate_reasons.append(f"clean source tree not confirmed across collection: {clean_tree_detail}")
         if args.controlled and not thermal_ok:
             gate_reasons.append(f"thermal stability not confirmed across collection: {thermal_detail}")
 
@@ -585,8 +600,8 @@ def main() -> None:
         write_controlled_provenance_manifest(
             candidate,
             sha=sha,
-            clean_tree=clean_tree_probe,
-            ac_power=ac_probe,
+            clean_tree=(clean_tree_ok, clean_tree_detail),
+            ac_power=(ac_ok, ac_detail),
             thermal=(thermal_ok, thermal_detail),
             host=host_probe,
         )
