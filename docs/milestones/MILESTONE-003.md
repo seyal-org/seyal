@@ -139,7 +139,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Native hierarchy / windows / tabs / splits / navigation | #674 | **Open umbrella** — not a pickup |
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
-| Trusted shell-integration / semantic command boundaries | #686 | **In Progress** — human owner @mahboobmonnamd; decision/ADR work in PR #991, no production code |
+| Trusted shell-integration / semantic command boundaries | #686 | **In Progress** — human owner @mahboobmonnamd; decision/ADR work in PR #1022, no production code |
 | Flow compositor Block-region drawing | #865 | **Technically Ready; ownership migration needed** — legacy `issue/865` / `cursor/live-tail-865-c8cd` require human disposition under #997 before pickup |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
@@ -165,7 +165,7 @@ Configuration lane
     → later bounded #676 children for keybindings and launch shell/CWD policy
 
 Shell-metadata decision
-  #686 active under @mahboobmonnamd; PR #991 only gates behavior that actually needs the proposed duration/trust expansion
+  #686 active under @mahboobmonnamd; PR #1022 only gates behavior that actually needs the proposed duration/trust expansion
 ```
 
 #993 is already active under @anulalbs / PR #1006 and is not available for pickup. #994 and #1000–#1004 provide independent Ready-for-Refinement lanes; #686 is already active under @mahboobmonnamd. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
@@ -189,7 +189,7 @@ Current contributor-ready M003 work is maintained in #999. Repeated references b
 
 **Active / already owned**
 - #993 — standard — human owner @anulalbs; production config/theme/font startup implementation in PR #1006, not available for pickup.
-- #686 — advanced/core — human owner @mahboobmonnamd; duration/trust decision in PR #991, not available for pickup.
+- #686 — advanced/core — human owner @mahboobmonnamd; duration/trust decision in PR #1022, not available for pickup.
 
 **Near-ready stacked work**
 - #923 / #934 after a refreshed consumable #922 head; merge need not wait for #922.
@@ -252,7 +252,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.4 #686 — shell-metadata refinement
 
-#686 is active decision/refinement work owned by @mahboobmonnamd through PR #991. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. PR #991 proposes the remaining duration boundary. Do not block unrelated Flow compositor or config work on #686. Only behavior that requires the proposed duration/trust expansion waits for its accepted ADR/spec update.
+#686 is active decision/refinement work owned by @mahboobmonnamd through PR #1022. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. PR #1022 proposes the remaining duration boundary. Do not block unrelated Flow compositor or config work on #686. Only behavior that requires the proposed duration/trust expansion waits for its accepted ADR/spec update.
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
