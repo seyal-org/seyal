@@ -42,7 +42,7 @@ Rules:
 2. SPEC-015 remains the sole privacy/revocation/forgetting and `RevocationFence` authority; this specification only consumes its current eligibility/fence contract at Action authorization and dispatch boundaries.
 3. Resource executors perform effects and return typed evidence; they do not own Action lifecycle.
 4. Harnesses, UI, MCP, CLI/SDK and workflows submit typed intents/requests but do not create competing state machines.
-5. External CLI-agent effects that bypass Seyal's dispatch boundary are never labeled `SeyalEnforced`.
+5. External CLI-agent effects that bypass the Agent Backend dispatch boundary are never labeled `BackendEnforced`.
 6. No Action persistence/executor/model/privacy work synchronously gates terminal I/O/rendering.
 
 ## 3. Action identity and immutable intent
@@ -198,7 +198,7 @@ If revocation linearizes first, the invocation must not cross the effect boundar
 
 If the irreversible effect boundary linearizes first, a later revocation cannot unsend, roll back or relabel the operation as prevented. The Action continues through normal result/reconciliation semantics while retained payload follows SPEC-015 cleanup policy.
 
-If the complete current `RevocationFence` cannot be established or the executor cannot enforce the required local privacy/effect ordering, fail closed before invocation; that executor cannot be treated as safely `SeyalEnforced` for the operation.
+If the complete current `RevocationFence` cannot be established or the executor cannot enforce the required local privacy/effect ordering, fail closed before invocation; that executor cannot be treated as safely `BackendEnforced` for the operation.
 
 A stale worker/dispatcher may submit observational evidence, but cannot cross the effect boundary or commit current Action state.
 
@@ -409,13 +409,13 @@ Action-specific composition rules are:
 6. Revocation after the irreversible effect boundary cannot be described as unsent, prevented or rolled back.
 7. Action payload/evidence retention and local cleanup follow SPEC-015/ADR-013 policy. Hashes/fingerprints do not reconstruct erased payload.
 8. If required payload is deleted before safe reconciliation, that prerequisite is reported unavailable; effect evidence is never fabricated.
-9. Provider deletion initiated or authorized by Seyal is itself an effect and therefore uses this same Action authority, while SPEC-015 remains authoritative for provider-deletion truthfulness and forgetting status.
+9. Provider deletion initiated through the Agent Backend is itself an effect and therefore uses this same Action authority, while SPEC-015 remains authoritative for provider-deletion truthfulness and forgetting status.
 
 ## 19. External-agent enforcement truthfulness
 
-Only operations crossing this Seyal-controlled Action boundary may be labeled `SeyalEnforced`.
+Only operations crossing this backend-controlled Action boundary may be labeled `BackendEnforced`.
 
-An independent external CLI agent may perform shell/network/tool effects outside this boundary. Seyal may observe/request those according to capabilities, but cannot claim this contract prevented or authorized them.
+An independent external CLI agent may perform shell/network/tool effects outside this boundary. The Agent Backend may observe/request those according to capabilities, but cannot claim this contract prevented or authorized them.
 
 ## 20. Duplicate/replay behavior
 
@@ -579,7 +579,7 @@ Concrete budgets are calibrated under #841/#680/#839 consumers before implementa
 
 ### External-agent truthfulness
 
-- direct external CLI effect bypassing Seyal Action -> never labeled `SeyalEnforced`.
+- direct external CLI effect bypassing Seyal Action -> never labeled `BackendEnforced`.
 
 ### Failure/resource
 
