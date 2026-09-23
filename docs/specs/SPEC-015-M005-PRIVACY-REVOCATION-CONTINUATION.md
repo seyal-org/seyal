@@ -490,7 +490,7 @@ Concrete budgets are calibrated under #681 before implementation readiness.
 ### Bundle/provider handoff
 
 - bundle built at vector `V`, revocation advances to `V+` before handoff fence -> send prevented;
-- revocation races final provider handoff -> deterministic winner at the Runtime/privacy serialization gate;
+- revocation races final provider handoff -> deterministic winner at the Agent Backend privacy serialization gate;
 - adapter cannot release bytes after fence invalidation or outside the one-shot exact payload/AgentRun binding;
 - adapter without enforceable handoff fence -> fail closed for revocable payload;
 - effectful tool cannot bypass ADR-014 via provider handoff path.
