@@ -67,7 +67,7 @@ ActionId
 
 `AgentRun` remains the durable agent-session authority under ADR-012. The Action authority owns only the lifecycle of the requested effect. It does not become a second AgentRun, PTY, process, resource or terminal-state authority.
 
-The Runtime/domain layer owns the durable Action transition authority. Existing resource authorities execute their own operations and return typed evidence/results. Examples include filesystem/Git/process/remote-service authorities. `TerminalExecution` remains the sole owner of its PTY/process/`TerminalState` semantics.
+Under ADR-016, the Agent Backend/domain layer owns the durable Action transition authority for agent-originated Action state. Existing resource authorities execute their own operations and return typed evidence/results. Examples include filesystem/Git/process/remote-service authorities. `TerminalExecution` remains the sole owner of its PTY/process/`TerminalState` semantics.
 
 Harnesses, adapters, provider clients, UI components and future CLI/SDK/MCP projections submit typed action intents or observations. They may not directly mutate durable Action state.
 
@@ -303,7 +303,7 @@ The downstream specification must make these cases deterministic:
 | stale dispatcher returns after replacement | result cannot overwrite current state unless accepted through the current reconciliation contract |
 | local persistence becomes repeatedly unavailable | fail closed for new affected dispatches, bound retry/backoff, surface degraded state; unrelated PTY/VT/render progress continues |
 
-Runtime restart never treats stale metadata as proof that an external process/operation is still live. It reconstructs durable identity and then reconciles liveness/effect status with the owning executor/resource authority.
+Agent Backend restart never treats stale metadata as proof that an external process/operation is still live. It reconstructs durable identity and then reconciles liveness/effect status with the owning executor/resource authority.
 
 ### 13. Result evidence is typed and provenance-bound
 
@@ -486,7 +486,7 @@ These costs are preferable to duplicate destructive effects, approval replay or 
 
 Reopen this ADR only if evidence shows a materially different permanent architecture is required, for example:
 
-- the Runtime/domain single Action transition authority cannot meet measured throughput/resource goals;
+- the Agent Backend/domain single Action transition authority cannot meet measured throughput/resource goals;
 - a new execution topology requires distributed fencing semantics not representable by the current generation model;
 - a widely used executor provides a stronger atomic transaction protocol that justifies a new generic abstraction;
 - accepted remote/team control architecture changes the trust/authorization boundary;
