@@ -29,7 +29,7 @@ It does not create a second AgentRun, PTY, resource, privacy/revocation, approva
 ## 2. Authority boundaries
 
 ```text
-WorkItem -> Attempt -> AgentRun       ADR-012 Runtime/domain authority
+WorkItem -> Attempt -> AgentRun       ADR-012 + ADR-016 Agent Backend/domain authority
 Attention / human Approval            #680 human-decision authority
 Context/privacy eligibility            ADR-013 + SPEC-015 privacy authority
 ActionId / ActionIntent / effect state ADR-014 Action authority
@@ -38,7 +38,7 @@ resource/executor                      owns the actual resource operation
 
 Rules:
 
-1. Runtime/domain layer is the sole durable Action transition writer.
+1. Under ADR-016, Agent Backend/domain is the sole durable Action transition writer for agent-originated Actions.
 2. SPEC-015 remains the sole privacy/revocation/forgetting and `RevocationFence` authority; this specification only consumes its current eligibility/fence contract at Action authorization and dispatch boundaries.
 3. Resource executors perform effects and return typed evidence; they do not own Action lifecycle.
 4. Harnesses, UI, MCP, CLI/SDK and workflows submit typed intents/requests but do not create competing state machines.
