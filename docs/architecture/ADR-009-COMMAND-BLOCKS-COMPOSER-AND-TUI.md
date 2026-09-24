@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration amendment proposed by #686; superseded predecessor PR #991; accepted on merge of PR #1022
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration amendment proposed 2026-09-19; accepted on merge of PR #1022
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration amendment proposed by #686; superseded predecessor PR #991; accepted on merge of PR #1022; prompt-anchor amendment proposed by #1041
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration amendment proposed 2026-09-19; accepted on merge of PR #1022; prompt-anchor amendment proposed 2026-09-24
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -942,3 +942,89 @@ After this amendment is accepted, update SPEC-008 and refine the separate
 implementation Issue before adding duration to Runtime, the wire protocol, or
 the client. Reopen #686 if a concrete M003 requirement appears for live CWD,
 Bash/fish integration, or trusted remote-shell Blocks.
+
+## 2026-09-24 amendment — Block prompt anchor and terminal-truth context line (#1041)
+
+**Status:** Proposed by #1041. Not normative until the amendment PR merges.
+Product code, wire changes and SPEC-008 edits stay out of scope until then.
+
+### Problem
+
+The approved Seyal Block Component visual (design document
+`ui/M003-BLOCK-COMPONENT-DESIGN.md`, added by PR #1044 for #1010) shows each Block as the shell's
+own prompt row(s) (the "context line"), then the command line, then output. All
+three are labelled terminal truth. This ADR defines a Block as the command's
+**output range** delimited by trusted `C`/`D`, and #1015 stamps that range at
+marker recognition so it excludes both the prompt/echo row and the next
+prompt's row. The 2026-09-19 amendment forbids synthesizing CWD/Git metadata,
+so Seyal chrome cannot recreate the context line. The only honest source is the
+prompt rows already in canonical history.
+
+### Decision
+
+Keep the Block output range exactly as defined (`[start_line, end_line]` from
+`C`/`D`). Add an optional, separately published **prompt anchor**:
+
+1. When the parser recognizes a nonce-trusted `A` marker, it stamps the
+   cursor's logical line at recognition time, as #1015 does for `C`/`D`. That
+   stamp is Runtime's `pending_prompt_line`.
+2. When a composer-correlated Block starts on the next trusted `C`, Runtime
+   stores `prompt_line = pending_prompt_line` only if
+   `pending_prompt_line < start_line` and no other trusted `A` or Block start
+   intervened. Otherwise `prompt_line` is `None`.
+3. `prompt_line` is immutable once recorded, survives detach/reattach, and
+   becomes `None` if bounded history evicts that line.
+4. Flow may present history `[prompt_line, start_line)` as the Block's context
+   region: the same canonical rows, drawn by the same Pane Metal compositor
+   into a second registered clip for that Block. It is never copied text,
+   never a second grid, and never part of "copy output".
+5. `None` means no context region. Clients never guess prompt rows by scanning
+   upward, and never render prompt text as AppKit.
+
+### Record and wire shape
+
+`BlockTimeline` gains `prompt_line: Option<LineId>` with explicit presence
+encoding. It is negotiated exactly like the duration amendment: a
+ClientHello/ServerHello capability bit selects the extended record. Without the
+bit, Runtime sends the existing shape. A capability without command Blocks is a
+protocol error. Mixed-version fallback composes after the duration and
+extended-key fallbacks in that fixed order, adding at most one attempt.
+Per-record growth is bounded to one optional `LineId`.
+
+### Invariants
+
+- One `TerminalExecution`, PTY and VT authority per Pane. The context region is
+  a view over canonical history.
+- Block output-range semantics are unchanged: line counts, copy output, and
+  running live tail.
+- There is no new trust source: only the authenticated `A` stamp can set
+  `prompt_line`. Forged or unauthenticated `A`, direct-input Blocks and
+  unsupported shells yield `None`.
+- There is no synchronous work on the PTY → VT → render hot path beyond storing
+  one already-computed line id at `A` recognition.
+
+### Edge cases that must be specified by tests
+
+Multi-line prompts (for example a two-line starship prompt: both rows
+included); `PROMPT_SP` and partial-line output; transient/right prompts;
+`clear` or `reset` between `A` and `C`; `A`, `C` and `D` parsed in one PTY
+read; prompt row evicted from bounded history; reattach after completion;
+interrupted multiline submission (no `C`); nested shell or `exec` replacement.
+
+### Alternatives considered
+
+- **Widen the Block range to start at `A`.** Rejected: it breaks the
+  output-range contract, copy-output semantics and #1015.
+- **Recreate the context line from shell metadata or OSC 7.** Rejected by the
+  2026-09-19 metadata boundary.
+- **Client scans upward from `start_line` for the prompt.** Rejected: it is
+  prompt scraping, is not trusted, and fails for multi-line prompts and cleared
+  screens.
+- **No context line.** Rejected by the owner: it diverges from the approved
+  visual.
+
+### Follow-up after acceptance
+
+Update SPEC-008 §5 (context region), `M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §7
+(Block model gains a terminal-truth context line), and mark #1042 Ready. #1010
+removes its staged command label only after #1042 lands.
