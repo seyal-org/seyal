@@ -14,6 +14,12 @@ struct NativeTheme {
     let success: NSColor
     let warning: NSColor
     let danger: NSColor
+    /// Block Component roles (#1010), resolved by Rust.
+    let blockFocus: NSColor
+    let blockSeamRest: NSColor
+    let blockSeamHover: NSColor
+    let blockSuccess: NSColor
+    let blockDanger: NSColor
     let appearance: NSAppearance
     let uiFontSize: CGFloat
     let terminalFontSize: CGFloat
@@ -72,6 +78,9 @@ enum NativeThemeRealization {
         let accent = color(packed.accent)
         let container = color(packed.container)
         let resolvedLight = packed.appearance == 1
+        // Block Component roles (#1010) remain on seyal_app_theme; both paths
+        // resolve through Rust process UI configuration (ADR-015 / #993).
+        let blockPacked = seyal_app_theme(packed.appearance)
         return NativeTheme(
             canvas: canvas,
             container: container,
@@ -85,6 +94,12 @@ enum NativeThemeRealization {
             success: NSColor(srgbRed: 0.22, green: 0.83, blue: 0.62, alpha: 1),
             warning: NSColor(srgbRed: 0.96, green: 0.65, blue: 0.14, alpha: 1),
             danger: NSColor(srgbRed: 0.98, green: 0.44, blue: 0.40, alpha: 1),
+            // Block roles from Rust seyal_app_theme (same resolve_process_visual as #993).
+            blockFocus: color(blockPacked.block_focus),
+            blockSeamRest: color(blockPacked.seam_rest),
+            blockSeamHover: color(blockPacked.seam_hover),
+            blockSuccess: color(blockPacked.success),
+            blockDanger: color(blockPacked.danger),
             appearance: resolvedLight
                 ? NSAppearance(named: .aqua)!
                 : NSAppearance(named: .darkAqua)!,

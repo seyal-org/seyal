@@ -67,6 +67,8 @@ pub enum AppError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     UnknownBlock,
+    /// Rerun refused: the Block's command is still running.
+    BlockRunning,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -247,6 +249,13 @@ pub enum AppAction {
     },
     ClearBlockSelection {
         fence: AppFence,
+    },
+    /// Load a focused-Pane Block's command as the composer draft so the host
+    /// submits it through the ordinary composer path (#1010 Rerun).
+    RerunBlock {
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
     },
 }
 
@@ -521,6 +530,11 @@ impl ApplicationRoot {
                 attention,
             } => self.replace_chrome(fence, agents, attention),
             AppAction::SelectBlock { fence, id } => self.select_block(fence, id),
+            AppAction::RerunBlock {
+                fence,
+                id,
+                composer_epoch,
+            } => self.rerun_block(fence, id, composer_epoch),
             AppAction::ClearBlockSelection { fence } => {
                 self.require_fence(fence)?;
                 let shell = self.shell.snapshot();
@@ -834,6 +848,31 @@ impl ApplicationRoot {
             .apply(ChromeAction::SelectBlock { id, blocks }, &shell)
             .map(|_| ())
             .map_err(chrome_error)
+    }
+
+    fn rerun_block(
+        &mut self,
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    ) -> Result<(), AppError> {
+        self.require_fence(fence)?;
+        let block = self
+            .focused_blocks()
+            .into_iter()
+            .find(|block| block.id == id)
+            .ok_or(AppError::UnknownBlock)?;
+        if block.state == crate::composer::BlockPresentationState::Running {
+            return Err(AppError::BlockRunning);
+        }
+        self.composer
+            .apply(ComposerAction::SetDraft {
+                pane: fence.pane,
+                text: block.command,
+                epoch: composer_epoch,
+            })
+            .map(|_| ())
+            .map_err(composer_error)
     }
 
     /// History recall is fenced like every other pane-sensitive composer
@@ -2117,6 +2156,83 @@ mod tests {
             .inspector_rows
             .iter()
             .all(|row| row.section != "Block"));
+    }
+
+    #[test]
+    fn rerun_block_loads_the_runtime_command_and_fails_closed() {
+        use seyal_core::BlockId;
+
+        let mut root = ApplicationRoot::new();
+        let done = BlockId::from_bytes([0x61; 16]);
+        let running = BlockId::from_bytes([0x62; 16]);
+        root.apply(AppAction::Bind {
+            fence: root.fence(),
+            evidence: evidence(8, true, false),
+        })
+        .unwrap();
+        root.apply(AppAction::ApplyRuntimeBlocks {
+            fence: root.fence(),
+            records: vec![
+                RuntimeBlockRecord {
+                    id: done,
+                    command: "cargo test -p seyal-client".into(),
+                    start_line: 1,
+                    end_line: Some(4),
+                    running: false,
+                    exit_status: Some(1),
+                },
+                RuntimeBlockRecord {
+                    id: running,
+                    command: "sleep 30".into(),
+                    start_line: 5,
+                    end_line: None,
+                    running: true,
+                    exit_status: None,
+                },
+            ],
+        })
+        .unwrap();
+        let epoch = root.snapshot().composer.unwrap().epoch;
+
+        assert_eq!(
+            root.apply(AppAction::RerunBlock {
+                fence: root.fence(),
+                id: BlockId::from_bytes([0x63; 16]),
+                composer_epoch: epoch,
+            }),
+            Err(AppError::UnknownBlock)
+        );
+        assert_eq!(
+            root.apply(AppAction::RerunBlock {
+                fence: root.fence(),
+                id: running,
+                composer_epoch: epoch,
+            }),
+            Err(AppError::BlockRunning)
+        );
+        let mut stale = root.fence();
+        stale.execution = Some(ExecutionId::from_bytes([0x99; 16]));
+        assert_eq!(
+            root.apply(AppAction::RerunBlock {
+                fence: stale,
+                id: done,
+                composer_epoch: epoch,
+            }),
+            Err(AppError::StaleExecution)
+        );
+        assert_eq!(root.snapshot().composer.unwrap().draft, "");
+
+        root.apply(AppAction::RerunBlock {
+            fence: root.fence(),
+            id: done,
+            composer_epoch: epoch,
+        })
+        .unwrap();
+        assert_eq!(
+            root.snapshot().composer.unwrap().draft,
+            "cargo test -p seyal-client",
+            "Rerun loads the Runtime-published command, never host text"
+        );
     }
 
     #[test]

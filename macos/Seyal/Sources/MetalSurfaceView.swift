@@ -429,6 +429,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var onFrameChanged: ((NativePreparedFrame) -> Void)?
   var onTimelineChanged: (() -> Void)?
   var onHistoryRangeChanged: ((NativeHistoryRange) -> Void)?
+  var onHistoryCopy: ((UInt64, String) -> Void)?
   var onComposerResultChanged: ((NativeComposerResult) -> Void)?
   var onComposerStatusChanged: ((NativeComposerStatus) -> Void)?
 
@@ -494,6 +495,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
     bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
+  }
+
+  /// Block Copy (#1010): Rust-built text for one Block arrives on
+  /// `onHistoryCopy`; it is never rendered.
+  func requestHistoryCopy(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
+    guard let bridge else { return -10 }
+    bridge.onHistoryCopy = { [weak self] blockID, text in self?.onHistoryCopy?(blockID, text) }
+    return bridge.requestHistoryCopy(startLine: startLine, endLine: endLine, blockID: blockID)
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {

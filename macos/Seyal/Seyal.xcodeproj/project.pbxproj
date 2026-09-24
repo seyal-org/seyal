@@ -32,10 +32,13 @@
 		A10000000000000000000043 /* RendererPresentationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* RendererPresentationPlan.swift */; };
 		A10000000000000000000044 /* ComposerBridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ComposerBridgeView.swift */; };
 		A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000047 /* ComposerHistoryOverlayView.swift */; };
+		A10000000000000000000060 /* CommandBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000060 /* CommandBlockView.swift */; };
 		A10000000000000000000045 /* ProductChromeHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* ProductChromeHostView.swift */; };
 		A10000000000000000000046 /* NativeThemeRealization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000046 /* NativeThemeRealization.swift */; };
 		C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* SeyalHostComponentTests.swift */; };
+		C10000000000000000000020 /* SeyalBlockComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000020 /* SeyalBlockComponentTests.swift */; };
 		C10000000000000000000002 /* SeyalHostUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* SeyalHostUITests.swift */; };
+		C10000000000000000000021 /* SeyalBlockComponentUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000021 /* SeyalBlockComponentUITests.swift */; };
 		C10000000000000000000005 /* SeyalHostHistoryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* SeyalHostHistoryUITests.swift */; };
 		C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */; };
 		C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007 /* IsolatedHostedRuntime.swift */; };
@@ -71,7 +74,9 @@
 		C20000000000000000000001 /* SeyalTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SeyalTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000000000000000000002 /* SeyalUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SeyalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000000000000000000003 /* SeyalHostComponentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostComponentTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000020 /* SeyalBlockComponentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalBlockComponentTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000004 /* SeyalHostUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostUITests.swift; sourceTree = "<group>"; };
+		C20000000000000000000021 /* SeyalBlockComponentUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalBlockComponentUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000005 /* SeyalHostHistoryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostHistoryUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostWorkloadUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000007 /* IsolatedHostedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedHostedRuntime.swift; sourceTree = "<group>"; };
@@ -95,6 +100,7 @@
 		A20000000000000000000043 /* RendererPresentationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererPresentationPlan.swift; sourceTree = "<group>"; };
 		A20000000000000000000044 /* ComposerBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBridgeView.swift; sourceTree = "<group>"; };
 		A20000000000000000000047 /* ComposerHistoryOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHistoryOverlayView.swift; sourceTree = "<group>"; };
+		A20000000000000000000060 /* CommandBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBlockView.swift; sourceTree = "<group>"; };
 		A20000000000000000000045 /* ProductChromeHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeHostView.swift; sourceTree = "<group>"; };
 		A20000000000000000000046 /* NativeThemeRealization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeThemeRealization.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -151,6 +157,7 @@
 				A20000000000000000000045 /* ProductChromeHostView.swift */,
 				A20000000000000000000044 /* ComposerBridgeView.swift */,
 				A20000000000000000000047 /* ComposerHistoryOverlayView.swift */,
+				A20000000000000000000060 /* CommandBlockView.swift */,
 				A20000000000000000000046 /* NativeThemeRealization.swift */,
 				A20000000000000000000042 /* InteractiveMetalSurfaceView.swift */,
 				A20000000000000000000043 /* RendererPresentationPlan.swift */,
@@ -207,6 +214,7 @@
 			isa = PBXGroup;
 			children = (
 				C20000000000000000000003 /* SeyalHostComponentTests.swift */,
+				C20000000000000000000020 /* SeyalBlockComponentTests.swift */,
 			);
 			path = SeyalTests;
 			sourceTree = "<group>";
@@ -218,6 +226,7 @@
 				C20000000000000000000005 /* SeyalHostHistoryUITests.swift */,
 				C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */,
 				C20000000000000000000007 /* IsolatedHostedRuntime.swift */,
+				C20000000000000000000021 /* SeyalBlockComponentUITests.swift */,
 			);
 			path = SeyalUITests;
 			sourceTree = "<group>";
@@ -342,6 +351,7 @@
 				A10000000000000000000045 /* ProductChromeHostView.swift in Sources */,
 				A10000000000000000000044 /* ComposerBridgeView.swift in Sources */,
 				A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */,
+				A10000000000000000000060 /* CommandBlockView.swift in Sources */,
 				A10000000000000000000046 /* NativeThemeRealization.swift in Sources */,
 				A10000000000000000000042 /* InteractiveMetalSurfaceView.swift in Sources */,
 				A10000000000000000000043 /* RendererPresentationPlan.swift in Sources */,
@@ -381,6 +391,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */,
+				C10000000000000000000020 /* SeyalBlockComponentTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -392,6 +403,7 @@
 				C10000000000000000000005 /* SeyalHostHistoryUITests.swift in Sources */,
 				C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */,
 				C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */,
+				C10000000000000000000021 /* SeyalBlockComponentUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

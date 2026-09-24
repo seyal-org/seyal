@@ -96,7 +96,14 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /*
+     * Block Rerun (#1010). target_execution_lo/hi = BlockId,
+     * target_pty_generation = composer epoch. Rust loads that focused-Pane
+     * Block's command as the composer draft; the host then submits through
+     * the ordinary composer path. Error 30 = UnknownBlock, 33 = BlockRunning.
+     */
+    SEYAL_APP_ACTION_RERUN_BLOCK = 53
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -282,6 +289,8 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_UNKNOWN 4u
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
+/* Rerun offered: Block not running and composer available (#1010). */
+#define SEYAL_APP_BLOCK_CAN_RERUN 16u
 
 typedef struct SeyalAppComposer {
     uint16_t version;
@@ -351,6 +360,12 @@ typedef struct SeyalAppTheme {
     uint32_t accent;
     uint16_t appearance;
     uint16_t reserved;
+    /* Block Component roles (#1010), packed RGBA like the fields above. */
+    uint32_t block_focus;
+    uint32_t seam_rest;
+    uint32_t seam_hover;
+    uint32_t success;
+    uint32_t danger;
 } SeyalAppTheme;
 
 /*

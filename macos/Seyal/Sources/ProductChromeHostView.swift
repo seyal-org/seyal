@@ -47,6 +47,9 @@ final class ProductChromeHostView: NSView {
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     private var chromeNeedsReconcile = false
     private var blockCards: [UInt64: CommandBlockView] = [:]
+    /// Pending Block Copy intents (#1010), keyed by Block; the text is built
+    /// by Rust from the Block's history and arrives on `onHistoryCopy`.
+    private var pendingBlockCopies: [UInt64: (kind: CommandBlockAction, command: String)] = [:]
     private var transcriptFrameRevision: UInt64 = 0
     private var paneFollowsTranscript: [NSLayoutConstraint] = []
     private var paneFillsCenter: [NSLayoutConstraint] = []
@@ -132,8 +135,9 @@ final class ProductChromeHostView: NSView {
 
         blocks.orientation = .vertical
         blocks.alignment = .width
-        blocks.spacing = 22
-        blocks.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        // M003-BLOCK-COMPONENT-DESIGN §3: block.gap 8 pt; Blocks inset from the Pane.
+        blocks.spacing = 8
+        blocks.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         blocks.translatesAutoresizingMaskIntoConstraints = false
         expose(blocks, identifier: "seyal-blocks")
         composer.setAccessibilityIdentifier("seyal-composer")
@@ -312,6 +316,9 @@ final class ProductChromeHostView: NSView {
             self?.projectRuntimeBlocks()
             self?.reconcileChrome()
             self?.refreshRunningBlockOutput()
+        }
+        pane.inputSurface.onHistoryCopy = { [weak self] blockID, text in
+            self?.completeBlockCopy(blockID: blockID, output: text)
         }
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
             self?.applyHistoryRange(range)
@@ -636,27 +643,28 @@ final class ProductChromeHostView: NSView {
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let span = seyal_app_block_span(pane.appHandle, UInt32(index))
-            let title = copyUTF8(row.title, row.title_len) ?? "command"
-            let detail = copyUTF8(row.detail, row.detail_len) ?? ""
-            let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
-            let prompt = copyUTF8(promptRow.title, promptRow.title_len) ?? "$"
+            let title = copyUTF8(row.title, row.title_len) ?? ""
             let blockID = row.id_lo
             let lines = outputLineCount(span)
             let card = CommandBlockView(
-                prompt: prompt,
-                title: title,
-                detail: detail,
-                state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                row: CommandBlockRow(
+                    command: title,
+                    state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                    isSelected: row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0,
+                    canRerun: row.flags & UInt16(SEYAL_APP_BLOCK_CAN_RERUN) != 0
+                ),
                 cellHeight: cellHeight,
                 lines: lines
             )
             card.setAccessibilityIdentifier("seyal-block-\(index)")
             card.body.setAccessibilityIdentifier("seyal-block-\(index)-body")
-            card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi
             card.onSelect = { [weak self] selected in
                 self?.selectBlock(idLo: idLo, idHi: idHi, deselect: selected)
+            }
+            card.onAction = { [weak self] action in
+                self?.performBlockAction(action, idLo: idLo, idHi: idHi, command: title, span: span)
             }
             blocks.addArrangedSubview(card)
             if blockID != 0 {
@@ -672,6 +680,61 @@ final class ProductChromeHostView: NSView {
             scrollTranscriptToLiveEnd()
         }
         lastBlockCount = count
+    }
+
+    private func performBlockAction(
+        _ action: CommandBlockAction,
+        idLo: UInt64,
+        idHi: UInt64,
+        command: String,
+        span: SeyalAppBlockSpan
+    ) {
+        switch action {
+        case .copyCommand:
+            writePasteboard(command)
+        case .copyOutput, .copyCommandAndOutput:
+            guard span.start_line > 0 else {
+                if action == .copyCommandAndOutput { writePasteboard(command) }
+                return
+            }
+            let end = span.end_line >= span.start_line ? span.end_line : span.start_line &+ 511
+            pendingBlockCopies[idLo] = (action, command)
+            if pane.inputSurface.requestHistoryCopy(
+                startLine: span.start_line, endLine: end, blockID: idLo) != 0
+            {
+                pendingBlockCopies.removeValue(forKey: idLo)
+            }
+        case .rerun:
+            let snapshot = seyal_app_snapshot(pane.appHandle)
+            var rerun = SeyalAppAction()
+            rerun.version = UInt16(SEYAL_APP_ABI_VERSION)
+            rerun.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            rerun.kind = UInt16(SEYAL_APP_ACTION_RERUN_BLOCK.rawValue)
+            rerun.applySnapshotFence(snapshot)
+            rerun.target_execution_lo = idLo
+            rerun.target_execution_hi = idHi
+            rerun.target_pty_generation = seyal_app_composer(pane.appHandle).epoch
+            guard seyal_app_apply(pane.appHandle, &rerun) == 0 else { return }
+            composer.submitRustDraft()
+        case .inspect:
+            selectBlock(idLo: idLo, idHi: idHi, deselect: false)
+        }
+    }
+
+    private func completeBlockCopy(blockID: UInt64, output: String) {
+        guard let pending = pendingBlockCopies.removeValue(forKey: blockID) else { return }
+        switch pending.kind {
+        case .copyCommandAndOutput:
+            writePasteboard(output.isEmpty ? pending.command : pending.command + "\n" + output)
+        default:
+            writePasteboard(output)
+        }
+    }
+
+    private func writePasteboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     private func outputLineCount(_ span: SeyalAppBlockSpan) -> Int {
@@ -1104,141 +1167,6 @@ private final class IdentityButton: NSButton {
     var kind: UInt16 = 0
     var idLo: UInt64 = 0
     var idHi: UInt64 = 0
-}
-
-private final class CommandBlockView: NSView {
-    let body = NSView()
-    /// Host click on the header; `true` when the card is already selected.
-    var onSelect: ((Bool) -> Void)?
-    /// Projected from the Rust block row's SEYAL_APP_BLOCK_SELECTED flag.
-    var isSelected = false {
-        didSet {
-            setAccessibilityValue(isSelected ? "selected" : "")
-            if let theme { apply(theme: theme) }
-        }
-    }
-    private let header = NSView()
-    private let prompt = NSTextField(labelWithString: "")
-    private let command = NSTextField(labelWithString: "")
-    private let status = NSTextField(labelWithString: "")
-    private let seam = NSView()
-    private let state: UInt16
-    private var bodyHeight: NSLayoutConstraint!
-    private var theme: NativeTheme?
-
-    init(
-        prompt: String,
-        title: String,
-        detail: String,
-        state: UInt16,
-        cellHeight: CGFloat,
-        lines: Int
-    ) {
-        self.state = state
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = false
-        setAccessibilityElement(true)
-        setAccessibilityRole(.group)
-        self.prompt.stringValue = prompt
-        self.prompt.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        self.prompt.setContentHuggingPriority(.required, for: .horizontal)
-        self.prompt.translatesAutoresizingMaskIntoConstraints = false
-        command.stringValue = title.isEmpty ? "command" : title
-        setAccessibilityLabel(command.stringValue)
-        command.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        command.lineBreakMode = .byTruncatingTail
-        command.translatesAutoresizingMaskIntoConstraints = false
-        status.stringValue = detail
-        status.isHidden = detail.isEmpty
-        status.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        status.tag = 2
-        status.setContentHuggingPriority(.required, for: .horizontal)
-        status.translatesAutoresizingMaskIntoConstraints = false
-        seam.translatesAutoresizingMaskIntoConstraints = false
-        seam.wantsLayer = true
-        header.translatesAutoresizingMaskIntoConstraints = false
-        body.translatesAutoresizingMaskIntoConstraints = false
-        body.wantsLayer = true
-        body.layer?.isOpaque = false
-        body.layer?.backgroundColor = NSColor.clear.cgColor
-        body.setAccessibilityElement(true)
-        body.setAccessibilityRole(.group)
-        header.addSubview(self.prompt)
-        header.addSubview(command)
-        header.addSubview(status)
-        header.wantsLayer = true
-        header.layer?.cornerRadius = 6
-        addSubview(header)
-        addSubview(body)
-        addSubview(seam)
-        bodyHeight = body.heightAnchor.constraint(
-            equalToConstant: max(cellHeight, 1) * CGFloat(max(lines, 1))
-        )
-        NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: trailingAnchor),
-            header.topAnchor.constraint(equalTo: topAnchor),
-            header.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
-            self.prompt.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            self.prompt.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            command.leadingAnchor.constraint(equalTo: self.prompt.trailingAnchor, constant: 8),
-            command.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            status.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            status.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            command.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -12),
-            body.leadingAnchor.constraint(equalTo: command.leadingAnchor),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor),
-            body.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
-            bodyHeight,
-            seam.leadingAnchor.constraint(equalTo: leadingAnchor),
-            seam.trailingAnchor.constraint(equalTo: trailingAnchor),
-            seam.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 12),
-            seam.bottomAnchor.constraint(equalTo: bottomAnchor),
-            seam.heightAnchor.constraint(equalToConstant: 1),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("CommandBlockView is programmatic")
-    }
-
-    func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
-        bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
-    }
-
-    /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
-    /// own the click. XCUI (and a user) hit the card center, which is the body
-    /// once output exists — a header-only gesture never sees that click.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        onSelect?(isSelected)
-    }
-
-    func apply(theme: NativeTheme) {
-        self.theme = theme
-        body.layer?.isOpaque = false
-        body.layer?.backgroundColor = NSColor.clear.cgColor
-        prompt.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .medium)
-        command.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .medium)
-        status.font = .monospacedSystemFont(ofSize: max(theme.terminalFontSize - 2, 9), weight: .regular)
-        prompt.textColor = theme.accent
-        command.textColor = theme.accent
-        header.layer?.backgroundColor = isSelected
-            ? theme.accent.withAlphaComponent(0.14).cgColor
-            : NSColor.clear.cgColor
-        if state == UInt16(SEYAL_APP_BLOCK_STATE_FAILED) {
-            status.textColor = theme.danger
-            seam.layer?.backgroundColor = theme.danger.withAlphaComponent(0.45).cgColor
-        } else {
-            status.textColor = theme.muted
-            seam.layer?.backgroundColor = theme.seam.cgColor
-        }
-    }
 }
 
 private func copyUTF8(_ pointer: UnsafePointer<UInt8>?, _ length: UInt32) -> String? {

@@ -47,6 +47,8 @@ const ROW_SELECTED: u16 = 1;
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
 const BLOCK_STATE_MASK: u16 = 7;
 const BLOCK_SELECTED: u16 = 8;
+/// Rerun is offered: the Block is not running and the composer is available.
+const BLOCK_CAN_RERUN: u16 = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -855,6 +857,13 @@ pub struct SeyalAppTheme {
     pub accent: u32,
     pub appearance: u16,
     pub reserved: u16,
+    /// Block Component roles (#1010): focus border, rest/hover seam and
+    /// status colors. Resolved here so the host never invents palette values.
+    pub block_focus: u32,
+    pub seam_rest: u32,
+    pub seam_hover: u32,
+    pub success: u32,
+    pub danger: u32,
 }
 
 /// Resolved portable visual snapshot for the thin AppKit host (#993).
@@ -960,6 +969,11 @@ pub extern "C" fn seyal_app_theme(appearance: u16) -> SeyalAppTheme {
         accent: pack_srgb(visual.colors.get(ColorRole::Focus)),
         appearance: resolved_appearance_code(visual.appearance),
         reserved: 0,
+        block_focus: pack_srgb(visual.colors.get(ColorRole::BlockFocus)),
+        seam_rest: pack_srgb(visual.colors.get(ColorRole::SeamRest)),
+        seam_hover: pack_srgb(visual.colors.get(ColorRole::SeamHover)),
+        success: pack_srgb(visual.colors.get(ColorRole::Success)),
+        danger: pack_srgb(visual.colors.get(ColorRole::Danger)),
     }
 }
 
@@ -1298,6 +1312,14 @@ fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
         }),
         46 => Ok(AppAction::ClearBlockSelection { fence }),
+        53 => Ok(AppAction::RerunBlock {
+            fence,
+            id: BlockId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            composer_epoch: action.target_pty_generation,
+        }),
         47 => Ok(AppAction::OpenPalette { fence }),
         48 => Ok(AppAction::SetPaletteQuery {
             fence,
@@ -1617,6 +1639,7 @@ fn encode_block_rows(state: &mut AppHandle) {
         return;
     };
     let selected = snapshot.chrome.selected_block;
+    let composer_available = composer.mode == crate::composer::ComposerMode::Available;
     for (index, block) in composer.blocks.iter().enumerate() {
         let mut flags: u16 = match block.state {
             crate::composer::BlockPresentationState::Running => 1,
@@ -1627,6 +1650,9 @@ fn encode_block_rows(state: &mut AppHandle) {
         debug_assert_eq!(flags & BLOCK_STATE_MASK, flags);
         if selected == Some(block.id) {
             flags |= BLOCK_SELECTED;
+        }
+        if composer_available && block.state != crate::composer::BlockPresentationState::Running {
+            flags |= BLOCK_CAN_RERUN;
         }
         push_row(
             &mut state.block_rows,
@@ -1811,6 +1837,7 @@ fn error_number(error: AppError) -> i32 {
         AppError::UnknownBlock => 30,
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
+        AppError::BlockRunning => 33,
     }
 }
 
@@ -1859,7 +1886,7 @@ mod tests {
         assert_eq!(size_of::<SeyalAppShell>(), 64);
         assert_eq!(size_of::<SeyalAppRow>(), 56);
         assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
-        assert_eq!(size_of::<SeyalAppTheme>(), 16);
+        assert_eq!(size_of::<SeyalAppTheme>(), 36);
         assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);
         assert_eq!(offset_of!(SeyalAppComposerHistory, query_utf8), 16);
     }
@@ -2510,6 +2537,138 @@ mod tests {
         assert!(!projected.running);
         assert_eq!(projected.exit_status, Some(1));
         assert_eq!(projected.end_line, Some(4));
+    }
+
+    #[test]
+    fn block_rerun_ffi_projects_availability_and_loads_draft() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 1,
+            target_execution_hi: 0,
+            target_attachment_lo: 2,
+            target_attachment_hi: 0,
+            target_pty_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        let fence = APPS.with(|apps| apps.borrow().get(&handle).unwrap().root.fence());
+        let seed = |available: bool| {
+            APPS.with(|apps| {
+                let mut apps = apps.borrow_mut();
+                let root = &mut apps.get_mut(&handle).unwrap().root;
+                root.apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: vec![
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x51; 16]),
+                            command: "ls /".into(),
+                            start_line: 1,
+                            end_line: Some(3),
+                            running: false,
+                            exit_status: Some(0),
+                        },
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x61; 16]),
+                            command: "sleep 9".into(),
+                            start_line: 4,
+                            end_line: None,
+                            running: true,
+                            exit_status: None,
+                        },
+                    ],
+                })
+                .unwrap();
+                if available {
+                    root.apply(AppAction::ApplyRuntimeComposerStatus {
+                        fence,
+                        eligibility: Some(RuntimeComposerEligibility::Available),
+                        revision: 1,
+                    })
+                    .unwrap();
+                }
+            });
+        };
+
+        // Composer busy: Rerun is not offered for any Block.
+        seed(false);
+        assert_eq!(seyal_app_block_row(handle, 0).flags & BLOCK_CAN_RERUN, 0);
+
+        seed(true);
+        let done = seyal_app_block_row(handle, 0);
+        let running = seyal_app_block_row(handle, 1);
+        assert_eq!(done.flags & BLOCK_CAN_RERUN, BLOCK_CAN_RERUN);
+        assert_eq!(
+            running.flags & BLOCK_CAN_RERUN,
+            0,
+            "running Block never offers Rerun"
+        );
+
+        let bound = seyal_app_snapshot(handle);
+        let mut rerun = identity_fence(53, &bound);
+        rerun.target_execution_lo = running.id_lo;
+        rerun.target_execution_hi = running.id_hi;
+        rerun.target_pty_generation = seyal_app_composer(handle).epoch;
+        assert_eq!(unsafe { seyal_app_apply(handle, &rerun) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 33);
+
+        rerun.target_execution_lo = done.id_lo;
+        rerun.target_execution_hi = done.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &rerun) }, 0);
+        let composer = seyal_app_composer(handle);
+        let draft =
+            unsafe { slice::from_raw_parts(composer.draft_utf8, composer.draft_utf8_len as usize) };
+        assert_eq!(draft, b"ls /");
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn theme_packs_block_component_roles() {
+        use crate::theme::{canonical, AccessibilitySignals, ColorRole, ResolvedAppearance};
+        for (appearance, resolved) in [
+            (0, ResolvedAppearance::Dark),
+            (1, ResolvedAppearance::Light),
+        ] {
+            let theme = seyal_app_theme(appearance);
+            let visual = canonical(resolved, AccessibilitySignals::default());
+            assert_eq!(
+                theme.block_focus,
+                pack_srgb(visual.colors.get(ColorRole::BlockFocus))
+            );
+            assert_eq!(
+                theme.seam_rest,
+                pack_srgb(visual.colors.get(ColorRole::SeamRest))
+            );
+            assert_eq!(
+                theme.seam_hover,
+                pack_srgb(visual.colors.get(ColorRole::SeamHover))
+            );
+            assert_eq!(
+                theme.success,
+                pack_srgb(visual.colors.get(ColorRole::Success))
+            );
+            assert_eq!(
+                theme.danger,
+                pack_srgb(visual.colors.get(ColorRole::Danger))
+            );
+            assert_ne!(
+                theme.block_focus, theme.accent,
+                "Block focus is its own role"
+            );
+        }
     }
 
     #[test]

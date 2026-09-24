@@ -153,6 +153,28 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
     .unwrap_or_else(SeyalHistorySidecar::empty)
 }
 
+/// Plain UTF-8 text of a held history response for Block Copy (#1010). The
+/// pointer stays valid until the next call or disconnect; the host copies it
+/// to the pasteboard before returning to the run loop. `len == 0` when the
+/// response is not held or has no text.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_text_for(
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    with_active_client_mut(
+        |client| match client.history_range_text(block_id, request_id) {
+            Some(text) => SeyalHistorySidecar {
+                bytes: text.as_ptr(),
+                len: text.len() as u32,
+                reserved: 0,
+            },
+            None => SeyalHistorySidecar::empty(),
+        },
+    )
+    .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
 /// Consumes a previously peeked response after its rows have been copied by
 /// the native consumer. Identity is always the typed block/request pair.
 #[unsafe(no_mangle)]
