@@ -1,4 +1,4 @@
-# SPEC-023 — M003 local keybinding schema, conflicts and routing
+# SPEC-024 — M003 local keybinding schema, conflicts and routing
 
 - **Status:** Proposed (refinement output of #1002; not an implemented-behavior claim; not Accepted)
 - **Date:** 2026-09-25
