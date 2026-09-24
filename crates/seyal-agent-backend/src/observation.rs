@@ -97,37 +97,51 @@ impl ObservationAuthority {
 
         match &observation.kind {
             HostObservationKind::ObservationDisconnected => {
-                self.liveness
-                    .insert(observation.run_id, RunLiveness::ObservationLost);
+                self.set_liveness(observation.run_id, RunLiveness::ObservationLost);
             }
             HostObservationKind::ObservationReconnected => {
                 if self.liveness(observation.run_id) == RunLiveness::ObservationLost {
-                    self.liveness
-                        .insert(observation.run_id, RunLiveness::ScriptedLive);
+                    self.set_liveness(observation.run_id, RunLiveness::ScriptedLive);
                 }
             }
             HostObservationKind::HarnessCrashed | HostObservationKind::UnknownLiveness => {
-                self.liveness
-                    .insert(observation.run_id, RunLiveness::UnknownAfterCrash);
+                self.set_liveness(observation.run_id, RunLiveness::UnknownAfterCrash);
             }
             HostObservationKind::Delayed { .. } => {
-                self.liveness
-                    .entry(observation.run_id)
-                    .or_insert(RunLiveness::ScriptedLive);
+                if !self.liveness.contains_key(&observation.run_id) {
+                    self.set_liveness(observation.run_id, RunLiveness::ScriptedLive);
+                }
             }
             HostObservationKind::KnownSuccess | HostObservationKind::KnownFailure => {
-                self.liveness
-                    .insert(observation.run_id, RunLiveness::KnownTerminated);
+                self.set_liveness(observation.run_id, RunLiveness::KnownTerminated);
             }
-            HostObservationKind::EffectUnknown => {}
+            HostObservationKind::Result(_) | HostObservationKind::Output(_) => {
+                self.effects_performed += 1;
+                if !self.liveness.contains_key(&observation.run_id) {
+                    self.set_liveness(observation.run_id, RunLiveness::ScriptedLive);
+                }
+            }
+            HostObservationKind::EffectUnknown => {
+                // Deliberately does not increment effects_performed: the
+                // unknown-effect path must prove zero side effects.
+            }
             _ => {
-                self.liveness
-                    .entry(observation.run_id)
-                    .or_insert(RunLiveness::ScriptedLive);
+                if !self.liveness.contains_key(&observation.run_id) {
+                    self.set_liveness(observation.run_id, RunLiveness::ScriptedLive);
+                }
             }
         }
         self.applied.insert(key, observation.kind);
         Ok(())
+    }
+
+    /// Terminal liveness is sticky: disconnect/crash/unknown must not reopen
+    /// a run that already reached KnownTerminated.
+    fn set_liveness(&mut self, run_id: AgentRunId, next: RunLiveness) {
+        if self.liveness(run_id) == RunLiveness::KnownTerminated {
+            return;
+        }
+        self.liveness.insert(run_id, next);
     }
 }
 
@@ -294,6 +308,58 @@ mod tests {
 
         let (unknown, run) = apply_script(UNKNOWN_LIVENESS);
         assert_eq!(unknown.liveness(run), RunLiveness::UnknownAfterCrash);
+    }
+
+    #[test]
+    fn known_terminated_liveness_is_sticky_against_disconnect_and_crash() {
+        let (mut authority, run, generation) = authority_with_run();
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 1,
+                kind: HostObservationKind::KnownSuccess,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+        for (ordinal, kind) in [
+            (2, HostObservationKind::ObservationDisconnected),
+            (3, HostObservationKind::HarnessCrashed),
+            (4, HostObservationKind::UnknownLiveness),
+        ] {
+            authority
+                .apply(HostObservation {
+                    run_id: run,
+                    binding_generation: generation,
+                    ordinal,
+                    kind,
+                })
+                .unwrap();
+            assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+        }
+    }
+
+    #[test]
+    fn effect_unknown_proves_zero_side_effects_while_result_increments() {
+        let (mut authority, run, generation) = authority_with_run();
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 1,
+                kind: HostObservationKind::EffectUnknown,
+            })
+            .unwrap();
+        assert_eq!(authority.effects_performed(), 0);
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 2,
+                kind: HostObservationKind::Result(b"ok".to_vec()),
+            })
+            .unwrap();
+        assert_eq!(authority.effects_performed(), 1);
     }
 
     #[test]
