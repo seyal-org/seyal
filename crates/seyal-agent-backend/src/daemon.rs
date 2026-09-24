@@ -55,10 +55,10 @@ pub enum DaemonError {
 }
 
 pub struct AgentDaemon {
-    listener: UnixListener,
+    listener: Option<UnixListener>,
     instance_id: BackendInstanceId,
     directory: PathBuf,
-    lock: File,
+    lock: Option<File>,
     config: DaemonConfig,
     cleanup: bool,
     our_uid: u32,
@@ -131,10 +131,10 @@ impl AgentDaemon {
             return Err(DaemonError::Io);
         }
         Ok(Self {
-            listener,
+            listener: Some(listener),
             instance_id: BackendInstanceId::new(),
             directory,
-            lock,
+            lock: Some(lock),
             config,
             cleanup: true,
             our_uid,
@@ -150,7 +150,8 @@ impl AgentDaemon {
     }
 
     pub fn accept_hello(&self) -> Result<HelloAck, DaemonError> {
-        let (mut stream, _) = self.listener.accept().map_err(map_io)?;
+        let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
+        let (mut stream, _) = listener.accept().map_err(map_io)?;
         stream
             .set_read_timeout(Some(self.config.read_timeout))
             .map_err(|_| DaemonError::Io)?;
@@ -189,11 +190,17 @@ impl AgentDaemon {
         }
     }
 
-    /// Leave the socket in place and record a dead owner, as a crashed process would.
+    /// Leave the socket pathname in place and record a dead owner, as a
+    /// crashed process would. Closes the accept fd first so reclaim never
+    /// races a still-connectable leaf under parallel tests.
     pub fn abandon_as_crash(mut self) {
-        let lock_path = self.directory.join(LOCK_NAME);
-        let _ = fs::write(&lock_path, b"v1\n0\n");
         self.cleanup = false;
+        let socket_path = self.directory.join(SOCKET_NAME);
+        let lock_path = self.directory.join(LOCK_NAME);
+        drop(self.listener.take());
+        drop(self.lock.take());
+        let _ = fs::write(&lock_path, b"v1\n0\n");
+        wait_until_not_connectable(&socket_path);
     }
 }
 
@@ -206,7 +213,9 @@ impl Drop for AgentDaemon {
         if endpoint_still_owned(&socket_path, self.our_uid) {
             let _ = fs::remove_file(socket_path);
         }
-        drop(self.lock.sync_all());
+        if let Some(lock) = self.lock.take() {
+            let _ = lock.sync_all();
+        }
         let _ = fs::remove_file(self.directory.join(LOCK_NAME));
     }
 }
@@ -368,16 +377,20 @@ fn verify_parent_directory(socket_path: &Path, our_uid: u32) -> Result<(), Daemo
 fn acquire_lock(directory: &Path, our_uid: u32) -> Result<File, DaemonError> {
     let lock_path = directory.join(LOCK_NAME);
     let socket_path = directory.join(SOCKET_NAME);
-    // Probe before creating or replacing any lock: a live socket means another
-    // owner still holds the endpoint — leave their lock completely untouched.
-    refuse_if_socket_live(&socket_path)?;
+    // Decide on an existing lock before any connect-probe so CorruptLock /
+    // LiveOwner fail-closed even if a just-closed leaf is briefly connectable.
     if let Some(file) = create_lock(&lock_path)? {
+        if let Err(error) = refuse_if_socket_live(&socket_path) {
+            release_lock_file(file, directory);
+            return Err(error);
+        }
         return Ok(file);
     }
     let facts = inspect(&socket_path, &lock_path, our_uid)?;
     match decide(&facts, our_uid) {
         EndpointDecision::Reject(fault) => Err(DaemonError::Endpoint(fault)),
         EndpointDecision::Create | EndpointDecision::ReclaimStale => {
+            // Prove the leaf is dead before stealing the lock file.
             refuse_if_socket_live(&socket_path)?;
             fs::remove_file(&lock_path).map_err(|_| DaemonError::Io)?;
             create_lock(&lock_path)?.ok_or(DaemonError::StartupContended)
@@ -404,6 +417,26 @@ fn refuse_if_socket_live(path: &Path) -> Result<(), DaemonError> {
             Ok(())
         }
         Err(_) => Err(DaemonError::Io),
+    }
+}
+
+/// After closing the accept fd, wait until connect fails so reclaim does not
+/// observe a still-live leaf under parallel test scheduling.
+fn wait_until_not_connectable(path: &Path) {
+    for _ in 0..200 {
+        match UnixStream::connect(path) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+                ) =>
+            {
+                return;
+            }
+            Ok(stream) => drop(stream),
+            Err(_) => return,
+        }
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -550,9 +583,13 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "seyal-agent-{}-{}",
+                "seyal-agent-{}-{}-{}",
                 std::process::id(),
-                NEXT_DIR.fetch_add(1, Ordering::Relaxed)
+                NEXT_DIR.fetch_add(1, Ordering::Relaxed),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
             ));
             Self(path)
         }
@@ -596,8 +633,8 @@ mod tests {
         assert_eq!(owners, 1);
         let daemon = results.into_iter().find_map(Result::ok).unwrap();
         let first_id = daemon.instance_id();
-        let path = daemon.socket_path();
-        let client_path = path.clone();
+        let directory = dir.path().to_path_buf();
+        let client_path = daemon.socket_path();
         let client = thread::spawn(move || connect_hello(&client_path, &hello(), 4096));
         let ack = daemon.accept_hello().unwrap();
         assert_eq!(
@@ -608,7 +645,7 @@ mod tests {
         assert!(daemon.socket_path().exists());
         drop(daemon);
 
-        let restarted = AgentDaemon::bind(&path).unwrap();
+        let restarted = AgentDaemon::bind(&directory).unwrap();
         assert_ne!(restarted.instance_id(), first_id);
     }
 
@@ -697,6 +734,7 @@ mod tests {
         socket_permissions.set_mode(0o600);
         fs::set_permissions(&socket, socket_permissions).unwrap();
         drop(listener);
+        wait_until_not_connectable(&socket);
 
         assert_eq!(
             AgentDaemon::bind(dir.path()).map(|_| ()),
