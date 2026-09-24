@@ -91,7 +91,8 @@ Label every perf/presentation/fuzz claim: `CI` | `controlled-host` | `PLATFORM_L
 
 1. Read `AGENTS.md` then the linked domain doc for the change class.
 2. For M002 remaining work, obey `docs/milestones/MILESTONE-002.md`: only #824/#672, #673, #837, and freeze-SHA validation remain; do not attach new product slices. #673 does not wait on #824 closure.
-3. For M003 workspace work, obey `docs/milestones/MILESTONE-003.md`: parallel with late M002 only at stable terminal seams; do not treat #674 as one Ready PR; do not mutate TerminalState/VT/Unicode/reflow.
-4. Open/refine one Ready Issue; one worktree; one scoped PR.
-5. Prefer extending these authorities over adding competing “baseline” docs.
-6. When M001 evidence documents are historical, treat them as precedent for honesty rules — not as a license to skip M002 acceptance gates.
+3. Before picking up any remaining M002 Issue, read `docs/engineering/M002-CLOSEOUT-PLAN.md` (readiness verdicts, review-churn preflight, Track A/B/C stop rules). Do not start implementation from a vague “work on M002” request.
+4. For M003 workspace work, obey `docs/milestones/MILESTONE-003.md`: parallel with late M002 only at stable terminal seams; do not treat #674 as one Ready PR; do not mutate TerminalState/VT/Unicode/reflow.
+5. Open/refine one Ready Issue; one worktree; one scoped PR.
+6. Prefer extending these authorities over adding competing “baseline” docs.
+7. When M001 evidence documents are historical, treat them as precedent for honesty rules — not as a license to skip M002 acceptance gates.

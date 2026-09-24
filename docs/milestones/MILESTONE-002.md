@@ -11,6 +11,8 @@
 
 **Why this file exists:** M001 had `MILESTONE-001.md`. M002 previously lived only as epic #664 plus children. That gap let evidence follow-ups and adjacent tracks attach as if they were new M002 product directions. After this freeze, remaining M002 work is only the chain in §5.
 
+**Operational close-out plan:** [`docs/engineering/M002-CLOSEOUT-PLAN.md`](../engineering/M002-CLOSEOUT-PLAN.md) records development-readiness verdicts, review-churn preflight, and Track A/B/C sequencing. It is subordinate to this freeze and to live GitHub ownership; it does not add product scope.
+
 ---
 
 ## 1. Goal
