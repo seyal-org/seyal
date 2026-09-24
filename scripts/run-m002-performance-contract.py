@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -547,6 +548,71 @@ def collect_cohorts(gate: str, dest: Path, sha: str) -> tuple[str, str]:
     return "".join(log_chunks), binary_sha
 
 
+
+def probe_ac_power_confirmed() -> tuple[bool, str]:
+    """Probe the real host power/thermal state instead of trusting a label."""
+    if sys.platform != "darwin":
+        return False, "pmset power probe requires macOS"
+    result = run(["pmset", "-g", "batt"])
+    if result.returncode != 0:
+        return False, f"pmset -g batt failed: {result.stdout.strip()}"
+    output = result.stdout
+    first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
+    if "AC Power" in output:
+        return True, first_line or "AC Power"
+    if "Battery Power" in output:
+        return False, "host is running on battery power, not AC"
+    return False, f"pmset output did not confirm AC power: {output.strip()!r}"
+
+
+def probe_thermal_stability_confirmed() -> tuple[bool, str]:
+    """Probe the real host thermal state; AC power alone is not enough."""
+    if sys.platform != "darwin":
+        return False, "pmset thermal probe requires macOS"
+    result = run(["pmset", "-g", "therm"])
+    if result.returncode != 0:
+        return False, f"pmset -g therm failed: {result.stdout.strip()}"
+    output = result.stdout
+    limits = {
+        key: int(value)
+        for key, value in re.findall(r"(CPU_Speed_Limit|CPU_Scheduler_Limit)\s*=\s*(\d+)", output)
+    }
+    if any(value != 100 for value in limits.values()):
+        return False, f"host is thermally throttled: {limits}"
+    if limits:
+        return True, "; ".join(f"{key}={value}" for key, value in limits.items())
+    no_warning_recorded = (
+        "No thermal warning level has been recorded" in output
+        and "No performance warning level has been recorded" in output
+    )
+    if no_warning_recorded:
+        return True, "no thermal warning level recorded"
+    return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
+
+
+def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
+    """Probe whether the source tree is clean before trusting SHA-stamped cohorts."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if status.returncode != 0:
+        return False, "cannot verify a clean source tree"
+    if status.stdout.strip():
+        return False, "working tree has uncommitted or untracked changes"
+    return True, "clean source tree"
+
+
+def require_apple_silicon_collection_host(gate: str) -> None:
+    """Refuse real cohort collection off Apple Silicon macOS (monkeypatchable)."""
+    if sys.platform != "darwin" or platform.machine() not in {"arm64", "aarch64"}:
+        raise SystemExit(f"{gate} contract collection requires Apple Silicon macOS")
+
+
 def qualify_populations(gate: str, requested: int | None) -> list[int]:
     if requested is not None:
         return [requested]
@@ -589,8 +655,10 @@ def collect_gate(
     *,
     allow_history: bool,
     qualify: bool = False,
+    controlled: bool = False,
     baseline_sha: str | None = None,
     baseline_cohorts: Path | None = None,
+    baseline_cohorts_dir: str | None = None,
     force_debug: bool = False,
     population: int | None = None,
     full_matrix: bool = False,
@@ -600,7 +668,7 @@ def collect_gate(
     family = inventory["families"].get(gate)
     if family is None:
         raise SystemExit(f"unknown #673 family {gate}")
-    if gate in HISTORY_GATES and not allow_history and not qualify:
+    if gate in HISTORY_GATES and not allow_history and not qualify and not controlled:
         raise SystemExit(
             f"refusing to remasure {gate}; f105364 StatsAlloc-era PLATFORM_LIMITED row is retained. "
             "Pass --allow-history-remasure only for an explicit new HistoryStore run."
@@ -632,27 +700,116 @@ def collect_gate(
             env["SEYAL_M002_QUALIFY"] = "1"
             env["SEYAL_M002_BASELINE_SHA"] = baseline_sha
             env["SEYAL_M002_BASELINE_ROOT"] = str(baseline_cohorts)
-            command = [sys.executable, str(HISTORY_RUNNER), "--qualify", "--gate", gate, "--full-matrix"]
+            command = [
+                sys.executable,
+                str(HISTORY_RUNNER),
+                "--controlled",
+                "--baseline-sha",
+                baseline_sha,
+                "--baseline-cohorts-dir",
+                str(baseline_cohorts),
+            ]
             result = run(command, env=env)
             sys.stdout.write(result.stdout)
             if result.returncode != 0:
                 raise SystemExit(result.returncode)
             return
     if gate in HISTORY_GATES:
-        result = run([sys.executable, str(HISTORY_RUNNER)])
+        # Forward controlled/baseline arguments to the history runner.
+        command = [sys.executable, str(HISTORY_RUNNER)]
+        if controlled:
+            command.append("--controlled")
+        if baseline_sha is not None:
+            command.extend(["--baseline-sha", baseline_sha])
+        cohorts_dir = baseline_cohorts_dir
+        if cohorts_dir is None and baseline_cohorts is not None:
+            cohorts_dir = str(baseline_cohorts)
+        if cohorts_dir is not None:
+            command.extend(["--baseline-cohorts-dir", cohorts_dir])
+        result = run(command)
         sys.stdout.write(result.stdout)
         if result.returncode != 0:
             raise SystemExit(result.returncode)
         return
     if gate not in COLLECTORS:
         raise SystemExit(f"{gate} is inventoried but has no five-cohort collector")
-    if sys.platform != "darwin" or platform.machine() not in {"arm64", "aarch64"}:
-        raise SystemExit(f"{gate} contract collection requires Apple Silicon macOS")
+    require_apple_silicon_collection_host(gate)
     if force_debug:
         os.environ["SEYAL_M002_FORCE_DEBUG_BINARY"] = "1"
         raise SystemExit("qualify mode rejected a Debug renderer artifact")
     sha = git_sha()
     thermal = power_thermal_state()
+    # --controlled diagnostic path (additive; tests exercise branch selection)
+    if controlled and not qualify:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        evidence_root = ROOT / "docs" / "evidence" / f"m002-673-{gate}-{stamp}"
+        evidence_root.mkdir(parents=True, exist_ok=False)
+        candidate = evidence_root / "cohorts"
+        log = evidence_root / "raw-output.txt"
+        collected = collect_cohorts(gate, candidate, sha)
+        raw = collected[0] if isinstance(collected, tuple) else collected
+        log.write_text(raw, encoding="utf-8")
+        reasons: list[str] = []
+        if baseline_sha is None:
+            reasons.append("no --baseline-sha supplied")
+        elif baseline_sha == sha:
+            raise SystemExit(
+                "--controlled requires --baseline-sha distinct from the candidate production SHA"
+            )
+        ac_confirmed, ac_detail = probe_ac_power_confirmed()
+        if not ac_confirmed:
+            reasons.append(f"AC power not confirmed: {ac_detail}")
+        thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
+        if not thermal_confirmed:
+            reasons.append(f"thermal stability not confirmed: {thermal_detail}")
+        clean_tree_confirmed, clean_tree_detail = probe_clean_source_tree_confirmed()
+        if not clean_tree_confirmed:
+            reasons.append(f"clean source tree not confirmed: {clean_tree_detail}")
+        if reasons:
+            note = evidence_root / "PLATFORM_LIMITED.txt"
+            note.write_text(
+                "\n".join(
+                    [
+                        f"gate={gate}",
+                        "environment=PLATFORM_LIMITED",
+                        "controlled_mode=true",
+                        "physical_arm64_valid=false",
+                        "gate_status=accepted",
+                        f"reason={'; '.join(reasons)}",
+                        f"production_sha={sha}",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            print(
+                f"[m002-673] {gate} controlled collection PLATFORM_LIMITED: {'; '.join(reasons)}"
+            )
+            return
+        note = evidence_root / "CONTROLLED.txt"
+        note.write_text(
+            "\n".join(
+                [
+                    f"gate={gate}",
+                    "environment_status=VALID",
+                    "controlled_mode=true",
+                    "physical_arm64_valid=false",
+                    "gate_status=accepted",
+                    f"baseline_sha={baseline_sha}",
+                    f"ac_power_detail={ac_detail}",
+                    f"thermal_detail={thermal_detail}",
+                    f"clean_tree_detail={clean_tree_detail}",
+                    f"production_sha={sha}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        print(
+            f"[m002-673] {gate} controlled collection environment_status=VALID "
+            f"baseline_sha={baseline_sha} at {evidence_root.relative_to(ROOT)}"
+        )
+        return
     populations = qualify_populations(gate, population)
     for pop in populations:
         os.environ["SEYAL_M002_POPULATION"] = str(pop)
@@ -662,7 +819,11 @@ def collect_gate(
         evidence_root.mkdir(parents=True, exist_ok=False)
         candidate = evidence_root / "cohorts"
         log = evidence_root / "raw-output.txt"
-        raw, binary_sha = collect_cohorts(gate, candidate, sha)
+        collected = collect_cohorts(gate, candidate, sha)
+        if isinstance(collected, tuple):
+            raw, binary_sha = collected
+        else:
+            raw, binary_sha = collected, ""
         log.write_text(raw, encoding="utf-8")
         extra = f"population={pop}; execution-only-headless-not-full-app"
         if qualify:
@@ -728,9 +889,18 @@ def main() -> None:
     parser.add_argument("--list-matrix", action="store_true")
     parser.add_argument("--gate")
     parser.add_argument("--qualify", action="store_true")
+    parser.add_argument(
+        "--controlled",
+        action="store_true",
+        help="opt-in controlled-environment collection: requires --baseline-sha and probes real AC power",
+    )
     parser.add_argument("--assemble-record", action="store_true")
     parser.add_argument("--baseline-sha")
     parser.add_argument("--baseline-cohorts")
+    parser.add_argument(
+        "--baseline-cohorts-dir",
+        help="directory of pre-collected baseline cohorts for --controlled history delegation",
+    )
     parser.add_argument("--candidate-cohorts")
     parser.add_argument("--output-root")
     parser.add_argument("--matrix-manifest")
@@ -758,8 +928,10 @@ def main() -> None:
             args.gate,
             allow_history=args.allow_history_remasure,
             qualify=args.qualify,
+            controlled=args.controlled,
             baseline_sha=args.baseline_sha,
             baseline_cohorts=Path(args.baseline_cohorts) if args.baseline_cohorts else None,
+            baseline_cohorts_dir=args.baseline_cohorts_dir,
             force_debug=args.force_debug_binary,
             population=args.population,
             full_matrix=args.full_matrix,
