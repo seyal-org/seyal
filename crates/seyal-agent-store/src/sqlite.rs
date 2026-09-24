@@ -198,10 +198,13 @@ impl AgentStore {
             .map_err(|_| StoreError::Corrupt)?
             .and_then(|value| AggregateSequence::from_raw(value as u64));
         let Some(earliest) = earliest else {
-            // Full retention truncation: snapshot present, every event dropped.
-            // A stale cursor must not fabricate empty history (SPEC-017 §11).
-            if let Some(requested) = requested_after {
-                if let Some(snapshot_sequence) = current_snapshot_sequence {
+            // No retained events. Gap only when the cursor is behind the
+            // snapshot frontier (or history was wiped with no snapshot).
+            // GetSnapshot → replay_after(incorporated_through) must be Ok([]).
+            match (requested_after, current_snapshot_sequence) {
+                (Some(requested), Some(snapshot_sequence))
+                    if requested.get() < snapshot_sequence.get() =>
+                {
                     let earliest_available =
                         snapshot_sequence.next().unwrap_or(AggregateSequence::FIRST);
                     return Err(StoreError::History(HistoryGap {
@@ -212,8 +215,17 @@ impl AgentStore {
                         reason: HistoryGapReason::RetentionTruncation,
                     }));
                 }
+                (Some(requested), None) => {
+                    return Err(StoreError::History(HistoryGap {
+                        aggregate_id,
+                        requested_after: requested,
+                        earliest_available: AggregateSequence::FIRST,
+                        current_snapshot_sequence: None,
+                        reason: HistoryGapReason::RetentionTruncation,
+                    }));
+                }
+                _ => return Ok(Vec::new()),
             }
-            return Ok(Vec::new());
         };
         let after = requested_after
             .map(|sequence| sequence.get() as i64)
@@ -447,13 +459,24 @@ fn insert_event(
     payload: &[u8],
 ) -> Result<AggregateSequence, StoreError> {
     let (kind, id) = aggregate_key(aggregate_id);
-    let current: i64 = tx
+    let max_event: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(sequence), 0) FROM aggregate_event WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
             params![kind, id],
             |row| row.get(0),
         )
         .map_err(|_| StoreError::Corrupt)?;
+    // Retention may delete every event while a snapshot still records a
+    // higher incorporated_through. Never renumber below that frontier.
+    let max_snapshot: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(incorporated_through), 0) FROM aggregate_snapshot
+             WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
+            params![kind, id],
+            |row| row.get(0),
+        )
+        .map_err(|_| StoreError::Corrupt)?;
+    let current = max_event.max(max_snapshot);
     let next = current.checked_add(1).ok_or(StoreError::Corrupt)?;
     let event_id = next;
     tx.execute(
@@ -615,11 +638,10 @@ mod tests {
             other => panic!("expected history gap, got {other:?}"),
         }
 
-        // Full truncation: every event dropped after a snapshot must still
-        // HistoryGap a stale cursor instead of fabricating empty history.
-        store
-            .drop_events_before(aggregate, AggregateSequence::from_raw(u64::MAX).unwrap())
-            .unwrap();
+        // Full truncation: cursor behind snapshot → gap; cursor at snapshot →
+        // caught-up empty Ok([]); append must not renumber below the frontier.
+        let past_all = AggregateSequence::from_raw(third.get() + 1).unwrap();
+        store.drop_events_before(aggregate, past_all).unwrap();
         match store.replay_after(aggregate, Some(first)) {
             Err(StoreError::History(gap)) => {
                 assert_eq!(gap.requested_after, first);
@@ -628,6 +650,22 @@ mod tests {
             }
             other => panic!("expected full-truncation history gap, got {other:?}"),
         }
+        assert_eq!(
+            store.replay_after(aggregate, Some(second)).unwrap(),
+            Vec::new()
+        );
+        let resumed = store.append_event(aggregate, 1, b"after-wipe").unwrap();
+        assert!(resumed.get() > second.get());
+
+        // Wipe with no snapshot: a stale cursor must not look caught-up.
+        let wiped = AggregateId::WorkScope(crate::WorkScopeId::new());
+        let prior = store.append_event(wiped, 1, b"gone").unwrap();
+        let past_prior = AggregateSequence::from_raw(prior.get() + 1).unwrap();
+        store.drop_events_before(wiped, past_prior).unwrap();
+        assert!(matches!(
+            store.replay_after(wiped, Some(prior)),
+            Err(StoreError::History(_))
+        ));
     }
 
     #[test]
