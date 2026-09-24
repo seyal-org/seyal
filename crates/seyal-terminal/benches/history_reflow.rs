@@ -115,9 +115,8 @@ fn run_contract_cohort() {
     let columns = parse_scales("SEYAL_HISTORY_BENCH_COLUMNS", &[80])[0];
     let workload = workload_names()[0];
     let population = parse_usize_env("SEYAL_M002_POPULATION", 1);
-    let mut terminals: Vec<TerminalState> = (0..population)
-        .map(|_| populate(lines, workload))
-        .collect();
+    let mut terminals: Vec<TerminalState> =
+        (0..population).map(|_| populate(lines, workload)).collect();
     {
         let terminal = terminals
             .first_mut()

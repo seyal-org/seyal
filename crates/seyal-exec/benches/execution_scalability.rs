@@ -194,7 +194,10 @@ mod macos {
             }
         }
         let child_line = format!("child_rss_bytes = {}", last_child_rss.saturating_mul(1024));
-        let process_line = format!("process_rss_bytes = {}", last_process_rss.saturating_mul(1024));
+        let process_line = format!(
+            "process_rss_bytes = {}",
+            last_process_rss.saturating_mul(1024)
+        );
         let population_line = format!("population = {population}");
         m002_write_cohort_file_with_lines(
             &out,

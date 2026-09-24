@@ -176,7 +176,10 @@ fn main() {
     println!("[seyal pty benchmark] workload=m001-terminal-execution-roundtrip");
     println!("[seyal pty benchmark] dimensions=120x40");
     println!("[seyal pty benchmark] iterations={ITERATIONS}");
-    println!("[seyal pty benchmark] payload_bytes={}", ASCII_PAYLOAD.len());
+    println!(
+        "[seyal pty benchmark] payload_bytes={}",
+        ASCII_PAYLOAD.len()
+    );
     println!("[seyal pty benchmark] received_bytes={received}");
     println!("[seyal pty benchmark] elapsed_ns={nanos}");
     println!("[seyal pty benchmark] bytes_per_second={bytes_per_second}");
