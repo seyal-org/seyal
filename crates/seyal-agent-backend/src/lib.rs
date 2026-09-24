@@ -10,10 +10,11 @@ mod auth;
 mod daemon;
 #[cfg(unix)]
 mod endpoint;
-mod execution_host;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 mod peer;
+mod execution_host;
+mod observation;
 
 pub use auth::{
     AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
@@ -23,6 +24,9 @@ pub use auth::{
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};
 pub use execution_host::{
     FakeExecutionHost, HostObservation, HostObservationKind, ScriptError, ScriptStep,
+};
+pub use observation::{
+    parse_script, ObservationAuthority, ObserveError, RunLiveness, WorkItemOutcome,
 };
 pub use seyal_agent_core::{AgentDomain, DomainError};
 pub use seyal_agent_protocol::ProtocolVersion;

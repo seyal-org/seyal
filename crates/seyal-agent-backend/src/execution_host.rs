@@ -40,6 +40,9 @@ pub enum ScriptError {
     ZeroOutputChunk,
     DuplicateWithoutObservation,
     OrdinalExhausted,
+    MalformedScript,
+    EmptyScript,
+    ScriptTooLarge,
 }
 
 pub struct FakeExecutionHost {
@@ -106,11 +109,7 @@ impl FakeExecutionHost {
                         .ok_or(ScriptError::DuplicateWithoutObservation)?;
                     observations.push(duplicate);
                 }
-                ScriptStep::DelayTicks(ticks) => {
-                    next_ordinal = next_ordinal
-                        .checked_add(*ticks)
-                        .ok_or(ScriptError::OrdinalExhausted)?;
-                }
+                ScriptStep::DelayTicks(_) => {}
             }
         }
 
