@@ -141,6 +141,36 @@ impl AgentStore {
         })
     }
 
+    /// Loads the current aggregate snapshot payload and position, if any.
+    pub fn get_snapshot(
+        &self,
+        aggregate_id: AggregateId,
+    ) -> Result<Option<(SnapshotPosition, Vec<u8>)>, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let (kind, id) = aggregate_key(aggregate_id);
+        let row = conn
+            .query_row(
+                "SELECT incorporated_through, payload FROM aggregate_snapshot
+                 WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
+                params![kind, id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?;
+        let Some((incorporated_through, payload)) = row else {
+            return Ok(None);
+        };
+        let incorporated_through =
+            AggregateSequence::from_raw(incorporated_through as u64).ok_or(StoreError::Corrupt)?;
+        Ok(Some((
+            SnapshotPosition {
+                aggregate_id,
+                incorporated_through,
+            },
+            payload,
+        )))
+    }
+
     pub fn replay_after(
         &self,
         aggregate_id: AggregateId,
@@ -157,7 +187,32 @@ impl AgentStore {
             .optional()
             .map_err(|_| StoreError::Corrupt)?
             .flatten();
+        let current_snapshot_sequence = conn
+            .query_row(
+                "SELECT incorporated_through FROM aggregate_snapshot
+                 WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
+                params![kind, id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?
+            .and_then(|value| AggregateSequence::from_raw(value as u64));
         let Some(earliest) = earliest else {
+            // Full retention truncation: snapshot present, every event dropped.
+            // A stale cursor must not fabricate empty history (SPEC-017 §11).
+            if let Some(requested) = requested_after {
+                if let Some(snapshot_sequence) = current_snapshot_sequence {
+                    let earliest_available =
+                        snapshot_sequence.next().unwrap_or(AggregateSequence::FIRST);
+                    return Err(StoreError::History(HistoryGap {
+                        aggregate_id,
+                        requested_after: requested,
+                        earliest_available,
+                        current_snapshot_sequence: Some(snapshot_sequence),
+                        reason: HistoryGapReason::RetentionTruncation,
+                    }));
+                }
+            }
             return Ok(Vec::new());
         };
         let after = requested_after
@@ -167,16 +222,6 @@ impl AgentStore {
             let earliest_available =
                 AggregateSequence::from_raw(earliest as u64).ok_or(StoreError::Corrupt)?;
             let requested = requested_after.unwrap_or(AggregateSequence::FIRST);
-            let current_snapshot_sequence = conn
-                .query_row(
-                    "SELECT incorporated_through FROM aggregate_snapshot
-                     WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
-                    params![kind, id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()
-                .map_err(|_| StoreError::Corrupt)?
-                .and_then(|value| AggregateSequence::from_raw(value as u64));
             return Err(StoreError::History(HistoryGap {
                 aggregate_id,
                 requested_after: requested,
@@ -275,6 +320,9 @@ impl AgentStore {
         Ok(count as u64)
     }
 
+    /// Test-only AgentRun insert that skips the mutate+append commit boundary.
+    /// Production writers must use [`Self::mutate_agent_run_and_append`].
+    #[cfg(test)]
     pub fn put_agent_run(
         &self,
         run_id: crate::AgentRunId,
@@ -550,6 +598,9 @@ mod tests {
         let second = store.append_event(aggregate, 1, b"two").unwrap();
         let third = store.append_event(aggregate, 1, b"three").unwrap();
         store.snapshot(aggregate, second, b"onetwo").unwrap();
+        let (position, payload) = store.get_snapshot(aggregate).unwrap().unwrap();
+        assert_eq!(position.incorporated_through, second);
+        assert_eq!(payload, b"onetwo");
         let replay = store.replay_after(aggregate, Some(second)).unwrap();
         assert_eq!(replay.len(), 1);
         assert_eq!(replay[0].payload, b"three");
@@ -562,6 +613,20 @@ mod tests {
                 assert_eq!(gap.reason, HistoryGapReason::RetentionTruncation);
             }
             other => panic!("expected history gap, got {other:?}"),
+        }
+
+        // Full truncation: every event dropped after a snapshot must still
+        // HistoryGap a stale cursor instead of fabricating empty history.
+        store
+            .drop_events_before(aggregate, AggregateSequence::from_raw(u64::MAX).unwrap())
+            .unwrap();
+        match store.replay_after(aggregate, Some(first)) {
+            Err(StoreError::History(gap)) => {
+                assert_eq!(gap.requested_after, first);
+                assert_eq!(gap.current_snapshot_sequence, Some(second));
+                assert_eq!(gap.reason, HistoryGapReason::RetentionTruncation);
+            }
+            other => panic!("expected full-truncation history gap, got {other:?}"),
         }
     }
 
