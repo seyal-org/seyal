@@ -6,7 +6,12 @@
 
 use std::num::NonZeroU64;
 
+mod sqlite;
+
 pub use seyal_agent_core::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
+pub use sqlite::{
+    AgentStore, PersistedAgentRun, PersistedLiveness, StoreError, OUTPUT_SEGMENT_LEN,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AggregateId {
