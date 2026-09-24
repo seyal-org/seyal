@@ -14,7 +14,8 @@ mod endpoint;
 mod peer;
 
 pub use auth::{
-    AuthorizationError, AuthorizationRepository, ClientScope, PrincipalKind, PrincipalStatus,
+    AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
+    PrincipalStatus,
 };
 #[cfg(unix)]
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};

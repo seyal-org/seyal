@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use seyal_agent_core::{AgentRunId, BackendInstanceId, ClientPrincipalId, ClientSessionId};
 
@@ -8,6 +11,38 @@ pub enum ClientScope {
     RunsObserve,
     RunsInteract,
     RunsControl,
+}
+
+impl ClientScope {
+    pub fn decode(byte: u8) -> Result<Self, AuthorizationError> {
+        match byte {
+            1 => Ok(Self::RunsCreate),
+            2 => Ok(Self::RunsObserve),
+            3 => Ok(Self::RunsInteract),
+            4 => Ok(Self::RunsControl),
+            _ => Err(AuthorizationError::Malformed),
+        }
+    }
+}
+
+/// Pairing material is never written into events or `Debug` output.
+pub struct PairingCredential(String);
+
+impl PairingCredential {
+    pub fn new(secret: impl Into<String>) -> Self {
+        Self(secret.into())
+    }
+
+    pub fn event_payload(&self) -> &'static [u8] {
+        b""
+    }
+}
+
+impl fmt::Debug for PairingCredential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let _secret_is_not_rendered = self.0.len();
+        formatter.write_str("PairingCredential([redacted])")
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +73,7 @@ struct Session {
     principal_id: ClientPrincipalId,
     backend_instance_id: BackendInstanceId,
     scopes: BTreeSet<ClientScope>,
+    next_control_nonce: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +85,10 @@ pub enum AuthorizationError {
     ScopeDenied,
     TargetDenied,
     StaleBackendInstance,
+    Malformed,
+    ReplayedRequest,
+    TransportAdmissionIsNotAuthorization,
+    RepositoryCannotRegisterPrincipal,
 }
 
 #[derive(Default)]
@@ -132,9 +172,25 @@ impl AuthorizationRepository {
                 principal_id,
                 backend_instance_id,
                 scopes,
+                next_control_nonce: 1,
             },
         );
         Ok(id)
+    }
+
+    pub fn authorize_local_uid(
+        &self,
+        _uid: u32,
+        _scope: ClientScope,
+    ) -> Result<(), AuthorizationError> {
+        Err(AuthorizationError::TransportAdmissionIsNotAuthorization)
+    }
+
+    pub fn register_principal_from_repository(
+        &mut self,
+        _manifest: &[u8],
+    ) -> Result<ClientPrincipalId, AuthorizationError> {
+        Err(AuthorizationError::RepositoryCannotRegisterPrincipal)
     }
 
     pub fn authorize_run(
@@ -166,6 +222,33 @@ impl AuthorizationRepository {
             return Err(AuthorizationError::TargetDenied);
         }
 
+        Ok(())
+    }
+
+    pub fn authorize_control(
+        &mut self,
+        session_id: ClientSessionId,
+        backend_instance_id: BackendInstanceId,
+        run_id: AgentRunId,
+        nonce: u64,
+    ) -> Result<(), AuthorizationError> {
+        self.authorize_run(
+            session_id,
+            backend_instance_id,
+            ClientScope::RunsControl,
+            run_id,
+        )?;
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or(AuthorizationError::UnknownSession)?;
+        if nonce != session.next_control_nonce {
+            return Err(AuthorizationError::ReplayedRequest);
+        }
+        session.next_control_nonce = session
+            .next_control_nonce
+            .checked_add(1)
+            .ok_or(AuthorizationError::Malformed)?;
         Ok(())
     }
 }
@@ -245,5 +328,91 @@ mod tests {
             repo.authorize_run(session, first_backend, ClientScope::RunsControl, run),
             Err(AuthorizationError::PrincipalInactive)
         );
+    }
+
+    #[test]
+    fn one_client_cannot_control_another_run_and_replay_fails_closed() {
+        let mut repo = AuthorizationRepository::default();
+        let client_a =
+            repo.register_principal(PrincipalKind::FirstPartyCli, [ClientScope::RunsControl]);
+        let client_b = repo.register_principal(
+            PrincipalKind::UserApprovedLocalClient,
+            [ClientScope::RunsControl],
+        );
+        let run_a = AgentRunId::new();
+        let run_b = AgentRunId::new();
+        repo.allow_run(client_a, run_a).unwrap();
+        repo.allow_run(client_b, run_b).unwrap();
+        let backend = BackendInstanceId::new();
+        let session_a = repo
+            .open_session(client_a, backend, [ClientScope::RunsControl])
+            .unwrap();
+
+        assert_eq!(
+            repo.authorize_control(session_a, backend, run_b, 1),
+            Err(AuthorizationError::TargetDenied)
+        );
+        repo.authorize_control(session_a, backend, run_a, 1)
+            .unwrap();
+        assert_eq!(
+            repo.authorize_control(session_a, backend, run_a, 1),
+            Err(AuthorizationError::ReplayedRequest)
+        );
+    }
+
+    #[test]
+    fn same_uid_and_repository_content_do_not_grant_authority() {
+        let mut repo = AuthorizationRepository::default();
+        assert_eq!(
+            repo.authorize_local_uid(501, ClientScope::RunsControl),
+            Err(AuthorizationError::TransportAdmissionIsNotAuthorization)
+        );
+        assert_eq!(
+            repo.register_principal_from_repository(b"{\"scope\":\"runs.control\"}"),
+            Err(AuthorizationError::RepositoryCannotRegisterPrincipal)
+        );
+        let managed = repo.register_principal(PrincipalKind::ManagedClient, []);
+        assert_eq!(
+            repo.principal_kind(managed),
+            Some(PrincipalKind::ManagedClient)
+        );
+        let backend = BackendInstanceId::new();
+        assert_eq!(
+            repo.open_session(managed, backend, [ClientScope::RunsObserve]),
+            Err(AuthorizationError::ScopeEscalation)
+        );
+    }
+
+    #[test]
+    fn suspended_principal_is_denied_and_scope_bytes_fail_closed() {
+        let mut repo = AuthorizationRepository::default();
+        let principal =
+            repo.register_principal(PrincipalKind::FirstPartySeyal, [ClientScope::RunsObserve]);
+        repo.set_principal_status(principal, PrincipalStatus::Suspended)
+            .unwrap();
+        assert_eq!(
+            repo.open_session(
+                principal,
+                BackendInstanceId::new(),
+                [ClientScope::RunsObserve]
+            ),
+            Err(AuthorizationError::PrincipalInactive)
+        );
+        let mut state = 0x1234_u64;
+        for _ in 0..256 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let byte = (state >> 33) as u8;
+            match ClientScope::decode(byte) {
+                Ok(scope) => {
+                    assert!((1..=4).contains(&byte) && format!("{scope:?}").starts_with("Runs"))
+                }
+                Err(AuthorizationError::Malformed) => assert!(byte == 0 || byte > 4),
+                Err(other) => panic!("unexpected {other:?}"),
+            }
+        }
+        let secret = PairingCredential::new("super-secret-token");
+        let rendered = format!("{secret:?}");
+        assert!(!rendered.contains("super-secret-token"));
+        assert!(secret.event_payload().is_empty());
     }
 }
