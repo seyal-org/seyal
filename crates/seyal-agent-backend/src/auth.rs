@@ -1,8 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 
-use seyal_agent_core::{
-    AgentRunId, BackendInstanceId, ClientPrincipalId, ClientSessionId,
-};
+use seyal_agent_core::{AgentRunId, BackendInstanceId, ClientPrincipalId, ClientSessionId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ClientScope {
@@ -225,10 +223,8 @@ mod tests {
     #[test]
     fn backend_restart_fences_old_session_and_revocation_is_immediate() {
         let mut repo = AuthorizationRepository::default();
-        let principal = repo.register_principal(
-            PrincipalKind::FirstPartyCli,
-            [ClientScope::RunsControl],
-        );
+        let principal =
+            repo.register_principal(PrincipalKind::FirstPartyCli, [ClientScope::RunsControl]);
         let run = AgentRunId::new();
         repo.allow_run(principal, run).unwrap();
 
