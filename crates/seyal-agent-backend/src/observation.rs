@@ -135,11 +135,20 @@ impl ObservationAuthority {
         Ok(())
     }
 
-    /// Terminal liveness is sticky: disconnect/crash/unknown must not reopen
-    /// a run that already reached KnownTerminated.
+    /// KnownTerminated is sticky against every later liveness. UnknownAfterCrash
+    /// is sticky against disconnect/reconnect so crash ≠ live (Issue #1028).
     fn set_liveness(&mut self, run_id: AgentRunId, next: RunLiveness) {
-        if self.liveness(run_id) == RunLiveness::KnownTerminated {
-            return;
+        match self.liveness(run_id) {
+            RunLiveness::KnownTerminated => return,
+            RunLiveness::UnknownAfterCrash
+                if matches!(
+                    next,
+                    RunLiveness::ObservationLost | RunLiveness::ScriptedLive
+                ) =>
+            {
+                return;
+            }
+            _ => {}
         }
         self.liveness.insert(run_id, next);
     }
@@ -337,6 +346,38 @@ mod tests {
                 .unwrap();
             assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
         }
+    }
+
+    #[test]
+    fn unknown_after_crash_is_sticky_against_disconnect_and_reconnect() {
+        let (mut authority, run, generation) = authority_with_run();
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 1,
+                kind: HostObservationKind::HarnessCrashed,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::UnknownAfterCrash);
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 2,
+                kind: HostObservationKind::ObservationDisconnected,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::UnknownAfterCrash);
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 3,
+                kind: HostObservationKind::ObservationReconnected,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::UnknownAfterCrash);
     }
 
     #[test]
