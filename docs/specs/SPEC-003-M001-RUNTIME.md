@@ -4,7 +4,7 @@
 - **Date:** 2026-08-24
 - **Issues:** #70, #80, #82; #994 proposes §4.1 and §5.2
 - **Architecture:** Foundation Architecture + ADR-005 + ADR-006 + ADR-007
-- **Proposed M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative only on ADR-017 acceptance** and not implemented.
+- **Proposed M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative only on ADR-019 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -68,7 +68,7 @@ M001 does not claim that a Runtime crash preserves arbitrary live PTYs.
 
 ### 4.1 Runtime process lifetime versus live-execution count
 
-- **Status:** proposed amendment; **normative only on ADR-017 acceptance** (Issue #994, ADR-017).
+- **Status:** proposed amendment; **normative only on ADR-019 acceptance** (Issue #994, ADR-019).
 
 Runtime process lifetime is independent of the live-execution count. **Zero live
 executions is a valid steady state**: the Runtime keeps its singleton endpoint,
@@ -118,8 +118,8 @@ Pass 4 does not implement named Workspace CRUD, Workspace deletion, layout persi
 
 ### 5.2 M003 client-requested provisioning and disposition
 
-- **Status:** proposed amendment; **normative only on ADR-017 acceptance**.
-- **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994. Wire contract is SPEC-004 §18.
+- **Status:** proposed amendment; **normative only on ADR-019 acceptance**.
+- **Authority:** [`../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994. Wire contract is SPEC-004 §18.
 
 An authenticated same-UID local client may request execution creation and, as
 Controller, request explicit termination. This adds callers, not a second

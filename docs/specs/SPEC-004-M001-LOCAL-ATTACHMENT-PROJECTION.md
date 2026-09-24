@@ -6,7 +6,7 @@
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
-- **Proposed M003 extension:** §18 execution provisioning/disposition (types 35–38, capability bit 8) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
+- **Proposed M003 extension:** §18 execution provisioning/disposition (types 35–38, capability bit 8) under Issue #994; **normative only on ADR-019 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -158,7 +158,7 @@ M001 server capability bits are:
 - bit 1: observer role;
 - bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — accepted by Pass 7 / SPEC-006 / PR #703;
 - bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703;
-- bit 8: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+- bit 8: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-019 acceptance.
 
 Message types 20–34 and capability bits 4–7 belong to later M002/M003 contracts and are outside this section's Pass 5/7 scope. §18 assigns types 35–38 and bit 8.
 
@@ -433,7 +433,7 @@ M001 defines:
 
 These numeric meanings are reused by `ResizeResult.result_code` values 1–14. `ResizeResult.result_code = 0` uniquely means `Applied`.
 
-§18 additionally defines, normative only on ADR-017 acceptance:
+§18 additionally defines, normative only on ADR-019 acceptance:
 
 ```text
 15 InvalidWorkspace
@@ -497,8 +497,8 @@ Comparator/reference shared-projection code may remain only if isolated from pro
 
 ## 18. M003 execution provisioning and disposition extension
 
-- **Status:** proposed amendment; **normative only on ADR-017 acceptance**.
-- **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
+- **Status:** proposed amendment; **normative only on ADR-019 acceptance**.
+- **Authority:** [`../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
 - **Nature:** additive, capability-gated. Framing version remains `1.0`. Nothing in §1–§17 changes.
 
 This section adds the only permitted way for a client to ask Runtime to create a

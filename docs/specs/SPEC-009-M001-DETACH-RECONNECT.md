@@ -11,7 +11,7 @@
 - **Pass 8 authority:** reviewed head `54b3a1748effc7c47c409d1f7cfdcbd547e8d1cc`, merged by PR #721 as `d9d21187e8429bbd3dbeb3e1c7cc4d05c1d147e6`
 - **Pass 9 authority:** #719 closed Done; PR #743 / PR #745; review candidate `1005bc42397aac485b1aeff08cafd0f67790d969`
 - **Numbering note:** SPEC-008 is already the active M003 command-Blocks/composer specification and is intentionally not a Pass 9 dependency historically. SPEC-008 governs presentation selection/routing when this reconnect contract is used by Flow/Raw/TUI.
-- **Proposed M003 amendment:** §8.2.1 multi-execution resolution under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
+- **Proposed M003 amendment:** §8.2.1 multi-execution resolution under Issue #994; **normative only on ADR-019 acceptance** and not implemented.
 
 ## 0. Presentation-mode applicability of the accepted ADR-009 amendment
 
@@ -346,7 +346,7 @@ If no eligible execution survives, continuity is not claimed. Creating a new exe
 
 #### 8.2.1 Multi-execution resolution (proposed M003 amendment)
 
-- **Status:** proposed amendment; **normative only on ADR-017 acceptance** (Issue #994, ADR-017). It narrows resolution; it does not weaken any Pass 9 continuity requirement.
+- **Status:** proposed amendment; **normative only on ADR-019 acceptance** (Issue #994, ADR-019). It narrows resolution; it does not weaken any Pass 9 continuity requirement.
 
 Once client-requested provisioning exists, several live executions are ordinary
 rather than exceptional. Resolution therefore becomes:
