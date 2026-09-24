@@ -178,7 +178,10 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(observations[0].binding_generation, observations[1].binding_generation);
+        assert_ne!(
+            observations[0].binding_generation,
+            observations[1].binding_generation
+        );
         assert_eq!(observations[1].ordinal, 1);
     }
 
@@ -197,9 +200,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(observations.len(), 3);
-        assert!(observations.iter().all(|observation| match &observation.kind {
-            HostObservationKind::Output(bytes) => bytes.len() <= 4,
-            _ => false,
-        }));
+        assert!(observations
+            .iter()
+            .all(|observation| match &observation.kind {
+                HostObservationKind::Output(bytes) => bytes.len() <= 4,
+                _ => false,
+            }));
     }
 }
