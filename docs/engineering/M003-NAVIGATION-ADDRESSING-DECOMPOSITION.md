@@ -2,11 +2,11 @@
 
 - **Status:** Proposed decomposition output of refinement Issue #1004
 - **Parent umbrella:** #674 (epic #665)
-- **Authority:** ADR-018 (Proposed), [`../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) (Proposed), ADR-007, ADR-015, SPEC-008, SPEC-009, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
+- **Authority:** ADR-019 (Proposed), [`../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) (Proposed), ADR-007, ADR-015, SPEC-008, SPEC-009, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 
 This file is a planning artifact. It creates no implementation authority: each
 slice below becomes real work only as a GitHub child Issue of #674 that passes
-the `ISSUE-PROTOCOL.md` Ready checklist, and only after ADR-018 and SPEC-022
+the `ISSUE-PROTOCOL.md` Ready checklist, and only after ADR-019 and SPEC-022
 are Accepted. `MILESTONE-003.md` §5 permits exactly this kind of child — a
 Ready child that decomposes #674 into one independently reviewable outcome — so
 no milestone amendment is required.
@@ -14,7 +14,7 @@ no milestone amendment is required.
 ## Ordering
 
 ```text
-ADR-018 + SPEC-022 accepted
+ADR-019 + SPEC-022 accepted
   → N1 address + resolver (pure Rust, no UI change)
   → N2 navigation commit + typed effects + palette runs by address
   → N3 focus history + Back/Forward
@@ -41,7 +41,7 @@ rejection taxonomy (§3.4), purity of resolution (§3.6).
 **Tests:** SPEC-022 §12 items 1–7 (type shape, equality, unsupported kind,
 each rejection variant, `NotComposed`, cross-workspace tab, resolution purity).
 
-**Ready preconditions:** ADR-018 and SPEC-022 Accepted.
+**Ready preconditions:** ADR-019 and SPEC-022 Accepted.
 
 **Review risk:** placing the module so it does not become a second Workspace
 registry. It reads `ShellState`; it does not own workspaces, tabs or panes.
@@ -158,7 +158,7 @@ them or prove they are impossible by construction.
 
 ## Cross-cutting requirements for every slice
 
-- No production code before ADR-018 and SPEC-022 are Accepted.
+- No production code before ADR-019 and SPEC-022 are Accepted.
 - No navigation work on the PTY → VT → damage path, and no synchronous
   Rust↔native ping-pong added to it.
 - Rust owns policy; Swift realizes focus/window activation only (ADR-015).

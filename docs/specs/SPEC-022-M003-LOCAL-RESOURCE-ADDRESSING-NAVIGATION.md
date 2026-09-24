@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (refinement output of #1004; not an implemented-behavior claim)
 - **Date:** 2026-09-24
-- **Architecture:** ADR-018; consumes ADR-007, ADR-015, ADR-009/SPEC-008, SPEC-009
+- **Architecture:** ADR-019; consumes ADR-007, ADR-015, ADR-009/SPEC-008, SPEC-009
 - **Issue:** #1004 — parent #674, epic #665
 - **UI references:** [`../architecture/ui/SEYAL-REFERENCE-SCREEN-CONTRACTS.md`](../architecture/ui/SEYAL-REFERENCE-SCREEN-CONTRACTS.md) §11, [`../architecture/ui/M001-COMPOSER-HISTORY-FUZZY-SEARCH.md`](../architecture/ui/M001-COMPOSER-HISTORY-FUZZY-SEARCH.md) §12, [`../architecture/ui/M001-SESSIONS-VIEW.md`](../architecture/ui/M001-SESSIONS-VIEW.md) §5/§7, [`../architecture/ui/references/README.md`](../architecture/ui/references/README.md)
 
@@ -63,11 +63,23 @@ Pane { w, t, p }   resolves iff t is currently a Tab of w
                    and p is currently a leaf of t's PaneTree
 ```
 
-R3.3 `Execution { e }` resolves to the unique Pane currently bound to `e`. If
-`e` is live but bound to no Pane, resolution yields `TargetUnbound`. If `e` is
-no longer live, resolution yields `TargetTerminated`.
+R3.3 `Execution { e }` resolution counts current Pane bindings to `e`:
 
-R3.4 Rejections are typed and exhaustive:
+- exactly one bound Pane → resolves to that Pane;
+- zero bindings and `e` still live → `TargetUnbound`;
+- zero bindings and `e` not live / unknown → `TargetTerminated` or
+  `UnknownExecution` as applicable;
+- two or more bound Panes → `AmbiguousTarget`.
+
+Pane→Execution is at most one (M001 multipane / M003 leaf rule). The reverse
+direction is **not** unique by construction; ambiguity is therefore an
+explicit rejection, not an assumed invariant.
+
+R3.4 Rejections are typed and exhaustive. When several faults apply to one
+address, evaluate in this order and return the first match:
+`UnsupportedKind` → `UnknownWorkspace` → `UnknownTab` → `UnknownPane` →
+`UnknownExecution` → `NotComposed` → `TargetTerminated` → `TargetUnbound` →
+`AmbiguousTarget` → `NavigationDenied`.
 
 | Rejection | Condition |
 |---|---|
@@ -78,6 +90,7 @@ R3.4 Rejections are typed and exhaustive:
 | `NotComposed` | components exist but do not currently compose (R3.2) |
 | `TargetTerminated` | the addressed Pane/Execution lifetime has ended |
 | `TargetUnbound` | Execution is live with no Pane binding |
+| `AmbiguousTarget` | Execution is bound to more than one Pane |
 | `UnsupportedKind` | unknown/unaccepted kind, version or size |
 | `NavigationDenied` | Workspace access/policy refusal (ADR-007 §11) |
 
@@ -98,8 +111,11 @@ activate owning Workspace
 → select owning Tab
 → set focused Pane
 → emit WindowActivation effect when the target window is not active
-→ append one focus-history entry (§6)
+→ record focus history per §6 (user-initiated commits only; see R6.5)
 ```
+
+A Navigate issued as the apply step of Back/Forward traversal (§6.5) performs
+the focus/activation steps above but does **not** append a history entry.
 
 R4.2 If any step cannot be applied, none are applied and the request is
 rejected under §3.4. There is no partially navigated state.
@@ -172,13 +188,20 @@ actually received focus.
 R6.4 An entry equal to the current head is not appended (adjacent
 deduplication). Non-adjacent repeats are appended normally.
 
-R6.5 Traversal is a linear back/forward cursor:
+R6.5 Traversal is a linear back/forward cursor. Distinguish *traversal apply*
+from *user-initiated commit*:
 
 ```text
-Back     cursor → previous entry, then Navigate to it
-Forward  cursor → next entry, then Navigate to it
-new commit while cursor < head → truncate forward portion, append
+Back     cursor → previous entry, then Navigate(apply-only) to it
+Forward  cursor → next entry, then Navigate(apply-only) to it
+user-initiated Navigate commit while cursor < head
+         → truncate forward portion, then append
 ```
+
+Traversal-driven Navigate moves the cursor and applies focus/activation; it
+does **not** append a history entry and does **not** truncate the forward
+portion. The truncate-and-append rule applies only to user-initiated
+(non-traversal) focus commits.
 
 R6.6 Capacity is the fixed bound `FOCUS_HISTORY_CAPACITY` (proposed 64).
 Appending at capacity evicts the oldest entry and shifts the cursor
@@ -187,16 +210,18 @@ clamps to the oldest surviving entry when that entry was the one evicted.
 
 R6.7 Destroying a Pane, Tab or Workspace eagerly removes every entry addressing
 it. Survivor relative order is preserved. The cursor moves to the nearest
-surviving entry at or before its previous position; if none survives it moves
-to the oldest surviving entry; if history is empty, Back and Forward are
-unavailable and must not focus an arbitrary Pane.
+surviving entry at or before its previous position; if no surviving entry at
+or before that position exists, the cursor moves to the oldest surviving
+entry; if history is empty, Back and Forward are unavailable and must not
+focus an arbitrary Pane.
 
 R6.8 A Back/Forward request carries the `FocusSeq` the requesting surface last
 observed at the cursor. If it does not match current history, the request is
 rejected (`StaleHistoryCursor`) and no navigation occurs.
 
-R6.9 Traversal reuses §3/§4. If a traversal target fails resolution despite
-R6.7 (for example a race with destruction), the request is rejected, the dead
+R6.9 Traversal reuses §3 resolution and the apply-only Navigate path in §4
+(R4.1 traversal clause). If a traversal target fails resolution despite R6.7
+(for example a race with destruction), the request is rejected, the dead
 entry is removed, and no fallback navigation occurs.
 
 R6.10 History is not persisted across restart in M003.
@@ -275,7 +300,7 @@ snapshot transfer under the ADR-015 borrow policy.
 ## 11. Compatibility and versioning
 
 R11.1 The address kind set is closed for M003. Adding a kind requires amending
-ADR-018 and this specification.
+ADR-019 and this specification.
 
 R11.2 The FFI address record is versioned and size-tagged; unknown version or
 size mismatch fails closed on both sides.
@@ -318,6 +343,8 @@ Rust, platform-independent unless stated:
 12. Execution address with no bound Pane yields `TargetUnbound` and performs no
     attach.
 13. Exited execution yields `TargetTerminated`.
+13b. Execution bound to two Panes yields `AmbiguousTarget` and performs no
+     navigation (R3.3).
 
 **Ordinal regression (the #932 gap)**
 

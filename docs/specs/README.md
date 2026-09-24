@@ -28,7 +28,7 @@ Specifications define **observable behavior and enforceable contracts** below ac
 
 ## Proposed specifications
 
-- [`SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) — **Proposed under #1004 / ADR-018:** typed local `ResourceAddress` forms, whole-composite resolution and the fail-closed rejection taxonomy, atomic reveal-and-focus navigation, cross-window activation effects, one application-scoped bounded/deterministic focus history with eager invalidation, address-versus-label separation, and the required test set. Not an implemented-behavior claim.
+- [`SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) — **Proposed under #1004 / ADR-019:** typed local `ResourceAddress` forms, whole-composite resolution and the fail-closed rejection taxonomy, atomic reveal-and-focus navigation, cross-window activation effects, one application-scoped bounded/deterministic focus history with eager invalidation, address-versus-label separation, and the required test set. Not an implemented-behavior claim.
 
 ## When a specification is required
 

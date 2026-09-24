@@ -1,9 +1,12 @@
-# ADR-018 — Local Resource Addressing and navigation authority
+# ADR-019 — Local Resource Addressing and navigation authority
 
 - **Status:** Proposed
 - **Date:** 2026-09-24
 - **Issue:** #1004 (refinement) — parent #674, epic #665
-- **Numbering:** ADR-017 is concurrently proposed by #1000 (native window/tab lifecycle), so this decision takes the next free number. If #1000 does not land, the parent may renumber this document before acceptance.
+- **Numbering:** Provisional allocation across concurrent M003 refinements is
+  #994 → ADR-017 (execution provisioning), #1000 → ADR-018 (window/tab
+  lifecycle), #1004 → ADR-019 (this document). Numbers remain provisional until
+  merge order is settled; siblings must not claim ADR-019.
 - **Scope:** portable local addressing of Workspace/Tab/Pane/Session-Execution navigation targets, target resolution and failure semantics, focus-history ownership, cross-window navigation, and the separation between an address and a user-visible label
 - **Consumes:** ADR-007 (Workspace/identity lifetimes), ADR-009 / SPEC-008 (presentation modes), ADR-015 (Rust product authority / thin native host), SPEC-009 (detach/reconnect), [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md)
 - **Does not change:** ADR-004/005/006 terminal ownership, SPEC-008 presentation contracts, ADR-007 persistence classes
@@ -143,9 +146,16 @@ UnknownWorkspace | UnknownTab | UnknownPane | UnknownExecution
 NotComposed        (components exist but do not currently compose)
 TargetTerminated   (execution/pane lifetime already ended)
 TargetUnbound      (execution alive, no Pane currently bound)
+AmbiguousTarget    (Execution bound to more than one Pane)
 UnsupportedKind    (unknown/unaccepted address kind or version)
 NavigationDenied   (Workspace access/policy refusal)
 ```
+
+`Execution { e }` resolves only when exactly one Pane is currently bound to
+`e`. Zero bindings → `TargetUnbound`. Two or more → `AmbiguousTarget`. No
+accepted authority establishes Execution→Pane uniqueness by construction
+(Pane→Execution is at most one; the reverse is not), so ambiguity is an
+explicit fail-closed outcome rather than an assumed invariant.
 
 Explicitly forbidden recovery behavior: nearest-match, fuzzy re-resolution,
 falling back to the first/last/active member of the container, silently
@@ -187,8 +197,10 @@ filters over this one store — never a second history authority.
   impossible.
 - Only committed focus transitions are recorded, only at Pane granularity, and
   an entry equal to the current head is not appended again.
-- Traversal is the linear back/forward cursor model. Committing a new focus
-  while the cursor is behind the head truncates the forward portion.
+- Traversal is the linear back/forward cursor model. Back/Forward *moves the
+  cursor and applies focus to the designated entry*; it does **not** record a
+  new history entry. Only a user-initiated (non-traversal) focus commit while
+  the cursor is behind the head truncates the forward portion and then appends.
 - Capacity is a fixed compile-time bound (`FOCUS_HISTORY_CAPACITY`, proposed
   64 entries). Overflow evicts the oldest entry and adjusts the cursor
   deterministically. Memory is O(capacity) and independent of session length.
@@ -251,7 +263,7 @@ M003 ingests no address from outside the process.
 - **#1001** owns intra-Tab `PaneTree` operations: move/reparent, zoom/equalize,
   directional focus, and which Pane receives focus after split/close. This ADR
   consumes the resulting focus commits and records them. If both land, #1001
-  defines *what becomes focused*; ADR-018 defines *how a target is named,
+  defines *what becomes focused*; ADR-019 defines *how a target is named,
   resolved, and remembered*. The seam is the committed focus transition.
 - **#1000** owns native window/tab containment and lifecycle, including the
   portable window identity and ordering this decision consumes. Where both are
@@ -326,7 +338,7 @@ specifications win in any conflict.
 
 No UI architecture amendment is required: those documents already place the
 palette/search surface and its rules. What was missing is the navigation
-*behavior* contract, which ADR-018 and SPEC-022 supply.
+*behavior* contract, which ADR-019 and SPEC-022 supply.
 
 ## Alternatives considered
 
