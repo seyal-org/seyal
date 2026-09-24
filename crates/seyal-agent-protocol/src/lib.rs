@@ -1,8 +1,20 @@
-//! Versioned local Agent Backend protocol value boundary.
+//! Versioned local Agent Backend protocol boundary.
 //!
-//! AB-0.1 intentionally defines no transport or daemon behavior. This crate
-//! carries provider-neutral wire-facing identities and protocol versioning only.
+//! AB-0.2 owns Hello/HelloAck negotiation and the bounded frame codec.
+//! Socket ownership, daemon lifecycle, and authorization stay outside this crate.
 
+mod frame;
+mod handshake;
+
+pub use frame::{
+    accepted_body_len, decode_frame, encode_frame, push_untrusted, Frame, FrameError, FrameKind,
+    ABSOLUTE_MAX_FRAME_SIZE,
+};
+pub use handshake::{
+    decode_ack, decode_handshake_error, decode_hello, encode_ack, encode_handshake_error,
+    encode_hello, negotiate_hello, HandshakeError, Hello, HelloAck, ServerCapabilities,
+    MAX_EVENT_WINDOW, MAX_PRINCIPAL_EVIDENCE, MAX_VERSIONS,
+};
 pub use seyal_agent_core::{
     AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
     ClientSessionId, ControlGeneration, WorkItemId, WorkScopeId,
@@ -14,17 +26,11 @@ pub struct ProtocolVersion(u16);
 impl ProtocolVersion {
     pub const V1: Self = Self(1);
 
+    pub const fn new(value: u16) -> Self {
+        Self(value)
+    }
+
     pub const fn get(self) -> u16 {
         self.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn protocol_v1_is_explicit_and_stable() {
-        assert_eq!(ProtocolVersion::V1.get(), 1);
     }
 }
