@@ -1,0 +1,5 @@
+emit started
+emit progress 1
+delay 1
+emit result 6f6b
+emit success
