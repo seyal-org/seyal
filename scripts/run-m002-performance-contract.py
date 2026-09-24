@@ -13,9 +13,11 @@ validity. Same-SHA A/A and Debug/stale artifacts are rejected.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import tomllib
 from datetime import datetime, timezone
@@ -32,7 +34,6 @@ from m002_contract_record import (
     prepare_controlled_cohort_bundle,
     re_full_sha,
     require_cargo_release_identity,
-    require_clean_worktree,
     run,
     sha256_file,
     write_qualification_record,
@@ -47,6 +48,7 @@ BUILD_MACOS = ROOT / "scripts/build-macos.sh"
 SEYAL_APP_DEBUG = ROOT / "target/macos-derived-data/Build/Products/Debug/Seyal.app/Contents/MacOS/Seyal"
 SEYAL_APP_RELEASE = ROOT / "target/macos-derived-data/Build/Products/Release/Seyal.app/Contents/MacOS/Seyal"
 SEYAL_APP = SEYAL_APP_DEBUG
+SEYAL_APP_CONFIGURATION = "Release"
 RETAINED_ACTIVE = (
     ROOT
     / "docs/evidence/m002-673-history-reflow-20260916T171837Z/history_active_reflow_ms/record.toml"
@@ -372,31 +374,115 @@ def assemble_self_test() -> None:
         shutil.rmtree(evidence_root, ignore_errors=True)
 
 
+def app_manifest_path(app: Path | None = None) -> Path:
+    return (app or SEYAL_APP).parent / "m002-app-identity-manifest.json"
+
+
+def load_app_manifest(app: Path | None = None) -> dict | None:
+    manifest_path = app_manifest_path(app)
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def write_app_manifest(sha: str, configuration: str, app: Path | None = None) -> None:
+    target = app or SEYAL_APP
+    manifest = {
+        "sha": sha,
+        "configuration": configuration,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "sha256": sha256_file(target),
+    }
+    app_manifest_path(target).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def app_identity_matches(
+    requested_sha: str, requested_configuration: str, app: Path | None = None
+) -> bool:
+    """True only when an existing Seyal.app binary is provably the requested
+    production SHA/configuration, not merely present and executable.
+    """
+    target = app or SEYAL_APP
+    if not (target.is_file() and os.access(target, os.X_OK)):
+        return False
+    manifest = load_app_manifest(target)
+    if manifest is None:
+        return False
+    if manifest.get("sha") != requested_sha or manifest.get("configuration") != requested_configuration:
+        return False
+    if manifest.get("sha256") != sha256_file(target):
+        return False
+    return True
+
+
+def require_clean_worktree() -> None:
+    """Refuse to build/stamp the app-identity manifest from a dirty checkout.
+
+    Uses this module's ROOT so unit tests can redirect the probe. Factored
+    out so a test can monkeypatch this one function without weakening the
+    real guard for an actual collection run. Qualify mode also calls this
+    (same clean-tree rule as qualify mode).
+    """
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise SystemExit("cannot verify a clean source tree for M002 app-identity collection")
+    if status.stdout.strip():
+        raise SystemExit(
+            "refusing to build/stamp the M002 app-identity manifest from a dirty working tree; "
+            "commit or stash changes, or collect from an isolated exact-SHA checkout"
+        )
+
+
 def ensure_seyal_app(*, require_release: bool = False, force_debug: bool = False) -> Path:
     if force_debug:
         raise SystemExit("qualify mode rejected a Debug renderer artifact")
-    target = SEYAL_APP_RELEASE if require_release else SEYAL_APP_DEBUG
-    if require_release and SEYAL_APP_DEBUG.is_file() and not target.is_file():
-        raise SystemExit("qualify mode refused to reuse a Debug Seyal.app for a Release measurement")
-    if target.is_file() and os.access(target, os.X_OK) and not require_release:
-        return target
+
+    # Tests redirect SEYAL_APP. Release qualify retargets only when still on
+    # the default Debug product alias so a Debug leftover cannot be reused.
+    app = SEYAL_APP
+    if require_release and app == SEYAL_APP_DEBUG:
+        if SEYAL_APP_DEBUG.is_file() and not SEYAL_APP_RELEASE.is_file():
+            raise SystemExit(
+                "qualify mode refused to reuse a Debug Seyal.app for a Release measurement"
+            )
+        app = SEYAL_APP_RELEASE
+
+    requested_sha = git_sha()
+    requested_configuration = "Release" if require_release else SEYAL_APP_CONFIGURATION
+    if app_identity_matches(requested_sha, requested_configuration, app=app):
+        return app
+
+    require_clean_worktree()
     env = os.environ.copy()
-    if require_release:
-        env["SEYAL_MACOS_CONFIGURATION"] = "Release"
+    env["SEYAL_MACOS_CONFIGURATION"] = requested_configuration
     built = run(["bash", str(BUILD_MACOS)], env=env)
-    if built.returncode != 0 or not target.is_file():
+    if built.returncode != 0 or not app.is_file():
         raise SystemExit(f"Seyal.app build failed for renderer contract:\n{built.stdout}")
+    write_app_manifest(requested_sha, requested_configuration, app=app)
     if require_release:
-        helper = target.parent.parent / "Helpers" / "seyal-runtime"
-        metallib = target.parent.parent / "Resources" / "default.metallib"
+        helper = app.parent.parent / "Helpers" / "seyal-runtime"
+        metallib = app.parent.parent / "Resources" / "default.metallib"
         if not helper.is_file():
             raise SystemExit("Release Seyal.app is missing the bundled seyal-runtime helper")
         print(
-            f"[m002-673] release_binary_sha256={sha256_file(target)} "
+            f"[m002-673] release_binary_sha256={sha256_file(app)} "
             f"helper_sha256={sha256_file(helper)} "
             f"metallib={'present' if metallib.is_file() else 'absent'}"
         )
-    return target
+    return app
 
 
 def collect_cohorts(gate: str, dest: Path, sha: str) -> tuple[str, str]:
