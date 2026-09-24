@@ -1,14 +1,14 @@
 # M003 PaneTree operations — child Issue decomposition
 
 **Status:** Refinement output for #1001. Ready-*candidate* children only; none is
-Ready until ADR-020 and SPEC-023 are **Accepted**, that child's own
+Ready until ADR-021 and SPEC-025 are **Accepted**, that child's own
 `docs/engineering/ISSUE-PROTOCOL.md` Ready-gate checklist passes, and a human
 owner claims it.
 
-**Authority:** [`../architecture/ADR-020-PANE-TREE-OPERATIONS.md`](../architecture/ADR-020-PANE-TREE-OPERATIONS.md)
-(Proposed) and [`../specs/SPEC-023-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-023-M003-PANE-TREE-OPERATIONS.md)
+**Authority:** [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md)
+(Proposed) and [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md)
 (Proposed). This file plans work; it creates no architecture. Where this file
-and ADR-020/SPEC-023 disagree, those documents win.
+and ADR-021/SPEC-025 disagree, those documents win.
 
 **Parent umbrella:** #674. **Epic:** #665. **Milestone contract:**
 [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
@@ -24,7 +24,7 @@ candidates after ADR acceptance. #674 stays unassigned.
 ## Dependency order
 
 ```text
-ADR-020 + SPEC-023 accepted
+ADR-021 + SPEC-025 accepted
   → PT1 Rust zoom overlay + focus/close successor tightening
   → PT2 Rust swap + move-beside (identity-preserving reparent)
   → PT3 Rust directional focus
@@ -48,10 +48,10 @@ Coordination (not owned here):
 ## PT1 — Zoom overlay and close/split focus successors
 
 **Goal.** Add Tab-scoped `zoomed: Option<PaneId>`; implement `ZoomPane` /
-`Unzoom`; tighten `ClosePane` focus successor to sibling-first per SPEC-023
-§5.2; clear zoom on the structural/focus rules in ADR-020 §3.
+`Unzoom`; tighten `ClosePane` focus successor to sibling-first per SPEC-025
+§5.2; clear zoom on the structural/focus rules in ADR-021 §3.
 
-**In scope.** Pure Rust `ShellState` / snapshot field; unit fixtures SPEC-023
+**In scope.** Pure Rust `ShellState` / snapshot field; unit fixtures SPEC-025
 §12 items 1–5, 9–12, 17.
 
 **Out of scope.** Move/swap, directional focus, equalize, host UI, history
@@ -65,7 +65,7 @@ store, provisioning.
 - [ ] Stale ids fail closed; last pane cannot close
 - [ ] Split clears zoom and focuses new leaf
 
-**Ready preconditions.** ADR-020 + SPEC-023 Accepted.
+**Ready preconditions.** ADR-021 + SPEC-025 Accepted.
 
 ---
 
@@ -74,7 +74,7 @@ store, provisioning.
 **Goal.** Implement `SwapPanes` and `MovePaneBeside` with PaneId + execution
 binding preservation (F-047).
 
-**In scope.** Rust reducer; SPEC-023 §12 items 6–8; property P1.
+**In scope.** Rust reducer; SPEC-025 §12 items 6–8; property P1.
 
 **Out of scope.** Cross-Tab/Window move; drag gesture polish; provisioning;
 history store.
@@ -93,7 +93,7 @@ or explicitly stacked on PT1 head.
 
 ## PT3 — Directional focus
 
-**Goal.** Implement `FocusDirection` geometric neighbor selection (SPEC-023
+**Goal.** Implement `FocusDirection` geometric neighbor selection (SPEC-025
 §5.7).
 
 **In scope.** Rust layout-rectangle derivation from tree (+ ratios when
@@ -153,7 +153,7 @@ regions; PT1–PT3 Rust actions.
 
 ## PT6 — Property/adversarial suite and headed acceptance
 
-**Goal.** SPEC-023 P1–P9 property tests; adversarial mixes of
+**Goal.** SPEC-025 P1–P9 property tests; adversarial mixes of
 zoom × close × move × stale id × directional miss; headed evidence that
 move/zoom never terminates or reprovisions an execution.
 
@@ -169,7 +169,7 @@ move/zoom never terminates or reprovisions an execution.
 
 ## Cross-cutting requirements for every slice
 
-- No production code before ADR-020 and SPEC-023 are Accepted.
+- No production code before ADR-021 and SPEC-025 are Accepted.
 - No second `PaneTree`, zoom stack, or AppKit layout authority.
 - No focus-history store in these slices — cite ADR-019 / N3.
 - No execution provisioning or terminate on close/move/zoom.
@@ -188,16 +188,16 @@ Contributor difficulty: standard
 
 ## Goal
 Implement Tab-scoped pane zoom/unzoom and sibling-first close focus succession
-in Rust ShellState per Accepted ADR-020 / SPEC-023.
+in Rust ShellState per Accepted ADR-021 / SPEC-025.
 
 ## Architecture/spec references
-- docs/architecture/ADR-020-PANE-TREE-OPERATIONS.md (Accepted)
-- docs/specs/SPEC-023-M003-PANE-TREE-OPERATIONS.md
+- docs/architecture/ADR-021-PANE-TREE-OPERATIONS.md (Accepted)
+- docs/specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md
 - ADR-015; Proposed/Accepted ADR-019 seam for focus commits only
 
 ## In scope
 - zoomed: Option<PaneId>; ZoomPane / Unzoom
-- ClosePane successor = sibling-first (SPEC-023 §5.2)
+- ClosePane successor = sibling-first (SPEC-025 §5.2)
 - Split clears zoom; focuses new leaf
 - Rust unit + regression fixture vs old first_pane()
 
@@ -211,7 +211,7 @@ in Rust ShellState per Accepted ADR-020 / SPEC-023.
 - [ ] cargo test -p seyal-client; make check relevant targets
 
 ## Tests required
-SPEC-023 §12 items 1–5, 9–12, 17
+SPEC-025 §12 items 1–5, 9–12, 17
 ```
 
 ### Draft — PT2
@@ -225,7 +225,7 @@ Depends on: PT1 Issue
 Identity-preserving SwapPanes and MovePaneBeside in Rust (F-047).
 
 ## In scope
-- SwapPanes; MovePaneBeside with side table from SPEC-023 §5.4
+- SwapPanes; MovePaneBeside with side table from SPEC-025 §5.4
 - Preserve PaneId set and execution bindings (P1)
 - Fail closed InvalidMoveTarget / UnknownPane
 
@@ -234,7 +234,7 @@ Identity-preserving SwapPanes and MovePaneBeside in Rust (F-047).
 
 ## Acceptance
 - [ ] P1 holds under property tests
-- [ ] fixtures SPEC-023 §12 items 6–8
+- [ ] fixtures SPEC-025 §12 items 6–8
 - [ ] focus PaneId stable across move when still present
 ```
 
@@ -246,7 +246,7 @@ Refs: #1001
 Depends on: PT1 Issue
 
 ## Goal
-FocusDirection geometric neighbor selection per SPEC-023 §5.7.
+FocusDirection geometric neighbor selection per SPEC-025 §5.7.
 
 ## Acceptance
 - [ ] 2×2 and uneven-ratio fixtures; stable ties
@@ -302,8 +302,8 @@ terminate or reprovision executions.
 ## Known open questions (Ready time)
 
 1. Whether ADR-019 acceptance keeps structural split/close successors as
-   history commits (gap recorded in ADR-020; do not fork here).
+   history commits (gap recorded in ADR-021; do not fork here).
 2. Exact key chords for zoom/move/equalize/directional (#1002).
 3. Whether PT4 merges with #928 or stacks after — prefer stack after.
-4. Cross-Tab pane move remains deferred; reopen ADR-020 if product makes it an
+4. Cross-Tab pane move remains deferred; reopen ADR-021 if product makes it an
    M003 gate.

@@ -1,4 +1,4 @@
-# ADR-020 — Intra-Tab PaneTree operations and focus transitions
+# ADR-021 — Intra-Tab PaneTree operations and focus transitions
 
 - **Status:** Proposed
 - **Date:** 2026-09-25
@@ -6,8 +6,8 @@
 - **Numbering:** Provisional allocation across concurrent M003 refinements is
   #994 → ADR-017 (execution provisioning), #1000 → ADR-018 (window/tab
   lifecycle), #1004 → ADR-019 (Resource Addressing / focus history),
-  #1001 → ADR-020 (this document). Numbers remain provisional until merge order
-  is settled; siblings must not claim ADR-020.
+  #1001 → ADR-021 (this document). Numbers remain provisional until merge order
+  is settled; siblings must not claim ADR-021.
 - **Scope:** deterministic Rust-owned intra-Tab `PaneTree` mutation for
   move/reparent, swap, zoom/unzoom, equalize, and directional focus; PaneId
   identity preservation; zoom as presentation overlay (not a second tree);
@@ -55,7 +55,7 @@ forbids.
   focus *history* are architecture. Existing code is not authority.
 - **New specification — required.** Before/after tree semantics, rejection
   taxonomy, and property-test invariants are reusable observable behavior
-  consumed by several production slices. SPEC-023 carries them.
+  consumed by several production slices. SPEC-025 carries them.
 - **UI architecture amendment — not required.** `M001-MULTIPANE-VIEW.md`
   already assigns the Tab the split tree and one primary keyboard focus. This
   ADR fills the missing operation contract beneath that surface.
@@ -152,7 +152,7 @@ Rules:
   - `SplitPane` / `MovePaneBeside` / `SwapPanes` / `Equalize` that succeed
     clear `zoomed` to `None` before applying (fail closed is not required;
     clearing avoids a stale overlay over a changed geometry). Implementations
-    may reject these while zoomed instead only if SPEC-023 lists that rejection;
+    may reject these while zoomed instead only if SPEC-025 lists that rejection;
     the default accepted path is clear-then-apply.
   - `FocusPane` / directional focus may change focus under zoom; they do not
     clear zoom unless the newly focused Pane is not the zoomed leaf — in which
@@ -323,7 +323,7 @@ reusable contract before coding.
 
 ## Required test classes for implementation
 
-See SPEC-023. At minimum: deterministic before/after fixtures per operation;
+See SPEC-025. At minimum: deterministic before/after fixtures per operation;
 identity-preservation properties for move/swap; zoom topology-invariance;
 fail-closed stale ids; directional neighbor fixtures including ties; close
 successor sibling preference; property tests that every rejection is

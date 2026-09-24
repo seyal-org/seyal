@@ -1,12 +1,12 @@
-# SPEC-023 — M003 intra-Tab PaneTree operations and focus transitions
+# SPEC-025 — M003 intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Proposed under #1001 / ADR-020 (not an implemented-behavior claim)
+- **Status:** Proposed under #1001 / ADR-021 (not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Issue:** #1001 — parent #674, epic #665
-- **Authority:** normative only after ADR-020 is Accepted. Until then this
+- **Authority:** normative only after ADR-021 is Accepted. Until then this
   document is the Proposed observable contract for review.
 - **Consumes:** Proposed
-  [`ADR-020-PANE-TREE-OPERATIONS.md`](../architecture/ADR-020-PANE-TREE-OPERATIONS.md);
+  [`ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md);
   ADR-015; ADR-009 / SPEC-008; Proposed ADR-019 / SPEC-022 for focus-history
   recording of committed transitions (do not redefine history here)
 - **Does not own:** Resource Addressing, focus-history capacity/ordering,
