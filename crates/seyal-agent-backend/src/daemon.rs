@@ -9,7 +9,6 @@ use std::{
         },
     },
     path::{Path, PathBuf},
-    process::Command,
     time::Duration,
 };
 
@@ -99,16 +98,38 @@ impl AgentDaemon {
         let lock = acquire_lock(&directory, our_uid)?;
         // After owning the lock, only unlink a socket that fails a connect
         // probe — never treat a live endpoint as stale (pathname TOCTOU).
-        remove_verified_stale_socket(&socket_path, our_uid)?;
-        let listener = UnixListener::bind(&socket_path).map_err(|_| DaemonError::Io)?;
-        let mut permissions = fs::metadata(&socket_path)
-            .map_err(|_| DaemonError::Io)?
-            .permissions();
+        // If probe/bind fails after we created the lock, drop it so we do not
+        // leak a lock file bearing our PID.
+        if let Err(error) = remove_verified_stale_socket(&socket_path, our_uid) {
+            release_lock_file(lock, &directory);
+            return Err(error);
+        }
+        let listener = match UnixListener::bind(&socket_path) {
+            Ok(listener) => listener,
+            Err(_) => {
+                release_lock_file(lock, &directory);
+                return Err(DaemonError::Io);
+            }
+        };
+        let mut permissions = match fs::metadata(&socket_path) {
+            Ok(meta) => meta.permissions(),
+            Err(_) => {
+                let _ = fs::remove_file(&socket_path);
+                release_lock_file(lock, &directory);
+                return Err(DaemonError::Io);
+            }
+        };
         permissions.set_mode(0o600);
-        fs::set_permissions(&socket_path, permissions).map_err(|_| DaemonError::Io)?;
-        listener
-            .set_nonblocking(false)
-            .map_err(|_| DaemonError::Io)?;
+        if fs::set_permissions(&socket_path, permissions).is_err() {
+            let _ = fs::remove_file(&socket_path);
+            release_lock_file(lock, &directory);
+            return Err(DaemonError::Io);
+        }
+        if listener.set_nonblocking(false).is_err() {
+            let _ = fs::remove_file(&socket_path);
+            release_lock_file(lock, &directory);
+            return Err(DaemonError::Io);
+        }
         Ok(Self {
             listener,
             instance_id: BackendInstanceId::new(),
@@ -255,22 +276,30 @@ fn read_one_frame(
 
 fn prepare_directory(directory: &Path, our_uid: u32) -> Result<(), DaemonError> {
     match fs::symlink_metadata(directory) {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            return Err(DaemonError::Endpoint(EndpointFault::Symlink));
-        }
-        Ok(meta) if !meta.is_dir() => return Err(DaemonError::InsecureDirectory),
-        Ok(meta) => {
-            if meta.uid() != our_uid || meta.mode() & 0o077 != 0 {
-                return Err(DaemonError::InsecureDirectory);
-            }
-        }
+        Ok(meta) => verify_directory_metadata(&meta, our_uid)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            DirBuilder::new()
-                .mode(0o700)
-                .create(directory)
-                .map_err(|_| DaemonError::Io)?;
+            match DirBuilder::new().mode(0o700).create(directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(_) => return Err(DaemonError::Io),
+            }
+            let meta = fs::symlink_metadata(directory).map_err(|_| DaemonError::Io)?;
+            verify_directory_metadata(&meta, our_uid)?;
         }
         Err(_) => return Err(DaemonError::Io),
+    }
+    Ok(())
+}
+
+fn verify_directory_metadata(meta: &fs::Metadata, our_uid: u32) -> Result<(), DaemonError> {
+    if meta.file_type().is_symlink() {
+        return Err(DaemonError::Endpoint(EndpointFault::Symlink));
+    }
+    if !meta.is_dir() {
+        return Err(DaemonError::InsecureDirectory);
+    }
+    if meta.uid() != our_uid || meta.mode() & 0o077 != 0 {
+        return Err(DaemonError::InsecureDirectory);
     }
     Ok(())
 }
@@ -339,6 +368,9 @@ fn verify_parent_directory(socket_path: &Path, our_uid: u32) -> Result<(), Daemo
 fn acquire_lock(directory: &Path, our_uid: u32) -> Result<File, DaemonError> {
     let lock_path = directory.join(LOCK_NAME);
     let socket_path = directory.join(SOCKET_NAME);
+    // Probe before creating or replacing any lock: a live socket means another
+    // owner still holds the endpoint — leave their lock completely untouched.
+    refuse_if_socket_live(&socket_path)?;
     if let Some(file) = create_lock(&lock_path)? {
         return Ok(file);
     }
@@ -346,10 +378,38 @@ fn acquire_lock(directory: &Path, our_uid: u32) -> Result<File, DaemonError> {
     match decide(&facts, our_uid) {
         EndpointDecision::Reject(fault) => Err(DaemonError::Endpoint(fault)),
         EndpointDecision::Create | EndpointDecision::ReclaimStale => {
+            refuse_if_socket_live(&socket_path)?;
             fs::remove_file(&lock_path).map_err(|_| DaemonError::Io)?;
             create_lock(&lock_path)?.ok_or(DaemonError::StartupContended)
         }
     }
+}
+
+/// Connect-probe an existing socket leaf. Success means a live owner — refuse
+/// without mutating lock state. Missing or refused sockets are reclaimable.
+fn refuse_if_socket_live(path: &Path) -> Result<(), DaemonError> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(DaemonError::Io),
+        Ok(_) => {}
+    }
+    match UnixStream::connect(path) {
+        Ok(_) => Err(DaemonError::StartupContended),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+            ) =>
+        {
+            Ok(())
+        }
+        Err(_) => Err(DaemonError::Io),
+    }
+}
+
+fn release_lock_file(lock: File, directory: &Path) {
+    drop(lock);
+    let _ = fs::remove_file(directory.join(LOCK_NAME));
 }
 
 fn create_lock(path: &Path) -> Result<Option<File>, DaemonError> {
@@ -441,11 +501,18 @@ fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    Command::new("ps")
-        .args(["-p", &pid.to_string()])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(true)
+    // SAFETY: `kill` with signal 0 only checks existence / permission; it does
+    // not deliver a signal and does not take ownership of the pid.
+    #[allow(unsafe_code)]
+    {
+        let result = unsafe { libc::kill(pid as i32, 0) };
+        if result == 0 {
+            return true;
+        }
+        // ESRCH → no such process. Any other error (e.g. EPERM) fails closed
+        // as alive so we never steal a lock we cannot prove is dead.
+        io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
 }
 
 fn current_uid() -> io::Result<u32> {
@@ -600,7 +667,8 @@ mod tests {
         let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
         socket_permissions.set_mode(0o600);
         fs::set_permissions(&socket, socket_permissions).unwrap();
-        // Dead lock owner + still-connectable leaf: reclaim must refuse unlink.
+        // Dead lock owner + still-connectable leaf: reclaim must refuse unlink
+        // and must not rewrite the foreign/dead lock body.
         fs::write(dir.path().join(LOCK_NAME), b"v1\n0\n").unwrap();
 
         assert_eq!(
@@ -608,7 +676,60 @@ mod tests {
             Err(DaemonError::StartupContended)
         );
         assert!(socket.exists());
+        assert_eq!(fs::read(dir.path().join(LOCK_NAME)).unwrap(), b"v1\n0\n");
         drop(listener);
+    }
+
+    #[test]
+    fn corrupt_lock_is_rejected_and_left_in_place() {
+        let dir = TempDir::new();
+        fs::create_dir(dir.path()).unwrap();
+        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(dir.path(), permissions).unwrap();
+
+        let lock_path = dir.path().join(LOCK_NAME);
+        fs::write(&lock_path, b"v1\nnot-a-pid\n").unwrap();
+        // Optional dead socket leaf must not change the CorruptLock outcome.
+        let socket = dir.path().join(SOCKET_NAME);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
+        socket_permissions.set_mode(0o600);
+        fs::set_permissions(&socket, socket_permissions).unwrap();
+        drop(listener);
+
+        assert_eq!(
+            AgentDaemon::bind(dir.path()).map(|_| ()),
+            Err(DaemonError::Endpoint(EndpointFault::CorruptLock))
+        );
+        assert_eq!(fs::read(&lock_path).unwrap(), b"v1\nnot-a-pid\n");
+        assert!(socket.exists());
+    }
+
+    #[test]
+    fn connect_hello_rejects_insecure_parent_directory() {
+        let dir = TempDir::new();
+        fs::create_dir(dir.path()).unwrap();
+        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(dir.path(), permissions).unwrap();
+
+        let socket = dir.path().join(SOCKET_NAME);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
+        socket_permissions.set_mode(0o600);
+        fs::set_permissions(&socket, socket_permissions).unwrap();
+        drop(listener);
+
+        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
+        permissions.set_mode(0o777);
+        fs::set_permissions(dir.path(), permissions).unwrap();
+
+        assert_eq!(
+            connect_hello(&socket, &hello(), 4096).map(|_| ()),
+            Err(DaemonError::InsecureDirectory)
+        );
+        assert!(socket.exists());
     }
 
     #[test]
@@ -624,11 +745,14 @@ mod tests {
         )
         .unwrap();
         let path = daemon.socket_path();
+        let lock_path = dir.path().join(LOCK_NAME);
 
         let mut bad = UnixStream::connect(&path).unwrap();
         bad.write_all(b"nopeNOPE!!").unwrap();
         assert_eq!(daemon.accept_hello(), Err(DaemonError::Malformed));
         drop(bad);
+        assert!(path.exists());
+        assert!(lock_path.exists());
 
         let mut huge = UnixStream::connect(&path).unwrap();
         let mut header = [0; 10];
@@ -637,6 +761,8 @@ mod tests {
         header[6..10].copy_from_slice(&u32::MAX.to_le_bytes());
         huge.write_all(&header).unwrap();
         assert_eq!(daemon.accept_hello(), Err(DaemonError::Oversized));
+        assert!(path.exists());
+        assert!(lock_path.exists());
 
         let incompatible = Hello {
             supported_versions: vec![ProtocolVersion::new(99)],
@@ -653,6 +779,8 @@ mod tests {
             client.join().unwrap(),
             Err(DaemonError::Handshake(HandshakeError::NoCompatibleVersion))
         );
+        assert!(daemon.socket_path().exists());
+        assert!(lock_path.exists());
 
         let stalled_path = daemon.socket_path();
         let stalled = thread::spawn(move || {
@@ -661,6 +789,8 @@ mod tests {
         });
         assert_eq!(daemon.accept_hello(), Err(DaemonError::TimedOut));
         stalled.join().unwrap();
+        assert!(daemon.socket_path().exists());
+        assert!(lock_path.exists());
 
         let path = daemon.socket_path();
         let good = thread::spawn(move || connect_hello(&path, &hello(), 1024));
@@ -670,6 +800,8 @@ mod tests {
             ack.backend_instance_id
         );
         assert!(hello().event_window <= MAX_EVENT_WINDOW);
+        assert!(daemon.socket_path().exists());
+        assert!(lock_path.exists());
     }
 
     #[test]
@@ -679,22 +811,7 @@ mod tests {
         let daemon = AgentDaemon::bind(dir.path()).unwrap();
         let cold_start = started.elapsed();
         let path = daemon.socket_path();
-        for _ in 0..20 {
-            let path = path.clone();
-            let client =
-                thread::spawn(move || connect_hello(&path, &hello(), ABSOLUTE_MAX_FRAME_SIZE));
-            daemon.accept_hello().unwrap();
-            client.join().unwrap().unwrap();
-        }
-        assert!(!path.symlink_metadata().unwrap().file_type().is_symlink());
-        let sample = DaemonSample {
-            cold_start,
-            handshake: Duration::ZERO,
-            churn_handshakes: 20,
-            retained_connections: 0,
-            rss_kib: resident_kib(),
-            cpu_percent: cpu_percent(),
-        };
+
         fn resident_kib() -> Option<u64> {
             let output = std::process::Command::new("ps")
                 .args(["-o", "rss=", "-p", &std::process::id().to_string()])
@@ -709,17 +826,49 @@ mod tests {
                 .ok()?;
             String::from_utf8(output.stdout).ok()?.trim().parse().ok()
         }
+
+        let idle_rss_kib = resident_kib();
+        let idle_cpu_percent = cpu_percent();
+
+        let handshake_started = Instant::now();
+        let handshake_path = path.clone();
+        let handshake_client = thread::spawn(move || {
+            connect_hello(&handshake_path, &hello(), ABSOLUTE_MAX_FRAME_SIZE)
+        });
+        daemon.accept_hello().unwrap();
+        handshake_client.join().unwrap().unwrap();
+        let handshake = handshake_started.elapsed();
+
+        for _ in 0..20 {
+            let path = path.clone();
+            let client =
+                thread::spawn(move || connect_hello(&path, &hello(), ABSOLUTE_MAX_FRAME_SIZE));
+            daemon.accept_hello().unwrap();
+            client.join().unwrap().unwrap();
+        }
+        assert!(!path.symlink_metadata().unwrap().file_type().is_symlink());
+        let post_churn_rss_kib = resident_kib();
+        let sample = DaemonSample {
+            cold_start,
+            handshake,
+            churn_handshakes: 20,
+            retained_connections: 0,
+            rss_kib: post_churn_rss_kib,
+            cpu_percent: idle_cpu_percent,
+        };
         assert_eq!(sample.retained_connections, 0);
         assert!(sample.churn_handshakes == 20);
+        assert!(sample.handshake > Duration::ZERO);
         if let Some(rss) = sample.rss_kib {
             assert!(rss < 512 * 1024, "spike RSS ceiling exceeded: {rss} KiB");
         }
         eprintln!(
-            "ab-0.2 measurement cold_start_us={} churn={} rss_kib={:?} cpu={:?}",
+            "ab-0.2 measurement cold_start_us={} handshake_us={} idle_rss_kib={:?} idle_cpu={:?} post_churn_rss_kib={:?}",
             sample.cold_start.as_micros(),
-            sample.churn_handshakes,
-            sample.rss_kib,
-            sample.cpu_percent
+            sample.handshake.as_micros(),
+            idle_rss_kib,
+            idle_cpu_percent,
+            post_churn_rss_kib
         );
     }
 

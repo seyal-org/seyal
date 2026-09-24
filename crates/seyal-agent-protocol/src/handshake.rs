@@ -301,4 +301,24 @@ mod tests {
         let decoded = crate::decode_frame(&encoded, 1024).unwrap();
         assert_eq!(decode_ack(&decoded.body).unwrap(), ack);
     }
+
+    #[test]
+    fn property_untrusted_handshake_bodies_never_panic() {
+        let mut state = 0xC0FFEE_u64;
+        for _ in 0..256 {
+            let len = (next(&mut state) as usize % 4096) + 1;
+            let mut body = vec![0; len];
+            for byte in &mut body {
+                *byte = next(&mut state);
+            }
+            let _ = decode_hello(&body);
+            let _ = decode_ack(&body);
+            let _ = decode_handshake_error(&body);
+        }
+    }
+
+    fn next(state: &mut u64) -> u8 {
+        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (*state >> 33) as u8
+    }
 }

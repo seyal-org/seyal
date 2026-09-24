@@ -175,6 +175,8 @@ mod tests {
 
         let ack = handshake(&socket, &hello()).unwrap();
         assert_eq!(ack.backend_instance_id, server.join().unwrap());
+        // Client never unlinks or replaces the daemon endpoint.
+        assert!(socket.exists());
         assert!(socket.symlink_metadata().unwrap().file_type().is_socket());
         std::fs::remove_dir_all(dir).unwrap();
     }

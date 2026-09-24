@@ -7,18 +7,24 @@
 use std::io;
 use std::os::fd::RawFd;
 
+/// Pure UID equality check used by [`verify_same_user_peer`].
+pub(crate) fn verify_peer_uid(actual: u32, expected: u32) -> io::Result<()> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "peer effective UID does not match Agent Backend effective UID",
+        ))
+    }
+}
+
 /// Verifies the connected peer's effective UID equals this process's.
 pub fn verify_same_user_peer(socket: RawFd) -> io::Result<()> {
     let peer_uid = peer_effective_uid(socket)?;
     // SAFETY: `geteuid` only reads the calling process credentials.
     let own_uid = unsafe { libc::geteuid() };
-    if peer_uid != own_uid {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "peer effective UID does not match Agent Backend effective UID",
-        ));
-    }
-    Ok(())
+    verify_peer_uid(peer_uid, own_uid)
 }
 
 fn peer_effective_uid(socket: RawFd) -> io::Result<u32> {
@@ -67,6 +73,7 @@ fn peer_effective_uid(socket: RawFd) -> io::Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::os::fd::AsRawFd;
     use std::os::unix::net::UnixStream;
 
@@ -74,5 +81,22 @@ mod tests {
     fn same_process_socketpair_matches_own_uid() {
         let (a, _b) = UnixStream::pair().unwrap();
         verify_same_user_peer(a.as_raw_fd()).unwrap();
+    }
+
+    #[test]
+    fn verify_peer_uid_mismatch_is_permission_denied() {
+        let error = verify_peer_uid(7, 8).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn verify_same_user_peer_rejects_non_socket_fd() {
+        let file = File::open("/dev/null").unwrap();
+        assert!(verify_same_user_peer(file.as_raw_fd()).is_err());
+    }
+
+    #[test]
+    fn verify_peer_uid_accepts_matching_uids() {
+        assert!(verify_peer_uid(42, 42).is_ok());
     }
 }
