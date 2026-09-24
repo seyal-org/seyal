@@ -160,7 +160,7 @@ M001 server capability bits are:
 - bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703;
 - bit 8: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
-Message types 20–34 and capability bits 4–7 belong to later M002/M003 contracts and are outside this section's Pass 5/7 scope. §18 assigns types 35–38 and bit 8.
+Allocated control types in this family beyond Pass 5/7 include 20 (`ComposerCommand`), 26 (`BlockState`), 27/28 (display v2) and reserved 29; types 21–25 and 30–34 have no current owner. Capability bits 4–7 are taken (SPEC-007 / SPEC-011 / SPEC-006). §18 therefore assigns the next free bit (**bit 8**) and contiguous free control types **35–38** (skipping unowned 30–34 only to keep the provisioning quartet packed and distinct from display/composer ranges).
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
