@@ -1,9 +1,12 @@
 use std::{
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, Read, Write},
-    os::unix::{
-        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
-        net::{UnixListener, UnixStream},
+    os::{
+        fd::AsRawFd,
+        unix::{
+            fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+            net::{UnixListener, UnixStream},
+        },
     },
     path::{Path, PathBuf},
     process::Command,
@@ -18,6 +21,7 @@ use seyal_agent_protocol::{
 };
 
 use crate::endpoint::{decide, EndpointDecision, EndpointFacts, EndpointFault};
+use crate::peer;
 
 const SOCKET_NAME: &str = "agent.sock";
 const LOCK_NAME: &str = "agent.lock";
@@ -89,11 +93,13 @@ impl AgentDaemon {
         let our_uid = current_uid().map_err(|_| DaemonError::Io)?;
         prepare_directory(&directory, our_uid)?;
         let socket_path = directory.join(SOCKET_NAME);
+        // Reject unsafe leaves before taking the lock so a bad leaf cannot
+        // pin a lock file; reclaim only after ownership is proven.
         reject_unsafe_endpoint(&socket_path, our_uid)?;
         let lock = acquire_lock(&directory, our_uid)?;
-        if fs::symlink_metadata(&socket_path).is_ok() {
-            fs::remove_file(&socket_path).map_err(|_| DaemonError::Io)?;
-        }
+        // After owning the lock, only unlink a socket that fails a connect
+        // probe — never treat a live endpoint as stale (pathname TOCTOU).
+        remove_verified_stale_socket(&socket_path, our_uid)?;
         let listener = UnixListener::bind(&socket_path).map_err(|_| DaemonError::Io)?;
         let mut permissions = fs::metadata(&socket_path)
             .map_err(|_| DaemonError::Io)?
@@ -133,6 +139,8 @@ impl AgentDaemon {
         if !endpoint_still_owned(&self.socket_path(), self.our_uid) {
             return Err(DaemonError::Endpoint(EndpointFault::Symlink));
         }
+        peer::verify_same_user_peer(stream.as_raw_fd())
+            .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
 
         let frame = read_one_frame(&mut stream as &mut dyn Read, self.config.max_frame_size)?;
         if frame.kind != FrameKind::Hello {
@@ -187,13 +195,17 @@ pub fn connect_hello(
     hello: &Hello,
     max_frame_size: u32,
 ) -> Result<HelloAck, DaemonError> {
-    if !endpoint_still_owned(socket_path, current_uid().map_err(|_| DaemonError::Io)?) {
+    let our_uid = current_uid().map_err(|_| DaemonError::Io)?;
+    verify_parent_directory(socket_path, our_uid)?;
+    if !endpoint_still_owned(socket_path, our_uid) {
         return Err(DaemonError::Endpoint(EndpointFault::Symlink));
     }
     let stream = UnixStream::connect(socket_path).map_err(map_io)?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|_| DaemonError::Io)?;
+    peer::verify_same_user_peer(stream.as_raw_fd())
+        .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
     complete_client_handshake(&stream, hello, max_frame_size)
 }
 
@@ -280,6 +292,46 @@ fn reject_unsafe_endpoint(socket_path: &Path, our_uid: u32) -> Result<(), Daemon
     }
     if meta.mode() & 0o077 != 0 {
         return Err(DaemonError::Endpoint(EndpointFault::InsecureMode));
+    }
+    Ok(())
+}
+
+/// Prove a pre-existing socket leaf is not connectable before unlinking it.
+/// A live endpoint is never treated as stale.
+fn remove_verified_stale_socket(path: &Path, our_uid: u32) -> Result<(), DaemonError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => reject_unsafe_endpoint(path, our_uid)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(DaemonError::Io),
+    }
+
+    match UnixStream::connect(path) {
+        Ok(_) => return Err(DaemonError::StartupContended),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+            ) => {}
+        Err(_) => return Err(DaemonError::Io),
+    }
+
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(DaemonError::Io),
+    }
+}
+
+fn verify_parent_directory(socket_path: &Path, our_uid: u32) -> Result<(), DaemonError> {
+    let Some(parent) = socket_path.parent() else {
+        return Err(DaemonError::InsecureDirectory);
+    };
+    let meta = fs::symlink_metadata(parent).map_err(|_| DaemonError::Io)?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(DaemonError::InsecureDirectory);
+    }
+    if meta.uid() != our_uid || meta.mode() & 0o077 != 0 {
+        return Err(DaemonError::InsecureDirectory);
     }
     Ok(())
 }
@@ -397,14 +449,11 @@ fn process_alive(pid: u32) -> bool {
 }
 
 fn current_uid() -> io::Result<u32> {
-    let output = Command::new("id").arg("-u").output()?;
-    if !output.status.success() {
-        return Err(io::Error::other("id -u failed"));
+    // SAFETY: `geteuid` only reads the calling process credentials.
+    #[allow(unsafe_code)]
+    {
+        Ok(unsafe { libc::geteuid() })
     }
-    let text = String::from_utf8(output.stdout).map_err(|_| io::Error::other("id -u utf8"))?;
-    text.trim()
-        .parse()
-        .map_err(|_| io::Error::other("id -u parse"))
 }
 
 fn map_io(error: io::Error) -> DaemonError {

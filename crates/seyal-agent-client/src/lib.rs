@@ -4,15 +4,20 @@
 //! Runtime, a PTY, or a renderer. It also never unlinks or replaces the daemon
 //! endpoint; endpoint ownership stays with the backend.
 
+#[allow(unsafe_code)]
+mod peer;
+
 use std::{
     fs,
     io::{self, Read, Write},
-    os::unix::{
-        fs::{FileTypeExt, MetadataExt},
-        net::UnixStream,
+    os::{
+        fd::AsRawFd,
+        unix::{
+            fs::{FileTypeExt, MetadataExt},
+            net::UnixStream,
+        },
     },
     path::Path,
-    process::Command,
     time::Duration,
 };
 
@@ -33,6 +38,7 @@ pub enum ClientError {
 
 pub fn handshake(socket_path: &Path, hello: &Hello) -> Result<HelloAck, ClientError> {
     let our_uid = current_uid().map_err(|_| ClientError::Io)?;
+    verify_parent_directory(socket_path, our_uid)?;
     let meta = fs::symlink_metadata(socket_path).map_err(map_io)?;
     if meta.file_type().is_symlink()
         || !meta.file_type().is_socket()
@@ -46,6 +52,7 @@ pub fn handshake(socket_path: &Path, hello: &Hello) -> Result<HelloAck, ClientEr
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|_| ClientError::Io)?;
+    peer::verify_same_user_peer(stream.as_raw_fd()).map_err(|_| ClientError::UnsafeEndpoint)?;
     let frame = encode_hello(hello, ABSOLUTE_MAX_FRAME_SIZE).map_err(|_| ClientError::Malformed)?;
     stream.write_all(&frame).map_err(map_io)?;
     let response = read_frame(&mut stream)?;
@@ -57,6 +64,21 @@ pub fn handshake(socket_path: &Path, hello: &Hello) -> Result<HelloAck, ClientEr
         }
         FrameKind::Hello => Err(ClientError::Malformed),
     }
+}
+
+fn verify_parent_directory(socket_path: &Path, our_uid: u32) -> Result<(), ClientError> {
+    let Some(parent) = socket_path.parent() else {
+        return Err(ClientError::UnsafeEndpoint);
+    };
+    let meta = fs::symlink_metadata(parent).map_err(map_io)?;
+    if meta.file_type().is_symlink()
+        || !meta.is_dir()
+        || meta.uid() != our_uid
+        || meta.mode() & 0o077 != 0
+    {
+        return Err(ClientError::UnsafeEndpoint);
+    }
+    Ok(())
 }
 
 fn read_frame(stream: &mut UnixStream) -> Result<seyal_agent_protocol::Frame, ClientError> {
@@ -77,9 +99,11 @@ fn read_frame(stream: &mut UnixStream) -> Result<seyal_agent_protocol::Frame, Cl
 }
 
 fn current_uid() -> io::Result<u32> {
-    let output = Command::new("id").arg("-u").output()?;
-    let text = String::from_utf8(output.stdout).map_err(|_| io::Error::other("uid"))?;
-    text.trim().parse().map_err(|_| io::Error::other("uid"))
+    // SAFETY: `geteuid` only reads the calling process credentials.
+    #[allow(unsafe_code)]
+    {
+        Ok(unsafe { libc::geteuid() })
+    }
 }
 
 fn map_io(error: io::Error) -> ClientError {
@@ -163,6 +187,9 @@ mod tests {
             NEXT_DIR.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&dir).unwrap();
+        let mut permissions = std::fs::metadata(&dir).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&dir, permissions).unwrap();
         let file = dir.join("plain");
         File::create(&file).unwrap();
         assert_eq!(handshake(&file, &hello()), Err(ClientError::UnsafeEndpoint));
@@ -172,6 +199,27 @@ mod tests {
         std::os::unix::fs::symlink(&file, &link).unwrap();
         assert_eq!(handshake(&link, &hello()), Err(ClientError::UnsafeEndpoint));
         assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn client_rejects_an_insecure_parent_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "seyal-agent-client-insecure-{}-{}",
+            std::process::id(),
+            NEXT_DIR.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let mut permissions = std::fs::metadata(&dir).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&dir, permissions).unwrap();
+        let socket = dir.join("agent.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        drop(listener);
+        assert_eq!(
+            handshake(&socket, &hello()),
+            Err(ClientError::UnsafeEndpoint)
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

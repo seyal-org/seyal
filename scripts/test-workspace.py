@@ -136,6 +136,15 @@ for name in ("seyal-exec", "seyal-protocol", "seyal-runtime"):
     if macos_dependencies["libc"] != "=0.2.189":
         fail(f"{name} must exactly pin the reviewed libc 0.2.189 dependency")
 
+for name in ("seyal-agent-backend", "seyal-agent-client"):
+    unix_dependencies = manifests[name].get("target", {}).get(
+        "cfg(unix)", {}
+    ).get("dependencies", {})
+    if set(unix_dependencies) != {"libc"}:
+        fail(f"{name} Unix platform boundary may depend only on libc for peer UID")
+    if unix_dependencies["libc"] != "=0.2.189":
+        fail(f"{name} must exactly pin the reviewed libc 0.2.189 dependency")
+
 for name in EXPECTED_CRATES:
     src = ROOT / "crates" / name / "src"
     if not src.is_dir():

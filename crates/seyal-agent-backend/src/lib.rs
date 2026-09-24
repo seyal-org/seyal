@@ -7,6 +7,9 @@
 mod daemon;
 #[cfg(unix)]
 mod endpoint;
+#[cfg(unix)]
+#[allow(unsafe_code)]
+mod peer;
 
 #[cfg(unix)]
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};
