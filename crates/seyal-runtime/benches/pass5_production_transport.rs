@@ -210,14 +210,14 @@ fn sample_damage_to_client_cache(session: &mut ContractSession, marker: &[u8]) -
         let mut measured = None;
         session.clients[0]
             .drain_available_with_batch_hook(|generation| {
-                if generation > before {
-                    if let Some(source) = session
-                        .runtime
-                        .benchmark_source_timestamp(session.execution_id, generation)
-                    {
-                        measured =
-                            Some(Instant::now().duration_since(source).as_secs_f64() * 1_000.0);
-                    }
+                if generation <= before {
+                    return;
+                }
+                if let Some(source) = session
+                    .runtime
+                    .benchmark_source_timestamp(session.execution_id, generation)
+                {
+                    measured = Some(Instant::now().duration_since(source).as_secs_f64() * 1_000.0);
                 }
             })
             .expect("client drain");

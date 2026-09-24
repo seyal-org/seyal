@@ -80,6 +80,7 @@ fn cache_contains_ascii(client: &LocalDisplayClient, needle: &str) -> bool {
     })
 }
 
+#[cfg(target_os = "macos")]
 fn sample_input_visible_proxy(client: &mut LocalDisplayClient, marker: &str) -> f64 {
     settle_client(client);
     let before = client.cache().generation;
