@@ -980,16 +980,24 @@ Keep the Block output range exactly as defined (`[start_line, end_line]` from
    never a second grid, and never part of "copy output".
 5. `None` means no context region. Clients never guess prompt rows by scanning
    upward, and never render prompt text as AppKit.
+6. **Empty output.** A command that prints nothing (`cd`, `export`, `true`)
+   finishes on the row it started on, which is where the next prompt is drawn.
+   Today Runtime clamps `end_line` to `start_line` so the Block completes
+   (#1015), and that single row later shows the next prompt. The extended
+   record therefore also carries `output_empty: bool`, set when the trusted
+   `D` completion line precedes `start_line`. Clients then present a Block with
+   no output region, and never request or draw its range.
 
 ### Record and wire shape
 
 `BlockTimeline` gains `prompt_line: Option<LineId>` with explicit presence
-encoding. It is negotiated exactly like the duration amendment: a
+encoding, and `output_empty: bool` for completed records (always `false` while
+running). It is negotiated exactly like the duration amendment: a
 ClientHello/ServerHello capability bit selects the extended record. Without the
 bit, Runtime sends the existing shape. A capability without command Blocks is a
 protocol error. Mixed-version fallback composes after the duration and
 extended-key fallbacks in that fixed order, adding at most one attempt.
-Per-record growth is bounded to one optional `LineId`.
+Per-record growth is bounded to one optional `LineId` and one flag byte.
 
 ### Invariants
 
@@ -1008,7 +1016,7 @@ Per-record growth is bounded to one optional `LineId`.
 Multi-line prompts (for example a two-line starship prompt: both rows
 included); `PROMPT_SP` and partial-line output; transient/right prompts;
 `clear` or `reset` between `A` and `C`; `A`, `C` and `D` parsed in one PTY
-read; prompt row evicted from bounded history; reattach after completion;
+read; zero-output commands (`output_empty`, never a stuck Running Block); prompt row evicted from bounded history; reattach after completion;
 interrupted multiline submission (no `C`); nested shell or `exec` replacement.
 
 ### Alternatives considered
