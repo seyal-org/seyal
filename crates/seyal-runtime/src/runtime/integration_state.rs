@@ -293,7 +293,10 @@ mod tests {
         // trusted line (no D marker was observed to stamp one from).
         assert_eq!(
             running.on(E::PromptStarted),
-            Transition::with(S::AtPrompt, Effect::Complete(block(9), BlockExit::Unknown, None))
+            Transition::with(
+                S::AtPrompt,
+                Effect::Complete(block(9), BlockExit::Unknown, None)
+            )
         );
         // Lost D and A: the next command completes the previous Block first,
         // again with no trusted line for that completion.

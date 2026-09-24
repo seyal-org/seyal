@@ -48,9 +48,7 @@ pub struct Diagnostics {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellIntegrationEvent {
     /// OSC `133;A;<nonce>`: the shell is about to draw a prompt.
-    PromptStarted {
-        token: ShellIntegrationToken,
-    },
+    PromptStarted { token: ShellIntegrationToken },
     /// `line` is the cursor's logical line at the moment this marker was
     /// recognized, before any later bytes in the same feed are applied. A
     /// caller sampling "the current cursor" instead, after draining a whole
@@ -2078,34 +2076,35 @@ impl Actions for TerminalCore {
             self.record_deferred();
             return;
         }
-        let event = match bytes.strip_prefix(b"133;") {
-            Some(payload) => {
-                let mut fields = payload.split(|byte| *byte == b';');
-                match (fields.next(), fields.next(), fields.next()) {
-                    (Some(b"A"), Some(token), None) => ShellIntegrationToken::from_hex(token)
-                        .map(|token| ShellIntegrationEvent::PromptStarted { token }),
-                    (Some(b"C"), Some(token), None) => ShellIntegrationToken::from_hex(token)
-                        .map(|token| ShellIntegrationEvent::CommandStarted {
-                            token,
-                            line: self.current_line(),
-                        }),
-                    (Some(b"D"), Some(token), Some(status)) => {
-                        ShellIntegrationToken::from_hex(token).and_then(|token| {
-                            std::str::from_utf8(status)
-                                .ok()
-                                .and_then(|status| status.parse::<i32>().ok())
-                                .map(|exit_status| ShellIntegrationEvent::CommandFinished {
-                                    token,
-                                    exit_status,
-                                    line: self.completion_line(),
-                                })
-                        })
+        let event =
+            match bytes.strip_prefix(b"133;") {
+                Some(payload) => {
+                    let mut fields = payload.split(|byte| *byte == b';');
+                    match (fields.next(), fields.next(), fields.next()) {
+                        (Some(b"A"), Some(token), None) => ShellIntegrationToken::from_hex(token)
+                            .map(|token| ShellIntegrationEvent::PromptStarted { token }),
+                        (Some(b"C"), Some(token), None) => ShellIntegrationToken::from_hex(token)
+                            .map(|token| ShellIntegrationEvent::CommandStarted {
+                                token,
+                                line: self.current_line(),
+                            }),
+                        (Some(b"D"), Some(token), Some(status)) => {
+                            ShellIntegrationToken::from_hex(token).and_then(|token| {
+                                std::str::from_utf8(status)
+                                    .ok()
+                                    .and_then(|status| status.parse::<i32>().ok())
+                                    .map(|exit_status| ShellIntegrationEvent::CommandFinished {
+                                        token,
+                                        exit_status,
+                                        line: self.completion_line(),
+                                    })
+                            })
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 }
-            }
-            _ => None,
-        };
+                _ => None,
+            };
         let Some(event) = event else {
             self.record_deferred();
             return;
