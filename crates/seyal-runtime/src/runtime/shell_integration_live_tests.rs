@@ -381,6 +381,53 @@ fn block_body_range_excludes_the_prompt_and_echoed_command_row() {
 }
 
 #[test]
+fn zero_output_commands_complete_and_later_blocks_stay_exact() {
+    // #1015 review: a command with no output finishes on the row it started
+    // on. Its completion line used to back up before start_line, the
+    // timeline rejected it and the Block stayed Running with no owner.
+    let mut h = spawn("zero-output", PLAIN_RC, None);
+    h.wait_at_prompt();
+    for (index, (command, status)) in [("true", 0), ("false", 1)].into_iter().enumerate() {
+        assert!(matches!(h.submit(command), ComposerAdmission::Accepted(_)));
+        assert_eq!(
+            h.wait_block_completed(index),
+            CommandBlockLifecycle::Completed {
+                exit_status: Some(status)
+            },
+            "{command} must complete, not stay Running"
+        );
+        h.wait_at_prompt();
+        let record = h.runtime.entries[&h.id]
+            .block_timeline
+            .records()
+            .nth(index)
+            .cloned()
+            .expect("record exists");
+        assert!(
+            record.end_line.is_some_and(|end| end >= record.start_line),
+            "{command}: end_line {:?} must not precede start_line {}",
+            record.end_line,
+            record.start_line
+        );
+    }
+
+    // A normal Block after zero-output ones keeps its exact output range.
+    assert!(matches!(
+        h.submit("printf 'AFTER_ZERO_OUTPUT\\n'"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert_eq!(
+        h.wait_block_completed(2),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    h.wait_at_prompt();
+    let body = h.block_body(2);
+    assert_eq!(body.trim(), "AFTER_ZERO_OUTPUT", "unexpected body:\n{body}");
+}
+
+#[test]
 fn aliased_command_and_real_exit_status_are_reported() {
     let mut h = spawn("alias", PLAIN_RC, None);
     h.wait_at_prompt();

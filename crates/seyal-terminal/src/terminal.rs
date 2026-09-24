@@ -1110,20 +1110,18 @@ impl TerminalCore {
     }
 
     /// The line where a command's real output ends, at the moment the
-    /// trusted `D` marker is recognized. When output ends with a trailing
-    /// newline (the common case), the cursor sits on a fresh row that has
-    /// no content yet -- that row is not the command's output, it is simply
-    /// where the shell's own next prompt will shortly be drawn, onto the
-    /// same row a caller would otherwise capture as this Block's last line.
-    /// The previous row is the true last output line in that case; a row
-    /// that already has content (no trailing newline) is used as-is.
+    /// trusted `D` marker is recognized. A cursor at column 0 means the
+    /// output ended with a newline (or zsh's `PROMPT_SP` already moved to a
+    /// fresh row, filling it with spaces before `precmd` emits `D`), so the
+    /// cursor's row is where the next prompt will be drawn, not output: use
+    /// the row before it. A cursor past column 0 is still on the last output
+    /// row (no trailing newline). The row's content is not a usable signal:
+    /// `PROMPT_SP` writes spaces into it. A command with no output backs up
+    /// before its start line; Runtime clamps that (#1015).
     fn completion_line(&self) -> LineId {
         let cursor = self.current().cursor(self.modes.cursor_visible);
         let screen = self.current();
-        let row_is_empty = screen
-            .cell_row(cursor.row)
-            .is_none_or(|cells| cells.iter().all(|cell| cell.role == CellRole::Empty));
-        let row = if row_is_empty && cursor.row > 0 {
+        let row = if cursor.col == 0 && cursor.row > 0 {
             cursor.row - 1
         } else {
             cursor.row
@@ -2272,6 +2270,37 @@ mod tests {
                 line: LineId(1),
             }),
             "line must be the row holding the real output, not the empty row after it"
+        );
+    }
+
+    #[test]
+    fn command_finished_line_ignores_prompt_sp_spaces_on_the_next_row() {
+        // zsh PROMPT_SP (default on) writes its end-of-line mark and a row of
+        // spaces, then CR, before precmd emits `D`. The next row is then not
+        // empty, but it is still the next prompt's row (#1015 live finding).
+        let mut terminal = TerminalState::new(80, 24).unwrap();
+        let token = ShellIntegrationToken::from_bytes([
+            0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff,
+        ]);
+        terminal
+            .feed(b"\x1b]133;C;00112233445566778899aabbccddeeff\x07")
+            .unwrap();
+        let _ = terminal.take_shell_integration_event();
+        terminal.feed(b"output-line\r\n").unwrap();
+        terminal.feed(&[b' '; 79]).unwrap();
+        terminal.feed(b"\r").unwrap();
+        terminal
+            .feed(b"\x1b]133;D;00112233445566778899aabbccddeeff;0\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandFinished {
+                token,
+                exit_status: 0,
+                line: LineId(1),
+            }),
+            "PROMPT_SP spaces must not turn the next prompt's row into output"
         );
     }
 
