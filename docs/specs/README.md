@@ -26,6 +26,10 @@ Specifications define **observable behavior and enforceable contracts** below ac
 - [`SPEC-020-M005-DETERMINISTIC-ROUTING.md`](SPEC-020-M005-DETERMINISTIC-ROUTING.md) — **Accepted on merge under #838 / #55:** deterministic RouteOffering filtering/scoring, confidence shrinkage, policy-anchored cost/latency normalization, bounded fallback and explainability.
 - [`SPEC-021-M005-MULTIMODAL-GRAPH-CONTEXT.md`](SPEC-021-M005-MULTIMODAL-GRAPH-CONTEXT.md) — **Accepted on merge under #838 / SPEC-013:** multimodal context/enrichment, prompt/provider-cache dependencies and provider-neutral SoftwareEngineeringGraphSource with coverage semantics.
 
+## Proposed specifications
+
+- [`SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) — **Proposed under #1004 / ADR-018:** typed local `ResourceAddress` forms, whole-composite resolution and the fail-closed rejection taxonomy, atomic reveal-and-focus navigation, cross-window activation effects, one application-scoped bounded/deterministic focus history with eager invalidation, address-versus-label separation, and the required test set. Not an implemented-behavior claim.
+
 ## When a specification is required
 
 Create or update a specification before implementation when work defines or changes a reusable behavioral contract whose correctness cannot safely be inferred from a single Issue. This includes, in particular:
