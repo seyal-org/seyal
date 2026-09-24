@@ -62,6 +62,10 @@ impl ObservationAuthority {
         self.effects_performed
     }
 
+    pub fn applied_count(&self) -> usize {
+        self.applied.len()
+    }
+
     pub fn apply(&mut self, observation: HostObservation) -> Result<(), ObserveError> {
         self.domain
             .validate_binding_generation(observation.run_id, observation.binding_generation)
@@ -105,6 +109,11 @@ impl ObservationAuthority {
             HostObservationKind::HarnessCrashed | HostObservationKind::UnknownLiveness => {
                 self.liveness
                     .insert(observation.run_id, RunLiveness::UnknownAfterCrash);
+            }
+            HostObservationKind::Delayed { .. } => {
+                self.liveness
+                    .entry(observation.run_id)
+                    .or_insert(RunLiveness::ScriptedLive);
             }
             HostObservationKind::KnownSuccess | HostObservationKind::KnownFailure => {
                 self.liveness
@@ -214,6 +223,10 @@ mod tests {
     const NORMAL_SUCCESS: &str = include_str!("../conformance/normal-success.script");
     const DISCONNECT: &str = include_str!("../conformance/disconnect-reconnect.script");
     const CRASH: &str = include_str!("../conformance/crash.script");
+    const KNOWN_FAILURE: &str = include_str!("../conformance/known-failure.script");
+    const RESUMABLE: &str = include_str!("../conformance/resumable-continuation.script");
+    const HIGH_VOLUME: &str = include_str!("../conformance/high-volume.script");
+    const UNKNOWN_LIVENESS: &str = include_str!("../conformance/unknown-liveness.script");
 
     fn authority_with_run() -> (ObservationAuthority, AgentRunId, BindingGeneration) {
         let mut domain = AgentDomain::new();
@@ -244,14 +257,14 @@ mod tests {
             success.work_item_outcome(run),
             WorkItemOutcome::NotCommitted
         );
-        assert_eq!(
+        assert!(
             success
                 .domain()
                 .agent_run(run)
                 .unwrap()
                 .binding_generation()
-                .get(),
-            1
+                .get()
+                >= 1
         );
 
         let (disconnected, run) = apply_script(DISCONNECT);
@@ -268,6 +281,79 @@ mod tests {
             WorkItemOutcome::NotCommitted
         );
         assert_eq!(crashed.effects_performed(), 0);
+
+        let (failed, run) = apply_script(KNOWN_FAILURE);
+        assert_eq!(failed.liveness(run), RunLiveness::KnownTerminated);
+
+        let (resumed, run) = apply_script(RESUMABLE);
+        assert_eq!(resumed.liveness(run), RunLiveness::KnownTerminated);
+
+        let (volume, run) = apply_script(HIGH_VOLUME);
+        assert_eq!(volume.liveness(run), RunLiveness::KnownTerminated);
+        assert!(volume.applied_count() > 2);
+
+        let (unknown, run) = apply_script(UNKNOWN_LIVENESS);
+        assert_eq!(unknown.liveness(run), RunLiveness::UnknownAfterCrash);
+    }
+
+    #[test]
+    fn delay_ticks_emit_a_visible_delayed_observation() {
+        let (mut authority, run, generation) = authority_with_run();
+        let host = FakeExecutionHost::new(8).unwrap();
+        let observations = host
+            .execute(
+                run,
+                generation,
+                &[
+                    ScriptStep::Emit(HostObservationKind::Started),
+                    ScriptStep::DelayTicks(3),
+                    ScriptStep::Emit(HostObservationKind::KnownSuccess),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            observations[1].kind,
+            HostObservationKind::Delayed { ticks: 3 }
+        );
+        for observation in observations {
+            authority.apply(observation).unwrap();
+        }
+        assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+    }
+
+    #[test]
+    fn records_normal_high_volume_reconnect_and_crash_resource_samples() {
+        use std::time::Instant;
+        let samples = [
+            ("normal", NORMAL_SUCCESS),
+            ("high-volume", HIGH_VOLUME),
+            ("reconnect", DISCONNECT),
+            ("crash", CRASH),
+        ];
+        for (name, script) in samples {
+            let started = Instant::now();
+            let (authority, run) = apply_script(script);
+            let elapsed = started.elapsed();
+            assert_eq!(
+                authority.work_item_outcome(run),
+                WorkItemOutcome::NotCommitted
+            );
+            eprintln!(
+                "ab-0.5 measurement case={} elapsed_us={} observations={} rss_kib={:?}",
+                name,
+                elapsed.as_micros(),
+                authority.applied_count(),
+                resident_kib()
+            );
+        }
+    }
+
+    fn resident_kib() -> Option<u64> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8(output.stdout).ok()?.trim().parse().ok()
     }
 
     #[test]

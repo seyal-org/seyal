@@ -13,6 +13,7 @@ pub enum HostObservationKind {
     UnknownLiveness,
     EffectUnknown,
     Output(Vec<u8>),
+    Delayed { ticks: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,7 +110,17 @@ impl FakeExecutionHost {
                         .ok_or(ScriptError::DuplicateWithoutObservation)?;
                     observations.push(duplicate);
                 }
-                ScriptStep::DelayTicks(_) => {}
+                ScriptStep::DelayTicks(ticks) => {
+                    observations.push(HostObservation {
+                        run_id,
+                        binding_generation,
+                        ordinal: next_ordinal,
+                        kind: HostObservationKind::Delayed { ticks: *ticks },
+                    });
+                    next_ordinal = next_ordinal
+                        .checked_add(1)
+                        .ok_or(ScriptError::OrdinalExhausted)?;
+                }
             }
         }
 
