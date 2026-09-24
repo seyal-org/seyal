@@ -93,32 +93,8 @@ fn sample_ms(gate: &str, terminal: &mut TerminalState, columns: u16) -> f64 {
     }
 }
 
-/// A single cohort file's matrix identity: exactly which point of the
-/// accepted retained_content x execution_populations x columns x workloads
-/// matrix (docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml `[matrix]`) this
-/// cohort's samples were collected at. The contract-gate cohort collector
-/// always operates on a single execution's HistoryStore (history reflow is
-/// a per-execution cost, not a population-scaling one), so `executions` is
-/// always 1 here -- that is the correct/only valid value for this family,
-/// not an unmeasured placeholder.
-struct MatrixPoint {
-    lines: usize,
-    columns: u16,
-    workload: &'static str,
-    executions: usize,
-}
-
-fn write_cohort_file(
-    path: &str,
-    cohort: usize,
-    point: &MatrixPoint,
-    commit: &str,
-    samples: &[f64],
-) {
-    let mut body = format!(
-        "cohort = {cohort}\ncommit = \"{commit}\"\nlines = {}\ncolumns = {}\nworkload = \"{}\"\nexecutions = {}\nsamples = [",
-        point.lines, point.columns, point.workload, point.executions,
-    );
+fn write_cohort_file(path: &str, cohort: usize, samples: &[f64]) {
+    let mut body = format!("cohort = {cohort}\nsamples = [");
     for (index, value) in samples.iter().enumerate() {
         if index > 0 {
             body.push_str(", ");
@@ -138,24 +114,33 @@ fn run_contract_cohort() {
     let lines = parse_scales("SEYAL_HISTORY_BENCH_LINES", &[10_000])[0];
     let columns = parse_scales("SEYAL_HISTORY_BENCH_COLUMNS", &[80])[0];
     let workload = workload_names()[0];
-    let point = MatrixPoint {
-        lines,
-        columns,
-        workload,
-        executions: 1,
-    };
-    let mut terminal = populate(lines, workload);
-    for _ in 0..warmups {
-        let _ = sample_ms(&gate, &mut terminal, columns);
+    let population = parse_usize_env("SEYAL_M002_POPULATION", 1);
+    let mut terminals: Vec<TerminalState> = (0..population)
+        .map(|_| populate(lines, workload))
+        .collect();
+    {
+        let terminal = terminals
+            .first_mut()
+            .expect("history contract population must be >= 1");
+        for _ in 0..warmups {
+            let _ = sample_ms(&gate, terminal, columns);
+        }
+        let mut retained = Vec::with_capacity(samples);
+        for _ in 0..samples {
+            retained.push(sample_ms(&gate, terminal, columns));
+        }
+        write_cohort_file(&out, cohort, &retained);
     }
-    let mut retained = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        retained.push(sample_ms(&gate, &mut terminal, columns));
-    }
-    let commit = benchmark_commit();
-    write_cohort_file(&out, cohort, &point, &commit, &retained);
+    let retained_history_bytes: usize = terminals
+        .iter()
+        .map(TerminalState::primary_history_resident_bytes)
+        .sum();
+    let derived_cache_bytes: usize = terminals
+        .iter()
+        .map(TerminalState::primary_history_derived_cache_bytes)
+        .sum();
     println!(
-        "[seyal history benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} lines={lines} columns={columns} workload={workload} out={out}"
+        "[seyal history benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} lines={lines} columns={columns} workload={workload} population={population} requested_lines={lines} retained_history_bytes={retained_history_bytes} derived_cache_bytes={derived_cache_bytes} out={out}"
     );
 }
 

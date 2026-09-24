@@ -1,19 +1,21 @@
 schema = "seyal.m002.performance-contract"
 version = 1
-status = "proposed"
+status = "accepted-thresholds"
 percentile_method = "nearest-rank"
 cohorts = 5
 warmups_per_cohort = 20
 samples_per_cohort = 100
 missing_metric_values = ["unknown", "not-instrumented"]
 invalid_environment_class = "PLATFORM_LIMITED"
+same_sha_baseline_class = "diagnostic-repeatability"
 
 [comparison]
 baseline_required = true
 exact_head_required = true
 raw_cohorts_required = true
-noise_policy = "retain five fresh-process cohorts; report every valid cohort; invalidate thermal, display-session, PTY-capacity, and host-change runs"
-regression_rule = "a gate fails when its accepted ceiling is exceeded or when the exact baseline comparison exceeds the named relative allowance; no best-run substitution"
+distinct_baseline_required = true
+noise_policy = "retain five fresh-process cohorts; report every valid cohort; invalidate thermal, display-session, PTY-capacity, battery/discharging, Debug-or-stale-binary, and host-change runs"
+regression_rule = "a gate fails when its accepted ceiling is exceeded or when the exact baseline comparison exceeds the named relative allowance; no best-run substitution; same-SHA A/A is not a release comparison; a zero baseline percentile with a positive candidate fails the relative rule"
 
 [evidence_classes.CI]
 establishes = ["schema", "validator", "fixture", "structural-guard"]
@@ -41,6 +43,7 @@ cache_runtime_aggregate_bytes = 33554432
 
 [gates.history_active_reflow_ms]
 evidence_class = "PHYSICAL_ARM64"
+status = "accepted"
 boundary = "HistoryStore active reflow"
 unit = "ms"
 p50 = 2
@@ -51,6 +54,7 @@ source = "SPEC-010 §18.1 / #818"
 
 [gates.history_sealed_segment_reflow_ms]
 evidence_class = "PHYSICAL_ARM64"
+status = "accepted"
 boundary = "HistoryStore sealed-segment lazy reflow"
 unit = "ms"
 p50 = 1
@@ -61,90 +65,135 @@ source = "SPEC-010 §18.1 / #818"
 
 [gates.input_visible_proxy]
 evidence_class = "PHYSICAL_ARM64"
-status = "proposed"
+status = "accepted"
 boundary = "native input admission to named visible-frame proxy"
 unit = "ms"
+p50 = 8
+p95 = 16
+p99 = 33
 relative_regression_percent = 10
+source = "MILESTONE-002 named visible-frame proxy; 60Hz frame budget; docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.pty_to_terminal_state]
 evidence_class = "NATIVE_HEADED"
-status = "proposed"
+status = "accepted"
 boundary = "pty-read to canonical TerminalState mutation"
 unit = "ms"
+p50 = 1
+p95 = 2
+p99 = 4
 relative_regression_percent = 10
+source = "SPEC-010 sealed-segment mutation order; docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.damage_to_client_cache]
 evidence_class = "NATIVE_HEADED"
-status = "proposed"
+status = "accepted"
 boundary = "damage extraction to client-cache readiness"
 unit = "ms"
+p50 = 4
+p95 = 8
+p99 = 16
 relative_regression_percent = 10
+source = "PERFORMANCE.md Pass 5.1 update-to-client-cache; docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.high_output_responsiveness]
 evidence_class = "PHYSICAL_ARM64"
-status = "proposed"
+status = "accepted"
 workload = "sustained high-output streaming for at least 2 seconds with input, resize, and scrolling"
 boundary = "high-output input responsiveness"
 unit = "ms"
+p50 = 8
+p95 = 16
+p99 = 33
 relative_regression_percent = 10
+source = "PERFORMANCE.md sustained_high_output_2s; docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.resource_scaling_rss]
 evidence_class = "PHYSICAL_ARM64"
-status = "proposed"
+status = "accepted"
 populations = [1, 10, 50, 100]
 boundary = "resident memory scaling across execution populations"
 unit = "bytes"
+p50 = 67108864
+p95 = 100663296
+p99 = 134217728
 relative_regression_percent = 10
+source = "#818 history/cache caps plus process overhead at population=1; docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.resource_scaling_fds]
 evidence_class = "PHYSICAL_ARM64"
-status = "proposed"
+status = "accepted"
 populations = [1, 10, 50, 100]
 boundary = "file-descriptor scaling across execution populations"
 unit = "count"
+p50 = 64
+p95 = 96
+p99 = 128
 relative_regression_percent = 10
+source = "docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.resource_scaling_threads]
 evidence_class = "PHYSICAL_ARM64"
-status = "proposed"
+status = "accepted"
 populations = [1, 10, 50, 100]
 boundary = "thread scaling across execution populations"
 unit = "count"
+p50 = 16
+p95 = 24
+p99 = 32
 relative_regression_percent = 10
+source = "docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.startup]
 evidence_class = "NATIVE_HEADED"
-status = "proposed"
+status = "accepted"
 boundary = "process launch to first usable terminal state"
 unit = "ms"
+p50 = 50
+p95 = 100
+p99 = 200
 relative_regression_percent = 10
+source = "docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.idle_cpu]
 evidence_class = "PHYSICAL_ARM64"
-status = "proposed"
+status = "accepted"
 boundary = "idle terminal CPU consumption"
 unit = "percent"
+p50 = 1
+p95 = 3
+p99 = 5
 relative_regression_percent = 10
+source = "docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.renderer_prepare_submission]
 evidence_class = "NATIVE_HEADED"
-status = "proposed"
+status = "accepted"
 boundary = "renderer preparation through Metal submission"
 unit = "ms"
+p50 = 8
+p95 = 16
+p99 = 33
 relative_regression_percent = 10
+source = "docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.teardown_recovery]
 evidence_class = "NATIVE_HEADED"
-status = "proposed"
+status = "accepted"
 boundary = "execution teardown and recovery"
 unit = "ms"
+p50 = 50
+p95 = 150
+p99 = 500
 relative_regression_percent = 10
+source = "docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [matrix]
 retained_content = [10000, 100000, 1000000]
 execution_populations = [1, 10, 50, 100]
 columns = [40, 48, 64, 80, 96, 132, 160]
 workloads = ["ASCII", "styled", "CJK", "emoji-combining"]
+configuration_count = 336
 
 [result_schema]
 required = [

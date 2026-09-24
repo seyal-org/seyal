@@ -16,7 +16,17 @@ fn m002_parse_usize_env(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+#[allow(dead_code)]
 fn m002_write_cohort_file(path: &str, cohort: usize, samples: &[f64]) {
+    m002_write_cohort_file_with_lines(path, cohort, samples, &[]);
+}
+
+fn m002_write_cohort_file_with_lines(
+    path: &str,
+    cohort: usize,
+    samples: &[f64],
+    extra_lines: &[&str],
+) {
     let mut body = format!("cohort = {cohort}\nsamples = [");
     for (index, value) in samples.iter().enumerate() {
         if index > 0 {
@@ -25,5 +35,9 @@ fn m002_write_cohort_file(path: &str, cohort: usize, samples: &[f64]) {
         body.push_str(&format!("{value:.9}"));
     }
     body.push_str("]\n");
+    for line in extra_lines {
+        body.push_str(line);
+        body.push('\n');
+    }
     std::fs::write(std::path::PathBuf::from(path), body).expect("write M002 cohort file");
 }

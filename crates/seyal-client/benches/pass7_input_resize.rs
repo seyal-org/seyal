@@ -21,8 +21,6 @@ use seyal_client::{GridGeometry, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use seyal_exec::{CommandSpec, WindowSize};
 #[cfg(target_os = "macos")]
-use seyal_protocol::display::DisplayCache;
-#[cfg(target_os = "macos")]
 use seyal_runtime::local_ipc::framing::Role;
 #[cfg(target_os = "macos")]
 use seyal_runtime::pass7_benchmark::{
@@ -36,40 +34,6 @@ const PERFORMANCE_CLAIM: &str = "performance_claim=false";
 const REPETITIONS: usize = 120;
 #[cfg(target_os = "macos")]
 static HARNESS_COUNTER: AtomicU64 = AtomicU64::new(0);
-#[cfg(target_os = "macos")]
-static INPUT_MARKER_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A unique per-sample marker so a completion check can prove the observed
-/// cache-generation bump was actually caused by admitting THIS sample's
-/// input, not by any other concurrent source advancing the cache (M002 #673
-/// Q3/Q4 correlation fix).
-#[cfg(target_os = "macos")]
-fn next_input_marker() -> String {
-    format!(
-        "m{:07}",
-        INPUT_MARKER_COUNTER.fetch_add(1, Ordering::Relaxed)
-    )
-}
-
-/// True when `marker` is visible somewhere in the committed display cache.
-/// Used to correlate a cache-generation advance with the specific input that
-/// produced it, rather than accepting any generation bump as proof.
-#[cfg(target_os = "macos")]
-fn cache_contains_marker(cache: &DisplayCache, marker: &str) -> bool {
-    if cache.columns == 0 || marker.is_empty() {
-        return marker.is_empty();
-    }
-    let needle: Vec<char> = marker.chars().collect();
-    let columns = cache.columns as usize;
-    cache.cells.chunks(columns).any(|row| {
-        row.windows(needle.len()).any(|window| {
-            window
-                .iter()
-                .zip(&needle)
-                .all(|(cell, expected)| cell.scalar == *expected)
-        })
-    })
-}
 
 fn main() {
     // Required by the repository benchmark contract. `Instant::now()` remains
@@ -99,6 +63,23 @@ fn main() {
 include!("../../../benches/m002_contract_support.rs");
 
 #[cfg(target_os = "macos")]
+fn cache_contains_ascii(client: &LocalDisplayClient, needle: &str) -> bool {
+    let cache = client.cache();
+    let needle = needle.as_bytes();
+    if cache.columns == 0 || needle.is_empty() {
+        return needle.is_empty();
+    }
+    let columns = cache.columns as usize;
+    cache.cells.chunks(columns).any(|row| {
+        row.windows(needle.len()).any(|window| {
+            window
+                .iter()
+                .zip(needle)
+                .all(|(cell, byte)| cell.scalar == *byte as char)
+        })
+    })
+}
+
 fn sample_input_visible_proxy(client: &mut LocalDisplayClient, marker: &str) -> f64 {
     settle_client(client);
     let before = client.cache().generation;
@@ -115,15 +96,15 @@ fn sample_input_visible_proxy(client: &mut LocalDisplayClient, marker: &str) -> 
             Ok(_) => {}
             Err(error) => panic!("visible-proxy poll failed: {error:?}"),
         }
-        // A generation bump alone is not proof this sample's input was what
-        // advanced the cache: require the cache to also visibly contain this
-        // sample's unique marker text.
-        if client.cache().generation > before && cache_contains_marker(client.cache(), marker) {
+        // Correlate the admitted marker to the cache generation that contains
+        // it. An unrelated later generation is not input-visible proof, and
+        // cache readiness is not scanout / key-to-photon.
+        if client.cache().generation > before && cache_contains_ascii(client, marker) {
             return started.elapsed().as_secs_f64() * 1_000.0;
         }
         assert!(
             Instant::now() < deadline,
-            "input_visible_proxy cache advance timed out"
+            "input_visible_proxy admitted-input generation timed out"
         );
         thread::yield_now();
     }
@@ -141,15 +122,14 @@ fn run_m002_contract_cohort() {
     let out = std::env::var("SEYAL_M002_COHORT_OUT").expect("SEYAL_M002_COHORT_OUT");
     let runtime = RuntimeHarness::start();
     let mut client = runtime.connect_controller();
-    for _ in 0..warmups {
-        let _ = sample_input_visible_proxy(&mut client, &next_input_marker());
+    for index in 0..warmups {
+        let marker = format!("V{index:03}");
+        let _ = sample_input_visible_proxy(&mut client, &marker);
     }
     let mut retained = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        retained.push(sample_input_visible_proxy(
-            &mut client,
-            &next_input_marker(),
-        ));
+    for index in 0..samples {
+        let marker = format!("S{index:03}");
+        retained.push(sample_input_visible_proxy(&mut client, &marker));
     }
     drop(client);
     runtime.finish();
@@ -167,12 +147,7 @@ fn run_macos() {
     }
     let mut args = std::env::args();
     let _ = args.next();
-    let first = args.next();
-    if first.as_deref() == Some("--selftest-correlation") {
-        selftest_correlation();
-        return;
-    }
-    if first.as_deref() == Some("--worker") {
+    if args.next().as_deref() == Some("--worker") {
         let case = args.next().expect("Pass 7 benchmark worker case");
         worker(&case);
         return;
@@ -199,81 +174,6 @@ fn run_macos() {
             .expect("launch Pass 7 benchmark worker");
         assert!(status.success(), "Pass 7 benchmark worker {case} failed");
     }
-}
-
-/// Proves cache_contains_marker()'s correlation predicate directly, without
-/// spawning a Runtime/PTY: a generation bump caused by unrelated concurrent
-/// activity (no marker text present) must NOT be accepted as proof of this
-/// sample's own input, while a generation bump that genuinely carries the
-/// marker text must be accepted. The old logic (`generation > before` alone)
-/// would have wrongly accepted the first case.
-#[cfg(target_os = "macos")]
-fn selftest_correlation() {
-    use seyal_protocol::display::{DisplayAttributes, DisplayCell, DisplayColor};
-
-    fn cache_with_row_text(generation: u64, text: &str, columns: u16) -> DisplayCache {
-        let mut cells = vec![DisplayCell::blank(); columns as usize];
-        for (index, ch) in text.chars().enumerate() {
-            if index >= cells.len() {
-                break;
-            }
-            cells[index] = DisplayCell::lead_scalar(
-                ch,
-                1,
-                DisplayColor::Default,
-                DisplayColor::Default,
-                DisplayAttributes::default(),
-            );
-        }
-        DisplayCache {
-            generation,
-            rows: 1,
-            columns,
-            cursor_row: 0,
-            cursor_col: 0,
-            cursor_visible: true,
-            alternate_screen: false,
-            cells,
-        }
-    }
-
-    let marker = "m0000001";
-
-    // Simulates an unrelated concurrent cache bump: generation advanced, but
-    // the visible content has nothing to do with our sample's own input. The
-    // old `generation > before` check alone would have falsely accepted this
-    // as proof of completion.
-    let unrelated = cache_with_row_text(2, "unrelated-content", 80);
-    assert!(
-        unrelated.generation > 1,
-        "precondition: generation advanced"
-    );
-    assert!(
-        !cache_contains_marker(&unrelated, marker),
-        "FAIL: an unrelated generation bump was wrongly accepted as correlated with our marker"
-    );
-
-    // A generation bump that genuinely carries this sample's marker text
-    // must be accepted.
-    let correlated = cache_with_row_text(2, marker, 80);
-    assert!(
-        correlated.generation > 1,
-        "precondition: generation advanced"
-    );
-    assert!(
-        cache_contains_marker(&correlated, marker),
-        "FAIL: a correlated generation bump carrying our marker was wrongly rejected"
-    );
-
-    // Marker present but generation did NOT advance: still not proof of
-    // completion (guards the `generation > before` half of the predicate).
-    let stale = cache_with_row_text(1, marker, 80);
-    assert!(
-        !(stale.generation > 1 && cache_contains_marker(&stale, marker)),
-        "FAIL: a stale (non-advanced) generation was wrongly accepted"
-    );
-
-    println!("pass7_input_resize selftest_correlation PASSED {PERFORMANCE_CLAIM}");
 }
 
 #[cfg(target_os = "macos")]

@@ -387,7 +387,7 @@ def main() -> None:
         malformed_performance = base / "m002-performance-malformed"
         write(
             malformed_performance / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         write(malformed_performance / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml", "schema = 'wrong'\nversion = 1\n")
         run_negative(
@@ -399,7 +399,7 @@ def main() -> None:
         invalid_result = base / "m002-performance-invalid-result"
         write(
             invalid_result / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         shutil.copy(ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml", invalid_result / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml")
         write(
@@ -415,7 +415,7 @@ def main() -> None:
         invalid_percentiles = base / "m002-performance-invalid-percentiles"
         write(
             invalid_percentiles / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         shutil.copy(ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml", invalid_percentiles / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml")
         write(
@@ -570,6 +570,17 @@ def main() -> None:
 
         proposed_gate = base / "m002-performance-proposed-gate"
         shutil.copytree(invalid_percentiles, proposed_gate)
+        schema_path = proposed_gate / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml"
+        schema_text = schema_path.read_text(encoding="utf-8")
+        schema_text = schema_text.replace(
+            'status = "accepted-thresholds"',
+            'status = "proposed"',
+        )
+        schema_text = schema_text.replace(
+            '[gates.input_visible_proxy]\nevidence_class = "PHYSICAL_ARM64"\nstatus = "accepted"',
+            '[gates.input_visible_proxy]\nevidence_class = "PHYSICAL_ARM64"\nstatus = "proposed"',
+        )
+        schema_path.write_text(schema_text, encoding="utf-8")
         record = (proposed_gate / "record.toml").read_text(encoding="utf-8")
         record = record.replace("p50 = 3\np95 = 2\np99 = 4", "p50 = 2\np95 = 4\np99 = 8")
         record = record.replace(
@@ -741,7 +752,7 @@ def main() -> None:
         incomplete_matrix = base / "m002-performance-incomplete-matrix"
         write(
             incomplete_matrix / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         toml = (ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml").read_text(encoding="utf-8")
         toml = toml.replace("columns = [40, 48, 64, 80, 96, 132, 160]\n", "")
@@ -768,7 +779,7 @@ def main() -> None:
         weakened_ceiling = base / "m002-performance-weakened-ceiling"
         write(
             weakened_ceiling / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         toml = (ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml").read_text(encoding="utf-8")
         toml = toml.replace(
