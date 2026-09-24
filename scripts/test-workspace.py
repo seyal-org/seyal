@@ -17,6 +17,11 @@ EXPECTED_CRATES = {
     "seyal-runtime": "crates/seyal-runtime",
     "seyal-render": "crates/seyal-render",
     "seyal-client": "crates/seyal-client",
+    "seyal-agent-core": "crates/seyal-agent-core",
+    "seyal-agent-protocol": "crates/seyal-agent-protocol",
+    "seyal-agent-store": "crates/seyal-agent-store",
+    "seyal-agent-backend": "crates/seyal-agent-backend",
+    "seyal-agent-client": "crates/seyal-agent-client",
 }
 
 
@@ -67,7 +72,7 @@ for name, member in EXPECTED_CRATES.items():
     if package.get("name") != name:
         fail(f"package must be named {name}")
     if package.get("publish") is not False:
-        fail("M001 crates must not be publishable packages")
+        fail("workspace crates must not be publishable packages")
     manifests[name] = data
 
 expected_portable_dependencies = {
@@ -82,6 +87,13 @@ expected_portable_dependencies = {
     # Identity value types only. Product reducers stay in seyal-client; this is
     # not a seyal-runtime edge.
     "seyal-client": {"seyal-core", "seyal-protocol", "seyal-render"},
+    "seyal-agent-core": set(),
+    "seyal-agent-protocol": {"seyal-agent-core"},
+    "seyal-agent-store": {"seyal-agent-core"},
+    "seyal-agent-backend": {
+        "seyal-agent-core", "seyal-agent-protocol", "seyal-agent-store"
+    },
+    "seyal-agent-client": {"seyal-agent-core", "seyal-agent-protocol"},
 }
 for name, expected in expected_portable_dependencies.items():
     dependencies = manifests[name].get("dependencies", {})

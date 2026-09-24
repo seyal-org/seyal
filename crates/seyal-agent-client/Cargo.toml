@@ -1,0 +1,15 @@
+[package]
+name = "seyal-agent-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+seyal-agent-core = { path = "../seyal-agent-core" }
+seyal-agent-protocol = { path = "../seyal-agent-protocol" }
+
+[lints.rust]
+unsafe_code = "deny"
