@@ -28,10 +28,12 @@ ADR-018 accepted
   → W7 adversarial lifecycle matrix + headed acceptance + measurements
 ```
 
-W1–W4 are independently reviewable and need neither #923 nor #994. W5 needs the
-split-tree host projection (#923). W6 needs the accepted #994 provisioning
-contract, because adoption and provisioning share the bind path. W7 closes the
-set and feeds `MILESTONE-003.md` §8.2.
+W1 and W3 are independently reviewable and need neither #923 nor #994. W2 close
+paths and W4 headed close that can remove a live execution's last binding must
+land with W6 (or be gated until W6) so `Unpresented` executions are never
+unreachable. W5 needs the split-tree host projection (#923). W6 needs the
+accepted #994 provisioning contract, because adoption and provisioning share
+the bind path. W7 closes the set and feeds `MILESTONE-003.md` §8.2.
 
 `#936` (multiple live Metal leaves) stays blocked on #923 plus #994 and is not
 part of this decomposition. `#928` (split drag ratios) is unaffected.
@@ -74,17 +76,21 @@ reachable by construction; existing `ShellState` tests unchanged in behavior.
 
 **Acceptance.**
 
-- Structural actions are generation-fenced; selection actions are identity-fenced
+- Structural actions are **containment-generation**-fenced (ADR-018 §6); that
+  counter bumps only on Window/Tab/`PaneTree` membership/topology mutation — not
+  on palette keystrokes or selection. Selection actions are identity-fenced
   only; execution-bearing actions keep the ADR-015 execution/attachment/epoch
-  fence (ADR-018 §6).
+  fence.
 - Reorder and move use a relative `before: Option<TabId>` anchor, never an index.
 - Every rejection is atomic: state is byte-identical to the pre-action state.
 - Unknown or destroyed identities are rejected with a typed reason; no nearest
   fallback, no retarget to the focused object, no silent success.
 - Hierarchical close never produces a zero-Pane Tab or zero-Tab Window.
-- `ActivateWorkspace` raises that Workspace's most recently active Window, or
-  creates one when it has none.
-- No close action can produce a `TerminateExecution` effect (ADR-018 §3.1).
+- `ActivateWorkspace` replaces in-place `SelectWorkspace`, is structural-fenced,
+  raises that Workspace's most recently active Window, or creates one when it
+  has none (including zero-Window re-entry).
+- No close action can produce a `TerminateExecution` effect for a previously
+  bound execution (ADR-018 §3.1). Never-bound in-flight disposition stays #994.
 
 **Tests.** Reducer unit tests per action; property tests for reorder/move
 permutations; stale-generation rejection for each structural action; live-identity
@@ -147,9 +153,13 @@ Remove the portable decisions currently taken in `AppDelegate.swift`.
   is never consulted as authority.
 - The host holds no writable window/tab/pane model; only a derived copy plus
   disposable view/GPU state.
-- `⌥⌘1…9` window selection, `⌘T`, `⌘W` hierarchical close and window cycling route
-  through typed actions via `NSMenuItem` key equivalents, never `keyDown`
-  interception.
+- `⌥⌘1…9` window selection, `⌘T`, `⌘W` hierarchical close, `⌘N` New Window, and
+  window cycling route through typed actions via `NSMenuItem` key equivalents,
+  never `keyDown` interception.
+- Zero-Window re-entry: Dock reopen / `applicationShouldHandleReopen` with no
+  visible Seyal windows and File → New Window both forward `CreateWindow` /
+  `ActivateWorkspace` (ADR-018 §3.3a); the host never constructs an `NSWindow`
+  without a Rust effect.
 
 **Tests.** Native XCTest/XCUI: close-forwarding; last-window-close does not quit;
 `terminateLater`/reply ordering; `tabbingMode`; event forwarding; UI order equals
@@ -285,7 +295,10 @@ candidate now.
    switch-inventory-in-place behavior to raise-or-create. This is the largest
    product-behavior consequence of the decomposition and deserves explicit product
    sign-off.
-3. **Sequencing against #994.** W6 is the only child that hard-depends on #994. If
-   #994 lands later than expected, W1–W5 and W7 can still close with W6 classified
-   as deferred, provided no M003 path can create an `Unpresented` execution before
-   W6 exists.
+3. **Sequencing against #994 / W6.** Closing a Tab/Window under ADR-018 §3.2 can
+   unbind live executions into `Unpresented`. Therefore **W6 must land with the
+   first child that makes a live execution's last Pane binding removable**
+   (typically W2 close paths and/or W4 headed close). W1/W3 and pure
+   selection/host wiring may proceed earlier; W7 must not claim Done while a
+   mergeable path can create unreachable `Unpresented` executions. W6 still
+   hard-depends on accepted #994 for adopt/bind semantics.

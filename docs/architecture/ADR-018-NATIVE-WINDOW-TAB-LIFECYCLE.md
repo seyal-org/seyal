@@ -5,12 +5,13 @@
 - **Issue:** #1000 (refinement); parent umbrella #674; epic #665
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 - **Coordinates with:** #994 (pane/tab → `TerminalExecution` provisioning contract), #922, #923, #928, #936, #929
-- **Numbering note:** this decision was drafted as ADR-017. Refinement of #994 was
-  drafting `ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md` concurrently, so this
-  document yields the number and takes ADR-018. The two are complementary, not
-  competing: #994's ADR owns how a leaf obtains an execution, this one owns how
-  windows/tabs are identified, ordered and destroyed. If the #994 ADR lands under a
-  different number, renumbering this document is a docs-only follow-up.
+- **Numbering note:** Provisional allocation across concurrent M003 refinements
+  (checkable at this PR's head): this document is **ADR-018**; #1004 / PR #1038
+  proposes **ADR-019** (local Resource Addressing); ADR-017 is currently vacant
+  and reserved for #994 (execution provisioning / disposition) so that sibling
+  does not also claim ADR-019. Numbers remain provisional until merge order is
+  settled. Complementary scopes: #994 owns how a leaf obtains an execution; this
+  ADR owns how windows/tabs are identified, ordered and destroyed.
 
 ## Context
 
@@ -59,9 +60,20 @@ which Rust object owns `WindowId`/`TabId` and their order, what a close or quit
 does to presentation versus execution, how inactive-but-live executions behave,
 and how stale or concurrent window/tab actions are rejected.
 
-Where the two meet, this ADR states only the invariant that presentation
-destruction never terminates an execution and never provisions one. The typed
-provisioning request shape remains #994's decision.
+Where the two meet:
+
+- Closing or destroying **presentation that has ever bound a Pane leaf to an
+  `ExecutionId`** never terminates that execution and never provisions one
+  (§3.1). Termination of a previously bound/presented execution is always an
+  explicit `TerminateExecution`.
+- Disposition of a **never-bound, in-flight** provisioning result (spawn
+  succeeded, binding never completed, requesting Pane closed concurrently) is
+  owned by #994. That disposition must still be expressed as an explicit
+  terminate/abandon request under #994's typed lifecycle — never as an implicit
+  side effect of `ClosePane`/`CloseTab`/`CloseWindow`. A child reading §3.1 must
+  not treat #994's never-bound cleanup as illegal.
+
+The typed provisioning request shape remains #994's decision.
 
 ## 1. Containment and identity ownership
 
@@ -94,10 +106,14 @@ shared-identity rule in `ui/M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §5.6.
 
 ### 1.2 Identity ownership
 
-- `WindowId` is a new **headed composition identity** owned by Rust, generated in
-  `seyal-core` with the same opaque, process-unique, non-reused scheme already
-  used by `TabId`/`PaneId`. It is not an `NSWindow` number, window level, tab-group
-  identifier, index, screen, Space or display identity.
+- The headed composition reducer in `seyal-client` (`ShellState` / `AppState`
+  apply path) is the sole Rust object that **allocates, retires and authorizes
+  mutation of** `WindowId`/`TabId`/`PaneId` membership. `seyal-core` supplies the
+  opaque id types; AppKit never mints or retires them.
+- `WindowId` is a new **headed composition identity** owned by that reducer,
+  generated in `seyal-core` with the same opaque, process-unique, non-reused
+  scheme already used by `TabId`/`PaneId`. It is not an `NSWindow` number, window
+  level, tab-group identifier, index, screen, Space or display identity.
 - `TabId` and `PaneId` keep their existing `seyal-core` semantics and gain no new
   authority.
 - `WindowId`, `TabId` and `PaneId` are **not durable** in M003. They identify one
@@ -108,7 +124,7 @@ shared-identity rule in `ui/M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §5.6.
 
 ### 1.3 Ordering authority
 
-Rust owns:
+The same `ShellState` reducer owns:
 
 - the order of Windows within a Workspace;
 - the order of Tabs within a Window;
@@ -154,13 +170,22 @@ Three fencing classes, defined normatively in §6:
 ```text
 structural   CreateWindow, CloseWindow, CreateTab, CloseTab, ClosePane,
              MoveTabToWindow, MoveTabBefore, MoveTabToNewWindow,
-             SplitPane, ClosePaneTree node operations
+             SplitPane, ClosePaneTree node operations,
+             ActivateWorkspace   (may create a Window; see §7)
 selection    SelectWindow, SelectTab, FocusPane, CycleWindow, CycleTab
 execution    BindExecution, TerminateExecution, presentation-mode transitions
 ```
 
 `RequestQuit` is an application-scope action, not a window action, and resolves
 through §4.
+
+`ActivateWorkspace` **replaces** today's in-place `AppAction::SelectWorkspace`
+(FFI opcode for workspace selection) under the §1.1 one-Workspace-per-Window
+binding. There must not be two concurrent workspace-activation paths. The
+product-active Workspace is derived from the product-active Window's
+`WorkspaceId`; a separate mutable `active_workspace` fact must not diverge from
+that derivation once multi-window lands (W2/W3 migrate the existing field to a
+derived projection or retire it).
 
 ### 2.3 Native-owned disposable state and inputs
 
@@ -173,8 +198,9 @@ geometry Runtime rejected (`ui/M001-MULTIPANE-VIEW.md` §12).
 
 Native inputs forwarded as typed events include: became/resigned key and main,
 occlusion-state change, miniaturize/deminiaturize, fullscreen transitions,
-screen/backing-scale change, and user close/new-tab/new-window/cycle intents from
-`NSMenuItem` key equivalents and window controls.
+screen/backing-scale change, Dock/`applicationShouldHandleReopen` reopen when
+there are zero visible Seyal windows, and user close/new-tab/new-window/cycle
+intents from `NSMenuItem` key equivalents and window controls.
 
 ### 2.4 Native effects
 
@@ -206,14 +232,20 @@ A stale derived host copy may render, but must never authorize an action
 ### 3.1 Normative rule
 
 Closing a Pane, Tab, Window, or quitting the application, **never** terminates a
-live `TerminalExecution`. This restates ADR-007 §1 and §10, ADR-005 detach-is-not-terminate,
-and SPEC-009 §6 and §15 at window and tab granularity.
+`TerminalExecution` that has **ever been bound** to a Pane leaf (presented or
+live-unpresented after unbind). This restates ADR-007 §1 and §10, ADR-005
+detach-is-not-terminate, and SPEC-009 §6 and §15 at window and tab granularity.
 
-Termination happens only through an explicit typed `TerminateExecution` action
-naming an `ExecutionId`. A close action must never carry an implicit terminate
-side effect, and a single user gesture must never be encoded as one action that
-both closes presentation and terminates an execution. A close affordance may
-*offer* termination; accepting that offer emits the separate explicit action.
+Termination of a previously bound execution happens only through an explicit
+typed `TerminateExecution` action naming an `ExecutionId`. A close action must
+never carry an implicit terminate side effect, and a single user gesture must
+never be encoded as one action that both closes presentation and terminates an
+execution. A close affordance may *offer* termination; accepting that offer
+emits the separate explicit action.
+
+Never-bound in-flight provisioning cleanup remains #994's explicit-disposition
+path (see Scope boundary). It is not a silent close side effect and is not
+forbidden by this section.
 
 ### 3.2 Per-operation semantics
 
@@ -222,7 +254,7 @@ both closes presentation and terminates an execution. A close affordance may
 | Close Pane leaf | leaf destroyed, parent split collapsed, surviving sibling keeps focus/draft state | unbound, attachment released, execution stays live |
 | Close Tab | Tab and its whole `PaneTree` destroyed | every bound execution unbound and detached, all stay live |
 | Close Window | Window, its Tabs and their `PaneTree`s destroyed | every bound execution unbound and detached, all stay live |
-| Close last Window | Window destroyed; application keeps running with zero Windows, zero attachments, zero Controller leases and no hidden input route (SPEC-009 §6) | all stay live |
+| Close last Window | Window destroyed; application keeps running with zero Windows, zero attachments, zero Controller leases and no hidden input route (SPEC-009 §6). Re-entry is mandatory (§3.3a) | all stay live |
 | Application quit | all presentation destroyed after §4 | all stay live |
 | Explicit terminate | unchanged by itself | named execution terminated through the ADR-005 path |
 
@@ -237,10 +269,29 @@ Runtime remains its owner and its `WorkspaceId` association is unchanged.
 M003 must not create `Unpresented` executions with no route back. It must provide
 one deterministic, explicit, non-guessing way to enumerate the Workspace's
 live-unpresented executions and either adopt one into a Pane leaf or terminate
-it. The surface may be minimal — a command-palette entry is sufficient. It must
-not guess or auto-select by unstable list order, which is the same prohibition
-SPEC-009 §8.2 already applies to reconnect resolution. A rich Sessions inventory
-remains #929.
+it. The surface may be minimal — a command-palette entry is sufficient **once at
+least one Window exists**. It must not guess or auto-select by unstable list
+order, which is the same prohibition SPEC-009 §8.2 already applies to reconnect
+resolution. A rich Sessions inventory remains #929.
+
+### 3.3a Zero-Window re-entry
+
+When the headed composition has **zero Windows**, the application remains
+running (§3.2) and must still accept a typed intent that creates presentation
+again. Normative requirements:
+
+- Rust admits `CreateWindow` (and `ActivateWorkspace`, which may create a Window)
+  in the zero-Window state;
+- the host keeps a non-window menu route (File → New Window or equivalent) with a
+  key equivalent (`⌘N` retained as Rust-owned policy alongside the §11.3
+  shortcuts) that forwards `CreateWindow` / `ActivateWorkspace`, never locally
+  constructing an `NSWindow` without a Rust effect;
+- Dock click / `applicationShouldHandleReopen(_:hasVisibleWindows:)` when
+  `hasVisibleWindows == false` forwards the same typed intent rather than
+  silently no-oping or quitting;
+- until a Window exists, live-unpresented enumeration (§3.3) is reachable after
+  re-entry creates a Window; the zero-Window state must not strand executions
+  with no future adopt surface.
 
 ### 3.4 Tradeoff recorded
 
@@ -319,10 +370,20 @@ Invariants:
 ## 6. Stale and concurrent action determinism
 
 Every host → Rust shell action carries the identities it targets plus the
-`shell_generation` of the snapshot it was derived from.
+`containment_generation` of the snapshot it was derived from.
 
-- **Structural** actions are generation-fenced: rejected unless
-  `shell_generation` equals the current generation. The host must not retry them
+`containment_generation` is a monotonic counter owned by the `ShellState`
+reducer. It increments **only** when Window/Tab/`PaneTree` containment mutates
+(create/close/move/reorder/split/collapse that changes membership or structural
+topology). It does **not** increment for selection-only actions, palette query
+keystrokes, label/attention projection updates, or other non-structural
+snapshot churn. Today's undifferentiated `snapshot_generation` bump-on-every-
+successful-action is **not** this fence and must not be reused as one (W2/W3).
+
+- **Structural** actions are containment-generation-fenced: rejected unless
+  `containment_generation` equals the current containment generation **or** the
+  targeted subtree is proven unchanged by an equivalent structural predicate
+  the reducer documents. The host must not retry a rejected structural action
   against a newer snapshot (ADR-015); it re-derives from the newest snapshot and
   the user repeats the intent.
 - **Selection** actions are identity-fenced only: applied when every named
@@ -366,8 +427,9 @@ M003 (start-time, in-session, no disk):
 - presentation tiers (§5);
 - bounded quit (§4);
 - explicit terminate and live-unpresented enumeration/adoption (§3.3);
-- `ActivateWorkspace` raises that Workspace's most recently active Window, or
-  creates one when it has none.
+- `ActivateWorkspace` (replacing in-place `SelectWorkspace`; §2.2) raises that
+  Workspace's most recently active Window, or creates one when it has none,
+  including from the zero-Window state (§3.3a).
 
 M004 (durable restoration, ADR-007 P4 presentation/layout persistence):
 
@@ -507,13 +569,15 @@ Conflicts resolved here, with the higher authority named:
    window switching is presentation-level AppKit behavior over visible titled
    windows. That conflicts with ADR-015 once windows carry product identity.
    Window ordering, cycling and direct selection become Rust-owned; AppKit
-   realizes the order. The scaffold's `⌥⌘1…9` window, `⌘T`, and hierarchical `⌘W`
-   shortcut *capabilities* are retained as Rust-owned policy.
+   realizes the order. The scaffold's `⌥⌘1…9` window, `⌘T`, hierarchical `⌘W`,
+   and `⌘N` (New Window / zero-Window re-entry, §3.3a) shortcut *capabilities*
+   are retained as Rust-owned policy.
 4. **Workspace switching in place.** The scaffold switches the tab inventory of a
    single window when the Workspace changes. Under §1.1 a Window is bound to one
-   Workspace, so `ActivateWorkspace` raises or creates that Workspace's Window
-   instead (§7). This is a deliberate behavior change from the preview scaffold,
-   which `MILESTONE-003.md` treats as subordinate preview authority.
+   Workspace, so `ActivateWorkspace` replaces in-place `SelectWorkspace` and
+   raises or creates that Workspace's Window instead (§2.2, §7). This is a
+   deliberate behavior change from the preview scaffold, which
+   `MILESTONE-003.md` treats as subordinate preview authority.
 
 No other mockup conflict with ADR-015, ADR-007 or ADR-009 was found.
 
@@ -528,10 +592,18 @@ No other mockup conflict with ADR-015, ADR-007 or ADR-009 was found.
 - any absolute latency, CPU, RSS or deadline value. Those are derived and recorded
   by the owning implementation child.
 
-A separate SPEC is deliberately not created: the observable contract is carried
-by this ADR plus the already accepted SPEC-004, SPEC-006, SPEC-008 and SPEC-009.
-A SPEC becomes required if #994 introduces a new public protocol shape, and that
-SPEC belongs to #994.
+A separate SPEC is deliberately not created in this refinement: the observable
+contract is carried by this ADR plus the already accepted SPEC-004, SPEC-006,
+SPEC-008 and SPEC-009. W3's multi-window snapshot/FFI ABI change is noted as a
+`docs/specs/README.md` "public API/ABI behavior" trigger; if reviewers require a
+SPEC before W3, promote §2–§6 into `SPEC-022-M003-WINDOW-TAB-LIFECYCLE` in a
+follow-up Architecture PR rather than inventing ABI in the child. A SPEC also
+becomes required if #994 introduces a new public protocol shape, and that SPEC
+belongs to #994.
+
+**Acceptance of this ADR:** merge of this Architecture/R&D PR with Status
+updated to Accepted (or "Accepted on merge") by maintainer review is the
+acceptance event that unblocks Ready children. Proposed status alone does not.
 
 Child decomposition, per-child acceptance and the M003/M004 split are in
 [`../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md`](../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md).
