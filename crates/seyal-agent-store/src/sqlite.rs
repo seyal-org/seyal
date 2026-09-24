@@ -7,7 +7,7 @@ use crate::{
     SnapshotPosition,
 };
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
 
@@ -54,6 +54,8 @@ impl AgentStore {
         }
         if version == 0 {
             initialize(&conn)?;
+        } else if version < SCHEMA_VERSION {
+            migrate_to_current(&conn, version)?;
         }
         Ok(Self {
             conn: Mutex::new(conn),
@@ -125,6 +127,20 @@ impl AgentStore {
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
         let (kind, id) = aggregate_key(aggregate_id);
+        // Snapshot must name an exact existing aggregate sequence.
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM aggregate_event
+                 WHERE aggregate_kind = ?1 AND aggregate_id = ?2 AND sequence = ?3",
+                params![kind, id, incorporated_through.get() as i64],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?
+            .unwrap_or(false);
+        if !exists {
+            return Err(StoreError::Corrupt);
+        }
         tx.execute(
             "INSERT INTO aggregate_snapshot (aggregate_kind, aggregate_id, incorporated_through, payload)
              VALUES (?1, ?2, ?3, ?4)
@@ -197,16 +213,24 @@ impl AgentStore {
             .optional()
             .map_err(|_| StoreError::Corrupt)?
             .and_then(|value| AggregateSequence::from_raw(value as u64));
+        let hwm: i64 = conn
+            .query_row(
+                "SELECT COALESCE(high_water, 0) FROM aggregate_sequence_hwm
+                 WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
+                params![kind, id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?
+            .unwrap_or(0);
         let Some(earliest) = earliest else {
-            // No retained events. Gap only when the cursor is behind the
-            // snapshot frontier (or history was wiped with no snapshot).
-            // GetSnapshot → replay_after(incorporated_through) must be Ok([]).
-            match (requested_after, current_snapshot_sequence) {
-                (Some(requested), Some(snapshot_sequence))
-                    if requested.get() < snapshot_sequence.get() =>
-                {
+            // No retained events. Absent cursor is treated as 0 (from the start).
+            let cursor = requested_after.map(|s| s.get() as i64).unwrap_or(0);
+            if let Some(snapshot_sequence) = current_snapshot_sequence {
+                if cursor < snapshot_sequence.get() as i64 {
                     let earliest_available =
                         snapshot_sequence.next().unwrap_or(AggregateSequence::FIRST);
+                    let requested = requested_after.unwrap_or(AggregateSequence::FIRST);
                     return Err(StoreError::History(HistoryGap {
                         aggregate_id,
                         requested_after: requested,
@@ -215,17 +239,22 @@ impl AgentStore {
                         reason: HistoryGapReason::RetentionTruncation,
                     }));
                 }
-                (Some(requested), None) => {
-                    return Err(StoreError::History(HistoryGap {
-                        aggregate_id,
-                        requested_after: requested,
-                        earliest_available: AggregateSequence::FIRST,
-                        current_snapshot_sequence: None,
-                        reason: HistoryGapReason::RetentionTruncation,
-                    }));
-                }
-                _ => return Ok(Vec::new()),
+                return Ok(Vec::new());
             }
+            // No snapshot: gap only when HWM proves prior history existed.
+            if hwm > 0 && cursor < hwm {
+                let requested = requested_after.unwrap_or(AggregateSequence::FIRST);
+                let earliest_available = AggregateSequence::from_raw((hwm + 1) as u64)
+                    .unwrap_or(AggregateSequence::FIRST);
+                return Err(StoreError::History(HistoryGap {
+                    aggregate_id,
+                    requested_after: requested,
+                    earliest_available,
+                    current_snapshot_sequence: None,
+                    reason: HistoryGapReason::RetentionTruncation,
+                }));
+            }
+            return Ok(Vec::new());
         };
         let after = requested_after
             .map(|sequence| sequence.get() as i64)
@@ -414,6 +443,50 @@ impl AgentStore {
             .map(|_| ())
     }
 
+    /// Begin mutate+append then roll back — proves no false durable success.
+    #[cfg(test)]
+    pub fn abandon_mutate_agent_run_and_append(
+        &self,
+        run_id: crate::AgentRunId,
+        attempt_id: crate::AttemptId,
+        binding_generation: u64,
+        control_generation: u64,
+        event_kind: u16,
+        event_payload: &[u8],
+    ) -> Result<(), StoreError> {
+        if event_payload.len() > MAX_EVENT_PAYLOAD {
+            return Err(StoreError::PayloadTooLarge);
+        }
+        let conn = self.conn.lock().expect("agent store lock");
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|_| StoreError::WriteFailed)?;
+        tx.execute(
+            "INSERT INTO agent_run (id, attempt_id, binding_generation, control_generation, liveness)
+             VALUES (?1, ?2, ?3, ?4, 'unknown')
+             ON CONFLICT (id) DO UPDATE SET
+               attempt_id = excluded.attempt_id,
+               binding_generation = excluded.binding_generation,
+               control_generation = excluded.control_generation,
+               liveness = 'unknown'",
+            params![
+                run_id.to_bytes().to_vec(),
+                attempt_id.to_bytes().to_vec(),
+                binding_generation as i64,
+                control_generation as i64
+            ],
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+        let _ = insert_event(
+            &tx,
+            AggregateId::AgentRun(run_id),
+            event_kind,
+            event_payload,
+        )?;
+        // Intentionally drop `tx` without commit.
+        Ok(())
+    }
+
     fn commit_insert(
         &self,
         aggregate_id: AggregateId,
@@ -459,25 +532,17 @@ fn insert_event(
     payload: &[u8],
 ) -> Result<AggregateSequence, StoreError> {
     let (kind, id) = aggregate_key(aggregate_id);
-    let max_event: i64 = tx
+    let hwm: i64 = tx
         .query_row(
-            "SELECT COALESCE(MAX(sequence), 0) FROM aggregate_event WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
-            params![kind, id],
-            |row| row.get(0),
-        )
-        .map_err(|_| StoreError::Corrupt)?;
-    // Retention may delete every event while a snapshot still records a
-    // higher incorporated_through. Never renumber below that frontier.
-    let max_snapshot: i64 = tx
-        .query_row(
-            "SELECT COALESCE(MAX(incorporated_through), 0) FROM aggregate_snapshot
+            "SELECT COALESCE(high_water, 0) FROM aggregate_sequence_hwm
              WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
             params![kind, id],
             |row| row.get(0),
         )
-        .map_err(|_| StoreError::Corrupt)?;
-    let current = max_event.max(max_snapshot);
-    let next = current.checked_add(1).ok_or(StoreError::Corrupt)?;
+        .optional()
+        .map_err(|_| StoreError::Corrupt)?
+        .unwrap_or(0);
+    let next = hwm.checked_add(1).ok_or(StoreError::Corrupt)?;
     let event_id = next;
     tx.execute(
         "INSERT INTO aggregate_event (aggregate_kind, aggregate_id, sequence, event_id, kind, payload)
@@ -485,7 +550,43 @@ fn insert_event(
         params![kind, id, next, event_id, event_kind as i64, payload],
     )
     .map_err(|_| StoreError::WriteFailed)?;
+    tx.execute(
+        "INSERT INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT (aggregate_kind, aggregate_id) DO UPDATE SET
+           high_water = excluded.high_water",
+        params![kind, id, next],
+    )
+    .map_err(|_| StoreError::WriteFailed)?;
     AggregateSequence::from_raw(next as u64).ok_or(StoreError::Corrupt)
+}
+
+fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
+    if from >= SCHEMA_VERSION {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS aggregate_sequence_hwm (
+            aggregate_kind INTEGER NOT NULL,
+            aggregate_id BLOB NOT NULL,
+            high_water INTEGER NOT NULL,
+            PRIMARY KEY (aggregate_kind, aggregate_id)
+        );",
+    )
+    .map_err(|_| StoreError::WriteFailed)?;
+    // Backfill from the max of retained events and snapshot frontiers.
+    conn.execute_batch(
+        "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
+         SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
+           SELECT aggregate_kind, aggregate_id, sequence AS seq FROM aggregate_event
+           UNION ALL
+           SELECT aggregate_kind, aggregate_id, incorporated_through AS seq FROM aggregate_snapshot
+         ) GROUP BY aggregate_kind, aggregate_id;",
+    )
+    .map_err(|_| StoreError::WriteFailed)?;
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+        .map_err(|_| StoreError::WriteFailed)?;
+    Ok(())
 }
 
 fn initialize(conn: &Connection) -> Result<(), StoreError> {
@@ -504,6 +605,12 @@ fn initialize(conn: &Connection) -> Result<(), StoreError> {
             aggregate_id BLOB NOT NULL,
             incorporated_through INTEGER NOT NULL,
             payload BLOB NOT NULL,
+            PRIMARY KEY (aggregate_kind, aggregate_id)
+        );
+        CREATE TABLE aggregate_sequence_hwm (
+            aggregate_kind INTEGER NOT NULL,
+            aggregate_id BLOB NOT NULL,
+            high_water INTEGER NOT NULL,
             PRIMARY KEY (aggregate_kind, aggregate_id)
         );
         CREATE TABLE output_segment (
@@ -638,8 +745,8 @@ mod tests {
             other => panic!("expected history gap, got {other:?}"),
         }
 
-        // Full truncation: cursor behind snapshot → gap; cursor at snapshot →
-        // caught-up empty Ok([]); append must not renumber below the frontier.
+        // Full truncation: cursor behind snapshot → gap; at snapshot → Ok([]);
+        // None (from start) → gap; append must continue past HWM (not renumber).
         let past_all = AggregateSequence::from_raw(third.get() + 1).unwrap();
         store.drop_events_before(aggregate, past_all).unwrap();
         match store.replay_after(aggregate, Some(first)) {
@@ -650,22 +757,52 @@ mod tests {
             }
             other => panic!("expected full-truncation history gap, got {other:?}"),
         }
+        assert!(matches!(
+            store.replay_after(aggregate, None),
+            Err(StoreError::History(_))
+        ));
+        let (position, payload) = store.get_snapshot(aggregate).unwrap().unwrap();
+        assert_eq!(position.incorporated_through, second);
+        assert_eq!(payload, b"onetwo");
         assert_eq!(
             store.replay_after(aggregate, Some(second)).unwrap(),
             Vec::new()
         );
         let resumed = store.append_event(aggregate, 1, b"after-wipe").unwrap();
-        assert!(resumed.get() > second.get());
+        assert_eq!(resumed.get(), third.get() + 1);
 
-        // Wipe with no snapshot: a stale cursor must not look caught-up.
+        // Wipe with no snapshot: HWM still prevents renumbering and fabrications.
         let wiped = AggregateId::WorkScope(crate::WorkScopeId::new());
-        let prior = store.append_event(wiped, 1, b"gone").unwrap();
-        let past_prior = AggregateSequence::from_raw(prior.get() + 1).unwrap();
-        store.drop_events_before(wiped, past_prior).unwrap();
+        let a = store.append_event(wiped, 1, b"a").unwrap();
+        let b = store.append_event(wiped, 1, b"b").unwrap();
+        let past_b = AggregateSequence::from_raw(b.get() + 1).unwrap();
+        store.drop_events_before(wiped, past_b).unwrap();
         assert!(matches!(
-            store.replay_after(wiped, Some(prior)),
+            store.replay_after(wiped, None),
             Err(StoreError::History(_))
         ));
+        assert!(matches!(
+            store.replay_after(wiped, Some(a)),
+            Err(StoreError::History(_))
+        ));
+        assert_eq!(store.replay_after(wiped, Some(b)).unwrap(), Vec::new());
+        let next = store.append_event(wiped, 1, b"again").unwrap();
+        assert_eq!(next.get(), b.get() + 1);
+
+        // Virgin aggregate: Some cursor with no HWM is empty, not a gap.
+        let virgin = AggregateId::WorkItem(crate::WorkItemId::new());
+        assert_eq!(
+            store
+                .replay_after(virgin, Some(AggregateSequence::FIRST))
+                .unwrap(),
+            Vec::new()
+        );
+
+        // Snapshot must name an exact existing sequence.
+        assert_eq!(
+            store.snapshot(aggregate, AggregateSequence::from_raw(999).unwrap(), b"lie"),
+            Err(StoreError::Corrupt)
+        );
     }
 
     #[test]
@@ -674,6 +811,17 @@ mod tests {
         let store = AgentStore::open(&file).unwrap();
         let run = crate::AgentRunId::new();
         let attempt = crate::AttemptId::new();
+        store
+            .abandon_mutate_agent_run_and_append(run, attempt, 2, 3, 9, b"started")
+            .unwrap();
+        drop(store);
+        let store = AgentStore::open(&file).unwrap();
+        assert!(store.agent_run(run).is_err());
+        assert!(store
+            .replay_after(AggregateId::AgentRun(run), None)
+            .unwrap()
+            .is_empty());
+
         let sequence = store
             .mutate_agent_run_and_append(run, attempt, 2, 3, 9, b"started")
             .unwrap();
@@ -681,6 +829,7 @@ mod tests {
         assert_eq!(loaded.attempt_id, attempt);
         assert_eq!(loaded.binding_generation, 2);
         assert_eq!(loaded.control_generation, 3);
+        assert_eq!(loaded.liveness, PersistedLiveness::Unknown);
         let events = store
             .replay_after(AggregateId::AgentRun(run), None)
             .unwrap();
@@ -688,6 +837,19 @@ mod tests {
         assert_eq!(events[0].sequence, sequence);
         assert_eq!(events[0].kind, 9);
         assert_eq!(events[0].payload, b"started");
+        drop(store);
+        let reopened = AgentStore::open(&file).unwrap();
+        assert_eq!(
+            reopened.agent_run(run).unwrap().liveness,
+            PersistedLiveness::Unknown
+        );
+        assert_eq!(
+            reopened
+                .replay_after(AggregateId::AgentRun(run), None)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -766,8 +928,10 @@ mod tests {
         assert!(snapshot < Duration::from_secs(1));
         assert!(recovery < Duration::from_secs(1));
         assert!(bytes > 0);
+        let rss = rss.expect("RSS sample required for AB-0.3 measurement budget");
+        assert!(rss < 512 * 1024, "RSS ceiling exceeded: {rss} KiB");
         eprintln!(
-            "ab-0.3 measurement cold_open_us={} append_256_us={} snapshot_us={} recovery_us={} db_bytes={} rss_kib={:?}",
+            "ab-0.3 measurement cold_open_us={} append_256_us={} snapshot_us={} recovery_us={} db_bytes={} rss_kib={}",
             cold_open.as_micros(),
             append.as_micros(),
             snapshot.as_micros(),
