@@ -1,8 +1,20 @@
-//! Versioned local Agent Backend protocol value boundary.
+//! Versioned local Agent Backend protocol boundary.
 //!
-//! AB-0.2 extends the AB-0.1 value boundary with the pure Hello/HelloAck
-//! negotiation model. Socket framing and daemon lifecycle remain backend-owned.
+//! AB-0.2 owns Hello/HelloAck negotiation and the bounded frame codec.
+//! Socket ownership, daemon lifecycle, and authorization stay outside this crate.
 
+mod frame;
+mod handshake;
+
+pub use frame::{
+    accepted_body_len, decode_frame, encode_frame, push_untrusted, Frame, FrameError, FrameKind,
+    ABSOLUTE_MAX_FRAME_SIZE,
+};
+pub use handshake::{
+    decode_ack, decode_handshake_error, decode_hello, encode_ack, encode_handshake_error,
+    encode_hello, negotiate_hello, HandshakeError, Hello, HelloAck, ServerCapabilities,
+    MAX_EVENT_WINDOW, MAX_PRINCIPAL_EVIDENCE, MAX_VERSIONS,
+};
 pub use seyal_agent_core::{
     AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
     ClientSessionId, ControlGeneration, WorkItemId, WorkScopeId,
@@ -20,107 +32,5 @@ impl ProtocolVersion {
 
     pub const fn get(self) -> u16 {
         self.0
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Hello {
-    pub supported_versions: Vec<ProtocolVersion>,
-    pub max_frame_size: u32,
-    pub event_window: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HelloAck {
-    pub selected_version: ProtocolVersion,
-    pub backend_instance_id: BackendInstanceId,
-    pub max_frame_size: u32,
-    pub event_window: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HandshakeError {
-    InvalidLimit,
-    NoCompatibleVersion,
-}
-
-pub fn negotiate_hello(
-    hello: &Hello,
-    backend_instance_id: BackendInstanceId,
-    server_max_frame_size: u32,
-    server_event_window: u32,
-) -> Result<HelloAck, HandshakeError> {
-    if hello.max_frame_size == 0
-        || hello.event_window == 0
-        || server_max_frame_size == 0
-        || server_event_window == 0
-    {
-        return Err(HandshakeError::InvalidLimit);
-    }
-
-    let selected_version = hello
-        .supported_versions
-        .iter()
-        .copied()
-        .filter(|version| *version == ProtocolVersion::V1)
-        .max()
-        .ok_or(HandshakeError::NoCompatibleVersion)?;
-
-    Ok(HelloAck {
-        selected_version,
-        backend_instance_id,
-        max_frame_size: hello.max_frame_size.min(server_max_frame_size),
-        event_window: hello.event_window.min(server_event_window),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn protocol_v1_is_explicit_and_stable() {
-        assert_eq!(ProtocolVersion::V1.get(), 1);
-    }
-
-    #[test]
-    fn hello_selects_a_compatible_version_and_narrows_limits() {
-        let backend = BackendInstanceId::new();
-        let hello = Hello {
-            supported_versions: vec![ProtocolVersion::new(99), ProtocolVersion::V1],
-            max_frame_size: 1024,
-            event_window: 64,
-        };
-
-        let ack = negotiate_hello(&hello, backend, 512, 128).unwrap();
-
-        assert_eq!(ack.selected_version, ProtocolVersion::V1);
-        assert_eq!(ack.backend_instance_id, backend);
-        assert_eq!(ack.max_frame_size, 512);
-        assert_eq!(ack.event_window, 64);
-    }
-
-    #[test]
-    fn incompatible_or_unbounded_hello_fails_closed() {
-        let backend = BackendInstanceId::new();
-        let incompatible = Hello {
-            supported_versions: vec![ProtocolVersion::new(99)],
-            max_frame_size: 1024,
-            event_window: 64,
-        };
-        assert_eq!(
-            negotiate_hello(&incompatible, backend, 1024, 64),
-            Err(HandshakeError::NoCompatibleVersion)
-        );
-
-        let zero_limit = Hello {
-            supported_versions: vec![ProtocolVersion::V1],
-            max_frame_size: 0,
-            event_window: 64,
-        };
-        assert_eq!(
-            negotiate_hello(&zero_limit, backend, 1024, 64),
-            Err(HandshakeError::InvalidLimit)
-        );
     }
 }
