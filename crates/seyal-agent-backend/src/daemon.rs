@@ -588,6 +588,30 @@ mod tests {
     }
 
     #[test]
+    fn active_owned_socket_is_never_unlinked_as_stale() {
+        let dir = TempDir::new();
+        fs::create_dir(dir.path()).unwrap();
+        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(dir.path(), permissions).unwrap();
+
+        let socket = dir.path().join(SOCKET_NAME);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
+        socket_permissions.set_mode(0o600);
+        fs::set_permissions(&socket, socket_permissions).unwrap();
+        // Dead lock owner + still-connectable leaf: reclaim must refuse unlink.
+        fs::write(dir.path().join(LOCK_NAME), b"v1\n0\n").unwrap();
+
+        assert_eq!(
+            AgentDaemon::bind(dir.path()).map(|_| ()),
+            Err(DaemonError::StartupContended)
+        );
+        assert!(socket.exists());
+        drop(listener);
+    }
+
+    #[test]
     fn malformed_and_incompatible_clients_do_not_stick_the_daemon() {
         let dir = TempDir::new();
         let daemon = AgentDaemon::bind_with(
