@@ -10,11 +10,11 @@ mod auth;
 mod daemon;
 #[cfg(unix)]
 mod endpoint;
+mod execution_host;
+mod observation;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 mod peer;
-mod execution_host;
-mod observation;
 
 pub use auth::{
     AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
