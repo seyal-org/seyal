@@ -4,9 +4,9 @@
 Ready until its own `docs/engineering/ISSUE-PROTOCOL.md` §"Ready gate" checklist
 passes and a human owner claims it.
 
-**Authority:** [`../architecture/ADR-017-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-017-NATIVE-WINDOW-TAB-LIFECYCLE.md)
+**Authority:** [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md)
 (Proposed). This file plans work; it creates no architecture. Where this file and
-ADR-017 disagree, ADR-017 wins.
+ADR-018 disagree, ADR-018 wins.
 
 **Parent umbrella:** #674. **Epic:** #665. **Milestone contract:**
 [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
@@ -18,7 +18,7 @@ below is the first category.
 ## Dependency order
 
 ```text
-ADR-017 accepted
+ADR-018 accepted
   → W1 Rust window containment + WindowId
   → W2 Rust window/tab lifecycle actions, ordering and fencing
   → W3 versioned multi-window snapshot/FFI + native effects
@@ -49,9 +49,9 @@ containment; no host change.
 **Acceptance.**
 
 - `WindowId` is opaque, never reused, and carries no `NSWindow`, index, screen or
-  Space semantics (ADR-017 §1.2).
+  Space semantics (ADR-018 §1.2).
 - Exactly one containment authority exists: no stored `Workspace.tabs` remains
-  alongside window-owned tabs (ADR-017 §1.1).
+  alongside window-owned tabs (ADR-018 §1.1).
 - A Window's `WorkspaceId` is immutable for the Window's lifetime.
 - Derived Workspace tab order equals `(window order, tab order within window)`.
 - The existing single-window production composition still constructs and behaves
@@ -65,7 +65,7 @@ reachable by construction; existing `ShellState` tests unchanged in behavior.
 
 ## W2 — Rust window/tab lifecycle actions, ordering and fencing
 
-**Scope.** Implement the ADR-017 §2.2 action set and the §6 fencing model:
+**Scope.** Implement the ADR-018 §2.2 action set and the §6 fencing model:
 `CreateWindow`, `CloseWindow`, `CreateTab`, `CloseTab`, `MoveTabBefore`,
 `MoveTabToWindow`, `MoveTabToNewWindow`, `SelectWindow`, `SelectTab`,
 `CycleWindow`, `CycleTab`, `ActivateWorkspace`, plus hierarchical close policy
@@ -76,7 +76,7 @@ reachable by construction; existing `ShellState` tests unchanged in behavior.
 
 - Structural actions are generation-fenced; selection actions are identity-fenced
   only; execution-bearing actions keep the ADR-015 execution/attachment/epoch
-  fence (ADR-017 §6).
+  fence (ADR-018 §6).
 - Reorder and move use a relative `before: Option<TabId>` anchor, never an index.
 - Every rejection is atomic: state is byte-identical to the pre-action state.
 - Unknown or destroyed identities are rejected with a typed reason; no nearest
@@ -84,7 +84,7 @@ reachable by construction; existing `ShellState` tests unchanged in behavior.
 - Hierarchical close never produces a zero-Pane Tab or zero-Tab Window.
 - `ActivateWorkspace` raises that Workspace's most recently active Window, or
   creates one when it has none.
-- No close action can produce a `TerminateExecution` effect (ADR-017 §3.1).
+- No close action can produce a `TerminateExecution` effect (ADR-018 §3.1).
 
 **Tests.** Reducer unit tests per action; property tests for reorder/move
 permutations; stale-generation rejection for each structural action; live-identity
@@ -98,7 +98,7 @@ presentation and terminates an execution.
 ## W3 — Versioned multi-window snapshot, FFI and native effects
 
 **Scope.** Extend the product snapshot and `SeyalBridge.h` / `seyal-client` FFI to
-carry the ADR-017 §2.1 fields for N windows, and to return the §2.4 native
+carry the ADR-018 §2.1 fields for N windows, and to return the §2.4 native
 effects (realize window, destroy window realization, order front / make key,
 existing `BoundedDetachThenTerminate`). Keep records versioned and size-tagged;
 unknown version or size mismatch fails closed.
@@ -126,20 +126,20 @@ hot-path transfer was introduced.
 ## W4 — Thin AppKit multi-window host
 
 **Scope.** Realize N windows from the snapshot, keyed by `WindowId`. Forward native
-inputs and user intents as typed actions. Implement the ADR-017 §4 quit sequence.
+inputs and user intents as typed actions. Implement the ADR-018 §4 quit sequence.
 Remove the portable decisions currently taken in `AppDelegate.swift`.
 
 **Acceptance.**
 
 - `windowShouldClose(_:)` returns `false`, forwards `CloseWindow`, and the
   realization is destroyed only when Rust's snapshot/effect says that `WindowId`
-  is gone (ADR-017 §2.5).
+  is gone (ADR-018 §2.5).
 - `applicationShouldTerminateAfterLastWindowClosed` returns `false`; Rust decides
   whether last-window-close means quit.
 - `applicationShouldTerminate` returns `.terminateLater`; `reply(toApplicationShouldTerminate:)`
   is called only after Rust reports cleanup complete or the bounded deadline
   expires. This replaces today's synchronous `.terminateNow`.
-- `NSWindow.tabbingMode == .disallowed` for every Seyal window (ADR-017 §1.4).
+- `NSWindow.tabbingMode == .disallowed` for every Seyal window (ADR-018 §1.4).
 - Key/main, occlusion, miniaturize/deminiaturize, fullscreen and screen/scale
   changes are forwarded as typed events; the host derives no product state from
   them.
@@ -162,7 +162,7 @@ an action); quit with 3 windows and 3 attachments.
 
 **Depends on:** W3, W4, #923.
 
-**Scope.** Implement the ADR-017 §5 `Focused` / `Visible` / `Hidden` /
+**Scope.** Implement the ADR-018 §5 `Focused` / `Visible` / `Hidden` /
 `Unpresented` tier model: attachment retention, prepared-frame delivery
 suspension, renderer/GPU release per SPEC-005, and bounded SPEC-004 resync on
 reveal.
@@ -194,7 +194,7 @@ while every leaf is `Hidden`; detached child exit while `Hidden`.
 
 **Depends on:** W2, W3, accepted #994.
 
-**Scope.** Implement ADR-017 §3.3: a deterministic, explicit, non-guessing way to
+**Scope.** Implement ADR-018 §3.3: a deterministic, explicit, non-guessing way to
 enumerate the Workspace's live-unpresented executions and either bind one into a
 Pane leaf or terminate it. A command-palette entry is sufficient surface. Add the
 explicit `TerminateExecution` action path.
@@ -265,22 +265,22 @@ candidate now.
 
 | Deferred work | Why M004 | Authority |
 |---|---|---|
-| Durable Window/Tab/Pane layout, order, focus and draft restore across quit/relaunch/crash | ADR-007 P4 presentation/layout persistence; M003 writes no layout to disk | ADR-007 §4, ADR-017 §7 |
-| Durable `WindowId`/`TabId` semantics | M003 identities are process-incarnation scoped | ADR-017 §1.2 |
-| Re-adopting more than the one execution SPEC-009 §8.2 resolves, mapped back to its original Pane | needs durable layout plus durable execution↔Pane records | SPEC-009 §8.2, ADR-017 §7 |
-| macOS window restoration, multi-display, Space and fullscreen placement persistence | OS restoration integration is durable presentation state | ADR-017 §7 |
+| Durable Window/Tab/Pane layout, order, focus and draft restore across quit/relaunch/crash | ADR-007 P4 presentation/layout persistence; M003 writes no layout to disk | ADR-007 §4, ADR-018 §7 |
+| Durable `WindowId`/`TabId` semantics | M003 identities are process-incarnation scoped | ADR-018 §1.2 |
+| Re-adopting more than the one execution SPEC-009 §8.2 resolves, mapped back to its original Pane | needs durable layout plus durable execution↔Pane records | SPEC-009 §8.2, ADR-018 §7 |
+| macOS window restoration, multi-display, Space and fullscreen placement persistence | OS restoration integration is durable presentation state | ADR-018 §7 |
 | Re-binding a Window to another Workspace; moving a Tab across Workspaces | requires explicit ADR-007 context/retention/execution-rehome disposition | ADR-007 §10, §11 |
-| Terminate-on-close and auto-close-on-exit configuration | config policy; must stay an explicit separately-actioned intent | #676, ADR-017 §3.4 |
+| Terminate-on-close and auto-close-on-exit configuration | config policy; must stay an explicit separately-actioned intent | #676, ADR-018 §3.4 |
 | Rich session inventory | blocked on session inventory authority | #929 |
 
 ## Open items for reviewer decision
 
-1. **ADR versus SPEC placement.** ADR-017 carries normative observable behavior
+1. **ADR versus SPEC placement.** ADR-018 carries normative observable behavior
    that `docs/specs/README.md` would also accept as a SPEC. A reviewer may prefer
-   promoting ADR-017 §3–§6 into `SPEC-022-M003-WINDOW-TAB-LIFECYCLE` and keeping
+   promoting ADR-018 §3–§6 into `SPEC-022-M003-WINDOW-TAB-LIFECYCLE` and keeping
    only ownership/containment in the ADR. This refinement chose one ADR to avoid a
    second overlapping authority for the same contract.
-2. **Window↔Workspace binding.** ADR-017 §1.1 binds a Window to one Workspace for
+2. **Window↔Workspace binding.** ADR-018 §1.1 binds a Window to one Workspace for
    life and changes `ActivateWorkspace` from the preview scaffold's
    switch-inventory-in-place behavior to raise-or-create. This is the largest
    product-behavior consequence of the decomposition and deserves explicit product

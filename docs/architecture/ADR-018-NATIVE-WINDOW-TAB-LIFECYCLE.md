@@ -1,10 +1,16 @@
-# ADR-017 — Native window and tab lifecycle, identity and ordering
+# ADR-018 — Native window and tab lifecycle, identity and ordering
 
 - **Status:** Proposed
 - **Date:** 2026-09-24
 - **Issue:** #1000 (refinement); parent umbrella #674; epic #665
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 - **Coordinates with:** #994 (pane/tab → `TerminalExecution` provisioning contract), #922, #923, #928, #936, #929
+- **Numbering note:** this decision was drafted as ADR-017. Refinement of #994 was
+  drafting `ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md` concurrently, so this
+  document yields the number and takes ADR-018. The two are complementary, not
+  competing: #994's ADR owns how a leaf obtains an execution, this one owns how
+  windows/tabs are identified, ordered and destroyed. If the #994 ADR lands under a
+  different number, renumbering this document is a docs-only follow-up.
 
 ## Context
 

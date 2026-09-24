@@ -195,7 +195,7 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 #674 remains the hierarchy/navigation parent. It is too large for one production PR (windows, tabs, nested splits, move/reparent, zoom, resource addressing, palette richness already partly landed). Mark children **Ready** only after `docs/engineering/ISSUE-PROTOCOL.md` checkboxes pass. If a child needs a reusable windows/tabs/splits behavioral contract that SPEC-008 does not own, stop and refine a specification **before** coding; do not invent that spec in an implementation PR.
 
-The window/tab half of that missing contract is refined by #1000: [`../architecture/ADR-017-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-017-NATIVE-WINDOW-TAB-LIFECYCLE.md) (**Proposed**) with child decomposition in [`../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md`](../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md). The pane/tab `TerminalExecution` provisioning half remains #994. Neither is accepted until its own PR merges; a child must not code window/tab lifecycle behavior before then.
+The window/tab half of that missing contract is refined by #1000: [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md) (**Proposed**) with child decomposition in [`../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md`](../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md). The pane/tab `TerminalExecution` provisioning half remains #994. Neither is accepted until its own PR merges; a child must not code window/tab lifecycle behavior before then.
 
 ### 6.3 #923 — first headed slice after branch resolution
 
