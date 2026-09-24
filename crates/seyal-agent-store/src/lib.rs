@@ -39,10 +39,26 @@ impl AggregateSequence {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryGap {
+    pub aggregate_id: AggregateId,
+    pub requested_after: AggregateSequence,
+    pub earliest_available: AggregateSequence,
+    pub current_snapshot_sequence: Option<AggregateSequence>,
+    pub reason: HistoryGapReason,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryGapReason {
+    RetentionTruncation,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AggregateEventEnvelopeV1 {
     pub aggregate_id: AggregateId,
     pub sequence: AggregateSequence,
+    pub event_id: u128,
+    pub kind: u16,
     pub payload: Vec<u8>,
 }
 
@@ -50,13 +66,6 @@ pub struct AggregateEventEnvelopeV1 {
 pub struct SnapshotPosition {
     pub aggregate_id: AggregateId,
     pub incorporated_through: AggregateSequence,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HistoryGap {
-    pub aggregate_id: AggregateId,
-    pub requested_after: AggregateSequence,
-    pub earliest_available: AggregateSequence,
 }
 
 #[cfg(test)]
@@ -82,16 +91,21 @@ mod tests {
         let scope_event = AggregateEventEnvelopeV1 {
             aggregate_id: scope,
             sequence: AggregateSequence::FIRST,
+            event_id: 1,
+            kind: 1,
             payload: b"scope".to_vec(),
         };
         let run_event = AggregateEventEnvelopeV1 {
             aggregate_id: run,
             sequence: AggregateSequence::FIRST,
+            event_id: 2,
+            kind: 1,
             payload: b"run".to_vec(),
         };
 
         assert_ne!(scope_event.aggregate_id, run_event.aggregate_id);
         assert_eq!(scope_event.sequence, run_event.sequence);
+        assert_ne!(scope_event.event_id, run_event.event_id);
     }
 
     #[test]
