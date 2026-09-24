@@ -4,7 +4,7 @@
 - **Date:** 2026-08-24
 - **Issues:** #70, #80, #82; #994 proposes §4.1 and §5.2
 - **Architecture:** Foundation Architecture + ADR-005 + ADR-006 + ADR-007
-- **Proposed M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative only on ADR-019 acceptance** and not implemented.
+- **Proposed M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative only on ADR-017 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -68,13 +68,26 @@ M001 does not claim that a Runtime crash preserves arbitrary live PTYs.
 
 ### 4.1 Runtime process lifetime versus live-execution count
 
-- **Status:** proposed amendment; **normative only on ADR-019 acceptance** (Issue #994, ADR-019).
+- **Status:** proposed amendment; **normative only on ADR-017 acceptance** (Issue #994, ADR-017).
 
 Runtime process lifetime is independent of the live-execution count. **Zero live
 executions is a valid steady state**: the Runtime keeps its singleton endpoint,
-its `RuntimeId` and its idle reactor wait, and exits only on explicit shutdown
-(§16) or an OS signal. It must not exit merely because the last live execution
-finalized.
+its `RuntimeId` and its idle reactor wait. It must not exit merely because the
+last live execution finalized.
+
+**Who may end the Runtime process on the production path:**
+
+- an OS signal that the process is required to honor;
+- an explicit controlled shutdown under §16, invoked only by a future
+  authenticated same-UID control path that this amendment does **not** invent.
+  Until that control path is accepted (tracked as a follow-on under #674 / M004
+  market-ready Runtime lifecycle, not by #994 children P1–M1), the production
+  client-launched Runtime is **resident for the local user scope** after first
+  launch: headed GUI quit (ADR-018 / #1000) never terminates the Runtime and
+  never invokes §16.
+
+Idle CPU and wake behavior at zero live executions must match the existing idle
+requirements in §18; an idle Runtime must not poll.
 
 On the production client-launched path the Runtime is started with an empty
 argument list (SPEC-009 §8.1.1) and must therefore create **no** execution from
@@ -82,9 +95,6 @@ its own startup: provisioning intent has exactly one owner, and a startup-create
 execution would compete with it. A Runtime started explicitly with a command by a
 developer or a test harness may still create that execution as its own
 composition, which is not a second product authority.
-
-Idle CPU and wake behavior at zero live executions must match the existing idle
-requirements in §18; an idle Runtime must not poll.
 
 ## 5. Execution registry
 
@@ -118,8 +128,8 @@ Pass 4 does not implement named Workspace CRUD, Workspace deletion, layout persi
 
 ### 5.2 M003 client-requested provisioning and disposition
 
-- **Status:** proposed amendment; **normative only on ADR-019 acceptance**.
-- **Authority:** [`../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994. Wire contract is SPEC-004 §18.
+- **Status:** proposed amendment; **normative only on ADR-017 acceptance**.
+- **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994. Wire contract is SPEC-004 §18.
 
 An authenticated same-UID local client may request execution creation and, as
 Controller, request explicit termination. This adds callers, not a second

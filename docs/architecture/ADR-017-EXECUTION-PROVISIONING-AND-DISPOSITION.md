@@ -1,4 +1,4 @@
-# ADR-019 — Pane/Tab TerminalExecution provisioning and disposition
+# ADR-017 — Pane/Tab TerminalExecution provisioning and disposition
 
 - **Status:** Proposed (refinement output of Issue #994; no production code in this decision)
 - **Date:** 2026-09-24
@@ -6,7 +6,8 @@
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-015, SPEC-003, SPEC-004, SPEC-006, SPEC-008, SPEC-009
 - **Scope:** how a new Tab or split Pane obtains one distinct Runtime-owned `TerminalExecution`, and how that execution is disposed of
 - **Classification:** new architecture decision plus tightly scoped SPEC-003 / SPEC-004 / SPEC-009 amendments (§12)
-- **Coordinates with:** #1000 (proposed window/tab lifecycle ADR) and #1004 (proposed local resource-addressing ADR); see §2.1. ADR numbers of all three proposals are provisional until merge order is decided.
+- **Numbering:** ADR-017 (vacant on `master`). Sibling proposals: #1000 → ADR-018 (PR #1039), #1004 → ADR-019 (PR #1038).
+- **Coordinates with:** #1000 and #1004; see §2.1.
 
 ## 1. Context
 
@@ -71,18 +72,23 @@ of the new operations. It does **not**:
 ### 2.1 Relationship to concurrent M003 refinements
 
 Two sibling refinements were proposed in the same M003 pass and must not become
-competing authorities:
+competing authorities. Provisional numbers checkable against their pushed
+branches / open PRs:
 
-- **#1000 — native window/tab lifecycle (proposed as ADR-017).** Owns
+- **#1000 — native window/tab lifecycle (proposed as ADR-018; PR #1039).** Owns
   Workspace → Window → Tab → `PaneTree` → Pane containment, Rust-owned
   `WindowId`/`TabId`/`PaneId` identity and ordering, presentation tiers for
   inactive-but-live executions, the bounded quit sequence, and the
   presentation-side rule that closing a Pane/Tab/Window or quitting never
-  terminates an execution. It explicitly defers the typed provisioning request
-  shape to this decision.
-- **#1004 — local resource addressing/navigation (proposed as ADR-018).** Owns
-  typed navigation targets and resolution; a "session" target is an existing
-  `ExecutionId` rather than a new identity.
+  terminates a previously bound execution. It explicitly defers the typed
+  provisioning request shape and never-bound in-flight disposition to this
+  decision.
+- **#1004 — local resource addressing/navigation (proposed as ADR-019; PR #1038).**
+  Owns typed navigation targets and resolution; a "session" target is an
+  existing `ExecutionId` rather than a new identity.
+
+This document is **ADR-017**. Numbers remain provisional until merge order is
+settled.
 
 Boundary: those documents own **presentation structure, lifecycle and
 navigation**; this document owns the **provisioning/disposition seam** — who may
@@ -297,9 +303,13 @@ the local protocol (§12).
   reuse or wrap is malformed, exactly as SPEC-004 requires for
   `ResizeRequest`. Reconnect starts a fresh request-ID space because the
   connection is new.
-- `workspace_id` must equal the Runtime's owning Workspace association for new
-  executions. M003 has one implicit/default Workspace (ADR-007 §2), so any other
-  value fails closed rather than implicitly creating a Workspace.
+- `workspace_id` selects the owning Workspace for the new association.
+  **M003:** the only accepted value is `0`, meaning "the Runtime's single
+  implicit/default Workspace" (ADR-007 §2). Every nonzero value fails closed
+  with `InvalidWorkspace`. The Runtime never creates a Workspace as a side
+  effect, and the client is not required to discover a durable `WorkspaceId`
+  over the wire in M003. A future named multi-workspace amendment must define
+  how clients learn nonzero ids before they become legal.
 - geometry obeys the existing SPEC-004 §5 maxima (nonzero; `rows <= 256`,
   `columns <= 512`, `cells <= 131072`), so provisioning cannot request a grid
   that resize would reject.
@@ -608,7 +618,7 @@ protocol detail. §2 records why the existing protocol does not already cover it
 
 | Artifact | Impact | Content |
 |---|---|---|
-| ADR-019 (this document) | **new decision** | ownership, lifecycle, disposition, bounds, rejected alternatives |
+| ADR-017 (this document) | **new decision** | ownership, lifecycle, disposition, bounds, rejected alternatives |
 | SPEC-004 | **amendment (normative on acceptance)** | capability bit 8; message types 35–38 with exact fixed-width layouts and validation order; outstanding-request bounds; two additive result codes; mandatory-control classification |
 | SPEC-003 | **amendment (normative on acceptance)** | client-requested provisioning/disposition as bounded control work; one create per dispatch; zero live executions as a valid steady state; production Runtime creates no execution from its own startup on the client-launched path; required tests |
 | SPEC-009 | **amendment (normative on acceptance)** | multi-execution resolution: bind by explicit `ExecutionId`; single-survivor adoption retained; more-than-one survivor never guessed or terminated |
@@ -618,7 +628,7 @@ protocol detail. §2 records why the existing protocol does not already cover it
 
 Because ADR create/amend must be its own PR (AGENTS.md, `README.md` change
 discipline), the amendments above are authored as part of this
-architecture/specification PR and carry an explicit "normative on ADR-019
+architecture/specification PR and carry an explicit "normative on ADR-017
 acceptance" marker. No production code may land in the same PR.
 
 ## 13. Issue #994 acceptance criteria
@@ -660,17 +670,28 @@ Costs and honest limits:
   Within one client session portable state keeps it re-attachable, but a fresh
   GUI process with more than one survivor will not adopt them. Until a truthful
   inventory/adoption surface exists (#929, and #1000's reachability requirement
-  for its `Unpresented` tier), the only remedies are the shell's own `exit`, the
-  explicit terminate action, or Runtime shutdown. This is a product gap to
-  schedule, not a defect to hide;
+  for its `Unpresented` tier), the reachable remedies are the shell's own
+  `exit` or the explicit terminate action. **Runtime shutdown is not a
+  production-path remedy in M003:** under SPEC-003 §4.1 the client-launched
+  Runtime is resident for the user scope until an accepted §16 control path
+  (follow-on under #674 / M004) or an OS signal ends it. GUI quit never invokes
+  §16. This accumulation gap is a product schedule item, not a defect to hide;
 - at most 16 simultaneously attached Panes under the current SPEC-004 maxima
   (§8);
 - CWD inheritance — the behavior users will expect from "split pane" — is
   deliberately absent until #686's trusted boundary is accepted;
 - disposing a never-bound execution costs one attach plus one bounded snapshot;
+  if that disposal attach fails (`ControllerBusy`, `InvalidExecution`, or the
+  child already exited), the client treats the execution as already disposed /
+  unreferenced and must not retry in a loop;
+- when #1000's quit deadline races an in-flight never-bound disposal attach, the
+  quit deadline wins and the execution falls through to the unreferenced case
+  above rather than unbounded quit wait;
 - the production Runtime must stop creating an execution from its own startup
   and must stop exiting when the live-execution count reaches zero; both are
-  behavior changes that the owning child Issue must cover with tests.
+  behavior changes that the owning child Issue must cover with tests, and both
+  imply a resident per-user Runtime daemon for the login scope until a §16
+  control path is accepted.
 
 ## 15. Production decomposition
 

@@ -195,7 +195,7 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 #674 remains the hierarchy/navigation parent. It is too large for one production PR (windows, tabs, nested splits, move/reparent, zoom, resource addressing, palette richness already partly landed). Mark children **Ready** only after `docs/engineering/ISSUE-PROTOCOL.md` checkboxes pass. If a child needs a reusable windows/tabs/splits behavioral contract that SPEC-008 does not own, stop and refine a specification **before** coding; do not invent that spec in an implementation PR.
 
-The pane/tab execution provisioning seam required by that decomposition is refined under #994: [`../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md) (Proposed) with child drafts in [`M003-674-EXECUTION-PROVISIONING-CHILDREN.md`](M003-674-EXECUTION-PROVISIONING-CHILDREN.md). No child is Ready before that ADR and its SPEC-003/004/009 amendments are accepted.
+The pane/tab execution provisioning seam required by that decomposition is refined under #994: [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md) (Proposed) with child drafts in [`M003-674-EXECUTION-PROVISIONING-CHILDREN.md`](M003-674-EXECUTION-PROVISIONING-CHILDREN.md). No child is Ready before that ADR and its SPEC-003/004/009 amendments are accepted.
 
 ### 6.3 #923 — first headed slice after branch resolution
 

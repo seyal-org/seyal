@@ -3,12 +3,12 @@
 **Status:** Draft Issue bodies produced by refinement Issue #994. **Not filed.** A
 maintainer files these as GitHub Issues under parent [#674](https://github.com/seyal-org/seyal/issues/674).
 
-**Authority:** [`../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-019-EXECUTION-PROVISIONING-AND-DISPOSITION.md)
+**Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md)
 (Proposed), SPEC-003 §4.1/§5.2, SPEC-004 §18, SPEC-009 §8.2.1,
 [`MILESTONE-003.md`](MILESTONE-003.md) §5–§6, ADR-005, ADR-006, ADR-007, ADR-008,
 ADR-009, ADR-015.
 
-**Hard gate:** no child below may be marked **Ready** before ADR-019 and the
+**Hard gate:** no child below may be marked **Ready** before ADR-017 and the
 SPEC-003 / SPEC-004 / SPEC-009 amendments are accepted on `master`. Until then
 these are refinement artifacts, not work authorizations. Each child is one
 independently reviewable outcome with one human owner, one
@@ -18,7 +18,7 @@ independently reviewable outcome with one human owner, one
 ## Dependency order
 
 ```text
-ADR-019 + SPEC amendments accepted
+ADR-017 + SPEC amendments accepted
   → P1 Runtime lifetime (zero-execution steady state)
   → P2 protocol encode/decode for types 35–38
   → P3 Runtime provisioning admission/creation
@@ -212,7 +212,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
   geometry (Pane cell geometry, or the documented 80×24 bootstrap geometry
   followed by a correlated resize).
 - Attach by explicit `ExecutionId`, then `ShellState::bind_execution`.
-- Disposition policy of ADR-019 §6.3, including the never-bound orphan path
+- Disposition policy of ADR-017 §6.3, including the never-bound orphan path
   (attach as Controller solely to dispose, then one terminate request).
 - Unreferenced-live-execution record inside the live client session, so a closed
   Pane's execution stays re-attachable and is never silently forgotten.
@@ -232,7 +232,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 - Deterministic portable state machine with no native product authority: a host
   cannot provision, choose an `ExecutionId` or retry a rejection.
-- Every ADR-019 §7 row is represented by a test.
+- Every ADR-017 §7 row is represented by a test.
 
 **Tests**
 
@@ -347,7 +347,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 - Evidence labelled `CI` / `controlled-host` / `PLATFORM_LIMITED` per
   MILESTONE-003 §8.1; the inherited `>5%` explain / `>10%` blocking policy passes.
 - If measured spawn cost inside a dispatch violates the fairness gate, the
-  finding is recorded against ADR-019 §16 rather than silently adding a worker.
+  finding is recorded against ADR-017 §16 rather than silently adding a worker.
 
 **Tests/measurements**
 
