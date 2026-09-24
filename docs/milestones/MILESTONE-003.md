@@ -211,6 +211,10 @@ Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do no
 
 These remain M001.1 recovery/architecture Issues assigned to **@mahboobmonnamd**. This freeze does not implement, close, or reassign them.
 
+### 6.7 #676 / #1003 — startup launch policy (refinement)
+
+Umbrella #676 remains unassigned and is not a pickup. The startup shell/environment/CWD half of that umbrella is refined by #1003: [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md) (**Proposed**) and [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (**Proposed**), with child drafts in [`../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md`](../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md). The typed `EffectiveLaunchPolicy` is the input the #994 / proposed ADR-017 (PR #1040) provisioning seam resolves for profile `0`. No launch-policy child is Ready before ADR-020 / SPEC-023 acceptance; provisioning consume paths also wait on ADR-017. Themes/fonts/keybindings and broader TOML schema remain separate #676 follow-ons. Do not assign #676 from this refinement.
+
 ---
 
 ## 7. IME and input honesty

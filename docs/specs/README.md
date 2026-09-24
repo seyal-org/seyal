@@ -25,6 +25,7 @@ Specifications define **observable behavior and enforceable contracts** below ac
 - [`SPEC-019-M005-EVALUATION-OUTCOME-COST.md`](SPEC-019-M005-EVALUATION-OUTCOME-COST.md) — **Accepted on merge under #838:** EvaluationObservation/Evaluation, AcceptanceContract, AttemptDisposition, WorkItem Outcome and honest usage/cost/time evidence.
 - [`SPEC-020-M005-DETERMINISTIC-ROUTING.md`](SPEC-020-M005-DETERMINISTIC-ROUTING.md) — **Accepted on merge under #838 / #55:** deterministic RouteOffering filtering/scoring, confidence shrinkage, policy-anchored cost/latency normalization, bounded fallback and explainability.
 - [`SPEC-021-M005-MULTIMODAL-GRAPH-CONTEXT.md`](SPEC-021-M005-MULTIMODAL-GRAPH-CONTEXT.md) — **Accepted on merge under #838 / SPEC-013:** multimodal context/enrichment, prompt/provider-cache dependencies and provider-neutral SoftwareEngineeringGraphSource with coverage semantics.
+- [`SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) — **Proposed** (#1003 / ADR-020): observable interactive launch-policy resolution (shell/login, cwd, env allowlist, capability keys, Finder-env fixtures and failure UX) consumed by Runtime create / proposed ADR-017 profile `0`. Normative only on ADR-020 acceptance. Provisional SPEC-022 is reserved by sibling #1004 / PR #1038.
 
 ## When a specification is required
 
