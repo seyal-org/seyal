@@ -49,13 +49,14 @@ final class SeyalHostHistoryUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
 
-        // ~4s of paced output (~200 lines) keeps PRIMARY_CLIP active for the
-        // mid-run capture; Issue acceptance uses seq 1 1000 class workloads.
+        // ~10s paced seq 1 1000 keeps PRIMARY_CLIP active for mid-run capture
+        // (Issue acceptance workload class). Assert running body exists and is
+        // taller than a single line while the producer is still live.
         submitComposerCommand(
             app,
-            "for i in $(seq 1 200); do printf '%s\\n' \"$i\"; sleep 0.02; done"
+            "for i in $(seq 1 1000); do printf '%s\\n' \"$i\"; sleep 0.01; done"
         )
-        waitBriefly(0.6)
+        waitBriefly(1.0)
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while seq live-tail ran")
         assertFlowBlocksOrFail(in: app)
         let runningBody = app.descendants(matching: .any)["seyal-block-0-body"]
@@ -63,10 +64,17 @@ final class SeyalHostHistoryUITests: XCTestCase {
             runningBody.waitForExistence(timeout: 4),
             "running Block body missing during live-tail"
         )
+        let runningFrame = runningBody.frame
+        XCTAssertGreaterThan(
+            runningFrame.height,
+            8,
+            "running live-tail body must be taller than a one-line stub while seq runs"
+        )
         attachScreenshot(app, name: "865-live-tail-running-seq")
 
         // Completion handoff must remain on Flow Blocks, not a raw Metal viewport.
-        waitBriefly(5.0)
+        // seq 1 1000 @ 10ms ≈ 10s; allow headroom under CI load.
+        waitBriefly(14.0)
         XCTAssertEqual(app.state, .runningForeground)
         assertFlowBlocksOrFail(in: app)
         attachScreenshot(app, name: "865-live-tail-after-seq")

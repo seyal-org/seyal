@@ -317,6 +317,8 @@ struct MetalRendererStats: Equatable {
     var rebuiltCells: UInt64 = 0
     var instanceBufferAllocations: UInt64 = 0
     var instanceBytes: UInt64 = 0
+    /// Cells rewritten into live-tail instance buffers (partial-damage evidence).
+    var liveTailCellsRewritten: UInt64 = 0
 }
 
 struct MetalSubmissionTiming {
@@ -797,10 +799,13 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             let byteCount = cells * MemoryLayout<TerminalInstance>.stride
             // Reuse capacity-stable buffers; allocate only on growth / first use.
             let buffer: MTLBuffer
+            let hadReusableBuffer: Bool
             if let existing = liveTailRegions[blockID],
-               existing.buffer.length >= byteCount
+               existing.buffer.length >= byteCount,
+               existing.instanceCount == cells
             {
                 buffer = existing.buffer
+                hadReusableBuffer = true
             } else {
                 guard let allocated = device.makeBuffer(
                     length: byteCount,
@@ -811,15 +816,22 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 allocated.label = "Seyal Flow Live-Tail Instances"
                 buffer = allocated
                 stats.instanceBufferAllocations &+= 1
+                hadReusableBuffer = false
             }
             let pointer = buffer.contents().bindMemory(to: TerminalInstance.self, capacity: cells)
-            var outputIndex = 0
+            // Dense row×col layout enables partial-damage row rewrites. Cells
+            // outside the region clip are written as zero-size so scissor still
+            // owns paint bounds and inspectFlowPaint stays clean.
+            let rewriteAll = force || !hadReusableBuffer
             for rowOffset in 0..<rowCount {
                 let row = firstRow + rowOffset
+                if !rewriteAll, !damage.contains(row: row) {
+                    continue
+                }
                 for column in 0..<frame.columns {
                     let index = row * frame.columns + column
+                    let outputIndex = rowOffset * frame.columns + column
                     let source = frame.cells[index]
-                    // Block-local Y: preceding viewport rows are not drawn.
                     let origin = SIMD2<Float>(
                         Float(region.origin.x) + Float(column * metrics.cellWidth),
                         Float(region.origin.y) + Float(rowOffset * metrics.cellHeight)
@@ -832,10 +844,18 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                         height: CGFloat(size.y)
                     )
                     guard region.clip.intersects(painted.insetBy(dx: 0.5, dy: 0.5)) else {
+                        pointer[outputIndex] = TerminalInstance(
+                            origin: .zero,
+                            size: .zero,
+                            uvRect: SIMD4<Float>(repeating: 0),
+                            foreground: 0,
+                            background: 0,
+                            flags: 0,
+                            atlasSlice: 0
+                        )
+                        stats.liveTailCellsRewritten &+= 1
                         continue
                     }
-                    // Copy glyph/color from the already-prepared Pane instance when
-                    // available; otherwise synthesize from the prepared cell.
                     var flags: UInt32 = 0
                     var uvRect = SIMD4<Float>(repeating: 0)
                     var atlasSlice: UInt32 = 0
@@ -877,16 +897,14 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                         inst.flags |= instanceCursorFlag
                         pointer[outputIndex] = inst
                     }
-                    outputIndex += 1
+                    stats.liveTailCellsRewritten &+= 1
                 }
             }
-            if outputIndex > 0 {
-                next[blockID] = HistoryRenderRegion(
-                    buffer: buffer,
-                    instanceCount: outputIndex,
-                    clip: region.clip
-                )
-            }
+            next[blockID] = HistoryRenderRegion(
+                buffer: buffer,
+                instanceCount: cells,
+                clip: region.clip
+            )
         }
         liveTailRegions = next
         needsPresent = true
@@ -1149,6 +1167,38 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         liveTailRegions[blockID]?.instanceCount ?? 0
     }
 
+    /// Non-zero painted instances for one live-tail Block (excludes dense
+    /// zero-size placeholders outside the region clip).
+    func liveTailPaintedInstanceCount(for blockID: UInt64) -> Int {
+        guard let region = liveTailRegions[blockID] else { return 0 }
+        let pointer = region.buffer.contents().bindMemory(
+            to: TerminalInstance.self,
+            capacity: region.instanceCount
+        )
+        var count = 0
+        for index in 0..<region.instanceCount {
+            if pointer[index].size.x > 0, pointer[index].size.y > 0 {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    /// Block-local origin Y of the first painted instance for `blockID`.
+    func liveTailFirstPaintedOriginY(for blockID: UInt64) -> Float? {
+        guard let region = liveTailRegions[blockID] else { return nil }
+        let pointer = region.buffer.contents().bindMemory(
+            to: TerminalInstance.self,
+            capacity: region.instanceCount
+        )
+        for index in 0..<region.instanceCount {
+            if pointer[index].size.x > 0, pointer[index].size.y > 0 {
+                return pointer[index].origin.y
+            }
+        }
+        return nil
+    }
+
     var lastPreparedRowCount: Int {
         lastPreparedFrame?.rows ?? 0
     }
@@ -1162,9 +1212,13 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 capacity: region.instanceCount
             )
             for index in 0..<region.instanceCount {
+                let size = pointer[index].size
+                // Zero-size slots are dense-layout placeholders outside the clip.
+                if size.x <= 0 || size.y <= 0 {
+                    continue
+                }
                 historyInstanceCount += 1
                 let origin = pointer[index].origin
-                let size = pointer[index].size
                 let painted = CGRect(
                     x: CGFloat(origin.x),
                     y: CGFloat(origin.y),

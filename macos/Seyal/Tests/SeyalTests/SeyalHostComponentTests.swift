@@ -1112,9 +1112,20 @@ final class SeyalHostComponentTests: XCTestCase {
         ])
 
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
-        // Only the mapped slice (2 rows × 2 cols), not the full 3-row viewport.
+        // Dense layout: 2 rows × 2 cols (including any zero-size placeholders).
         XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        // Must draw Block-local row 0 from prepared viewport row 1 ("H"), not
+        // preceding viewport row 0 ("A") — wrong-source mapping would start at
+        // a different block-local Y or copy the wrong prepared cells.
+        let cellHeight = Float(renderer.cellPixelSize(backingScale: 1).height)
+        XCTAssertEqual(
+            renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1,
+            0,
+            "first painted live-tail row must be Block-local Y 0"
+        )
         let allocationsAfterClip = renderer.stats.instanceBufferAllocations
+        let rewrittenAfterClip = renderer.stats.liveTailCellsRewritten
         let inspection = renderer.inspectPresentation()
         XCTAssertEqual(inspection.mode, .flow)
         XCTAssertFalse(inspection.drawsLiveGrid)
@@ -1128,7 +1139,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(paint.instancesOutsideClips, 0)
 
         // Damage-free update must reuse the live-tail clip (still 4 instances)
-        // without allocating another live-tail buffer.
+        // without allocating another live-tail buffer or rewriting cells.
         damage = DamageMask()
         let reused = try cells.withUnsafeBufferPointer { buffer in
             try renderer.update(
@@ -1150,6 +1161,44 @@ final class SeyalHostComponentTests: XCTestCase {
             allocationsAfterClip,
             "damage-free live-tail refresh must not allocate"
         )
+        XCTAssertEqual(
+            renderer.stats.liveTailCellsRewritten,
+            rewrittenAfterClip,
+            "damage-free live-tail refresh must not rewrite cells"
+        )
+
+        // Partial damage on prepared row 2 (clip-local rowOffset 1) rewrites
+        // only that row's two cells, not the full 4-cell clip.
+        var partial = DamageMask()
+        partial.mark(row: 2)
+        cells[4] = cell("X")
+        cells[5] = cell("Y")
+        let partialUpdated = try cells.withUnsafeBufferPointer { buffer in
+            try renderer.update(
+                frame: NativePreparedFrame(
+                    cells: buffer,
+                    generation: 867,
+                    rows: 3,
+                    columns: 2,
+                    fullRebuild: false,
+                    damage: partial
+                ),
+                backingScale: 1
+            )
+        }
+        XCTAssertEqual(partialUpdated, .updated)
+        XCTAssertEqual(
+            renderer.stats.liveTailCellsRewritten,
+            rewrittenAfterClip &+ 2,
+            "partial damage must rewrite only the damaged clip row"
+        )
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        XCTAssertEqual(
+            renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1,
+            0,
+            accuracy: 0.01
+        )
+        _ = cellHeight
 
         // Clearing live-tail must not re-enable Pane-wide live grid.
         renderer.setLiveTailBlocks([:])

@@ -858,6 +858,7 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
         let Some(state) = apps.get(&handle) else {
             return SeyalAppBlockProjection::fail_closed();
         };
+        let fence = state.root.fence();
         let snapshot = state.root.snapshot();
         let Some(block) = snapshot
             .composer
@@ -875,10 +876,12 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
             }
         };
         let running = block.state == BlockPresentationState::Running;
-        // History/fail-closed paths must not depend on an active display client.
-        // Only running PRIMARY_CLIP needs paired ViewportLineIds from that client.
+        // History/fail-closed paths must not depend on a display client.
+        // Running PRIMARY_CLIP needs ViewportLineIds from the Pane's owning
+        // client (matched by fence attachment/execution), never another Pane's
+        // ambient ACTIVE_HANDLE.
         let projection = if running {
-            with_active_client(|client| {
+            with_fence_matched_client(fence.execution, fence.attachment, |client| {
                 project_block_output(
                     mode,
                     block.start_line,
@@ -908,6 +911,38 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
             },
             LiveTailProjection::FailClosed => SeyalAppBlockProjection::fail_closed(),
         }
+    })
+}
+
+/// Resolve the display client that owns this AppRoot fence.
+/// Prefer the active handle when it matches; otherwise scan registered clients.
+/// Never borrow another Pane's LineIds via an unmatched ambient ACTIVE_HANDLE.
+fn with_fence_matched_client<R>(
+    execution: Option<ExecutionId>,
+    attachment: Option<AttachmentId>,
+    operation: impl FnOnce(&crate::LocalDisplayClient) -> R,
+) -> Option<R> {
+    let (Some(execution), Some(attachment)) = (execution, attachment) else {
+        return None;
+    };
+    crate::ffi::CLIENTS.with(|clients| {
+        let clients = clients.borrow();
+        let active = crate::ffi::active_handle();
+        if let Some(client) = clients.get(&active)
+            && client.execution_id() == execution
+            && client.attachment_id() == attachment
+        {
+            return Some(operation(client));
+        }
+        for (handle, client) in clients.iter() {
+            if *handle == active {
+                continue;
+            }
+            if client.execution_id() == execution && client.attachment_id() == attachment {
+                return Some(operation(client));
+            }
+        }
+        None
     })
 }
 
@@ -2160,21 +2195,26 @@ mod tests {
         assert_eq!(completed.end_line, 12);
 
         // Running Blocks fail closed until Runtime publishes ViewportLineIds
-        // through the attached LocalDisplayClient cache.
+        // through the fence-matched LocalDisplayClient cache.
         let running = seyal_app_block_projection(handle, 1);
         assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         assert_eq!(running.end_line, 0, "must not invent a history end");
 
-        // Production path: LineIds come from the active LocalDisplayClient, not
-        // ApplicationRoot.client. Install a paired fixture and expect PRIMARY_CLIP.
+        // Production path: LineIds come from the fence-matched client, not
+        // ApplicationRoot.client or an unmatched ambient ACTIVE_HANDLE.
         let (stream, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let mut client = crate::local::tests::test_client_for_ffi(stream);
+        // Match the Bind evidence (execution_lo=1, attachment_lo=2).
+        client.execution_id = ExecutionId::from_bytes(id16(1, 0).unwrap());
+        client.attachment_id = AttachmentId::from_bytes(id16(2, 0).unwrap());
         client.set_paired_viewport_line_ids_for_test(7, vec![10, 20, 21, 22]);
         let bridge = allocate_handle();
         crate::ffi::CLIENTS.with(|clients| {
             clients.borrow_mut().insert(bridge, Box::new(client));
         });
-        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(bridge));
+        // Deliberately leave ACTIVE_HANDLE unset — projection must still find
+        // the owning client by fence attachment/execution.
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
 
         let clipped = seyal_app_block_projection(handle, 1);
         assert_eq!(clipped.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
@@ -2183,8 +2223,31 @@ mod tests {
         assert_eq!(clipped.reserved1, 3);
         assert_eq!(clipped.end_line, 0);
 
+        // Adversarial: another Pane's active client must not supply LineIds.
+        let (other_stream, _other_peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut other = crate::local::tests::test_client_for_ffi(other_stream);
+        other.execution_id = ExecutionId::from_bytes([0x99; 16]);
+        other.attachment_id = AttachmentId::from_bytes([0xaa; 16]);
+        // Wrong LineIds that would map start_line 20 to a different clip.
+        other.set_paired_viewport_line_ids_for_test(7, vec![20, 21, 22, 23]);
+        let other_bridge = allocate_handle();
         crate::ffi::CLIENTS.with(|clients| {
-            clients.borrow_mut().remove(&bridge);
+            clients.borrow_mut().insert(other_bridge, Box::new(other));
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(other_bridge));
+
+        let still_clipped = seyal_app_block_projection(handle, 1);
+        assert_eq!(still_clipped.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
+        assert_eq!(
+            still_clipped.reserved0, 1,
+            "must keep owning Pane's mapping, not ambient peer's"
+        );
+        assert_eq!(still_clipped.reserved1, 3);
+
+        crate::ffi::CLIENTS.with(|clients| {
+            let mut clients = clients.borrow_mut();
+            clients.remove(&bridge);
+            clients.remove(&other_bridge);
         });
         crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
         assert_eq!(seyal_app_destroy(handle), 0);
