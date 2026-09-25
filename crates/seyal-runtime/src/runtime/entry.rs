@@ -79,7 +79,6 @@ pub(in crate::runtime) struct Entry {
 pub(super) struct PendingComposerCommand {
     pub(super) command: String,
     pub(super) block_id: CommandBlockId,
-    pub(super) start_line: u64,
 }
 
 impl Entry {
