@@ -3,7 +3,8 @@
 **Status:** Proposed implementation design (doc-only). No production code is authorized by this document.
 **Produced by:** `.agents/skills/image-to-code/SKILL.md` Gates 1–4. Gate 5 (implementation) has **not** started.
 **Scope:** Visual/material fidelity of the Core Terminal screen (`C01`–`C10`) in the thin AppKit host.
-**Owning Issue candidate:** #934 "M001.1 — vertical slice: Adaptive Depth chrome fidelity" (parent). See §13.
+**Owning Issue:** #934 "M001.1 — vertical slice: Adaptive Depth chrome fidelity" (parent). Child Issues VF-1…VF-8 are #1014, #1007–#1013; see §13.
+**Block chrome:** not specified here. The Block surface, border, radius, status seam, quick actions and focused/selected treatment (VF-5, #1010) are owned by `M003-BLOCK-COMPONENT-DESIGN.md` (see §11 C-12).
 
 ## 0. Authority order used by this document
 
@@ -146,6 +147,8 @@ Content grid: section labels and row state glyphs share the left edge at **x = 8
 
 Center content inset: **left 16 px (x=237), right 16 px (to x=566)**.
 
+> The `C08-FOCUS` and "Block body background" rows below are **measurements of this mockup only**. They are not the Block chrome specification: `M003-BLOCK-COMPONENT-DESIGN.md` owns Block surface, border, radius, focus and seam treatment (§11 C-12).
+
 | ID | Box | Measurements |
 |---|---|---|
 | `C07-BLOCK-1` | 221,159 → 582,339 | `$ cargo test`, elapsed `/ 2.18s`. |
@@ -155,7 +158,7 @@ Center content inset: **left 16 px (x=237), right 16 px (to x=566)**.
 | `C07-BODY` | from x 237 | Output line pitch **18.5 px**; header top → first output top = **23 px**. |
 | `C08-SEAM` | 221,339 → 582,340 (and 529 → 530) | **1 px** hairline. `#182027` / `#1E252B` dark (≈ +12/255 over canvas), `#E8EAEF` / `#EBEEF1` light. |
 | `C08-FOCUS` accent | 220,340 → 224,530 | 3 px core (x 221–223) `#7DACF4` dark / `#2D6FEE` light. Full Block height, flush at the center surface's left edge. Blocks 1 and 3 have **no** accent (verified at y=200/250/600/650). |
-| Block body background | — | **None.** All three Blocks sample within 1/255 of the canvas. No card, no shadow, no radius — matches `C07` "no card background and no persistent shadow". |
+| Block body background | — | **None** in this mockup. All three Blocks sample within 1/255 of the canvas; no card, no shadow, no radius. Superseded for implementation by `M003-BLOCK-COMPONENT-DESIGN.md` (C-12). |
 | Output colours | — | Normal `#FFFFFF` / `#1D1F25`; dim `#ACB1B9` / `#7F828B`; success green `#3CAF5A`; error red `#DF5352` / `#DC5360`. These are **terminal-owned ANSI/shell colours**, not application tokens (see §11 C-4). |
 
 ### 2.7 `C09` — Pane composer
@@ -227,7 +230,7 @@ C01 UI Container (NSWindow + ProductChromeHostView)
 │   ├── C07 Semantic Block (× block_count)
 │   │   ├── C07-HEADER (prompt glyph, command, status/elapsed)
 │   │   ├── C07-BODY   (Metal-composited terminal output — NOT AppKit text)
-│   │   └── C08-SEAM   + C08-FOCUS accent
+│   │   └── C08-SEAM   (Block chrome: M003-BLOCK-COMPONENT-DESIGN.md, C-12)
 │   └── (live Metal surface composited over the Block bodies)
 ├── C09 Pane Composer
 │   ├── C09-CHEVRON, C09-EDITOR/placeholder, C09-HINTS
@@ -254,7 +257,7 @@ Source geometry is normalized onto the **existing Rust `Metrics`** (`crates/seya
 | `left_context_width` | 220 | 194 (rail+panel) / 143 (panel alone) | Keep 220 unless a measured density review says otherwise; the image's 194 is one mockup composition, and the light half says 180. |
 | `left_context_min_width` | 180 | — | Unchanged. |
 | `inspector_width` | 248 | 241 | Within noise of the current default; keep 248. |
-| `top_chrome_height` | 48 | 41 (`CT-BAND`) + 38 (`CT-TITLE`) | The image splits the top into title bar + band. Needs an explicit decision (see §13, Issue B). |
+| `top_chrome_height` | 48 | 41 (`CT-BAND`) + 38 (`CT-TITLE`) | The image splits the top into title bar + band. Needs an explicit decision (VF-2, #1007; see §13). |
 | `content_padding_horizontal` | 12 | 16 (block content inset) | Consider 16 for the transcript inset specifically; do not silently change the global token. |
 | `sidebar_padding` | 10 | 4 (section/accent edge) + 15 (label gutter) | The image uses a 4 px accent gutter plus a 15 px state-glyph gutter. Model as accent gutter + glyph gutter, not as one padding. |
 | `inspector_padding` | 10 | 15/16 | Propose 16. |
@@ -262,11 +265,11 @@ Source geometry is normalized onto the **existing Rust `Metrics`** (`crates/seya
 | `composer_min_height` | 52 | 38 | The image's 38 px composer is below `min_interactive_size` + text metrics at any plausible scale; keep 52 and record as an intentional deviation (§11 C-7). |
 | `composer_inset_horizontal` | 12 | 14 (chevron) | Close enough; keep 12 unless the chevron becomes a real control. |
 | `seam_width` | 1 | 1 | Confirmed by measurement in five places. |
-| `block_corner_radius` | 0 | 0 | Confirmed — no Block radius anywhere. |
+| `block_corner_radius` | 0 | 0 | No Block radius in this mockup. Block radius is owned by `M003-BLOCK-COMPONENT-DESIGN.md` (C-12); not proposed here. |
 | `pane_corner_radius` | 0 | 0 | Confirmed. |
 | `block_seam_spacing` | 8 | header-top 20 / first-output 23 | Model as `block.header_inset_top` and `block.header_to_body`; both are currently absent from `Metrics`. |
 | — (new) | — | 2 | `active_indicator_thickness` — the tab and inspector underlines are both 2 px. |
-| — (new) | — | 3 | `row_accent_thickness` — row/Block/rail accents are all 3 px. |
+| — (new) | — | 3 | `row_accent_thickness` — row/rail accents are 3 px. Not used for Blocks: the Block focus border is owned by `M003-BLOCK-COMPONENT-DESIGN.md` (C-12). |
 | — (new) | — | 8 | `state_glyph_size` — every `C16` dot is 8 px. |
 | — (new) | — | 46–48 | `context_row_pitch` (two-line `C04` variant). |
 | — (new) | — | 19–20 | `inspector_row_pitch`. |
@@ -316,7 +319,7 @@ Column "Available today" states whether the data already crosses the C ABI (`cra
 | `C05-LAYOUT` split presence | `allows_pane_splitting` | `SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING` | **Yes** |
 | `C07-HEADER` command text | `BlockProjection.command` | `seyal_app_block_row(...).title` | **Yes** |
 | `C07` status word | `BlockPresentationState::transcript_status()` | `.detail` | **Yes** |
-| `C08-FOCUS` accent (selected Block) | `ChromeSnapshot.selected_block` | `SEYAL_APP_BLOCK_SELECTED` | **Yes** |
+| Selected-Block treatment (visual per `M003-BLOCK-COMPONENT-DESIGN.md`) | `ChromeSnapshot.selected_block` | `SEYAL_APP_BLOCK_SELECTED` | **Yes** |
 | `C08-SEAM` running/failed variant | `BlockPresentationState` | `SEYAL_APP_BLOCK_STATE_*` | **Yes** |
 | `C09` placeholder, mode, hints | `ComposerMode`, `SeyalAppComposer.flags` | `seyal_app_copy(COMPOSER_PLACEHOLDER/EXECUTE)`, `CAN_SUBMIT` | **Yes** |
 | `C10-MODES` selected mode | `ChromeSnapshot.inspector_mode` | `SeyalAppChrome.inspector_mode` | **Yes** |
@@ -387,7 +390,7 @@ Transitions: short opacity/typography/seam emphasis only; no movement; zero dura
 
 ## 10. Structural prerequisite
 
-`macos/Seyal/Sources/ProductChromeHostView.swift` is **1,199 lines**, above the 1,000-line threshold that `AGENTS.md` says "require explicit PR justification and should normally be decomposed before merge". Adding six regions of styling to it would make that worse and would force every fidelity issue to mutate the same file (which the image-to-code skill warns against). Decomposition by region — `TitleBarChrome`, `UtilityRailView`, `LeftContextPanelView`, `TabStripView`, `BlockTranscriptView`, `InspectorView` — is a prerequisite, not an optional cleanup, and belongs in the first structural issue so the later issues own disjoint files.
+`macos/Seyal/Sources/ProductChromeHostView.swift` is **1,127 lines** on master at `af08ac2`, above the 1,000-line threshold that `AGENTS.md` says "require explicit PR justification and should normally be decomposed before merge". Adding six regions of styling to it would make that worse and would force every fidelity issue to mutate the same file (which the image-to-code skill warns against). Decomposition by region — `TitleBarChrome`, `UtilityRailView`, `LeftContextPanelView`, `TabStripView`, `BlockTranscriptView`, `InspectorView` — is a prerequisite, not an optional cleanup, and belongs in the first structural issue so the later issues own disjoint files.
 
 ---
 
@@ -406,6 +409,7 @@ Transitions: short opacity/typography/seam emphasis only; no movement; zero dura
 | C-9 | **Light variant uses dark-variant geometry.** | D-2: the two halves disagree; the contract requires one geometry. |
 | C-10 | **Workspace state dots gain a non-colour cue** the image lacks. | `C16` "never colour-only"; design language §19. |
 | C-11 | **The figure page (`CT-00`), the `DARK`/`LIGHT` captions and the branding strip are not product UI.** | They are mockup annotations. The branding strip in particular must never become window chrome — the Zero-Chrome acceptance test (`SEYAL-UNIVERSAL-COMPONENT-CONTRACT.md` §23) is that the screen is recognizable *after* labels are removed. |
+| C-12 | **Block chrome follows `M003-BLOCK-COMPONENT-DESIGN.md`, not this mockup's 3 px `C08-FOCUS` accent and card-less, radius-free Blocks.** | #1010 (VF-5) was retargeted by owner decision on 2026-09-24 to the approved Seyal Block Component visual. That document is the single Block-chrome authority (surface, 1 pt border, minimal radius, status seam, hover/focus quick actions, 1.5 pt focus border). This document keeps only the source measurements in §2.6. |
 
 ## 12. Screenshot / visual-regression matrix
 
@@ -421,7 +425,7 @@ No image-diff harness exists in the repository today (`macos/Seyal/Tests/SeyalUI
 | 4 | `C03` collapsed | dark | Center reclaims width, no gutter |
 | 5 | `C10` hidden | dark | Center reclaims width |
 | 6 | Tab strip: 2 tabs / 9 tabs (overflow) / 1 tab | dark | Single row, minimum width, no wrap, `+` omitted when disallowed |
-| 7 | Blocks: completed / running / failed / unknown / selected | dark + light | `C08` seam token per state, `C08-FOCUS` accent |
+| 7 | Blocks: rest / hover / selected / running / success / failed / unknown | dark + light | Block states and pass criteria per the regression matrix in `M003-BLOCK-COMPONENT-DESIGN.md` (C-12) |
 | 8 | Composer: rest / focused / busy-retracted / hidden (TUI) | dark + light | `C09` D1↔D2, radius, insets |
 | 9 | Inspector: Context / Block modes, and empty-row state | dark + light | Section grammar, seams, key/value right alignment |
 | 10 | Reduced transparency + increased contrast + reduced motion | dark + light | Opaque fallback preserves hierarchy |
@@ -431,11 +435,22 @@ No image-diff harness exists in the repository today (`macos/Seyal/Tests/SeyalUI
 
 ## 13. Implementation dependency graph and proposed Issue plan
 
-> **This section proposes an Issue graph. No Issue was created, assigned, or modified.** Each child must go through `issue-refinement` + `development-readiness` before it is Ready, and must be created as a **sub-issue of #934**.
+> **The child Issues below already exist as native sub-issues of #934. Do not file new ones.** Each must still pass `issue-refinement` + `development-readiness` before it is Ready.
+
+| Slice | Issue |
+|---|---|
+| VF-1 token transport + host decomposition | #1014 |
+| VF-2 window frame, top chrome band, region seams | #1007 |
+| VF-3 left context panel + context rows | #1008 |
+| VF-4 top tab strip | #1009 |
+| VF-5 Block transcript presentation | #1010 (Block chrome per `M003-BLOCK-COMPONENT-DESIGN.md`) |
+| VF-6 inspector sections and rows | #1011 |
+| VF-7 Pane composer | #1012 |
+| VF-8 convergence, visual evidence, native validation | #1013 |
 
 ### 13.1 Why more than one Issue
 
-The screen spans six independent component families over ~46 components, crosses the Rust↔Swift ABI, requires a structural decomposition first (§10), and depends on a separate already-open Issue (#993) for token transport. One Issue would be an oversized mixed PR, which the skill and `AGENTS.md` both reject. The regions are dependency-ordered rather than parallel because **all of them currently mutate the same 1,199-line Swift file** — independence is only proven after VF-1 splits it.
+The screen spans six independent component families over ~46 components, crosses the Rust↔Swift ABI, requires a structural decomposition first (§10), and depends on a separate already-open Issue (#993) for token transport. One Issue would be an oversized mixed PR, which the skill and `AGENTS.md` both reject. The regions are dependency-ordered rather than parallel because **all of them currently mutate the same Swift file (1,127 lines on master at `af08ac2`)** — independence is only proven after VF-1 splits it.
 
 ### 13.2 Existing Issues this plan must not duplicate
 
@@ -452,57 +467,57 @@ The screen spans six independent component families over ~46 components, crosses
 
 ```text
 #993 (token transport)
-   └─> VF-1 token ABI + host decomposition
-          ├─> VF-2 window frame, top chrome band, region seams
-          │      ├─> VF-3 left context panel + context rows
-          │      ├─> VF-4 top tab strip
-          │      ├─> VF-5 Block transcript presentation
-          │      ├─> VF-6 inspector
-          │      └─> VF-7 composer
-          └─────────────> VF-8 convergence, visual evidence, a11y/resize validation
+   └─> VF-1 #1014 token ABI + host decomposition
+          ├─> VF-2 #1007 window frame, top chrome band, region seams
+          │      ├─> VF-3 #1008 left context panel + context rows
+          │      ├─> VF-4 #1009 top tab strip
+          │      ├─> VF-5 #1010 Block transcript presentation
+          │      ├─> VF-6 #1011 inspector
+          │      └─> VF-7 #1012 composer
+          └─────────────> VF-8 #1013 convergence, visual evidence, a11y/resize validation
 ```
 
 VF-3…VF-7 are dependency-siblings but **must be implemented sequentially** unless VF-1 proves file-level independence.
 
-### 13.4 Proposed child Issues
+### 13.4 Child Issues
 
-**VF-1 — "Core Terminal visual fidelity: Rust-owned token transport and host chrome decomposition"**
+**VF-1 (#1014) — "Core Terminal visual fidelity: Rust-owned token transport and host chrome decomposition"**
 *Scope:* widen `seyal_app_theme` (or the #993 visual-snapshot call) to carry all 24 `ColorRole`s, the 11 `TypographyRole` specs, the `Metrics` fields this screen uses, and `DepthLevel`/`MaterialIntent`/`SeamRole`/`MotionSettings`; delete Swift-side colour derivation and the hardcoded `success`/`warning`/`danger` literals in `NativeThemeRealization.swift`; split `ProductChromeHostView.swift` into per-region views with no behavior change.
 *Depends on:* #993, #922. *Blocks:* VF-2…VF-8.
 *Acceptance:* no product colour/metric literal remains in Swift; Rust tests assert every role/metric round-trips the ABI; host tests assert realization matches the Rust value; `ProductChromeHostView.swift` under the cohesion trigger; every existing accessibility identifier and UI test unchanged; zero visual change in captures 1–3.
 
-**VF-2 — "Core Terminal visual fidelity: window frame, top chrome band and region seams"**
+**VF-2 (#1007) — "Core Terminal visual fidelity: window frame, top chrome band and region seams"**
 *Scope:* `C01` fill/radius, `CT-TITLE` unified transparent titlebar with native traffic lights and the workspace/tab title string, the `CT-BAND` top chrome row and its bottom seam, the `C03`↔`C06` and `C06`↔`C10` seams, D1/D0 material assignment per region, and the `top_chrome_height` decision (single 48 band vs title bar + band).
 *Depends on:* VF-1. *Blocks:* VF-3…VF-7.
 *Acceptance:* measured region boxes and 1 px seams match §2.1 within ±1 px at the capture size; captures 1, 4, 5, 10, 11; hide/reopen reclaims width with no gutter and no focus change.
 *Out of scope:* the `C02` rail (C-2), `CT-TITLE-ACTION` (C-6).
 
-**VF-3 — "Core Terminal visual fidelity: left context panel and context rows"**
+**VF-3 (#1008) — "Core Terminal visual fidelity: left context panel and context rows"**
 *Scope:* `C03` section labels, `C04` two-line row anatomy (state glyph gutter, label column, row pitch), selected fill + 3 px accent, attention accent without row recolour, `C16` dots with a non-colour cue, mode switcher and collapse control treatment; **plus the ABI additions for workspace `attention` and `tab_count`, and for `AgentActivity` when #927 is in play** (G-2).
 *Depends on:* VF-2. *Coordinates with:* #927.
 *Acceptance:* captures 2, 3, 4; every dot has a non-colour cue; no rounded card per row; pointer-down/commit/cancel semantics unchanged and asserted.
 
-**VF-4 — "Core Terminal visual fidelity: top tab strip"**
+**VF-4 (#1009) — "Core Terminal visual fidelity: top tab strip"**
 *Scope:* `C05` typography-led active state with the 2 px underline, no chip backgrounds, `tab_min_width`/`tab_max_width` compression then horizontal overflow, `+` and layout controls omitted (not disabled) when the shell disallows them, close affordance treatment.
 *Depends on:* VF-2. *Prefer after:* #923.
 *Acceptance:* capture 6; single row at every width; active tab always visible; existing `seyal-new-tab`/`seyal-close-tab`/`seyal-split-*` identifiers and behavior unchanged.
 
-**VF-5 — "Core Terminal visual fidelity: Block transcript presentation"**
-*Scope:* `C07` header grammar (prompt glyph, command, right-aligned status), `C08` 1 px seam with per-state token (`SeamRest`/`SeamRunning`/`SeamAttention`), `C08-FOCUS` 3 px accent for the selected Block, header/body insets and rhythm, removal of any card affordance.
-*Depends on:* VF-2.
-*Acceptance:* capture 7; Blocks remain intrinsically sized with one Pane-level scroll owner; **no elapsed-time text is added** (§5.3); Metal-composited output is untouched and no AppKit text duplicates terminal output; no synchronous work added to the render path.
+**VF-5 (#1010) — "Core Terminal visual fidelity: Block transcript presentation"**
+*Scope:* Block chrome is **specified by `M003-BLOCK-COMPONENT-DESIGN.md`**, not by this document (C-12): surface, border, radius, semantic status seam, hover/focus quick actions and the focused/selected border. The earlier 3 px `C08-FOCUS` accent / no-card plan is superseded. This document contributes only the shared token transport (VF-1) and region seams (VF-2) that the Block Component builds on.
+*Depends on:* VF-2; **merge-order dependency:** `M003-BLOCK-COMPONENT-DESIGN.md` (PR #1059) must merge before this document (PR #1018) so the single Block-chrome authority exists when this one lands.
+*Acceptance:* per `M003-BLOCK-COMPONENT-DESIGN.md` regression matrix (capture 7); Blocks remain intrinsically sized with one Pane-level scroll owner; **no elapsed-time text is added by VF-5** (§5.3; duration is #1043); Metal-composited output is untouched and no AppKit text duplicates terminal output; no synchronous work added to the render path.
 
-**VF-6 — "Core Terminal visual fidelity: inspector sections and rows"**
+**VF-6 (#1011) — "Core Terminal visual fidelity: inspector sections and rows"**
 *Scope:* group `chrome_row(INSPECTOR)` output by `InspectorRow.section` instead of rendering the joined `"Section · Label"` string; section label treatment, key/value row with right-aligned value, 1 px inter-section seams, mode switcher matching `C05`'s underline treatment, empty-state behavior.
 *Depends on:* VF-2.
 *Acceptance:* capture 9; modes are the five real `InspectorMode` values (C-3); **no `CHANGED FILES`/`SUMMARY`/`ENVIRONMENT` section is fabricated** (G-3); the full agent inventory is not duplicated here.
 
-**VF-7 — "Core Terminal visual fidelity: Pane composer"**
+**VF-7 (#1012) — "Core Terminal visual fidelity: Pane composer"**
 *Scope:* `C09` tonal fill, 8 px radius, focus ring, prompt chevron, placeholder token, right-aligned shortcut affordances shown only when `CAN_SUBMIT`/history capability is real, D1↔D2 focus transition, busy-retracted and TUI-hidden presentations.
 *Depends on:* VF-2.
 *Acceptance:* capture 8; identical component geometry in every state; composer height stays `composer_min_height` (C-7); history overlay still anchors above it.
 
-**VF-8 — "Core Terminal visual fidelity: convergence, visual evidence and native validation"**
+**VF-8 (#1013) — "Core Terminal visual fidelity: convergence, visual evidence and native validation"**
 *Scope:* add the controlled-capture harness and the §12 matrix; run the Gate 6 component-by-component comparison; run Gate 7 (keyboard-only pass, focus order, VoiceOver tree, resize/min-size, reduced transparency/motion/contrast, Retina, TUI/raw behavior, paint cost); classify and either fix or document every remaining mismatch.
 *Depends on:* VF-3…VF-7.
 *Acceptance:* every §12 state captured and reviewed; every §11 deviation restated and accepted; no unexplained mismatch inside the owned regions; no extra PTY, no duplicate terminal state, no synchronous terminal hot-path work.
