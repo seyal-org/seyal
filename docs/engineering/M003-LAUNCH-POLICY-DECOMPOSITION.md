@@ -35,12 +35,37 @@ ADR-020 + SPEC-023 accepted
 Provisioning consume path (after ADR-017 accepted):
   ADR-017 P3 create admission
     → uses L2 policy resolution for profile 0
+  L0 SPEC-004 additive `17 LaunchPolicyRejected` (docs-only amendment PR)
+    → consumed by L3 (switches the interim 14 mapping in the same PR)
 ```
 
 L1 is independent of ADR-017. L2's developer/test argv path can land before
 provisioning; L2's headed multi-execution path needs ADR-017 P1/P3. L4 must not
 invent a TOML schema inside a launch-policy PR if a dedicated #676 config child
 owns that schema.
+
+---
+
+## L0 — SPEC-004 additive `LaunchPolicyRejected` result code
+
+**Owner:** this #1003 workstream (not #994). A separate docs-only SPEC-004
+amendment PR; it does not edit ADR-017 files.
+
+**In scope**
+
+- Add `17 LaunchPolicyRejected` to the SPEC-004 §15 / §18 result-code
+  registry as an additive `CreateExecutionResult` code, with `detail_code` 0
+  and no path/env bytes. If 17 has been claimed by then, take the next free
+  code and update ADR-020 §3.10 in the same PR.
+
+**Acceptance**
+
+- The registry lists the code; older clients treat it as a non-retryable
+  unknown failure (SPEC-004 §15 rule).
+
+**Dependencies:** ADR-017 accepted (it introduces the create result and codes
+15/16). Until L0 merges, ADR-020 §3.10's `14 InternalFailure` mapping is the
+only authoritative mapping.
 
 ---
 
@@ -88,6 +113,9 @@ owns that schema.
 - `seyal-runtime` production default (empty argv / client-launched helper)
   stops using bare `$SHELL` without validation.
 - Explicit developer/test command argv remains a documented bypass.
+- Enforce the ADR-020 §3.6 `SEYAL_USER_ZDOTDIR` bounds in
+  `shell_integration_policy.rs` (today it copies any set `ZDOTDIR` verbatim),
+  and restrict locale copy to `LANG` / `LC_CTYPE`.
 
 **Out of scope**
 
@@ -101,7 +129,7 @@ owns that schema.
 
 **Tests**
 
-- SPEC-023 §12 items 6–9, 11–12; plus integration with existing SPEC-003 create
+- SPEC-023 §12 items 6–9, 11–14; plus integration with existing SPEC-003 create
   rollback tests.
 
 **Dependencies:** L1; CapabilityPolicy (ADR-008) already on master; headed
@@ -117,9 +145,11 @@ provisioning consume path also needs ADR-017 P1/P3.
 - Map `LaunchPolicyWarning` (`ConfiguredShellInvalid`, `CwdOverrideInvalid`)
   to a bounded warning state when create succeeds after fallback.
 - Thin native rendering of that bounded state only (ADR-015).
-- Protocol mapping note: prefer additive `LaunchPolicyRejected` after ADR-017 /
-  SPEC-004 accept; until present, document the temporary accepted code mapping
-  without putting paths on the wire.
+- Protocol mapping: until L0 merges, every `LaunchPolicyFailure` maps to
+  create `14 InternalFailure` with `detail_code` 0 and warnings stay off the
+  wire (ADR-020 §3.10). When L0 has merged, L3 uses `17 LaunchPolicyRejected`
+  instead, in the same PR; the two mappings never coexist.
+- `pw_shell` empty/invalid with safe-default spawn → `ConfiguredShellInvalid`.
 
 **Out of scope**
 
@@ -133,8 +163,9 @@ provisioning consume path also needs ADR-017 P1/P3.
 
 **Tests**
 
-- Snapshot/unit tests for each failure class; headed smoke that invalid home /
-  exhausted shell fallback shows the bounded state.
+- SPEC-023 §12 items 15–16; snapshot/unit tests for each failure class;
+  headed smoke that invalid home / exhausted shell fallback shows the bounded
+  state.
 
 **Dependencies:** L2.
 

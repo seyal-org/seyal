@@ -5,7 +5,7 @@
 - **Issue:** #1003 (parent umbrella #676, epic #665; consumed by #994 provisioning children; related #686)
 - **Depends on:** ADR-005, ADR-008, ADR-009, ADR-015, SPEC-002, SPEC-003, SPEC-009
 - **Neighbor (Proposed, not on `master`):** [PR #1056](https://github.com/seyal-org/seyal/pull/1056) / Issue #994 proposes **ADR-017** (TerminalExecution provisioning and disposition). This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
-- **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). Numbers remain provisional until merge order is settled.
+- **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). #1001 landed on `master` as ADR-021 / SPEC-025 (PR #1053). Numbers remain provisional until merge order is settled; siblings must not claim ADR-020.
 - **Scope:** deterministic cold-path policy for program/argv (including login bit), startup CWD, bounded environment construction, and `TERM`/`COLORTERM`/capability ownership when composing a new local interactive `TerminalExecution`
 - **Classification:** new architecture decision plus tightly scoped SPEC-023 (Proposed) and light SPEC-003/SPEC-009 cross-references
 
@@ -188,7 +188,13 @@ Production interactive launches **always** set `clear_environment = true` on `Co
 
 These keys remain owned by ADR-008/ADR-009; this ADR neither defines their values nor lets any other layer add keys after the allowlist. Changing either set requires an amendment to the owning ADR.
 
-**Optional locale keys**, copied from the Runtime process environment only when each value is present, valid UTF-8, free of control characters and ≤ 128 bytes (same bounds as SPEC-009 §8.1.1 for helper launch): `LANG`, `LC_ALL`, `LC_CTYPE`, and other `LC_*` keys that pass the same predicate. Missing locale keys are omitted; they are not invented.
+**Optional locale keys** are exactly `LANG` and `LC_CTYPE`, the same set SPEC-009 §8.1.1 admits for helper launch. Each is copied independently from the Runtime process environment only when present, valid UTF-8, free of control characters and ≤ 128 bytes. Missing keys are omitted, not invented. `LC_ALL` and other `LC_*` keys are never copied: a headed Runtime helper never has them (SPEC-009 §8.1.1), so admitting them only for a directly launched Runtime would make the child locale depend on how Runtime was started. A user who wants them sets them in their own shell startup files, which the child still runs.
+
+**`SEYAL_USER_ZDOTDIR` source and bounds (ADR-009 ShellIntegrationPolicy).** When integration is eligible, Runtime copies the **Runtime process's own** `ZDOTDIR` into the child's `SEYAL_USER_ZDOTDIR`, then sets child `ZDOTDIR` to the bundled integration directory (`crates/seyal-runtime/src/shell_integration_policy.rs`). The bundled `.zshenv` restores `ZDOTDIR` from `SEYAL_USER_ZDOTDIR` when present and **unsets** `ZDOTDIR` when absent, so the user's startup files then resolve from `$HOME`; the bundled directory is never referenced again either way. This copy is the only Runtime-process shell-hook value a child may observe, and ADR-009 names it explicitly.
+
+- **Bounds.** Copy only when the Runtime-process value is present, non-empty, valid UTF-8, free of control characters and ≤ 1024 bytes. Otherwise omit `SEYAL_USER_ZDOTDIR` and record one structural count-only log event; never invent or truncate a path. Current code copies any set value verbatim with no bounds; enforcing these bounds, with tests for each rejection, is owned by decomposition slice L2.
+- **Headed launches (Finder, Dock, LaunchServices, or GUI-started helper).** SPEC-009 §8.1.1 constructs the Runtime helper environment with no shell-hook keys, so `ZDOTDIR` is never present and `SEYAL_USER_ZDOTDIR` is always absent. The child then reads `$HOME/.zshenv` first. A user who sets `ZDOTDIR` inside `$HOME/.zshenv` (the common zsh pattern) keeps their configuration, because zsh reads the remaining startup files from the updated `ZDOTDIR`. A user who sets `ZDOTDIR` only outside zsh (for example `launchctl setenv`) is not honoured in headed launches; this is an accepted consequence of the SPEC-009 helper boundary, not a defect to work around here.
+- **Direct Runtime launch** (developer/test invocation from a shell) is the only case where `SEYAL_USER_ZDOTDIR` can be present.
 
 **Forbidden to inherit or inject** (non-exhaustive class): `DYLD_*`, `LD_*`, `SSH_AUTH_SOCK`, cloud/credential/token variables, agent-socket variables, shell-hook injection variables other than the ADR-009 ShellIntegrationPolicy keys named above, allocator/debug variables, and application-private Seyal keys other than those an accepted ADR explicitly names (today only ADR-009's `SEYAL_NONCE_FD` / `SEYAL_USER_ZDOTDIR`).
 
@@ -203,7 +209,8 @@ Diagnostics:
 | Variable / claim | Owner | M003 rule |
 |---|---|---|
 | `TERM` | CapabilityPolicy / ADR-008 | `seyal-m001` (or successor accepted profile); never inherited |
-| `TERMINFO` / `TERMINFO_DIRS` | CapabilityPolicy / ADR-008 | bundled lookup path; never inherited from GUI |
+| `TERMINFO` | CapabilityPolicy / ADR-008 | bundled lookup path; never inherited from GUI |
+| `TERMINFO_DIRS` | none | never set and never inherited; the §3.6 allowlist excludes it, so an inherited value cannot redirect terminfo lookup |
 | `COLORTERM` | CapabilityPolicy (same owner as TERM) | **omit** until an accepted capability profile claims truecolor (or another COLORTERM contract) with VT evidence; do not set `COLORTERM=truecolor` while advertising `seyal-m001` |
 
 `seyal-exec` remains policy-neutral. Shell integration (ADR-009) continues to deliver its nonce over an inherited descriptor, never through the environment; only the non-secret descriptor *number* travels in the environment as `SEYAL_NONCE_FD` (§3.6 carve-out).
@@ -258,8 +265,9 @@ LaunchPolicyWarning =
 Mapping rules:
 
 - On the proposed ADR-017 create path, until SPEC-004 adds an additive
-  `17 LaunchPolicyRejected` result code (owned prerequisite slice after ADR-017
-  acceptance), **all** `LaunchPolicyFailure` variants map to create result code
+  `17 LaunchPolicyRejected` result code (decomposition slice L0, owned by this
+  #1003 workstream as a separate SPEC-004 amendment PR after ADR-017
+  acceptance; 17 is the next free code after ADR-017's 15/16), **all** `LaunchPolicyFailure` variants map to create result code
   `14 InternalFailure` with `detail_code` 0. The bounded failure class is kept
   only in portable Rust product UI state and structured logs — never in the
   create-result wire payload. `LaunchPolicyWarning` values are **not** surfaced
@@ -267,31 +275,16 @@ Mapping rules:
   Rust UI only through a separate product-state channel owned by the
   implementation Issue. Implementations must not invent interim wire encodings
   of paths, secrets, or warning bitmasks in `detail_code`.
+- **Removal boundary.** The `14 InternalFailure` mapping is authoritative only
+  until L0 merges. L3 then switches every `LaunchPolicyFailure` to
+  `17 LaunchPolicyRejected` in the same PR that consumes it; the two mappings
+  never coexist. If another specification claims 17 first, L0 takes the next
+  free code and updates this section.
 - Portable Rust product authority owns user-visible copy: short, non-secret strings such as "Shell unavailable", "Working directory unavailable", or "Using the default shell because the configured shell is invalid".
 - Native AppKit renders that bounded state only; it does not reinterpret OS error strings.
 - Structured logs record the failure class and counts, never program/argv/cwd/env contents.
 
 Warnings never map to a create failure. Fallback that still spawns (invalid configured shell → safe default; invalid CWD override → account home) is success of create with an accompanying bounded `LaunchPolicyWarning` state in portable product UI, not a protocol secret channel and never carrying the rejected path. When the account-record `pw_shell` is empty/invalid and a safe-default shell still spawns, emit `LaunchPolicyWarning::ConfiguredShellInvalid` (same class as an invalid configured override).
-
-`SEYAL_USER_ZDOTDIR` source (ADR-009 ShellIntegrationPolicy): when integration
-is eligible, Runtime copies the **Runtime process's own** `ZDOTDIR` value into
-`SEYAL_USER_ZDOTDIR` for the child (see `shell_integration_policy.rs`), then
-sets child `ZDOTDIR` to the bundled integration directory. Bounds: present
-only when Runtime-process `ZDOTDIR` is set; value must be valid UTF-8, free of
-NUL/control characters, and ≤ 1024 bytes, otherwise omit `SEYAL_USER_ZDOTDIR`
-(do not invent a path). Finder / LaunchServices helper launches typically have
-no `ZDOTDIR` in the Runtime process environment, so `SEYAL_USER_ZDOTDIR` is
-absent and the child's bundled `ZDOTDIR` stands alone. This is the sole
-accepted exception to §3.6's "do not inherit shell-hook keys from the Runtime
-process" rule and is named explicitly by ADR-009.
-
-`TERMINFO_DIRS` is never set and never inherited on the child environment;
-CapabilityPolicy owns only `TERMINFO` (and `TERM`).
-
-Optional locale keys: until a follow-up converges child env with SPEC-009's
-`LANG`/`LC_CTYPE`-only helper contract, headed create may copy `LANG`,
-`LC_ALL`, `LC_CTYPE`, and other `LC_*` keys under the §3.6 bounds. The
-implementation Issue must not treat that broader set as permanent authority.
 
 ### 3.11 Explicit developer/test command bypass
 

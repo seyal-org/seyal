@@ -143,8 +143,11 @@ Required:
 - `TERM` / `TERMINFO` from CapabilityPolicy (ADR-008).
 
 Optional locale copy from the Runtime process env, each key independently, only
-when value is valid UTF-8, control-character free and ≤ 128 bytes: `LANG`,
-`LC_ALL`, `LC_CTYPE`, other `LC_*`.
+when value is valid UTF-8, control-character free and ≤ 128 bytes: exactly
+`LANG` and `LC_CTYPE` (the SPEC-009 §8.1.1 helper set). `LC_ALL` and other
+`LC_*` are never copied (ADR-020 §3.6).
+
+`TERMINFO_DIRS` is never set and never inherited.
 
 Must not set `COLORTERM` until an accepted capability profile claims it with VT
 evidence.
@@ -158,11 +161,16 @@ Must not inherit `DYLD_*`, `LD_*`, credential/token/agent-socket, shell-hook
 |---|---|---|
 | CapabilityPolicy (ADR-008) | `TERM`, `TERMINFO` | always |
 | ShellIntegrationPolicy (ADR-009) | `ZDOTDIR`, `SEYAL_NONCE_FD` | integration eligible for the resolved program |
-| ShellIntegrationPolicy (ADR-009) | `SEYAL_USER_ZDOTDIR` | integration eligible and the user's original `ZDOTDIR` was set |
+| ShellIntegrationPolicy (ADR-009) | `SEYAL_USER_ZDOTDIR` | integration eligible and the Runtime process's own `ZDOTDIR` is present and passes the ADR-020 §3.6 bounds (non-empty, valid UTF-8, control-character free, ≤ 1024 bytes) |
 
 `SEYAL_NONCE_FD` carries only the non-secret descriptor number; the nonce itself
 travels over the inherited descriptor (ADR-009), never the environment. Values
 are owned by ADR-008/ADR-009; no other key may be added after the allowlist.
+
+In headed launches the Runtime helper environment (SPEC-009 §8.1.1) has no
+`ZDOTDIR`, so `SEYAL_USER_ZDOTDIR` is always absent; the bundled `.zshenv` then
+unsets `ZDOTDIR` and the user's startup files resolve from `$HOME`. It can be
+present only for a directly launched Runtime (ADR-020 §3.6).
 
 ## 7. Startup CWD
 
@@ -204,13 +212,11 @@ LaunchPolicyWarning =
 - Exactly one failure result to the create caller.
 - Until SPEC-004 adds additive `17 LaunchPolicyRejected`, every
   `LaunchPolicyFailure` maps to create result code `14 InternalFailure` with
-  `detail_code` 0. Warnings are not carried on the create-result wire.
+  `detail_code` 0. Warnings are not carried on the create-result wire. L0
+  (ADR-020 §3.10) owns adding code 17; L3 switches to it in the same PR, so
+  the two mappings never coexist.
 - User-visible strings are bounded and non-secret.
 - Protocol payloads carry no paths or env data.
-
-`SEYAL_USER_ZDOTDIR` is copied from the Runtime process's own `ZDOTDIR` when
-set (ADR-009 ShellIntegrationPolicy), under the ADR-020 §3.10 bounds. Finder
-helper launches typically omit it.
 
 ## 10. Relationship to provisioning
 
@@ -247,12 +253,25 @@ Implementation children must provide at least:
    and the child key set equals exactly §6 required keys ∪ present valid locale
    keys ∪ §6.1 carve-out keys (asserted both with ADR-009 integration eligible
    — including `SEYAL_USER_ZDOTDIR` present/absent — and not eligible);
-8. `TERM=seyal-m001` and bundled `TERMINFO` present; `COLORTERM` absent;
+8. `TERM=seyal-m001` and bundled `TERMINFO` present; `COLORTERM` and
+   `TERMINFO_DIRS` absent even when the Runtime process has `TERMINFO_DIRS`
+   set;
 9. OSC 7 / Pane title changes cannot alter the next create's cwd or program;
 10. `CommandSpec` / policy `Debug` emits no program/path/env contents;
 11. CapabilityPolicy failure maps to `CapabilityUnavailable` with rollback;
 12. developer/test argv command path remains usable without becoming the GUI
     profile `0` route.
+13. `SEYAL_USER_ZDOTDIR` bounds: Runtime-process `ZDOTDIR` empty, non-UTF-8,
+    containing a control character, or longer than 1024 bytes → key omitted,
+    one count-only log event, spawn succeeds; a valid value is copied exactly.
+14. Locale: Runtime process with `LANG`, `LC_CTYPE`, `LC_ALL` and `LC_MESSAGES`
+    set → child has only `LANG` and `LC_CTYPE`.
+15. Account-record `pw_shell` empty or invalid with a safe default spawned →
+    `ConfiguredShellInvalid` warning, create succeeds.
+16. Interim wire mapping: each `LaunchPolicyFailure` variant → create
+    `result_code` 14 with `detail_code` 0 and no path/env bytes in the payload;
+    a fallback-with-warning create returns `Created` with no warning on the
+    wire.
 
 ## 13. Acceptance criteria
 
