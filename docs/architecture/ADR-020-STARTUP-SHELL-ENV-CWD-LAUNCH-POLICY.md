@@ -257,12 +257,41 @@ LaunchPolicyWarning =
 
 Mapping rules:
 
-- On the proposed ADR-017 create path, failures map to a CreateExecutionResult failure. Prefer a dedicated additive result code (for example `LaunchPolicyRejected`) via a scoped SPEC-004 amendment after ADR-017 acceptance; until that code exists, implementations may use the nearest accepted failure code **only if** they still preserve the bounded reason for client UX and never encode paths/secrets in the result payload.
+- On the proposed ADR-017 create path, until SPEC-004 adds an additive
+  `17 LaunchPolicyRejected` result code (owned prerequisite slice after ADR-017
+  acceptance), **all** `LaunchPolicyFailure` variants map to create result code
+  `14 InternalFailure` with `detail_code` 0. The bounded failure class is kept
+  only in portable Rust product UI state and structured logs — never in the
+  create-result wire payload. `LaunchPolicyWarning` values are **not** surfaced
+  on the create-result wire (`Created` has no warning field); they reach the
+  Rust UI only through a separate product-state channel owned by the
+  implementation Issue. Implementations must not invent interim wire encodings
+  of paths, secrets, or warning bitmasks in `detail_code`.
 - Portable Rust product authority owns user-visible copy: short, non-secret strings such as "Shell unavailable", "Working directory unavailable", or "Using the default shell because the configured shell is invalid".
 - Native AppKit renders that bounded state only; it does not reinterpret OS error strings.
 - Structured logs record the failure class and counts, never program/argv/cwd/env contents.
 
-Warnings never map to a create failure. Fallback that still spawns (invalid configured shell → safe default; invalid CWD override → account home) is success of create with an accompanying bounded `LaunchPolicyWarning` state in portable product UI, not a protocol secret channel and never carrying the rejected path.
+Warnings never map to a create failure. Fallback that still spawns (invalid configured shell → safe default; invalid CWD override → account home) is success of create with an accompanying bounded `LaunchPolicyWarning` state in portable product UI, not a protocol secret channel and never carrying the rejected path. When the account-record `pw_shell` is empty/invalid and a safe-default shell still spawns, emit `LaunchPolicyWarning::ConfiguredShellInvalid` (same class as an invalid configured override).
+
+`SEYAL_USER_ZDOTDIR` source (ADR-009 ShellIntegrationPolicy): when integration
+is eligible, Runtime copies the **Runtime process's own** `ZDOTDIR` value into
+`SEYAL_USER_ZDOTDIR` for the child (see `shell_integration_policy.rs`), then
+sets child `ZDOTDIR` to the bundled integration directory. Bounds: present
+only when Runtime-process `ZDOTDIR` is set; value must be valid UTF-8, free of
+NUL/control characters, and ≤ 1024 bytes, otherwise omit `SEYAL_USER_ZDOTDIR`
+(do not invent a path). Finder / LaunchServices helper launches typically have
+no `ZDOTDIR` in the Runtime process environment, so `SEYAL_USER_ZDOTDIR` is
+absent and the child's bundled `ZDOTDIR` stands alone. This is the sole
+accepted exception to §3.6's "do not inherit shell-hook keys from the Runtime
+process" rule and is named explicitly by ADR-009.
+
+`TERMINFO_DIRS` is never set and never inherited on the child environment;
+CapabilityPolicy owns only `TERMINFO` (and `TERM`).
+
+Optional locale keys: until a follow-up converges child env with SPEC-009's
+`LANG`/`LC_CTYPE`-only helper contract, headed create may copy `LANG`,
+`LC_ALL`, `LC_CTYPE`, and other `LC_*` keys under the §3.6 bounds. The
+implementation Issue must not treat that broader set as permanent authority.
 
 ### 3.11 Explicit developer/test command bypass
 

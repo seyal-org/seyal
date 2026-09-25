@@ -193,7 +193,7 @@ LaunchPolicyFailure =
   | CapabilityUnavailable      // ADR-008
 
 LaunchPolicyWarning =
-  | ConfiguredShellInvalid     // §5.4
+  | ConfiguredShellInvalid     // §5.4 (invalid configured override OR invalid account pw_shell with safe-default spawn)
   | CwdOverrideInvalid         // §7 item 3
 ```
 
@@ -202,8 +202,15 @@ LaunchPolicyWarning =
 - Pre-spawn failure → no registry publication, no live child, no leaked
   descriptors.
 - Exactly one failure result to the create caller.
+- Until SPEC-004 adds additive `17 LaunchPolicyRejected`, every
+  `LaunchPolicyFailure` maps to create result code `14 InternalFailure` with
+  `detail_code` 0. Warnings are not carried on the create-result wire.
 - User-visible strings are bounded and non-secret.
 - Protocol payloads carry no paths or env data.
+
+`SEYAL_USER_ZDOTDIR` is copied from the Runtime process's own `ZDOTDIR` when
+set (ADR-009 ShellIntegrationPolicy), under the ADR-020 §3.10 bounds. Finder
+helper launches typically omit it.
 
 ## 10. Relationship to provisioning
 
