@@ -919,7 +919,12 @@ fn workload_command(workload: Workload) -> CommandSpec {
         ]),
         Workload::SustainedResponder => CommandSpec::new("/bin/sh").args([
             "-c",
-            "stty -echo; read _; ( i=0; while [ $i -lt 220 ]; do printf '\x1b[2r\x1b[999;1H%04096d\r\n' 0; sleep 0.01; i=$((i+1)); done; printf 'DONE\r\n' ) & while IFS= read -r line; do printf '\x1b7\x1b[1;1H\x1b[2K%s\x1b8' \"$line\"; done",
+            // Flood runs until Runtime teardown kills the process group (not a
+            // fixed 220-line budget). Keep ≥2s of live flood under warmups+samples
+            // by never emitting DONE; the harness asserts stream-active via
+            // DONE-not-observed. DECSTBM confines flood below row 1; responder
+            // writes each input line to row 1 with echo off.
+            "stty -echo; read _; ( while :; do printf '\\x1b[2r\\x1b[999;1H%04096d\\r\\n' 0; sleep 0.01; done ) & while IFS= read -r line; do printf '\\x1b7\\x1b[1;1H\\x1b[2K%s\\x1b8' \"$line\"; done",
         ]),
         Workload::TuiPartial => CommandSpec::new("/bin/sh").args([
             "-c",

@@ -106,7 +106,7 @@ p50 = 8
 p95 = 16
 p99 = 33
 relative_regression_percent = 10
-source = "PERFORMANCE.md sustained_high_output_2s; docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
+source = "PERFORMANCE.md sustained_high_output_2s_responder (SustainedResponder); docs/evidence/M002-673-THRESHOLD-DECISIONS.md"
 
 [gates.resource_scaling_rss]
 evidence_class = "PHYSICAL_ARM64"

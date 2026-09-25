@@ -239,6 +239,12 @@ The decisive `sustained_high_output_2s` workload at `200x60` completed for same-
 - aggregate UDS throughput: approximately `166–207 MB/s`;
 - `shutdown_ok=true` and `aggregate_pending_input_final=0`.
 
+For M002 contract gate `high_output_responsiveness`, the collector uses the related
+`sustained_high_output_2s_responder` workload (`Workload::SustainedResponder`):
+DECSTBM confines the flood below row 1 while a responder writes each correlated
+input marker to row 1 (echo off). The flood runs until Runtime teardown kills the
+process group so warmups+samples always overlap a live stream (≥2 s floor).
+
 The ordinary 16-viewer interactive case remained substantially lower latency (about `122 µs` p95 in the captured run). The full matrix also exercised token streaming, normal command output, burst/scroll, partial/full TUI redraw, alternate screen, reconnect, maximum representative geometry, and cleanup.
 
 Execution-population cases requested at 50 and 100 were reported `PLATFORM_LIMITED` on this host after 27 live PTYs with the exact platform error `Device not configured (os error 6)`. This is retained as host/platform evidence and is not reinterpreted as a Seyal execution-capacity limit.
