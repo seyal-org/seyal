@@ -88,6 +88,8 @@ Use the strongest available source, in order:
 
 Prompt scraping is not an acceptable authoritative source.
 
+Per accepted ADR-009 (duration amendment landed in #1022): live CWD / OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority. Composer cwd/Git chips are presentation affordances only until a separate trust-source decision lands; they do not become Block/Workspace truth.
+
 ## 5. Git context chip
 
 When the current cwd is inside a Git worktree and the execution context can be inspected reliably, Composer may show:
