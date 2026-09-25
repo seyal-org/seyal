@@ -89,7 +89,7 @@ Linux/Windows GUI, remote-product attach (M007)
 plugins, collaboration, enterprise, cloud
 second terminal model, per-Block PTY, or popup/untracked PTYs
 implementing umbrella #674 as one PR
-stealing actively claimed/assigned work (for example #922 or M002 #673)
+stealing actively claimed/assigned work (for example #922, #865, or M002 #673)
 reviving superseded historical Cursor branches as production evidence or creating a second branch for the same active Issue
 reopening merged #932 / #933 / #935
 ```
@@ -125,9 +125,9 @@ These landings are **foundation**, not M003 Done. The headed host is still a one
 | Workspace chrome (left / tabs / inspector) | #922 | **Active** — owned by @crdileep82; implementation PR #1017 open; do not duplicate |
 | Split-tree projection; one live Metal leaf | #923 | **Blocked only on consumable #922 head**; may develop stacked before #922 merge |
 | Split drag-resize ratios | #928 | **Blocked only on a consumable #923 head**; may develop stacked before #923 merges |
-| Pane/tab execution provisioning contract | #994 | **Refinement** — defines the missing product→Runtime execution-creation seam |
+| Pane/tab execution provisioning contract | #994 | **Active refinement** — owned by @mahboobmonnamd; open PR #1056 (Proposed ADR-017); defines the missing product→Runtime execution-creation seam |
 | Multiple live Metal surfaces per Tab | #936 | **Blocked** on #923 plus accepted provisioning work derived from #994 |
-| Adaptive Depth chrome fidelity | #934 | **Open**; presentation-only, prefer after the active hierarchy/chrome frontier |
+| Adaptive Depth chrome fidelity | #934 | **Blocked only on a consumable #922 head**; presentation-only, may develop stacked once #922 publishes it (design-doc PR #1018 by @crdileep82 open) |
 
 Historical `cursor/issue-922-*` / `cursor/issue-923-*` branches are not current production authority. #923 has an explicit 2026-09-21 product-owner disposition that its old Cursor branch is abandoned/superseded. Do not resume old branches implicitly.
 
@@ -141,13 +141,15 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
 | Trusted shell-integration / semantic command boundaries | #686 | **In Progress** — human owner @mahboobmonnamd; ADR-009 duration amendment accepted on `master` via merged #1022; remaining open work is SPEC-008 alignment, unchecked spike acceptance, and any follow-on implementation-Issue refinement — no production code in #686 |
-| Flow compositor Block-region drawing | #865 | **Technically Ready; ownership migration needed** — legacy `issue/865` / `cursor/live-tail-865-c8cd` require human disposition under #997 before pickup |
+| Flow compositor Block-region drawing | #865 | **Active** — owned by @mahboobmonnamd; implementation PR #1058 open on legacy `issue/865`; migration of `issue/865` / `cursor/live-tail-865-c8cd` to `mahboobmonnamd/issue/865` under #997 still pending; not available for pickup |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
 | Headed Flow/Raw/TUI workload matrix | #868 | **Blocked on #867** |
 | Renderer qualification / regression | #869 | **Refinement / after #868** |
 | Production startup config realization | #993 | **Active** — owned by @anulalbs; implementation PR #1006 open; do not duplicate |
-| Pane/tab execution provisioning contract | #994 | **Ready for Refinement/R&D** |
+| Pane/tab execution provisioning contract | #994 | **Active refinement** — owned by @mahboobmonnamd; open PR #1056 |
+| Native window/tab lifecycle contract | #1000 | **Active refinement** — owned by @mahboobmonnamd; open PR #1055 (Proposed ADR-018) |
+| Local resource addressing / goto / focus history | #1004 | **Active refinement** — owned by @mahboobmonnamd; open PR #1057 (Proposed ADR-019 / SPEC-022) |
 
 **Executable frontier (2026-09-25):**
 
@@ -155,12 +157,14 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 Hierarchy lane
   #922 active → publish refreshed consumable head/PR
        └─ #923 may develop stacked before #922 merge → #928
-  #994 Ready-for-Refinement ─────┐
-                                 └→ provisioning implementation → #936
+  #994 active under @mahboobmonnamd / PR #1056 ─┐
+                                                └→ provisioning implementation → #936
+  #1000 active under @mahboobmonnamd / PR #1055 (window/tab lifecycle)
+  #1004 active under @mahboobmonnamd / PR #1057 (addressing/focus history)
   #1001 active (ADR-021/SPEC-025 Proposed via merged #1053) → acceptance before PaneTree op children
 
 Presentation lane
-  #865 technically Ready / human-ownership migration → #866 → #867 → #868 → #869
+  #865 active under @mahboobmonnamd / PR #1058 (legacy-ref migration pending) → #866 → #867 → #868 → #869
   #1005 fixtures landed on master (PR #1052); later #868 consumes them
 
 Configuration lane
@@ -174,7 +178,7 @@ Shell-metadata decision
     only gates behavior that still needs that remaining contract work
 ```
 
-#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (merged #1053; open #1051 / #1050) and are not available for pickup. #1005 is Done on `master` via #1052. #994, #1000, and #1004 remain independent Ready-for-Refinement lanes; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (merged #1053; open #1051 / #1050) and are not available for pickup. #1005 is Done on `master` via #1052. #994, #1000, and #1004 are active refinements under @mahboobmonnamd (open PRs #1056 / #1055 / #1057 on `mahboobmonnamd/issue/<n>`) and are not available for pickup; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is owned by @mahboobmonnamd with implementation PR #1058 open; its legacy `issue/865` / `cursor/live-tail-865-c8cd` refs still await migration to `mahboobmonnamd/issue/865`, and it is not available for pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
 Contributor ownership follows #997 / merged PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. New branches use the human owner's namespace per the merged `ISSUE-PROTOCOL.md`.
 
@@ -182,12 +186,14 @@ Contributor ownership follows #997 / merged PR #998: work remains human-owned, w
 
 Current contributor-ready M003 work is maintained in #999. Repeated references below are summaries of the same Issues, not duplicate pickup authority.
 
-**Refinement/R&D — start now**
-- #1004 — standard — local resource addressing/goto/focus-history semantics.
-- #1000 — advanced/core — native window/tab lifecycle contract.
-- #994 — advanced/core — TerminalExecution provisioning contract.
+**Start now — currently empty (live GitHub, 2026-09-25)**
+- No unclaimed, unblocked M003 Issue exists at this snapshot. Every refinement lane is owned (below) and the remaining production slices are stacked on a consumable upstream head. Under §5.5 this is a scarcity signal: #999 must replenish the pool before new contributors arrive.
 
 **Active / already owned**
+- #994 — advanced/core — human owner @mahboobmonnamd; TerminalExecution provisioning contract in open PR #1056 (Proposed ADR-017), not available for pickup.
+- #1000 — advanced/core — human owner @mahboobmonnamd; native window/tab lifecycle contract in open PR #1055 (Proposed ADR-018), not available for pickup.
+- #1004 — standard — human owner @mahboobmonnamd; local resource addressing/goto/focus-history semantics in open PR #1057 (Proposed ADR-019 / SPEC-022), not available for pickup.
+- #865 — advanced/core — human owner @mahboobmonnamd; Flow live-tail implementation PR #1058 open on legacy `issue/865` pending migration to `mahboobmonnamd/issue/865`, not available for pickup.
 - #993 — standard — human owner @anulalbs; production config/theme/font startup implementation in PR #1006, not available for pickup.
 - #1001 — standard — human owner @mahboobmonnamd; ADR-021 / SPEC-025 Proposed on `master` via merged #1053; remaining acceptance/DoD still open; not available for pickup.
 - #1002 — standard — human owner @mahboobmonnamd; keybinding/chord schema refinement in open PR #1051, not available for pickup.
@@ -252,7 +258,7 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 #674 remains the hierarchy/navigation parent. It is too large for one production PR (windows, tabs, nested splits, move/reparent, zoom, resource addressing, palette richness already partly landed). Mark children **Ready** only after `docs/engineering/ISSUE-PROTOCOL.md` checkboxes pass. If a child needs a reusable windows/tabs/splits behavioral contract that SPEC-008 does not own, stop and refine a specification **before** coding; do not invent that spec in an implementation PR.
 
-The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing remain #1004 (Proposed ADR-019); window/tab lifecycle remains #1000; execution provisioning remains #994. ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
+The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing remain #1004 (ADR-019 proposed in open PR #1057, not on `master`); window/tab lifecycle remains #1000 (open PR #1055); execution provisioning remains #994 (open PR #1056). ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
 
 ### 6.3 #923 — split-tree projection after #922
 
@@ -264,7 +270,7 @@ Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane host
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
-Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865's technical scope is Ready because its compositor work is pane-local and #861 is complete; it does not require #923. Legacy `issue/865` and `cursor/live-tail-865-c8cd` are pre-#997 ownership artifacts. A human maintainer must disposition/migrate them before a new owner starts; closed PR #874 is historical only. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
+Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do not start #675 as a bundle. #865's technical scope is Ready because its compositor work is pane-local and #861 is complete; it does not require #923. #865 is now owned by @mahboobmonnamd with implementation PR #1058 open and is not available for pickup. Legacy `issue/865` and `cursor/live-tail-865-c8cd` are pre-#997 ownership artifacts still awaiting migration to `mahboobmonnamd/issue/865`; closed PR #874 is historical only. #866 follows #865, and #867 follows #866. Their final multi-pane integration is validated later with the hierarchy lane; none may create a second terminal authority.
 
 ### 6.6 #676 / #993 — configuration frontier
 
