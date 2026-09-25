@@ -222,13 +222,6 @@ pub(crate) fn classify_connect_error(error: std::io::Error) -> ClientError {
 pub(crate) fn requested_capabilities(
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
-) -> u32 {
-    requested_capabilities_with(request_block_metadata, request_extended_terminal_key, true)
-}
-
-pub(crate) fn requested_capabilities_with(
-    request_block_metadata: bool,
-    request_extended_terminal_key: bool,
     request_viewport_line_ids: bool,
 ) -> u32 {
     CAP_COMMAND_BLOCKS
@@ -259,27 +252,10 @@ pub(crate) fn hello_until(
     interactive: bool,
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
-    deadline: Instant,
-) -> Result<ServerHello, ClientError> {
-    hello_until_with(
-        stream,
-        interactive,
-        request_block_metadata,
-        request_extended_terminal_key,
-        true,
-        deadline,
-    )
-}
-
-pub(crate) fn hello_until_with(
-    stream: &mut UnixStream,
-    interactive: bool,
-    request_block_metadata: bool,
-    request_extended_terminal_key: bool,
     request_viewport_line_ids: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
-    let client_capabilities = requested_capabilities_with(
+    let client_capabilities = requested_capabilities(
         request_block_metadata,
         request_extended_terminal_key,
         request_viewport_line_ids,
@@ -328,7 +304,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
     request_block_metadata: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
-    match hello_until_with(
+    match hello_until(
         stream,
         interactive,
         request_block_metadata,
@@ -339,7 +315,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
         Ok(hello) => Ok(hello),
         Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
             *stream = reconnect()?;
-            match hello_until_with(
+            match hello_until(
                 stream,
                 interactive,
                 request_block_metadata,
@@ -350,7 +326,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
                 Ok(hello) => Ok(hello),
                 Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
                     *stream = reconnect()?;
-                    hello_until_with(
+                    hello_until(
                         stream,
                         interactive,
                         request_block_metadata,
@@ -395,9 +371,8 @@ pub(crate) fn send_control_until(
 mod connect_error_tests {
     use super::{
         canonical_control_socket_path, classify_connect_error, classify_discovery_error,
-        extended_terminal_key_supported, hello_until, hello_until_with,
-        hello_until_with_legacy_key_fallback, requested_capabilities, ClientError,
-        DiscoveryFailure,
+        extended_terminal_key_supported, hello_until, hello_until_with_legacy_key_fallback,
+        requested_capabilities, ClientError, DiscoveryFailure,
     };
     use seyal_runtime::local_ipc::{discovery::DiscoveryError, framing::*};
     use std::{
@@ -433,6 +408,7 @@ mod connect_error_tests {
 
         let hello = hello_until(
             &mut client,
+            true,
             true,
             true,
             true,
@@ -540,8 +516,8 @@ mod connect_error_tests {
 
     #[test]
     fn requested_capabilities_can_omit_extended_key_for_old_runtimes() {
-        let with_v2 = requested_capabilities(true, true);
-        let without_v2 = requested_capabilities(true, false);
+        let with_v2 = requested_capabilities(true, true, true);
+        let without_v2 = requested_capabilities(true, false, true);
         assert_ne!(with_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_eq!(without_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_ne!(without_v2 & CAP_COMMAND_BLOCKS, 0);
@@ -552,8 +528,8 @@ mod connect_error_tests {
 
     #[test]
     fn requested_capabilities_can_omit_viewport_line_ids() {
-        let with = super::requested_capabilities_with(true, true, true);
-        let without = super::requested_capabilities_with(true, true, false);
+        let with = requested_capabilities(true, true, true);
+        let without = requested_capabilities(true, true, false);
         assert_ne!(with & CAP_VIEWPORT_LINE_IDS, 0);
         assert_eq!(without & CAP_VIEWPORT_LINE_IDS, 0);
         assert_ne!(without & CAP_EXTENDED_TERMINAL_KEY, 0);
@@ -568,6 +544,7 @@ mod connect_error_tests {
             true,
             true,
             true,
+            true,
             Instant::now() + Duration::from_secs(1),
         )
         .expect_err("pre-v2 Runtime rejects unknown ClientHello bits");
@@ -576,7 +553,7 @@ mod connect_error_tests {
 
         let (mut fallback_client, fallback_server) = UnixStream::pair().expect("unix stream pair");
         let acceptor = std::thread::spawn(move || pre_v2_runtime_hello(fallback_server, true));
-        let hello = hello_until_with(
+        let hello = hello_until(
             &mut fallback_client,
             true,
             true,
