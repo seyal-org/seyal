@@ -67,8 +67,10 @@ R3.3 `Execution { e }` resolution counts current Pane bindings to `e`:
 
 - exactly one bound Pane → resolves to that Pane;
 - zero bindings and `e` still live → `TargetUnbound`;
-- zero bindings and `e` not live / unknown → `TargetTerminated` or
-  `UnknownExecution` as applicable;
+- zero bindings, `e` exited, and the Runtime inventory still holds `e`'s
+  exited record → `TargetTerminated`;
+- `e` not present in the Runtime inventory (never existed, or its exited
+  record has been released) → `UnknownExecution`;
 - two or more bound Panes → `AmbiguousTarget`.
 
 Pane→Execution is at most one (M001 multipane / M003 leaf rule). The reverse
@@ -77,22 +79,41 @@ explicit rejection, not an assumed invariant.
 
 R3.4 Rejections are typed and exhaustive. When several faults apply to one
 address, evaluate in this order and return the first match:
-`UnsupportedKind` → `UnknownWorkspace` → `UnknownTab` → `UnknownPane` →
-`UnknownExecution` → `NotComposed` → `TargetTerminated` → `TargetUnbound` →
-`AmbiguousTarget` → `NavigationDenied`.
+`UnsupportedKind` → `NavigationDenied` → `UnknownWorkspace` → `UnknownTab` →
+`UnknownPane` → `UnknownExecution` → `NotComposed` → `TargetTerminated` →
+`TargetUnbound` → `AmbiguousTarget`.
+
+Authorization is evaluated immediately after kind/version/size validation and
+before any existence or binding check. It tests the requesting principal's
+Workspace access set (ADR-007 §11): for `Workspace`/`Tab`/`Pane` addresses the
+addressed `WorkspaceId` must be in that set; for `Execution` addresses the
+principal must hold local navigation authority. A `WorkspaceId` outside the
+set yields `NavigationDenied` whether or not it exists, so an unauthorized
+principal cannot distinguish unknown from existing-but-denied resources or
+learn how they are bound. If the target resolves into a Workspace outside the
+principal's set (for example an `Execution` bound in such a Workspace), the
+result is also `NavigationDenied`. In M003 the only principal is the local
+user, authorized for every local Workspace.
 
 | Rejection | Condition |
 |---|---|
+| `UnsupportedKind` | unknown/unaccepted kind, version or size |
+| `NavigationDenied` | Workspace access/policy refusal (ADR-007 §11), evaluated as above |
 | `UnknownWorkspace` | `WorkspaceId` is not a current Workspace |
 | `UnknownTab` | `TabId` is not a current Tab anywhere |
-| `UnknownPane` | `PaneId` is not a current Pane anywhere |
-| `UnknownExecution` | `ExecutionId` is unknown to the Runtime inventory |
+| `UnknownPane` | `PaneId` is not a current Pane anywhere, including a Pane that has been destroyed |
+| `UnknownExecution` | `ExecutionId` is not in the Runtime inventory (never existed, or exited record released) |
 | `NotComposed` | components exist but do not currently compose (R3.2) |
-| `TargetTerminated` | the addressed Pane/Execution lifetime has ended |
+| `TargetTerminated` | `Execution` address only: `e` has exited and the Runtime inventory still holds its exited record |
 | `TargetUnbound` | Execution is live with no Pane binding |
 | `AmbiguousTarget` | Execution is bound to more than one Pane |
-| `UnsupportedKind` | unknown/unaccepted kind, version or size |
-| `NavigationDenied` | Workspace access/policy refusal (ADR-007 §11) |
+
+`TargetTerminated` is never produced for `Workspace`, `Tab` or `Pane`
+addresses. A destroyed container is removed from `ShellState` and is
+indistinguishable from one that never existed, so it yields the matching
+`Unknown*` variant. No tombstone store is kept (ADR-019 Alternative E). A
+current Pane whose bound Execution has exited still exists and resolves
+normally; its exit state is presented by the Pane itself.
 
 R3.5 A rejection leaves all state unchanged and is reported to the surface that
 requested it. Resolution must not substitute a nearest match, a fuzzy
@@ -172,21 +193,27 @@ R6.2 An entry is:
 FocusHistoryEntry {
   seq: FocusSeq,                 // monotonic, Rust-owned, total order
   target: ResourceAddress::Pane,
-  window: WindowId,
   observed_at: Instant,          // display only, never authoritative
 }
 ```
 
-No display string is stored. In the current single-window composition `window`
-is the one implicit window; the field becomes meaningful when the multi-window
-slice lands (§5.6) and is not implemented speculatively before it.
+No display string and no window identity is stored. The hosting window of an
+entry is resolved from the Rust Tab → Window placement map (R5.1/R5.2) when
+the entry is applied, so moving a Tab between windows never leaves a stale
+placement copy in history. N3 therefore does not depend on `WindowId`.
+
+Two entries are **equal** iff their `target` addresses are equal (R3.2
+component-wise equality). `seq` and `observed_at` do not participate.
 
 R6.3 Only committed focus transitions are recorded, and only at Pane
 granularity. Workspace/Tab/Execution navigations are recorded as the Pane that
 actually received focus.
 
-R6.4 An entry equal to the current head is not appended (adjacent
-deduplication). Non-adjacent repeats are appended normally.
+R6.4 Deduplication is against the **cursor** entry, which is the currently
+focused history position (it equals the head except after Back). A
+user-initiated commit whose target equals the cursor entry's `target` is a
+no-op: no truncation, no append, cursor unchanged. This is the history side of
+R4.4. Non-adjacent repeats are appended normally.
 
 R6.5 Traversal is a linear back/forward cursor. Distinguish *traversal apply*
 from *user-initiated commit*:
@@ -194,19 +221,27 @@ from *user-initiated commit*:
 ```text
 Back     cursor → previous entry, then Navigate(apply-only) to it
 Forward  cursor → next entry, then Navigate(apply-only) to it
-user-initiated Navigate commit while cursor < head
-         → truncate forward portion, then append
+user-initiated Navigate commit, target ≠ cursor entry target
+         → remove every entry after the cursor (none when cursor = head)
+         → append the new entry
+         → cursor = new head
+user-initiated Navigate commit, target = cursor entry target
+         → no-op (R6.4)
 ```
 
 Traversal-driven Navigate moves the cursor and applies focus/activation; it
 does **not** append a history entry and does **not** truncate the forward
 portion. The truncate-and-append rule applies only to user-initiated
-(non-traversal) focus commits.
+(non-traversal) focus commits. On an empty history, the first user-initiated
+commit appends and sets the cursor to that entry.
 
-R6.6 Capacity is the fixed bound `FOCUS_HISTORY_CAPACITY` (proposed 64).
-Appending at capacity evicts the oldest entry and shifts the cursor
-deterministically so it continues to designate the same logical entry, or
-clamps to the oldest surviving entry when that entry was the one evicted.
+R6.6 Capacity is the fixed bound `FOCUS_HISTORY_CAPACITY` (proposed 64; a
+compile-time assertion requires it to be ≥ 2). Only an append can reach
+capacity. An append that would exceed capacity first evicts the oldest entry
+(index 0), shifting every surviving entry down by one; the new entry is then
+appended and the cursor set to the new head. Because truncation of the forward
+part happens before the append, an append from a cursor behind the head never
+evicts. The cursor entry is therefore never the evicted entry.
 
 R6.7 Destroying a Pane, Tab or Workspace eagerly removes every entry addressing
 it. Survivor relative order is preserved. The cursor moves to the nearest
@@ -261,8 +296,18 @@ initiated it. It must not be silently swallowed, and it must not be reported as
 success.
 
 R8.3 Concurrent destruction between projection and request is an expected case,
-not an error condition to be papered over: the request is rejected with the
-precise reason (`TargetTerminated` / `UnknownPane`) rather than redirected.
+not an error condition to be papered over: the request is rejected rather than
+redirected, with exactly one variant per case (first match in R3.4 order):
+
+| Change between projection and request | Address kind | Rejection |
+|---|---|---|
+| Workspace destroyed | any composite containing it | `UnknownWorkspace` |
+| Tab destroyed | `Tab` / `Pane` in that Tab | `UnknownTab` |
+| Pane destroyed | `Pane` | `UnknownPane` |
+| Pane moved to another Tab | `Pane { w, t_old, p }` | `NotComposed` |
+| Execution exited, exited record still held, no Pane bound | `Execution` | `TargetTerminated` |
+| Execution exited and exited record released | `Execution` | `UnknownExecution` |
+| Execution live, bound Pane destroyed | `Execution` | `TargetUnbound` |
 
 R8.4 Repeated rejection must not create an unbounded retry loop in either Rust
 or the host. A rejected navigation is terminal until the user acts again.
@@ -342,7 +387,11 @@ Rust, platform-independent unless stated:
     selection unchanged.
 12. Execution address with no bound Pane yields `TargetUnbound` and performs no
     attach.
-13. Exited execution yields `TargetTerminated`.
+13. Exited execution yields `TargetTerminated` while its exited record is held
+    and `UnknownExecution` after release; a destroyed Pane yields
+    `UnknownPane`, never `TargetTerminated` (each R8.3 row asserted exactly).
+13a. An unauthorized principal receives `NavigationDenied` for both an existing
+     and a nonexistent `WorkspaceId`, with no existence/binding checks run.
 13b. Execution bound to two Panes yields `AmbiguousTarget` and performs no
      navigation (R3.3).
 
@@ -359,17 +408,25 @@ Rust, platform-independent unless stated:
     (property test).
 16. Ordering is total and reproducible for a fixed action sequence (property
     test over generated navigation sequences).
-17. Adjacent duplicates are not appended; non-adjacent repeats are.
+17. A commit equal to the cursor entry's `target` is a no-op (no append, no
+    truncation), including when the cursor is behind the head; non-adjacent
+    repeats are appended. Equality ignores `seq`/`observed_at`.
 18. Back/Forward traverses exactly one entry per request and is inverse over a
     no-mutation interval.
-19. New commit behind the head truncates the forward portion.
+19. A commit to a different target while behind the head truncates the forward
+    portion, appends, and leaves the cursor at the new head.
 20. Destroying a Pane removes all its entries eagerly, preserves survivor
     order, and repositions the cursor per R6.7.
 21. Destroying every referenced resource empties history and makes
     Back/Forward unavailable rather than focusing arbitrarily.
 22. Stale `FocusSeq` in a traversal request is rejected with no navigation.
-23. Overflow eviction keeps the cursor designating the same logical entry, or
-    clamps deterministically when that entry was evicted.
+23. Overflow eviction: with history full and cursor at head, a commit to a new
+    target evicts exactly the oldest entry, keeps length at capacity, and sets
+    the cursor to the new head; Back then reaches the previous head. With
+    history full and cursor behind the head, a commit truncates first and
+    evicts nothing.
+23b. Moving a Tab to another window between commit and Back applies the entry
+     in the Tab's current window (placement resolved at apply time, R6.2).
 
 **Cross-window**
 

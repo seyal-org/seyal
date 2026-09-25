@@ -144,7 +144,7 @@ Every rejection is typed and leaves state unchanged:
 ```text
 UnknownWorkspace | UnknownTab | UnknownPane | UnknownExecution
 NotComposed        (components exist but do not currently compose)
-TargetTerminated   (execution/pane lifetime already ended)
+TargetTerminated   (Execution exited; exited record still held by Runtime)
 TargetUnbound      (execution alive, no Pane currently bound)
 AmbiguousTarget    (Execution bound to more than one Pane)
 UnsupportedKind    (unknown/unaccepted address kind or version)
@@ -156,6 +156,14 @@ NavigationDenied   (Workspace access/policy refusal)
 accepted authority establishes Execution→Pane uniqueness by construction
 (Pane→Execution is at most one; the reverse is not), so ambiguity is an
 explicit fail-closed outcome rather than an assumed invariant.
+
+`TargetTerminated` applies only to `Execution { e }` addresses whose exited
+record the Runtime inventory still holds. A destroyed Workspace, Tab or Pane is
+removed from `ShellState` and is indistinguishable from one that never existed,
+so it always yields the corresponding `Unknown*` rejection. No tombstone store
+exists (see Alternative E). Workspace authorization is evaluated immediately
+after kind/version validation, before any existence or binding check, so an
+unauthorized principal cannot probe what exists or how it is bound.
 
 Explicitly forbidden recovery behavior: nearest-match, fuzzy re-resolution,
 falling back to the first/last/active member of the container, silently
@@ -191,19 +199,27 @@ One focus history exists per application (not per window, not per Workspace).
 Per-window or per-Workspace "recent" affordances, if ever built, are derived
 filters over this one store — never a second history authority.
 
-- An entry is `{ FocusSeq, ResourceAddress::Pane, WindowId }` plus a
-  non-authoritative timestamp for display. `FocusSeq` is a monotonically
-  increasing Rust-owned counter, so entry order is total and ties are
-  impossible.
-- Only committed focus transitions are recorded, only at Pane granularity, and
-  an entry equal to the current head is not appended again.
+- An entry is `{ FocusSeq, ResourceAddress::Pane }` plus a non-authoritative
+  timestamp for display. `FocusSeq` is a monotonically increasing Rust-owned
+  counter, so entry order is total and ties are impossible. An entry stores
+  **no window identity**: traversal resolves the hosting window through the
+  Rust Tab → Window placement map at apply time (§3), so a Tab move never
+  leaves a stale second copy of placement in history.
+- Entry equality is `target` equality only (`FocusSeq` and timestamp are
+  ignored).
+- Only committed focus transitions are recorded, only at Pane granularity.
 - Traversal is the linear back/forward cursor model. Back/Forward *moves the
   cursor and applies focus to the designated entry*; it does **not** record a
-  new history entry. Only a user-initiated (non-traversal) focus commit while
-  the cursor is behind the head truncates the forward portion and then appends.
+  new history entry and does not truncate.
+- A user-initiated (non-traversal) focus commit whose target equals the cursor
+  entry's target is a no-op (no truncation, no append). Any other
+  user-initiated commit truncates every entry after the cursor, appends, and
+  sets the cursor to the new head.
 - Capacity is a fixed compile-time bound (`FOCUS_HISTORY_CAPACITY`, proposed
-  64 entries). Overflow evicts the oldest entry and adjusts the cursor
-  deterministically. Memory is O(capacity) and independent of session length.
+  64 entries, required ≥ 2). An append at capacity evicts the oldest entry;
+  because the cursor is always the new head after an append, eviction never
+  removes the cursor entry. Memory is O(capacity) and independent of session
+  length.
 - Destroying a Pane/Tab/Workspace **eagerly removes** every entry addressing
   it, preserves the relative order of survivors, and repositions the cursor to
   the nearest surviving entry at or before its previous position. If nothing

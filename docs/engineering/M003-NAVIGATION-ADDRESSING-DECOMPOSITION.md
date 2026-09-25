@@ -76,15 +76,18 @@ existing coarse snapshot transfer.
 **Outcome:** one application-scoped, bounded, deterministic focus history with
 Back/Forward actions and eager invalidation.
 
-**Scope:** SPEC-022 §6 in full, including `FocusSeq`, adjacent deduplication,
-forward truncation, capacity eviction, eager removal on
-Pane/Tab/Workspace destruction, and `StaleHistoryCursor` rejection.
+**Scope:** SPEC-022 §6 in full, including `FocusSeq`, target-equality
+deduplication against the cursor entry, forward truncation with cursor = new
+head, capacity eviction, eager removal on Pane/Tab/Workspace destruction, and
+`StaleHistoryCursor` rejection. Entries store no window identity, so N3 does
+not depend on `WindowId` or N5; in the single-window composition apply-time
+placement resolution is trivially the one window.
 
 **Non-goals:** persistence, per-window stores, "reopen closed pane" (a
 resurrection feature that needs its own refinement — closing a Pane destroys
 its entries here).
 
-**Tests:** SPEC-022 §12 items 15–23, with 15 and 16 as property tests over
+**Tests:** SPEC-022 §12 items 15–23b, with 15 and 16 as property tests over
 generated navigation/destruction sequences.
 
 **Coordination:** #1001 owns which Pane receives focus after split/close/move.
@@ -129,7 +132,9 @@ must stay typed and separated.
 survival on activation failure.
 
 **Blocked on:** the multi-window slice under #674 / #936. Do not introduce
-`WindowId` speculatively before a second window exists.
+`WindowId` speculatively before a second window exists. `WindowId` appears only
+in the Rust placement map and the `WindowActivation` effect; focus-history
+entries never carry it (SPEC-022 R6.2), so N5 adds no history migration.
 
 **Tests:** SPEC-022 §12 items 24–27, including repeated activation failure
 (persistent-failure rule in `AGENTS.md`) and no implicit reparenting.
