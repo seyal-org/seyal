@@ -223,11 +223,7 @@ pub(crate) fn requested_capabilities(
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
 ) -> u32 {
-    requested_capabilities_with(
-        request_block_metadata,
-        request_extended_terminal_key,
-        true,
-    )
+    requested_capabilities_with(request_block_metadata, request_extended_terminal_key, true)
 }
 
 pub(crate) fn requested_capabilities_with(
@@ -400,7 +396,8 @@ mod connect_error_tests {
     use super::{
         canonical_control_socket_path, classify_connect_error, classify_discovery_error,
         extended_terminal_key_supported, hello_until, hello_until_with,
-        hello_until_with_legacy_key_fallback, requested_capabilities, ClientError, DiscoveryFailure,
+        hello_until_with_legacy_key_fallback, requested_capabilities, ClientError,
+        DiscoveryFailure,
     };
     use seyal_runtime::local_ipc::{discovery::DiscoveryError, framing::*};
     use std::{

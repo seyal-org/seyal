@@ -119,6 +119,14 @@ mod tests {
     }
 
     #[test]
+    fn reordered_viewport_line_ids_still_map_from_first_owned_row() {
+        // After CSI T / insert-line, unique LineIds need not be monotonic in
+        // row order. Mapping still starts at the first id >= start_line.
+        let ids = [1_u64, 4, 2];
+        assert_eq!(map_primary_clip(2, &ids), Some((1, 2)));
+    }
+
+    #[test]
     fn scrolled_off_start_keeps_full_viewport_for_running_block() {
         // start_line has left the viewport; every visible row belongs to the
         // running Block.

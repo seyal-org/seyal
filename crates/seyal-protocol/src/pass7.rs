@@ -2017,9 +2017,14 @@ impl ViewportLineIds {
         if self.line_ids.contains(&0) {
             return Err(FramingError::MalformedPayload);
         }
-        // LineIds must be strictly increasing (primary scrollback order).
-        if self.line_ids.windows(2).any(|pair| pair[0] >= pair[1]) {
-            return Err(FramingError::MalformedPayload);
+        // Viewport rows may be reordered by insert-line / reverse-index / CSI T
+        // without renumbering LineIds, so ids need not be monotonic. They must
+        // remain unique within one viewport so start_line mapping is unambiguous.
+        let mut seen = std::collections::BTreeSet::new();
+        for id in &self.line_ids {
+            if !seen.insert(*id) {
+                return Err(FramingError::MalformedPayload);
+            }
         }
         Ok(())
     }
@@ -2096,13 +2101,25 @@ mod viewport_line_ids_tests {
     }
 
     #[test]
-    fn viewport_line_ids_reject_non_increasing() {
+    fn viewport_line_ids_accept_reordered_unique_rows() {
+        // Legal after CSI T / insert-line / reverse-index: ids stay unique but
+        // are no longer strictly increasing in row order.
+        let message = ViewportLineIds {
+            generation: 7,
+            line_ids: vec![1, 4, 2],
+        };
+        assert_eq!(ViewportLineIds::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn viewport_line_ids_reject_duplicate_ids() {
         let mut encoded = ViewportLineIds {
             generation: 1,
             line_ids: vec![1, 2, 3],
         }
         .encode();
-        encoded[12 + 8..12 + 16].copy_from_slice(&1u64.to_le_bytes());
+        // Force a duplicate of the first id into the last slot.
+        encoded[12 + 16..12 + 24].copy_from_slice(&1u64.to_le_bytes());
         assert_eq!(
             ViewportLineIds::decode(&encoded),
             Err(FramingError::MalformedPayload)

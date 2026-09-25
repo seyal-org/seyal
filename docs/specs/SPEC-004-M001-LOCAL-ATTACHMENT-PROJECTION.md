@@ -2,7 +2,7 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703; M003 Flow live-tail capability bit 9 / message type 35 (#865)
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
@@ -146,13 +146,15 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
+| 35 | R→C | `ViewportLineIds` — M003 Flow live-tail (#865); gated on `CAP_VIEWPORT_LINE_IDS` (bit 9). Primary viewport LineIds for one display generation: `generation(u64)` + `row_count(u16)` + `reserved(u16=0)` + `row_count` little-endian `u64` ids. Ids are non-zero and unique within the viewport; they are **not** required to be monotonic (insert-line / reverse-index / CSI T may reorder rows). |
 
 M001 server capability bits are:
 
 - bit 0: binary display snapshot/delta transport;
 - bit 1: observer role;
 - bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — accepted by Pass 7 / SPEC-006 / PR #703;
-- bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703.
+- bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703;
+- bit 9: primary viewport LineIds (`CAP_VIEWPORT_LINE_IDS`) — M003 Flow live-tail under SPEC-008 §5.2 Approach B / #865; clients that do not advertise the bit never receive type 35.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
