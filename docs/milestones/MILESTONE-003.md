@@ -100,7 +100,7 @@ A FAIL or INCONCLUSIVE **mandatory** criterion on a remaining §5 issue may crea
 
 ## 5. Finding-set freeze and remaining chain
 
-Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-23** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
+Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. Headed leftover slices after M001.1 parent #878 closed now live under this contract. Snapshot **2026-09-25** (live GitHub remains authority over stale prose). This refresh defines the executable development frontier rather than treating every open M003-related Issue as Ready.
 
 ### 5.1 Already on `master` (do not reopen)
 
@@ -114,6 +114,7 @@ Approved umbrellas are **#674 / #675 / #676**, plus refinement/spike **#686**. H
 | Command palette | #932 / PR #940 | **Closed** |
 | Composer history fuzzy recall | #933 / PR #938 | **Closed** |
 | Block details inspector | #935 / PR #939 | **Closed** |
+| Retained Flow/long-output/TUI workload fixtures | #1005 / PR #1052 | **Closed** |
 
 These landings are **foundation**, not M003 Done. The headed host is still a one-live-Metal-leaf adapter until #923 / #936.
 
@@ -139,7 +140,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Native hierarchy / windows / tabs / splits / navigation | #674 | **Open umbrella** — not a pickup |
 | Pane input, Blocks, selection, same-execution presentation | #675 | **Open umbrella** — not a pickup |
 | Local config / themes / fonts / keybindings / launch policy | #676 | **Open umbrella** — not a pickup |
-| Trusted shell-integration / semantic command boundaries | #686 | **In Progress** — human owner @mahboobmonnamd; decision/ADR work in PR #1022, no production code |
+| Trusted shell-integration / semantic command boundaries | #686 | **In Progress** — human owner @mahboobmonnamd; ADR-009 duration amendment accepted on `master` via merged #1022; remaining open work is SPEC-008 alignment, unchecked spike acceptance, and any follow-on implementation-Issue refinement — no production code in #686 |
 | Flow compositor Block-region drawing | #865 | **Technically Ready; ownership migration needed** — legacy `issue/865` / `cursor/live-tail-865-c8cd` require human disposition under #997 before pickup |
 | Flow composer input/IME/focus fence | #866 | **Blocked on #865** |
 | Raw/TUI full-Pane takeover | #867 | **Blocked on #866** |
@@ -148,7 +149,7 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Production startup config realization | #993 | **Active** — owned by @anulalbs; implementation PR #1006 open; do not duplicate |
 | Pane/tab execution provisioning contract | #994 | **Ready for Refinement/R&D** |
 
-**Executable frontier (2026-09-23):**
+**Executable frontier (2026-09-25):**
 
 ```text
 Hierarchy lane
@@ -156,40 +157,45 @@ Hierarchy lane
        └─ #923 may develop stacked before #922 merge → #928
   #994 Ready-for-Refinement ─────┐
                                  └→ provisioning implementation → #936
+  #1001 active (ADR-021/SPEC-025 Proposed via merged #1053) → acceptance before PaneTree op children
 
 Presentation lane
   #865 technically Ready / human-ownership migration → #866 → #867 → #868 → #869
+  #1005 fixtures landed on master (PR #1052); later #868 consumes them
 
 Configuration lane
   #993 active under @anulalbs / PR #1006
-    → later bounded #676 children for keybindings and launch shell/CWD policy
+  #1002 active under @mahboobmonnamd / PR #1051 (keybinding schema)
+  #1003 active under @mahboobmonnamd / PR #1050 (startup shell/env/CWD)
 
 Shell-metadata decision
-  #686 active under @mahboobmonnamd; PR #1022 only gates behavior that actually needs the proposed duration/trust expansion
+  #686 active under @mahboobmonnamd; duration amendment accepted via merged #1022;
+    remaining open #686 work (SPEC-008 / spike acceptance / implementation-Issue refinement)
+    only gates behavior that still needs that remaining contract work
 ```
 
-#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #994 and #1000–#1004 provide independent Ready-for-Refinement lanes; #686 is already active under @mahboobmonnamd. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (merged #1053; open #1051 / #1050) and are not available for pickup. #1005 is Done on `master` via #1052. #994, #1000, and #1004 remain independent Ready-for-Refinement lanes; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is technically Ready but its legacy branch ownership must be migrated before pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
-Contributor ownership is being corrected by #997 / PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. Until #998 lands, contributors follow the currently merged `ISSUE-PROTOCOL.md`; after it lands, new branches use the human owner's namespace.
+Contributor ownership follows #997 / merged PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. New branches use the human owner's namespace per the merged `ISSUE-PROTOCOL.md`.
 
 ### 5.4 Groomed contributor frontier
 
 Current contributor-ready M003 work is maintained in #999. Repeated references below are summaries of the same Issues, not duplicate pickup authority.
 
-**Starter/test infrastructure — start now**
-- #1005 — starter — retained deterministic Flow/long-output/TUI workload fixtures with bounded self-test.
-
 **Refinement/R&D — start now**
-- #1001 — standard — pane move/reparent/zoom/equalize/focus-history contract.
-- #1002 — standard — keybinding/chord schema, conflicts and routing.
 - #1004 — standard — local resource addressing/goto/focus-history semantics.
 - #1000 — advanced/core — native window/tab lifecycle contract.
-- #1003 — advanced/core — startup shell/environment/CWD launch policy.
 - #994 — advanced/core — TerminalExecution provisioning contract.
 
 **Active / already owned**
 - #993 — standard — human owner @anulalbs; production config/theme/font startup implementation in PR #1006, not available for pickup.
-- #686 — advanced/core — human owner @mahboobmonnamd; duration/trust decision in PR #1022, not available for pickup.
+- #1001 — standard — human owner @mahboobmonnamd; ADR-021 / SPEC-025 Proposed on `master` via merged #1053; remaining acceptance/DoD still open; not available for pickup.
+- #1002 — standard — human owner @mahboobmonnamd; keybinding/chord schema refinement in open PR #1051, not available for pickup.
+- #1003 — advanced/core — human owner @mahboobmonnamd; startup shell/environment/CWD launch-policy refinement in open PR #1050, not available for pickup.
+- #686 — advanced/core — human owner @mahboobmonnamd; ADR-009 duration amendment accepted on `master` via merged #1022; remaining open work is SPEC-008 alignment, unchecked spike acceptance, and any follow-on implementation-Issue refinement — not available for pickup.
+
+**Done / landed (do not reopen as start-now)**
+- #1005 — starter — retained Flow/long-output/TUI workload fixtures landed via merged #1052; later #868 consumes them.
 
 **Near-ready stacked work**
 - #923 / #934 after a refreshed consumable #922 head; merge need not wait for #922.
@@ -246,13 +252,15 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 #674 remains the hierarchy/navigation parent. It is too large for one production PR (windows, tabs, nested splits, move/reparent, zoom, resource addressing, palette richness already partly landed). Mark children **Ready** only after `docs/engineering/ISSUE-PROTOCOL.md` checkboxes pass. If a child needs a reusable windows/tabs/splits behavioral contract that SPEC-008 does not own, stop and refine a specification **before** coding; do not invent that spec in an implementation PR.
 
+The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing remain #1004 (Proposed ADR-019); window/tab lifecycle remains #1000; execution provisioning remains #994. ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
+
 ### 6.3 #923 — split-tree projection after #922
 
 Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. The historical Cursor branch has been explicitly abandoned/superseded. #923 does **not** require #922 to merge: once #922 publishes a refreshed/current consumable branch or PR with stable action/snapshot fields, #923 may start stacked on that head and rebase after #922 lands.
 
 ### 6.4 #686 — shell-metadata refinement
 
-#686 is active decision/refinement work owned by @mahboobmonnamd through PR #1022. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. PR #1022 proposes the remaining duration boundary. Do not block unrelated Flow compositor or config work on #686. Only behavior that requires the proposed duration/trust expansion waits for its accepted ADR/spec update.
+#686 remains active decision/refinement work owned by @mahboobmonnamd. The accepted zsh path already exists; Bash/fish remain Unsupported/Raw. The ADR-009 duration amendment is **accepted on `master` via merged #1022** (superseded predecessor #991 is historical only). Remaining open #686 work is SPEC-008 alignment to that accepted duration/trust boundary, closing the Issue's unchecked spike acceptance criteria, and refining any separate implementation Issue before production code — do not treat #1022 as in-flight. Do not block unrelated Flow compositor or config work on #686. Only behavior that still needs that remaining contract work waits on #686.
 
 ### 6.5 #675 / #865–#867 — same-execution presentation
 
@@ -260,7 +268,7 @@ Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do no
 
 ### 6.6 #676 / #993 — configuration frontier
 
-#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is now active under @anulalbs / PR #1006: it wires those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. General keybinding/chord behavior and launch shell/CWD policy remain separate bounded children to refine after #993; do not implement #676 wholesale.
+#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is now active under @anulalbs / PR #1006: it wires those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. Keybinding/chord schema (#1002 / open PR #1051) and startup shell/env/CWD launch policy (#1003 / open PR #1050) are already active under @mahboobmonnamd; do not duplicate them or implement #676 wholesale.
 
 ### 6.7 #994 — execution provisioning before #936
 
@@ -303,7 +311,7 @@ Label every performance/presentation claim: `CI` | `controlled-host` | `PLATFORM
 - #674 children covering windows/tabs/nested splits/focus and the #994-derived execution-provisioning seam are Done or explicitly classified
 - #675 / #865–#867 presentation rows are usable with real shell/TUI workloads, or classified
 - #676 children, beginning with #993, prove config/themes/fonts/keybindings/launch policy are usable without an account
-- #686 decision output is accepted before any #675 semantic-boundary claim that actually depends on its proposed expansion
+- #686 remaining open decision output (beyond the duration amendment already accepted via merged #1022) is accepted before any #675 semantic-boundary claim that still depends on that remaining contract work
 - #936 multi-live Metal uses distinct Runtime-owned executions through the accepted provisioning seam and is Done or explicitly deferred with an owning follow-up
 
 **Performance / resources**

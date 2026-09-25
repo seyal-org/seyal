@@ -67,7 +67,7 @@ ActionId
 
 `AgentRun` remains the durable agent-session authority under ADR-012. The Action authority owns only the lifecycle of the requested effect. It does not become a second AgentRun, PTY, process, resource or terminal-state authority.
 
-The Runtime/domain layer owns the durable Action transition authority. Existing resource authorities execute their own operations and return typed evidence/results. Examples include filesystem/Git/process/remote-service authorities. `TerminalExecution` remains the sole owner of its PTY/process/`TerminalState` semantics.
+Under ADR-016, the Agent Backend/domain layer owns the durable Action transition authority for backend-controlled Action state. Existing resource authorities execute their own operations and return typed evidence/results. Examples include filesystem/Git/process/remote-service authorities. `TerminalExecution` remains the sole owner of its PTY/process/`TerminalState` semantics.
 
 Harnesses, adapters, provider clients, UI components and future CLI/SDK/MCP projections submit typed action intents or observations. They may not directly mutate durable Action state.
 
@@ -125,14 +125,14 @@ ADR-012 distinguishes:
 ```text
 Observed
 UpstreamRequestable
-SeyalEnforced
+BackendEnforced
 ```
 
-This Action authority applies only where Seyal actually controls the dispatch boundary.
+This Action authority applies only where the Agent Backend actually controls the dispatch boundary.
 
-If an external CLI agent performs an operation directly through its own process, shell, network client or upstream harness, Seyal may observe or request behavior according to negotiated capability, but it must not claim that this Action authority enforced or prevented that external effect.
+If an external CLI agent performs an operation directly through its own process, shell, network client or upstream harness, The Agent Backend may observe or request behavior according to negotiated capability, but it must not claim that this Action authority enforced or prevented that external effect.
 
-No implementation may convert raw terminal text, OSC content, heuristics, provider narration or an observed tool call into authoritative `SeyalEnforced` action evidence.
+No implementation may convert raw terminal text, OSC content, heuristics, provider narration or an observed tool call into authoritative `BackendEnforced` action evidence.
 
 ### 5. Canonical Action lifecycle
 
@@ -303,7 +303,7 @@ The downstream specification must make these cases deterministic:
 | stale dispatcher returns after replacement | result cannot overwrite current state unless accepted through the current reconciliation contract |
 | local persistence becomes repeatedly unavailable | fail closed for new affected dispatches, bound retry/backoff, surface degraded state; unrelated PTY/VT/render progress continues |
 
-Runtime restart never treats stale metadata as proof that an external process/operation is still live. It reconstructs durable identity and then reconciles liveness/effect status with the owning executor/resource authority.
+Agent Backend restart never treats stale metadata as proof that an external process/operation is still live. It reconstructs durable identity and then reconciles liveness/effect status with the owning executor/resource authority.
 
 ### 13. Result evidence is typed and provenance-bound
 
@@ -442,7 +442,7 @@ The implementation specification/tests must cover at least:
 - repeated disk-full/persistence failure and bounded recovery;
 - action payload privacy revocation/deletion before dispatch;
 - secret-bearing arguments/result metadata and redaction;
-- external-agent observed action incorrectly presented as `SeyalEnforced`;
+- external-agent observed action incorrectly presented as `BackendEnforced`;
 - terminal-isolation regression while many Actions are active/reconciling/failing.
 
 Property/state-machine tests and deterministic fault injection are required for this boundary.
@@ -486,7 +486,7 @@ These costs are preferable to duplicate destructive effects, approval replay or 
 
 Reopen this ADR only if evidence shows a materially different permanent architecture is required, for example:
 
-- the Runtime/domain single Action transition authority cannot meet measured throughput/resource goals;
+- the Agent Backend/domain single Action transition authority cannot meet measured throughput/resource goals;
 - a new execution topology requires distributed fencing semantics not representable by the current generation model;
 - a widely used executor provides a stronger atomic transaction protocol that justifies a new generic abstraction;
 - accepted remote/team control architecture changes the trust/authorization boundary;
