@@ -242,8 +242,12 @@ The decisive `sustained_high_output_2s` workload at `200x60` completed for same-
 For M002 contract gate `high_output_responsiveness`, the collector uses the related
 `sustained_high_output_2s_responder` workload (`Workload::SustainedResponder`):
 DECSTBM confines the flood below row 1 while a responder writes each correlated
-input marker to row 1 (echo off). The flood runs until Runtime teardown kills the
-process group so warmups+samples always overlap a live stream (≥2 s floor).
+input marker to row 1 (echo off). The flood has no end condition: it runs until
+Runtime teardown signals the process group, and the cohort stays open for at
+least 2 s. After the last retained sample the collector requires further
+input-free flood generations; because the flood can stop early only by dying,
+that proves every warmup and sample overlapped a live stream. The workload never
+prints `DONE`, so the streaming-matrix runner rejects it.
 
 The ordinary 16-viewer interactive case remained substantially lower latency (about `122 µs` p95 in the captured run). The full matrix also exercised token streaming, normal command output, burst/scroll, partial/full TUI redraw, alternate screen, reconnect, maximum representative geometry, and cleanup.
 

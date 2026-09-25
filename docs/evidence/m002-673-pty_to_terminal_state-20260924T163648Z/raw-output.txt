@@ -1,20 +1,20 @@
    Compiling libc v0.2.189
    Compiling unicode-segmentation v1.13.3
    Compiling unicode-width v0.2.2
-   Compiling seyal-terminal v0.0.0 (/Users/mahboob/Developer/seyal-m002-673-qualify/crates/seyal-terminal)
-   Compiling seyal-exec v0.0.0 (/Users/mahboob/Developer/seyal-m002-673-qualify/crates/seyal-exec)
+   Compiling seyal-terminal v0.0.0 (<repo>/crates/seyal-terminal)
+   Compiling seyal-exec v0.0.0 (<repo>/crates/seyal-exec)
     Finished `bench` profile [optimized] target(s) in 1.60s
      Running benches/pty_io.rs (target/release/deps/pty_io-eeb74e154ca8692b)
-[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=1 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=2082204 bytes_per_second_sum_latencies=2534825 unicode_workload= out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/1.toml performance_claim=false
+[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=1 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=2082204 bytes_per_second_sum_latencies=2534825 unicode_workload= out=<repo>/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/1.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.01s
      Running benches/pty_io.rs (target/release/deps/pty_io-eeb74e154ca8692b)
-[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=2 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=3693817 bytes_per_second_sum_latencies=4630842 unicode_workload= out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/2.toml performance_claim=false
+[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=2 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=3693817 bytes_per_second_sum_latencies=4630842 unicode_workload= out=<repo>/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/2.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.00s
      Running benches/pty_io.rs (target/release/deps/pty_io-eeb74e154ca8692b)
-[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=3 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=4174480 bytes_per_second_sum_latencies=5293609 unicode_workload= out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/3.toml performance_claim=false
+[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=3 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=4174480 bytes_per_second_sum_latencies=5293609 unicode_workload= out=<repo>/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/3.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.00s
      Running benches/pty_io.rs (target/release/deps/pty_io-eeb74e154ca8692b)
-[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=4 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=4147541 bytes_per_second_sum_latencies=5225181 unicode_workload= out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/4.toml performance_claim=false
+[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=4 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=4147541 bytes_per_second_sum_latencies=5225181 unicode_workload= out=<repo>/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/4.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.00s
      Running benches/pty_io.rs (target/release/deps/pty_io-eeb74e154ca8692b)
-[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=5 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=3908595 bytes_per_second_sum_latencies=4851550 unicode_workload= out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/5.toml performance_claim=false
+[seyal pty benchmark] m002_contract gate=pty_to_terminal_state cohort=5 warmups=20 samples=100 received_bytes=6400 bytes_per_second_wall=3908595 bytes_per_second_sum_latencies=4851550 unicode_workload= out=<repo>/docs/evidence/m002-673-pty_to_terminal_state-20260924T163648Z/cohorts/5.toml performance_claim=false

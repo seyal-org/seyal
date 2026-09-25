@@ -120,7 +120,7 @@
 [seyal scalability] m002_topology process_rss_kib=2816 child_rss_kib=2448 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2816 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2816 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
-[seyal scalability] m002_contract gate=idle_cpu cohort=1 warmups=20 samples=100 population=1 process_rss_kib=2816 child_rss_kib=2400 out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/1.toml performance_claim=false
+[seyal scalability] m002_contract gate=idle_cpu cohort=1 warmups=20 samples=100 population=1 process_rss_kib=2816 child_rss_kib=2400 out=<repo>/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/1.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.01s
      Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
 [seyal scalability] m002_topology process_rss_kib=2336 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
@@ -243,7 +243,7 @@
 [seyal scalability] m002_topology process_rss_kib=2912 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2912 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2912 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
-[seyal scalability] m002_contract gate=idle_cpu cohort=2 warmups=20 samples=100 population=1 process_rss_kib=2912 child_rss_kib=2400 out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/2.toml performance_claim=false
+[seyal scalability] m002_contract gate=idle_cpu cohort=2 warmups=20 samples=100 population=1 process_rss_kib=2912 child_rss_kib=2400 out=<repo>/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/2.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.01s
      Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
 [seyal scalability] m002_topology process_rss_kib=2336 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
@@ -366,7 +366,7 @@
 [seyal scalability] m002_topology process_rss_kib=2944 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2944 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2944 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
-[seyal scalability] m002_contract gate=idle_cpu cohort=3 warmups=20 samples=100 population=1 process_rss_kib=2944 child_rss_kib=2400 out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/3.toml performance_claim=false
+[seyal scalability] m002_contract gate=idle_cpu cohort=3 warmups=20 samples=100 population=1 process_rss_kib=2944 child_rss_kib=2400 out=<repo>/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/3.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.01s
      Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
 [seyal scalability] m002_topology process_rss_kib=2336 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
@@ -489,7 +489,7 @@
 [seyal scalability] m002_topology process_rss_kib=2896 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2896 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2896 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
-[seyal scalability] m002_contract gate=idle_cpu cohort=4 warmups=20 samples=100 population=1 process_rss_kib=2896 child_rss_kib=2400 out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/4.toml performance_claim=false
+[seyal scalability] m002_contract gate=idle_cpu cohort=4 warmups=20 samples=100 population=1 process_rss_kib=2896 child_rss_kib=2400 out=<repo>/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/4.toml performance_claim=false
     Finished `bench` profile [optimized] target(s) in 0.01s
      Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
 [seyal scalability] m002_topology process_rss_kib=2336 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
@@ -612,4 +612,4 @@
 [seyal scalability] m002_topology process_rss_kib=2816 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2816 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
 [seyal scalability] m002_topology process_rss_kib=2816 child_rss_kib=2400 threads=1 fds=9 population=1 evidence=execution-only-headless-not-full-app
-[seyal scalability] m002_contract gate=idle_cpu cohort=5 warmups=20 samples=100 population=1 process_rss_kib=2816 child_rss_kib=2400 out=/Users/mahboob/Developer/seyal-m002-673-qualify/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/5.toml performance_claim=false
+[seyal scalability] m002_contract gate=idle_cpu cohort=5 warmups=20 samples=100 population=1 process_rss_kib=2816 child_rss_kib=2400 out=<repo>/docs/evidence/m002-673-idle_cpu-20260924T163709Z/cohorts/5.toml performance_claim=false

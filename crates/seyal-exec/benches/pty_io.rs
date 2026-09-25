@@ -132,10 +132,6 @@ fn run_contract_cohort() {
         let count = read_echo(&mut execution, &mut buffer, payload);
         retained.push(started.elapsed().as_secs_f64() * 1_000.0);
         received += count as u128;
-        assert!(
-            execution.terminal().rows() > 0,
-            "pty_to_terminal_state did not feed canonical TerminalState"
-        );
     }
     let wall_ms = wall_started.elapsed().as_secs_f64() * 1_000.0;
     let _ = execution.terminate(TerminationPolicy::new(

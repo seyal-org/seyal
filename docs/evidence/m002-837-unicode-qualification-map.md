@@ -1,8 +1,10 @@
 # #837 Unicode qualification map
 
-Refs #837 / #673. This mapping becomes executable only after the accepted
-#673 ceilings in `M002-673-THRESHOLD-DECISIONS.md` and freeze F. It does
-not claim a Unicode performance PASS.
+Refs #837 / #673. #837 was closed as *not planned* on 2026-09-24; this map is
+retained as #673 collector input and has no separate open owner. It becomes
+executable only after the accepted #673 ceilings in
+`M002-673-THRESHOLD-DECISIONS.md` and freeze F. It does not claim a Unicode
+performance PASS.
 
 Shared runner/schema remain #673-owned. This file is the #837 fixture and
 metric map.

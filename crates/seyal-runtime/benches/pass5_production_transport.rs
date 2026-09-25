@@ -355,12 +355,36 @@ fn marker_generation_observed(cache: &DisplayCache, before: u64, marker: &[u8]) 
     cache.generation > before && cache_contains_ascii(cache, marker)
 }
 
-/// True while the Sustained workload's child stream has not yet produced its
-/// terminal `DONE` marker. Checked per retained sample: total session elapsed
-/// time does not prove any individual sample overlapped live stream output.
+/// Minimum input-free generations that prove the responder flood is still
+/// producing output. The flood emits one line per ~10 ms, while a residual
+/// generation from the last sample's marker or resize can account for at most
+/// a couple of bumps.
 #[cfg(target_os = "macos")]
-fn sustained_stream_active(session: &ContractSession) -> bool {
-    !cache_contains_ascii(&session.clients[0].cache, b"DONE")
+const RESPONDER_FLOOD_LIVE_GENERATIONS: u64 = 5;
+
+/// Proves every retained sample overlapped live flood output. The
+/// SustainedResponder flood has no end condition and stops only when teardown
+/// signals its process group, so if it still commits fresh generations with no
+/// client input after the last sample, it was live for all earlier samples.
+#[cfg(target_os = "macos")]
+fn assert_responder_flood_live(session: &mut ContractSession) {
+    let before = session.clients[0].cache.generation;
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        session
+            .runtime
+            .poll_once(Some(Duration::from_millis(1)))
+            .expect("Runtime poll");
+        session.clients[0].drain_available().expect("client drain");
+        if session.clients[0].cache.generation >= before + RESPONDER_FLOOD_LIVE_GENERATIONS {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "high_output_responsiveness flood stopped before teardown; retained samples \
+             cannot be shown to overlap a live stream"
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -394,26 +418,16 @@ fn run_m002_contract_cohort() {
             for index in 0..warmups {
                 let marker = format!("W{index:03}");
                 let _ = sample_high_output_responsiveness(&mut session, false, marker.as_bytes());
-                assert!(
-                    sustained_stream_active(&session),
-                    "high_output_responsiveness warmup {index} ran after the sustained stream \
-                     finished (DONE observed)"
-                );
             }
             for index in 0..samples {
                 let marker = format!("H{index:03}");
-                let sample = sample_high_output_responsiveness(
+                retained.push(sample_high_output_responsiveness(
                     &mut session,
                     index % 8 == 0,
                     marker.as_bytes(),
-                );
-                assert!(
-                    sustained_stream_active(&session),
-                    "high_output_responsiveness sample {index} ran after the sustained stream \
-                     finished (DONE observed); a retained sample must overlap live stream output"
-                );
-                retained.push(sample);
+                ));
             }
+            assert_responder_flood_live(&mut session);
             while stream_started.elapsed() < Duration::from_secs(2) {
                 session
                     .runtime
@@ -537,10 +551,9 @@ fn run_worker(executable: &std::path::Path, case: Case) {
     );
 }
 
-/// Proves, without spawning a Runtime/PTY, that (1) an unrelated or stale
-/// cache generation cannot be mistaken for this sample's input-correlated
-/// generation, and (2) the sustained-stream predicate distinguishes a cache
-/// that has not yet observed the workload's `DONE` marker from one that has.
+/// Proves, without spawning a Runtime/PTY, that an unrelated or stale cache
+/// generation cannot be mistaken for this sample's input-correlated
+/// generation.
 #[cfg(target_os = "macos")]
 fn selftest_correlation() {
     let unrelated = cache_with_row_text(2, "unrelated-content", 80);
@@ -559,18 +572,6 @@ fn selftest_correlation() {
     assert!(
         marker_generation_observed(&correlated, 1, b"H001"),
         "FAIL: a new generation carrying the marker was rejected"
-    );
-
-    let still_streaming = cache_with_row_text(3, "0004096", 80);
-    assert!(
-        !cache_contains_ascii(&still_streaming, b"DONE"),
-        "FAIL: a cache without DONE was treated as stream-finished"
-    );
-
-    let finished = cache_with_row_text(4, "DONE", 80);
-    assert!(
-        cache_contains_ascii(&finished, b"DONE"),
-        "FAIL: a cache carrying DONE was treated as stream-active"
     );
 
     println!("pass5_production_transport selftest_correlation PASSED performance_claim=false");
@@ -919,12 +920,11 @@ fn workload_command(workload: Workload) -> CommandSpec {
         ]),
         Workload::SustainedResponder => CommandSpec::new("/bin/sh").args([
             "-c",
-            // Flood runs until Runtime teardown kills the process group (not a
-            // fixed 220-line budget). Keep ≥2s of live flood under warmups+samples
-            // by never emitting DONE; the harness asserts stream-active via
-            // DONE-not-observed. DECSTBM confines flood below row 1; responder
-            // writes each input line to row 1 with echo off.
-            "stty -echo; read _; ( while :; do printf '\\x1b[2r\\x1b[999;1H%04096d\\r\\n' 0; sleep 0.01; done ) & while IFS= read -r line; do printf '\\x1b7\\x1b[1;1H\\x1b[2K%s\\x1b8' \"$line\"; done",
+            // The flood never ends on its own: it runs until Runtime teardown
+            // signals the owned process group, so it can stop early only by
+            // dying (see assert_responder_flood_live). DECSTBM confines it below
+            // row 1; the responder writes each input line to row 1 with echo off.
+            "stty -echo; read _; ( while :; do printf '\x1b[2r\x1b[999;1H%04096d\r\n' 0; sleep 0.01; done ) & while IFS= read -r line; do printf '\x1b7\x1b[1;1H\x1b[2K%s\x1b8' \"$line\"; done",
         ]),
         Workload::TuiPartial => CommandSpec::new("/bin/sh").args([
             "-c",
@@ -1061,12 +1061,16 @@ fn measure_streaming(
     // percentile calculations unchanged.
     let deadline = Instant::now()
         + match workload {
-            Workload::Sustained | Workload::SustainedResponder => Duration::from_secs(20),
+            Workload::Sustained => Duration::from_secs(20),
             Workload::Token | Workload::TuiPartial | Workload::Tui | Workload::Alternate => {
                 Duration::from_secs(12)
             }
             Workload::Command | Workload::Burst => Duration::from_secs(6),
             Workload::Interactive => unreachable!("interactive uses measure_interactive"),
+            Workload::SustainedResponder => unreachable!(
+                "sustained_high_output_2s_responder never emits DONE; it is only used by the \
+                 high_output_responsiveness contract gate"
+            ),
         };
     let mut runtime_poll_us = 0u128;
     let mut client_apply_us = 0u128;

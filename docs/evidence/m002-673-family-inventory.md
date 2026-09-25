@@ -13,8 +13,10 @@ and SPEC-010 §18.1 / #818 for the two accepted HistoryStore ceilings.
 - **Machine:** Apple M5 Pro MacBook Pro (`Mac17,9`), 15 cores, 24 GiB, macOS 27.0
 - **Power:** battery, discharging — not a controlled lab slot
 - **`PHYSICAL_ARM64` `VALID`:** forbidden on this host
-- **#837:** unblocked for fixture mapping; physical Unicode qualification
-  still waits on freeze F and a controlled host
+- **#837:** closed as *not planned* on 2026-09-24. The fixture map in
+  `m002-837-unicode-qualification-map.md` is retained as #673 collector
+  input; physical Unicode-heavy qualification has no open owner and still
+  needs freeze F and a controlled host
 
 ## Decision rule
 

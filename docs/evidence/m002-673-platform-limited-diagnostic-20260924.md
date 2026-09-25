@@ -12,7 +12,8 @@ Refs #673 only. **Not** `PHYSICAL_ARM64` `VALID`. **Not** a release PASS.
 ## Collected (diagnostic `--gate`, no `--qualify`)
 
 Each directory carries `PLATFORM_LIMITED.txt`, five cohort files (500 samples),
-and `raw-output.txt`.
+and `raw-output.txt`. Absolute checkout paths in `raw-output.txt` are redacted
+to `<repo>/`; no other byte of the captured output is changed.
 
 | Gate | Evidence directory | Samples | Label |
 | --- | --- | ---: | --- |
@@ -21,6 +22,16 @@ and `raw-output.txt`.
 | `idle_cpu` | `m002-673-idle_cpu-20260924T163709Z` | 500 | PLATFORM_LIMITED |
 | `input_visible_proxy` | `m002-673-input_visible_proxy-20260924T164753Z` | 500 | PLATFORM_LIMITED |
 | `damage_to_client_cache` | `m002-673-damage_to_client_cache-20260924T164812Z` | 500 | PLATFORM_LIMITED |
+
+## Collector revision (ledger note)
+
+These cohorts were collected at production SHA `e431311`, **before**
+`904a1d4` restored #992 collector faithfulness in the pass5 / pass7 /
+scalability / history benches. They were produced by the pre-`904a1d4`
+collectors, stay `PLATFORM_LIMITED` diagnostics, and must not be reused as
+input to a `--qualify` run or cited as evidence for any post-`904a1d4`
+collector. `high_output_responsiveness` (the `SustainedResponder` workload) was
+not collected in this pass.
 
 ## Failed / not collected
 
