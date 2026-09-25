@@ -1,0 +1,97 @@
+version = 1
+owner_issue = "#1005"
+parent_issue = "#868"
+package = "m003-presentation"
+description = "Bounded deterministic local presentation workloads for later Flow/Raw/TUI tests. External child-process fixtures only; never TerminalState/Block truth."
+
+[[fixtures]]
+id = "short-normal"
+script = "short-normal.sh"
+invocation = "/bin/bash --noprofile --norc tests/fixtures/m003-presentation/short-normal.sh"
+expected_exit_code = 0
+timeout_seconds = 5
+max_output_bytes = 4096
+needs_tty = false
+stdin = ""
+required_markers = [
+  "seyal-m003-short-stdout line=1",
+  "seyal-m003-short-stderr line=1",
+  "seyal-m003-short-done",
+]
+allowed_marker_prefixes = [
+  "seyal-m003-short-",
+]
+safety_bounds = "Completes immediately; no loops; no network; no home mutation."
+notes = "Short normal-screen stdout and stderr with an explicit completion marker."
+
+[[fixtures]]
+id = "long-output"
+script = "long-output.sh"
+invocation = "/bin/bash --noprofile --norc tests/fixtures/m003-presentation/long-output.sh"
+expected_exit_code = 0
+timeout_seconds = 10
+max_output_bytes = 65536
+needs_tty = false
+stdin = ""
+hard_line_count = 200
+required_markers = [
+  "seyal-m003-long line=0001",
+  "seyal-m003-long line=0200",
+  "seyal-m003-long-done lines=200",
+]
+allowed_marker_prefixes = [
+  "seyal-m003-long ",
+  "seyal-m003-long-",
+]
+safety_bounds = "Exactly 200 body lines plus one done marker; hard finite bound in script and manifest."
+notes = "Bounded long-output stream with deterministic line count and content."
+
+[[fixtures]]
+id = "alternate-screen"
+script = "alternate-screen.sh"
+invocation = "/bin/bash --noprofile --norc tests/fixtures/m003-presentation/alternate-screen.sh"
+expected_exit_code = 0
+timeout_seconds = 15
+max_output_bytes = 8192
+needs_tty = true
+stdin = "\n"
+input_timeout_seconds = 5
+required_markers = [
+  "seyal-m003-altscreen-enter",
+  "seyal-m003-altscreen-active",
+  "seyal-m003-altscreen-exit",
+  "seyal-m003-altscreen-restored",
+]
+# Exactly one of input-received or input-timeout appears depending on stdin delivery.
+optional_marker_groups = [
+  ["seyal-m003-altscreen-input-received", "seyal-m003-altscreen-input-timeout"],
+]
+allowed_marker_prefixes = [
+  "seyal-m003-altscreen-",
+]
+safety_bounds = "read -t bounded by SEYAL_M003_ALTSCREEN_TIMEOUT (default 5s); EXIT trap restores primary screen; no network."
+notes = "Alternate-screen enter, bounded input wait, clean exit/restore including signal cleanup path via EXIT trap."
+
+[[fixtures]]
+id = "resize-observable"
+script = "resize-observable.sh"
+invocation = "/bin/bash --noprofile --norc tests/fixtures/m003-presentation/resize-observable.sh"
+expected_exit_code = 0
+timeout_seconds = 10
+max_output_bytes = 65536
+needs_tty = true
+stdin = ""
+max_cols = 80
+max_rows = 24
+required_markers = [
+  "seyal-m003-resize-begin cols=",
+  "seyal-m003-resize-active cols=",
+  "seyal-m003-resize-row ",
+  "seyal-m003-resize-done cols=",
+  "seyal-m003-resize-restored",
+]
+allowed_marker_prefixes = [
+  "seyal-m003-resize-",
+]
+safety_bounds = "Output rows/cols clamped to 24×80; EXIT trap restores primary screen; no network."
+notes = "Resize-observable full-screen text pattern suitable for later TUI tests."

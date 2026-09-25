@@ -93,8 +93,32 @@ fn sample_ms(gate: &str, terminal: &mut TerminalState, columns: u16) -> f64 {
     }
 }
 
-fn write_cohort_file(path: &str, cohort: usize, samples: &[f64]) {
-    let mut body = format!("cohort = {cohort}\nsamples = [");
+/// A single cohort file's matrix identity: exactly which point of the
+/// accepted retained_content x execution_populations x columns x workloads
+/// matrix (docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml `[matrix]`) this
+/// cohort's samples were collected at. The contract-gate cohort collector
+/// always operates on a single execution's HistoryStore (history reflow is
+/// a per-execution cost, not a population-scaling one), so `executions` is
+/// always 1 here -- that is the correct/only valid value for this family,
+/// not an unmeasured placeholder.
+struct MatrixPoint {
+    lines: usize,
+    columns: u16,
+    workload: &'static str,
+    executions: usize,
+}
+
+fn write_cohort_file(
+    path: &str,
+    cohort: usize,
+    point: &MatrixPoint,
+    commit: &str,
+    samples: &[f64],
+) {
+    let mut body = format!(
+        "cohort = {cohort}\ncommit = \"{commit}\"\nlines = {}\ncolumns = {}\nworkload = \"{}\"\nexecutions = {}\nsamples = [",
+        point.lines, point.columns, point.workload, point.executions,
+    );
     for (index, value) in samples.iter().enumerate() {
         if index > 0 {
             body.push_str(", ");
@@ -114,6 +138,12 @@ fn run_contract_cohort() {
     let lines = parse_scales("SEYAL_HISTORY_BENCH_LINES", &[10_000])[0];
     let columns = parse_scales("SEYAL_HISTORY_BENCH_COLUMNS", &[80])[0];
     let workload = workload_names()[0];
+    let point = MatrixPoint {
+        lines,
+        columns,
+        workload,
+        executions: 1,
+    };
     let mut terminal = populate(lines, workload);
     for _ in 0..warmups {
         let _ = sample_ms(&gate, &mut terminal, columns);
@@ -122,7 +152,8 @@ fn run_contract_cohort() {
     for _ in 0..samples {
         retained.push(sample_ms(&gate, &mut terminal, columns));
     }
-    write_cohort_file(&out, cohort, &retained);
+    let commit = benchmark_commit();
+    write_cohort_file(&out, cohort, &point, &commit, &retained);
     println!(
         "[seyal history benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} lines={lines} columns={columns} workload={workload} out={out}"
     );

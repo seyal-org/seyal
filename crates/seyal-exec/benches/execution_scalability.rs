@@ -38,13 +38,65 @@ mod macos {
     include!("../../../benches/m002_contract_support.rs");
 
     pub(super) fn run() {
-        if std::env::var_os("SEYAL_SCALABILITY_WORKER").is_some() {
+        if std::env::args().nth(1).as_deref() == Some("--selftest-topology") {
+            selftest_topology();
+        } else if std::env::var_os("SEYAL_SCALABILITY_WORKER").is_some() {
             worker();
         } else if m002_contract_gate().is_some() {
             run_contract_cohort();
         } else {
             controller();
         }
+    }
+
+    /// Proves child-process metrics are reported as distinct numeric fields
+    /// from harness-process metrics (not summed/conflated), and that
+    /// teardown genuinely waits for reap (M002 #673 Q6/Q7).
+    fn selftest_topology() {
+        let size = WindowSize::cells(80, 24).expect("valid size");
+        let mut execution =
+            TerminalExecution::spawn(&ready_idle_command(), size).expect("selftest spawn");
+        wait_ready(&mut execution);
+        let child_pid = execution.child_id();
+
+        assert!(
+            pid_is_alive(child_pid),
+            "FAIL: pid_is_alive reported a live child as not alive"
+        );
+        assert_ne!(
+            child_pid,
+            std::process::id(),
+            "FAIL: child and harness PIDs must differ"
+        );
+
+        let harness_metrics = ps_metrics(std::process::id()).expect("harness metrics");
+        let executions = std::slice::from_ref(&execution);
+        let child = child_topology_metrics(executions);
+        let direct_child_metrics = ps_metrics(child_pid).expect("direct child metrics");
+
+        assert_eq!(
+            child.rss_kib_sum, direct_child_metrics.rss_kib,
+            "FAIL: child_topology_metrics for a single execution did not match that \
+             child's own ps_metrics -- it must reflect the CHILD process, not the harness"
+        );
+        assert!(
+            harness_metrics.rss_kib > 0 && child.rss_kib_sum > 0,
+            "FAIL: expected both a non-zero harness RSS and a non-zero child RSS \
+             (two distinct, independently non-trivial numbers)"
+        );
+
+        execution
+            .terminate(TerminationPolicy::new(
+                Duration::from_millis(100),
+                Duration::from_secs(5),
+            ))
+            .expect("selftest terminate");
+        assert!(
+            !pid_is_alive(child_pid),
+            "FAIL: pid_is_alive reported a reaped child as still alive after terminate()"
+        );
+
+        println!("execution_scalability selftest_topology PASSED performance_claim=false");
     }
 
     fn ready_idle_command() -> CommandSpec {
@@ -84,30 +136,116 @@ mod macos {
         }
     }
 
+    /// FD-count slack tolerated when checking that teardown returned the
+    /// harness process to (near) its pre-spawn baseline. `ps`/`lsof`
+    /// themselves transiently open descriptors around this check.
+    const TEARDOWN_FD_SLACK: usize = 2;
+
+    /// True when `pid` is still a live process (portable macOS check via
+    /// `ps -p`, matching the rest of this file's existing `ps`/`lsof`-based
+    /// process introspection rather than adding unsafe FFI).
+    fn pid_is_alive(pid: u32) -> bool {
+        Command::new("ps")
+            .args(["-p", &pid.to_string()])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Child-process (execution/PTY) resource metrics aggregated across a
+    /// population, kept distinct from the harness (benchmark process)
+    /// metrics so the two are never summed/conflated (M002 #673 Q6/Q7).
+    struct ChildTopologyMetrics {
+        rss_kib_sum: u64,
+        threads_sum: u64,
+        fds_sum: usize,
+    }
+
+    fn child_topology_metrics(executions: &[TerminalExecution]) -> ChildTopologyMetrics {
+        let mut rss_kib_sum = 0u64;
+        let mut threads_sum = 0u64;
+        let mut fds_sum = 0usize;
+        for execution in executions {
+            if let Ok(metrics) = ps_metrics(execution.child_id()) {
+                rss_kib_sum += metrics.rss_kib;
+                threads_sum += metrics.threads;
+            }
+            if let Ok(fds) = open_file_count(execution.child_id()) {
+                fds_sum += fds;
+            }
+        }
+        ChildTopologyMetrics {
+            rss_kib_sum,
+            threads_sum,
+            fds_sum,
+        }
+    }
+
     fn sample_contract(gate: &str, population: usize) -> f64 {
         let size = WindowSize::cells(80, 24).expect("valid size");
         match gate {
             "startup" => {
+                // No "first usable terminal state" readiness concept exists
+                // in seyal-exec/seyal-runtime today (Readiness there means
+                // low-level PTY I/O readability, not app/shell readiness).
+                // This measures literal "ready" bytes from a benchmark-
+                // authored shell command; label it explicitly as that
+                // submetric rather than claiming full first-usable-
+                // terminal-state semantics.
                 let started = Instant::now();
                 let mut execution =
                     TerminalExecution::spawn(&ready_idle_command(), size).expect("startup spawn");
                 wait_ready(&mut execution);
-                let ms = started.elapsed().as_secs_f64() * 1_000.0;
+                let startup_child_ready_ms = started.elapsed().as_secs_f64() * 1_000.0;
                 terminate_all(std::slice::from_mut(&mut execution));
-                ms
+                startup_child_ready_ms
             }
             "teardown_recovery" => {
+                let baseline_rss_kib = ps_metrics(std::process::id())
+                    .map(|metrics| metrics.rss_kib)
+                    .unwrap_or(0);
+                let baseline_fds = open_file_count(std::process::id()).unwrap_or(0);
+
                 let mut execution =
                     TerminalExecution::spawn(&ready_idle_command(), size).expect("teardown spawn");
                 wait_ready(&mut execution);
+                let child_pid = execution.child_id();
                 let started = Instant::now();
-                execution
+                let exit = execution
                     .terminate(TerminationPolicy::new(
                         Duration::from_millis(100),
                         Duration::from_secs(5),
                     ))
                     .expect("teardown terminate");
-                started.elapsed().as_secs_f64() * 1_000.0
+                let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
+                // terminate() already blocks until the child is reaped
+                // (child.rs::terminate -> wait_for_exit), but this benchmark
+                // must not merely trust that silently: confirm the PID is
+                // genuinely gone rather than just accepting `exit`'s
+                // presence as proof.
+                assert!(
+                    !pid_is_alive(child_pid),
+                    "teardown_recovery: child pid {child_pid} still alive after terminate() \
+                     reported {exit:?}"
+                );
+                drop(execution);
+
+                // Resource-return-to-baseline: teardown must return the
+                // harness process near its pre-spawn RSS/FD baseline, not
+                // merely report that the child process exited.
+                let after_fds = open_file_count(std::process::id()).unwrap_or(0);
+                let after_rss_kib = ps_metrics(std::process::id())
+                    .map(|metrics| metrics.rss_kib)
+                    .unwrap_or(0);
+                println!(
+                    "[m002 resource_topology] gate=teardown_recovery baseline_rss_kib={baseline_rss_kib} after_rss_kib={after_rss_kib} baseline_fds={baseline_fds} after_fds={after_fds} teardown_fd_slack={TEARDOWN_FD_SLACK}"
+                );
+                assert!(
+                    after_fds <= baseline_fds + TEARDOWN_FD_SLACK,
+                    "teardown_recovery: fd count did not return to baseline after teardown \
+                     (baseline={baseline_fds}, after={after_fds}, slack={TEARDOWN_FD_SLACK})"
+                );
+                elapsed_ms
             }
             "idle_cpu"
             | "resource_scaling_rss"
@@ -126,13 +264,29 @@ mod macos {
                 if gate == "idle_cpu" {
                     std::thread::sleep(Duration::from_millis(50));
                 }
+                // Harness (benchmark-process) metrics: this is what Seyal's
+                // own in-process TerminalExecution/PTY/TerminalState state
+                // actually costs, and is the value this gate's ceiling is
+                // measured against (unchanged from before this fix).
                 let metrics = ps_metrics(std::process::id()).expect("contract metrics");
-                let fds = open_file_count(std::process::id()).expect("contract fds") as f64;
+                let harness_fds = open_file_count(std::process::id()).expect("contract fds");
+                // Child (spawned /bin/sh) process metrics: real system
+                // resource cost of running N executions, reported as
+                // distinct diagnostic fields -- never summed into the
+                // harness-process retained value (M002 #673 Q6/Q7: the old
+                // code reported the harness process only and never
+                // surfaced this split at all).
+                let child = child_topology_metrics(&executions);
+                println!(
+                    "[m002 resource_topology] gate={gate} population={population} harness_rss_kib={} harness_fds={} harness_threads={} child_rss_kib_sum={} child_fds_sum={} child_threads_sum={}",
+                    metrics.rss_kib, harness_fds, metrics.threads,
+                    child.rss_kib_sum, child.fds_sum, child.threads_sum,
+                );
                 terminate_all(&mut executions);
                 match gate {
                     "idle_cpu" => metrics.cpu_percent,
                     "resource_scaling_rss" => (metrics.rss_kib as f64) * 1024.0,
-                    "resource_scaling_fds" => fds,
+                    "resource_scaling_fds" => harness_fds as f64,
                     "resource_scaling_threads" => metrics.threads as f64,
                     _ => unreachable!(),
                 }

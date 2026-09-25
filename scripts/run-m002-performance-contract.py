@@ -13,8 +13,11 @@ PASS/FAIL (the validator rejects proposed gates).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tomllib
@@ -27,7 +30,10 @@ CONTRACT = ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml"
 VALIDATOR = ROOT / "scripts/check-m002-performance-contract.py"
 HISTORY_RUNNER = ROOT / "scripts/run-m002-history-reflow-contract.py"
 BUILD_MACOS = ROOT / "scripts/build-macos.sh"
-SEYAL_APP = ROOT / "target/macos-derived-data/Build/Products/Debug/Seyal.app/Contents/MacOS/Seyal"
+# Contract collection always builds/uses a Release Seyal.app: a Debug binary
+# is not a production-representative renderer_prepare_submission measurement.
+SEYAL_APP_CONFIGURATION = "Release"
+SEYAL_APP = ROOT / "target/macos-derived-data/Build/Products/Release/Seyal.app/Contents/MacOS/Seyal"
 RETAINED_ACTIVE = (
     ROOT
     / "docs/evidence/m002-673-history-reflow-20260916T171837Z/history_active_reflow_ms/record.toml"
@@ -220,12 +226,103 @@ def self_test() -> None:
     print("M002 #673 family inventory self-test passed.")
 
 
+def app_manifest_path() -> Path:
+    return SEYAL_APP.parent / "m002-app-identity-manifest.json"
+
+
+def sha256_of_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_app_manifest() -> dict | None:
+    manifest_path = app_manifest_path()
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def write_app_manifest(sha: str, configuration: str) -> None:
+    manifest = {
+        "sha": sha,
+        "configuration": configuration,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "sha256": sha256_of_file(SEYAL_APP),
+    }
+    app_manifest_path().write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def app_identity_matches(requested_sha: str, requested_configuration: str) -> bool:
+    """True only when an existing Seyal.app binary is provably the requested
+    production SHA/configuration, not merely present and executable.
+
+    A stale binary left over from a previous SHA, a previous configuration
+    (e.g. a Debug build from an ordinary `make build`), or a binary whose
+    content no longer matches what was recorded at build time must never be
+    silently reused for contract collection.
+    """
+    if not (SEYAL_APP.is_file() and os.access(SEYAL_APP, os.X_OK)):
+        return False
+    manifest = load_app_manifest()
+    if manifest is None:
+        return False
+    if manifest.get("sha") != requested_sha or manifest.get("configuration") != requested_configuration:
+        return False
+    if manifest.get("sha256") != sha256_of_file(SEYAL_APP):
+        return False
+    return True
+
+
+def require_clean_source_tree() -> None:
+    """Refuse to build/stamp the app-identity manifest from a dirty checkout.
+
+    The build consumes the current working tree's contents, not just the
+    commit `git rev-parse HEAD` names. A dirty checkout (staged, unstaged,
+    or untracked changes) can therefore produce a binary that does not
+    actually match what the identity manifest would claim, defeating the
+    manifest's whole purpose. Factored out (like the other collection-host
+    guards in this file) so a test can monkeypatch this one function without
+    weakening the real guard for an actual collection run.
+    """
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise SystemExit("cannot verify a clean source tree for M002 app-identity collection")
+    if status.stdout.strip():
+        raise SystemExit(
+            "refusing to build/stamp the M002 app-identity manifest from a dirty working tree; "
+            "commit or stash changes, or collect from an isolated exact-SHA checkout"
+        )
+
+
 def ensure_seyal_app() -> Path:
-    if SEYAL_APP.is_file() and os.access(SEYAL_APP, os.X_OK):
+    requested_sha = git_sha()
+    requested_configuration = SEYAL_APP_CONFIGURATION
+    if app_identity_matches(requested_sha, requested_configuration):
         return SEYAL_APP
-    built = run(["bash", str(BUILD_MACOS)])
+    require_clean_source_tree()
+    env = os.environ.copy()
+    # An env-var override for THIS collection run only, not a change to
+    # build-macos.sh's own Debug default (other callers may legitimately
+    # want Debug).
+    env["SEYAL_MACOS_CONFIGURATION"] = requested_configuration
+    built = run(["bash", str(BUILD_MACOS)], env=env)
     if built.returncode != 0 or not SEYAL_APP.is_file():
         raise SystemExit(f"Seyal.app build failed for renderer contract:\n{built.stdout}")
+    write_app_manifest(requested_sha, requested_configuration)
     return SEYAL_APP
 
 
@@ -281,7 +378,121 @@ def git_sha() -> str:
     return sha
 
 
-def collect_gate(gate: str, *, allow_history: bool) -> None:
+def probe_ac_power_confirmed() -> tuple[bool, str]:
+    """Probe the real host power/thermal state instead of trusting a label.
+
+    Returns (confirmed, detail). Inability to confirm AC power -- non-macOS,
+    `pmset` missing/failing, or output that does not clearly show AC power --
+    invalidates the probe (confirmed=False); a thermal/power-noisy host must
+    never be silently treated as controlled.
+    """
+    if sys.platform != "darwin":
+        return False, "pmset power probe requires macOS"
+    result = run(["pmset", "-g", "batt"])
+    if result.returncode != 0:
+        return False, f"pmset -g batt failed: {result.stdout.strip()}"
+    output = result.stdout
+    first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
+    if "AC Power" in output:
+        return True, first_line or "AC Power"
+    if "Battery Power" in output:
+        return False, "host is running on battery power, not AC"
+    return False, f"pmset output did not confirm AC power: {output.strip()!r}"
+
+
+def probe_thermal_stability_confirmed() -> tuple[bool, str]:
+    """Probe the real host thermal state; AC power alone does not prove a
+    controlled measurement environment.
+
+    A host can be on AC power and still be thermally throttled (e.g. a
+    laptop under load on a warm desk), which would silently distort
+    PHYSICAL_ARM64 timing evidence the same way an uncontrolled host would.
+    Returns (confirmed, detail).
+
+    `pmset -g therm` reports differently by platform: Intel Macs report
+    numeric `CPU_Speed_Limit`/`CPU_Scheduler_Limit` keys (100 = unthrottled,
+    lower = throttled); Apple Silicon macOS -- the only platform this
+    collection host guard (require_apple_silicon_collection_host) ever
+    allows -- reports no numeric limits at all when thermally nominal, only
+    "No ... warning level has been recorded" notes (verified against a real
+    Apple Silicon host). Either a confirmed-unthrottled numeric reading or
+    that no-warning-recorded state counts as confirmed; anything else
+    (command failure, an actual reported throttle, or unrecognized output)
+    invalidates the probe.
+    """
+    if sys.platform != "darwin":
+        return False, "pmset thermal probe requires macOS"
+    result = run(["pmset", "-g", "therm"])
+    if result.returncode != 0:
+        return False, f"pmset -g therm failed: {result.stdout.strip()}"
+    output = result.stdout
+    limits = {key: int(value) for key, value in re.findall(r"(CPU_Speed_Limit|CPU_Scheduler_Limit)\s*=\s*(\d+)", output)}
+    if any(value != 100 for value in limits.values()):
+        return False, f"host is thermally throttled: {limits}"
+    if limits:
+        return True, "; ".join(f"{key}={value}" for key, value in limits.items())
+    no_warning_recorded = (
+        "No thermal warning level has been recorded" in output
+        and "No performance warning level has been recorded" in output
+    )
+    if no_warning_recorded:
+        return True, "no thermal warning level recorded"
+    return False, f"pmset -g therm did not report a recognizable thermal state: {output.strip()!r}"
+
+
+def probe_clean_source_tree_confirmed() -> tuple[bool, str]:
+    """Probe whether the source tree is clean before trusting a SHA-stamped
+    --controlled collection for a non-history family.
+
+    Mirrors probe_clean_source_tree_confirmed() in run-m002-history-reflow-
+    contract.py (consistency-debt follow-up from PR review): collect_cohorts()
+    stamps every cohort file with `git rev-parse HEAD` via SEYAL_BENCH_COMMIT,
+    but a dirty checkout can produce measured behavior that does not actually
+    match that recorded commit. Unlike the history runner, no non-history
+    family here ever reaches evaluate_record's PASS/FAIL path (proposed
+    gates only, physical_arm64_valid always stays false) or an accepted
+    ceiling comparison, so this is defense-in-depth rather than a currently
+    exploitable gap; it keeps the two runners' controlled-mode fail-closed
+    behavior aligned before any non-history family is ever promoted to
+    accepted. Returns (confirmed, detail); any inability to prove a clean
+    tree invalidates the probe (confirmed=False).
+    """
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if status.returncode != 0:
+        return False, "cannot verify a clean source tree"
+    if status.stdout.strip():
+        return False, "working tree has uncommitted or untracked changes"
+    return True, "clean source tree"
+
+
+def require_apple_silicon_collection_host(gate: str) -> None:
+    """Refuse real cohort collection off Apple Silicon macOS.
+
+    Factored out (rather than inlined in `collect_gate`) so a test can
+    monkeypatch this one function to exercise `collect_gate`'s branch logic
+    on any CI runner, the same way it already monkeypatches
+    `probe_ac_power_confirmed` and `collect_cohorts` -- without weakening
+    the real guard for an actual collection run.
+    """
+    if sys.platform != "darwin" or platform.machine() not in {"arm64", "aarch64"}:
+        raise SystemExit(f"{gate} contract collection requires Apple Silicon macOS")
+
+
+def collect_gate(
+    gate: str,
+    *,
+    allow_history: bool,
+    controlled: bool = False,
+    baseline_sha: str | None = None,
+    baseline_cohorts_dir: str | None = None,
+) -> None:
     inventory = load_inventory()
     require_uncontrolled_honesty(inventory)
     family = inventory["families"].get(gate)
@@ -298,15 +509,25 @@ def collect_gate(gate: str, *, allow_history: bool) -> None:
             f"{family.get('platform_limit_reason')}"
         )
     if gate in HISTORY_GATES:
-        result = run([sys.executable, str(HISTORY_RUNNER)])
+        # Forward controlled/baseline arguments to the history runner rather
+        # than silently delegating to its uncontrolled-only default: without
+        # this, `--gate <history> --controlled ...` would drop every
+        # controlled/baseline flag on the floor.
+        command = [sys.executable, str(HISTORY_RUNNER)]
+        if controlled:
+            command.append("--controlled")
+        if baseline_sha is not None:
+            command.extend(["--baseline-sha", baseline_sha])
+        if baseline_cohorts_dir is not None:
+            command.extend(["--baseline-cohorts-dir", baseline_cohorts_dir])
+        result = run(command)
         sys.stdout.write(result.stdout)
         if result.returncode != 0:
             raise SystemExit(result.returncode)
         return
     if gate not in COLLECTORS:
         raise SystemExit(f"{gate} is inventoried but has no five-cohort collector")
-    if sys.platform != "darwin" or platform.machine() not in {"arm64", "aarch64"}:
-        raise SystemExit(f"{gate} contract collection requires Apple Silicon macOS")
+    require_apple_silicon_collection_host(gate)
     sha = git_sha()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     evidence_root = ROOT / "docs" / "evidence" / f"m002-673-{gate}-{stamp}"
@@ -314,16 +535,92 @@ def collect_gate(gate: str, *, allow_history: bool) -> None:
     candidate = evidence_root / "cohorts"
     log = evidence_root / "raw-output.txt"
     log.write_text(collect_cohorts(gate, candidate, sha), encoding="utf-8")
-    note = evidence_root / "PLATFORM_LIMITED.txt"
+
+    if not controlled:
+        # Default path: unconditional PLATFORM_LIMITED diagnostic collection,
+        # unchanged from before --controlled existed.
+        note = evidence_root / "PLATFORM_LIMITED.txt"
+        note.write_text(
+            "\n".join(
+                [
+                    f"gate={gate}",
+                    "environment=PLATFORM_LIMITED",
+                    "physical_arm64_valid=false",
+                    "gate_status=proposed",
+                    "reason=uncontrolled-developer-host; proposed gate has no accepted ceiling; "
+                    "samples are harness proof only and must not be evaluated as PASS/FAIL",
+                    f"production_sha={sha}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        print(
+            f"[m002-673] {gate} collected as PLATFORM_LIMITED harness proof at "
+            f"{evidence_root.relative_to(ROOT)}; not a release evaluation"
+        )
+        return
+
+    # --controlled: explicit opt-in. Only ever emits something other than
+    # PLATFORM_LIMITED when a distinct baseline SHA was supplied AND the
+    # host's real power state probes as AC-confirmed.
+    reasons: list[str] = []
+    if baseline_sha is None:
+        reasons.append("no --baseline-sha supplied")
+    elif baseline_sha == sha:
+        raise SystemExit(
+            "--controlled requires --baseline-sha distinct from the candidate production SHA"
+        )
+    ac_confirmed, ac_detail = probe_ac_power_confirmed()
+    if not ac_confirmed:
+        reasons.append(f"AC power not confirmed: {ac_detail}")
+    # AC power alone does not prove a controlled measurement environment: a
+    # throttled/hot host on AC must still fail closed to PLATFORM_LIMITED.
+    thermal_confirmed, thermal_detail = probe_thermal_stability_confirmed()
+    if not thermal_confirmed:
+        reasons.append(f"thermal stability not confirmed: {thermal_detail}")
+    # Consistency-debt fix (non-blocking review follow-up): align with the
+    # history runner's clean-tree probe before this path ever writes a
+    # PHYSICAL_ARM64 VALID record.
+    clean_tree_confirmed, clean_tree_detail = probe_clean_source_tree_confirmed()
+    if not clean_tree_confirmed:
+        reasons.append(f"clean source tree not confirmed: {clean_tree_detail}")
+
+    if reasons:
+        note = evidence_root / "PLATFORM_LIMITED.txt"
+        note.write_text(
+            "\n".join(
+                [
+                    f"gate={gate}",
+                    "environment=PLATFORM_LIMITED",
+                    "controlled_mode=true",
+                    "physical_arm64_valid=false",
+                    "gate_status=proposed",
+                    f"reason={'; '.join(reasons)}",
+                    f"production_sha={sha}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        print(
+            f"[m002-673] {gate} controlled collection PLATFORM_LIMITED: {'; '.join(reasons)}"
+        )
+        return
+
+    note = evidence_root / "CONTROLLED.txt"
     note.write_text(
         "\n".join(
             [
                 f"gate={gate}",
-                "environment=PLATFORM_LIMITED",
+                "environment_status=VALID",
+                "controlled_mode=true",
                 "physical_arm64_valid=false",
                 "gate_status=proposed",
-                "reason=uncontrolled-developer-host; proposed gate has no accepted ceiling; "
-                "samples are harness proof only and must not be evaluated as PASS/FAIL",
+                f"baseline_sha={baseline_sha}",
+                f"ac_power_detail={ac_detail}",
+                f"thermal_detail={thermal_detail}",
+                f"clean_tree_detail={clean_tree_detail}",
                 f"production_sha={sha}",
                 "",
             ]
@@ -331,8 +628,9 @@ def collect_gate(gate: str, *, allow_history: bool) -> None:
         encoding="utf-8",
     )
     print(
-        f"[m002-673] {gate} collected as PLATFORM_LIMITED harness proof at "
-        f"{evidence_root.relative_to(ROOT)}; not a release evaluation"
+        f"[m002-673] {gate} controlled collection environment_status=VALID "
+        f"baseline_sha={baseline_sha} at {evidence_root.relative_to(ROOT)}; "
+        "proposed gate still has no accepted ceiling and is not a PASS/FAIL evaluation"
     )
 
 
@@ -342,12 +640,32 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--gate")
     parser.add_argument("--allow-history-remasure", action="store_true")
+    parser.add_argument(
+        "--controlled",
+        action="store_true",
+        help="opt-in controlled-environment collection: requires --baseline-sha and probes real AC power",
+    )
+    parser.add_argument(
+        "--baseline-sha",
+        help="baseline production SHA for --controlled mode; must differ from the candidate HEAD SHA",
+    )
+    parser.add_argument(
+        "--baseline-cohorts-dir",
+        help="directory of pre-collected baseline cohorts for --baseline-sha; forwarded as-is to the "
+        "HistoryStore runner for history gates (--gate history_active_reflow_ms/history_sealed_segment_reflow_ms)",
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
         return
     if args.gate:
-        collect_gate(args.gate, allow_history=args.allow_history_remasure)
+        collect_gate(
+            args.gate,
+            allow_history=args.allow_history_remasure,
+            controlled=args.controlled,
+            baseline_sha=args.baseline_sha,
+            baseline_cohorts_dir=args.baseline_cohorts_dir,
+        )
         return
     print_inventory(load_inventory())
     if not args.inventory and args.gate is None:

@@ -391,6 +391,7 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         let connected = expectation(description: "production Runtime and projection connected")
         var connectedOnce = false
+        var didRetryExhaustedRecovery = false
         let checkConnected = {
             if !connectedOnce, view.terminalBridgeIsConnected,
                 view.terminalCurrentFrame() != nil,
@@ -399,6 +400,17 @@ final class SeyalHostComponentTests: XCTestCase {
             {
                 connectedOnce = true
                 connected.fulfill()
+                return
+            }
+            // XCTest can reach this live-app case after the launch-time one-second
+            // recovery episode has already exhausted. Exercise the same explicit
+            // retry boundary available to the host once; do not poll a terminal
+            // recovery state for the full 30-second test timeout.
+            if !connectedOnce, !didRetryExhaustedRecovery,
+                view.runtimeRecoveryState.stage == .exhausted
+            {
+                didRetryExhaustedRecovery = true
+                _ = view.retryRuntimeConnection()
             }
         }
         observeProductChange = checkConnected

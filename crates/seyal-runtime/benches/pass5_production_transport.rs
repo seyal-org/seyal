@@ -15,6 +15,7 @@ use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
     process::{self, Command},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -24,7 +25,7 @@ use seyal_exec::{CommandSpec, WindowSize};
 use seyal_runtime::{
     display::{
         benchmark_display_counters, decode_chunk, empty_cache, reset_benchmark_display_counters,
-        DecodedDisplayChunk, DisplayCache,
+        DecodedDisplayChunk, DisplayAttributes, DisplayCache, DisplayCell, DisplayColor,
     },
     local_ipc::{
         fd_transfer::{benchmark_syscall_counters, reset_benchmark_syscall_counters},
@@ -186,8 +187,57 @@ fn wait_cache_advance(session: &mut ContractSession, before: u64, deadline: Inst
     }
 }
 
+/// Like `wait_cache_advance`, but additionally requires the cache to
+/// visibly contain `marker` before treating a generation bump as proof of
+/// completion. A bare generation bump is not proof THIS input caused it --
+/// any concurrent source (e.g. a sustained-output stream also writing to
+/// the same cache) can advance the generation too. Used for measured
+/// samples; `wait_cache_advance` itself stays uncorrelated for call sites
+/// that are not measuring a specific input's latency (e.g. kicking off a
+/// stream).
+#[cfg(target_os = "macos")]
+fn wait_cache_advance_correlated(
+    session: &mut ContractSession,
+    before: u64,
+    marker: &[u8],
+    deadline: Instant,
+) {
+    loop {
+        session
+            .runtime
+            .poll_once(Some(Duration::from_millis(1)))
+            .expect("Runtime poll");
+        session.clients[0].drain_available().expect("client drain");
+        if session.clients[0].cache.generation > before
+            && cache_contains_ascii(&session.clients[0].cache, marker)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "contract cache advance timed out"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+static DAMAGE_MARKER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A unique per-sample marker so completion can be attributed to THIS
+/// sample's own input rather than any concurrent source (M002 #673 Q3/Q4
+/// correlation fix). ASCII-only and short enough to fit a narrow test
+/// geometry (columns as low as 80).
+#[cfg(target_os = "macos")]
+fn next_damage_marker() -> String {
+    format!(
+        "d{:06}",
+        DAMAGE_MARKER_COUNTER.fetch_add(1, Ordering::Relaxed) % 1_000_000
+    )
+}
+
 #[cfg(target_os = "macos")]
 fn sample_damage_to_client_cache(session: &mut ContractSession) -> f64 {
+    let marker = next_damage_marker();
     let before = session.clients[0].cache.generation;
     let started = Instant::now();
     send_client_frame(
@@ -196,11 +246,16 @@ fn sample_damage_to_client_cache(session: &mut ContractSession) -> f64 {
         MessageType::Input,
         &InputRef {
             attachment_id: session.controller_attachment,
-            bytes: b"x",
+            bytes: marker.as_bytes(),
         }
         .encode(),
     );
-    wait_cache_advance(session, before, Instant::now() + Duration::from_secs(2));
+    wait_cache_advance_correlated(
+        session,
+        before,
+        marker.as_bytes(),
+        Instant::now() + Duration::from_secs(2),
+    );
     started.elapsed().as_secs_f64() * 1_000.0
 }
 
@@ -255,6 +310,19 @@ fn sample_high_output_responsiveness(session: &mut ContractSession, flip: bool) 
     sample_damage_to_client_cache(session)
 }
 
+/// True while the Sustained workload's child stream is still known to be
+/// actively producing output: the client's committed cache has not yet
+/// observed the workload's terminal "DONE" marker. A retained
+/// high_output_responsiveness sample is only meaningful while genuinely
+/// concurrent with this stream; a bare "total session elapsed > 2s" check
+/// (the old logic) does not prove any INDIVIDUAL sample overlapped with
+/// live stream activity -- the stream could have already finished while
+/// later samples kept being collected.
+#[cfg(target_os = "macos")]
+fn sustained_stream_active(session: &ContractSession) -> bool {
+    !cache_contains_ascii(&session.clients[0].cache, b"DONE")
+}
+
 #[cfg(target_os = "macos")]
 fn run_m002_contract_cohort() {
     let gate = m002_contract_gate().expect("contract gate");
@@ -280,12 +348,23 @@ fn run_m002_contract_cohort() {
             let stream_started = Instant::now();
             for _ in 0..warmups {
                 let _ = sample_high_output_responsiveness(&mut session, false);
+                assert!(
+                    sustained_stream_active(&session),
+                    "high_output_responsiveness warmup sample ran after the sustained \
+                     stream finished (DONE observed); it no longer reflects concurrent-\
+                     stream responsiveness"
+                );
             }
             for index in 0..samples {
-                retained.push(sample_high_output_responsiveness(
-                    &mut session,
-                    index % 8 == 0,
-                ));
+                let sample = sample_high_output_responsiveness(&mut session, index % 8 == 0);
+                assert!(
+                    sustained_stream_active(&session),
+                    "high_output_responsiveness sample {index} ran after the sustained \
+                     stream finished (DONE observed); a retained sample must reflect \
+                     genuinely concurrent stream activity, not just total session \
+                     elapsed time"
+                );
+                retained.push(sample);
             }
             while stream_started.elapsed() < Duration::from_secs(2) {
                 session
@@ -308,6 +387,10 @@ fn run_m002_contract_cohort() {
 fn run_macos() {
     if m002_contract_gate().is_some() {
         run_m002_contract_cohort();
+        return;
+    }
+    if env::args().nth(1).as_deref() == Some("--selftest-correlation") {
+        selftest_correlation();
         return;
     }
     if env::args().nth(1).as_deref() == Some("--worker") {
@@ -404,6 +487,75 @@ fn run_worker(executable: &std::path::Path, case: Case) {
         status.success(),
         "Pass-5 production benchmark worker failed"
     );
+}
+
+/// Proves, without spawning a Runtime/PTY, that (1) an unrelated cache
+/// generation bump cannot be mistaken for proof that this sample's own
+/// input admission completed (M002 #673 Q3/Q4), and (2) the sustained-
+/// stream "active" predicate correctly distinguishes a cache that has not
+/// yet observed the workload's DONE marker from one that has (Q5).
+#[cfg(target_os = "macos")]
+fn selftest_correlation() {
+    let unrelated = cache_with_row_text(2, "unrelated-content", 80);
+    assert!(
+        unrelated.generation > 1,
+        "precondition: generation advanced"
+    );
+    assert!(
+        !cache_contains_ascii(&unrelated, b"d000001"),
+        "FAIL: an unrelated generation bump was wrongly accepted as correlated with our marker"
+    );
+
+    let correlated = cache_with_row_text(2, "d000001", 80);
+    assert!(
+        correlated.generation > 1,
+        "precondition: generation advanced"
+    );
+    assert!(
+        cache_contains_ascii(&correlated, b"d000001"),
+        "FAIL: a correlated generation bump carrying our marker was wrongly rejected"
+    );
+
+    let still_streaming = cache_with_row_text(3, "0004096", 80);
+    assert!(
+        !cache_contains_ascii(&still_streaming, b"DONE"),
+        "FAIL: a cache without DONE was wrongly treated as stream-finished"
+    );
+
+    let finished = cache_with_row_text(4, "DONE", 80);
+    assert!(
+        cache_contains_ascii(&finished, b"DONE"),
+        "FAIL: a cache carrying DONE was wrongly treated as stream-active"
+    );
+
+    println!("pass5_production_transport selftest_correlation PASSED performance_claim=false");
+}
+
+#[cfg(target_os = "macos")]
+fn cache_with_row_text(generation: u64, text: &str, columns: u16) -> DisplayCache {
+    let mut cells = vec![DisplayCell::blank(); columns as usize];
+    for (index, byte) in text.bytes().enumerate() {
+        if index >= cells.len() {
+            break;
+        }
+        cells[index] = DisplayCell::lead_scalar(
+            byte as char,
+            1,
+            DisplayColor::Default,
+            DisplayColor::Default,
+            DisplayAttributes::default(),
+        );
+    }
+    DisplayCache {
+        generation,
+        rows: 1,
+        columns,
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_visible: true,
+        alternate_screen: false,
+        cells,
+    }
 }
 
 #[cfg(target_os = "macos")]

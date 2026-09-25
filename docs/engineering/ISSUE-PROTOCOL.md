@@ -28,17 +28,18 @@ Only **Ready** items may be picked up by implementation agents.
 
 ## Active implementation claim
 
-Seyal implementation work is exclusively owned while active. GitHub assignee state is the human-visible claim; the deterministic implementation branch is the collision backstop.
+Seyal implementation work is exclusively owned while active. The single human owner record — sole GitHub assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` claim — is the human-visible cross-contributor ownership lock. The deterministic human-namespaced implementation branch is only that owner's audit/resume backstop.
 
 The pickup contract is:
 
 ```text
 fresh open Ready Issue
-→ resolve authenticated GitHub login
-→ exactly one assignee = current implementer
+→ resolve authenticated **human** GitHub owner
+→ exactly one human owner = sole assignee when assignable, otherwise acknowledged `Owner: @login`
 → plan confirmed
-→ create exact branch issue/<number>
-→ re-read Issue and verify same sole assignee
+→ create exact branch <human-login>/issue/<number>
+→ re-read Issue and verify the same unique human owner record
+→ coding agent may act only on behalf of that human owner
 → create isolated worktree
 → implementation may begin
 ```
@@ -46,25 +47,40 @@ fresh open Ready Issue
 Rules:
 
 - Production implementation of a GitHub Issue must enter through `.agents/skills/implement-issue/SKILL.md`.
-- Resolve the authenticated GitHub login from project-approved GitHub tooling. Never infer identity from git author configuration, local username, chat name, or repository ownership.
-- Fetch assignee state fresh immediately before pickup. Cached context is not ownership authority.
-- An unassigned Ready Issue may be assigned to the current authenticated implementer. Re-fetch after assignment; continue only if that implementer is now the sole assignee.
-- If exactly one different assignee exists, the Issue is already taken. Report the assignee and stop before planning, worktree/branch creation, or production edits.
-- Multiple assignees are an ownership collision for an implementation Issue. Stop and require explicit resolution.
-- If implementer identity, assignment write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
-- Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the assignee rule.
-- For new production pickups the exact branch name is `issue/<number>`. Do not create alternative short-name branches to escape a collision.
-- Branch creation happens only after the implementation plan is confirmed. If `issue/<number>` already exists, stop by default. Resume it only when the user explicitly asks to continue/resume that existing work and the current implementer is still the sole assignee.
-- If concurrent assignment/branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid claim to win a race.
-- Legacy `issue/<number>-<short-name>` branches that were already active before this protocol may finish; new pickups use only `issue/<number>`.
+- Resolve the authenticated **human GitHub owner** from project-approved GitHub tooling and the fresh Issue owner-record state. Never infer ownership from git author configuration, local username, chat name, an agent/bot account, or repository ownership.
+- Fetch the complete owner-record state fresh immediately before pickup: assignees plus any maintainer-acknowledged `Owner: @login` claim. Cached context is not ownership authority.
+- For an assignable contributor, assign the Ready Issue only to the authenticated **human** owner and re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning, record `Owner: @login` in an Issue comment and require a maintainer acknowledgement before branch/worktree creation. A coding-agent/bot identity must never be the owner record.
+- If the unique human owner record names a different contributor — by sole assignee or acknowledged external-owner claim — the Issue is already taken. Report that owner and stop before planning, worktree/branch creation, or production edits.
+- Multiple assignees, multiple acknowledged external-owner claims, or disagreement between assignment and acknowledged owner claim are ownership collisions. Stop and require explicit resolution.
+- If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
+- Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the **human-owner rule**.
+- For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record prevents two people from owning the same implementation Issue at once**; the human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
+- Branch creation happens only after the implementation plan is confirmed. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim.
+- If concurrent owner-record or branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid owner record to win a race.
+- Legacy `issue/<number>`, `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other pre-policy/agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
+
+### Parent and child ownership
+
+A planning/umbrella parent is not an ownership lock for independently scoped child Issues. Different humans may own different Ready children in parallel. Block only when parent and child represent the same implementation slice or an explicit parent-level implementation claim overlaps the child.
+
+### Human owner and agent attribution
+
+Seyal's durable ownership identity is always a human GitHub account.
+
+- Coding agents (Cursor, Codex, Claude Code, Copilot, or similar) are delegated tools. They may write code, tests, documentation, and review analysis on behalf of a human owner, but they do not own Issues.
+- Agent/bot identities must not be the owner record, branch namespace, PR owner of record, durable handoff identity, or independent reviewer used to satisfy a required review gate.
+- New branches use `<human-login>/issue/<number>`; switching agents does not rename or transfer the branch.
+- Agent assistance may be recorded as PR tooling provenance and/or a standard `Co-authored-by:` trailer when a real attribution identity exists. Never invent an identity/email for attribution.
+- If tooling can only post a bot-authored review/comment, treat it as supplemental evidence. Required independent review remains attached to a human reviewer account.
+- A stale agent-named branch does not reserve work forever. A human owner or maintainer must explicitly classify it as resume, migrate, or abandon before new work proceeds.
 
 ### Ownership handoff
 
 A handoff is explicit, never inferred from inactivity.
 
 - The current owner stops editing and records the exact branch/PR/check state.
-- GitHub assignee is explicitly changed to the new implementer.
-- The new implementer re-runs the full Ready/ownership preflight and resumes the existing Issue branch; no second implementation branch is created.
+- Transfer the human owner record explicitly: change the GitHub assignee when the contributor is assignable, otherwise replace the acknowledged `Owner: @login` claim through a maintainer-recorded handoff.
+- The new **human** implementer re-runs the full Ready/ownership preflight. Ownership handoff uses the recipient's human identity; migrate the deterministic branch to `<new-human-login>/issue/<number>` only as part of that explicit handoff, preserving the exact prior head and recording the old/new refs. No parallel implementation branch is created.
 - If work was abandoned before implementation, remove an unused claim branch before clearing/reassigning ownership.
 - An agent that merely suspects a stale claim must report it and stop; it must not self-unassign another contributor.
 
