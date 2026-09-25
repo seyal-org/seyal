@@ -12,8 +12,9 @@ independently reviewable outcome — no milestone amendment is required for this
 decomposition document alone.
 
 **Lane isolation:** do not edit contracts owned by #993 / PR #1006, #922, #686,
-#994, #1000, #1001, #1003, #1004. Do not implement production keybindings inside
-#1002.
+#994, #1000, #1001, #1003, #1004. #1002 owns only the key assignment for the
+ADR-021 (#1001) verbs (SPEC-024 §5.1), not their semantics. Do not implement
+production keybindings inside #1002.
 
 ## Ordering
 
@@ -25,6 +26,7 @@ SPEC-024 Accepted
   → K4 chord prefix state machine (cold table only)
   → K5 menu / AX shortcut projection + native realization
   → K6 headed acceptance + adversarial matrix (M004 launch-blocker evidence)
+K7 ADR-021 pane-verb bindings: after K3 + the matching #1001 verb (per verb)
 ```
 
 K2 depends on K1. K3 depends on K1/K2 and must land before any binding can
@@ -38,7 +40,8 @@ produces the MARKET-READY-M004 keybinding launch-blocker evidence.
 strokes/chords/actions/contexts, compiles an immutable `KeybindingTable`, and
 emits non-secret `KeybindingDiagnostic`s. No native input-path behavior change.
 
-**Scope:** SPEC-024 §2–§3, §5 (catalog validation), §7.2, §12.2–§12.4 (load
+**Scope:** SPEC-024 §2–§3 (including punctuation keys and the `ordinal`
+field), §5 (catalog validation, §5.2 ordinal encoding), §7.2, §12.2–§12.4 (load
 trust), shared config path with existing cold loader (without owning theme
 semantics).
 
@@ -55,14 +58,15 @@ privacy on fixtures).
 
 ## K2 — Defaults, reserved Command, conflict resolution
 
-**Outcome:** builtin default rows from SPEC-024 §4.1; reserved collisions from
-§4.2; last-wins duplicate resolution with `DuplicateSequence` diagnostics.
+**Outcome:** builtin default rows from SPEC-024 §4.1 (excluding ADR-021 pane
+rows, see K7); reserved collisions from §4.2; per-context-bit last-wins
+resolution with `DuplicateSequence` diagnostics; `action = "none"` unbind.
 
-**Scope:** SPEC-024 §4, §7.1.
+**Scope:** SPEC-024 §4, §7.1, §7.3.
 
 **Non-goals:** dispatching actions; changing AppDelegate menu items yet.
 
-**Tests:** SPEC-024 §14 items 2–3.
+**Tests:** SPEC-024 §14 items 2–3, 15.
 
 **Ready preconditions:** K1 merged or same PR only if still one reviewable
 outcome — prefer separate Issue.
@@ -72,17 +76,20 @@ rebindable cut/copy/paste catalog in M003.
 
 ## K3 — Routing gate and Raw/TUI non-interception
 
-**Outcome:** input-path integration that matches SPEC-024 §6: composition first,
-reserved Command, table match, then SPEC-006 terminal classification. Enforce
-`TerminalPassthroughProtected` at load and the opt-in `raw`/`tui` context rule
-at runtime.
+**Outcome:** input-path integration that matches SPEC-024 §6.2: Command
+strokes (reserved, then table) before composition per SPEC-006 §5; then
+composition; then non-Command table match; then SPEC-006 terminal
+classification. Route context sets and specificity per §6.1; palette modal
+per §6.4. Enforce `TerminalPassthroughProtected` at load and the opt-in
+`raw`/`tui` context rule at runtime.
 
 **Scope:** SPEC-024 §6, §9, §10; thin native forwarding of already-normalized
-strokes into Rust match (ADR-015); zero PTY bytes on ApplicationCommand matches.
+strokes (unshifted base plus Shift-applied scalar, §3.2) into Rust match
+(ADR-015); zero PTY bytes on ApplicationCommand matches.
 
 **Non-goals:** chord prefixes (K4); menu projection (K5); live reload.
 
-**Tests:** SPEC-024 §14 items 4–7, 11, 13.
+**Tests:** SPEC-024 §14 items 4–7, 11, 13, 16, 17.
 
 **Ready preconditions:** K1+K2; SPEC-006 production path available; must not
 regress headed Control-C / arrow Raw behavior.
@@ -143,6 +150,26 @@ switch mid-chord, reserved override attempts, passthrough protection.
 **Review risk:** do not claim M004 Done; only the keybinding blocker evidence
 owned by this slice.
 
+## K7 — ADR-021 pane-verb bindings
+
+**Outcome:** SPEC-024 §5.1 catalog ids (`pane.focus_*`, `pane.zoom_toggle`,
+`pane.equalize_*`, `pane.swap_*`, `pane.move_*`) with focus-relative target
+resolution, and the builtin `cmd+opt+arrows` / `cmd+shift+enter` rows.
+
+**Scope:** SPEC-024 §5.1, §10.2. Each id lands in the same PR as, or after, the
+#1001 production child that implements its ADR-021 verb (R5.1.3); it may be
+split per verb family.
+
+**Non-goals:** any PaneTree semantics (ADR-021 / SPEC-025 own them).
+
+**Tests:** SPEC-024 §14 item 18 for the verbs included.
+
+**Ready preconditions:** K3; ADR-021 and SPEC-025 Accepted; the matching
+#1001 production verb merged (and #928 for equalize).
+
+**Review risk:** no dead catalog entry or placeholder dispatch for a verb that
+does not exist yet.
+
 ## Child Issue template (when opening after Acceptance)
 
 Each child should carry:
@@ -160,13 +187,14 @@ Documentation impact: user-facing keybinding docs if behavior ships
 Do not mark children Ready until SPEC-024 is Accepted and
 `development-readiness` passes for that slice.
 
+## Resolved in SPEC-024 (no longer open)
+
+- Ordinal encoding: single `tab.select_ordinal` id plus an integer `ordinal`
+  field (SPEC-024 §3.1, §5.2).
+- `settings.open`: builtin `cmd+,` stays; invoke returns `ActionUnavailable`
+  until a production settings surface exists (SPEC-024 §4.1).
+
 ## Open questions deferred to acceptance review (not blockers for this PR)
 
-1. Exact ordinal encoding for user-rebound `cmd+1`…`cmd+9` (keep parallel
-   builtin family vs single parameterized id) — SPEC-024 allows the family;
-   K2 must pick one typed representation and lock tests.
-2. Whether `settings.open` remains a default before a settings surface exists
-   (stub action vs omit from builtins until UI lands) — acceptance may drop the
-   default row without changing schema.
-3. Cross-coordination with Accepted SPEC-022 for future address-bearing
+1. Cross-coordination with Accepted SPEC-022 for future address-bearing
    keybindings — explicitly out of M003 TOML catalog.
