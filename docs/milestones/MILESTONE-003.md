@@ -150,6 +150,9 @@ Agent inventory/Agents-center/attention product work (#926/#927/#930) is not par
 | Pane/tab execution provisioning contract | #994 | **Active refinement** — owned by @mahboobmonnamd; open PR #1056 |
 | Native window/tab lifecycle contract | #1000 | **Active refinement** — owned by @mahboobmonnamd; open PR #1055 (Proposed ADR-018) |
 | Local resource addressing / goto / focus history | #1004 | **Active refinement** — owned by @mahboobmonnamd; open PR #1057 (Proposed ADR-019 / SPEC-022) |
+| VF-5 / presentation validation lane | #1010 | **Active** — owned by @crdileep82; open PRs #1044 / #1059; not available for pickup |
+| ADR-009 prompt-anchor amendment | #1041 | **Active refinement** — owned by @crdileep82; open PR #1045; not available for pickup |
+| Composer shell context / Git branch switching | #1036 | **Active docs** — owned by @mahboobmonnamd; open PR #1031; not available for pickup |
 
 **Executable frontier (2026-09-25):**
 
@@ -166,6 +169,9 @@ Hierarchy lane
 Presentation lane
   #865 active under @mahboobmonnamd / PR #1058 (legacy-ref migration pending) → #866 → #867 → #868 → #869
   #1005 fixtures landed on master (PR #1052); later #868 consumes them
+  #1010 active under @crdileep82 / PRs #1044 / #1059 (VF-5)
+  #1041 active under @crdileep82 / PR #1045 (ADR-009 prompt-anchor)
+  #1036 active under @mahboobmonnamd / PR #1031 (Composer shell context)
 
 Configuration lane
   #993 active under @anulalbs / PR #1006
@@ -178,7 +184,9 @@ Shell-metadata decision
     only gates behavior that still needs that remaining contract work
 ```
 
-#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (merged #1053; open #1051 / #1050) and are not available for pickup. #1005 is Done on `master` via #1052. #994, #1000, and #1004 are active refinements under @mahboobmonnamd (open PRs #1056 / #1055 / #1057 on `mahboobmonnamd/issue/<n>`) and are not available for pickup; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is owned by @mahboobmonnamd with implementation PR #1058 open; its legacy `issue/865` / `cursor/live-tail-865-c8cd` refs still await migration to `mahboobmonnamd/issue/865`, and it is not available for pickup. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (merged #1053; open #1051 / #1050) and are not available for pickup. #1005 is Done on `master` via #1052. #994, #1000, and #1004 are active refinements under @mahboobmonnamd (open PRs #1056 / #1055 / #1057 on `mahboobmonnamd/issue/<n>`) and are not available for pickup; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is owned by @mahboobmonnamd with implementation PR #1058 open; its legacy `issue/865` / `cursor/live-tail-865-c8cd` refs still await migration to `mahboobmonnamd/issue/865`, and it is not available for pickup. #1010 / #1041 are owned by @crdileep82 (open PRs noted above). #1036 is owned by @mahboobmonnamd via PR #1031. Concurrent edits to `MILESTONE-003.md` from #1056 / #1055 / #1050 may conflict on merge — rebase the later PR when landing. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+
+Product-owner merge confirmation for #995's DoD remains outstanding before this frontier Issue can close.
 
 Contributor ownership follows #997 / merged PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. New branches use the human owner's namespace per the merged `ISSUE-PROTOCOL.md`.
 
