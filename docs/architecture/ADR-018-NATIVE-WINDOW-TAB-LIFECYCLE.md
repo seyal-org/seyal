@@ -738,8 +738,8 @@ contract is carried by this ADR plus the already accepted SPEC-004, SPEC-006,
 SPEC-008 and SPEC-009. W3's multi-window snapshot/FFI ABI change is noted as a
 `docs/specs/README.md` "public API/ABI behavior" trigger; if reviewers require a
 SPEC before W3, promote §2–§6 into an unnumbered
-`SPEC-0xx-M003-WINDOW-TAB-LIFECYCLE` (number allocated at promotion; SPEC-022,
-SPEC-024 and SPEC-025 are already claimed) in a follow-up Architecture PR rather
+`SPEC-0xx-M003-WINDOW-TAB-LIFECYCLE` (number allocated at promotion; SPEC-022
+(#1004), SPEC-023 (#1003), SPEC-024 (#1002) and SPEC-025 (#1001) are already claimed) in a follow-up Architecture PR rather
 than inventing ABI in the child. A SPEC also
 becomes required if #994 introduces a new public protocol shape, and that SPEC
 belongs to #994.

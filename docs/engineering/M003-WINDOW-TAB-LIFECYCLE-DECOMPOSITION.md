@@ -401,7 +401,7 @@ candidate now.
 1. **ADR versus SPEC placement.** ADR-018 carries normative observable behavior
    that `docs/specs/README.md` would also accept as a SPEC. A reviewer may prefer
    promoting ADR-018 §3–§6 into an unnumbered `SPEC-0xx-M003-WINDOW-TAB-LIFECYCLE`
-   (number allocated at promotion; SPEC-022 is claimed by #1004) and keeping
+   (number allocated at promotion; SPEC-022–SPEC-025 are claimed by #1004 / #1003 / #1002 / #1001) and keeping
    only ownership/containment in the ADR. This refinement chose one ADR to avoid a
    second overlapping authority for the same contract.
 2. **Window↔Workspace binding.** ADR-018 §1.1 binds a Window to one Workspace for
