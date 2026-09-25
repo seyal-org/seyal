@@ -6,7 +6,7 @@
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
-- **Proposed M003 extension:** §18 execution provisioning/disposition (types 35–38, capability bit 8) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
+- **Proposed M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -147,10 +147,10 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
-| 35 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
-| 36 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
-| 37 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
-| 38 | R→C | `TerminateExecutionResult` — M003 disposition (§18) |
+| 36 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
+| 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
+| 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
+| 39 | R→C | `TerminateExecutionResult` — M003 disposition (§18) |
 
 M001 server capability bits are:
 
@@ -158,9 +158,9 @@ M001 server capability bits are:
 - bit 1: observer role;
 - bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — accepted by Pass 7 / SPEC-006 / PR #703;
 - bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703;
-- bit 8: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
-Allocated control types in this family beyond Pass 5/7 include 20 (`ComposerCommand`), 26 (`BlockState`), 27/28 (display v2) and reserved 29; types 21–25 and 30–34 have no current owner. Capability bits 4–7 are taken (SPEC-007 / SPEC-011 / SPEC-006). §18 therefore assigns the next free bit (**bit 8**) and contiguous free control types **35–38** (skipping unowned 30–34 only to keep the provisioning quartet packed and distinct from display/composer ranges).
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 Pass 8 `BlockState` (block metadata, not a control `MessageType`), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and capability **bit 9** are claimed by open PR #1058 (#865, `ViewportLineIds` / `CAP_VIEWPORT_LINE_IDS`). Capability **bit 8** is reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code). Capability bits 0–7 are allocated on `master` (0 binary display, 1 observer, 2 semantic terminal key, 3 correlated resize, 4 command blocks, 5 block metadata, 6 grapheme display, 7 extended terminal key). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
@@ -509,15 +509,15 @@ transaction.
 
 ### 18.1 Capability and connection state
 
-`CAP_EXECUTION_PROVISIONING = 1 << 8`. Runtime must not send types 36/38 to a
-peer that did not advertise the capability, and must reject types 35/37 from such
+`CAP_EXECUTION_PROVISIONING = 1 << 10`. Runtime must not send types 37/39 to a
+peer that did not advertise the capability, and must reject types 36/38 from such
 a peer with `UnknownMessage`. A client must not probe an older Runtime by
 sending an unknown message type.
 
-Types 35 and 37 are legal in connection states `Ready` and `Attached`.
+Types 36 and 38 are legal in connection states `Ready` and `Attached`.
 Provisioning is **connection-scoped**: it creates no attachment, grants no
 authority over any existing execution, cannot preempt a Controller and returns
-no display state. Disposition (type 37) is **execution-scoped** and legal only
+no display state. Disposition (type 38) is **execution-scoped** and legal only
 for the current attached Controller of the target execution.
 
 ### 18.2 `CreateExecutionRequest` — exactly 32 bytes
@@ -538,7 +538,7 @@ Rules, validated in this order before any process or terminal mutation:
 3. exact payload length and `reserved == 0`, otherwise `MalformedPayload`;
 4. `request_id != 0`, strictly increasing within the live connection; reuse or
    wrap is malformed, exactly as §9 requires for `ResizeRequest`. Reconnect
-   starts a fresh request-ID space because the connection is new. Types 35 and 37
+   starts a fresh request-ID space because the connection is new. Types 36 and 38
    share one connection-local request-ID space that is separate from the
    correlated-resize space, because correlation is per message-type pair and the
    existing resize bookkeeping is unchanged;
@@ -601,8 +601,10 @@ Rules, validated in this order:
 3. exact payload length, otherwise `MalformedPayload`;
 4. `request_id` obeys the same nonzero/strictly-increasing rules as §18.2 in the
    same connection-local request-ID space;
-5. `attachment_id` is this connection's current live attachment, otherwise
-   `InvalidAttachment` or `StaleIdentity`;
+5. `attachment_id` is this connection's current live attachment. An all-zero
+   `attachment_id` (never a valid identity) is `InvalidAttachment`; any other
+   value that is not the current live attachment (previously released,
+   issued to another connection, or never issued) is `StaleIdentity`;
 6. `execution_id` matches that attachment's execution, otherwise
    `StaleIdentity`;
 7. the attachment holds the Controller lease, otherwise `PermissionDenied`.
@@ -626,14 +628,25 @@ u32  detail_code = 0
 - Termination completion is observed only through the existing `Lifecycle`
   finalization path. Runtime never blocks the reactor and never waits for the
   client to consume a result.
-- A request for an execution that has already reaped its primary child is
-  idempotent: no signal is sent after reap, the result reports the accepted or
-  not-running outcome, and lifecycle finalization is still emitted exactly once.
 - Failure codes reuse §15 meanings.
+
+Exact outcomes for the non-fresh cases (rules evaluated in §18.4 order; each
+case has exactly one `result_code`):
+
+| Execution / attachment state when the request is validated | `result_code` | Effect |
+|---|---|---|
+| live, not terminating (fresh request) | `0 TerminationRequested` | §11 state machine starts |
+| already `TerminatingGraceful` or `TerminatingForced` (duplicate terminate) | `0 TerminationRequested` | idempotent: no additional signal, no deadline reset, no change to escalation |
+| primary child reaped, execution in `DrainingAfterPrimaryExit`, attachment still live | `0 TerminationRequested` | idempotent: no signal after reap; the existing SPEC-003 §10 finalization deadline is neither shortened nor extended |
+| finalization completed and released the attachment; connection has no current attachment | `3 InvalidState` (rule 2) | none |
+| finalization released the attachment; connection has since attached elsewhere | `6 StaleIdentity` (rule 5) | none |
+
+In every case lifecycle finalization is emitted exactly once and no signal is
+sent after primary reap. `detail_code` is `0` in all rows.
 
 ### 18.6 Bounds and hot-path constraints
 
-- At most **4** outstanding (unresolved) type-35 requests per connection and at
+- At most **4** outstanding (unresolved) type-36 requests per connection and at
   most **8** Runtime-wide. Excess is rejected with `Backpressure` before any
   spawn work starts.
 - At most **one** execution is created per Runtime reactor dispatch turn, so a
@@ -646,7 +659,7 @@ u32  detail_code = 0
 
 ### 18.7 Privacy
 
-Type 35–38 payloads are fixed-width and contain no strings, paths, environment
+Type 36–39 payloads are fixed-width and contain no strings, paths, environment
 data, terminal content or secrets. Provisioning/disposition logging carries only
 bounded structured codes; program names, argv, environment names/values, cwd,
 shell contents, terminal cells and input bytes must never be logged, matching
@@ -657,8 +670,8 @@ the SPEC-009 §8.1.1 redaction contract.
 The owning production child Issues must prove:
 
 - capability negotiation: an older/non-advertising peer is never sent types
-  36/38, and existing Pass 5/6/7 clients tolerate capability bit 8;
-- exact 32/32/40/32-byte fixtures for types 35/36/37/38 plus malformed,
+  37/39, and existing Pass 5/6/7 clients tolerate capability bit 10;
+- exact 32/32/40/32-byte fixtures for types 36/37/38/39 plus malformed,
   truncated, oversized, nonzero-reserved and fuzz coverage;
 - `request_id` nonzero/strictly-increasing/duplicate-rejection/wrap/reconnect-reset
   behavior in the shared connection-local space;

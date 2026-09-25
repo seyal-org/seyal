@@ -20,7 +20,7 @@ independently reviewable outcome with one human owner, one
 ```text
 ADR-017 + SPEC amendments accepted
   → P1 Runtime lifetime (zero-execution steady state)
-  → P2 protocol encode/decode for types 35–38
+  → P2 protocol encode/decode for types 36–39
   → P3 Runtime provisioning admission/creation
   → P4 Runtime explicit disposition
   → C1 portable client provisioning/binding/disposition authority
@@ -79,7 +79,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 **In scope**
 
-- `seyal-protocol`: `MessageType` 35–38, `CAP_EXECUTION_PROVISIONING = 1 << 8`,
+- `seyal-protocol`: `MessageType` 36–39, `CAP_EXECUTION_PROVISIONING = 1 << 10`,
   and exact fixed-width encode/decode for `CreateExecutionRequest` (32 B),
   `CreateExecutionResult` (32 B), `TerminateExecutionRequest` (40 B),
   `TerminateExecutionResult` (32 B).
@@ -112,9 +112,9 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 **In scope**
 
-- Handle type 35 on the reactor owner as bounded control work; validate in the
+- Handle type 36 on the reactor owner as bounded control work; validate in the
   SPEC-004 §18.2 order; create through the existing SPEC-003 §7 transaction;
-  queue exactly one type-36 result.
+  queue exactly one type-37 result.
 - Per-connection (4) and Runtime-wide (8) outstanding-request bounds; at most one
   creation per dispatch turn.
 - Launch profile `0` resolves to the Runtime's default interactive shell with its
@@ -167,10 +167,10 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 **In scope**
 
-- Handle type 37 with SPEC-004 §18.4 validation order; require the current
+- Handle type 38 with SPEC-004 §18.4 validation order; require the current
   attached Controller; drive the existing SPEC-003 §11 termination state machine
   with the Runtime's own configured `TerminationPolicy`; queue exactly one
-  type-38 result meaning `TerminationRequested`.
+  type-39 result meaning `TerminationRequested`.
 
 **Out of scope**
 
@@ -189,13 +189,15 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 - Controller terminate → `TerminationRequested` → SIGTERM → deadline → SIGKILL →
   finalize, without blocking unrelated execution output;
-- Observer → `PermissionDenied`; stale/foreign `AttachmentId` → `StaleIdentity`
-  or `InvalidAttachment`; mismatched `execution_id` → `StaleIdentity`;
-- duplicate/interleaved terminate requests are idempotent and produce exactly one
-  finalization;
-- terminate raced against natural child exit sends no post-reap signal;
-- terminate during `DrainingAfterPrimaryExit` is accepted or rejected
-  deterministically and never double-finalizes;
+- Observer → `PermissionDenied`; all-zero `AttachmentId` → `InvalidAttachment`;
+  any other stale/foreign `AttachmentId` → `StaleIdentity`; mismatched
+  `execution_id` → `StaleIdentity` (SPEC-004 §18.4 rule 5/6);
+- every row of the SPEC-004 §18.5 outcome table asserted exactly: duplicate
+  terminate → `0 TerminationRequested` with no extra signal or deadline reset;
+  terminate during `DrainingAfterPrimaryExit` → `0 TerminationRequested` with no
+  post-reap signal and unchanged finalization deadline; terminate after the
+  attachment is released → `InvalidState` (no attachment) or `StaleIdentity`
+  (attached elsewhere); exactly one finalization in every case;
 - repeated create/terminate cycles return fd, registration, attachment,
   controller and association counters to baseline.
 

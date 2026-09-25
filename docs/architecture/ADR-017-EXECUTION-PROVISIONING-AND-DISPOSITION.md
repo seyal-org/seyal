@@ -6,8 +6,8 @@
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-015, SPEC-003, SPEC-004, SPEC-006, SPEC-008, SPEC-009
 - **Scope:** how a new Tab or split Pane obtains one distinct Runtime-owned `TerminalExecution`, and how that execution is disposed of
 - **Classification:** new architecture decision plus tightly scoped SPEC-003 / SPEC-004 / SPEC-009 amendments (§12)
-- **Numbering:** ADR-017 (vacant on `master`). Sibling proposals: #1000 → ADR-018 (PR #1039), #1004 → ADR-019 (PR #1038).
-- **Coordinates with:** #1000 and #1004; see §2.1.
+- **Numbering:** ADR-017 (vacant on `master`). Sibling proposals: #1000 → ADR-018 (PR #1055), #1004 → ADR-019 (PR #1057), #1003 → ADR-020 (PR #1050).
+- **Coordinates with:** #1000, #1003, and #1004; see §2.1.
 
 ## 1. Context
 
@@ -67,15 +67,17 @@ of the new operations. It does **not**:
 - introduce named multi-Workspace CRUD or Workspace UI (ADR-007 §2 stands);
 - raise SPEC-004's connection/attachment maxima (§8);
 - define durable session inventory or adoption UI (#929);
-- define config-declared launch profiles (#676) or trusted CWD signalling (#686).
+- define config-declared launch profiles (#676), the launch-policy object that
+  profile `0` resolves to (#1003 / proposed ADR-020), or trusted CWD signalling
+  (#686).
 
 ### 2.1 Relationship to concurrent M003 refinements
 
-Two sibling refinements were proposed in the same M003 pass and must not become
-competing authorities. Provisional numbers checkable against their pushed
-branches / open PRs:
+Three sibling refinements were proposed in the same M003 pass and must not
+become competing authorities. Provisional numbers checkable against their open
+PRs (earlier PRs #1038 / #1039 are closed and superseded by #1057 / #1055):
 
-- **#1000 — native window/tab lifecycle (proposed as ADR-018; PR #1039).** Owns
+- **#1000 — native window/tab lifecycle (proposed as ADR-018; PR #1055).** Owns
   Workspace → Window → Tab → `PaneTree` → Pane containment, Rust-owned
   `WindowId`/`TabId`/`PaneId` identity and ordering, presentation tiers for
   inactive-but-live executions, the bounded quit sequence, and the
@@ -83,9 +85,16 @@ branches / open PRs:
   terminates a previously bound execution. It explicitly defers the typed
   provisioning request shape and never-bound in-flight disposition to this
   decision.
-- **#1004 — local resource addressing/navigation (proposed as ADR-019; PR #1038).**
+- **#1004 — local resource addressing/navigation (proposed as ADR-019; PR #1057).**
   Owns typed navigation targets and resolution; a "session" target is an
   existing `ExecutionId` rather than a new identity.
+- **#1003 — startup shell/env/CWD launch policy (proposed as ADR-020; PR #1050).**
+  Owns the launch-policy **object** contents (env construction, CWD policy,
+  shell selection, CapabilityPolicy / ShellIntegrationPolicy keys). This ADR
+  owns only the wire `launch_profile` selector and fail-closed validation of
+  that selector; ADR-020 owns what profile `0` resolves to. This ADR does not
+  define profile contents and must not compete as a second launch-policy
+  authority.
 
 This document is **ADR-017**. Numbers remain provisional until merge order is
 settled.
@@ -208,9 +217,11 @@ The Runtime owns the complete effective launch policy:
 The request therefore carries only a bounded launch-profile selector, the owning
 `WorkspaceId`, a request identity and geometry. This keeps one launch-policy
 authority under ADR-015, keeps the wire free of paths and strings, and keeps the
-shell-integration nonce contract intact. It is not a privilege claim: a
-same-UID client can already execute programs itself, and SPEC-004 §4's same-UID
-threat boundary is unchanged.
+shell-integration nonce contract intact. Profile **contents** (env, CWD, shell,
+integration keys) are owned by #1003 / proposed ADR-020 (PR #1050); this ADR
+validates the selector fail-closed and never inlines policy payloads on the wire.
+It is not a privilege claim: a same-UID client can already execute programs itself,
+and SPEC-004 §4's same-UID threat boundary is unchanged.
 
 Named/configurable launch profiles (shell selection, per-profile CWD, startup
 command) are portable configuration owned by #676. When they land they extend
@@ -275,19 +286,19 @@ version `1.0`, following the accepted Pass 7 `ResizeRequest`/`ResizeResult`
 correlation pattern:
 
 ```text
-35  C→R  CreateExecutionRequest
-36  R→C  CreateExecutionResult
-37  C→R  TerminateExecutionRequest
-38  R→C  TerminateExecutionResult
+36  C→R  CreateExecutionRequest
+37  R→C  CreateExecutionResult
+38  C→R  TerminateExecutionRequest
+39  R→C  TerminateExecutionResult
 
-capability  CAP_EXECUTION_PROVISIONING = 1 << 8   (first free bit)
+capability  CAP_EXECUTION_PROVISIONING = 1 << 10  (next free bit; bit 8 = ADR-009 CAP_COMMAND_BLOCK_DURATION; bit 9 = open PR #1058 CAP_VIEWPORT_LINE_IDS)
 ```
 
 All four payloads are fixed-width, contain no strings, paths, environment data
 or terminal content, and are validated completely before any terminal or process
-mutation. A client must observe the capability before sending types 35/37; it
+mutation. A client must observe the capability before sending types 36/38; it
 must never probe an older Runtime with an unknown message (SPEC-004 §7). An
-older client ignores capability bit 8 unchanged.
+older client ignores capability bit 10 unchanged.
 
 Normative byte layouts, exact validation order, request-ID space and the two
 additive result codes are amended into SPEC-004 §18, with the message-type,
@@ -386,7 +397,9 @@ closing chrome. `TerminateExecutionRequest` is:
 - legal only for the **current attached Controller** of the target execution,
   carrying `AttachmentId`, `ExecutionId` and `request_id`;
 - rejected as `StaleIdentity` when the attachment is stale or its execution does
-  not match, and as `PermissionDenied` for an Observer.
+  not match (`InvalidAttachment` only for an all-zero `AttachmentId`), and as
+  `PermissionDenied` for an Observer. Exact outcomes for duplicate, post-reap
+  and post-release terminates are fixed by SPEC-004 §18.5.
 
 The Runtime owns the termination policy. The request carries no grace or kill
 duration: ADR-005 requires a caller-supplied `TerminationPolicy`, and the
@@ -450,7 +463,9 @@ single-execution resolution; that is a named child Issue outcome (§15).
 | Runtime shutting down | request rejected with a bounded failure code; no partial execution |
 | registry at capacity | `CapacityExceeded`; no partial PTY/child/association (SPEC-003 §5) |
 | outstanding-request budget exceeded | `Backpressure` before any spawn work is started |
-| terminate raced with natural child exit | idempotent: no signal after reap (ADR-005, SPEC-003 §10/§11); the result reports the accepted/no-longer-running outcome and lifecycle finalization is emitted once |
+| duplicate terminate while already terminating | `result_code 0 TerminationRequested`; no additional signal, no deadline reset (SPEC-004 §18.5) |
+| terminate raced with natural child exit, primary reaped, execution in `DrainingAfterPrimaryExit` | `result_code 0 TerminationRequested`; no signal after reap (ADR-005, SPEC-003 §10/§11); finalization deadline unchanged; lifecycle finalization emitted once |
+| terminate arriving after finalization released the attachment | `3 InvalidState` when the connection has no current attachment; `6 StaleIdentity` when it has since attached elsewhere (SPEC-004 §18.4/§18.5) |
 
 Adversarial states that must be represented by the implementation children
 (AGENTS.md adversarial lifecycle rules) include: repeated persistent spawn
@@ -619,7 +634,7 @@ protocol detail. §2 records why the existing protocol does not already cover it
 | Artifact | Impact | Content |
 |---|---|---|
 | ADR-017 (this document) | **new decision** | ownership, lifecycle, disposition, bounds, rejected alternatives |
-| SPEC-004 | **amendment (normative on acceptance)** | capability bit 8; message types 35–38 with exact fixed-width layouts and validation order; outstanding-request bounds; two additive result codes; mandatory-control classification |
+| SPEC-004 | **amendment (normative on acceptance)** | capability bit 10; message types 36–39 with exact fixed-width layouts and validation order; outstanding-request bounds; two additive result codes; mandatory-control classification |
 | SPEC-003 | **amendment (normative on acceptance)** | client-requested provisioning/disposition as bounded control work; one create per dispatch; zero live executions as a valid steady state; production Runtime creates no execution from its own startup on the client-launched path; required tests |
 | SPEC-009 | **amendment (normative on acceptance)** | multi-execution resolution: bind by explicit `ExecutionId`; single-survivor adoption retained; more-than-one survivor never guessed or terminated |
 | SPEC-006 / SPEC-008 | **no change** | native command classification and Flow/Raw/TUI presentation are unchanged; a newly bound Pane enters the existing presentation-selection fence |
@@ -709,8 +724,9 @@ Reopen only with concrete evidence that:
   worker (or another owner boundary) is required;
 - the 16 connection/attachment maxima block a required product shape and a
   reviewed multiplexing/limit change is needed;
-- an accepted trusted CWD/launch-profile decision (#686 / #676) requires the
-  request to carry inputs this ADR excludes;
+- an accepted trusted CWD/launch-profile decision (#686 / #676, or #1003 /
+  ADR-020 for the launch-policy object that profile `0` resolves to) requires
+  the request to carry inputs this ADR excludes;
 - agent-created or remote executions require a provisioning authority that this
   client→Runtime seam cannot express without creating a second creation path;
 - measured resource behavior shows that unreferenced live executions cannot be
