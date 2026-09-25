@@ -205,6 +205,19 @@ fn high_volume_logs_remain_bounded_and_searchable() {
             &mut terminal,
             format!("log-{i:04} stream-line\r\n").as_bytes(),
         );
+        if i == 80 {
+            // Mid-flood type + resize must remain coherent on the live grid.
+            feed(&mut terminal, b"typed-during-flood");
+            terminal.resize(20, 6).unwrap();
+            assert!(
+                contains_visible(&terminal, "typed-during-flood"),
+                "input must remain visible while high-volume output continues"
+            );
+            feed(&mut terminal, b"\r\n");
+        }
+        if i == 200 {
+            feed(&mut terminal, b"\x1b[5~");
+        }
     }
     assert!(terminal.primary_history_resident_bytes() <= HISTORY_PER_EXECUTION_BYTE_CAP);
     let matches = terminal.primary_history_search("log-0000", 8);
@@ -212,8 +225,17 @@ fn high_volume_logs_remain_bounded_and_searchable() {
         !matches.is_empty(),
         "high-volume primary history must retain early log lines"
     );
-    feed(&mut terminal, b"typed-during-flood");
-    assert!(contains_visible(&terminal, "typed-during-flood"));
+    // Host-search covers retained history + active grid (composer Ctrl-R does not).
+    let found = terminal
+        .search_and_select("typed-during-flood", true)
+        .expect("host search must find text typed during the flood");
+    let copied = terminal
+        .copy_selection_text()
+        .expect("host copy must return the mid-flood typed needle");
+    assert_eq!(
+        copied, "typed-during-flood",
+        "mid-flood typed input must remain searchable/copyable, anchors={found:?}"
+    );
 }
 
 #[test]
@@ -411,4 +433,82 @@ fn hostile_osc_query_paste_and_mouse_stay_bounded_and_non_executing() {
     };
     assert!(encode_mouse_report(report, off.modes()).is_none());
     assert!(contains_visible(&terminal, "SAFE"));
+}
+
+#[test]
+fn retained_unicode_history_host_search_and_copy_after_resize() {
+    // Production host-search/copy path used by Runtime `HostSearch` /
+    // `search_and_select`. Composer Ctrl-R is command history, not this route.
+    let mut terminal = TerminalState::new(20, 4).unwrap();
+    feed(
+        &mut terminal,
+        "needle-日本語-👩‍💻-softwrap-aaaaaaaaaaaa\r\n".as_bytes(),
+    );
+    for i in 0..16 {
+        feed(&mut terminal, format!("pad-{i:02}\r\n").as_bytes());
+    }
+    terminal.resize(12, 4).unwrap();
+    terminal.resize(28, 6).unwrap();
+
+    let found = terminal
+        .search_and_select("日本語", true)
+        .expect("host search must find retained CJK after resize");
+    let copied = terminal
+        .copy_selection_text()
+        .expect("host copy must use the selected history anchors");
+    assert_eq!(
+        copied, "日本語",
+        "host-search copy must return the selected CJK needle, anchors={found:?}"
+    );
+
+    let emoji = terminal
+        .search_and_select("👩‍💻", true)
+        .expect("host search must find retained ZWJ emoji after resize");
+    let copied_emoji = terminal
+        .copy_selection_text()
+        .expect("host copy must keep the ZWJ emoji grapheme");
+    assert_eq!(
+        copied_emoji, "👩‍💻",
+        "host-search copy must return the selected ZWJ emoji, anchors={emoji:?}"
+    );
+}
+
+#[test]
+fn row_grow_resize_keeps_full_screen_history_seal_for_typed_line() {
+    // Regression: growing rows must not leave a stale DECSTBM region that
+    // discards scrolled primary rows instead of sealing them into HistoryStore.
+    let mut terminal = TerminalState::new(24, 4).unwrap();
+    feed(&mut terminal, b"pad-01\r\npad-02\r\n");
+    feed(&mut terminal, b"typed-during-flood");
+    terminal.resize(20, 6).unwrap();
+    assert!(contains_visible(&terminal, "typed-during-flood"));
+    feed(&mut terminal, b"\r\n");
+    for _ in 0..20 {
+        feed(&mut terminal, b"more\r\n");
+    }
+    assert!(
+        !terminal
+            .primary_history_search("typed-during-flood", 8)
+            .is_empty(),
+        "typed line must seal into primary history after row-grow resize"
+    );
+}
+
+#[test]
+fn explicit_partial_decstbm_still_skips_history_seal_after_row_grow() {
+    // Inverse of the full-screen margin fix: an intentional partial DECSTBM must
+    // remain a non-sealing region after row growth.
+    let mut terminal = TerminalState::new(24, 6).unwrap();
+    feed(&mut terminal, b"\x1b[2;4r"); // DECSTBM rows 2..4 (1-based)
+    feed(&mut terminal, b"\x1b[2;1Hregion-needle\r\n");
+    terminal.resize(24, 10).unwrap();
+    for _ in 0..30 {
+        feed(&mut terminal, b"flood\r\n");
+    }
+    assert!(
+        terminal
+            .primary_history_search("region-needle", 8)
+            .is_empty(),
+        "intentional partial DECSTBM must still skip HistoryStore seal after row growth"
+    );
 }

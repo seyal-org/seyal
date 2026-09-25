@@ -138,23 +138,15 @@ impl Runtime {
             .entries
             .get_mut(&id)
             .ok_or(RuntimeError::UnknownExecution)?;
-        let cursor = entry.execution.terminal().cursor();
-        let start_line = entry
-            .execution
-            .terminal()
-            .line_id(cursor.row)
-            .map(|line| line.0)
-            .unwrap_or(1);
         let block_id = entry
             .block_timeline
             .allocate_id()
             .map_err(|_| RuntimeError::CapacityExceeded)?;
         // Pending only: Running Block metadata is published after trusted C.
-        entry.pending_composer = Some(PendingComposerCommand {
-            command,
-            block_id,
-            start_line,
-        });
+        // The Block's start line comes from the parser-stamped line the C
+        // marker carries (see ShellIntegrationEvent::CommandStarted), never
+        // sampled here: the cursor right now is still on the prompt row.
+        entry.pending_composer = Some(PendingComposerCommand { command, block_id });
         entry.integration = entry.integration.submitted();
         self.publish_composer_status_if_changed(id);
         Ok(ComposerAdmission::Accepted(block_id))
@@ -198,12 +190,17 @@ impl Runtime {
                     ShellIntegrationEvent::PromptStarted { token } => {
                         (token, IntegrationEvent::PromptStarted)
                     }
-                    ShellIntegrationEvent::CommandStarted { token } => {
-                        (token, IntegrationEvent::CommandStarted)
+                    ShellIntegrationEvent::CommandStarted { token, line } => {
+                        (token, IntegrationEvent::CommandStarted { line })
                     }
-                    ShellIntegrationEvent::CommandFinished { token, exit_status } => {
-                        (token, IntegrationEvent::CommandFinished { exit_status })
-                    }
+                    ShellIntegrationEvent::CommandFinished {
+                        token,
+                        exit_status,
+                        line,
+                    } => (
+                        token,
+                        IntegrationEvent::CommandFinished { exit_status, line },
+                    ),
                 };
                 if entry.shell_nonce != Some(token) {
                     entry.untrusted_markers = entry.untrusted_markers.saturating_add(1);
@@ -315,13 +312,13 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
     let mut changed = false;
     for effect in transition.effects.into_iter().flatten() {
         match effect {
-            Effect::StartPendingBlock => {
+            Effect::StartPendingBlock { line } => {
                 let Some(pending) = entry.pending_composer.take() else {
                     continue;
                 };
                 if entry
                     .block_timeline
-                    .start(pending.block_id, pending.command, pending.start_line)
+                    .start(pending.block_id, pending.command, line.0)
                     .is_ok()
                 {
                     entry.integration = entry.integration.block_started(pending.block_id);
@@ -333,14 +330,19 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
             Effect::DropPending => {
                 entry.pending_composer = None;
             }
-            Effect::Complete(block_id, exit) => {
-                let cursor = entry.execution.terminal().cursor();
-                let end_line = entry
-                    .execution
-                    .terminal()
-                    .line_id(cursor.row)
-                    .map(|line| line.0)
-                    .unwrap_or(1);
+            Effect::Complete(block_id, exit, line) => {
+                // A trusted D marker's parser-stamped line is authoritative.
+                // Without one (lost D, or execution ended with no D observed)
+                // the current cursor is the best available fallback.
+                let end_line = line.map(|line| line.0).unwrap_or_else(|| {
+                    let cursor = entry.execution.terminal().cursor();
+                    entry
+                        .execution
+                        .terminal()
+                        .line_id(cursor.row)
+                        .map(|line| line.0)
+                        .unwrap_or(1)
+                });
                 let exit_status = match exit {
                     BlockExit::Code(code) => Some(code),
                     BlockExit::Unknown => None,

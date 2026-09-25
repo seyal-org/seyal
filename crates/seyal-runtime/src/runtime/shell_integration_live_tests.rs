@@ -177,6 +177,33 @@ impl Harness {
         self.records()[index].1
     }
 
+    /// Exact `[start_line, end_line]` body text Runtime recorded for one
+    /// completed Block, the same range a client requests to render its body.
+    fn block_body(&self, index: usize) -> String {
+        let record = self.runtime.entries[&self.id]
+            .block_timeline
+            .records()
+            .nth(index)
+            .expect("record exists");
+        let start = LineId(record.start_line);
+        let end = LineId(record.end_line.expect("Block must be completed"));
+        let terminal = self.runtime.entries[&self.id].execution.terminal();
+        terminal
+            .primary_history_range(start, end, 4096)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, cells)| {
+                cells
+                    .into_iter()
+                    .map(|cell| cell.character)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// All canonical primary text, scrollback included.
     fn text(&self) -> String {
         let terminal = self.runtime.entries[&self.id].execution.terminal();
@@ -319,6 +346,122 @@ fn composer_pwd_shows_only_command_and_output_on_first_and_second_submission() {
         !history.contains("_seyal") && !history.contains("133;"),
         "{history}"
     );
+}
+
+#[test]
+fn block_body_range_excludes_the_prompt_and_echoed_command_row() {
+    // Regression: the Block's start_line used to be sampled at submission
+    // time (the prompt row, before the shell echoed the command), so the
+    // client-requested [start_line, end_line] body range included that row.
+    // start_line must instead come from the parser-stamped line the trusted
+    // `C` marker carries, taken at the moment the parser recognized it, not
+    // resampled later by Runtime after draining a whole batch of events.
+    let mut h = spawn("body-range", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("printf 'BLOCK_BODY_MARKER\\n'"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    h.wait_at_prompt();
+    let body = h.block_body(0);
+    assert!(
+        body.contains("BLOCK_BODY_MARKER"),
+        "expected the real command output in the Block body:\n{body}"
+    );
+    assert!(
+        !body.contains("printf") && !body.contains("T% "),
+        "Block body must exclude the shell's own echoed-command/prompt row:\n{body}"
+    );
+}
+
+#[test]
+fn zero_output_commands_complete_and_later_blocks_stay_exact() {
+    // #1015 review: a command with no output finishes on the row it started
+    // on. Its completion line used to back up before start_line, the
+    // timeline rejected it and the Block stayed Running with no owner.
+    let mut h = spawn("zero-output", PLAIN_RC, None);
+    h.wait_at_prompt();
+    for (index, (command, status)) in [("true", 0), ("false", 1)].into_iter().enumerate() {
+        assert!(matches!(h.submit(command), ComposerAdmission::Accepted(_)));
+        assert_eq!(
+            h.wait_block_completed(index),
+            CommandBlockLifecycle::Completed {
+                exit_status: Some(status)
+            },
+            "{command} must complete, not stay Running"
+        );
+        h.wait_at_prompt();
+        let record = h.runtime.entries[&h.id]
+            .block_timeline
+            .records()
+            .nth(index)
+            .cloned()
+            .expect("record exists");
+        assert!(
+            record.end_line.is_some_and(|end| end >= record.start_line),
+            "{command}: end_line {:?} must not precede start_line {}",
+            record.end_line,
+            record.start_line
+        );
+    }
+
+    // A normal Block after zero-output ones keeps its exact output range.
+    assert!(matches!(
+        h.submit("printf 'AFTER_ZERO_OUTPUT\\n'"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert_eq!(
+        h.wait_block_completed(2),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    h.wait_at_prompt();
+    let body = h.block_body(2);
+    assert_eq!(body.trim(), "AFTER_ZERO_OUTPUT", "unexpected body:\n{body}");
+}
+
+#[test]
+fn shell_and_child_stderr_reach_the_terminal() {
+    // #1046: the bootstrap closed the nonce descriptor with a bare
+    // `exec {fd}<&- 2>/dev/null`, which made /dev/null the shell's stderr for
+    // its whole lifetime. Every command's stderr silently disappeared.
+    let mut h = spawn("stderr", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("printf 'CHILD_OUT_1046\\n'; printf 'CHILD_ERR_1046\\n' >&2; print -u2 SHELL_ERR_1046; ls /seyal-1046-no-such-dir"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert!(matches!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(status)
+        } if status != 0
+    ));
+    h.wait_at_prompt();
+    let text = h.text();
+    let lines: Vec<&str> = text.lines().collect();
+    let position = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.trim_end() == needle)
+            .unwrap_or_else(|| panic!("{needle} missing from terminal text:\n{text}"))
+    };
+    let out = position("CHILD_OUT_1046");
+    let child_err = position("CHILD_ERR_1046");
+    let shell_err = position("SHELL_ERR_1046");
+    let ls_err = position("ls: /seyal-1046-no-such-dir: No such file or directory");
+    assert!(
+        out < child_err && child_err < shell_err && shell_err < ls_err,
+        "stdout and stderr must interleave in write order:\n{text}"
+    );
+    h.assert_no_instrumentation_visible();
 }
 
 #[test]
