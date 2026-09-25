@@ -414,7 +414,9 @@ typedef struct SeyalAppBlockSpan {
 
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
 
-/* #865 Flow output projection. Hosts must not invent start+511 ranges. */
+/* #865 Flow output projection. Hosts must not invent start+511 ranges.
+ * PRIMARY_CLIP: reserved0 = first prepared-frame row; reserved1 = row count.
+ * HISTORY: start_line/end_line inclusive; reserved0/reserved1 unused (0). */
 #define SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED 0u
 #define SEYAL_APP_BLOCK_PROJECTION_HISTORY 1u
 #define SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP 2u

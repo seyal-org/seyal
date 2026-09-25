@@ -1358,25 +1358,29 @@ enum RendererValidation {
         }
     }
 
-    /// #865: Flow running live-tail clips the prepared primary frame into the
-    /// Block region without enabling Pane-wide live grid drawing.
+    /// #865: Flow running live-tail clips only the mapped primary-frame row
+    /// slice into the Block region without enabling Pane-wide live grid drawing.
     static func liveTailPrimaryClipSelfTest() -> Bool {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
         do {
             let renderer = try MetalTerminalRenderer(device: device)
             renderer.setPresentationPlan(.flow())
+            func cell(_ ascii: UInt32) -> SeyalPreparedCell {
+                preparedCell(scalar: ascii)
+            }
             let liveCells = [
-                preparedCell(scalar: UInt32(ascii: "H")),
-                preparedCell(scalar: UInt32(ascii: "i"))
+                cell(UInt32(ascii: "A")), cell(UInt32(ascii: "B")),
+                cell(UInt32(ascii: "H")), cell(UInt32(ascii: "i")),
+                cell(UInt32(ascii: "!")), cell(UInt32(ascii: "!"))
             ]
             var damage = DamageMask()
-            damage.mark(row: 0)
+            damage.markAll(rows: 3)
             guard try liveCells.withUnsafeBufferPointer({ buffer in
                 try renderer.update(
                     frame: NativePreparedFrame(
                         cells: buffer,
                         generation: 865,
-                        rows: 1,
+                        rows: 3,
                         columns: 2,
                         fullRebuild: true,
                         damage: damage
@@ -1393,12 +1397,16 @@ enum RendererValidation {
                     x: 0,
                     y: 0,
                     width: CGFloat(cellSize.width * 2),
-                    height: CGFloat(cellSize.height)
+                    height: CGFloat(cellSize.height * 2)
                 )
             )
             renderer.setTranscriptRegions([region])
-            renderer.setLiveTailBlocks([865: 1])
-            guard renderer.liveTailRegionCount == 1 else { return false }
+            renderer.setLiveTailBlocks([
+                865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+            ])
+            guard renderer.liveTailRegionCount == 1,
+                  renderer.liveTailInstanceCount(for: 865) == 4
+            else { return false }
 
             let inspection = renderer.inspectPresentation()
             guard inspection.mode == .flow,
@@ -1411,7 +1419,9 @@ enum RendererValidation {
             }
 
             let paint = renderer.inspectFlowPaint()
-            return paint.isClean && paint.historyInstanceCount > 0
+            return paint.isClean
+                && paint.historyInstanceCount == 4
+                && paint.instancesOutsideClips == 0
         } catch {
             return false
         }

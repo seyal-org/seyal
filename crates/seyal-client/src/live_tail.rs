@@ -6,6 +6,9 @@
 //! - **Running** Blocks use a damage-driven clip of the prepared primary frame
 //!   into the Block output region (Approach B). Hosts must not invent a history
 //!   range such as `start + 511`.
+//! - Clip rows are derived from Runtime viewport `LineId`s: only primary rows
+//!   whose line id is `>= start_line` are drawn. Preceding prompts/output still
+//!   on screen are excluded.
 //! - **Completed** Blocks keep the trusted finite history span.
 //! - Raw/TUI and conflicting evidence fail closed.
 
@@ -18,10 +21,14 @@ pub struct HistorySpan {
     pub end_line: u64,
 }
 
-/// Trusted start anchor for a running primary-frame live-tail clip.
+/// Trusted start anchor plus the viewport row slice for a running live-tail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrimaryFrameClip {
     pub start_line: u64,
+    /// Inclusive first prepared-frame row belonging to this Block.
+    pub first_row: u16,
+    /// Number of prepared-frame rows to draw (`0` is invalid / fail closed).
+    pub row_count: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,20 +42,53 @@ pub enum LiveTailProjection {
     FailClosed,
 }
 
+/// Map a running Block's `start_line` onto the current primary viewport.
+///
+/// `viewport_line_ids[row]` is the absolute primary `LineId` for that prepared
+/// row. Returns `None` when the mapping cannot be established (fail closed):
+/// empty viewport, missing ids, or no visible row belongs to the Block yet.
+pub fn map_primary_clip(start_line: u64, viewport_line_ids: &[u64]) -> Option<(u16, u16)> {
+    if start_line == 0 || viewport_line_ids.is_empty() {
+        return None;
+    }
+    if viewport_line_ids.len() > u16::MAX as usize {
+        return None;
+    }
+    if viewport_line_ids.contains(&0) {
+        return None;
+    }
+    let first = viewport_line_ids.iter().position(|&id| id >= start_line)? as u16;
+    let row_count = (viewport_line_ids.len() as u16).saturating_sub(first);
+    if row_count == 0 {
+        return None;
+    }
+    Some((first, row_count))
+}
+
 /// Project one Block's Flow output path for the current presentation.
 ///
 /// `end_line` is the Runtime-trusted completed end, or `None` while running.
+/// `viewport_line_ids` is required for a running primary clip; pass `&[]` when
+/// the mapping is unavailable (projection fails closed).
 pub fn project_block_output(
     mode: PresentationMode,
     start_line: u64,
     end_line: Option<u64>,
     running: bool,
+    viewport_line_ids: &[u64],
 ) -> LiveTailProjection {
     if mode != PresentationMode::Flow || start_line == 0 {
         return LiveTailProjection::FailClosed;
     }
     match (running, end_line) {
-        (true, None) => LiveTailProjection::PrimaryFrame(PrimaryFrameClip { start_line }),
+        (true, None) => match map_primary_clip(start_line, viewport_line_ids) {
+            Some((first_row, row_count)) => LiveTailProjection::PrimaryFrame(PrimaryFrameClip {
+                start_line,
+                first_row,
+                row_count,
+            }),
+            None => LiveTailProjection::FailClosed,
+        },
         (false, Some(end)) if end >= start_line => LiveTailProjection::History(HistorySpan {
             start_line,
             end_line: end,
@@ -62,28 +102,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn running_flow_block_uses_primary_frame_clip() {
+    fn running_clip_skips_preceding_viewport_rows() {
+        // Two sequential commands: rows 0..1 are the previous Block, 2..4 are
+        // the running command starting at line 30.
+        let ids = [10_u64, 11, 30, 31, 32];
+        assert_eq!(map_primary_clip(30, &ids), Some((2, 3)));
+        let projection = project_block_output(PresentationMode::Flow, 30, None, true, &ids);
         assert_eq!(
-            project_block_output(PresentationMode::Flow, 10, None, true),
-            LiveTailProjection::PrimaryFrame(PrimaryFrameClip { start_line: 10 })
+            projection,
+            LiveTailProjection::PrimaryFrame(PrimaryFrameClip {
+                start_line: 30,
+                first_row: 2,
+                row_count: 3,
+            })
         );
     }
 
     #[test]
-    fn seq_one_to_one_thousand_stays_one_primary_clip() {
-        let first = project_block_output(PresentationMode::Flow, 20, None, true);
-        let after_many_lines = project_block_output(PresentationMode::Flow, 20, None, true);
-        assert_eq!(first, after_many_lines);
+    fn scrolled_off_start_keeps_full_viewport_for_running_block() {
+        // start_line has left the viewport; every visible row belongs to the
+        // running Block.
+        let ids = [100_u64, 101, 102, 103];
+        assert_eq!(map_primary_clip(20, &ids), Some((0, 4)));
+    }
+
+    #[test]
+    fn start_not_yet_on_viewport_fails_closed() {
+        let ids = [1_u64, 2, 3];
+        assert_eq!(map_primary_clip(50, &ids), None);
         assert_eq!(
-            first,
-            LiveTailProjection::PrimaryFrame(PrimaryFrameClip { start_line: 20 })
+            project_block_output(PresentationMode::Flow, 50, None, true, &ids),
+            LiveTailProjection::FailClosed
+        );
+    }
+
+    #[test]
+    fn missing_or_zero_line_ids_fail_closed() {
+        assert_eq!(map_primary_clip(10, &[]), None);
+        assert_eq!(map_primary_clip(10, &[0, 11, 12]), None);
+        assert_eq!(
+            project_block_output(PresentationMode::Flow, 10, None, true, &[]),
+            LiveTailProjection::FailClosed
         );
     }
 
     #[test]
     fn completion_hands_off_to_trusted_history_span() {
-        let running = project_block_output(PresentationMode::Flow, 20, None, true);
-        let completed = project_block_output(PresentationMode::Flow, 20, Some(1019), false);
+        let ids = [20_u64, 21, 22];
+        let running = project_block_output(PresentationMode::Flow, 20, None, true, &ids);
+        let completed = project_block_output(PresentationMode::Flow, 20, Some(1019), false, &ids);
         assert_ne!(running, completed);
         assert_eq!(
             completed,
@@ -95,48 +162,68 @@ mod tests {
     }
 
     #[test]
-    fn raw_and_tui_fail_closed() {
+    fn seq_long_output_stays_one_running_clip_identity() {
+        // Many lines have scrolled; start is above the viewport. The projection
+        // remains one PrimaryFrame clip anchored at the same start_line.
+        let early = [50_u64, 51, 52];
+        let later = [900_u64, 901, 902, 903];
+        let first = project_block_output(PresentationMode::Flow, 20, None, true, &early);
+        let after_many = project_block_output(PresentationMode::Flow, 20, None, true, &later);
+        assert!(matches!(first, LiveTailProjection::PrimaryFrame(c) if c.start_line == 20));
+        assert!(matches!(after_many, LiveTailProjection::PrimaryFrame(c) if c.start_line == 20));
+        assert_ne!(first, after_many); // row slice tracks the viewport
         assert_eq!(
-            project_block_output(PresentationMode::Raw, 10, None, true),
+            after_many,
+            LiveTailProjection::PrimaryFrame(PrimaryFrameClip {
+                start_line: 20,
+                first_row: 0,
+                row_count: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn raw_and_tui_fail_closed() {
+        let ids = [10_u64, 11];
+        assert_eq!(
+            project_block_output(PresentationMode::Raw, 10, None, true, &ids),
             LiveTailProjection::FailClosed
         );
         assert_eq!(
-            project_block_output(PresentationMode::Tui, 10, Some(12), false),
+            project_block_output(PresentationMode::Tui, 10, Some(12), false, &ids),
             LiveTailProjection::FailClosed
         );
     }
 
     #[test]
     fn stale_or_conflicting_evidence_fail_closed() {
+        let ids = [10_u64, 11];
         assert_eq!(
-            project_block_output(PresentationMode::Flow, 0, None, true),
+            project_block_output(PresentationMode::Flow, 0, None, true, &ids),
             LiveTailProjection::FailClosed
         );
         assert_eq!(
-            project_block_output(PresentationMode::Flow, 10, Some(9), false),
+            project_block_output(PresentationMode::Flow, 10, Some(9), false, &ids),
             LiveTailProjection::FailClosed
         );
         assert_eq!(
-            project_block_output(PresentationMode::Flow, 10, Some(15), true),
+            project_block_output(PresentationMode::Flow, 10, Some(15), true, &ids),
             LiveTailProjection::FailClosed
         );
         assert_eq!(
-            project_block_output(PresentationMode::Flow, 10, None, false),
+            project_block_output(PresentationMode::Flow, 10, None, false, &ids),
             LiveTailProjection::FailClosed
         );
-    }
-
-    #[test]
-    fn identical_running_projections_coalesce() {
-        let a = project_block_output(PresentationMode::Flow, 3, None, true);
-        let b = project_block_output(PresentationMode::Flow, 3, None, true);
-        assert_eq!(a, b);
     }
 
     #[test]
     fn host_must_not_receive_invented_history_for_running() {
-        match project_block_output(PresentationMode::Flow, 40, None, true) {
-            LiveTailProjection::PrimaryFrame(_) => {}
+        let ids = [40_u64, 41];
+        match project_block_output(PresentationMode::Flow, 40, None, true, &ids) {
+            LiveTailProjection::PrimaryFrame(clip) => {
+                assert_eq!(clip.first_row, 0);
+                assert_eq!(clip.row_count, 2);
+            }
             LiveTailProjection::History(_) | LiveTailProjection::FailClosed => {
                 panic!("running Flow must not fall back to history or fail closed")
             }

@@ -11,7 +11,7 @@ pub use crate::pass7::{
     ComposerResult, ComposerResultCode, ComposerStatus, HistoryCell, HistoryRangeRequest,
     HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow, HistorySourceCell, ResizeRequest,
     ResizeResult, ResizeResultCode, TerminalKey, TerminalKeyKind, TerminalKeyModifiers,
-    TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers,
+    TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers, ViewportLineIds,
     CAP_CORRELATED_RESIZE, CAP_EXTENDED_TERMINAL_KEY, CAP_SEMANTIC_TERMINAL_KEY,
     HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG, HISTORY_CELL_WIDTH_MASK,
     HISTORY_CELL_WIDTH_SHIFT, MAX_HISTORY_GRAPHEME_BYTES, MAX_HISTORY_RANGE_BYTES,
@@ -32,6 +32,9 @@ pub const CAP_OBSERVER: u32 = 1 << 1;
 pub const CAP_COMMAND_BLOCKS: u32 = 1 << 4;
 /// Peer accepts Candidate-D grapheme display v2 (types 27/28, schema 2).
 pub const CAP_GRAPHEME_DISPLAY: u32 = 1 << 6;
+/// Peer accepts Runtime→client primary viewport LineId vectors (type 35) so
+/// Flow live-tail can map Block `start_line` onto prepared-frame rows.
+pub const CAP_VIEWPORT_LINE_IDS: u32 = 1 << 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
@@ -798,6 +801,9 @@ pub enum MessageType {
     HostSearch = 33,
     /// Native mouse event. Runtime encodes SGR/X10 from canonical modes.
     TerminalMouse = 34,
+    /// Runtime→client primary viewport LineIds for one display generation.
+    /// Gated on `CAP_VIEWPORT_LINE_IDS`.
+    ViewportLineIds = 35,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -835,6 +841,7 @@ impl MessageType {
             32 => Self::CopiedText,
             33 => Self::HostSearch,
             34 => Self::TerminalMouse,
+            35 => Self::ViewportLineIds,
             _ => return None,
         })
     }
@@ -875,6 +882,7 @@ pub enum Message<'a> {
     CopiedText(InputRef<'a>),
     HostSearch(HostSearch<'a>),
     TerminalMouse(TerminalMouse),
+    ViewportLineIds(ViewportLineIds),
 }
 
 pub fn decode_message<'a>(
@@ -936,6 +944,7 @@ pub fn decode_message<'a>(
         MessageType::CopiedText => Message::CopiedText(InputRef::decode(payload)?),
         MessageType::HostSearch => Message::HostSearch(HostSearch::decode(payload)?),
         MessageType::TerminalMouse => Message::TerminalMouse(TerminalMouse::decode(payload)?),
+        MessageType::ViewportLineIds => Message::ViewportLineIds(ViewportLineIds::decode(payload)?),
     })
 }
 
@@ -1021,6 +1030,10 @@ mod tests {
         assert_eq!(MessageType::from_u16(32), Some(MessageType::CopiedText));
         assert_eq!(MessageType::from_u16(33), Some(MessageType::HostSearch));
         assert_eq!(MessageType::from_u16(34), Some(MessageType::TerminalMouse));
+        assert_eq!(
+            MessageType::from_u16(35),
+            Some(MessageType::ViewportLineIds)
+        );
     }
 
     #[test]

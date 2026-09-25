@@ -505,8 +505,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   /// Running Flow Blocks: clip the prepared primary frame into Block regions.
-  func setLiveTailBlocks(_ startLinesByBlock: [UInt64: UInt64]) {
-    renderer.setLiveTailBlocks(startLinesByBlock)
+  func setLiveTailBlocks(_ clipsByBlock: [UInt64: LiveTailClip]) {
+    renderer.setLiveTailBlocks(clipsByBlock)
   }
 
   var lastPreparedRowCount: Int {

@@ -14,6 +14,7 @@ use seyal_runtime::{
             encode_frame, ClientHello, ErrorCode, ErrorMessage, MessageType, ServerHello,
             CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS, CAP_CORRELATED_RESIZE,
             CAP_EXTENDED_TERMINAL_KEY, CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY,
+            CAP_VIEWPORT_LINE_IDS,
         },
     },
     pass8::CAP_BLOCK_METADATA,
@@ -224,6 +225,7 @@ pub(crate) fn requested_capabilities(
 ) -> u32 {
     CAP_COMMAND_BLOCKS
         | CAP_GRAPHEME_DISPLAY
+        | CAP_VIEWPORT_LINE_IDS
         | if request_extended_terminal_key {
             CAP_EXTENDED_TERMINAL_KEY
         } else {
@@ -421,6 +423,7 @@ mod connect_error_tests {
         assert_eq!(without_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_ne!(without_v2 & CAP_COMMAND_BLOCKS, 0);
         assert_ne!(without_v2 & CAP_GRAPHEME_DISPLAY, 0);
+        assert_ne!(without_v2 & CAP_VIEWPORT_LINE_IDS, 0);
         assert_ne!(without_v2 & seyal_runtime::pass8::CAP_BLOCK_METADATA, 0);
     }
 

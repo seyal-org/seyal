@@ -801,7 +801,9 @@ pub const SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP: u16 = 2;
 #[derive(Clone, Copy)]
 pub struct SeyalAppBlockProjection {
     pub kind: u16,
+    /// For [`SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP`]: first prepared-frame row.
     pub reserved0: u16,
+    /// For [`SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP`]: prepared-frame row count.
     pub reserved1: u32,
     pub start_line: u64,
     /// Inclusive end for [`SEYAL_APP_BLOCK_PROJECTION_HISTORY`]; zero otherwise.
@@ -853,9 +855,10 @@ pub extern "C" fn seyal_app_block_span(handle: u64, index: u32) -> SeyalAppBlock
 pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAppBlockProjection {
     APPS.with(|apps| {
         let apps = apps.borrow();
-        let Some(snapshot) = apps.get(&handle).map(|state| state.root.snapshot()) else {
+        let Some(state) = apps.get(&handle) else {
             return SeyalAppBlockProjection::fail_closed();
         };
+        let snapshot = state.root.snapshot();
         let Some(block) = snapshot
             .composer
             .as_ref()
@@ -876,11 +879,12 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
             block.start_line,
             block.end_line,
             block.state == BlockPresentationState::Running,
+            state.root.viewport_line_ids(),
         ) {
             LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {
                 kind: SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
-                reserved0: 0,
-                reserved1: 0,
+                reserved0: clip.first_row,
+                reserved1: u32::from(clip.row_count),
                 start_line: clip.start_line,
                 end_line: 0,
             },
@@ -1694,6 +1698,8 @@ mod tests {
         assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
         assert_eq!(size_of::<SeyalAppBlockProjection>(), 24);
         assert_eq!(offset_of!(SeyalAppBlockProjection, kind), 0);
+        assert_eq!(offset_of!(SeyalAppBlockProjection, reserved0), 2);
+        assert_eq!(offset_of!(SeyalAppBlockProjection, reserved1), 4);
         assert_eq!(offset_of!(SeyalAppBlockProjection, start_line), 8);
         assert_eq!(offset_of!(SeyalAppBlockProjection, end_line), 16);
         assert_eq!(size_of::<SeyalAppTheme>(), 16);
@@ -2127,9 +2133,10 @@ mod tests {
         assert_eq!(completed.start_line, 10);
         assert_eq!(completed.end_line, 12);
 
+        // Running Blocks fail closed until Runtime publishes ViewportLineIds
+        // through the attached LocalDisplayClient cache.
         let running = seyal_app_block_projection(handle, 1);
-        assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
-        assert_eq!(running.start_line, 20);
+        assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         assert_eq!(running.end_line, 0, "must not invent a history end");
 
         assert_eq!(seyal_app_destroy(handle), 0);

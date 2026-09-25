@@ -567,6 +567,21 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Primary viewport LineIds from the attached LocalDisplayClient, or empty
+    /// when unbound / unavailable (Flow live-tail fails closed).
+    #[cfg(target_os = "macos")]
+    pub fn viewport_line_ids(&self) -> &[u64] {
+        self.client
+            .as_ref()
+            .map(LocalDisplayClient::viewport_line_ids)
+            .unwrap_or(&[])
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn viewport_line_ids(&self) -> &[u64] {
+        &[]
+    }
+
     #[cfg(target_os = "macos")]
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)

@@ -346,10 +346,14 @@ impl Runtime {
             let Some(batch) = batch else {
                 continue;
             };
+            let generation = batch.generation;
+            let rows = batch.rows;
             if let Some(state) = self.local_ipc.as_mut() {
                 state.pending_resync_set.remove(&token);
             }
-            let _ = self.send_snapshot_batch(token, batch);
+            if self.send_snapshot_batch(token, batch) {
+                self.maybe_send_viewport_line_ids(token, execution_id, generation, rows);
+            }
         }
 
         let ready_pending = self.local_ipc.as_ref().is_some_and(|state| {

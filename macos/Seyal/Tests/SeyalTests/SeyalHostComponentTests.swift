@@ -1053,9 +1053,9 @@ final class SeyalHostComponentTests: XCTestCase {
 
     // MARK: - Flow live-tail primary clip (#865)
 
-    /// Running Flow Blocks must clip the prepared primary frame into the Block
-    /// region without enabling Pane-wide live-grid drawing or inventing
-    /// `start+511` history ranges.
+    /// Running Flow Blocks must clip only the Rust-mapped primary-frame row
+    /// slice into the Block region (skip preceding viewport rows) without
+    /// enabling Pane-wide live-grid drawing or inventing `start+511` history.
     @MainActor
     func testFlowLiveTailPrimaryClipStaysInsideBlockRegion() throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -1064,23 +1064,28 @@ final class SeyalHostComponentTests: XCTestCase {
         let renderer = try MetalTerminalRenderer(device: device)
         renderer.setPresentationPlan(.flow())
 
-        var leadH = SeyalPreparedCell()
-        leadH.scalar = UInt32(UnicodeScalar("H").value)
-        leadH.foreground = 0xffe9_e1d8
-        leadH.background = 0xff10_0d0b
-        var leadI = SeyalPreparedCell()
-        leadI.scalar = UInt32(UnicodeScalar("i").value)
-        leadI.foreground = 0xffe9_e1d8
-        leadI.background = 0xff10_0d0b
-        var cells = [leadH, leadI]
+        // Three prepared rows: preceding Block output on row 0, running
+        // Block on rows 1..2. Clip must exclude row 0.
+        func cell(_ ch: Character) -> SeyalPreparedCell {
+            var c = SeyalPreparedCell()
+            c.scalar = UInt32(ch.unicodeScalars.first!.value)
+            c.foreground = 0xffe9_e1d8
+            c.background = 0xff10_0d0b
+            return c
+        }
+        var cells = [
+            cell("A"), cell("B"),
+            cell("H"), cell("i"),
+            cell("!"), cell("!")
+        ]
         var damage = DamageMask()
-        damage.mark(row: 0)
+        damage.markAll(rows: 3)
         let updated = try cells.withUnsafeBufferPointer { buffer in
             try renderer.update(
                 frame: NativePreparedFrame(
                     cells: buffer,
                     generation: 865,
-                    rows: 1,
+                    rows: 3,
                     columns: 2,
                     fullRebuild: true,
                     damage: damage
@@ -1098,13 +1103,17 @@ final class SeyalHostComponentTests: XCTestCase {
                 x: 0,
                 y: 0,
                 width: CGFloat(cellSize.width * 2),
-                height: CGFloat(cellSize.height)
+                height: CGFloat(cellSize.height * 2)
             )
         )
         renderer.setTranscriptRegions([region])
-        renderer.setLiveTailBlocks([865: 1])
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
 
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        // Only the mapped slice (2 rows × 2 cols), not the full 3-row viewport.
+        XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
         let inspection = renderer.inspectPresentation()
         XCTAssertEqual(inspection.mode, .flow)
         XCTAssertFalse(inspection.drawsLiveGrid)
@@ -1114,8 +1123,26 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let paint = renderer.inspectFlowPaint()
         XCTAssertTrue(paint.isClean, "Flow must not submit Pane-wide live grid")
-        XCTAssertGreaterThan(paint.historyInstanceCount, 0)
+        XCTAssertEqual(paint.historyInstanceCount, 4)
         XCTAssertEqual(paint.instancesOutsideClips, 0)
+
+        // Damage-free update must reuse the live-tail clip (still 4 instances).
+        damage = DamageMask()
+        let reused = try cells.withUnsafeBufferPointer { buffer in
+            try renderer.update(
+                frame: NativePreparedFrame(
+                    cells: buffer,
+                    generation: 866,
+                    rows: 3,
+                    columns: 2,
+                    fullRebuild: false,
+                    damage: damage
+                ),
+                backingScale: 1
+            )
+        }
+        XCTAssertEqual(reused, .updated)
+        XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
 
         // Clearing live-tail must not re-enable Pane-wide live grid.
         renderer.setLiveTailBlocks([:])
@@ -1129,6 +1156,8 @@ final class SeyalHostComponentTests: XCTestCase {
         let unbound = seyal_app_block_projection(handle, 0)
         XCTAssertEqual(unbound.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
         XCTAssertEqual(unbound.end_line, 0)
+        XCTAssertEqual(unbound.reserved0, 0)
+        XCTAssertEqual(unbound.reserved1, 0)
     }
 
 }

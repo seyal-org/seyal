@@ -584,7 +584,6 @@ final class ProductChromeHostView: NSView {
         var retained = Set<UInt64>()
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
-            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             let title = copyUTF8(row.title, row.title_len) ?? "command"
             let detail = copyUTF8(row.detail, row.detail_len) ?? ""
@@ -592,7 +591,6 @@ final class ProductChromeHostView: NSView {
             let prompt = copyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let blockID = row.id_lo
             let lines = outputLineCount(projection: projection)
-            _ = span
             let card = CommandBlockView(
                 prompt: prompt,
                 title: title,
@@ -634,8 +632,9 @@ final class ProductChromeHostView: NSView {
             }
             return Int(min(projection.end_line - projection.start_line + 1, 512))
         case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
-            let rows = pane.inputSurface.lastPreparedRowCount
-            return max(rows, 1)
+            // Rust-owned row slice height (not the full prepared viewport).
+            let rows = Int(projection.reserved1)
+            return rows > 0 ? rows : 1
         default:
             return 1
         }
@@ -696,15 +695,21 @@ final class ProductChromeHostView: NSView {
             return
         }
         let composer = seyal_app_composer(pane.appHandle)
-        var live: [UInt64: UInt64] = [:]
+        var live: [UInt64: LiveTailClip] = [:]
         for index in 0..<Int(composer.block_count) {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             guard row.id_lo != 0,
                   projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
-                  projection.start_line > 0
+                  projection.start_line > 0,
+                  projection.reserved1 > 0
             else { continue }
-            live[row.id_lo] = projection.start_line
+            let rowCount = UInt16(min(projection.reserved1, UInt32(UInt16.max)))
+            live[row.id_lo] = LiveTailClip(
+                startLine: projection.start_line,
+                firstRow: projection.reserved0,
+                rowCount: rowCount
+            )
         }
         pane.inputSurface.setLiveTailBlocks(live)
     }

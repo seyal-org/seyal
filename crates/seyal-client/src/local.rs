@@ -16,7 +16,7 @@ use seyal_runtime::{
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus, ErrorCode,
         FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle, MessageType,
-        ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        ResizeResult, Role, ViewportLineIds, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
@@ -135,6 +135,10 @@ pub struct LocalDisplayClient {
     pub(crate) last_sent_v2_action_id: u32,
     pub(crate) highest_v2_error_id: u32,
     pub(crate) last_admitted_mouse_action_id: u32,
+    /// Primary viewport LineIds for the latest accepted `ViewportLineIds`
+    /// generation. Cleared on disconnect/resync; empty until Runtime publishes.
+    pub(crate) viewport_line_ids: Vec<u64>,
+    pub(crate) viewport_line_ids_generation: u64,
 }
 
 impl LocalDisplayClient {
@@ -211,6 +215,22 @@ impl LocalDisplayClient {
         request_id: u64,
     ) -> Option<&HistoryRangeSnapshot> {
         self.history_ranges.get(&(block_id, request_id))
+    }
+
+    /// Latest Runtime-published primary viewport LineIds for Flow live-tail
+    /// mapping. Empty until a `ViewportLineIds` frame is accepted for this
+    /// attachment, and cleared on disconnect/resync.
+    pub fn viewport_line_ids(&self) -> &[u64] {
+        &self.viewport_line_ids
+    }
+
+    pub fn viewport_line_ids_generation(&self) -> u64 {
+        self.viewport_line_ids_generation
+    }
+
+    pub(crate) fn clear_viewport_line_ids(&mut self) {
+        self.viewport_line_ids.clear();
+        self.viewport_line_ids_generation = 0;
     }
 
     /// Drops one copied history response after the native consumer has
@@ -459,6 +479,19 @@ impl LocalDisplayClient {
                         }
                         self.copied_text = copied.bytes.to_vec();
                     }
+                    MessageType::ViewportLineIds => {
+                        let message = ViewportLineIds::decode(&frame[HEADER_LEN..])
+                            .map_err(|_| ClientError::Protocol)?;
+                        if message.generation >= self.viewport_line_ids_generation {
+                            if self.viewport_line_ids_generation != message.generation
+                                || self.viewport_line_ids != message.line_ids
+                            {
+                                metadata_changed = true;
+                            }
+                            self.viewport_line_ids = message.line_ids;
+                            self.viewport_line_ids_generation = message.generation;
+                        }
+                    }
                     _ => return Err(ClientError::Protocol),
                 }
                 self.read_offset = frame_end;
@@ -475,6 +508,7 @@ impl LocalDisplayClient {
             let mut chunk = [0u8; READ_CHUNK_BYTES];
             match self.stream.read(&mut chunk) {
                 Ok(0) => {
+                    self.clear_viewport_line_ids();
                     self.input_failure = Some(InputAdmissionFailure::Disconnected);
                     self.resize_failure = Some(ResizeFailure::Disconnected);
                     return Err(ClientError::Disconnected);
@@ -621,6 +655,8 @@ mod tests {
             last_sent_v2_action_id: 0,
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
+            viewport_line_ids: Vec::new(),
+            viewport_line_ids_generation: 0,
         }
     }
 

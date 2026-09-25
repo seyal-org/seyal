@@ -242,6 +242,15 @@ private struct HistoryRenderRegion {
     let clip: CGRect
 }
 
+/// Rust-owned primary-frame clip for one running Flow Block (#865).
+/// `firstRow`/`rowCount` map `start_line` onto the prepared viewport; hosts
+/// must not invent a history end such as `start + 511`.
+struct LiveTailClip: Equatable {
+    var startLine: UInt64
+    var firstRow: UInt16
+    var rowCount: UInt16
+}
+
 enum MetalTerminalRendererError: Error {
     case unavailableCommandQueue
     case unavailableLibrary
@@ -341,7 +350,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     /// Running Flow Blocks: damage-driven primary-frame clips keyed by Block ID.
     private var liveTailRegions: [UInt64: HistoryRenderRegion] = [:]
     private var liveTailOrder: [UInt64] = []
-    private var liveTailStartLines: [UInt64: UInt64] = [:]
+    private var liveTailClips: [UInt64: LiveTailClip] = [:]
     private var transcriptRegions: [UInt64: NativeTranscriptRegion] = [:]
     private var lastPreparedFrame: NativePreparedFrame?
     private var presentationPlan = RendererPresentationPlan.fullPane(.raw)
@@ -619,7 +628,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             needsPresent = true
             preparationSucceeded = true
             lastPreparedFrame = frame
-            try refreshLiveTailClips(backingScale: scale)
+            // Damage-free: reuse live-tail buffers unless clip membership changed.
+            try refreshLiveTailClips(backingScale: scale, damage: DamageMask(), force: false)
             return .updated
         }
 
@@ -675,7 +685,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         }
         preparationSucceeded = true
         lastPreparedFrame = frame
-        try refreshLiveTailClips(backingScale: scale)
+        try refreshLiveTailClips(backingScale: scale, damage: damage, force: false)
         return .updated
     }
 
@@ -725,7 +735,11 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         return .updated
     }
 
-    private func refreshLiveTailClips(backingScale: CGFloat) throws {
+    private func refreshLiveTailClips(
+        backingScale: CGFloat,
+        damage: DamageMask,
+        force: Bool
+    ) throws {
         guard presentationPlan.mode == .flow,
               !presentationPlan.drawsLiveGrid,
               let frame = lastPreparedFrame
@@ -737,12 +751,37 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         let metrics = glyphAtlas.metrics(backingScale: scale)
         var next: [UInt64: HistoryRenderRegion] = [:]
         for blockID in liveTailOrder {
-            guard liveTailStartLines[blockID] != nil,
+            guard let clip = liveTailClips[blockID],
+                  clip.startLine > 0,
+                  clip.rowCount > 0,
                   let region = transcriptRegions[blockID]
             else {
                 continue
             }
-            let cells = frame.rows * frame.columns
+            let firstRow = Int(clip.firstRow)
+            let rowCount = Int(clip.rowCount)
+            guard firstRow >= 0,
+                  rowCount > 0,
+                  firstRow < frame.rows,
+                  firstRow + rowCount <= frame.rows
+            else {
+                // Stale mapping vs prepared frame: fail closed for this Block.
+                continue
+            }
+            // Damage-driven reuse: skip buffer rebuild when the clip row slice
+            // is untouched and membership/geometry did not force a refresh.
+            if !force,
+               let existing = liveTailRegions[blockID],
+               !liveTailClipIntersectsDamage(
+                   firstRow: firstRow,
+                   rowCount: rowCount,
+                   damage: damage
+               )
+            {
+                next[blockID] = existing
+                continue
+            }
+            let cells = rowCount * frame.columns
             guard cells > 0 else { continue }
             let byteCount = cells * MemoryLayout<TerminalInstance>.stride
             guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared)
@@ -752,13 +791,15 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             buffer.label = "Seyal Flow Live-Tail Instances"
             let pointer = buffer.contents().bindMemory(to: TerminalInstance.self, capacity: cells)
             var outputIndex = 0
-            for row in 0..<frame.rows {
+            for rowOffset in 0..<rowCount {
+                let row = firstRow + rowOffset
                 for column in 0..<frame.columns {
                     let index = row * frame.columns + column
                     let source = frame.cells[index]
+                    // Block-local Y: preceding viewport rows are not drawn.
                     let origin = SIMD2<Float>(
                         Float(region.origin.x) + Float(column * metrics.cellWidth),
-                        Float(region.origin.y) + Float(row * metrics.cellHeight)
+                        Float(region.origin.y) + Float(rowOffset * metrics.cellHeight)
                     )
                     let size = SIMD2<Float>(Float(metrics.cellWidth), Float(metrics.cellHeight))
                     let painted = CGRect(
@@ -826,6 +867,34 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         }
         liveTailRegions = next
         needsPresent = true
+    }
+
+    private func liveTailClipIntersectsDamage(
+        firstRow: Int,
+        rowCount: Int,
+        damage: DamageMask
+    ) -> Bool {
+        if damage.isEmpty { return false }
+        for row in firstRow..<(firstRow + rowCount) where damage.contains(row: row) {
+            return true
+        }
+        return false
+    }
+
+    /// Fail closed: drop live-tail draws and surface the persistent failure.
+    private func failClosedLiveTail(error: Error) {
+        liveTailRegions.removeAll(keepingCapacity: false)
+        needsPresent = true
+        let failure: MetalTerminalRendererError
+        if let metal = error as? MetalTerminalRendererError {
+            failure = metal
+        } else if let atlas = error as? GlyphAtlasError {
+            failure = .glyphAtlas(atlas)
+        } else {
+            failure = .invalidFrame
+        }
+        persistentDisplayFailure = failure
+        onPersistentDisplayFailure?(failure)
     }
 
     private func applyHistoryPrepare(
@@ -978,13 +1047,23 @@ final class MetalTerminalRenderer: @unchecked Sendable {
 
     /// Register running Flow Blocks that clip the prepared primary frame.
     /// Empty clears all live-tail regions. Hosts must not invent history ranges.
-    func setLiveTailBlocks(_ startLinesByBlock: [UInt64: UInt64]) {
-        liveTailStartLines = startLinesByBlock
-        liveTailOrder = startLinesByBlock.keys.sorted()
+    /// On refresh failure, live-tail draws are cleared (fail closed) so stale
+    /// instances cannot remain on screen.
+    func setLiveTailBlocks(_ clipsByBlock: [UInt64: LiveTailClip]) {
+        liveTailClips = clipsByBlock
+        liveTailOrder = clipsByBlock.keys.sorted()
         let keep = Set(liveTailOrder)
         liveTailRegions = liveTailRegions.filter { keep.contains($0.key) }
         if lastPreparedFrame != nil {
-            try? refreshLiveTailClips(backingScale: currentScale > 0 ? currentScale : 1)
+            do {
+                try refreshLiveTailClips(
+                    backingScale: currentScale > 0 ? currentScale : 1,
+                    damage: DamageMask(),
+                    force: true
+                )
+            } catch {
+                failClosedLiveTail(error: error)
+            }
         }
         needsPresent = true
     }
@@ -996,13 +1075,26 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         }
         transcriptRegions = map
         if lastPreparedFrame != nil {
-            try? refreshLiveTailClips(backingScale: currentScale > 0 ? currentScale : 1)
+            do {
+                try refreshLiveTailClips(
+                    backingScale: currentScale > 0 ? currentScale : 1,
+                    damage: DamageMask(),
+                    force: true
+                )
+            } catch {
+                failClosedLiveTail(error: error)
+            }
         }
         needsPresent = true
     }
 
     var liveTailRegionCount: Int {
         liveTailRegions.count
+    }
+
+    /// Instance count for one live-tail Block (0 when absent / fail closed).
+    func liveTailInstanceCount(for blockID: UInt64) -> Int {
+        liveTailRegions[blockID]?.instanceCount ?? 0
     }
 
     var lastPreparedRowCount: Int {
@@ -1699,7 +1791,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         historyRegionOrder.removeAll()
         liveTailRegions.removeAll()
         liveTailOrder.removeAll()
-        liveTailStartLines.removeAll()
+        liveTailClips.removeAll()
         transcriptRegions.removeAll()
         lastPreparedFrame = nil
         deferredHistoryPrepares.removeAll()
