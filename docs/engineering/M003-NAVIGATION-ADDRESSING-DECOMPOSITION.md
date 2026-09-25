@@ -78,7 +78,8 @@ Back/Forward actions and eager invalidation.
 
 **Scope:** SPEC-022 §6 in full, including `FocusSeq`, target-equality
 deduplication against the cursor entry, forward truncation with cursor = new
-head, capacity eviction, eager removal on Pane/Tab/Workspace destruction, and
+head, capacity eviction, eager removal on Pane/Tab/Workspace destruction, the
+R6.7a purge → reposition → successor-commit order on close, and
 `StaleHistoryCursor` rejection. Entries store no window identity, so N3 does
 not depend on `WindowId` or N5; in the single-window composition apply-time
 placement resolution is trivially the one window.
@@ -87,11 +88,13 @@ placement resolution is trivially the one window.
 resurrection feature that needs its own refinement — closing a Pane destroys
 its entries here).
 
-**Tests:** SPEC-022 §12 items 15–23b, with 15 and 16 as property tests over
+**Tests:** SPEC-022 §12 items 15–20, 20a, 21–23, 23b, with 15 and 16 as property tests over
 generated navigation/destruction sequences.
 
-**Coordination:** #1001 owns which Pane receives focus after split/close/move.
-This slice consumes those committed transitions. If #1001 lands first, N3
+**Coordination:** #1001 (Proposed ADR-021 / SPEC-025 on `master`, PR #1053)
+owns which Pane receives focus after split/close/move (SPEC-025 §5.2) and
+declares those successors user-initiated commits (SPEC-025 §6). This slice
+consumes those committed transitions in the R6.7a order. If #1001 lands first, N3
 records its results unchanged; if N3 lands first, #1001 must route its focus
 commits through the same commit path rather than writing focus directly.
 

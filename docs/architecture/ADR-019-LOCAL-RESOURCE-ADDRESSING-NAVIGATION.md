@@ -3,10 +3,11 @@
 - **Status:** Proposed
 - **Date:** 2026-09-24
 - **Issue:** #1004 (refinement) — parent #674, epic #665
-- **Numbering:** Provisional allocation across concurrent M003 refinements is
-  #994 → ADR-017 (execution provisioning), #1000 → ADR-018 (window/tab
-  lifecycle), #1004 → ADR-019 (this document). Numbers remain provisional until
-  merge order is settled; siblings must not claim ADR-019.
+- **Numbering:** Allocation across concurrent M003 refinements is
+  #994 → ADR-017 (execution provisioning, PR #1056), #1000 → ADR-018
+  (window/tab lifecycle, PR #1055), #1004 → ADR-019 (this document, PR #1057),
+  #1003 → ADR-020 (shell launch policy, PR #1050). #1001 landed on `master` as
+  ADR-021 / SPEC-025 (PR #1053). Siblings must not claim ADR-019.
 - **Scope:** portable local addressing of Workspace/Tab/Pane/Session-Execution navigation targets, target resolution and failure semantics, focus-history ownership, cross-window navigation, and the separation between an address and a user-visible label
 - **Consumes:** ADR-007 (Workspace/identity lifetimes), ADR-009 / SPEC-008 (presentation modes), ADR-015 (Rust product authority / thin native host), SPEC-009 (detach/reconnect), [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md)
 - **Does not change:** ADR-004/005/006 terminal ownership, SPEC-008 presentation contracts, ADR-007 persistence classes
@@ -151,14 +152,24 @@ UnsupportedKind    (unknown/unaccepted address kind or version)
 NavigationDenied   (Workspace access/policy refusal)
 ```
 
-`Execution { e }` resolves only when exactly one Pane is currently bound to
-`e`. Zero bindings → `TargetUnbound`. Two or more → `AmbiguousTarget`. No
+`Execution { e }` resolution is decided by the number of Panes currently bound
+to `e`, independent of whether `e` is live or exited:
+
+- exactly one bound Pane → resolves to that Pane (live or exited; an exited
+  execution's Pane still exists and presents its own exit state);
+- zero bound Panes and `e` live → `TargetUnbound`;
+- zero bound Panes, `e` exited, exited record still held → `TargetTerminated`;
+- `e` absent from the Runtime inventory → `UnknownExecution`;
+- two or more bound Panes → `AmbiguousTarget` (live or exited).
+
+The binding-count outcomes are mutually exclusive, so their relative position
+in the SPEC-022 R3.4 evaluation order never selects between them. No
 accepted authority establishes Execution→Pane uniqueness by construction
 (Pane→Execution is at most one; the reverse is not), so ambiguity is an
 explicit fail-closed outcome rather than an assumed invariant.
 
-`TargetTerminated` applies only to `Execution { e }` addresses whose exited
-record the Runtime inventory still holds. A destroyed Workspace, Tab or Pane is
+`TargetTerminated` applies only to `Execution { e }` addresses with zero bound
+Panes whose exited record the Runtime inventory still holds. A destroyed Workspace, Tab or Pane is
 removed from `ShellState` and is indistinguishable from one that never existed,
 so it always yields the corresponding `Unknown*` rejection. No tombstone store
 exists (see Alternative E). Workspace authorization is evaluated immediately
@@ -174,6 +185,10 @@ rejection and stops.
 `TargetUnbound` is the reconnect seam: an alive-but-unattached execution is
 offered as an explicit attach/reconnect action under SPEC-009, never as an
 implicit side effect of "go to it".
+
+Back/Forward traversal adds one traversal-only rejection, `StaleHistoryCursor`,
+returned when the request's observed `FocusSeq` no longer matches the current
+cursor (§6). It is never produced by address resolution.
 
 ### 5. Navigate means reveal-and-focus, nothing else
 
@@ -222,12 +237,17 @@ filters over this one store — never a second history authority.
   length.
 - Destroying a Pane/Tab/Workspace **eagerly removes** every entry addressing
   it, preserves the relative order of survivors, and repositions the cursor to
-  the nearest surviving entry at or before its previous position. If nothing
-  survives, history is empty and Back/Forward are unavailable rather than
-  jumping to an arbitrary Pane.
+  the nearest surviving entry at or before its previous position; if no
+  survivor lies at or before it, the cursor moves to the oldest surviving
+  entry. If nothing survives, history is empty and Back/Forward are
+  unavailable rather than jumping to an arbitrary Pane.
+- When a close also moves focus (SPEC-025 §5.2 successor), the purge and
+  cursor reposition complete first; the successor is then recorded as an
+  ordinary user-initiated commit against the repositioned cursor (SPEC-022
+  R6.7a).
 - Back/Forward requests carry the `FocusSeq` of the entry the user was looking
-  at. If history changed since that projection, the request is rejected rather
-  than traversing to a different entry.
+  at. If history changed since that projection, the request is rejected with
+  `StaleHistoryCursor` rather than traversing to a different entry.
 - No display string is ever stored in history.
 - M003 does not persist focus history across restart (ADR-007 P4 is out of
   scope here).
@@ -276,7 +296,10 @@ M003 ingests no address from outside the process.
 
 ## Boundaries with adjacent refinements
 
-- **#1001** owns intra-Tab `PaneTree` operations: move/reparent, zoom/equalize,
+- **#1001** (landed on `master` as Proposed
+  [ADR-021](ADR-021-PANE-TREE-OPERATIONS.md) /
+  [SPEC-025](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md), PR #1053) owns
+  intra-Tab `PaneTree` operations: move/reparent, zoom/equalize,
   directional focus, and which Pane receives focus after split/close. This ADR
   consumes the resulting focus commits and records them. If both land, #1001
   defines *what becomes focused*; ADR-019 defines *how a target is named,

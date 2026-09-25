@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (refinement output of #1004; not an implemented-behavior claim)
 - **Date:** 2026-09-24
-- **Architecture:** ADR-019; consumes ADR-007, ADR-015, ADR-009/SPEC-008, SPEC-009
+- **Architecture:** ADR-019; consumes ADR-007, ADR-015, ADR-009/SPEC-008, SPEC-009, and the focus-successor rules of ADR-021 / SPEC-025 (#1001)
 - **Issue:** #1004 — parent #674, epic #665
 - **UI references:** [`../architecture/ui/SEYAL-REFERENCE-SCREEN-CONTRACTS.md`](../architecture/ui/SEYAL-REFERENCE-SCREEN-CONTRACTS.md) §11, [`../architecture/ui/M001-COMPOSER-HISTORY-FUZZY-SEARCH.md`](../architecture/ui/M001-COMPOSER-HISTORY-FUZZY-SEARCH.md) §12, [`../architecture/ui/M001-SESSIONS-VIEW.md`](../architecture/ui/M001-SESSIONS-VIEW.md) §5/§7, [`../architecture/ui/references/README.md`](../architecture/ui/references/README.md)
 
@@ -22,8 +22,10 @@ commit semantics, focus-history ordering/retention/invalidation, cross-window
 activation, and the address-versus-label separation.
 
 Out of scope: remote/cloud addresses, agent routing, persistence/restart
-restoration, textual address syntax, ranking algorithms, keybindings,
-`PaneTree` mutation semantics (#1001), and execution provisioning (#994).
+restoration, textual address syntax, ranking algorithms, keybindings (owned by
+SPEC-024 §5.5),
+`PaneTree` mutation semantics (#1001, ADR-021 / SPEC-025), and execution
+provisioning (#994).
 
 ## 2. Address forms
 
@@ -65,13 +67,14 @@ Pane { w, t, p }   resolves iff t is currently a Tab of w
 
 R3.3 `Execution { e }` resolution counts current Pane bindings to `e`:
 
-- exactly one bound Pane → resolves to that Pane;
+- exactly one bound Pane → resolves to that Pane, whether `e` is live or
+  exited;
 - zero bindings and `e` still live → `TargetUnbound`;
 - zero bindings, `e` exited, and the Runtime inventory still holds `e`'s
   exited record → `TargetTerminated`;
 - `e` not present in the Runtime inventory (never existed, or its exited
   record has been released) → `UnknownExecution`;
-- two or more bound Panes → `AmbiguousTarget`.
+- two or more bound Panes → `AmbiguousTarget`, whether `e` is live or exited.
 
 Pane→Execution is at most one (M001 multipane / M003 leaf rule). The reverse
 direction is **not** unique by construction; ambiguity is therefore an
@@ -82,6 +85,12 @@ address, evaluate in this order and return the first match:
 `UnsupportedKind` → `NavigationDenied` → `UnknownWorkspace` → `UnknownTab` →
 `UnknownPane` → `UnknownExecution` → `NotComposed` → `TargetTerminated` →
 `TargetUnbound` → `AmbiguousTarget`.
+
+The three binding-count variants are mutually exclusive by their conditions:
+`TargetTerminated` and `TargetUnbound` require zero bound Panes, and
+`AmbiguousTarget` requires two or more. Their relative order therefore never
+selects between them; an Execution with exactly one bound Pane matches none of
+them and resolves (R3.3), including when that Execution has exited.
 
 Authorization is evaluated immediately after kind/version/size validation and
 before any existence or binding check. It tests the requesting principal's
@@ -104,9 +113,9 @@ user, authorized for every local Workspace.
 | `UnknownPane` | `PaneId` is not a current Pane anywhere, including a Pane that has been destroyed |
 | `UnknownExecution` | `ExecutionId` is not in the Runtime inventory (never existed, or exited record released) |
 | `NotComposed` | components exist but do not currently compose (R3.2) |
-| `TargetTerminated` | `Execution` address only: `e` has exited and the Runtime inventory still holds its exited record |
-| `TargetUnbound` | Execution is live with no Pane binding |
-| `AmbiguousTarget` | Execution is bound to more than one Pane |
+| `TargetTerminated` | `Execution` address only: zero Panes bound to `e`, `e` has exited, and the Runtime inventory still holds its exited record |
+| `TargetUnbound` | `Execution` address only: zero Panes bound to `e`, `e` is live |
+| `AmbiguousTarget` | `Execution` address only: two or more Panes bound to `e` (live or exited) |
 
 `TargetTerminated` is never produced for `Workspace`, `Tab` or `Pane`
 addresses. A destroyed container is removed from `ShellState` and is
@@ -250,9 +259,30 @@ or before that position exists, the cursor moves to the oldest surviving
 entry; if history is empty, Back and Forward are unavailable and must not
 focus an arbitrary Pane.
 
+R6.7a When a destruction also changes focus (for example a Pane close whose
+focus successor is chosen by SPEC-025 §5.2, or a Tab/Workspace close), the
+history update is ordered:
+
+```text
+1. purge every entry addressing the destroyed resource(s)   (R6.7)
+2. reposition the cursor                                     (R6.7)
+3. commit the successor focus as a user-initiated commit     (R6.4 / R6.5)
+   against the repositioned cursor
+```
+
+Step 3 is the SPEC-025 §6 focus-history seam: the successor is deduplicated
+against the repositioned cursor entry (R6.4); otherwise every entry after the
+repositioned cursor is truncated and the successor appended (R6.5). Steps 1–3
+occur in the same transition as the destruction; no surface observes an
+intermediate history. If no successor Pane exists (last Pane of the last Tab),
+step 3 is skipped.
+
 R6.8 A Back/Forward request carries the `FocusSeq` the requesting surface last
 observed at the cursor. If it does not match current history, the request is
-rejected (`StaleHistoryCursor`) and no navigation occurs.
+rejected (`StaleHistoryCursor`) and no navigation occurs. A Back/Forward
+dispatched by a keybinding in Rust (SPEC-024 §5.5) has no separate projection;
+its observed `FocusSeq` is the cursor of the same authoritative snapshot it is
+dispatched against.
 
 R6.9 Traversal reuses §3 resolution and the apply-only Navigate path in §4
 (R4.1 traversal clause). If a traversal target fails resolution despite R6.7
@@ -308,6 +338,7 @@ redirected, with exactly one variant per case (first match in R3.4 order):
 | Execution exited, exited record still held, no Pane bound | `Execution` | `TargetTerminated` |
 | Execution exited and exited record released | `Execution` | `UnknownExecution` |
 | Execution live, bound Pane destroyed | `Execution` | `TargetUnbound` |
+| Execution exited, still bound to exactly one Pane | `Execution` | none — resolves to that Pane (R3.3) |
 
 R8.4 Repeated rejection must not create an unbounded retry loop in either Rust
 or the host. A rejected navigation is terminal until the user acts again.
@@ -387,9 +418,12 @@ Rust, platform-independent unless stated:
     selection unchanged.
 12. Execution address with no bound Pane yields `TargetUnbound` and performs no
     attach.
-13. Exited execution yields `TargetTerminated` while its exited record is held
-    and `UnknownExecution` after release; a destroyed Pane yields
-    `UnknownPane`, never `TargetTerminated` (each R8.3 row asserted exactly).
+13. Exited execution with no bound Pane yields `TargetTerminated` while its
+    exited record is held and `UnknownExecution` after release; an exited
+    execution still bound to exactly one Pane resolves to that Pane; an exited
+    execution bound to two Panes yields `AmbiguousTarget`; a destroyed Pane
+    yields `UnknownPane`, never `TargetTerminated` (each R8.3 row asserted
+    exactly).
 13a. An unauthorized principal receives `NavigationDenied` for both an existing
      and a nonexistent `WorkspaceId`, with no existence/binding checks run.
 13b. Execution bound to two Panes yields `AmbiguousTarget` and performs no
@@ -416,7 +450,15 @@ Rust, platform-independent unless stated:
 19. A commit to a different target while behind the head truncates the forward
     portion, appends, and leaves the cursor at the new head.
 20. Destroying a Pane removes all its entries eagerly, preserves survivor
-    order, and repositions the cursor per R6.7.
+    order, and repositions the cursor per R6.7, including the oldest-surviving
+    fallback when no survivor lies at or before the previous cursor.
+20a. Closing the focused Pane orders history per R6.7a. (a) Cursor at head:
+     the closed Pane's entries are purged, the cursor repositions, and the
+     SPEC-025 §5.2 successor is appended as the new head — or is a no-op when
+     it equals the repositioned cursor entry. (b) Cursor behind head: purge and
+     reposition happen first, then the successor commit truncates every entry
+     after the repositioned cursor and appends. Both cases assert the exact
+     final entry sequence and cursor.
 21. Destroying every referenced resource empties history and makes
     Back/Forward unavailable rather than focusing arbitrarily.
 22. Stale `FocusSeq` in a traversal request is rejected with no navigation.
@@ -459,9 +501,9 @@ Rust, platform-independent unless stated:
 - no display string participates in identity or resolution anywhere on the
   path, enforced by type shape plus tests 1, 14, 28 and 29;
 - every stale/missing/destroyed target produces a typed refusal with unchanged
-  state (tests 4–7, 11–14, 22);
+  state (tests 4–7, 11–13, 13a, 13b, 14, 22);
 - focus history is bounded, totally ordered, deterministic, and eagerly
-  invalidated (tests 15–23);
+  invalidated (tests 15–20, 20a, 21–23, 23b);
 - cross-window navigation activates exactly one window, never reparents, and
   survives native activation failure without corrupting portable state
   (tests 24–27);
@@ -475,6 +517,12 @@ Rust, platform-independent unless stated:
 - remote/cloud/shared addresses and any textual/URI form;
 - persistence or restart restoration of history and layout;
 - Block, Agent, Attention, Artifact, WorkItem address kinds;
-- fuzzy-ranking algorithm design and keybinding assignment;
-- `PaneTree` mutation semantics (#1001) and execution provisioning (#994);
+- fuzzy-ranking algorithm design;
+- keybinding assignment: Proposed SPEC-024 §5.5 (#1002) owns the keys for
+  Back/Forward (`focus_history.back` / `focus_history.forward`) and goto open
+  (`goto.open`). Those catalog ids enter production only with the N3/N4 action
+  they invoke and after this specification is Accepted. This specification
+  owns their semantics;
+- `PaneTree` mutation semantics (#1001, ADR-021 / SPEC-025) and execution
+  provisioning (#994);
 - multi-live Metal surface policy (#936).
