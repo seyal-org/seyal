@@ -11,6 +11,17 @@
 - **Relationship:** `Refs #824` / `Refs #672` only. PR #964 remains the merged production delta. `#824` DoD (including `#673` and owner confirmation) stays open after this PR.
 - **IME 37–41 close classification:** **covered** by existing native `NSTextInputClient` + local ABC XCUI. Not a new #824 row. Do not pull #836.
 
+## Agent close-out session (2026-09-24)
+
+- **Exact head (pre-commit base):** `5011be9` (`5011be94b5ef1ed51466f7c27d823ab3241c76f7`); PR tip is this ledger + product commit.
+- **Product fix:** row-grow resize left a stale DECSTBM region (`scroll_bottom` stuck at old `rows-1`), so scrolled primary rows were discarded instead of HistoryStore seal. Fixed in `Screen::commit_prepared` to reset full-screen margins when the pre-resize region was full-screen; intentional partial DECSTBM still skips seal.
+- **Tests:** `cargo test -p seyal-terminal --test m002_workload_matrix` **13/13 PASS** (includes `row_grow_resize_keeps_full_screen_history_seal_for_typed_line` + inverse partial-DECSTBM).
+- **`CARGO_TEST_THREADS=1 make check`:** **PASS** (`site/node_modules` aside for doc-link noise only).
+- **`make ui-test` on this head:**
+  - Component `SeyalHostComponentTests` **32/32 PASS**.
+  - XCUIAutomation **ENVIRONMENT_INCONCLUSIVE** on this host after competing-agent / `testmanagerd` disruption: prior exclusive runs hit XCTH Code=14 (“hung before establishing connection”); post-`launchctl kickstart` retry ended **TEST EXECUTE FAILED** with `Timed out while enabling automation mode` (SeyalUITests-Runner). Not a product FAIL. Hosted Foundation Quality XCUI remains the cross-check; local 2026-09-19 **20/20** XCUI on `4d0cbb2` retained.
+- **Relationship:** `Refs #824` / `Refs #672` only until independent Approve. `performance_claim=false`. #673 remains sibling authority ([PR #1048](https://github.com/seyal-org/seyal/pull/1048)).
+
 ## Local exact-head gates (2026-09-19) — actually executed
 
 PR #984 was opened too early as a docs-only `Closes` after classifying local
@@ -68,9 +79,14 @@ Owner-accepted classified gaps for M002 technical preview (not product FAIL):
 - live Claude/Codex TUI scroll/prompt/resize: **ENVIRONMENT_UNSUPPORTED**
   (`claude` stayed Flow / `alternate-screen=false`; VT agent-TUI equivalent
   retained)
-- headed retained-grid search/copy after resize: **ENVIRONMENT_UNSUPPORTED**
-  (⌃R opened composer command history, not grid search; VT combined fixture
-  retained)
+- headed retained-grid search/copy after resize: composer ⌃R is **not**
+  the production path and is not a platform-limit. The reachable route is
+  host-search / `search_and_select` plus `copy_selection_text`. Deterministic
+  fixture `retained_unicode_history_host_search_and_copy_after_resize` proves
+  CJK and ZWJ-emoji search+copy on `TerminalState` after a 20→12→28 resize.
+  It does not prove wrap-lineage oracles, Runtime/FFI, or headed GUI.
+  Headed GUI driving of `submitHostSearch` remains a W6 freeze-F row, not
+  `ENVIRONMENT_UNSUPPORTED`.
 - hosted ABC dead-key XCUI: `XCTSkip` without that layout; local ABC bytes
   `c3 a9 78 1b` retained
 
@@ -379,9 +395,9 @@ Record PASS / FAIL / ENVIRONMENT_UNSUPPORTED / PLATFORM_LIMITED per case. Never 
 | 4. tmux child windows/panes/copy-mode | **PASS** TUI takeover `alternate-screen=true` with `split-window -h` in the spawn. `Ctrl-b [` sent while TUI. Restore to Flow via `Ctrl-C`. tmux hierarchy was not Seyal panes. |
 | 5. htop/watch/ncurses | **PASS** `htop -d 10` and `watch -n 1 date` → `alternate-screen=true`; `q` restored Flow / composer `available`. |
 | 6. git/docker/kubectl/terraform TTY | **PASS** composer: `git log --oneline --color -n 3`, `docker ps`, `kubectl version --client`, `terraform version`. Spinners/long TTY progress not claimed. |
-| 7. CLI-agent TUI | `claude --version` **PASS** on Flow. Live `claude` stayed `alternate-screen=false` / composer `available`. **ENVIRONMENT_UNSUPPORTED** for live Claude/Codex TUI. VT agent-TUI equivalent retained. |
+| 7. CLI-agent TUI | `claude --version` **PASS** on Flow. Live `claude` stayed `alternate-screen=false`. Issue-authorized deterministic equivalent retained (alt-screen, kitty 1\|2, SGR mouse, title). Not a claim that every agent uses alt-screen. |
 | 8. high-volume while typing/scrolling | headed Flow/Blocks XCUI PASS retained (`testHighVolumeComposerOutputStaysOnFlowBlocks`); this close-out session did not type-while-flood. VT/PTY automated PASS |
-| 9. search/copy Unicode after resize | Unicode composer submit + resize **PASS**. ⌃R opened composer command history, not retained-grid search/copy. **ENVIRONMENT_UNSUPPORTED** for headed history search/copy. VT combined fixture retained. |
+| 9. search/copy Unicode after resize | Composer ⌃R is command history, not the production host-search path. Deterministic CJK + ZWJ-emoji `search_and_select` / `copy_selection_text` after resize **PASS** on `TerminalState`. Wrap lineage, FFI, and headed `submitHostSearch` remain freeze-F. |
 | 10. GUI close/reopen M001 reconnect | **PASS** GUI quit left helper pid **96808**; reopen GUI pid **2318** `connection=usable` same `runtime=` / `execution=` new `attachment=` (`…0004` → `…0005`). XCUI relaunch case retained PASS. |
 
 Do not treat Flow/Blocks XCUI as a raw-terminal Vim/htop/tmux/ssh oracle.

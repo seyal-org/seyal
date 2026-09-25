@@ -12,7 +12,7 @@ The Developer Guide explains **how to navigate and contribute to Seyal**. It doe
     Understand ownership boundaries, hot-path invariants, runtime state, PTY/VT/rendering responsibilities, persistence, Blocks, and the OSS/commercial boundary.
   </Card>
   <Card title="Contributing" icon="github">
-    Follow the Ready Issue → exclusive assignee claim → deterministic branch/worktree → tests → PR → independent validation workflow.
+    Follow the Ready Issue → sole human owner → human-namespaced branch/worktree → tests → PR → independent validation workflow.
   </Card>
   <Card title="Quality" icon="approve-check-circle">
     Terminal correctness, performance, fuzzing, security, deterministic builds, and reproducible verification are completion gates.
@@ -30,20 +30,21 @@ The Developer Guide explains **how to navigate and contribute to Seyal**. It doe
 
 ## Claim an implementation Issue
 
-Seyal uses exclusive implementation ownership so parallel contributors do not unknowingly implement the same ticket.
+Seyal uses exclusive **human** implementation ownership so parallel contributors and their coding agents do not unknowingly implement the same ticket.
 
 ```text
 Ready Issue
-→ authenticated GitHub developer
-→ sole Issue assignee
+→ authenticated human GitHub developer
+→ sole human owner (assignee when assignable, acknowledged Owner claim otherwise)
 → confirmed plan
-→ issue/<number> branch
+→ <human-login>/issue/<number> branch
+→ coding agent may assist as delegated tool/co-author
 → isolated worktree
 → implementation
 ```
 
-If the Issue is already assigned to another developer, has multiple assignees, the current GitHub identity cannot be resolved, or the deterministic `issue/<number>` branch already exists for work you were not explicitly asked to resume, stop and report the collision. Do not create another branch or overwrite the existing assignee.
+Exactly one human owns an implementation Issue at a time: the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @username` claim. If another human already owns the Issue, assignee/owner-claim records conflict, the human owner cannot be resolved, or that same owner's deterministic `<human-login>/issue/<number>` branch already exists for work you were not explicitly asked to resume, stop and report the collision. The branch is only an audit/resume backstop for that human; the Issue owner record is what prevents duplicate human ownership. External contributors who cannot be assigned may use a maintainer-acknowledged `Owner: @username` Issue claim. Cursor/Codex/Claude Code/Copilot/bot identities are not work owners and must not be used as new branch namespaces.
 
-Ownership transfer is explicit: stop current edits, record the existing branch/PR/check state, reassign the Issue, and have the new developer re-run the implementation preflight before resuming the same branch.
+Ownership transfer is explicit and human-to-human: stop current edits, record the existing branch/PR/check state, transfer the assignee when possible or the acknowledged external-owner claim otherwise, and have the new human owner re-run the implementation preflight. Switching coding agents does not transfer ownership. Agents may be credited in PR tooling provenance or as real co-authors, but a bot-authored review does not satisfy a required independent human review.
 
 When this guide conflicts with an accepted source-of-truth document, the source-of-truth document wins and this guide must be corrected.
