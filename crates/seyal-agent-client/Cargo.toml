@@ -11,5 +11,8 @@ publish = false
 seyal-agent-core = { path = "../seyal-agent-core" }
 seyal-agent-protocol = { path = "../seyal-agent-protocol" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
+
 [lints.rust]
 unsafe_code = "deny"

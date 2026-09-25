@@ -197,6 +197,8 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 The pane/tab execution provisioning seam required by that decomposition is refined under #994: [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md) (Proposed) with child drafts in [`M003-674-EXECUTION-PROVISIONING-CHILDREN.md`](M003-674-EXECUTION-PROVISIONING-CHILDREN.md). No child is Ready before that ADR and its SPEC-003/004/009 amendments are accepted.
 
+The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001: [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed**) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing remain #1004 (Proposed ADR-019); window/tab lifecycle remains #1000; execution provisioning remains #994. None is accepted until its own PR merges; a child must not code PaneTree operation behavior before ADR-021 acceptance.
+
 ### 6.3 #923 — first headed slice after branch resolution
 
 Project the Tab `PaneTree` into visible Pane regions. Only the focused Pane hosts the live terminal/Metal/composer surface in that slice. Multiple simultaneous live PTY/Metal surfaces stay #936. Resume the existing Cursor branch only with an explicit resume request and sole assignee; otherwise abandon that branch before creating `issue/923`.
