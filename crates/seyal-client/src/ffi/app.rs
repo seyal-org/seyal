@@ -11,10 +11,12 @@ use crate::app::{
 };
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{
-    ComposerMode, RuntimeBlockRecord, RuntimeComposerEligibility, BLOCK_PROMPT,
-    COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL, COMPOSER_HISTORY_PLACEHOLDER,
+    BlockPresentationState, ComposerMode, RuntimeBlockRecord, RuntimeComposerEligibility,
+    BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL, COMPOSER_HISTORY_PLACEHOLDER,
 };
 use crate::input_policy::process_input_policy;
+use crate::live_tail::{project_block_output, LiveTailProjection};
+use crate::presentation::PresentationMode;
 use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryEffect, RecoveryStage};
 
 use super::{allocate_handle, with_active_client};
@@ -787,8 +789,41 @@ pub struct SeyalAppBlockSpan {
     pub end_line: u64,
 }
 
+/// Fail closed: host must not invent a history range or draw terminal pixels.
+pub const SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED: u16 = 0;
+/// Completed Block: request the inclusive trusted history span.
+pub const SEYAL_APP_BLOCK_PROJECTION_HISTORY: u16 = 1;
+/// Running Block: clip the damage-driven prepared primary frame into the
+/// Block output region. Not a Pane-wide live grid.
+pub const SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP: u16 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppBlockProjection {
+    pub kind: u16,
+    pub reserved0: u16,
+    pub reserved1: u32,
+    pub start_line: u64,
+    /// Inclusive end for [`SEYAL_APP_BLOCK_PROJECTION_HISTORY`]; zero otherwise.
+    pub end_line: u64,
+}
+
+impl SeyalAppBlockProjection {
+    const fn fail_closed() -> Self {
+        Self {
+            kind: SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED,
+            reserved0: 0,
+            reserved1: 0,
+            start_line: 0,
+            end_line: 0,
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_block_span(handle: u64, index: u32) -> SeyalAppBlockSpan {
+    // Raw Runtime anchors only. Hosts must use `seyal_app_block_projection`
+    // for Flow drawing; do not invent `start + 511` from a zero end.
     APPS.with(|apps| {
         let apps = apps.borrow();
         let Some(composer) = apps
@@ -809,6 +844,54 @@ pub extern "C" fn seyal_app_block_span(handle: u64, index: u32) -> SeyalAppBlock
         SeyalAppBlockSpan {
             start_line: block.start_line,
             end_line: block.end_line.unwrap_or(0),
+        }
+    })
+}
+
+/// Rust-owned Flow output projection for one Block index (#865).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAppBlockProjection {
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(snapshot) = apps.get(&handle).map(|state| state.root.snapshot()) else {
+            return SeyalAppBlockProjection::fail_closed();
+        };
+        let Some(block) = snapshot
+            .composer
+            .as_ref()
+            .and_then(|composer| composer.blocks.get(index as usize))
+        else {
+            return SeyalAppBlockProjection::fail_closed();
+        };
+        let mode = match snapshot.eligibility {
+            PresentationEligibility::Flow => PresentationMode::Flow,
+            PresentationEligibility::Raw => PresentationMode::Raw,
+            PresentationEligibility::Tui => PresentationMode::Tui,
+            PresentationEligibility::Unbound => {
+                return SeyalAppBlockProjection::fail_closed();
+            }
+        };
+        match project_block_output(
+            mode,
+            block.start_line,
+            block.end_line,
+            block.state == BlockPresentationState::Running,
+        ) {
+            LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {
+                kind: SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
+                reserved0: 0,
+                reserved1: 0,
+                start_line: clip.start_line,
+                end_line: 0,
+            },
+            LiveTailProjection::History(span) => SeyalAppBlockProjection {
+                kind: SEYAL_APP_BLOCK_PROJECTION_HISTORY,
+                reserved0: 0,
+                reserved1: 0,
+                start_line: span.start_line,
+                end_line: span.end_line,
+            },
+            LiveTailProjection::FailClosed => SeyalAppBlockProjection::fail_closed(),
         }
     })
 }
@@ -1609,6 +1692,10 @@ mod tests {
         assert_eq!(size_of::<SeyalAppShell>(), 64);
         assert_eq!(size_of::<SeyalAppRow>(), 56);
         assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
+        assert_eq!(size_of::<SeyalAppBlockProjection>(), 24);
+        assert_eq!(offset_of!(SeyalAppBlockProjection, kind), 0);
+        assert_eq!(offset_of!(SeyalAppBlockProjection, start_line), 8);
+        assert_eq!(offset_of!(SeyalAppBlockProjection, end_line), 16);
         assert_eq!(size_of::<SeyalAppTheme>(), 16);
         assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);
         assert_eq!(offset_of!(SeyalAppComposerHistory, query_utf8), 16);
@@ -1974,6 +2061,77 @@ mod tests {
         let span = seyal_app_block_span(handle, 0);
         assert_eq!(span.start_line, 0);
         assert_eq!(span.end_line, 0);
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn block_projection_ffi_uses_primary_clip_for_running_and_history_for_completed() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let bind = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 1,
+            flags: FLAG_TARGET_CONTROLLER,
+            fence_pane_lo: snap.pane_lo,
+            fence_pane_hi: snap.pane_hi,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: snap.epoch,
+            target_execution_lo: 1,
+            target_execution_hi: 0,
+            target_attachment_lo: 2,
+            target_attachment_hi: 0,
+            target_pty_generation: 1,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &bind) }, 0);
+        assert_eq!(seyal_app_snapshot(handle).eligibility, 1, "Flow");
+
+        let fence = APPS.with(|apps| apps.borrow().get(&handle).unwrap().root.fence());
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle).unwrap();
+            state
+                .root
+                .apply(AppAction::ApplyRuntimeBlocks {
+                    fence,
+                    records: vec![
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x21; 16]),
+                            command: "printf hello".into(),
+                            start_line: 10,
+                            end_line: Some(12),
+                            running: false,
+                            exit_status: Some(0),
+                        },
+                        RuntimeBlockRecord {
+                            id: BlockId::from_bytes([0x22; 16]),
+                            command: "seq 1 1000".into(),
+                            start_line: 20,
+                            end_line: None,
+                            running: true,
+                            exit_status: None,
+                        },
+                    ],
+                })
+                .unwrap();
+        });
+
+        let completed = seyal_app_block_projection(handle, 0);
+        assert_eq!(completed.kind, SEYAL_APP_BLOCK_PROJECTION_HISTORY);
+        assert_eq!(completed.start_line, 10);
+        assert_eq!(completed.end_line, 12);
+
+        let running = seyal_app_block_projection(handle, 1);
+        assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
+        assert_eq!(running.start_line, 20);
+        assert_eq!(running.end_line, 0, "must not invent a history end");
+
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 

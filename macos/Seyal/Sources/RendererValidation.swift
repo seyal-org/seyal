@@ -324,7 +324,8 @@ enum RendererValidation {
             guard atlasPressureSelfTest(device: device),
                   try repeatedLifecycleSelfTest(device: device),
                   try productionLayerPresentSelfTest(device: device),
-                  historyPrepareDefersWhileFrameInFlightSelfTest()
+                  historyPrepareDefersWhileFrameInFlightSelfTest(),
+                  liveTailPrimaryClipSelfTest()
             else {
                 return false
             }
@@ -1352,6 +1353,65 @@ enum RendererValidation {
                     forceFullRebuild: true
                 ) == .updated && renderer.hasPresentablePreparedState
             }
+        } catch {
+            return false
+        }
+    }
+
+    /// #865: Flow running live-tail clips the prepared primary frame into the
+    /// Block region without enabling Pane-wide live grid drawing.
+    static func liveTailPrimaryClipSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            renderer.setPresentationPlan(.flow())
+            let liveCells = [
+                preparedCell(scalar: UInt32(ascii: "H")),
+                preparedCell(scalar: UInt32(ascii: "i"))
+            ]
+            var damage = DamageMask()
+            damage.mark(row: 0)
+            guard try liveCells.withUnsafeBufferPointer({ buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 865,
+                        rows: 1,
+                        columns: 2,
+                        fullRebuild: true,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                ) == .updated
+            }) else { return false }
+
+            let cellSize = renderer.cellPixelSize(backingScale: 1)
+            let region = NativeTranscriptRegion(
+                id: 865,
+                origin: .zero,
+                clip: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: CGFloat(cellSize.width * 2),
+                    height: CGFloat(cellSize.height)
+                )
+            )
+            renderer.setTranscriptRegions([region])
+            renderer.setLiveTailBlocks([865: 1])
+            guard renderer.liveTailRegionCount == 1 else { return false }
+
+            let inspection = renderer.inspectPresentation()
+            guard inspection.mode == .flow,
+                  !inspection.drawsLiveGrid,
+                  !inspection.drawsFullGridBackground,
+                  !inspection.drawsCursorOutsideBlockRegions,
+                  inspection.blockRegionIDs == [865]
+            else {
+                return false
+            }
+
+            let paint = renderer.inspectFlowPaint()
+            return paint.isClean && paint.historyInstanceCount > 0
         } catch {
             return false
         }

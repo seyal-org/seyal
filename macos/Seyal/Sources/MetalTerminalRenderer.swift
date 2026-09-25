@@ -338,6 +338,12 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     /// transcript frame replaces the order and membership atomically.
     private var historyRegions: [UInt64: HistoryRenderRegion] = [:]
     private var historyRegionOrder: [UInt64] = []
+    /// Running Flow Blocks: damage-driven primary-frame clips keyed by Block ID.
+    private var liveTailRegions: [UInt64: HistoryRenderRegion] = [:]
+    private var liveTailOrder: [UInt64] = []
+    private var liveTailStartLines: [UInt64: UInt64] = [:]
+    private var transcriptRegions: [UInt64: NativeTranscriptRegion] = [:]
+    private var lastPreparedFrame: NativePreparedFrame?
     private var presentationPlan = RendererPresentationPlan.fullPane(.raw)
     private var currentRows = 0
     private var currentColumns = 0
@@ -439,6 +445,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                     && instanceCount > 0
                     && glyphAtlas.texture != nil)
                     || !historyRegionOrder.isEmpty && glyphAtlas.texture != nil
+                    || !liveTailOrder.isEmpty && glyphAtlas.texture != nil
                     || !presentationPlan.drawsLiveGrid
             )
     }
@@ -611,6 +618,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             needsCurrentFrameWhenIdle = false
             needsPresent = true
             preparationSucceeded = true
+            lastPreparedFrame = frame
+            try refreshLiveTailClips(backingScale: scale)
             return .updated
         }
 
@@ -665,6 +674,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             stats.rebuiltCells &+= UInt64(frame.columns)
         }
         preparationSucceeded = true
+        lastPreparedFrame = frame
+        try refreshLiveTailClips(backingScale: scale)
         return .updated
     }
 
@@ -712,6 +723,109 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             cells: cells
         )
         return .updated
+    }
+
+    private func refreshLiveTailClips(backingScale: CGFloat) throws {
+        guard presentationPlan.mode == .flow,
+              !presentationPlan.drawsLiveGrid,
+              let frame = lastPreparedFrame
+        else {
+            liveTailRegions.removeAll(keepingCapacity: false)
+            return
+        }
+        let scale = max(backingScale, 1)
+        let metrics = glyphAtlas.metrics(backingScale: scale)
+        var next: [UInt64: HistoryRenderRegion] = [:]
+        for blockID in liveTailOrder {
+            guard liveTailStartLines[blockID] != nil,
+                  let region = transcriptRegions[blockID]
+            else {
+                continue
+            }
+            let cells = frame.rows * frame.columns
+            guard cells > 0 else { continue }
+            let byteCount = cells * MemoryLayout<TerminalInstance>.stride
+            guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared)
+            else {
+                throw MetalTerminalRendererError.unavailableBuffer
+            }
+            buffer.label = "Seyal Flow Live-Tail Instances"
+            let pointer = buffer.contents().bindMemory(to: TerminalInstance.self, capacity: cells)
+            var outputIndex = 0
+            for row in 0..<frame.rows {
+                for column in 0..<frame.columns {
+                    let index = row * frame.columns + column
+                    let source = frame.cells[index]
+                    let origin = SIMD2<Float>(
+                        Float(region.origin.x) + Float(column * metrics.cellWidth),
+                        Float(region.origin.y) + Float(row * metrics.cellHeight)
+                    )
+                    let size = SIMD2<Float>(Float(metrics.cellWidth), Float(metrics.cellHeight))
+                    let painted = CGRect(
+                        x: CGFloat(origin.x),
+                        y: CGFloat(origin.y),
+                        width: CGFloat(size.x),
+                        height: CGFloat(size.y)
+                    )
+                    guard region.clip.intersects(painted.insetBy(dx: 0.5, dy: 0.5)) else {
+                        continue
+                    }
+                    // Copy glyph/color from the already-prepared Pane instance when
+                    // available; otherwise synthesize from the prepared cell.
+                    var flags: UInt32 = 0
+                    var uvRect = SIMD4<Float>(repeating: 0)
+                    var atlasSlice: UInt32 = 0
+                    if let instanceBuffer, index < instanceCount {
+                        let prepared = instanceBuffer.contents().bindMemory(
+                            to: TerminalInstance.self,
+                            capacity: instanceCount
+                        )[index]
+                        flags = prepared.flags
+                        uvRect = prepared.uvRect
+                        atlasSlice = prepared.atlasSlice
+                        pointer[outputIndex] = TerminalInstance(
+                            origin: origin,
+                            size: size,
+                            uvRect: uvRect,
+                            foreground: prepared.foreground,
+                            background: prepared.background,
+                            flags: flags,
+                            atlasSlice: atlasSlice
+                        )
+                    } else {
+                        pointer[outputIndex] = TerminalInstance(
+                            origin: origin,
+                            size: size,
+                            uvRect: uvRect,
+                            foreground: resolveTerminalColor(source.foreground, defaultRGBA: 0xffe9_e1d8),
+                            background: resolveTerminalColor(source.background, defaultRGBA: 0xff10_0d0b),
+                            flags: flags,
+                            atlasSlice: atlasSlice
+                        )
+                    }
+                    // Cursor only inside the running Block clip.
+                    if frame.cursorVisible,
+                       row == frame.cursorRow,
+                       column == frame.cursorColumn,
+                       presentationPlan.drawsCursorOutsideBlockRegions == false
+                    {
+                        var inst = pointer[outputIndex]
+                        inst.flags |= instanceCursorFlag
+                        pointer[outputIndex] = inst
+                    }
+                    outputIndex += 1
+                }
+            }
+            if outputIndex > 0 {
+                next[blockID] = HistoryRenderRegion(
+                    buffer: buffer,
+                    instanceCount: outputIndex,
+                    clip: region.clip
+                )
+            }
+        }
+        liveTailRegions = next
+        needsPresent = true
     }
 
     private func applyHistoryPrepare(
@@ -848,6 +962,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         // grid cannot remain on the drawable after the mode fence.
         needsPresent = instanceBuffer != nil
             || !historyRegionOrder.isEmpty
+            || !liveTailOrder.isEmpty
             || !plan.drawsLiveGrid
     }
 
@@ -857,14 +972,47 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             drawsFullGridBackground: presentationPlan.drawsFullGridBackground,
             drawsLiveGrid: presentationPlan.drawsLiveGrid,
             drawsCursorOutsideBlockRegions: presentationPlan.drawsCursorOutsideBlockRegions,
-            blockRegionIDs: historyRegionOrder
+            blockRegionIDs: historyRegionOrder + liveTailOrder
         )
+    }
+
+    /// Register running Flow Blocks that clip the prepared primary frame.
+    /// Empty clears all live-tail regions. Hosts must not invent history ranges.
+    func setLiveTailBlocks(_ startLinesByBlock: [UInt64: UInt64]) {
+        liveTailStartLines = startLinesByBlock
+        liveTailOrder = startLinesByBlock.keys.sorted()
+        let keep = Set(liveTailOrder)
+        liveTailRegions = liveTailRegions.filter { keep.contains($0.key) }
+        if lastPreparedFrame != nil {
+            try? refreshLiveTailClips(backingScale: currentScale > 0 ? currentScale : 1)
+        }
+        needsPresent = true
+    }
+
+    func setTranscriptRegions(_ regions: [NativeTranscriptRegion]) {
+        var map: [UInt64: NativeTranscriptRegion] = [:]
+        for region in regions {
+            map[region.id] = region
+        }
+        transcriptRegions = map
+        if lastPreparedFrame != nil {
+            try? refreshLiveTailClips(backingScale: currentScale > 0 ? currentScale : 1)
+        }
+        needsPresent = true
+    }
+
+    var liveTailRegionCount: Int {
+        liveTailRegions.count
+    }
+
+    var lastPreparedRowCount: Int {
+        lastPreparedFrame?.rows ?? 0
     }
 
     func inspectFlowPaint(from texture: MTLTexture? = nil) -> FlowPaintInspection {
         var instancesOutsideClips = 0
         var historyInstanceCount = 0
-        for region in orderedHistoryRegions {
+        for region in orderedHistoryRegions + orderedLiveTailRegions {
             let pointer = region.buffer.contents().bindMemory(
                 to: TerminalInstance.self,
                 capacity: region.instanceCount
@@ -887,7 +1035,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         var opaqueOutside = 0
         var opaqueInside = 0
         if let texture {
-            let sampled = countOpaquePixels(in: texture, clips: orderedHistoryRegions.map(\.clip))
+            let sampled = countOpaquePixels(in: texture, clips: (orderedHistoryRegions + orderedLiveTailRegions).map(\.clip))
             opaqueOutside = sampled.outside
             opaqueInside = sampled.inside
         }
@@ -920,6 +1068,10 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         historyRegionOrder.compactMap { historyRegions[$0] }
     }
 
+    private var orderedLiveTailRegions: [HistoryRenderRegion] {
+        liveTailOrder.compactMap { liveTailRegions[$0] }
+    }
+
     /// Submit a frame to a drawable supplied by the platform frame scheduler.
     /// Production presentation must not call `CAMetalLayer.nextDrawable()`
     /// here because that API can wait while all drawables are in use.
@@ -945,7 +1097,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             target: drawable.texture,
             instanceBuffer: instanceBuffer,
             atlasTexture: glyphAtlas.texture,
-            historyRegions: orderedHistoryRegions
+            historyRegions: orderedHistoryRegions + orderedLiveTailRegions
         ) else {
             deferredNeedsFullRebuild = true
             needsCurrentFrameWhenIdle = true
@@ -1046,7 +1198,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                   target: texture,
                   instanceBuffer: instanceBuffer,
                   atlasTexture: glyphAtlas.texture,
-                  historyRegions: orderedHistoryRegions
+                  historyRegions: orderedHistoryRegions + orderedLiveTailRegions
               )
         else {
             return nil
@@ -1084,7 +1236,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                   target: texture,
                   instanceBuffer: instanceBuffer,
                   atlasTexture: atlasTexture,
-                  historyRegions: orderedHistoryRegions
+                  historyRegions: orderedHistoryRegions + orderedLiveTailRegions
               )
         else {
             return nil
@@ -1545,6 +1697,11 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         instanceCount = 0
         historyRegions.removeAll()
         historyRegionOrder.removeAll()
+        liveTailRegions.removeAll()
+        liveTailOrder.removeAll()
+        liveTailStartLines.removeAll()
+        transcriptRegions.removeAll()
+        lastPreparedFrame = nil
         deferredHistoryPrepares.removeAll()
         currentRows = 0
         currentColumns = 0
