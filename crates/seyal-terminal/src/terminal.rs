@@ -48,15 +48,24 @@ pub struct Diagnostics {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellIntegrationEvent {
     /// OSC `133;A;<nonce>`: the shell is about to draw a prompt.
-    PromptStarted {
-        token: ShellIntegrationToken,
-    },
+    PromptStarted { token: ShellIntegrationToken },
+    /// `line` is the cursor's logical line at the moment this marker was
+    /// recognized, before any later bytes in the same feed are applied. A
+    /// caller sampling "the current cursor" instead, after draining a whole
+    /// batch of queued events, would observe the position after every later
+    /// marker/output in that same batch, not the position at this marker.
     CommandStarted {
         token: ShellIntegrationToken,
+        line: LineId,
     },
+    /// `line` is the last line of the command's own output: when output
+    /// ends with a trailing newline, the cursor's row at recognition time is
+    /// still empty (about to be overwritten by the next prompt), so `line`
+    /// is the row before it; otherwise the cursor's row is used as-is.
     CommandFinished {
         token: ShellIntegrationToken,
         exit_status: i32,
+        line: LineId,
     },
 }
 
@@ -1090,6 +1099,36 @@ impl TerminalCore {
         }
     }
 
+    /// The cursor's logical line right now. Used to stamp a shell-integration
+    /// marker's line at the moment it is recognized (see
+    /// `ShellIntegrationEvent`), never as a later re-sample: a caller that
+    /// re-samples after draining a whole batch of queued events would
+    /// observe the position after every later marker/output in that batch.
+    fn current_line(&self) -> LineId {
+        let cursor = self.current().cursor(self.modes.cursor_visible);
+        self.current().line_id(cursor.row).unwrap_or(LineId(1))
+    }
+
+    /// The line where a command's real output ends, at the moment the
+    /// trusted `D` marker is recognized. A cursor at column 0 means the
+    /// output ended with a newline (or zsh's `PROMPT_SP` already moved to a
+    /// fresh row, filling it with spaces before `precmd` emits `D`), so the
+    /// cursor's row is where the next prompt will be drawn, not output: use
+    /// the row before it. A cursor past column 0 is still on the last output
+    /// row (no trailing newline). The row's content is not a usable signal:
+    /// `PROMPT_SP` writes spaces into it. A command with no output backs up
+    /// before its start line; Runtime clamps that (#1015).
+    fn completion_line(&self) -> LineId {
+        let cursor = self.current().cursor(self.modes.cursor_visible);
+        let screen = self.current();
+        let row = if cursor.col == 0 && cursor.row > 0 {
+            cursor.row - 1
+        } else {
+            cursor.row
+        };
+        screen.line_id(row).unwrap_or(LineId(1))
+    }
+
     fn current_mut(&mut self) -> &mut Screen {
         if self.modes.alternate_screen
             && let Some(screen) = &mut self.alternate
@@ -2035,30 +2074,35 @@ impl Actions for TerminalCore {
             self.record_deferred();
             return;
         }
-        let event = match bytes.strip_prefix(b"133;") {
-            Some(payload) => {
-                let mut fields = payload.split(|byte| *byte == b';');
-                match (fields.next(), fields.next(), fields.next()) {
-                    (Some(b"A"), Some(token), None) => ShellIntegrationToken::from_hex(token)
-                        .map(|token| ShellIntegrationEvent::PromptStarted { token }),
-                    (Some(b"C"), Some(token), None) => ShellIntegrationToken::from_hex(token)
-                        .map(|token| ShellIntegrationEvent::CommandStarted { token }),
-                    (Some(b"D"), Some(token), Some(status)) => {
-                        ShellIntegrationToken::from_hex(token).and_then(|token| {
-                            std::str::from_utf8(status)
-                                .ok()
-                                .and_then(|status| status.parse::<i32>().ok())
-                                .map(|exit_status| ShellIntegrationEvent::CommandFinished {
-                                    token,
-                                    exit_status,
-                                })
-                        })
+        let event =
+            match bytes.strip_prefix(b"133;") {
+                Some(payload) => {
+                    let mut fields = payload.split(|byte| *byte == b';');
+                    match (fields.next(), fields.next(), fields.next()) {
+                        (Some(b"A"), Some(token), None) => ShellIntegrationToken::from_hex(token)
+                            .map(|token| ShellIntegrationEvent::PromptStarted { token }),
+                        (Some(b"C"), Some(token), None) => ShellIntegrationToken::from_hex(token)
+                            .map(|token| ShellIntegrationEvent::CommandStarted {
+                                token,
+                                line: self.current_line(),
+                            }),
+                        (Some(b"D"), Some(token), Some(status)) => {
+                            ShellIntegrationToken::from_hex(token).and_then(|token| {
+                                std::str::from_utf8(status)
+                                    .ok()
+                                    .and_then(|status| status.parse::<i32>().ok())
+                                    .map(|exit_status| ShellIntegrationEvent::CommandFinished {
+                                        token,
+                                        exit_status,
+                                        line: self.completion_line(),
+                                    })
+                            })
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 }
-            }
-            _ => None,
-        };
+                _ => None,
+            };
         let Some(event) = event else {
             self.record_deferred();
             return;
@@ -2173,16 +2217,123 @@ mod tests {
 
         assert_eq!(
             terminal.take_shell_integration_event(),
-            Some(ShellIntegrationEvent::CommandStarted { token })
+            Some(ShellIntegrationEvent::CommandStarted {
+                token,
+                line: LineId(1),
+            })
         );
         assert_eq!(
             terminal.take_shell_integration_event(),
             Some(ShellIntegrationEvent::CommandFinished {
                 token,
                 exit_status: 17,
+                line: LineId(1),
             })
         );
         assert_eq!(terminal.take_shell_integration_event(), None);
+    }
+
+    #[test]
+    fn command_finished_line_is_the_last_output_row_not_the_next_empty_one() {
+        // Regression: output ending with a trailing newline leaves the
+        // cursor on a fresh, still-empty row when `D` fires. That row is
+        // about to be overwritten by the shell's own next prompt, not part
+        // of the command's output, so `line` must back up to the row that
+        // actually holds the output.
+        let mut terminal = TerminalState::new(80, 24).unwrap();
+        let token_bytes = [
+            0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff,
+        ];
+        let token = ShellIntegrationToken::from_bytes(token_bytes);
+        terminal
+            .feed(b"\x1b]133;C;00112233445566778899aabbccddeeff\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandStarted {
+                token,
+                line: LineId(1)
+            })
+        );
+        // Real output on row 1, ending with a newline: cursor moves to a
+        // fresh, empty row 2 before the `D` marker is even parsed.
+        terminal.feed(b"output-line\r\n").unwrap();
+        terminal
+            .feed(b"\x1b]133;D;00112233445566778899aabbccddeeff;0\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandFinished {
+                token,
+                exit_status: 0,
+                line: LineId(1),
+            }),
+            "line must be the row holding the real output, not the empty row after it"
+        );
+    }
+
+    #[test]
+    fn command_finished_line_ignores_prompt_sp_spaces_on_the_next_row() {
+        // zsh PROMPT_SP (default on) writes its end-of-line mark and a row of
+        // spaces, then CR, before precmd emits `D`. The next row is then not
+        // empty, but it is still the next prompt's row (#1015 live finding).
+        let mut terminal = TerminalState::new(80, 24).unwrap();
+        let token = ShellIntegrationToken::from_bytes([
+            0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff,
+        ]);
+        terminal
+            .feed(b"\x1b]133;C;00112233445566778899aabbccddeeff\x07")
+            .unwrap();
+        let _ = terminal.take_shell_integration_event();
+        terminal.feed(b"output-line\r\n").unwrap();
+        terminal.feed(&[b' '; 79]).unwrap();
+        terminal.feed(b"\r").unwrap();
+        terminal
+            .feed(b"\x1b]133;D;00112233445566778899aabbccddeeff;0\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandFinished {
+                token,
+                exit_status: 0,
+                line: LineId(1),
+            }),
+            "PROMPT_SP spaces must not turn the next prompt's row into output"
+        );
+    }
+
+    #[test]
+    fn command_finished_line_stays_on_the_output_row_without_a_trailing_newline() {
+        let mut terminal = TerminalState::new(80, 24).unwrap();
+        let token = ShellIntegrationToken::from_bytes([
+            0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff,
+        ]);
+        terminal
+            .feed(b"\x1b]133;C;00112233445566778899aabbccddeeff\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandStarted {
+                token,
+                line: LineId(1)
+            })
+        );
+        // No trailing newline: cursor stays on the same row as the output.
+        terminal.feed(b"no-newline-output").unwrap();
+        terminal
+            .feed(b"\x1b]133;D;00112233445566778899aabbccddeeff;0\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_shell_integration_event(),
+            Some(ShellIntegrationEvent::CommandFinished {
+                token,
+                exit_status: 0,
+                line: LineId(1),
+            })
+        );
     }
 
     #[test]

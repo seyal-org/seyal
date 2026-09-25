@@ -97,6 +97,12 @@ impl CommandBlockTimeline {
         Ok(())
     }
 
+    /// Complete the matching running record. A completion line before
+    /// `start_line` is clamped to `start_line`: a command with no output
+    /// finishes on the row it started on, and the parser's completion line
+    /// then backs up past it. The Block must still complete rather than stay
+    /// `Running` with no owner (#1015). The wire range cannot express an empty
+    /// output yet; that marker is proposed in the ADR-009 amendment (#1041).
     pub(crate) fn complete(
         &mut self,
         id: CommandBlockId,
@@ -108,10 +114,10 @@ impl CommandBlockTimeline {
             .iter_mut()
             .find(|record| record.id == id)
             .ok_or(CommandBlockTimelineError::UnknownBlock)?;
-        if record.lifecycle != CommandBlockLifecycle::Running || end_line < record.start_line {
+        if record.lifecycle != CommandBlockLifecycle::Running {
             return Err(CommandBlockTimelineError::InvalidCompletion);
         }
-        record.end_line = Some(end_line);
+        record.end_line = Some(end_line.max(record.start_line));
         record.lifecycle = CommandBlockLifecycle::Completed { exit_status };
         Ok(())
     }
@@ -188,8 +194,8 @@ mod tests {
         let id = timeline.allocate_id().unwrap();
         timeline.start(id, "false".into(), 5).unwrap();
         assert_eq!(
-            timeline.complete(id, 4, Some(1)),
-            Err(CommandBlockTimelineError::InvalidCompletion)
+            timeline.complete(CommandBlockId(99), 7, Some(1)),
+            Err(CommandBlockTimelineError::UnknownBlock)
         );
         timeline.complete(id, 7, Some(1)).unwrap();
         let record = timeline.records().next().unwrap();
@@ -199,6 +205,34 @@ mod tests {
             CommandBlockLifecycle::Completed {
                 exit_status: Some(1)
             }
+        );
+        assert_eq!(
+            timeline.complete(id, 8, Some(0)),
+            Err(CommandBlockTimelineError::InvalidCompletion),
+            "a completed record never completes again"
+        );
+    }
+
+    #[test]
+    fn zero_output_completion_before_start_clamps_and_completes() {
+        // `true`/`cd`: C and D land on the same empty row; the parser's
+        // completion line backs up one row past start_line (#1015 review).
+        let mut timeline = CommandBlockTimeline::default();
+        let id = timeline.allocate_id().unwrap();
+        timeline.start(id, "true".into(), 5).unwrap();
+        timeline.complete(id, 4, Some(0)).unwrap();
+        let record = timeline.records().next().unwrap();
+        assert_eq!(
+            record.end_line,
+            Some(5),
+            "end_line is never before start_line"
+        );
+        assert_eq!(
+            record.lifecycle,
+            CommandBlockLifecycle::Completed {
+                exit_status: Some(0)
+            },
+            "a zero-output Block completes instead of staying Running"
         );
     }
 
