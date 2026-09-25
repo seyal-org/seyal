@@ -133,9 +133,16 @@ No new module/ADR was required. Refs evidence (not Issue Done):
    restore via Ctrl-C. Vim/Neovim/htop/watch TUI takeover/restore **PASS**.
 3. SPEC-011 IME 37–41 **covered**. Hosted ABC `XCTSkip`. #836 not pulled.
 4. #673 PHYSICAL_ARM64 remains a **sibling** close-out Issue; `performance_claim=false` here.
-5. Live Claude/Codex TUI and headed retained-grid search/copy remain
-   **ENVIRONMENT_UNSUPPORTED**. Independent non-author Approve is still
-   required before merge of this Refs PR. `#824` stays open.
+5. Live Claude/Codex TUI uses the issue-authorized deterministic equivalent
+   (exact subset: alt-screen, kitty 1|2, SGR mouse, title). That is not a
+   claim that every agent uses alt-screen.
+6. Retained-history search/copy after resize uses host-search /
+   `search_and_select`, not composer ⌃R. Deterministic fixture
+   `retained_unicode_history_host_search_and_copy_after_resize` proves CJK
+   and ZWJ-emoji `TerminalState` search+copy after resize. It does not
+   prove wrap lineage, FFI, or headed GUI. Headed `submitHostSearch`
+   remains a freeze-F W6 row.
+7. Independent non-author Approve is still required. `#824` stays open.
 
 Local `CARGO_TEST_THREADS=1 make check` and `make ui-test` **PASS** on
 `4d0cbb2` (Xcode 27 + Metal toolchain). Hosted FQ + fuzz on `2ef8332` retained.
@@ -150,3 +157,11 @@ superseded history only.
 
 No VT/renderer/runtime replacement. No terminfo weakening. No M003 chrome.
 No ADR create/amend. `TerminalState` remains sole terminal authority.
+
+## 2026-09-24 agent close-out delta
+
+- Row-grow DECSTBM history-seal regression fixed and covered by `row_grow_resize_keeps_full_screen_history_seal_for_typed_line` + inverse partial-region test.
+- High-volume mid-flood type+resize retained via host-search path.
+- Exact-head `make check` PASS on this branch. Component XCTest **32/32 PASS**. Local XCUIAutomation ENVIRONMENT_INCONCLUSIVE after `testmanagerd` disruption (`Timed out while enabling automation mode`); see headed ledger.
+- Still `Refs #824`; do not claim PHYSICAL_ARM64 / #673 Done here.
+

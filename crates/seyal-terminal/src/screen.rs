@@ -610,6 +610,12 @@ impl Screen {
                 Self::release_cell(*cell, store);
             }
         }
+        // Default full-screen margins must stay full-screen after row growth.
+        // `clamp_scroll_region_to_geometry` only expands `scroll_bottom` when it
+        // is out of range, so a prior full region (bottom == old_rows-1) would
+        // otherwise become a partial DECSTBM and discard scrolled rows instead
+        // of sealing them into HistoryStore.
+        let was_full_screen = self.region_is_full_screen();
         self.cols = prepared.cols;
         self.rows = prepared.rows;
         self.cells = prepared.cells;
@@ -619,7 +625,12 @@ impl Screen {
         self.source_breaks = prepared.source_breaks;
         self.cursor = prepared.cursor;
         self.saved_cursor = prepared.saved_cursor;
-        self.clamp_scroll_region_to_geometry();
+        if was_full_screen && self.rows > 0 {
+            self.scroll_top = 0;
+            self.scroll_bottom = self.rows - 1;
+        } else {
+            self.clamp_scroll_region_to_geometry();
+        }
         Mutation::full(rows)
     }
 
