@@ -85,7 +85,8 @@ Workspace (ADR-007 durable domain identity)
     └── Tab           ordered; Rust-owned, window-scoped membership
         └── PaneTree  nested split tree; Rust-owned
             └── Pane leaf
-                 └── at most one existing ExecutionId (bound, never owned)
+                 └── at most one existing ExecutionId (bound, never owned;
+                     bound to no other leaf, §8 invariant 4)
 ```
 
 `ui/SEYAL-UI-ARCHITECTURE-001.md` §4 is the selected reading. The `App -> Workspace -> Tab`
@@ -170,11 +171,21 @@ Three fencing classes, defined normatively in §6:
 ```text
 structural   CreateWindow, CloseWindow, CreateTab, CloseTab, ClosePane,
              MoveTabToWindow, MoveTabBefore, MoveTabToNewWindow,
-             SplitPane, ClosePaneTree node operations,
-             ActivateWorkspace   (may create a Window; see §7)
-selection    SelectWindow, SelectTab, FocusPane, CycleWindow, CycleTab
+             SplitPane and the other PaneTree structural operations (ADR-021),
+             ActivateWorkspace   create path only (target Workspace has zero Windows)
+selection    SelectWindow, SelectTab, FocusPane, CycleWindow, CycleTab,
+             ActivateWorkspace   raise path (target Workspace has ≥1 Window)
 execution    BindExecution, TerminateExecution, presentation-mode transitions
 ```
+
+`ActivateWorkspace` is one action whose fencing class is decided by the
+reducer from **current** state, never from the host's snapshot: if the target
+Workspace has at least one Window, the action raises its most recently active
+Window and is identity-fenced like any selection; if it has zero Windows, the
+action creates one and is containment-generation-fenced like any structural
+action. A stale host that believes a raise is possible, while the Workspace's
+last Window was destroyed in between, therefore reaches the create path with a
+stale generation and is rejected rather than silently creating a Window.
 
 `RequestQuit` is an application-scope action, not a window action, and resolves
 through §4.
@@ -184,7 +195,7 @@ through §4.
 binding. There must not be two concurrent workspace-activation paths. The
 product-active Workspace is derived from the product-active Window's
 `WorkspaceId`; a separate mutable `active_workspace` fact must not diverge from
-that derivation once multi-window lands (W2/W3 migrate the existing field to a
+that derivation once multi-window lands (W2a/W3 migrate the existing field to a
 derived projection or retire it).
 
 ### 2.3 Native-owned disposable state and inputs
@@ -217,9 +228,14 @@ The host must not, locally:
   typed `CloseWindow` action, and destroys the realization only when Rust's next
   snapshot or effect says that `WindowId` is gone;
 - decide that closing the last Window quits the application.
-  `applicationShouldTerminateAfterLastWindowClosed` returns `false`; Rust owns
-  whether last-window-close produces a quit intent;
-- terminate the process while bounded cleanup is owed (§4);
+  `applicationShouldTerminateAfterLastWindowClosed` returns `false`. The M003
+  policy is fixed here: closing the last Window **never** produces a quit
+  intent; the application keeps running with zero Windows (§3.2) and re-entry
+  follows §3.3a. Rust must not emit quit from last-window-close in M003; any
+  quit-on-last-close option is M004 config policy (#676) and requires amending
+  this ADR;
+- terminate the process while bounded cleanup is owed (§4), except through the
+  single Rust-armed backstop timer that §4 defines;
 - create, reorder, group or renumber tabs or windows;
 - infer a window/tab operation from AppKit ordering, from a previous snapshot
   copy, or from terminal output text.
@@ -316,12 +332,34 @@ Quit is a bounded, Rust-owned sequence realized by the host:
 4. Native revokes input, mouse capture, first responder, AX focus and marked
    text for every route.
 5. Rust requests bounded detach/cleanup for every live attachment under one
-   global monotonic deadline and emits BoundedDetachThenTerminate.
-6. Native releases renderer/GPU resources per SPEC-005 and destroys window
+   global monotonic deadline and emits BoundedDetachThenTerminate carrying
+   that deadline value.
+6. Native arms exactly one one-shot backstop timer with the Rust-supplied
+   deadline, releases renderer/GPU resources per SPEC-005 and destroys window
    realizations.
-7. Native calls reply(toApplicationShouldTerminate: true) only after Rust
-   reports cleanup complete, or after the bounded deadline expires.
+7. Native calls reply(toApplicationShouldTerminate: true) exactly once, on the
+   first of: Rust's cleanup-complete signal, or the backstop timer firing.
 ```
+
+Deadline ownership:
+
+- Rust owns the deadline **value** (its derivation, below) and the normal
+  cleanup-complete signal. Rust also enforces the deadline internally, so a
+  healthy reducer reports completion (success or expiry) before the backstop
+  fires.
+- Native owns only the one-shot backstop that guarantees termination when Rust
+  never replies (wedged bridge, panic caught at the FFI boundary, lost
+  completion). It carries no policy: it does not choose the value, does not
+  retry, is not rearmed, and is cancelled once `reply` has been called. This is
+  an OS-adapter liveness guard for a pending `terminateLater`, permitted under
+  ADR-015 because the value and the decision to quit remain Rust's.
+- If forwarding `RequestQuit` itself fails at the bridge (typed error, caught
+  panic), no Rust deadline exists; native calls
+  `reply(toApplicationShouldTerminate: true)` immediately rather than leaving
+  `terminateLater` pending. Bridge calls are non-blocking per ADR-015, so a
+  bridge call that never returns is outside this contract.
+- A late cleanup-complete signal after the backstop fired is ignored; `reply`
+  is never called twice.
 
 Constraints:
 
@@ -349,10 +387,49 @@ tier:
 |---|---|---|
 | `Focused` | focused Pane of the active Tab of the product-active Window | attachment retained; renderer/GPU resources live; sole input/IME/mouse/AX route |
 | `Visible` | in an active Tab of a visible Window but not focused | attachment retained; renderer resources scale with visible content; no input route |
-| `Hidden` | leaf exists but its Tab is inactive, or its Window is minimized/fully occluded | attachment retained so tab switching is not attach churn; prepared-frame delivery and renderer/GPU resources released or suspended; reveal resyncs through the existing bounded SPEC-004 path |
+| `Hidden` | leaf exists but its Tab is inactive, or its Window is minimized/fully occluded | attachment retained so tab switching is not attach churn; Runtime-side `DisplayDelta` delivery suspended for that attachment and renderer/GPU resources released; reveal resumes delivery and resyncs through the bounded SPEC-004 path. Requires the §5.1 SPEC-004 amendment |
 | `Unpresented` | execution live with no Pane binding | no attachment; Runtime-only live state; reachable per §3.3 |
 
-Invariants:
+### 5.1 SPEC-004 amendment is an owned prerequisite
+
+Accepted SPEC-004 §5 allows **1 attachment per connection**, at most **16 local
+control connections** and at most **16 live local attachments**, and has no
+control message that suspends `DisplayDelta` delivery for one attachment. Under
+that protocol, retaining an attachment on every `Hidden` leaf means:
+
+- one Runtime connection per retained leaf, of any tier;
+- a hard ceiling of 16 presented leaves across all Windows, which cannot meet the
+  `MILESTONE-003.md` §8.2 1/10/50/100 presentation-scaling row; and
+- Runtime keeps encoding and writing deltas for hidden attachments that the
+  client then discards, which works against the §9 idle-CPU/RSS measurements.
+
+Recording that cost and proceeding is rejected, because the 16-leaf ceiling is a
+correctness limit, not a tunable budget. Instead, the `Hidden` tier as defined
+above depends on a **separate Architecture/R&D SPEC-004 amendment**, owned by
+decomposition item S1, which must at minimum:
+
+1. add a per-attachment delivery-suspend / resume control message, where resume
+   always performs the existing bounded snapshot resync and never replays PTY
+   bytes;
+2. revise attachment/connection capacity (for example multiple attachments per
+   connection, or re-derived maxima) so 1/10/50/100 presentation scaling is
+   reachable, with a recorded resource derivation;
+3. keep suspension a delivery decision only — it never throttles PTY reads, VT
+   progress, canonical state mutation or child-exit observation.
+
+W5 is not Ready until that amendment is accepted. This ADR does not amend
+SPEC-004.
+
+Alternative E (release the attachment on hide) was re-weighed against this
+retention cost. Both designs pay the same full-snapshot resync on reveal. E
+additionally pays a connect / peer-credential / attach handshake and a fresh
+`AttachmentId` per switch, and loses Controller-lease continuity across tab
+switches; retention additionally requires the protocol change above. Retention
+is kept because Controller continuity and handshake-free switching are
+user-visible, while the protocol change is bounded and reviewable. If the S1
+amendment is rejected, this section reopens and E becomes the default candidate.
+
+### 5.2 Tier invariants
 
 - tier is a **client projection** decision. It never throttles PTY reads, VT
   progress, canonical state mutation, child-exit observation or damage
@@ -378,14 +455,20 @@ reducer. It increments **only** when Window/Tab/`PaneTree` containment mutates
 topology). It does **not** increment for selection-only actions, palette query
 keystrokes, label/attention projection updates, or other non-structural
 snapshot churn. Today's undifferentiated `snapshot_generation` bump-on-every-
-successful-action is **not** this fence and must not be reused as one (W2/W3).
+successful-action is **not** this fence and must not be reused as one (W2a/W3).
 
-- **Structural** actions are containment-generation-fenced: rejected unless
-  `containment_generation` equals the current containment generation **or** the
-  targeted subtree is proven unchanged by an equivalent structural predicate
-  the reducer documents. The host must not retry a rejected structural action
-  against a newer snapshot (ADR-015); it re-derives from the newest snapshot and
-  the user repeats the intent.
+- **Structural** actions are containment-generation-fenced: accepted only when
+  the carried `containment_generation` is exactly equal to the reducer's current
+  `containment_generation`, and rejected with a typed `StaleContainment` reason
+  otherwise. There is one global counter per headed composition and no other
+  acceptance predicate: no subtree comparison, per-container generation or
+  implementation-documented equivalence may admit a stale structural action.
+  ADR-021 PaneTree structural operations use this same fence. Finer-grained
+  (per-Window or per-Tab) generations may be introduced only by amending this
+  ADR with measured evidence that global fencing fails `MILESTONE-003.md` §8.2.
+  The host must not retry a rejected structural action against a newer snapshot
+  (ADR-015); it re-derives from the newest snapshot and the user repeats the
+  intent.
 - **Selection** actions are identity-fenced only: applied when every named
   identity is still live, regardless of generation; rejected when unknown. They
   are idempotent and destroy nothing, so generation-fencing them would only add
@@ -411,9 +494,39 @@ Additional rules:
   state. The hierarchical close order in `ui/M001-UI-SHELL-SCAFFOLD.md` —
   focused Pane, then active Tab, then Window — is retained as Rust-owned keyboard
   policy;
+- moving a Window's **only** Tab out of that Window follows §6.1, which keeps
+  the zero-Tab invariant by construction;
+- `BindExecution` (including §3.3 adoption) naming an `ExecutionId` that is
+  already bound to any leaf in any Window or Tab is rejected with a typed
+  `ExecutionAlreadyBound` reason (§8 invariant 4);
 - concurrent host events are serialized by the single Rust reducer. A second
   action naming an identity the first action destroyed is rejected, not applied
   to a different target.
+
+### 6.1 Moving a Window's only Tab
+
+- `MoveTabToWindow { tab, window }` or `MoveTabBefore { tab, before, window }`
+  where `window` differs from the Tab's current Window and the Tab is its source
+  Window's **only** Tab: accepted. In the same atomic reducer step the Tab is
+  appended to (or inserted before `before` in) the target Window and the source
+  Window is destroyed:
+  - the source `WindowId` is retired and removed from the Window order; the
+    relative order of every other Window is unchanged;
+  - the target Window becomes the product-active Window, the moved Tab becomes
+    its active Tab, and the Tab's focused Pane becomes the product-focused Pane;
+  - no binding changes: every leaf in the moved Tab keeps its `ExecutionId`,
+    `AttachmentId` and presentation mode, so no execution becomes `Unpresented`;
+  - `containment_generation` increments once;
+  - Rust emits, in order, destroy-realization for the source `WindowId` and
+    order-front / make-key for the target `WindowId`.
+- `MoveTabToNewWindow { tab }` where the Tab is its Window's only Tab: rejected
+  with a typed `MoveWouldNotChangeContainment` reason and state unchanged. The
+  result would be the same Tab alone in a Window with a different `WindowId`,
+  so it is not treated as a destroy-and-recreate.
+- Moving a Tab within its own Window (`MoveTabBefore` naming the current
+  Window) never destroys a Window, including when it is the only Tab. After the
+  fence passes, an anchor that leaves the order unchanged is accepted as a
+  no-op without a generation increment.
 
 ## 7. M003 versus M004 durability boundary
 
@@ -457,7 +570,13 @@ restore behavior.
 2. Creating a Window or Tab does not create an execution. Provisioning is #994.
 3. Moving a Tab or Pane between Windows does not recreate a PTY and does not
    change its `ExecutionId` (`ui/SEYAL-UI-ARCHITECTURE-001.md` §4).
-4. A Pane leaf binds at most one existing `ExecutionId`.
+4. Binding is one-to-one in both directions: a Pane leaf binds at most one
+   existing `ExecutionId`, and an `ExecutionId` is bound to **at most one** Pane
+   leaf across every Window and Tab of the headed composition. The `Focused`
+   tier's sole input/IME/mouse/AX route, Controller-lease use, `MoveTab*` and
+   §3.3 adoption all rely on this. Any bind or adopt that would give an
+   `ExecutionId` a second leaf is rejected (§6); showing one execution in two
+   places requires a separately accepted decision.
 5. Flow, Raw and TUI remain mutually exclusive presentations of one execution
    (ADR-009, SPEC-008). Window and tab operations are not presentation-mode
    transitions and do not bypass the ADR-009 transition fence.
@@ -475,18 +594,36 @@ Children must carry, at minimum:
   ordering equals `(window order, tab order)`; atomic rejection leaves state
   unchanged.
 - **Identity tests:** `WindowId` opacity and non-reuse; `ExecutionId` unchanged
-  across Tab and Pane moves between Windows.
+  across Tab and Pane moves between Windows; property test that after any
+  action sequence every `ExecutionId` is bound to at most one leaf; bind and
+  adopt of an already-bound `ExecutionId` rejected with `ExecutionAlreadyBound`
+  and state unchanged.
 - **Close/detach/terminate tests:** close Pane, Tab, Window and last Window each
   keep the execution live; explicit terminate remains a distinct path; no close
   action produces termination; adopt-after-unpresented rebinds the same
   `ExecutionId`.
-- **Stale/concurrent tests:** structural action with stale generation rejected;
-  selection action with live identity accepted across generations; unknown
+- **Stale/concurrent tests:** structural action with any generation other than
+  the current one rejected with `StaleContainment`, including when the targeted
+  subtree is unchanged; selection action with live identity accepted across
+  generations; `ActivateWorkspace` raise accepted with a stale generation and
+  create rejected with a stale generation, including the case where the
+  Workspace's last Window was destroyed after the host's snapshot; unknown
   identity rejected with no retarget; index-drift move rejected; duplicate close
   rejected rather than retargeted.
+- **Last-Tab move tests (§6.1):** moving a Window's only Tab to another Window
+  destroys the source Window atomically, makes the target product-active with
+  the moved Tab active, preserves every binding and `AttachmentId`, increments
+  the generation once and emits destroy-then-order-front effects;
+  `MoveTabToNewWindow` of an only Tab rejected with state unchanged; a stale
+  last-Tab move rejected with neither Window changed; property test that no
+  move sequence produces a zero-Tab Window.
 - **Quit tests:** `terminateLater` path; cleanup for N windows and N attachments
   under one deadline; deadline expiry still terminates; unrelated executions
-  survive and their PTY progress is not stalled during cleanup.
+  survive and their PTY progress is not stalled during cleanup; Rust never
+  replies (wedged or panicking bridge) and the native backstop still calls
+  `reply(true)` exactly once at the Rust-supplied deadline; `RequestQuit`
+  forwarding failure replies immediately; a late completion after the backstop
+  fired does not reply twice.
 - **Adversarial lifecycle matrix** (AGENTS.md): the orthogonal product of window
   open/closed, execution alive/dead, attached/detached, Controller/Observer,
   quitting/not, and focused/visible/hidden/unpresented. Required inverse cases:
@@ -496,14 +633,16 @@ Children must carry, at minimum:
   flight; repeated (not one-shot) reveal-resync failure proving bounded retry and
   no unbounded hot loop.
 - **Native XCTest/XCUI:** `windowShouldClose` forwards instead of destroying;
-  `applicationShouldTerminateAfterLastWindowClosed` is `false`;
+  `applicationShouldTerminateAfterLastWindowClosed` is `false` and closing the
+  last Window leaves the application running;
   `tabbingMode == .disallowed`; key/main/occlusion/miniaturize events forwarded;
   window and tab order in the UI equals snapshot order; host holds no writable
   window/tab model.
 - **Performance/resources** (`MILESTONE-003.md` §8.2): window, Tab and Pane create
   latency; focus/switch latency; idle CPU and RSS with hidden and occluded panes;
-  1/10/50/100 presentation scaling reported separately from real PTY count; the
-  derived quit-cleanup deadline.
+  Runtime `DisplayDelta` encode/write counts for suspended `Hidden` attachments
+  (expected zero under the §5.1 amendment); 1/10/50/100 presentation scaling
+  reported separately from real PTY count; the derived quit-cleanup deadline.
 - **Security:** invalid and stale resource references fail safely; closing chrome
   cannot target a different execution; no window/tab authority from terminal
   text; rejection logs carry no content or secrets.
@@ -537,9 +676,11 @@ operation. §6 fences the destructive class instead.
 
 ### E. Release the attachment whenever a Tab becomes inactive
 
-Rejected. Tab switching would become attach/detach churn with a fresh
-`AttachmentId` and a full resync per switch. §5 keeps the attachment and releases
-only renderer resources and prepared-frame delivery.
+Rejected conditionally. Tab switching would become attach/detach churn with a
+fresh `AttachmentId`, a connection handshake and loss of Controller-lease
+continuity per switch. The full resync on reveal is paid by both designs. §5.1
+weighs E against the retention cost, which requires an owned SPEC-004
+amendment; E becomes the default candidate if that amendment is rejected.
 
 ### F. Defer the whole contract and let #923/#936 choose behavior
 
@@ -596,8 +737,10 @@ A separate SPEC is deliberately not created in this refinement: the observable
 contract is carried by this ADR plus the already accepted SPEC-004, SPEC-006,
 SPEC-008 and SPEC-009. W3's multi-window snapshot/FFI ABI change is noted as a
 `docs/specs/README.md` "public API/ABI behavior" trigger; if reviewers require a
-SPEC before W3, promote §2–§6 into `SPEC-022-M003-WINDOW-TAB-LIFECYCLE` in a
-follow-up Architecture PR rather than inventing ABI in the child. A SPEC also
+SPEC before W3, promote §2–§6 into an unnumbered
+`SPEC-0xx-M003-WINDOW-TAB-LIFECYCLE` (number allocated at promotion; SPEC-022,
+SPEC-024 and SPEC-025 are already claimed) in a follow-up Architecture PR rather
+than inventing ABI in the child. A SPEC also
 becomes required if #994 introduces a new public protocol shape, and that SPEC
 belongs to #994.
 
@@ -614,6 +757,8 @@ Reopen only with concrete evidence that:
 
 - measured tab/window switch latency, CPU or RSS cannot meet `MILESTONE-003.md` §8.2
   under the §5 tier model or the §6 fencing model;
+- the §5.1 SPEC-004 amendment (decomposition item S1) is rejected, in which case
+  §5 reopens with Alternative E as the default candidate;
 - a Window bound to exactly one Workspace cannot express a required product
   behavior without making presentation the Workspace authority;
 - macOS window restoration, Spaces, Stage Manager or native tabbing cannot be
