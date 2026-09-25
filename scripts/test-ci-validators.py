@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -46,7 +49,34 @@ def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
-def pin_exact_head(root: Path, record_path: Path) -> None:
+
+def write_controlled_provenance_manifest(
+    directory: Path,
+    *,
+    sha: str,
+    host: str = "TESTHOST-0001",
+    clean: bool = True,
+    ac: bool = True,
+    thermal: bool = True,
+    host_confirmed: bool = True,
+) -> None:
+    manifest = {
+        "schema": "seyal.m002.controlled-provenance-manifest",
+        "version": 1,
+        "sha": sha,
+        "clean_source_tree_confirmed": clean,
+        "clean_source_tree_detail": "clean source tree" if clean else "working tree has uncommitted changes",
+        "ac_power_confirmed": ac,
+        "ac_power_detail": "AC Power" if ac else "host is running on battery power, not AC",
+        "thermal_stability_confirmed": thermal,
+        "thermal_stability_detail": "CPU_Speed_Limit=100" if thermal else "host is thermally throttled",
+        "host_identity_confirmed": host_confirmed,
+        "host_identity": host,
+        "collected_at": "2026-09-22T00:00:00+00:00",
+    }
+    write(directory / "controlled-provenance-manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+def pin_exact_head(root: Path) -> str:
     subprocess.run(
         ["git", "init"],
         cwd=root,
@@ -72,13 +102,171 @@ def pin_exact_head(root: Path, record_path: Path) -> None:
         stdout=subprocess.DEVNULL,
     )
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    record_path.write_text(
-        record_path.read_text(encoding="utf-8").replace(
-            "1111111111111111111111111111111111111111", sha
-        ),
-        encoding="utf-8",
+    # Cohort fixture files also stamp the placeholder production SHA (as
+    # `commit = '1111...1'`) so the commit-provenance-binding check can
+    # verify against it; rewrite every fixture .toml AND
+    # controlled-provenance-manifest.json under root, not just record.toml,
+    # so that stamp stays consistent with the pinned HEAD.
+    for fixture_file in list(root.rglob("*.toml")) + list(root.rglob("*.json")):
+        text = fixture_file.read_text(encoding="utf-8")
+        if "1111111111111111111111111111111111111111" in text:
+            fixture_file.write_text(
+                text.replace("1111111111111111111111111111111111111111", sha), encoding="utf-8"
+            )
+    return sha
+
+
+
+def run_accepted_gate_evaluation_unit_test(base: Path) -> None:
+    """Exercise evaluate_record()'s PASS/FAIL arithmetic for an accepted
+    NON-history gate.
+
+    In the real contract only the 2 HistoryStore families ever carry
+    status="accepted", so evaluate_record's PASS/FAIL branch is otherwise
+    never exercised for any other gate. evaluate_record() never calls
+    validate_contract_shape() and never reads ACCEPTED_GATE_CEILINGS, so a
+    synthetic in-memory schema dict naming a placeholder-accepted "startup"
+    gate is sufficient to test it in isolation. This never edits the real
+    docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml file.
+    """
+    fixture_root = base / "m002-accepted-gate-unit-test"
+    fixture_root.mkdir()
+
+    previous_root_env = os.environ.get(ENV_ROOT)
+    previous_dont_write_bytecode = sys.dont_write_bytecode
+    os.environ[ENV_ROOT] = str(fixture_root)
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "seyal_check_m002_performance_contract_unit",
+            ROOT / "scripts/check-m002-performance-contract.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous_dont_write_bytecode
+        if previous_root_env is None:
+            os.environ.pop(ENV_ROOT, None)
+        else:
+            os.environ[ENV_ROOT] = previous_root_env
+
+    # TEST FIXTURE — NOT AN ACCEPTED PRODUCT CEILING. This placeholder "startup"
+    # gate and its p50/p95/p99 ceiling exist only to prove evaluate_record's
+    # PASS/FAIL arithmetic for a non-history accepted gate; it is never the
+    # real contract and D1 (final numeric ceilings) is not decided here.
+    synthetic_schema = {
+        "schema": "seyal.m002.performance-contract",
+        "version": 1,
+        "percentile_method": "nearest-rank",
+        "cohorts": 5,
+        "samples_per_cohort": 100,
+        "raw_cohorts": {"file_count": 5, "observations_per_file": 100},
+        "result_schema": {
+            "required": [
+                "contract_schema", "contract_version", "production_sha", "harness_sha",
+                "baseline_sha", "build_mode", "os_version", "toolchain", "hardware", "display",
+                "power_thermal_state", "workload_hash", "topology", "evidence_class", "gate",
+                "metric", "boundary", "unit", "percentile_method", "sample_count", "cohort_count",
+                "environment_status", "platform_limit_reason", "comparator", "p50", "p95", "p99",
+                "baseline_p50", "baseline_p95", "baseline_p99", "relative_regression_percent",
+                "raw_log", "raw_cohorts", "baseline_raw_cohorts",
+            ],
+            "environment_statuses": ["VALID", "PLATFORM_LIMITED"],
+            "comparators": ["less_equal"],
+        },
+        "gates": {
+            "startup": {
+                "evidence_class": "NATIVE_HEADED",
+                "boundary": "process launch to first usable terminal state",
+                "unit": "ms",
+                "status": "accepted",
+                "source": "TEST FIXTURE — NOT AN ACCEPTED PRODUCT CEILING",
+                "p50": 100,
+                "p95": 200,
+                "p99": 400,
+                "relative_regression_percent": 10,
+            },
+        },
+    }
+
+    def write_cohort_files(directory: Path, samples: list[int]) -> None:
+        for cohort in range(1, 6):
+            write(
+                directory / f"cohort-{cohort}.toml",
+                f"cohort = {cohort}\nsamples = [{', '.join(map(str, samples))}]\n",
+            )
+
+    def build_record(case_dir: str, *, tail_value: int) -> Path:
+        case_root = fixture_root / case_dir
+        cohort_samples = [100] * 50 + [200] * 45 + [tail_value] * 5
+        write_cohort_files(case_root / "cohorts", cohort_samples)
+        baseline_samples = [100] * 50 + [200] * 45 + [400] * 5
+        write_cohort_files(case_root / "baseline-cohorts", baseline_samples)
+        write(case_root / "raw.log", "synthetic startup contract fixture\n")
+        record = case_root / "record.toml"
+        write(
+            record,
+            "\n".join(
+                [
+                    "contract_schema = 'seyal.m002.performance-contract'",
+                    "contract_version = 1",
+                    "production_sha = '1111111111111111111111111111111111111111'",
+                    "harness_sha = '2222222222222222222222222222222222222222'",
+                    "baseline_sha = '3333333333333333333333333333333333333333'",
+                    "build_mode = 'release'",
+                    "os_version = 'macOS'",
+                    "toolchain = 'Xcode/Rust'",
+                    "hardware = 'arm64'",
+                    "display = 'headless-unit-test'",
+                    "power_thermal_state = 'nominal'",
+                    "workload_hash = 'hash'",
+                    "topology = 'one-execution-headless'",
+                    "evidence_class = 'NATIVE_HEADED'",
+                    "gate = 'startup'",
+                    "metric = 'startup'",
+                    "boundary = 'process launch to first usable terminal state'",
+                    "unit = 'ms'",
+                    "percentile_method = 'nearest-rank'",
+                    "sample_count = 500",
+                    "cohort_count = 5",
+                    "environment_status = 'VALID'",
+                    "platform_limit_reason = ''",
+                    "comparator = 'less_equal'",
+                    "p50 = 100",
+                    "p95 = 200",
+                    f"p99 = {tail_value}",
+                    "baseline_p50 = 100",
+                    "baseline_p95 = 200",
+                    "baseline_p99 = 400",
+                    "relative_regression_percent = 10",
+                    f"raw_log = '{case_dir}/raw.log'",
+                    f"raw_cohorts = '{case_dir}/cohorts/'",
+                    f"baseline_raw_cohorts = '{case_dir}/baseline-cohorts/'",
+                    "",
+                ]
+            ),
+        )
+        return record
+
+    passing_record = build_record("matching", tail_value=400)
+    passing_status = module.evaluate_record(passing_record, synthetic_schema)
+    require(
+        passing_status == "PASS",
+        f"evaluate_record did not PASS a matching-percentile accepted non-history gate record: {passing_status}",
     )
 
+    failing_record = build_record("exceeding", tail_value=900)
+    failing_status = module.evaluate_record(failing_record, synthetic_schema)
+    require(
+        failing_status == "FAIL",
+        f"evaluate_record did not FAIL an exceeding-percentile accepted non-history gate record: {failing_status}",
+    )
+
+    print(
+        "[seyal CI validator self-test] evaluate_record PASS/FAIL arithmetic verified for a "
+        "synthetic non-history accepted gate without touching the real M002 contract file."
+    )
 
 
 def main() -> None:
@@ -109,6 +297,17 @@ def main() -> None:
         protocol_layering = base / "layering-protocol"
         write(protocol_layering / "crates/seyal-protocol/Cargo.toml", '[package]\nname = "seyal-protocol"\nversion = "0.0.0"\n\n[dependencies]\nseyal-runtime = { path = "../seyal-runtime" }\n')
         run_negative(["python3", str(ROOT / "scripts/check-layering.py")], protocol_layering, "seyal-protocol has forbidden dependencies: seyal-runtime")
+
+        agent_layering = base / "layering-agent"
+        write(
+            agent_layering / "crates/seyal-agent-core/Cargo.toml",
+            '[package]\nname = "seyal-agent-core"\nversion = "0.0.0"\n\n[dependencies]\nseyal-runtime = { path = "../seyal-runtime" }\n',
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-layering.py")],
+            agent_layering,
+            "seyal-agent-core has forbidden dependencies: seyal-runtime",
+        )
 
         unknown_layering = base / "layering-unknown"
         write(unknown_layering / "crates/seyal-mystery/Cargo.toml", '[package]\nname = "seyal-mystery"\nversion = "0.0.0"\n')
@@ -228,16 +427,29 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 invalid_percentiles / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(['2'] * 100)}]\n",
+                f"cohort = {cohort}\ncommit = '1111111111111111111111111111111111111111'\nsamples = [{', '.join(['2'] * 100)}]\n",
             )
         (invalid_percentiles / "baseline-cohorts").mkdir()
         baseline_samples = [2] * 250 + [4] * 225 + [8] * 25
         for cohort in range(1, 6):
             write(
                 invalid_percentiles / "baseline-cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '3333333333333333333333333333333333333333'\nsamples = [{', '.join(map(str, baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
-        pin_exact_head(invalid_percentiles, invalid_percentiles / "record.toml")
+        # Blocking-review fix (round 2): a PHYSICAL_ARM64 VALID result's
+        # raw_cohorts/baseline_raw_cohorts must each carry a
+        # controlled-provenance-manifest.json proving clean/AC/thermal/host
+        # provenance, not just a matching `commit` stamp. Every fixture
+        # below derives (via shutil.copytree) from this one, so stamping
+        # matching-host manifests here covers them all; the dedicated
+        # negative fixtures further down mutate copies of these manifests.
+        write_controlled_provenance_manifest(
+            invalid_percentiles / "cohorts", sha="1111111111111111111111111111111111111111"
+        )
+        write_controlled_provenance_manifest(
+            invalid_percentiles / "baseline-cohorts", sha="3333333333333333333333333333333333333333"
+        )
+        pinned_sha = pin_exact_head(invalid_percentiles)
         run_negative(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
             invalid_percentiles,
@@ -263,7 +475,7 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 absolute_fail / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, absolute_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '{pinned_sha}'\nsamples = [{', '.join(map(str, absolute_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
         result = subprocess.run(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -283,13 +495,13 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 relative_fail / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, relative_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '{pinned_sha}'\nsamples = [{', '.join(map(str, relative_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
         relative_baseline_samples = [1] * 250 + [2] * 225 + [4] * 25
         for cohort in range(1, 6):
             write(
                 relative_fail / "baseline-cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(map(str, relative_baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
+                f"cohort = {cohort}\ncommit = '3333333333333333333333333333333333333333'\nsamples = [{', '.join(map(str, relative_baseline_samples[(cohort - 1) * 100:cohort * 100]))}]\n",
             )
         result = subprocess.run(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -384,7 +596,7 @@ def main() -> None:
         for cohort in range(1, 6):
             write(
                 accepted_pass / "cohorts" / f"cohort-{cohort}.toml",
-                f"cohort = {cohort}\nsamples = [{', '.join(['2'] * 50 + ['4'] * 45 + ['8'] * 5)}]\n",
+                f"cohort = {cohort}\ncommit = '{pinned_sha}'\nsamples = [{', '.join(['2'] * 50 + ['4'] * 45 + ['8'] * 5)}]\n",
             )
         result = subprocess.run(
             ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
@@ -394,6 +606,114 @@ def main() -> None:
         require(
             result.returncode == 0 and "M002 performance result: PASS" in result.stdout,
             "accepted-ceiling in-policy record was not evaluated as PASS",
+        )
+
+        # Blocking-review fix: a PHYSICAL_ARM64 VALID result's raw/baseline
+        # cohorts must be bound to the SHA the record claims for them, not
+        # merely trusted. accepted_pass's cohorts/baseline-cohorts already
+        # carry correct `commit` stamps (proven above); mutate the baseline
+        # cohorts' commit to an unrelated SHA and confirm evaluate_record
+        # rejects it instead of silently evaluating unverified evidence.
+        forged_baseline_provenance = base / "m002-performance-forged-baseline-provenance"
+        shutil.copytree(accepted_pass, forged_baseline_provenance)
+        for cohort in range(1, 6):
+            path = forged_baseline_provenance / "baseline-cohorts" / f"cohort-{cohort}.toml"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "commit = '3333333333333333333333333333333333333333'",
+                    "commit = '9999999999999999999999999999999999999999'",
+                ),
+                encoding="utf-8",
+            )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            forged_baseline_provenance,
+            "is not bound to",
+        )
+
+        # Same check, but the cohort file carries no `commit` field at all
+        # (e.g. collected by a harness predating this fix) -- must also be
+        # rejected, not silently treated as unverifiable-but-acceptable.
+        missing_baseline_provenance = base / "m002-performance-missing-baseline-provenance"
+        shutil.copytree(accepted_pass, missing_baseline_provenance)
+        for cohort in range(1, 6):
+            path = missing_baseline_provenance / "baseline-cohorts" / f"cohort-{cohort}.toml"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "commit = '3333333333333333333333333333333333333333'\n", ""
+                ),
+                encoding="utf-8",
+            )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            missing_baseline_provenance,
+            "is not bound to",
+        )
+
+        # A PLATFORM_LIMITED record makes no provenance claim, so cohorts
+        # with no `commit` field at all remain acceptable -- already proven
+        # by platform_limited_missing_reason/platform_limited_ok/
+        # uncontrolled_limited below, whose cohort fixtures carry no commit
+        # field and are still accepted; this check must not regress them.
+
+        # Blocking-review fix (round 2): a SHA-correct baseline bundle is
+        # not enough -- it must also carry a controlled-provenance-manifest
+        # proving it was itself collected clean/AC/thermal-confirmed on the
+        # same host as the candidate. Each of the four cases below starts
+        # from accepted_pass (whose manifests are already valid and
+        # host-matched) and breaks exactly one property.
+
+        def mutate_manifest(directory: Path, **overrides: object) -> None:
+            manifest_path = directory / "controlled-provenance-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.update(overrides)
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        missing_baseline_manifest = base / "m002-performance-missing-baseline-manifest"
+        shutil.copytree(accepted_pass, missing_baseline_manifest)
+        (missing_baseline_manifest / "baseline-cohorts" / "controlled-provenance-manifest.json").unlink()
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            missing_baseline_manifest,
+            "has no controlled-provenance-manifest.json",
+        )
+
+        dirty_baseline_manifest = base / "m002-performance-dirty-baseline-manifest"
+        shutil.copytree(accepted_pass, dirty_baseline_manifest)
+        mutate_manifest(
+            dirty_baseline_manifest / "baseline-cohorts",
+            clean_source_tree_confirmed=False,
+            clean_source_tree_detail="working tree has uncommitted changes",
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            dirty_baseline_manifest,
+            "was not collected with a clean source tree",
+        )
+
+        uncontrolled_baseline_manifest = base / "m002-performance-uncontrolled-baseline-manifest"
+        shutil.copytree(accepted_pass, uncontrolled_baseline_manifest)
+        mutate_manifest(
+            uncontrolled_baseline_manifest / "baseline-cohorts",
+            thermal_stability_confirmed=False,
+            thermal_stability_detail="host is thermally throttled",
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            uncontrolled_baseline_manifest,
+            "was not collected with confirmed thermal stability",
+        )
+
+        host_mismatched_baseline_manifest = base / "m002-performance-host-mismatched-baseline-manifest"
+        shutil.copytree(accepted_pass, host_mismatched_baseline_manifest)
+        mutate_manifest(
+            host_mismatched_baseline_manifest / "baseline-cohorts",
+            host_identity="TESTHOST-0002",
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-m002-performance-contract.py"), "--record", "record.toml"],
+            host_mismatched_baseline_manifest,
+            "collected on different hosts",
         )
 
         unordered_cohort_names = base / "m002-performance-unordered-cohort-names"
@@ -655,6 +975,8 @@ def main() -> None:
             rewritten_fail,
             "must retain the f105364 history_active_reflow_ms FAIL",
         )
+
+        run_accepted_gate_evaluation_unit_test(base)
 
 
         unicode_benchmark = base / "unicode-benchmark-contract"

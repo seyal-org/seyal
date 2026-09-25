@@ -47,14 +47,18 @@ fn spawn_ready() -> (TerminalExecution, [u8; 4096]) {
     (execution, buffer)
 }
 
+/// Reads exactly `PAYLOAD.len()` echoed bytes and returns the byte count.
+/// Panics loudly if the echoed content does not exactly match `PAYLOAD` --
+/// matching byte COUNT alone (the old check) cannot detect corruption,
+/// reordering, or a same-length-but-wrong-content echo.
 #[cfg(target_os = "macos")]
 fn read_echo(execution: &mut TerminalExecution, buffer: &mut [u8]) -> usize {
-    let mut iteration_received = 0;
-    while iteration_received < PAYLOAD.len() {
+    let mut received = Vec::with_capacity(PAYLOAD.len());
+    while received.len() < PAYLOAD.len() {
         match execution.read_output(buffer).expect("benchmark read") {
             ReadOutcome::Bytes(count) => {
                 black_box(&buffer[..count]);
-                iteration_received += count;
+                received.extend_from_slice(&buffer[..count]);
             }
             ReadOutcome::WouldBlock => {
                 let readiness = execution
@@ -65,7 +69,24 @@ fn read_echo(execution: &mut TerminalExecution, buffer: &mut [u8]) -> usize {
             ReadOutcome::Eof => panic!("benchmark child closed PTY early"),
         }
     }
-    iteration_received
+    assert_payload_identity(&received);
+    received.len()
+}
+
+/// Asserts `received` is byte-for-byte identical to `PAYLOAD`, not merely
+/// the same length. Factored out so it can be exercised directly by
+/// `--selftest-payload-identity` without spawning a PTY.
+#[cfg(target_os = "macos")]
+fn assert_payload_identity(received: &[u8]) {
+    assert_eq!(
+        received.len(),
+        PAYLOAD.len(),
+        "echoed byte count does not match PAYLOAD length"
+    );
+    assert_eq!(
+        received, PAYLOAD,
+        "echoed bytes do not exactly match PAYLOAD content (byte count matched, but content diverged)"
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -98,9 +119,58 @@ fn run_contract_cohort() {
         Duration::from_millis(100),
         Duration::from_secs(2),
     ));
+    // Throughput alongside the retained latency percentiles: the cohort
+    // file itself stays a single-metric (latency ms) array per the M002
+    // contract's schema, so this is reported as a separate diagnostic field,
+    // not folded into `samples`.
+    let total_bytes = (samples * PAYLOAD.len()) as f64;
+    let total_seconds: f64 = retained.iter().sum::<f64>() / 1_000.0;
+    let bytes_per_second = if total_seconds > 0.0 {
+        total_bytes / total_seconds
+    } else {
+        0.0
+    };
     m002_write_cohort_file(&out, cohort, &retained);
     println!(
-        "[seyal pty benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} out={out} performance_claim=false"
+        "[seyal pty benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} out={out} payload_bytes={} total_bytes={total_bytes} bytes_per_second={bytes_per_second:.3} performance_claim=false",
+        PAYLOAD.len(),
+    );
+}
+
+/// Proves assert_payload_identity() catches single-byte corruption that a
+/// byte-COUNT-only check (the old logic) would miss entirely, without
+/// spawning a PTY. Prints PASS/FAIL lines so the corrupted-vs-correct
+/// behavior can be observed directly from bench output.
+#[cfg(target_os = "macos")]
+fn selftest_payload_identity() {
+    assert_payload_identity(PAYLOAD);
+    println!("pty_io selftest_payload_identity: exact PAYLOAD PASSED performance_claim=false");
+
+    let same_length_wrong_content: Vec<u8> = PAYLOAD
+        .iter()
+        .enumerate()
+        .map(|(index, byte)| {
+            if index == 3 {
+                byte.wrapping_add(1)
+            } else {
+                *byte
+            }
+        })
+        .collect();
+    assert_eq!(
+        same_length_wrong_content.len(),
+        PAYLOAD.len(),
+        "selftest precondition: corrupted payload must keep the same length"
+    );
+    let panicked =
+        std::panic::catch_unwind(|| assert_payload_identity(&same_length_wrong_content)).is_err();
+    assert!(
+        panicked,
+        "FAIL: a single corrupted byte (same length as PAYLOAD) was NOT caught -- \
+         a byte-count-only check would have silently passed this"
+    );
+    println!(
+        "pty_io selftest_payload_identity: single-byte corruption correctly PANICKED performance_claim=false"
     );
 }
 
@@ -108,6 +178,10 @@ fn run_contract_cohort() {
 fn main() {
     if m002_contract_gate().is_some() {
         run_contract_cohort();
+        return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--selftest-payload-identity") {
+        selftest_payload_identity();
         return;
     }
 

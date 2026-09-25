@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration amendment proposed by #686; superseded predecessor PR #991; accepted on merge of PR #1022
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration amendment proposed 2026-09-19; accepted on merge of PR #1022
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -731,3 +731,214 @@ Originally approved by product authority on 2026-08-28. Presentation-mode
 clarification requested by product authority on 2026-09-11 under #858 and
 accepted on merge of PR #859 as `8d08f2f`. Silent shell-integration injection
 mechanism approved by product authority on 2026-09-16 under #968.
+
+## 2026-09-19 amendment — M003 shell metadata boundary (#686)
+
+**Status:** Proposed originally in superseded PR #991; accepted and normative only when PR #1022
+merges. Before merge, this section is not normative. Product code and SPEC-008
+changes remain out of scope for #686.
+
+### Decision
+
+Keep trusted shell integration at the accepted zsh-only boundary, and define
+Runtime-owned elapsed duration for completed Blocks. Do not add trusted live
+CWD or Bash/fish integration to M003.
+
+| Context | M003 trust and presentation contract |
+|---|---|
+| Interactive zsh launched by Seyal | The existing per-execution nonce authenticates the accepted `A`/`C`/`D` events. `C`/`D` delimit a composer-correlated Block; the trusted shell hook supplies exit status in `D`, which Runtime validates and records. Runtime independently measures elapsed duration. |
+| Interactive Bash, fish, or any other shell without an accepted integration | `Unsupported`; keep the shell usable in full-Pane Raw. Do not create Blocks from prompt/output scraping. |
+| Nested shell or SSH child | No secret or hook is propagated. It remains part of the already-running outer command until that child exits; no nested/remote Block or live CWD claim is made. |
+| Startup working directory | Runtime launch/config policy may supply the initial CWD. It is not inferred from terminal output and is not a trusted live-CWD event. |
+| Live CWD / OSC 7 | Not required for M003 Block semantics. OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority. |
+
+The accepted [M003 reference design](ui/M003-COMMAND-BLOCKS-REFERENCE-DESIGN.md)
+includes elapsed time in the completed-Block header, so completed-Block elapsed
+time is required. Runtime measures a monotonic interval for the Block it
+already owns:
+
+1. Start when Runtime observes the matching nonce-trusted `C` event for the
+   pending composer submission and creates its Running Block. Capture
+   `std::time::Instant` at this Runtime boundary, not at composer admission.
+2. Stop when Runtime observes the matching nonce-trusted `D` event. Capture the
+   same monotonic clock at the Runtime boundary; do not wait for the next
+   prompt, later background output, wall-clock timestamps, or a client repaint.
+3. This is Runtime-observed elapsed time, quantized by PTY-reactor scheduling;
+   the nanosecond storage unit does not claim nanosecond accuracy. If `C` and
+   `D` are parsed from the same PTY read, mark duration unavailable instead of
+   publishing the near-zero time spent draining the parser queue. The
+   implementation must cover that coalesced fast-command case explicitly.
+4. A missing, untrusted, conflicting, or lifecycle-only end has unknown
+   duration. Never estimate from composer-submit time, prompt time, child exit,
+   output-drain time, OSC 7, or shell-provided clocks.
+5. A completed duration is immutable across client detach/reattach while the
+   same Runtime retains its BlockTimeline. A running Block remains Running;
+   clients do not reconstruct elapsed time across Runtime replacement or from
+   wall-clock values. Runtime restart recovery remains outside M003.
+6. Keep the monotonic `Instant` only while Runtime holds the Running Block.
+   On a matching `D`, store the result as `duration_ns: Option<u64>` in Runtime
+   Block metadata and expose that optional value in `CommandBlock`/
+   `BlockTimeline` and the client projection. It is `Some` only after a
+   matching trusted `D`; all other completions have `None`. Do not add
+   start/finish wall-clock timestamps or command timing to shell marker
+   payloads.
+
+The duration field changes the existing exact-length `BlockTimeline` record
+schema. Add `CAP_COMMAND_BLOCK_DURATION = 1 << 8` as a separately negotiated
+capability that depends on `CAP_COMMAND_BLOCKS`; a ClientHello requesting
+duration without command Blocks is invalid, and Runtime must not advertise
+duration without command Blocks. The extended record carries
+`duration_ns: Option<u64>` with explicit presence encoding; unknown duration is
+not a numeric sentinel.
+
+For each connection, the negotiated schema is the intersection of the
+ClientHello request and ServerHello capabilities. Without the duration bit,
+Runtime sends the current record shape byte-for-byte and the client uses only
+the legacy decoder. With the duration bit, Runtime sends the extended shape
+and the client uses only the duration decoder. The client must never infer the
+schema from payload length. A record whose shape disagrees with the negotiated
+capability, or a duration capability without command Blocks, is a protocol
+violation: fail closed before applying that timeline.
+
+Runtime groups attached Block clients by negotiated schema and emits at most
+two bounded encodings (legacy and duration-capable), sharing each frame within
+its compatible group. Timeline admission and eviction must reserve enough
+payload capacity for the largest supported schema for every retained record,
+including duration presence. Before adding a Running Block, evict completed
+records until both encodings fit `MAX_FRAME_PAYLOAD`; never evict a Running
+record. Plan the required evictions first. If the timeline still cannot fit,
+reject the new admission with the existing timeline unchanged; otherwise apply
+the planned evictions and admission atomically. Consequently every admitted
+timeline must encode within the frame limit for both schemas. A later encode
+failure is an invariant failure: fail the affected group closed and do not
+silently leave it with a stale timeline.
+
+When a Runtime rejects a ClientHello that requested duration, the client may
+make one duration-specific compatibility retry. Retry only after a decoded
+Error has `error_code=MalformedPayload` and
+`offending_message_type=ClientHello` for a ClientHello the client itself
+encoded and validated. The retry uses a fresh connection and removes only
+`CAP_COMMAND_BLOCK_DURATION`. If that ClientHello is still rejected and it
+requested `CAP_EXTENDED_TERMINAL_KEY`, the existing one-reconnect compatibility
+fallback may then remove that bit once, also on a fresh connection. Thus the
+duration fallback composes with the existing extended-key fallback in the
+fixed order duration, then extended key, for at most three ClientHello attempts
+including the initial request. This amendment does not change fallback or
+negotiation behavior for `CAP_BLOCK_METADATA`, `CAP_COMMAND_BLOCKS`, or
+`CAP_GRAPHEME_DISPLAY`. Propagate unrelated protocol and transport failures
+without retry; if these bounded retries are exhausted, return the final error.
+Never append a field under the existing schema and assume older decoders ignore
+it.
+
+SPEC-008 and the implementation Issue must define the exact byte layout and
+display rounding after this ADR is accepted.
+
+Before product implementation, the implementation Issue must also require:
+
+- Runtime tests with an injectable monotonic clock for positive duration,
+  missing/untrusted `D`, execution-end completion, and immutability after
+  detach/reattach;
+- live PTY coverage for a short command, a delayed foreground command, and
+  `C`/`D` coalesced in one read (the coalesced case must be unknown, not a
+  misleading near-zero duration);
+- protocol tests for old/new record shapes, malformed presence encoding,
+  negotiated-schema binding (including shape mismatch), bounded lengths,
+  worst-case timeline capacity for both schemas, rejected admission without
+  timeline mutation, and mixed-client fan-out where only one client negotiates
+  duration;
+- ClientHello fallback tests proving duration-only rejection removes only the
+  duration bit, duration plus extended-key rejection composes with the existing
+  one-shot fallback in at most three attempts, unrelated-error/transport
+  non-retry, and bounded exhaustion; preserve the existing extended-key
+  fallback behavior;
+- the separate implementation Issue must carry the same-read `C`/`D` live-PTY
+  case as an explicit required acceptance test: duration is unknown, never a
+  misleading near-zero value;
+- hot-path/performance evidence showing that timing and per-capability encoding
+  never block PTY/VT/output progress or allocate a frame per attached client.
+
+### Installation, update, removal and fallback
+
+The accepted static `.zshenv`/inherited-descriptor mechanism remains the only
+M003 integration. It makes no runtime file writes and does not edit user-owned
+dotfiles. The bundled startup artifact applies to newly launched zsh
+executions; an already-running execution retains the hooks and Runtime state
+it started with. No per-user uninstall or cleanup is needed because there is
+no installed user file. Nested shells and children receive neither the
+bootstrap directory nor the nonce. Replacing the shell, removing a required
+hook, losing a trusted marker, or launching an Unsupported shell does not
+attempt repair or broaden trust: structured eligibility remains unavailable
+and the terminal stays usable through Raw under the accepted fallback rules.
+
+This amendment adds no new shell trust source: Runtime derives duration from
+the already accepted, nonce-validated command boundaries. The elapsed value is
+execution metadata, not a claim that the child process or all of its background
+descendants have stopped.
+
+### Evidence and remaining limits
+
+The accepted zsh bootstrap, marker contract and performance evidence remain
+owned by ADR-009 and merged PRs #970, #979 and #986; this proposal does not
+reopen them. The permanent live-PTY coverage in
+[`shell_integration_live_tests.rs`](../../crates/seyal-runtime/src/runtime/shell_integration_live_tests.rs)
+includes user startup ordering, composer command/alias/exit-status behavior,
+blank and interrupted multiline submissions, admission-time direct-input
+fencing, foreground stdin isolation, nested-shell secret isolation, forged
+marker rejection, lifecycle/`exec` replacement, user-hook removal, unsupported
+shell Raw fallback, and nonce absence from argv/environment. PR #986 covers
+published composer-eligibility transitions. The retained Tier 1 startup and
+marker-overhead evidence is
+[`m003-shell-integration-967-tier1-4da2354.md`](../evidence/m003-shell-integration-967-tier1-4da2354.md).
+
+The [#686 evidence comments](https://github.com/seyal-org/seyal/issues/686#issuecomment-5742459046)
+and [latest live-PTY update](https://github.com/seyal-org/seyal/issues/686#issuecomment-5742658701)
+record the additional probes. Custom zsh prompt/theme hooks preserved exit
+status, delayed background output stayed beyond the completed Block anchor,
+and tmux child takeover returned eligibility to the parent prompt. Interactive
+Bash and fish remained usable through Raw with no Block. A denied `sudo -n`
+recovered the parent prompt.
+
+The following remain evidence limits rather than reasons to broaden M003:
+
+- No reachable SSH server was available. The exact missing cases are successful
+  authentication, remote prompt behavior, and integration-propagation
+  boundaries; a refused localhost connection verified only parent-shell
+  recovery. M003 does not claim remote Block/CWD support, and no SSH integration
+  change is proposed.
+- Successful privileged `sudo` execution was unavailable because noninteractive
+  authorization required a password. The exact missing case is one successful
+  privileged child followed by the trusted parent prompt; the denial/recovery
+  path was exercised.
+- The existing Tier 1 performance artifact was not repeated by the #686 probe.
+  Re-run it only if the accepted zsh hooks, marker parser, or integration state
+  machine changes.
+- Runtime duration, reconnect immutability, missing-end behavior, wall-clock
+  independence, and mixed-version wire fallback have no production tests yet;
+  they belong to the post-acceptance implementation Issue and are not claimed
+  as implemented by this decision proposal.
+
+### Alternatives considered
+
+- **Defer completed-Block elapsed time.** Rejected because the accepted M003
+  reference design already requires that visible field; deferral would silently
+  weaken the selected product design.
+- **Measure in the client from submission or first paint.** Rejected because
+  those events do not define trusted command start/end and cannot reproduce an
+  immutable completed value after detach/reattach.
+- **Trust shell-supplied timestamps or OSC 7 metadata.** Rejected because the
+  current authenticated marker contract carries no timing/CWD payload, shell
+  wall clocks are not the Runtime monotonic authority, and terminal output is
+  not trusted metadata.
+- **Add Bash/fish hooks or remote integration now.** Deferred. Unsupported
+  shells already have a usable Raw path; no accepted M003 requirement needs
+  broader shell support, and each additional hook would need its own startup,
+  failure, security and performance evidence.
+- **Add live CWD to each Block.** Deferred. Startup CWD belongs to #676 launch
+  policy; no accepted M003 Block criterion requires live CWD. Any later
+  requirement needs an explicit trust source and a separate architecture/spec
+  decision before production work.
+
+After this amendment is accepted, update SPEC-008 and refine the separate
+implementation Issue before adding duration to Runtime, the wire protocol, or
+the client. Reopen #686 if a concrete M003 requirement appears for live CWD,
+Bash/fish integration, or trusted remote-shell Blocks.

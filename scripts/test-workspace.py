@@ -17,6 +17,11 @@ EXPECTED_CRATES = {
     "seyal-runtime": "crates/seyal-runtime",
     "seyal-render": "crates/seyal-render",
     "seyal-client": "crates/seyal-client",
+    "seyal-agent-core": "crates/seyal-agent-core",
+    "seyal-agent-protocol": "crates/seyal-agent-protocol",
+    "seyal-agent-store": "crates/seyal-agent-store",
+    "seyal-agent-backend": "crates/seyal-agent-backend",
+    "seyal-agent-client": "crates/seyal-agent-client",
 }
 
 
@@ -67,7 +72,7 @@ for name, member in EXPECTED_CRATES.items():
     if package.get("name") != name:
         fail(f"package must be named {name}")
     if package.get("publish") is not False:
-        fail("M001 crates must not be publishable packages")
+        fail("workspace crates must not be publishable packages")
     manifests[name] = data
 
 expected_portable_dependencies = {
@@ -82,6 +87,13 @@ expected_portable_dependencies = {
     # Identity value types only. Product reducers stay in seyal-client; this is
     # not a seyal-runtime edge.
     "seyal-client": {"seyal-core", "seyal-protocol", "seyal-render"},
+    "seyal-agent-core": set(),
+    "seyal-agent-protocol": {"seyal-agent-core"},
+    "seyal-agent-store": {"rusqlite", "seyal-agent-core"},
+    "seyal-agent-backend": {
+        "seyal-agent-core", "seyal-agent-protocol", "seyal-agent-store"
+    },
+    "seyal-agent-client": {"seyal-agent-core", "seyal-agent-protocol"},
 }
 for name, expected in expected_portable_dependencies.items():
     dependencies = manifests[name].get("dependencies", {})
@@ -111,6 +123,15 @@ else:
     width_version = ""
 if not width_version.startswith("0.2."):
     fail("seyal-terminal must pin unicode-width 0.2.x")
+store_sqlite = manifests["seyal-agent-store"].get("dependencies", {}).get("rusqlite")
+if not isinstance(store_sqlite, dict):
+    fail("seyal-agent-store must pin rusqlite as a reviewed table dependency")
+if str(store_sqlite.get("version", "")) != "0.40.2":
+    fail("seyal-agent-store must pin rusqlite 0.40.2")
+if store_sqlite.get("default-features") is not False:
+    fail("seyal-agent-store rusqlite must disable default features")
+if store_sqlite.get("features") != ["bundled"]:
+    fail("seyal-agent-store rusqlite must enable only the bundled SQLite feature")
 client_dev_dependencies = manifests["seyal-client"].get("dev-dependencies", {})
 if set(client_dev_dependencies) != {"seyal-exec", "seyal-runtime"}:
     fail("seyal-client integration tests may depend exactly on seyal-exec and seyal-runtime")
@@ -122,6 +143,15 @@ for name in ("seyal-exec", "seyal-protocol", "seyal-runtime"):
     if set(macos_dependencies) != {"libc"}:
         fail(f"{name} macOS platform boundary may depend only on libc in M001")
     if macos_dependencies["libc"] != "=0.2.189":
+        fail(f"{name} must exactly pin the reviewed libc 0.2.189 dependency")
+
+for name in ("seyal-agent-backend", "seyal-agent-client"):
+    unix_dependencies = manifests[name].get("target", {}).get(
+        "cfg(unix)", {}
+    ).get("dependencies", {})
+    if set(unix_dependencies) != {"libc"}:
+        fail(f"{name} Unix platform boundary may depend only on libc for peer UID")
+    if unix_dependencies["libc"] != "=0.2.189":
         fail(f"{name} must exactly pin the reviewed libc 0.2.189 dependency")
 
 for name in EXPECTED_CRATES:

@@ -1,0 +1,19 @@
+[package]
+name = "seyal-agent-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+seyal-agent-core = { path = "../seyal-agent-core" }
+seyal-agent-protocol = { path = "../seyal-agent-protocol" }
+seyal-agent-store = { path = "../seyal-agent-store" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
+
+[lints.rust]
+unsafe_code = "deny"
