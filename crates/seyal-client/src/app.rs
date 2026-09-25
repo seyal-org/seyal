@@ -573,6 +573,12 @@ impl ApplicationRoot {
         }
     }
 
+    /// Monotonic product-state generation; every successful transition bumps
+    /// it. Hosts and FFI encoders use it to skip re-projecting unchanged state.
+    pub fn snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
+    }
+
     /// Attach the existing Candidate-D client for this Pane. Does not create a
     /// PTY, VT, or Runtime registry entry.
     #[cfg(target_os = "macos")]

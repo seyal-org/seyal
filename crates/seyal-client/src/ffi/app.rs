@@ -47,8 +47,10 @@ const ROW_SELECTED: u16 = 1;
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
 const BLOCK_STATE_MASK: u16 = 7;
 const BLOCK_SELECTED: u16 = 8;
-/// Rerun is offered: the Block is not running and the composer is available.
-const BLOCK_CAN_RERUN: u16 = 16;
+/// Block action row flag: the action is currently available (#1010).
+const BLOCK_ACTION_ENABLED: u16 = 1;
+/// Block action placement lives in bits 4..6 of the action row flags.
+const BLOCK_ACTION_PLACEMENT_SHIFT: u16 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -259,6 +261,15 @@ struct AppHandle {
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
+    /// Quick-action rows for every Block (#1010), flat, with each Block's
+    /// `(first, count)` span into it.
+    block_action_rows: Vec<SeyalAppRow>,
+    block_action_text: Vec<u8>,
+    block_action_spans: Vec<(u32, u32)>,
+    /// Root generation the Block/action rows were encoded at (0 = never).
+    /// Hosts read every row and action per rebuild; re-encoding all of them
+    /// on each call would be quadratic in the Block count.
+    block_rows_generation: u64,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
 }
@@ -341,6 +352,10 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
+                block_action_rows: Vec::new(),
+                block_action_text: Vec::new(),
+                block_action_spans: Vec::new(),
+                block_rows_generation: 0,
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
             },
@@ -659,6 +674,51 @@ pub extern "C" fn seyal_app_block_row(handle: u64, index: u32) -> SeyalAppRow {
         state
             .block_rows
             .get(index as usize)
+            .copied()
+            .unwrap_or_else(SeyalAppRow::empty)
+    })
+}
+
+/// Number of quick actions for the Block at `block_index` (#1010).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_block_action_count(handle: u64, block_index: u32) -> u32 {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return 0;
+        };
+        encode_block_rows(state);
+        state
+            .block_action_spans
+            .get(block_index as usize)
+            .map_or(0, |span| span.1)
+    })
+}
+
+/// One Rust-projected quick action (#1010): `kind` = action, `flags` =
+/// enabled bit plus placement, `title` = label, `detail` = shortcut hint.
+/// Pointers stay valid until the next Block row/action call.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_block_action_row(
+    handle: u64,
+    block_index: u32,
+    action_index: u32,
+) -> SeyalAppRow {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return SeyalAppRow::empty();
+        };
+        encode_block_rows(state);
+        let Some(&(first, count)) = state.block_action_spans.get(block_index as usize) else {
+            return SeyalAppRow::empty();
+        };
+        if action_index >= count {
+            return SeyalAppRow::empty();
+        }
+        state
+            .block_action_rows
+            .get((first + action_index) as usize)
             .copied()
             .unwrap_or_else(SeyalAppRow::empty)
     })
@@ -1632,8 +1692,16 @@ fn encode_chrome_rows(state: &mut AppHandle) {
 }
 
 fn encode_block_rows(state: &mut AppHandle) {
+    let generation = state.root.snapshot_generation();
+    if state.block_rows_generation == generation {
+        return;
+    }
+    state.block_rows_generation = generation;
     state.block_text.clear();
     state.block_rows.clear();
+    state.block_action_text.clear();
+    state.block_action_rows.clear();
+    state.block_action_spans.clear();
     let snapshot = state.root.snapshot();
     let Some(composer) = snapshot.composer else {
         return;
@@ -1651,9 +1719,27 @@ fn encode_block_rows(state: &mut AppHandle) {
         if selected == Some(block.id) {
             flags |= BLOCK_SELECTED;
         }
-        if composer_available && block.state != crate::composer::BlockPresentationState::Running {
-            flags |= BLOCK_CAN_RERUN;
+        let first = state.block_action_rows.len() as u32;
+        for action in crate::composer::block_actions(block, composer_available) {
+            let mut action_flags = (action.placement as u16) << BLOCK_ACTION_PLACEMENT_SHIFT;
+            if action.enabled {
+                action_flags |= BLOCK_ACTION_ENABLED;
+            }
+            push_row(
+                &mut state.block_action_rows,
+                &mut state.block_action_text,
+                RowDraft {
+                    kind: action.kind as u16,
+                    index: index as u32,
+                    id: block.id.to_bytes(),
+                    flags: action_flags,
+                    title: action.label,
+                    detail: action.shortcut,
+                },
+            );
         }
+        let count = state.block_action_rows.len() as u32 - first;
+        state.block_action_spans.push((first, count));
         push_row(
             &mut state.block_rows,
             &mut state.block_text,
@@ -1663,11 +1749,15 @@ fn encode_block_rows(state: &mut AppHandle) {
                 id: block.id.to_bytes(),
                 flags,
                 title: &block.command,
-                detail: block.state.transcript_status(),
+                detail: block.state.status_label(),
             },
         );
     }
     relocate_row_pointers(&mut state.block_rows, state.block_text.as_ptr());
+    relocate_row_pointers(
+        &mut state.block_action_rows,
+        state.block_action_text.as_ptr(),
+    );
 }
 
 fn encode_history_rows(state: &mut AppHandle) {
@@ -2603,18 +2693,59 @@ mod tests {
             });
         };
 
+        // Seam Rerun action (kind 5, placement 0) for one Block row.
+        let seam_rerun = |block: u32| {
+            (0..seyal_app_block_action_count(handle, block))
+                .map(|index| seyal_app_block_action_row(handle, block, index))
+                .find(|row| row.kind == 5 && row.flags >> BLOCK_ACTION_PLACEMENT_SHIFT == 0)
+                .expect("seam Rerun action")
+        };
+
         // Composer busy: Rerun is not offered for any Block.
         seed(false);
-        assert_eq!(seyal_app_block_row(handle, 0).flags & BLOCK_CAN_RERUN, 0);
+        assert_eq!(seam_rerun(0).flags & BLOCK_ACTION_ENABLED, 0);
 
         seed(true);
         let done = seyal_app_block_row(handle, 0);
         let running = seyal_app_block_row(handle, 1);
-        assert_eq!(done.flags & BLOCK_CAN_RERUN, BLOCK_CAN_RERUN);
+        assert_eq!(seyal_app_block_action_count(handle, 0), 10);
+        let rerun_row = seam_rerun(0);
+        assert_eq!(rerun_row.flags & BLOCK_ACTION_ENABLED, BLOCK_ACTION_ENABLED);
+        assert_eq!(copy_text(rerun_row), "Rerun", "label is Rust-owned");
         assert_eq!(
-            running.flags & BLOCK_CAN_RERUN,
+            seam_rerun(1).flags & BLOCK_ACTION_ENABLED,
             0,
             "running Block never offers Rerun"
+        );
+        let copy_command = seyal_app_block_action_row(handle, 0, 3);
+        assert_eq!(copy_command.kind, 2);
+        assert_eq!(
+            copy_command.flags >> BLOCK_ACTION_PLACEMENT_SHIFT,
+            1,
+            "in the Copy menu"
+        );
+        assert_eq!(copy_text(copy_command), "Copy command");
+        let hint =
+            unsafe { slice::from_raw_parts(copy_command.detail, copy_command.detail_len as usize) };
+        assert_eq!(hint, b"cmd+c");
+        assert_eq!(
+            seyal_app_block_action_row(handle, 0, 10).kind,
+            0,
+            "out of range is empty"
+        );
+        assert_eq!(
+            seyal_app_block_action_count(handle, 9),
+            0,
+            "unknown Block has no actions"
+        );
+        // Rows are encoded once per root generation, not once per FFI call.
+        let before = seyal_app_block_row(handle, 0).title;
+        let _ = seyal_app_block_action_row(handle, 0, 0);
+        let _ = seyal_app_block_action_count(handle, 1);
+        assert_eq!(
+            seyal_app_block_row(handle, 0).title,
+            before,
+            "no re-encode without a state change"
         );
 
         let bound = seyal_app_snapshot(handle);

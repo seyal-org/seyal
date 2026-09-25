@@ -12,6 +12,7 @@ final class SeyalBlockComponentUITests: XCTestCase {
     }
 
     func testBlockQuickActionsCopyAndRerun() throws {
+        try requireZshLoginShell()
         let app = XCUIApplication()
         app.launchIsolatedHost()
         waitForUsablePty(in: app)
@@ -62,6 +63,7 @@ final class SeyalBlockComponentUITests: XCTestCase {
     }
 
     func testRunningBlockWithholdsRerun() throws {
+        try requireZshLoginShell()
         let app = XCUIApplication()
         app.launchIsolatedHost()
         waitForUsablePty(in: app)
@@ -81,6 +83,19 @@ final class SeyalBlockComponentUITests: XCTestCase {
         XCTAssertFalse(rerun.isEnabled, "a running Block never offers Rerun")
         attachScreenshot(app, name: "1010-running")
         app.typeKey("c", modifierFlags: [.control])
+    }
+
+    /// Blocks exist only under Seyal's trusted zsh integration (ADR-009
+    /// mechanism 6); any other login shell stays on the raw path by design.
+    /// Hosted runners log in with bash, so their Block evidence is the Rust
+    /// app/FFI tests plus the live-zsh Runtime tests; this headed case runs
+    /// on zsh machines.
+    private func requireZshLoginShell() throws {
+        guard let account = getpwuid(geteuid()), let shell = account.pointee.pw_shell,
+            URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
+        else {
+            throw XCTSkip("Block quick actions need a zsh login shell (trusted integration)")
+        }
     }
 
     private func waitForPasteboard(

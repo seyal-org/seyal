@@ -278,7 +278,9 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_COPY_COMPOSER_HISTORY_PLACEHOLDER 4u
 
 /*
- * seyal_app_block_row flags: state in the low three bits, plus
+ * seyal_app_block_row: title = command, detail = Rust status name for the
+ * status icon ("Running", "Succeeded", "Failed", "Status unknown").
+ * flags: state in the low three bits, plus
  * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935).
  * Hosts must mask with SEYAL_APP_BLOCK_STATE_MASK before comparing states.
  */
@@ -289,8 +291,26 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_UNKNOWN 4u
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
-/* Rerun offered: Block not running and composer available (#1010). */
-#define SEYAL_APP_BLOCK_CAN_RERUN 16u
+/*
+ * Block quick actions (#1010), from seyal_app_block_action_row. Rust owns the
+ * action set, order, labels (title), shortcut hints (detail, e.g. "cmd+c")
+ * and availability; the host only draws them and routes `kind` back.
+ * row.kind = SEYAL_APP_BLOCK_ACTION_*; row.flags = ENABLED bit plus placement
+ * ((flags & PLACEMENT_MASK) >> PLACEMENT_SHIFT) = SEAM / COPY_MENU / MORE_MENU.
+ */
+#define SEYAL_APP_BLOCK_ACTION_COPY_MENU 1u
+#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND 2u
+#define SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT 3u
+#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT 4u
+#define SEYAL_APP_BLOCK_ACTION_RERUN 5u
+#define SEYAL_APP_BLOCK_ACTION_MORE_MENU 6u
+#define SEYAL_APP_BLOCK_ACTION_INSPECT 7u
+#define SEYAL_APP_BLOCK_ACTION_ENABLED 1u
+#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT 4u
+#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK 0x30u
+#define SEYAL_APP_BLOCK_ACTION_SEAM 0u
+#define SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU 1u
+#define SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU 2u
 
 typedef struct SeyalAppComposer {
     uint16_t version;
@@ -463,6 +483,8 @@ typedef struct SeyalAppBlockSpan {
 } SeyalAppBlockSpan;
 
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
+uint32_t seyal_app_block_action_count(uint64_t handle, uint32_t block_index);
+SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, uint32_t action_index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);

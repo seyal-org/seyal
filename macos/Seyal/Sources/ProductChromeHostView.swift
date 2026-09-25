@@ -49,7 +49,7 @@ final class ProductChromeHostView: NSView {
     private var blockCards: [UInt64: CommandBlockView] = [:]
     /// Pending Block Copy intents (#1010), keyed by Block; the text is built
     /// by Rust from the Block's history and arrives on `onHistoryCopy`.
-    private var pendingBlockCopies: [UInt64: (kind: CommandBlockAction, command: String)] = [:]
+    private var pendingBlockCopies: [UInt64: (kind: UInt16, command: String)] = [:]
     private var transcriptFrameRevision: UInt64 = 0
     private var paneFollowsTranscript: [NSLayoutConstraint] = []
     private var paneFillsCenter: [NSLayoutConstraint] = []
@@ -642,16 +642,19 @@ final class ProductChromeHostView: NSView {
         var retained = Set<UInt64>()
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
-            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
             let title = copyUTF8(row.title, row.title_len) ?? ""
+            // Copy row text before the span/action calls re-encode the buffers.
+            let statusLabel = copyUTF8(row.detail, row.detail_len) ?? ""
+            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
             let blockID = row.id_lo
             let lines = outputLineCount(span)
             let card = CommandBlockView(
                 row: CommandBlockRow(
                     command: title,
                     state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                    statusLabel: statusLabel,
                     isSelected: row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0,
-                    canRerun: row.flags & UInt16(SEYAL_APP_BLOCK_CAN_RERUN) != 0
+                    actions: blockActions(blockIndex: UInt32(index))
                 ),
                 cellHeight: cellHeight,
                 lines: lines
@@ -682,29 +685,45 @@ final class ProductChromeHostView: NSView {
         lastBlockCount = count
     }
 
+    /// Rust-projected quick actions for one Block row (#1010).
+    private func blockActions(blockIndex: UInt32) -> [CommandBlockActionRow] {
+        let count = seyal_app_block_action_count(pane.appHandle, blockIndex)
+        return (0..<count).compactMap { actionIndex in
+            let row = seyal_app_block_action_row(pane.appHandle, blockIndex, actionIndex)
+            guard row.kind != 0 else { return nil }
+            return CommandBlockActionRow(
+                kind: row.kind,
+                placement: (row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK))
+                    >> UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT),
+                label: copyUTF8(row.title, row.title_len) ?? "",
+                shortcut: copyUTF8(row.detail, row.detail_len) ?? "",
+                enabled: row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_ENABLED) != 0
+            )
+        }
+    }
+
+    /// Routes a Rust action kind. Availability was already decided by Rust;
+    /// disabled actions are never delivered by the view.
     private func performBlockAction(
-        _ action: CommandBlockAction,
+        _ kind: UInt16,
         idLo: UInt64,
         idHi: UInt64,
         command: String,
         span: SeyalAppBlockSpan
     ) {
-        switch action {
-        case .copyCommand:
+        switch UInt32(kind) {
+        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND:
             writePasteboard(command)
-        case .copyOutput, .copyCommandAndOutput:
-            guard span.start_line > 0 else {
-                if action == .copyCommandAndOutput { writePasteboard(command) }
-                return
-            }
+        case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
+            guard span.start_line > 0 else { return }
             let end = span.end_line >= span.start_line ? span.end_line : span.start_line &+ 511
-            pendingBlockCopies[idLo] = (action, command)
+            pendingBlockCopies[idLo] = (kind, command)
             if pane.inputSurface.requestHistoryCopy(
                 startLine: span.start_line, endLine: end, blockID: idLo) != 0
             {
                 pendingBlockCopies.removeValue(forKey: idLo)
             }
-        case .rerun:
+        case SEYAL_APP_BLOCK_ACTION_RERUN:
             let snapshot = seyal_app_snapshot(pane.appHandle)
             var rerun = SeyalAppAction()
             rerun.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -716,15 +735,17 @@ final class ProductChromeHostView: NSView {
             rerun.target_pty_generation = seyal_app_composer(pane.appHandle).epoch
             guard seyal_app_apply(pane.appHandle, &rerun) == 0 else { return }
             composer.submitRustDraft()
-        case .inspect:
+        case SEYAL_APP_BLOCK_ACTION_INSPECT:
             selectBlock(idLo: idLo, idHi: idHi, deselect: false)
+        default:
+            break
         }
     }
 
     private func completeBlockCopy(blockID: UInt64, output: String) {
         guard let pending = pendingBlockCopies.removeValue(forKey: blockID) else { return }
-        switch pending.kind {
-        case .copyCommandAndOutput:
+        switch UInt32(pending.kind) {
+        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
             writePasteboard(output.isEmpty ? pending.command : pending.command + "\n" + output)
         default:
             writePasteboard(output)

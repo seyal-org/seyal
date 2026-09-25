@@ -1,22 +1,25 @@
 import AppKit
 
-/// Quick actions a Block can request (M003-BLOCK-COMPONENT-DESIGN §6). The
-/// host routes each to Rust (Rerun, Inspect) or to the pasteboard with
-/// Rust-built text (Copy); this view owns no product state.
-enum CommandBlockAction {
-    case copyCommand
-    case copyOutput
-    case copyCommandAndOutput
-    case rerun
-    case inspect
+/// One Rust-projected quick action (`seyal_app_block_action_row`, #1010).
+/// Rust owns the set, order, placement, label, shortcut hint and
+/// availability (ADR-015); the view only draws it and reports `kind` back.
+struct CommandBlockActionRow: Equatable {
+    let kind: UInt16
+    let placement: UInt16
+    let label: String
+    /// Portable hint such as `shift+cmd+c`; empty when none.
+    let shortcut: String
+    let enabled: Bool
 }
 
 /// Snapshot of one Rust Block row the view renders.
 struct CommandBlockRow {
     let command: String
     let state: UInt16
+    /// Rust status name for the icon/spinner ("Succeeded", "Running", …).
+    let statusLabel: String
     let isSelected: Bool
-    let canRerun: Bool
+    let actions: [CommandBlockActionRow]
 }
 
 /// AppKit chrome around one Runtime Block (`C-BLOCK`). Terminal output is
@@ -28,7 +31,8 @@ final class CommandBlockView: NSView {
     let body = NSView()
     /// Click on the Block; argument is `true` when it is already selected.
     var onSelect: ((Bool) -> Void)?
-    var onAction: ((CommandBlockAction) -> Void)?
+    /// A chosen action's Rust kind (`SEYAL_APP_BLOCK_ACTION_*`).
+    var onAction: ((UInt16) -> Void)?
 
     private enum Metrics {
         static let insetH: CGFloat = 14
@@ -46,12 +50,6 @@ final class CommandBlockView: NSView {
     private let actions = NSStackView()
     private let statusIcon = NSImageView()
     private let spinner = NSProgressIndicator()
-    private let copyButton = CommandBlockView.actionButton(
-        symbol: "doc.on.doc", label: "Copy", id: "copy")
-    private let rerunButton = CommandBlockView.actionButton(
-        symbol: "play", label: "Rerun", id: "rerun")
-    private let moreButton = CommandBlockView.actionButton(
-        symbol: "ellipsis", label: "More", id: "more")
     private var bodyHeight: NSLayoutConstraint!
     private var theme: NativeTheme?
     private var isHovered = false
@@ -79,7 +77,7 @@ final class CommandBlockView: NSView {
         statusIcon.setAccessibilityElement(true)
         statusIcon.setAccessibilityRole(.image)
         statusIcon.setAccessibilityIdentifier("seyal-block-status")
-        statusIcon.setAccessibilityLabel(Self.statusName(row.state))
+        statusIcon.setAccessibilityLabel(row.statusLabel)
         statusIcon.translatesAutoresizingMaskIntoConstraints = false
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -89,19 +87,14 @@ final class CommandBlockView: NSView {
         // status identity for VoiceOver (a hidden icon leaves the AX tree).
         spinner.setAccessibilityElement(true)
         spinner.setAccessibilityIdentifier("seyal-block-status")
-        spinner.setAccessibilityLabel(Self.statusName(UInt16(SEYAL_APP_BLOCK_STATE_RUNNING)))
+        spinner.setAccessibilityLabel(row.statusLabel)
 
-        copyButton.target = self
-        copyButton.action = #selector(showCopyMenu(_:))
-        rerunButton.target = self
-        rerunButton.action = #selector(rerun)
-        rerunButton.isEnabled = row.canRerun
-        moreButton.target = self
-        moreButton.action = #selector(showMoreMenu(_:))
         actions.orientation = .horizontal
         actions.spacing = 2
         actions.translatesAutoresizingMaskIntoConstraints = false
-        [copyButton, rerunButton, moreButton].forEach(actions.addArrangedSubview)
+        for action in row.actions where action.placement == UInt16(SEYAL_APP_BLOCK_ACTION_SEAM) {
+            actions.addArrangedSubview(seamButton(action))
+        }
 
         topLine.translatesAutoresizingMaskIntoConstraints = false
         [command, actions, statusIcon, spinner].forEach(topLine.addSubview)
@@ -242,74 +235,58 @@ final class CommandBlockView: NSView {
         default: (symbol, tint) = ("questionmark.circle", theme.muted)
         }
         statusIcon.image = NSImage(
-            systemSymbolName: symbol, accessibilityDescription: Self.statusName(row.state))?
+            systemSymbolName: symbol, accessibilityDescription: row.statusLabel)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
         statusIcon.contentTintColor = tint
     }
 
-    @objc private func showCopyMenu(_ sender: NSButton) {
-        let menu = NSMenu()
-        menu.addItem(item("Copy command", .copyCommand, key: [.command]))
-        menu.addItem(item("Copy output", .copyOutput, key: [.command, .shift]))
-        menu.addItem(item("Copy command + output", .copyCommandAndOutput, key: [.command, .option]))
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
-    }
-
-    @objc private func showMoreMenu(_ sender: NSButton) {
+    /// Seam buttons either open a Rust-listed menu or report their kind.
+    @objc private func seamButtonClicked(_ sender: NSButton) {
+        let kind = UInt16(sender.tag)
+        let placement: UInt32
+        switch UInt32(kind) {
+        case SEYAL_APP_BLOCK_ACTION_COPY_MENU: placement = SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU
+        case SEYAL_APP_BLOCK_ACTION_MORE_MENU: placement = SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU
+        default:
+            onAction?(kind)
+            return
+        }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.addItem(item("Inspect", .inspect, symbol: "sidebar.right"))
-        menu.addItem(.separator())
-        menu.addItem(item("Copy command", .copyCommand))
-        menu.addItem(item("Copy output", .copyOutput))
-        let rerunItem = item("Rerun", .rerun, symbol: "play")
-        rerunItem.isEnabled = row.canRerun
-        menu.addItem(rerunItem)
+        for action in row.actions where action.placement == UInt16(placement) {
+            menu.addItem(menuItem(action))
+        }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
     }
 
-    @objc private func rerun() {
-        onAction?(.rerun)
+    @objc private func menuItemChosen(_ sender: NSMenuItem) {
+        onAction?(UInt16(sender.tag))
     }
 
-    @objc private func performMenuAction(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? ActionBox else { return }
-        onAction?(box.action)
-    }
-
-    private func item(
-        _ title: String,
-        _ action: CommandBlockAction,
-        symbol: String = "doc.on.doc",
-        key: NSEvent.ModifierFlags? = nil
-    ) -> NSMenuItem {
+    private func menuItem(_ action: CommandBlockActionRow) -> NSMenuItem {
+        let (key, modifiers) = Self.keyEquivalent(action.shortcut)
         let item = NSMenuItem(
-            title: title, action: #selector(performMenuAction(_:)), keyEquivalent: key == nil ? "" : "c")
-        if let key { item.keyEquivalentModifierMask = key }
+            title: action.label, action: #selector(menuItemChosen(_:)), keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
         item.target = self
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        item.representedObject = ActionBox(action)
+        item.tag = Int(action.kind)
+        item.isEnabled = action.enabled
+        item.image = NSImage(systemSymbolName: Self.symbol(action.kind), accessibilityDescription: nil)
         return item
     }
 
-    private static func statusName(_ state: UInt16) -> String {
-        switch state {
-        case UInt16(SEYAL_APP_BLOCK_STATE_RUNNING): return "Running"
-        case UInt16(SEYAL_APP_BLOCK_STATE_COMPLETED): return "Succeeded"
-        case UInt16(SEYAL_APP_BLOCK_STATE_FAILED): return "Failed"
-        default: return "Status unknown"
-        }
-    }
-
-    private static func actionButton(symbol: String, label: String, id: String) -> NSButton {
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+    private func seamButton(_ action: CommandBlockActionRow) -> NSButton {
+        let image = NSImage(
+            systemSymbolName: Self.symbol(action.kind), accessibilityDescription: action.label)?
             .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
-        let button = NSButton(image: image ?? NSImage(), target: nil, action: nil)
+        let button = NSButton(image: image ?? NSImage(), target: self, action: #selector(seamButtonClicked(_:)))
+        button.tag = Int(action.kind)
+        button.isEnabled = action.enabled
         button.isBordered = false
         button.imagePosition = .imageOnly
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
-        button.setAccessibilityIdentifier("seyal-block-action-\(id)")
+        button.toolTip = action.label
+        button.setAccessibilityLabel(action.label)
+        button.setAccessibilityIdentifier("seyal-block-action-\(Self.identifier(action.kind))")
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             button.widthAnchor.constraint(equalToConstant: 24),
@@ -317,9 +294,40 @@ final class CommandBlockView: NSView {
         ])
         return button
     }
-}
 
-private final class ActionBox {
-    let action: CommandBlockAction
-    init(_ action: CommandBlockAction) { self.action = action }
+    /// Platform presentation only: SF Symbol per Rust action kind.
+    private static func symbol(_ kind: UInt16) -> String {
+        switch UInt32(kind) {
+        case SEYAL_APP_BLOCK_ACTION_RERUN: return "play"
+        case SEYAL_APP_BLOCK_ACTION_MORE_MENU: return "ellipsis"
+        case SEYAL_APP_BLOCK_ACTION_INSPECT: return "sidebar.right"
+        default: return "doc.on.doc"
+        }
+    }
+
+    private static func identifier(_ kind: UInt16) -> String {
+        switch UInt32(kind) {
+        case SEYAL_APP_BLOCK_ACTION_COPY_MENU: return "copy"
+        case SEYAL_APP_BLOCK_ACTION_RERUN: return "rerun"
+        case SEYAL_APP_BLOCK_ACTION_MORE_MENU: return "more"
+        default: return "\(kind)"
+        }
+    }
+
+    /// Maps Rust's portable shortcut hint (`shift+cmd+c`) onto AppKit.
+    static func keyEquivalent(_ shortcut: String) -> (String, NSEvent.ModifierFlags) {
+        let parts = shortcut.split(separator: "+").map(String.init)
+        guard let key = parts.last, !key.isEmpty else { return ("", []) }
+        var modifiers: NSEvent.ModifierFlags = []
+        for part in parts.dropLast() {
+            switch part {
+            case "cmd": modifiers.insert(.command)
+            case "shift": modifiers.insert(.shift)
+            case "alt": modifiers.insert(.option)
+            case "ctrl": modifiers.insert(.control)
+            default: break
+            }
+        }
+        return (key, modifiers)
+    }
 }
