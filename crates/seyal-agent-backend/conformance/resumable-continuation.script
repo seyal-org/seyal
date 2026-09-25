@@ -1,0 +1,7 @@
+emit started
+emit progress 1
+emit disconnect
+emit reconnect
+emit progress 2
+emit result 636f6e74696e7565
+emit success
