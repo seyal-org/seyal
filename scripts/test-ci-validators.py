@@ -1025,6 +1025,35 @@ def main() -> None:
             "introduces portable product authority token 'enum InspectorMode'",
         )
 
+        structural_self = run_command(
+            ["python3", str(ROOT / "scripts/check-structural-debt.py"), "--self-test"],
+            base,
+        )
+        require(
+            structural_self.returncode == 0,
+            f"structural-debt self-test failed:\n{structural_self.stdout}",
+        )
+
+        structural = base / "structural-debt-new-huge"
+        write(structural / "crates/seyal-core/src/lib.rs", "x\n" * 1200)
+        write(
+            structural / "docs/engineering/structural-debt-baseline.toml",
+            'schema = "seyal.structural-debt-baseline"\nversion = 1\n',
+        )
+        env_changed = os.environ.get("SEYAL_STRUCTURAL_DEBT_CHANGED_FILES")
+        os.environ["SEYAL_STRUCTURAL_DEBT_CHANGED_FILES"] = "crates/seyal-core/src/lib.rs"
+        try:
+            run_negative(
+                ["python3", str(ROOT / "scripts/check-structural-debt.py")],
+                structural,
+                "exceeds 1000 LOC",
+            )
+        finally:
+            if env_changed is None:
+                os.environ.pop("SEYAL_STRUCTURAL_DEBT_CHANGED_FILES", None)
+            else:
+                os.environ["SEYAL_STRUCTURAL_DEBT_CHANGED_FILES"] = env_changed
+
         workspace = base / "workspace"
         workspace.mkdir()
         run_negative(["python3", str(ROOT / "scripts/test-workspace.py")], workspace, "missing root Cargo.toml")

@@ -1,0 +1,136 @@
+schema = "seyal.structural-debt-baseline"
+version = 1
+review_loc = 700
+hard_loc = 1000
+
+# Grandfathered handwritten production debt at the #1021 freeze tip.
+# Increasing ceiling_loc requires a narrowly scoped [[exception]] tied to an owning Issue.
+# Reducing a file requires lowering ceiling_loc in the same change (ratchet down).
+# Do not add skip=true escapes. Split by responsibility — never part1/part2 fragments.
+
+[[grandfathered]]
+path = "crates/seyal-client/src/app.rs"
+ceiling_loc = 2142
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-client/src/chrome.rs"
+ceiling_loc = 1195
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-client/src/composer/mod.rs"
+ceiling_loc = 1443
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-client/src/ffi/app.rs"
+ceiling_loc = 2274
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-client/src/local.rs"
+ceiling_loc = 1049
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-client/src/local/attach.rs"
+ceiling_loc = 1012
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-client/src/local/input_resize.rs"
+ceiling_loc = 1248
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-protocol/src/framing.rs"
+ceiling_loc = 1107
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-protocol/src/pass7.rs"
+ceiling_loc = 1940
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-render/src/lib.rs"
+ceiling_loc = 1051
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-runtime/src/display.rs"
+ceiling_loc = 1103
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-runtime/src/local_ipc/connection.rs"
+ceiling_loc = 1108
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-terminal/src/history.rs"
+ceiling_loc = 3362
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-terminal/src/screen.rs"
+ceiling_loc = 1545
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "crates/seyal-terminal/src/terminal.rs"
+ceiling_loc = 2716
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
+ceiling_loc = 1201
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "macos/Seyal/Sources/MetalSurfaceView.swift"
+ceiling_loc = 1309
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
+ceiling_loc = 1612
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "macos/Seyal/Sources/ProductChromeHostView.swift"
+ceiling_loc = 1127
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "macos/Seyal/Sources/RendererValidation.swift"
+ceiling_loc = 1705
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+[[grandfathered]]
+path = "macos/Seyal/Sources/RustDisplayBridge.swift"
+ceiling_loc = 1382
+issue = 1021
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+

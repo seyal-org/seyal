@@ -56,6 +56,7 @@ An Issue or PR cannot override architecture/specification. Existing code is neve
 - Prefer composition and narrow interfaces. Avoid factories, service layers, dependency-injection frameworks, or other indirection unless they materially improve the design.
 - Structural refactoring must not add synchronous IPC, serialization, copies, allocations, locks, thread/process hops, or language round-trips to terminal hot paths merely to satisfy code organization rules.
 - These rules apply to Rust and native macOS Swift/Metal code equally.
+- `scripts/check-structural-debt.py` (via `make check` / Foundation Quality) continuously enforces the ratchet against `docs/engineering/structural-debt-baseline.toml`: new >1,000 LOC handwritten production files fail; grandfathered debt cannot grow silently; reductions must lower the checked-in ceiling; changed 700–1,000 LOC files need a `[[cohesion_acknowledgement]]`. Before finalizing a PR, inspect structural impact; do not grow grandfathered modules by convenience; prefer responsibility-based extraction with narrow interfaces; do not create new crates or add hot-path indirection/allocations solely to satisfy the LOC gate.
 
 ## Implementation pickup
 
