@@ -6,7 +6,8 @@
 - **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership); ADR-015 menu/command forwarding.
 - **Issue:** #1002 — parent umbrella #676, epic #665
 - **Owns for others:** key assignment for the Proposed ADR-021 (#1001) PaneTree verbs (zoom/unzoom, equalize, swap, move, directional focus) per ADR-021 §8; ADR-021 / SPEC-025 own their semantics (§5.1).
-- **Related (do not own):** palette action enumeration on master (`PaletteCommand` / `ShellAction` / `PresentationAction`) is a naming/compatibility input only — existing code is never architectural authority; Proposed SPEC-022 (#1004) owns address-bearing navigation when Accepted; #993 / PR #1006 owns theme/font startup wiring and must not be edited here.
+- **Owns for others (continued):** key assignment for Proposed SPEC-022 (#1004) focus-history Back/Forward and goto-open (§5.5), and for the composer history-search trigger delegated by `M001-COMPOSER-HISTORY-FUZZY-SEARCH.md` §6 (§5.4). SPEC-022 and SPEC-008 own their semantics.
+- **Related (do not own):** palette action enumeration on master (`PaletteCommand` / `ShellAction` / `PresentationAction`) is a naming/compatibility input only — existing code is never architectural authority; Proposed SPEC-022 (#1004) owns address-bearing navigation when Accepted; SPEC-008 §4 owns composer execute/newline keys (§4.1); #993 / PR #1006 owns theme/font startup wiring and must not be edited here.
 
 ## 0. Architecture-change verdict
 
@@ -75,9 +76,15 @@ R2.2 The binding table is loaded once at process startup from the same config
 file selection as SPEC-006 §21.3 / existing UI config:
 
 ```text
-SEYAL_CONFIG if set and non-empty
+SEYAL_CONFIG if set
 else ~/.config/seyal/config.toml
 ```
+
+This is the SPEC-006 §21.3 selection rule, not a second one. The existing
+loader (`input_policy_config_path`) treats an empty `SEYAL_CONFIG` value as
+unset; keybinding load uses that same function, so both surfaces always read
+the same file. Any future clarification of the rule belongs to SPEC-006 and
+applies here unchanged.
 
 Precedence for the keybinding surface:
 
@@ -269,15 +276,29 @@ when §4.2 / §7 permit:
 | `cmd+1`…`cmd+9` | `tab.select_ordinal` with `ordinal` 1…9 (nine rows) | `app` |
 | `cmd+enter` | `presentation.toggle_raw` | `app` |
 | `cmd+opt+enter` | `presentation.toggle_tui` | `app` |
-| `cmd+,` | `settings.open` | `app` |
 | `escape` | `command_palette.close` | `palette` |
 | `cmd+opt+left` / `right` / `up` / `down` | `pane.focus_left` / `_right` / `_up` / `_down` | `app` |
 | `cmd+shift+enter` | `pane.zoom_toggle` | `app` |
+| `ctrl+r` | `composer.history_search.open` | `composer` |
+| `cmd+[` / `cmd+]` | `focus_history.back` / `focus_history.forward` | `app` |
+| `cmd+shift+o` | `goto.open` | `app` |
 
-`settings.open` is a real catalog action whose invoke-time result is
-`ActionUnavailable` (§10.2; menu item disabled, non-secret AX reason) until a
-production settings surface exists. It is not a stub path: no placeholder
-window or fake settings UI is opened.
+There is no `settings.open` id or `cmd+,` builtin in M003. No production
+settings surface exists, and a catalog id whose only possible result is
+`ActionUnavailable` would ship a dead binding. The id and its `cmd+,` builtin
+enter the catalog in the same PR that lands the production settings surface,
+under the same rule as R5.1.3. Until then `cmd+,` is an ordinary unbound
+Command stroke (§6.2 step 2c).
+
+**Composer execute and newline are not WorkspaceCommands.** SPEC-008 §4 fixes
+them: unmarked Return requests the Rust execute action, Shift-Return inserts a
+newline, and Return during marked text stays IME-owned. They are composer
+text-editing semantics consumed by the composer text-input context (§6.2
+step 3), like the Edit actions below, and are not rebindable in M003. Making
+them rebindable requires amending SPEC-008 §4 first.
+
+The `ctrl+r`, `cmd+[` / `cmd+]` and `cmd+shift+o` rows are gated per §5.4 and
+§5.5.
 
 `command_palette.close` uses the `palette` context so it is live only while the
 palette is open (§6.4). Escape is terminal-capable, so it must never carry
@@ -299,15 +320,41 @@ The following remain exclusively host/application and **cannot** be rebound to
 another `WorkspaceCommandId`. A user entry targeting the same `keys` sequence is
 rejected (`ReservedCommandCollision`) and the reserved behavior is retained:
 
+**Application / AppKit menu equivalents** (delivered to Seyal; handled by the
+standard application, Window, View and Edit menus):
+
 | keys | reserved behavior |
 |---|---|
 | `cmd+q` | application quit / Cmd-Q path (SPEC-006 / ADR-015 / SPEC-009) |
 | `cmd+h` | macOS Hide |
+| `cmd+opt+h` | macOS Hide Others |
 | `cmd+m` | macOS Minimize |
-| `` cmd+` `` | macOS cycle windows (when present) |
+| `cmd+opt+m` | macOS Minimize All |
+| `` cmd+` `` / `` cmd+shift+` `` | macOS cycle windows forward / backward |
 | `cmd+ctrl+f` | macOS standard Enter/Exit Full Screen (View menu) |
 | `cmd+x` / `cmd+c` / `cmd+v` / `cmd+a` | standard Edit menu when a text field owns first responder; otherwise existing product copy/paste policy — still not reassigned via `[[keybindings]]` in M003 |
-| any stroke with `cmd` that AppKit treats as an unoverridable system equivalent for the running process | reserved; fail closed |
+| `cmd+z` / `cmd+shift+z` | standard Edit Undo / Redo when a text field owns first responder |
+| `cmd+ctrl+space` | standard Edit Emoji & Symbols (Character Viewer) |
+
+**System-intercepted strokes** (consumed by macOS before Seyal receives them
+under default system settings; a binding could never fire, so it is rejected
+rather than silently dead):
+
+| keys | system behavior |
+|---|---|
+| `cmd+tab` / `cmd+shift+tab` | application switcher |
+| `cmd+space` / `cmd+opt+space` | Spotlight / Finder search |
+| `cmd+opt+escape` | Force Quit Applications |
+| `cmd+shift+3` / `cmd+shift+4` / `cmd+shift+5` | screenshots |
+| `cmd+ctrl+q` | Lock Screen |
+| `cmd+opt+d` | show/hide Dock |
+
+R4.2.0 The reserved set is **exactly** the two tables above; there is no
+open-ended catch-all, so K2 tests can enumerate it. A user who has remapped a
+system shortcut in macOS settings may find some other `cmd` stroke intercepted
+by the system; that is an environment property, not a load diagnostic, and
+the binding simply never receives the event. Adding a stroke to the reserved
+set is an amendment to this specification.
 
 R4.2.1 **Command never becomes terminal input.** Per SPEC-006 §4.1 / §21.3, a
 Command-modified event must not become `Input` or `TerminalKey` merely because
@@ -360,7 +407,10 @@ presentation.toggle_raw
 presentation.toggle_tui
 window.new
 window.close
-settings.open
+composer.history_search.open   # focus-relative (§5.4)
+focus_history.back             # SPEC-022 gated (§5.5)
+focus_history.forward          # SPEC-022 gated (§5.5)
+goto.open                      # SPEC-022 gated (§5.5)
 app.quit                    # still subject to reserved Cmd-Q path; explicit bind of app.quit to non-reserved keys is allowed
 ```
 
@@ -372,6 +422,7 @@ Naming compatibility with master (informational, not authority):
 | `tab.create` | `ShellAction::CreateTab` / `PaletteCommand::CreateTab` |
 | `pane.split_right` / `pane.split_down` | `ShellAction::SplitFocused` |
 | `presentation.set_*` | `PresentationAction` / mode transition |
+| `composer.history_search.open` | `ComposerAction::OpenHistory { pane }` (#933) |
 
 ### 5.1 ADR-021 PaneTree verb bindings (owned here)
 
@@ -436,6 +487,58 @@ The only action argument in M003 is the bounded `ordinal` integer of §5.2.
 
 R5.3.2 No action may encode: shell text, executable path, AppleScript, URL open
 with free-form string, Lua, or agent invocation.
+
+### 5.4 Composer history-search trigger (owned here)
+
+`M001-COMPOSER-HISTORY-FUZZY-SEARCH.md` §6 delegates the history-search
+shortcut to "the input/keybinding spec". This specification owns it.
+
+| WorkspaceCommandId | Action at invoke time | Builtin key (M003) |
+|---|---|---|
+| `composer.history_search.open` | `ComposerAction::OpenHistory { pane: focused }` (#933) | `ctrl+r`, context `["composer"]` |
+
+R5.4.1 The action is production today (#933), so the id is in the catalog from
+K2. Its semantics, including fail-closed behavior before any accepted submit,
+stay with the composer contract; this specification owns only the key.
+
+R5.4.2 `ctrl+r` is terminal-capable (R6.3.1). It is bound only in the
+`composer` context, which R6.3.3 always allows, so Control-R still reaches the
+PTY in Raw/TUI (reverse-i-search) and is never claimed by `app`.
+
+R5.4.3 The native composer currently hardcodes `⌃R` in `ComposerTextView`.
+K3 must remove that hardcoded match and route the stroke through the table,
+so there is one binding authority (R2.1, R11.2). A user may rebind or unbind
+the trigger like any other entry.
+
+### 5.5 SPEC-022 navigation commands (owned here, gated on SPEC-022)
+
+Proposed SPEC-022 (#1004) owns focus-history Back/Forward and goto semantics
+and leaves key assignment out of scope (SPEC-022 §14). This specification owns
+the keys:
+
+| WorkspaceCommandId | SPEC-022 action at invoke time | Builtin key (M003) |
+|---|---|---|
+| `focus_history.back` | Back (SPEC-022 R6.5) carrying the cursor `FocusSeq` read from the same authoritative snapshot as the dispatch (R6.8) | `cmd+[` |
+| `focus_history.forward` | Forward (SPEC-022 R6.5), same `FocusSeq` rule | `cmd+]` |
+| `goto.open` | open the goto/quick-switcher surface (SPEC-022 §1, decomposition N4) | `cmd+shift+o` |
+
+R5.5.1 These ids are not identity-bearing (R5.3.1): Back/Forward are
+cursor-relative, and `goto.open` opens a surface whose selected row then
+resolves by `ResourceAddress` under SPEC-022. No address or `FocusSeq` is ever
+written in TOML.
+
+R5.5.2 Back with no earlier entry, Forward with no later entry, or either on an
+empty history is `ActionUnavailable` (§10.2). SPEC-022 rejections, including
+`StaleHistoryCursor`, surface unchanged; nothing retargets.
+
+R5.5.3 Gating is the R5.1.3 rule: each id and its builtin row enter the
+production catalog only in the same or a later PR that lands its typed Rust
+action (SPEC-022 decomposition N3 for Back/Forward, N4 for `goto.open`), and
+only after SPEC-022 is Accepted. Before that the id is `UnknownAction` at load.
+
+R5.5.4 If SPEC-022 acceptance renames or removes one of these actions, this
+table must be updated before a keybinding child that includes it is marked
+Ready.
 
 ## 6. Routing precedence and Raw/TUI non-interception
 
@@ -543,6 +646,26 @@ the §4.2 reserved Command set consume keys. Other workspace bindings do not run
 until the palette closes. Palette query text uses the text-field path (after
 composition, §6.2 step 3), not terminal encoding. Closing the palette restores
 the previous route context set.
+
+R6.4.1 **Menu path cannot bypass the modal.** A `WorkspaceCommand` can also
+arrive from an `NSMenuItem` (click, or AppKit's own key-equivalent dispatch of
+a projected shortcut, §11). Rust re-validates every menu-invoked
+`WorkspaceCommand` against the **current** route context set at invoke time,
+exactly as for a keybinding match. While the palette is open that set is
+`{palette}`, so any command other than a `palette`-context command is rejected
+with `ActionUnavailable`: no state change, no PTY write. Pressing ⌘T while the
+palette is open therefore creates no Tab, whether the stroke reaches Rust as a
+keybinding match or as the "New Tab" menu item's key equivalent.
+
+R6.4.2 The menu projection (§11) marks every non-`palette`-context
+`WorkspaceCommand` item disabled while the palette is open, and re-enables it
+when the palette closes. The native host realizes that enabled state (for
+example in `validateMenuItem`) only from the Rust projection. Disabled state is
+presentation only: R6.4.1 still rejects the command if the host is stale.
+
+R6.4.3 The §4.2 reserved application/menu equivalents (quit, hide, minimize,
+full screen, window cycling, Edit actions on the palette query field) are not
+`WorkspaceCommand`s and are unaffected.
 
 ## 7. Conflict, duplicate and diagnostic policy
 
@@ -682,8 +805,11 @@ or reject rather than invent):
 - action currently disallowed by policy (e.g. tab creation disabled) →
   `ActionUnavailable`; no-op; non-secret visible/AX reason;
 - required focus/target missing (including a `tab.select_ordinal` ordinal
-  beyond the tab count, or no settings surface for `settings.open`) →
-  `ActionUnavailable`;
+  beyond the tab count, or Back/Forward with no entry in that direction,
+  R5.5.2) → `ActionUnavailable`;
+- command not permitted by the current route context set, whether it came
+  from a keybinding or a menu item (for example any non-`palette` command
+  while the palette is open, R6.4.1) → `ActionUnavailable`;
 - focus-relative ADR-021 verbs (§5.1) resolve the focused Pane and any
   directional neighbor from the same authoritative snapshot as the dispatch;
   ADR-021 rejections (`NoDirectionalNeighbor`, …) surface unchanged;
@@ -699,16 +825,34 @@ into the PTY.
 ## 11. Menu and accessibility synchronization
 
 R11.1 Rust projects a read-only `KeybindingShortcutProjection`: for each
-menu-visible `WorkspaceCommand` (id plus `ordinal` where present), the winning
-`app`-context `keys` notation (or none).
+menu-visible `WorkspaceCommand` (id plus `ordinal` where present), at most one
+`NSMenuItem` key equivalent plus a list of AX/palette shortcut hints.
+
+- **Key equivalent.** Among the surviving (§7.1) single-stroke bindings of
+  that command whose context contains `app`, the one with the highest
+  declaration index wins (builtins precede user rows, user rows in file order,
+  §7.1 step 3). So a user row adding a second key for `command_palette.open`
+  becomes the menu equivalent, and the builtin `cmd+k` still works but is not
+  shown on the menu item. If no such binding exists, the item has no key
+  equivalent.
+- **Chords never become key equivalents.** `NSMenuItem` cannot represent a
+  multi-stroke sequence, and AppKit dispatch of a partial chord would bypass
+  §8. Chord bindings appear only as AX shortcut hints and palette row hints.
+- **Hints.** Every surviving binding of the command (single-stroke or chord,
+  any context) is listed in declaration order as a hint, so no binding is
+  undiscoverable.
+- **Enabled state.** The projection also carries whether each item is
+  currently enabled (R6.4.2).
 
 R11.2 Native `NSMenuItem` key equivalents and AX shortcut strings are realized
 **only** from that projection (plus hard reserved Edit/AppKit items in §4.2).
 Native must not hardcode product shortcuts that disagree with the table, except
 the reserved set.
 
-R11.3 Changing bindings requires process restart in M003; menus refresh from the
-startup projection only.
+R11.3 Changing bindings requires process restart in M003; menu key
+equivalents and hints come from the startup projection only. Only the
+enabled state (R6.4.2) changes at runtime, and it is derived from the route
+context set, not from the binding table.
 
 R11.4 Accessibility must expose shortcut labels without exposing live input
 or terminal contents (SPEC-006 §14 / §18).
@@ -751,12 +895,15 @@ Production Issues derived from this specification must include measurable cases:
    a key, unknown keys, chord length > 4, bad modifiers, unknown action and
    disallowed payload are rejected. `ordinal` present/missing/out-of-range/on
    the wrong action → `InvalidActionArgument`.
-2. Defaults: the complete builtin table of §4.1 passes the same validation as
+2. Defaults: every §4.1 builtin row present in the build (gated rows included
+   once their action lands, R5.1.3 / R5.5.3) passes the same validation as
    user rows with zero diagnostics (no `TerminalPassthroughProtected`,
    `InvalidKeys` or `ReservedCommandCollision`); user override of `cmd+k` wins
-   with a `DuplicateSequence` diagnostic when replacing builtin.
-3. Reserved: user `cmd+q` and `cmd+ctrl+f` → `ReservedCommandCollision`; quit
-   and Enter Full Screen paths unchanged.
+   with a `DuplicateSequence` diagnostic when replacing builtin. `settings.open`
+   is `UnknownAction` and `cmd+,` has no builtin.
+3. Reserved: a user binding on **every** stroke in both §4.2 tables →
+   `ReservedCommandCollision` (table-driven over the enumerated set); quit and
+   Enter Full Screen paths unchanged.
 4. Command non-leak: matched and unmatched Command strokes produce zero PTY
    bytes under Raw/TUI.
 5. Passthrough protection: `keys = "ctrl+c"` with default `app` context, and
@@ -774,7 +921,10 @@ Production Issues derived from this specification must include measurable cases:
 10. Cold-only: simulated theme reload leaves `KeybindingTable` pointer/identity
     unchanged.
 11. Stale/unavailable action invoke → `ActionUnavailable`; no PTY fallback.
-12. Menu/AX projection matches winning binding for `command_palette.open`.
+12. Menu/AX projection (R11.1): with builtin `cmd+k` plus a user
+    `cmd+shift+p` for `command_palette.open`, the key equivalent is
+    `cmd+shift+p` and both appear as hints; a command bound only by a chord has
+    no key equivalent and shows the chord as a hint.
 13. Flow active: unmatched keys do not hit a hidden terminal route.
 14. Diagnostics never contain marked text / terminal fixtures used in the test.
 15. Partial overlap and unbind: each §7.1 worked example yields exactly the
@@ -789,6 +939,21 @@ Production Issues derived from this specification must include measurable cases:
 18. ADR-021 verbs (in the child that lands each verb): focus-relative
     resolution of `pane.focus_*`, `pane.zoom_toggle`, `pane.swap_*`,
     `pane.move_*`; no neighbor → `NoDirectionalNeighbor`, state unchanged.
+19. Palette modal (R6.4.1–R6.4.2): with the palette open, ⌘T delivered as a
+    keybinding match **and** as the "New Tab" menu item action creates no Tab
+    and returns `ActionUnavailable`; the projection reports that item disabled
+    while open and enabled after close; Escape still closes the palette.
+20. Composer history search (§5.4): `ctrl+r` with the composer first responder
+    opens history for the focused Pane; the same stroke in Raw/TUI reaches the
+    PTY as Control-R; `action = "none"` on `ctrl+r` context `["composer"]`
+    removes the trigger; no hardcoded native `⌃R` match remains.
+21. SPEC-022 navigation (§5.5, in the child that lands each action): `cmd+[` /
+    `cmd+]` traverse exactly one entry; at either end → `ActionUnavailable`;
+    `cmd+shift+o` opens goto; before the action lands the id is
+    `UnknownAction`.
+22. Config selection: `SEYAL_CONFIG` unset, set to a path, and set to the empty
+    string select the same file for keybindings as for `input.option_as_alt`
+    (§2.2).
 
 ## 15. Acceptance criteria (refinement)
 
@@ -796,8 +961,11 @@ Ticked items are fully specified in this document. Unticked items are gates
 this PR does not satisfy.
 
 - [x] Schema / defaults / precedence defined (§2–§5), including punctuation
-      keys (§3.2), `tab.select_ordinal` encoding (§5.2) and the `settings.open`
-      default decision (§4.1).
+      keys (§3.2), `tab.select_ordinal` encoding (§5.2), the enumerated
+      reserved set (§4.2) and the decision to ship no `settings.open` until a
+      settings surface exists (§4.1).
+- [x] Menu key-equivalent choice and palette-modal menu re-validation
+      defined (§6.4, §11).
 - [x] Conflict rules measurable, including partial overlap and unbind
       (§7.1, §7.3).
 - [x] Raw/TUI forwarding cannot be accidentally intercepted (§6.3).
@@ -805,10 +973,14 @@ this PR does not satisfy.
       §6.2, §9).
 - [x] Security / diagnostic policy defined (§7.2, §12).
 - [x] Key-assignment owner for ADR-021 verbs named and assigned (§5.1).
+- [x] Key-assignment owner for composer history search (§5.4) and SPEC-022
+      Back/Forward/goto (§5.5) named and assigned; composer execute/newline
+      left with SPEC-008 §4 (§4.1).
 - [x] Production decomposition written
       (`docs/engineering/M003-KEYBINDING-DECOMPOSITION.md`).
 - [ ] SPEC-024 Accepted (separate review; gates every production child).
 - [ ] ADR-021 / SPEC-025 Accepted (gates only the §5.1 pane-verb bindings).
+- [ ] ADR-019 / SPEC-022 Accepted (gates only the §5.5 navigation bindings).
 
 ## 16. Explicit non-goals / deferred
 
@@ -819,6 +991,8 @@ per-project keybinding files
 cloud sync
 Lua-generated bindings
 rebindable Edit cut/copy/paste catalog
+rebindable composer execute/newline (SPEC-008 §4 owns)
+settings.open and its cmd+, builtin (land with the settings surface)
 identity-bearing TOML actions (await SPEC-022)
 kitty/VT protocol changes
 Option-as-Alt redesign

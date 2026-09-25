@@ -13,7 +13,9 @@ decomposition document alone.
 
 **Lane isolation:** do not edit contracts owned by #993 / PR #1006, #922, #686,
 #994, #1000, #1001, #1003, #1004. #1002 owns only the key assignment for the
-ADR-021 (#1001) verbs (SPEC-024 §5.1), not their semantics. Do not implement
+ADR-021 (#1001) verbs (SPEC-024 §5.1), the composer history-search trigger
+(§5.4) and the SPEC-022 (#1004) Back/Forward/goto commands (§5.5), not their
+semantics. Do not implement
 production keybindings inside #1002.
 
 ## Ordering
@@ -27,6 +29,7 @@ SPEC-024 Accepted
   → K5 menu / AX shortcut projection + native realization
   → K6 headed acceptance + adversarial matrix (M004 launch-blocker evidence)
 K7 ADR-021 pane-verb bindings: after K3 + the matching #1001 verb (per verb)
+K8 SPEC-022 navigation bindings: after K3 + the matching #1004 N3/N4 action
 ```
 
 K2 depends on K1. K3 depends on K1/K2 and must land before any binding can
@@ -59,14 +62,15 @@ privacy on fixtures).
 ## K2 — Defaults, reserved Command, conflict resolution
 
 **Outcome:** builtin default rows from SPEC-024 §4.1 (excluding ADR-021 pane
-rows, see K7); reserved collisions from §4.2; per-context-bit last-wins
+rows, see K7, and SPEC-022 navigation rows, see K8; including the §5.4
+`ctrl+r` composer history-search row); the enumerated reserved set from §4.2; per-context-bit last-wins
 resolution with `DuplicateSequence` diagnostics; `action = "none"` unbind.
 
 **Scope:** SPEC-024 §4, §7.1, §7.3.
 
 **Non-goals:** dispatching actions; changing AppDelegate menu items yet.
 
-**Tests:** SPEC-024 §14 items 2–3, 15.
+**Tests:** SPEC-024 §14 items 2–3, 15, 22.
 
 **Ready preconditions:** K1 merged or same PR only if still one reviewable
 outcome — prefer separate Issue.
@@ -80,7 +84,9 @@ rebindable cut/copy/paste catalog in M003.
 strokes (reserved, then table) before composition per SPEC-006 §5; then
 composition; then non-Command table match; then SPEC-006 terminal
 classification. Route context sets and specificity per §6.1; palette modal
-per §6.4. Enforce `TerminalPassthroughProtected` at load and the opt-in
+per §6.4, including Rust re-validation of menu-invoked commands (R6.4.1).
+Remove the hardcoded native `⌃R` match in `ComposerTextView` and route it
+through the table (R5.4.3). Enforce `TerminalPassthroughProtected` at load and the opt-in
 `raw`/`tui` context rule at runtime.
 
 **Scope:** SPEC-024 §6, §9, §10; thin native forwarding of already-normalized
@@ -89,7 +95,7 @@ strokes (unshifted base plus Shift-applied scalar, §3.2) into Rust match
 
 **Non-goals:** chord prefixes (K4); menu projection (K5); live reload.
 
-**Tests:** SPEC-024 §14 items 4–7, 11, 13, 16, 17.
+**Tests:** SPEC-024 §14 items 4–7, 11, 13, 16, 17, 19 (keybinding half), 20.
 
 **Ready preconditions:** K1+K2; SPEC-006 production path available; must not
 regress headed Control-C / arrow Raw behavior.
@@ -116,15 +122,18 @@ clears prefix.
 ## K5 — Menu and accessibility shortcut projection
 
 **Outcome:** Rust `KeybindingShortcutProjection`; native menus/AX realize
-shortcuts from it (plus hard reserved Edit/AppKit items). Startup-only refresh
-in M003.
+shortcuts from it (plus hard reserved Edit/AppKit items). Key equivalent is the
+highest-declaration-index single-stroke `app` binding; chords are hints only
+(R11.1). Menu enabled state follows the route context set, so non-palette
+items are disabled while the palette is open (R6.4.2). Startup-only refresh of
+equivalents in M003.
 
 **Scope:** SPEC-024 §11; align `NSMenuItem` for palette/new tab/etc. with the
 table; remove disagreeing hardcoded product equivalents except §4.2 reserved.
 
 **Non-goals:** in-app keybinding editor; live menu rewrite without restart.
 
-**Tests:** SPEC-024 §14 item 12; AX label privacy.
+**Tests:** SPEC-024 §14 items 12, 19 (menu half); AX label privacy.
 
 **Ready preconditions:** K2 (projection contents); can parallel K4.
 
@@ -170,6 +179,25 @@ split per verb family.
 **Review risk:** no dead catalog entry or placeholder dispatch for a verb that
 does not exist yet.
 
+## K8 — SPEC-022 navigation bindings
+
+**Outcome:** SPEC-024 §5.5 catalog ids (`focus_history.back`,
+`focus_history.forward`, `goto.open`) and their builtin `cmd+[` / `cmd+]` /
+`cmd+shift+o` rows.
+
+**Scope:** SPEC-024 §5.5, §10.2. Back/Forward land in the same PR as, or
+after, SPEC-022 decomposition N3; `goto.open` with or after N4 (R5.5.3).
+
+**Non-goals:** focus-history or goto semantics (SPEC-022 owns them).
+
+**Tests:** SPEC-024 §14 item 21 for the actions included.
+
+**Ready preconditions:** K3; ADR-019 and SPEC-022 Accepted; the matching
+N3/N4 production action merged.
+
+**Review risk:** no dead catalog entry before the action exists; the dispatch
+reads `FocusSeq` from the same snapshot, so it never self-rejects as stale.
+
 ## Child Issue template (when opening after Acceptance)
 
 Each child should carry:
@@ -191,10 +219,14 @@ Do not mark children Ready until SPEC-024 is Accepted and
 
 - Ordinal encoding: single `tab.select_ordinal` id plus an integer `ordinal`
   field (SPEC-024 §3.1, §5.2).
-- `settings.open`: builtin `cmd+,` stays; invoke returns `ActionUnavailable`
-  until a production settings surface exists (SPEC-024 §4.1).
+- `settings.open`: not in the M003 catalog and `cmd+,` has no builtin; both
+  land with the production settings surface (SPEC-024 §4.1).
+- Composer execute/newline stay SPEC-008 §4 text-editing semantics, not
+  rebindable in M003; composer history search is `composer.history_search.open`
+  on `ctrl+r` (SPEC-024 §4.1, §5.4).
+- SPEC-022 Back/Forward/goto key ownership: SPEC-024 §5.5, slice K8.
 
 ## Open questions deferred to acceptance review (not blockers for this PR)
 
-1. Cross-coordination with Accepted SPEC-022 for future address-bearing
-   keybindings — explicitly out of M003 TOML catalog.
+1. Future address-bearing keybindings (a TOML action naming a specific
+   `ResourceAddress`) — explicitly out of the M003 TOML catalog (R5.3.1).
