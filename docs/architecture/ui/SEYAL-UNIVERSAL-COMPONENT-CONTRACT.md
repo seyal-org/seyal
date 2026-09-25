@@ -246,8 +246,9 @@ Contract:
 - same horizontal padding, height rhythm and icon placement everywhere;
 - shell prompt rendering remains shell/terminal truth and is never reconstructed by Composer;
 - optional cwd/Git affordances are Seyal UI, not a second prompt;
-- cwd/Git chips appear only from reliable pane/execution-scoped metadata; never by parsing arbitrary prompt text;
-- Git branch chip may open a keyboard-first branch helper and explicitly execute a safe `git switch` through the same Pane execution context after revalidation;
+- composer state, eligibility and command construction/submission are Rust-owned (ADR-015 / ADR-009); native hosts render snapshots and forward typed actions only;
+- cwd/Git chips appear only from pane/execution-scoped metadata, never by parsing arbitrary prompt text; untrusted cwd (for example OSC 7) is display-only;
+- Git branch chip may open a keyboard-first branch helper only when the repository comes from a trusted cwd source; a switch is a Rust composer submission under ADR-009 after revalidation and leaves the draft untouched (see `SEYAL-COMPOSER-COMPONENT-SPEC.md`, Proposed);
 - no auto-stash/reset/force checkout behavior;
 - shell-aware completion may be surfaced only by delegating to a supported shell/completion integration; history/Agents/Actions remain separate Seyal suggestion modes;
 - auto-expands vertically for multiline editing;

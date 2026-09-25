@@ -42,7 +42,7 @@ Until that asset exists in the repository, the UI container must be checked agai
 | Notifications | `M001-NOTIFICATIONS-ATTENTION-POPOVER.md` | Global attention stack and inline approval/action handling |
 | Full-screen TUI | `M001-TUI-TAKEOVER.md` | Same-PTY/VT full-Pane takeover with composer hidden/disabled |
 | Block details | `M001-BLOCK-DETAILS-INSPECTOR.md` | Selected Block metadata, enrichments and actions |
-| Composer component | `SEYAL-COMPOSER-COMPONENT-SPEC.md` | Shell-truth authority, cwd/Git context affordances, branch switching, shell-aware completion, states and performance/security rules |
+| Composer component (**Proposed; not M001 scope**) | `SEYAL-COMPOSER-COMPONENT-SPEC.md` | Proposed shell-truth split, cwd/Git context affordances, branch switching, shell-aware completion, states and performance/security rules |
 | Composer history | `M001-COMPOSER-HISTORY-FUZZY-SEARCH.md` | Multiline Pane composer and contextual fuzzy history retrieval |
 | Live tail | `M001-LIVE-TAIL-BEHAVIOR.md` | Long-running output with growing Block + Pane-level follow/scroll-away/return-to-live |
 | Pre-Pass-6 shell scaffold | `M001-UI-SHELL-SCAFFOLD.md` | Native UI-container decomposition boundary that preserves M001 pass ordering and terminal ownership |
