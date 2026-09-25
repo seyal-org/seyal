@@ -4,8 +4,8 @@
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent umbrella #676, epic #665; consumed by #994 provisioning children; related #686)
 - **Depends on:** ADR-005, ADR-008, ADR-009, ADR-015, SPEC-002, SPEC-003, SPEC-009
-- **Neighbor (Proposed, not on `master`):** [PR #1040](https://github.com/seyal-org/seyal/pull/1040) / Issue #994 proposes **ADR-017** (TerminalExecution provisioning and disposition). This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
-- **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 (PR #1040), #1000 → ADR-018 (PR #1039), #1004 → ADR-019 (PR #1038), #1003 → **ADR-020** (this document). Numbers remain provisional until merge order is settled.
+- **Neighbor (Proposed, not on `master`):** [PR #1056](https://github.com/seyal-org/seyal/pull/1056) / Issue #994 proposes **ADR-017** (TerminalExecution provisioning and disposition). This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
+- **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). Numbers remain provisional until merge order is settled.
 - **Scope:** deterministic cold-path policy for program/argv (including login bit), startup CWD, bounded environment construction, and `TERM`/`COLORTERM`/capability ownership when composing a new local interactive `TerminalExecution`
 - **Classification:** new architecture decision plus tightly scoped SPEC-023 (Proposed) and light SPEC-003/SPEC-009 cross-references
 
@@ -35,7 +35,7 @@ seyal-runtime main()
 
 That path inherits whatever environment the Runtime process has, does not define login vs non-login, does not validate CWD, and does not distinguish account-record shell authority from an arbitrary `$SHELL`. SPEC-009 §8.1.1 already constructs a minimal helper-launch environment for the Runtime process itself; child-shell policy must not silently re-open that boundary.
 
-Proposed ADR-017 (PR #1040) correctly assigns **launch-policy ownership to the Runtime composition root** and keeps the provisioning wire free of paths, environment pairs and command strings. It deliberately defers the *contents* of that policy and named/configurable profiles to #676 / this Issue. Without this decision, ADR-017's profile `0` and any later profile selector have no normative resolution.
+Proposed ADR-017 (PR #1056) correctly assigns **launch-policy ownership to the Runtime composition root** and keeps the provisioning wire free of paths, environment pairs and command strings. It deliberately defers the *contents* of that policy and named/configurable profiles to #676 / this Issue. Without this decision, ADR-017's profile `0` and any later profile selector have no normative resolution.
 
 ## 2. Why this is architecture
 
@@ -52,7 +52,7 @@ An implementation PR that "just picks `$SHELL` and inherits the environment" wou
 
 ### 3.1 One cold-path owner: Runtime composition root
 
-The Runtime composition root owns the complete **effective** launch policy for every interactive local execution it creates, including executions created through the proposed ADR-017 provisioning seam and executions created by an explicit developer/test command invocation that intentionally bypasses the interactive profile (see §3.8).
+The Runtime composition root owns the complete **effective** launch policy for every interactive local execution it creates, including executions created through the proposed ADR-017 provisioning seam and executions created by an explicit developer/test command invocation that intentionally bypasses the interactive profile (see §3.11).
 
 ```text
 LaunchProfileId                    (wire: proposed ADR-017 create request)
@@ -82,7 +82,7 @@ EffectiveLaunchPolicy {
   argv: [OsString],                // login / interactive bits only; no -c payloads
   cwd: AbsolutePath,               // validated directory
   clear_environment: true,         // production interactive always clears
-  env: BoundedAllowlist,           // key→value pairs from §3.5 only
+  env: BoundedAllowlist,           // key→value pairs from §3.6 only
   capability_profile: CapabilityId // selects TERM/TERMINFO/(optional COLORTERM)
 }
 ```
@@ -101,14 +101,16 @@ Invariants:
 
 #### Default shell source (profile `0`)
 
+Precondition: Runtime first looks up the effective UID's POSIX account record (`getpwuid_r` / equivalent). The record is the sole authority for `HOME`, `USER`, `LOGNAME` and the default CWD (§3.5, §3.6). If the lookup fails, returns no entry, or yields an empty/non-absolute home or an empty name, resolution **fails closed** with `AccountRecordUnavailable` (§3.10) before shell resolution; Runtime-process `HOME`/`USER`/`LOGNAME` are never substituted. An account record that is present but has an empty or invalid `pw_shell` is not this failure — shell resolution continues at step 2.
+
 Resolution order for the interactive default program:
 
 1. **Account-record shell** — the absolute shell path returned by the effective user's POSIX account record (`pw_shell` / equivalent), when present, non-empty, and it passes §3.4 validation;
 2. else **Runtime process `SHELL`** — only when it is an absolute path that passes §3.4 validation (SPEC-009 §8.1.1 already places the account-record shell into the helper environment; this step is a defensive secondary, not GUI authority);
 3. else **platform safe fallbacks**, first existing validated executable in order: `/bin/zsh`, `/bin/bash`, `/bin/sh`;
-4. else **fail closed** — do not spawn; emit a bounded launch-policy failure (§3.7).
+4. else **fail closed** — do not spawn; emit a bounded `ShellFallbackExhausted` launch-policy failure (§3.10).
 
-Relative paths, bare command names and `PATH` lookups are rejected for interactive profile resolution. An explicit developer/test Runtime invocation that supplies a command on argv remains a deliberate bypass (§3.8) and is not the headed provisioning path.
+Relative paths, bare command names and `PATH` lookups are rejected for interactive profile resolution. An explicit developer/test Runtime invocation that supplies a command on argv remains a deliberate bypass (§3.11) and is not the headed provisioning path.
 
 #### Login / non-login
 
@@ -140,10 +142,10 @@ Failure behavior:
 | Condition | Behavior |
 |---|---|
 | configured shell fails validation | **do not spawn that program**; fall back through §3.3 order starting at account-record shell |
-| account-record and all fallbacks fail | **fail closed** — no execution is published |
+| account-record and all fallbacks fail | **fail closed** with `ShellFallbackExhausted` — no execution is published |
 | configured shell validates | use it; do not silently substitute another program |
 
-Fallback that recovers from an invalid configured shell is a **visible, bounded** product fact (§3.7): the user is told the configured shell was unusable and which safe default class was used (not the raw path in ordinary UI chrome unless the user opens a diagnostic surface that still redacts secrets). There is no silent success that pretends the configured shell started.
+Fallback that recovers from an invalid configured shell is a **visible, bounded** `ConfiguredShellInvalid` warning (§3.10): the user is told the configured shell was unusable and which safe default class was used (not the raw path in ordinary UI chrome unless the user opens a diagnostic surface that still redacts secrets). There is no silent success that pretends the configured shell started.
 
 ### 3.5 Startup CWD
 
@@ -157,8 +159,8 @@ Invalid / unusable CWD behavior:
 
 | Condition | Behavior |
 |---|---|
-| explicit override invalid or not a directory | fall back to validated account home |
-| account home invalid | **fail closed** — no spawn (do not use `/`, Runtime cwd, or repository path as hidden defaults) |
+| explicit override invalid or not a directory | fall back to validated account home; spawn succeeds with a bounded `CwdOverrideInvalid` warning (§3.10) |
+| account home invalid | **fail closed** with `CwdInvalid` — no spawn (do not use `/`, Runtime cwd, or repository path as hidden defaults) |
 
 Workspace association (ADR-007) must not be derived from cwd (SPEC-003 already forbids cwd-derived Workspace identity).
 
@@ -177,9 +179,18 @@ Production interactive launches **always** set `clear_environment = true` on `Co
 | `TMPDIR` | already-validated absolute per-user temporary directory when available; otherwise omit |
 | `TERM`, `TERMINFO` | CapabilityPolicy (ADR-008) — applied as overrides after base env |
 
+**Policy-owned keys (named carve-out).** After the base allowlist, exactly two later policies may add keys, and only these:
+
+| Owner | Keys | Condition |
+|---|---|---|
+| CapabilityPolicy (ADR-008) | `TERM`, `TERMINFO` (and `COLORTERM` only once §3.7 permits it) | always for production interactive launches |
+| ShellIntegrationPolicy (ADR-009) | `ZDOTDIR` (bundled integration directory), `SEYAL_NONCE_FD` (non-secret descriptor *number*), `SEYAL_USER_ZDOTDIR` (the user's original `ZDOTDIR`, only when it was set) | only when ADR-009 integration is eligible for the resolved program |
+
+These keys remain owned by ADR-008/ADR-009; this ADR neither defines their values nor lets any other layer add keys after the allowlist. Changing either set requires an amendment to the owning ADR.
+
 **Optional locale keys**, copied from the Runtime process environment only when each value is present, valid UTF-8, free of control characters and ≤ 128 bytes (same bounds as SPEC-009 §8.1.1 for helper launch): `LANG`, `LC_ALL`, `LC_CTYPE`, and other `LC_*` keys that pass the same predicate. Missing locale keys are omitted; they are not invented.
 
-**Forbidden to inherit or inject** (non-exhaustive class): `DYLD_*`, `LD_*`, `SSH_AUTH_SOCK`, cloud/credential/token variables, agent-socket variables, shell-hook injection variables, allocator/debug variables, application-private Seyal keys unless an accepted ADR explicitly adds a named non-secret capability key.
+**Forbidden to inherit or inject** (non-exhaustive class): `DYLD_*`, `LD_*`, `SSH_AUTH_SOCK`, cloud/credential/token variables, agent-socket variables, shell-hook injection variables other than the ADR-009 ShellIntegrationPolicy keys named above, allocator/debug variables, and application-private Seyal keys other than those an accepted ADR explicitly names (today only ADR-009's `SEYAL_NONCE_FD` / `SEYAL_USER_ZDOTDIR`).
 
 Diagnostics:
 
@@ -195,7 +206,7 @@ Diagnostics:
 | `TERMINFO` / `TERMINFO_DIRS` | CapabilityPolicy / ADR-008 | bundled lookup path; never inherited from GUI |
 | `COLORTERM` | CapabilityPolicy (same owner as TERM) | **omit** until an accepted capability profile claims truecolor (or another COLORTERM contract) with VT evidence; do not set `COLORTERM=truecolor` while advertising `seyal-m001` |
 
-`seyal-exec` remains policy-neutral. Shell integration (ADR-009) continues to deliver its nonce over an inherited descriptor, never through the environment.
+`seyal-exec` remains policy-neutral. Shell integration (ADR-009) continues to deliver its nonce over an inherited descriptor, never through the environment; only the non-secret descriptor *number* travels in the environment as `SEYAL_NONCE_FD` (§3.6 carve-out).
 
 ### 3.8 Finder / launchd and Runtime-helper relationship
 
@@ -224,25 +235,34 @@ Named profiles, when #676 defines them, only extend the selector→intent map in
 
 ### 3.10 Error UX when shell or CWD is invalid
 
+Resolution has two disjoint outcome types. A **failure** means nothing spawns; a **warning** accompanies a successful spawn. No condition appears in both.
+
 Pre-spawn policy failures produce **no published execution** and exactly one bounded failure to the caller:
 
 ```text
 LaunchPolicyFailure =
-  | AccountRecordUnavailable
-  | ShellInvalid
-  | ShellFallbackExhausted
-  | CwdInvalid
-  | CapabilityUnavailable
+  | AccountRecordUnavailable   // §3.3 precondition: effective-UID record lookup failed or unusable
+  | ShellFallbackExhausted     // §3.3 / §3.4: no candidate program validates
+  | CwdInvalid                 // §3.5: validated account home unusable
+  | CapabilityUnavailable      // ADR-008 CapabilityPolicy could not apply
+```
+
+Successful resolution returns `EffectiveLaunchPolicy` plus zero or more bounded warnings:
+
+```text
+LaunchPolicyWarning =
+  | ConfiguredShellInvalid     // §3.4: configured shell rejected; safe default spawned
+  | CwdOverrideInvalid         // §3.5: explicit CWD override rejected; account home used
 ```
 
 Mapping rules:
 
-- On the proposed ADR-017 create path, these map to a CreateExecutionResult failure. Prefer a dedicated additive result code (for example `LaunchPolicyRejected`) via a scoped SPEC-004 amendment after ADR-017 acceptance; until that code exists, implementations may use the nearest accepted failure code **only if** they still preserve the bounded reason for client UX and never encode paths/secrets in the result payload.
+- On the proposed ADR-017 create path, failures map to a CreateExecutionResult failure. Prefer a dedicated additive result code (for example `LaunchPolicyRejected`) via a scoped SPEC-004 amendment after ADR-017 acceptance; until that code exists, implementations may use the nearest accepted failure code **only if** they still preserve the bounded reason for client UX and never encode paths/secrets in the result payload.
 - Portable Rust product authority owns user-visible copy: short, non-secret strings such as "Shell unavailable", "Working directory unavailable", or "Using the default shell because the configured shell is invalid".
 - Native AppKit renders that bounded state only; it does not reinterpret OS error strings.
 - Structured logs record the failure class and counts, never program/argv/cwd/env contents.
 
-Fallback that still spawns (invalid configured shell → account shell) is success of create with an accompanying bounded warning state in portable product UI, not a protocol secret channel.
+Warnings never map to a create failure. Fallback that still spawns (invalid configured shell → safe default; invalid CWD override → account home) is success of create with an accompanying bounded `LaunchPolicyWarning` state in portable product UI, not a protocol secret channel and never carrying the rejected path.
 
 ### 3.11 Explicit developer/test command bypass
 
@@ -299,7 +319,7 @@ Costs / honest limits:
 
 - **New:** [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (Proposed) — observable resolution, validation, failure and test contract.
 - **Cross-reference only:** SPEC-003 create transaction consumes `EffectiveLaunchPolicy`→`CommandSpec`; SPEC-009 helper env remains the Runtime-process contract, not the child-shell contract.
-- **Do not edit in this PR:** proposed ADR-017 files that exist only on PR #1040.
+- **Do not edit in this PR:** proposed ADR-017 files that exist only on PR #1056.
 - **Decomposition:** [`../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md`](../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md).
 
 ## 7. Security and privacy
@@ -329,4 +349,4 @@ Reopen only with concrete evidence that:
 | TERM/COLORTERM ownership | §3.7 ADR-008 CapabilityPolicy; COLORTERM omitted for now |
 | Finder/launchd behavior | §3.8 works on SPEC-009 helper env |
 | typed inputs for #994 seam | §3.2 / §3.9 `EffectiveLaunchPolicy` behind profile selector |
-| error UX | §3.10 bounded failure/warning classes |
+| error UX | §3.10 disjoint bounded `LaunchPolicyFailure` / `LaunchPolicyWarning` types |

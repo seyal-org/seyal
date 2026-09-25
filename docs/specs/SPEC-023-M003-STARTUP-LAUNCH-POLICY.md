@@ -5,7 +5,7 @@
 - **Issue:** #1003 (parent #676, epic #665)
 - **Architecture:** [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md) (Proposed)
 - **Consumes:** ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1
-- **Neighbor:** Proposed ADR-017 (PR #1040 / #994) defines the provisioning seam that selects a launch profile; this specification defines how Runtime resolves that profile into a spawnable `CommandSpec`
+- **Neighbor:** Proposed ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056) / #994) defines the provisioning seam that selects a launch profile; this specification defines how Runtime resolves that profile into a spawnable `CommandSpec`
 
 ## 1. Purpose
 
@@ -85,6 +85,12 @@ CommandSpec::new(program)
 
 ### 5.1 Program
 
+Precondition: the effective-UID account record lookup succeeds and yields a
+non-empty name and an absolute home. Otherwise resolution stops with
+`LaunchPolicyFailure::AccountRecordUnavailable` before shell resolution; Runtime
+process `HOME`/`USER`/`LOGNAME` are never substituted. A present record with an
+empty or invalid shell field is not this failure.
+
 Try in order; first candidate that passes §5.3 wins:
 
 1. account-record shell path;
@@ -117,13 +123,15 @@ Relative paths and `PATH` lookups fail validation.
 When a configured path is supplied by a future profile intent:
 
 - valid → use it;
-- invalid → do not spawn it; resume §5.1 at account-record; surface
-  `ShellInvalid` warning UX if a fallback spawn succeeds;
+- invalid → do not spawn it; resume §5.1 at account-record; if a fallback
+  spawn succeeds, return `LaunchPolicyWarning::ConfiguredShellInvalid`;
 - if fallbacks exhaust → `ShellFallbackExhausted` and no published execution.
 
 ## 6. Environment allowlist
 
-After `env_clear`, set only:
+After `env_clear`, the child environment contains only the keys below. The
+only keys added after the base allowlist are the named policy-owned carve-outs
+in §6.1.
 
 Required:
 
@@ -141,15 +149,28 @@ when value is valid UTF-8, control-character free and ≤ 128 bytes: `LANG`,
 Must not set `COLORTERM` until an accepted capability profile claims it with VT
 evidence.
 
-Must not inherit `DYLD_*`, `LD_*`, credential/token/agent-socket, shell-hook or
-allocator/debug variables.
+Must not inherit `DYLD_*`, `LD_*`, credential/token/agent-socket, shell-hook
+(other than §6.1) or allocator/debug variables.
+
+### 6.1 Policy-owned carve-out
+
+| Owner | Keys | Present when |
+|---|---|---|
+| CapabilityPolicy (ADR-008) | `TERM`, `TERMINFO` | always |
+| ShellIntegrationPolicy (ADR-009) | `ZDOTDIR`, `SEYAL_NONCE_FD` | integration eligible for the resolved program |
+| ShellIntegrationPolicy (ADR-009) | `SEYAL_USER_ZDOTDIR` | integration eligible and the user's original `ZDOTDIR` was set |
+
+`SEYAL_NONCE_FD` carries only the non-secret descriptor number; the nonce itself
+travels over the inherited descriptor (ADR-009), never the environment. Values
+are owned by ADR-008/ADR-009; no other key may be added after the allowlist.
 
 ## 7. Startup CWD
 
 1. Default: validated account-record home directory.
 2. Explicit profile override (future): validated absolute directory.
-3. Invalid explicit override → fall back to account home.
-4. Invalid account home → `CwdInvalid`; no spawn.
+3. Invalid explicit override → fall back to account home and return
+   `LaunchPolicyWarning::CwdOverrideInvalid`.
+4. Invalid account home → `LaunchPolicyFailure::CwdInvalid`; no spawn.
 5. Never use `/`, Runtime process cwd, repository path, OSC 7 or sibling Pane
    cwd as a hidden default.
 
@@ -160,17 +181,24 @@ locale keys and absent inherited `TERM`), profile `0` resolution must still
 succeed whenever account-record shell and home validate. Tests must include a
 fixture whose process environment equals the helper allowlist only.
 
-## 9. Failures
+## 9. Failures and warnings
+
+Failures (no spawn) and warnings (spawn succeeded) are disjoint types:
 
 ```text
 LaunchPolicyFailure =
-  | AccountRecordUnavailable
-  | ShellInvalid
-  | ShellFallbackExhausted
-  | CwdInvalid
-  | CapabilityUnavailable
+  | AccountRecordUnavailable   // §5.1 precondition
+  | ShellFallbackExhausted     // §5.1 / §5.4
+  | CwdInvalid                 // §7 item 4
+  | CapabilityUnavailable      // ADR-008
+
+LaunchPolicyWarning =
+  | ConfiguredShellInvalid     // §5.4
+  | CwdOverrideInvalid         // §7 item 3
 ```
 
+- A warning never turns a successful create into a failure and never carries
+  the rejected path.
 - Pre-spawn failure → no registry publication, no live child, no leaked
   descriptors.
 - Exactly one failure result to the create caller.
@@ -200,12 +228,18 @@ This specification does not define wire layouts.
 Implementation children must provide at least:
 
 1. account-record shell selected when valid;
-2. invalid configured shell falls back and warns;
+2. invalid configured shell falls back and returns `ConfiguredShellInvalid`;
+   account-record lookup failure returns `AccountRecordUnavailable` with no
+   spawn;
 3. exhausted fallbacks fail closed with zero published executions;
 4. login argv shape for zsh and bash fixtures; sh last-resort non-login `-i`;
-5. default cwd = home; invalid explicit cwd falls back; invalid home fails;
+5. default cwd = home; invalid explicit cwd falls back with
+   `CwdOverrideInvalid`; invalid home fails with `CwdInvalid`;
 6. process env equal to SPEC-009 helper allowlist still launches;
-7. poisoned `DYLD_*` / secret-bearing parent env does not appear in child env;
+7. poisoned `DYLD_*` / secret-bearing parent env does not appear in child env,
+   and the child key set equals exactly §6 required keys ∪ present valid locale
+   keys ∪ §6.1 carve-out keys (asserted both with ADR-009 integration eligible
+   — including `SEYAL_USER_ZDOTDIR` present/absent — and not eligible);
 8. `TERM=seyal-m001` and bundled `TERMINFO` present; `COLORTERM` absent;
 9. OSC 7 / Pane title changes cannot alter the next create's cwd or program;
 10. `CommandSpec` / policy `Debug` emits no program/path/env contents;

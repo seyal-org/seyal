@@ -8,7 +8,7 @@
   (Proposed), [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md)
   (Proposed), ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1,
   [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
-- **Neighbor:** Proposed ADR-017 (PR #1040) owns the create/dispose seam and
+- **Neighbor:** Proposed ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)) owns the create/dispose seam and
   profile selector. These children supply the policy object that seam resolves.
   Do not edit ADR-017 files on that PR from this workstream.
 
@@ -49,10 +49,13 @@ owns that schema.
 **In scope**
 
 - Portable Rust types for `LaunchProfileIntent`, `EffectiveLaunchPolicy` and
-  `LaunchPolicyFailure` matching ADR-020 / SPEC-023.
+  the disjoint `LaunchPolicyFailure` / `LaunchPolicyWarning` types matching
+  ADR-020 §3.10 / SPEC-023 §9.
 - Account-record shell/home resolution and validation predicates.
 - Login/argv construction tables for zsh, bash, fish and `sh` last-resort.
-- Environment allowlist builder with clear-then-set semantics.
+- Environment allowlist builder with clear-then-set semantics; only the
+  ADR-020 §3.6 / SPEC-023 §6.1 CapabilityPolicy and ShellIntegrationPolicy
+  keys may be added afterwards.
 - Structural/`Debug` redaction tests.
 - Unit fixtures with injectable account-record and filesystem predicates (no
   real PTY).
@@ -111,7 +114,8 @@ provisioning consume path also needs ADR-017 P1/P3.
 **In scope**
 
 - Map `LaunchPolicyFailure` to portable product UI state (non-secret copy).
-- Warning path when configured shell falls back but create succeeds.
+- Map `LaunchPolicyWarning` (`ConfiguredShellInvalid`, `CwdOverrideInvalid`)
+  to a bounded warning state when create succeeds after fallback.
 - Thin native rendering of that bounded state only (ADR-015).
 - Protocol mapping note: prefer additive `LaunchPolicyRejected` after ADR-017 /
   SPEC-004 accept; until present, document the temporary accepted code mapping
@@ -123,7 +127,8 @@ provisioning consume path also needs ADR-017 P1/P3.
 
 **Acceptance**
 
-- Every failure class in SPEC-023 §9 has a user-visible bounded string.
+- Every failure and warning class in SPEC-023 §9 has a user-visible bounded
+  string; warnings never surface as create failures.
 - No OS strerror, path or env value appears in default UI.
 
 **Tests**
@@ -191,7 +196,7 @@ fields.
 
 ## Non-goals for all children
 
-- Production edits to proposed ADR-017 files on PR #1040;
+- Production edits to proposed ADR-017 files on PR #1056;
 - Trusted OSC CWD (#686);
 - Remote shell integration;
 - Persistence of dead process state;
