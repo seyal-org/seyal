@@ -25,6 +25,7 @@ Specifications define **observable behavior and enforceable contracts** below ac
 - [`SPEC-019-M005-EVALUATION-OUTCOME-COST.md`](SPEC-019-M005-EVALUATION-OUTCOME-COST.md) — **Accepted on merge under #838:** EvaluationObservation/Evaluation, AcceptanceContract, AttemptDisposition, WorkItem Outcome and honest usage/cost/time evidence.
 - [`SPEC-020-M005-DETERMINISTIC-ROUTING.md`](SPEC-020-M005-DETERMINISTIC-ROUTING.md) — **Accepted on merge under #838 / #55:** deterministic RouteOffering filtering/scoring, confidence shrinkage, policy-anchored cost/latency normalization, bounded fallback and explainability.
 - [`SPEC-021-M005-MULTIMODAL-GRAPH-CONTEXT.md`](SPEC-021-M005-MULTIMODAL-GRAPH-CONTEXT.md) — **Accepted on merge under #838 / SPEC-013:** multimodal context/enrichment, prompt/provider-cache dependencies and provider-neutral SoftwareEngineeringGraphSource with coverage semantics.
+- [`SPEC-025-M003-PANE-TREE-OPERATIONS.md`](SPEC-025-M003-PANE-TREE-OPERATIONS.md) — **Proposed under #1001 / ADR-021:** deterministic intra-Tab `PaneTree` move/reparent/swap, zoom/unzoom overlay, equalize, directional focus, focus-after-split/close/move, fail-closed rejection taxonomy, and property-test invariants. Focus-history store remains Proposed SPEC-022 / ADR-019. Not an implemented-behavior claim.
 
 ## Proposed specifications
 

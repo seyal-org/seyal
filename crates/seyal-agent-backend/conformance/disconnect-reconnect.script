@@ -1,0 +1,4 @@
+emit started
+emit disconnect
+emit reconnect
+emit progress 2

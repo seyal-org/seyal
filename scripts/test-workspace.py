@@ -89,7 +89,7 @@ expected_portable_dependencies = {
     "seyal-client": {"seyal-core", "seyal-protocol", "seyal-render"},
     "seyal-agent-core": set(),
     "seyal-agent-protocol": {"seyal-agent-core"},
-    "seyal-agent-store": {"seyal-agent-core"},
+    "seyal-agent-store": {"rusqlite", "seyal-agent-core"},
     "seyal-agent-backend": {
         "seyal-agent-core", "seyal-agent-protocol", "seyal-agent-store"
     },
@@ -123,6 +123,15 @@ else:
     width_version = ""
 if not width_version.startswith("0.2."):
     fail("seyal-terminal must pin unicode-width 0.2.x")
+store_sqlite = manifests["seyal-agent-store"].get("dependencies", {}).get("rusqlite")
+if not isinstance(store_sqlite, dict):
+    fail("seyal-agent-store must pin rusqlite as a reviewed table dependency")
+if str(store_sqlite.get("version", "")) != "0.40.2":
+    fail("seyal-agent-store must pin rusqlite 0.40.2")
+if store_sqlite.get("default-features") is not False:
+    fail("seyal-agent-store rusqlite must disable default features")
+if store_sqlite.get("features") != ["bundled"]:
+    fail("seyal-agent-store rusqlite must enable only the bundled SQLite feature")
 client_dev_dependencies = manifests["seyal-client"].get("dev-dependencies", {})
 if set(client_dev_dependencies) != {"seyal-exec", "seyal-runtime"}:
     fail("seyal-client integration tests may depend exactly on seyal-exec and seyal-runtime")
@@ -134,6 +143,15 @@ for name in ("seyal-exec", "seyal-protocol", "seyal-runtime"):
     if set(macos_dependencies) != {"libc"}:
         fail(f"{name} macOS platform boundary may depend only on libc in M001")
     if macos_dependencies["libc"] != "=0.2.189":
+        fail(f"{name} must exactly pin the reviewed libc 0.2.189 dependency")
+
+for name in ("seyal-agent-backend", "seyal-agent-client"):
+    unix_dependencies = manifests[name].get("target", {}).get(
+        "cfg(unix)", {}
+    ).get("dependencies", {})
+    if set(unix_dependencies) != {"libc"}:
+        fail(f"{name} Unix platform boundary may depend only on libc for peer UID")
+    if unix_dependencies["libc"] != "=0.2.189":
         fail(f"{name} must exactly pin the reviewed libc 0.2.189 dependency")
 
 for name in EXPECTED_CRATES:

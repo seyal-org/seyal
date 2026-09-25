@@ -38,6 +38,7 @@ case "$cmd" in
     bash scripts/test-tooling.sh
     python3 scripts/test-workspace.py
     python3 scripts/test-harnesses.py
+    python3 scripts/test-m003-presentation-fixtures.py
     python3 scripts/fuzz-smoke.py
     bash scripts/check-toolchain.sh
     cargo_pinned test --workspace --locked
@@ -68,6 +69,7 @@ case "$cmd" in
     bash scripts/test-tooling.sh
     python3 scripts/test-workspace.py
     python3 scripts/test-harnesses.py
+    python3 scripts/test-m003-presentation-fixtures.py
     python3 scripts/fuzz-smoke.py
     python3 scripts/test-ci-validators.py
     python3 scripts/test-m002-app-identity.py
