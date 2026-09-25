@@ -201,6 +201,11 @@ pub struct ShellSnapshot {
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
     pub allows_pane_splitting: bool,
+    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
+    /// Pane would currently be accepted (the last Tab/Pane cannot close).
+    /// Hosts read these instead of re-deriving the rule from counts.
+    pub allows_tab_close: bool,
+    pub allows_pane_close: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -392,6 +397,8 @@ impl ShellState {
             last_error: self.last_error,
             allows_tab_creation: self.allows_tab_creation,
             allows_pane_splitting: self.allows_pane_splitting,
+            allows_tab_close: workspace.allows_tab_close(),
+            allows_pane_close: tab.allows_pane_close(),
         }
     }
 
@@ -461,7 +468,7 @@ impl ShellState {
 
     fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;
-        if workspace.tabs.len() <= 1 {
+        if !workspace.allows_tab_close() {
             return Err(ShellError::CannotCloseLastTab);
         }
         let Some(index) = workspace.tabs.iter().position(|tab| tab.id == id) else {
@@ -508,7 +515,7 @@ impl ShellState {
     fn close_pane(&mut self, pane_id: PaneId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;
         let tab = workspace.active_tab_mut()?;
-        if tab.panes.len() <= 1 {
+        if !tab.allows_pane_close() {
             return Err(ShellError::CannotCloseLastPane);
         }
         if !tab.panes.contains_key(&pane_id) {
@@ -648,6 +655,11 @@ impl Workspace {
         self.tabs.iter().find(|tab| tab.id == id)
     }
 
+    /// The last Tab of a Workspace cannot be closed.
+    fn allows_tab_close(&self) -> bool {
+        self.tabs.len() > 1
+    }
+
     fn active_tab_mut(&mut self) -> Result<&mut Tab, ShellError> {
         let id = self.active_tab;
         self.tabs
@@ -670,6 +682,11 @@ impl Tab {
             root: PaneTree::Leaf(pane_id),
             focused: pane_id,
         }
+    }
+
+    /// The last Pane of a Tab cannot be closed.
+    fn allows_pane_close(&self) -> bool {
+        self.panes.len() > 1
     }
 }
 
@@ -745,6 +762,8 @@ mod tests {
         assert!(snap.panes[0].allows_implicit_bootstrap);
         assert!(!shell.allows_tab_creation());
         assert!(!shell.allows_pane_splitting());
+        assert!(!snap.allows_tab_close);
+        assert!(!snap.allows_pane_close);
         assert_eq!(
             shell.apply(ShellAction::CreateTab),
             Err(ShellError::TabCreationUnavailable)
@@ -760,6 +779,53 @@ mod tests {
         );
         assert_eq!(shell.snapshot().tabs.len(), 1);
         assert_eq!(shell.snapshot().layout, LayoutDescription::Single);
+    }
+
+    #[test]
+    fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
+        let mut shell = seed_two_workspaces();
+        let single = shell.snapshot();
+        assert!(!single.allows_tab_close);
+        assert!(!single.allows_pane_close);
+
+        shell.apply(ShellAction::CreateTab).expect("tabs allowed");
+        let two_tabs = shell.snapshot();
+        assert!(two_tabs.allows_tab_close);
+        assert!(!two_tabs.allows_pane_close);
+
+        shell
+            .apply(ShellAction::SplitFocused {
+                axis: SplitAxis::Right,
+            })
+            .expect("splits allowed");
+        let two_panes = shell.snapshot();
+        assert!(two_panes.allows_pane_close);
+
+        shell
+            .apply(ShellAction::ClosePane {
+                id: two_panes.focused_pane,
+            })
+            .expect("close split pane");
+        assert!(!shell.snapshot().allows_pane_close);
+        shell
+            .apply(ShellAction::CloseTab {
+                id: two_tabs.active_tab,
+            })
+            .expect("close created tab");
+        let closed = shell.snapshot();
+        assert!(!closed.allows_tab_close);
+        assert_eq!(
+            shell.apply(ShellAction::CloseTab {
+                id: closed.active_tab
+            }),
+            Err(ShellError::CannotCloseLastTab)
+        );
+        assert_eq!(
+            shell.apply(ShellAction::ClosePane {
+                id: closed.focused_pane
+            }),
+            Err(ShellError::CannotCloseLastPane)
+        );
     }
 
     #[test]

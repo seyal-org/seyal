@@ -139,6 +139,29 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testShellCompositionControlsAreOmittedWhenRustPolicyDisallowsThem() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        // M001 production policy: no tab creation/pane splitting, and the sole
+        // Tab/Pane cannot be closed. Rust reports all four as unset flags.
+        let shell = seyal_app_shell(view.pane.appHandle)
+        for bit in [
+            SEYAL_APP_SHELL_ALLOWS_TAB_CREATION,
+            SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING,
+            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
+            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
+        ] {
+            XCTAssertEqual(shell.flags & UInt16(bit), 0)
+        }
+        for identifier in [
+            "seyal-new-tab", "seyal-close-tab", "seyal-split-right", "seyal-split-down", "seyal-close-pane",
+        ] {
+            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
+            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
+        }
+    }
+
+    @MainActor
     func testNestedProductChangeDuringReconcileStillHidesComposerForTui() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         let handle = view.pane.appHandle

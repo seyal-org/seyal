@@ -339,6 +339,9 @@ final class SeyalHostUITests: XCTestCase {
         let inspector = app.descendants(matching: .any)["seyal-inspector"]
         let commandRow = inspector.descendants(matching: .staticText)["Block · Command"]
         XCTAssertFalse(commandRow.exists, "no Block details before any selection")
+        // Hide the inspector through Rust first so "selecting a Block reveals
+        // the inspector" below observes a real hidden -> visible transition.
+        hideInspectorThroughPalette(in: app, inspector: inspector)
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         editor.firstMatch.click()
@@ -398,6 +401,27 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [deselected], timeout: 5), .completed, "clicking again clears the selection")
         XCTAssertFalse(commandRow.exists, "Block rows leave with the selection")
         XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    private func hideInspectorThroughPalette(in app: XCUIApplication, inspector: XCUIElement) {
+        XCTAssertTrue(inspector.firstMatch.isHittable, "Core Terminal inspector is visible by default (#922)")
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "⌘K opens the Rust-backed palette")
+        let query = app.descendants(matching: .any)["seyal-command-palette-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.firstMatch.click()
+        query.firstMatch.typeText("Hide Inspector")
+        let row = app.descendants(matching: .any)["seyal-command-palette-row-0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertEqual(row.label, "Hide Inspector")
+        app.typeKey("\r", modifierFlags: [])
+        let hidden = expectation(
+            for: NSPredicate(format: "isHittable == false"),
+            evaluatedWith: inspector.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, "Rust hid the inspector before selection")
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {

@@ -360,6 +360,13 @@ typedef struct SeyalAppTheme {
  */
 #define SEYAL_APP_SHELL_ALLOWS_TAB_CREATION 1u
 #define SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING 2u
+/*
+ * Whether CLOSE_TAB of the active Tab / CLOSE_PANE of the focused Pane would
+ * currently be accepted (Rust rejects closing the last Tab/Pane). Hosts omit
+ * the close control when the bit is unset instead of re-deriving the rule.
+ */
+#define SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE 4u
+#define SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE 8u
 
 typedef struct SeyalAppShell {
     uint16_t version;

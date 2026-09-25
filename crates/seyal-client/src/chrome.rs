@@ -984,6 +984,19 @@ mod tests {
             chrome.snapshot(&snap, &[]).inspector_mode,
             InspectorMode::Context
         );
+        // Hide the (default-visible) inspector so the reveal below is a real
+        // hidden -> visible transition.
+        chrome
+            .apply(
+                ChromeAction::SetShellVisibility {
+                    left: true,
+                    inspector: false,
+                    tab_strip: true,
+                },
+                &snap,
+            )
+            .unwrap();
+        assert!(!chrome.snapshot(&snap, &[]).inspector_visible);
         chrome
             .apply(
                 ChromeAction::SelectBlock {

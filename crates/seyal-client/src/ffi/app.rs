@@ -34,6 +34,8 @@ const HISTORY_OPEN: u16 = 1;
 const HISTORY_HAS_ENTRIES: u16 = 2;
 const SHELL_FLAG_ALLOWS_TAB_CREATION: u16 = 1;
 const SHELL_FLAG_ALLOWS_PANE_SPLITTING: u16 = 2;
+const SHELL_FLAG_ALLOWS_TAB_CLOSE: u16 = 4;
+const SHELL_FLAG_ALLOWS_PANE_CLOSE: u16 = 8;
 const ROW_SELECTED: u16 = 1;
 /// Block-row `flags`: low bits are the presentation state (1..3); bit 3 marks
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
@@ -579,6 +581,12 @@ pub extern "C" fn seyal_app_shell(handle: u64) -> SeyalAppShell {
         }
         if shell.allows_pane_splitting {
             flags |= SHELL_FLAG_ALLOWS_PANE_SPLITTING;
+        }
+        if shell.allows_tab_close {
+            flags |= SHELL_FLAG_ALLOWS_TAB_CLOSE;
+        }
+        if shell.allows_pane_close {
+            flags |= SHELL_FLAG_ALLOWS_PANE_CLOSE;
         }
         SeyalAppShell {
             version: APP_ABI_VERSION,
@@ -1955,7 +1963,8 @@ mod tests {
         assert_eq!(shell.pane_count, 1);
         assert_eq!(
             shell.flags, 0,
-            "M001 default shell policy disallows tab creation/pane splitting"
+            "M001 default shell policy disallows tab creation/pane splitting, \
+             and the sole Tab/Pane cannot be closed"
         );
         let workspace = seyal_app_shell_row(handle, 0, 0);
         assert_eq!(workspace.flags & 1, 1);
