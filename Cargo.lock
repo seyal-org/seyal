@@ -76,6 +76,7 @@ dependencies = [
 name = "seyal-agent-backend"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "seyal-agent-core",
  "seyal-agent-protocol",
  "seyal-agent-store",
@@ -85,6 +86,7 @@ dependencies = [
 name = "seyal-agent-client"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "seyal-agent-core",
  "seyal-agent-protocol",
 ]
