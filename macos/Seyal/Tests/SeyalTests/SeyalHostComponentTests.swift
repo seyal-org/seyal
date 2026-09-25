@@ -15,9 +15,15 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(snapshot.version, UInt16(SEYAL_APP_ABI_VERSION))
         XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue))
         XCTAssertEqual(MemoryLayout<SeyalAppBlockSpan>.size, 16)
+        XCTAssertEqual(MemoryLayout<SeyalAppBlockProjection>.size, 24)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED), 0)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY), 1)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP), 2)
         let emptySpan = seyal_app_block_span(handle, 0)
         XCTAssertEqual(emptySpan.start_line, 0)
         XCTAssertEqual(emptySpan.end_line, 0)
+        let emptyProjection = seyal_app_block_projection(handle, 0)
+        XCTAssertEqual(emptyProjection.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
         XCTAssertEqual(seyal_app_destroy(handle), 0)
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
@@ -1045,7 +1051,88 @@ final class SeyalHostComponentTests: XCTestCase {
         view.reconcileChrome()
     }
 
+    // MARK: - Flow live-tail primary clip (#865)
+
+    /// Running Flow Blocks must clip the prepared primary frame into the Block
+    /// region without enabling Pane-wide live-grid drawing or inventing
+    /// `start+511` history ranges.
+    @MainActor
+    func testFlowLiveTailPrimaryClipStaysInsideBlockRegion() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        renderer.setPresentationPlan(.flow())
+
+        var leadH = SeyalPreparedCell()
+        leadH.scalar = UInt32(UnicodeScalar("H").value)
+        leadH.foreground = 0xffe9_e1d8
+        leadH.background = 0xff10_0d0b
+        var leadI = SeyalPreparedCell()
+        leadI.scalar = UInt32(UnicodeScalar("i").value)
+        leadI.foreground = 0xffe9_e1d8
+        leadI.background = 0xff10_0d0b
+        var cells = [leadH, leadI]
+        var damage = DamageMask()
+        damage.mark(row: 0)
+        let updated = try cells.withUnsafeBufferPointer { buffer in
+            try renderer.update(
+                frame: NativePreparedFrame(
+                    cells: buffer,
+                    generation: 865,
+                    rows: 1,
+                    columns: 2,
+                    fullRebuild: true,
+                    damage: damage
+                ),
+                backingScale: 1
+            )
+        }
+        XCTAssertEqual(updated, .updated)
+
+        let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let region = NativeTranscriptRegion(
+            id: 865,
+            origin: .zero,
+            clip: NSRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(cellSize.width * 2),
+                height: CGFloat(cellSize.height)
+            )
+        )
+        renderer.setTranscriptRegions([region])
+        renderer.setLiveTailBlocks([865: 1])
+
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        let inspection = renderer.inspectPresentation()
+        XCTAssertEqual(inspection.mode, .flow)
+        XCTAssertFalse(inspection.drawsLiveGrid)
+        XCTAssertFalse(inspection.drawsFullGridBackground)
+        XCTAssertFalse(inspection.drawsCursorOutsideBlockRegions)
+        XCTAssertEqual(inspection.blockRegionIDs, [865])
+
+        let paint = renderer.inspectFlowPaint()
+        XCTAssertTrue(paint.isClean, "Flow must not submit Pane-wide live grid")
+        XCTAssertGreaterThan(paint.historyInstanceCount, 0)
+        XCTAssertEqual(paint.instancesOutsideClips, 0)
+
+        // Clearing live-tail must not re-enable Pane-wide live grid.
+        renderer.setLiveTailBlocks([:])
+        XCTAssertEqual(renderer.liveTailRegionCount, 0)
+        XCTAssertFalse(renderer.inspectPresentation().drawsLiveGrid)
+    }
+
+    func testBlockProjectionABIRejectsInventedRunningHistoryEnd() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let unbound = seyal_app_block_projection(handle, 0)
+        XCTAssertEqual(unbound.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
+        XCTAssertEqual(unbound.end_line, 0)
+    }
+
 }
+
 
 private func utf8(_ row: SeyalAppRow) -> String {
     guard row.title_len > 0, let title = row.title else { return "" }

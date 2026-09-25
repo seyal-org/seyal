@@ -41,6 +41,25 @@ final class SeyalHostHistoryUITests: XCTestCase {
         attachScreenshot(app, name: "842-history-wide")
     }
 
+    /// #865: a long running normal-screen command must stay on one Flow Block
+    /// surface under the Pane scroll owner (no Pane-wide live grid chrome).
+    func testRunningSeqLiveTailStaysOnFlowBlocks() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+
+        submitComposerCommand(app, "seq 1 100")
+        waitBriefly(0.8)
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while seq live-tail ran")
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "865-live-tail-running-seq")
+
+        // Completion handoff must remain on Flow Blocks, not a raw Metal viewport.
+        waitBriefly(1.2)
+        XCTAssertEqual(app.state, .runningForeground)
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "865-live-tail-after-seq")
+    }
+
     func testAlternateScreenExitRestoresFlowHistorySurface() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
