@@ -102,7 +102,7 @@ Behavior:
 Cwd sources fall into two classes, and only the first may enable a mutating
 action:
 
-**Trusted (may enable branch listing and switching):**
+**Trusted (may enable branch listing and switching once ADR-009 accepts that source; none is accepted today):**
 
 1. Runtime process metadata that resolves the cwd of the execution's primary
    shell process, read by Runtime while the ADR-009 integration state is
@@ -126,10 +126,12 @@ class their source is in.
 
 **Prerequisite:** Runtime process-metadata cwd (trusted source 1) is not yet an
 accepted trust source under ADR-009. Enabling Git branch listing/switching from
-that source **requires an ADR-009 amendment** (reopen #686) that explicitly
-accepts Runtime process-metadata cwd as trusted for Composer chip purposes.
-Until that amendment is accepted, no trusted source exists, and the Git chip is
-read-only or omitted (§5).
+that source **requires an ADR-009 amendment** that explicitly accepts Runtime
+process-metadata cwd as trusted for Composer chip purposes. The amendment is
+refined under the open trusted-shell-integration spike #686 and lands as its
+own ADR PR; this component specification cannot supply that acceptance, and an
+implementation Issue cannot either. Until that amendment is accepted, no
+trusted source exists, and the Git chip is read-only or omitted (§5).
 
 ## 5. Git context chip
 
@@ -404,6 +406,7 @@ Composer passes when:
 - no prompt parsing is required for correctness;
 - all Composer state, eligibility, and command construction/submission is Rust-owned; native code only renders snapshots and forwards typed actions;
 - branch listing/switching is enabled only from a trusted cwd source; an OSC 7 or other untrusted cwd yields at most a read-only chip;
+- branch listing/switching stays disabled until an accepted ADR-009 amendment names at least one §4 trusted source (§4 prerequisite);
 - branch switch is an ADR-009 composer submission (same eligibility, byte contract, correlated `Busy`/`Unsupported`, one authenticated Block), targets the Pane/repository identified by the fresh trusted observation, and leaves the user's draft untouched;
 - branch names outside the §16 rules are never submitted;
 - dirty state never triggers automatic stash/reset/force behavior;
