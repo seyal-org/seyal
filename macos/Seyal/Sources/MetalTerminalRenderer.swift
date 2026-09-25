@@ -351,6 +351,9 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     private var liveTailRegions: [UInt64: HistoryRenderRegion] = [:]
     private var liveTailOrder: [UInt64] = []
     private var liveTailClips: [UInt64: LiveTailClip] = [:]
+    /// Clip membership changed while a command buffer still samples live-tail
+    /// instance buffers. Refresh after GPU completion (same gate as history).
+    private var deferredLiveTailForceRefresh = false
     private var transcriptRegions: [UInt64: NativeTranscriptRegion] = [:]
     private var lastPreparedFrame: NativePreparedFrame?
     private var presentationPlan = RendererPresentationPlan.fullPane(.raw)
@@ -1063,20 +1066,31 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     /// On refresh failure, live-tail draws are cleared (fail closed) so stale
     /// instances cannot remain on screen.
     func setLiveTailBlocks(_ clipsByBlock: [UInt64: LiveTailClip]) {
+        if clipsByBlock == liveTailClips {
+            return
+        }
         liveTailClips = clipsByBlock
         liveTailOrder = clipsByBlock.keys.sorted()
         let keep = Set(liveTailOrder)
         liveTailRegions = liveTailRegions.filter { keep.contains($0.key) }
-        if lastPreparedFrame != nil {
-            do {
-                try refreshLiveTailClips(
-                    backingScale: currentScale > 0 ? currentScale : 1,
-                    damage: DamageMask(),
-                    force: true
-                )
-            } catch {
-                failClosedLiveTail(error: error)
-            }
+        guard lastPreparedFrame != nil else {
+            needsPresent = true
+            return
+        }
+        // Never CPU-write shared live-tail buffers while GPU may still sample.
+        if framesInFlight > 0 {
+            deferredLiveTailForceRefresh = true
+            needsPresent = true
+            return
+        }
+        do {
+            try refreshLiveTailClips(
+                backingScale: currentScale > 0 ? currentScale : 1,
+                damage: DamageMask(),
+                force: true
+            )
+        } catch {
+            failClosedLiveTail(error: error)
         }
         needsPresent = true
     }
@@ -1086,19 +1100,44 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         for region in regions {
             map[region.id] = region
         }
+        if map == transcriptRegions {
+            return
+        }
         transcriptRegions = map
-        if lastPreparedFrame != nil {
-            do {
-                try refreshLiveTailClips(
-                    backingScale: currentScale > 0 ? currentScale : 1,
-                    damage: DamageMask(),
-                    force: true
-                )
-            } catch {
-                failClosedLiveTail(error: error)
-            }
+        guard lastPreparedFrame != nil, !liveTailClips.isEmpty else {
+            needsPresent = true
+            return
+        }
+        if framesInFlight > 0 {
+            deferredLiveTailForceRefresh = true
+            needsPresent = true
+            return
+        }
+        do {
+            try refreshLiveTailClips(
+                backingScale: currentScale > 0 ? currentScale : 1,
+                damage: DamageMask(),
+                force: true
+            )
+        } catch {
+            failClosedLiveTail(error: error)
         }
         needsPresent = true
+    }
+
+    private func flushDeferredLiveTailRefresh() {
+        guard framesInFlight == 0, deferredLiveTailForceRefresh else { return }
+        deferredLiveTailForceRefresh = false
+        guard lastPreparedFrame != nil else { return }
+        do {
+            try refreshLiveTailClips(
+                backingScale: currentScale > 0 ? currentScale : 1,
+                damage: DamageMask(),
+                force: true
+            )
+        } catch {
+            failClosedLiveTail(error: error)
+        }
     }
 
     var liveTailRegionCount: Int {
@@ -1743,6 +1782,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
 
         flushDeferredHistoryPrepares()
         guard persistentDisplayFailure == nil else { return }
+        flushDeferredLiveTailRefresh()
+        guard persistentDisplayFailure == nil else { return }
 
         if !deferredDamage.isEmpty || deferredNeedsFullRebuild || needsCurrentFrameWhenIdle {
             requestCurrentFrameIfNeeded()
@@ -1805,6 +1846,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         liveTailRegions.removeAll()
         liveTailOrder.removeAll()
         liveTailClips.removeAll()
+        deferredLiveTailForceRefresh = false
         transcriptRegions.removeAll()
         lastPreparedFrame = nil
         deferredHistoryPrepares.removeAll()

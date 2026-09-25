@@ -1055,7 +1055,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     guard let frame = NativePreparedFrame(bridgeFrame: bridgeFrame) else {
       return
     }
-    onFrameChanged?(frame)
     if lastAlternateScreen != frame.alternateScreen {
       lastAlternateScreen = frame.alternateScreen
       onAlternateScreenChanged?(frame.alternateScreen)
@@ -1071,6 +1070,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       if result == .updated {
         forceNextFrame = false
         hasPreparedState = true
+        // Notify product chrome only after Candidate-D prepare so live-tail
+        // clip publication cannot force a Metal rewrite before damage-driven
+        // update (and cannot race a still-in-flight GPU sample).
+        onFrameChanged?(frame)
         if runtimeRecoveryState.stage != .usable {
           bridgeRecoveryCoordinator.transition(to: .restoringInteraction)
         }

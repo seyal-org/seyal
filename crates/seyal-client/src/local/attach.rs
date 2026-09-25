@@ -995,9 +995,24 @@ mod tests {
         .expect("valid control frame must not poison bounded resync");
         assert_eq!(attached.cache().generation, 5);
         assert_eq!(attached.cache().cells[0].scalar, 'V');
-        attached
-            .poll_prepare()
-            .expect("retained timeline should reach normal consumer");
+        // Timeline may arrive after the replacement snapshot on a separate
+        // write; poll until it is visible or the deadline expires (avoids a
+        // client/server race that flakes under CI load).
+        let deadline = std::time::Instant::now() + Duration::from_millis(250);
+        loop {
+            attached
+                .poll_prepare()
+                .expect("retained timeline should reach normal consumer");
+            if attached.block_timeline().revision == 7 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "block timeline revision stayed {}; expected 7",
+                attached.block_timeline().revision
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert_eq!(attached.block_timeline().revision, 7);
         release_server.send(()).expect("release server");
         server_thread.join().expect("server thread");

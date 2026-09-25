@@ -874,17 +874,24 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
                 return SeyalAppBlockProjection::fail_closed();
             }
         };
-        match project_block_output(
-            mode,
-            block.start_line,
-            block.end_line,
-            block.state == BlockPresentationState::Running,
-            // Production Blocks arrive via the process-global active LocalDisplayClient
-            // (timeline poll). ApplicationRoot.client is only set by attach_client in
-            // tests — never in the macOS FFI path — so projection must read LineIds
-            // from the same active client that owns display/timeline state.
-            &viewport_line_ids_from_active_client(),
-        ) {
+        let running = block.state == BlockPresentationState::Running;
+        // History/fail-closed paths must not depend on an active display client.
+        // Only running PRIMARY_CLIP needs paired ViewportLineIds from that client.
+        let projection = if running {
+            with_active_client(|client| {
+                project_block_output(
+                    mode,
+                    block.start_line,
+                    block.end_line,
+                    true,
+                    paired_viewport_line_ids(client),
+                )
+            })
+            .unwrap_or(LiveTailProjection::FailClosed)
+        } else {
+            project_block_output(mode, block.start_line, block.end_line, false, &[])
+        };
+        match projection {
             LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {
                 kind: SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
                 reserved0: clip.first_row,
@@ -974,21 +981,18 @@ fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
 }
 
 /// Primary viewport LineIds from the active display client (production path).
-fn viewport_line_ids_from_active_client() -> Vec<u64> {
-    with_active_client(|client| {
-        let ids = client.viewport_line_ids();
-        let rows = client.cache().rows;
-        // Fail closed when the vector is not paired with the committed display.
-        if client.viewport_line_ids_generation() == 0
-            || rows == 0
-            || client.viewport_line_ids_generation() != client.cache().generation
-            || ids.len() != usize::from(rows)
-        {
-            return Vec::new();
-        }
-        ids.to_vec()
-    })
-    .unwrap_or_default()
+/// Returns a borrow of the client's cache — no per-call allocation.
+fn paired_viewport_line_ids(client: &crate::LocalDisplayClient) -> &[u64] {
+    let ids = client.viewport_line_ids();
+    let rows = client.cache().rows;
+    if client.viewport_line_ids_generation() == 0
+        || rows == 0
+        || client.viewport_line_ids_generation() != client.cache().generation
+        || ids.len() != usize::from(rows)
+    {
+        return &[];
+    }
+    ids
 }
 
 fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockRecord {
