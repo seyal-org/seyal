@@ -13,19 +13,30 @@ Follow the canonical generic procedure in `.sdlc/framework/skills/implementation
 
 Claiming the Issue is a coordination preflight, not implementation permission. Perform it before planning, worktree/branch creation, generated files, or production edits.
 
-1. Resolve the current implementer's **authenticated GitHub login** using the project-approved GitHub tooling. Do not guess from git author name, OS username, chat name, or repository owner. If the authenticated login cannot be resolved uniquely, stop with `BLOCKED: implementation identity unavailable` and do not claim or edit the Issue.
-2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for assignee state.
+1. Resolve the responsible **human GitHub owner** using the project-approved GitHub tooling and the fresh complete Issue owner-record state (assignees plus any maintainer-acknowledged `Owner: @login` claim). Coding-agent/bot identities are not valid Seyal owners. Do not guess from git author name, OS username, chat name, agent/vendor identity, or repository ownership. If the human owner cannot be resolved uniquely, stop with `BLOCKED: human implementation owner unavailable` and do not claim or edit the Issue.
+2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for owner-record state.
 3. Verify the Issue is still open and **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Readiness and ownership are separate gates.
-4. Inspect the complete assignee list:
-   - **No assignee:** assign exactly the authenticated current implementer, then fetch the Issue again.
-   - **Exactly the current implementer:** treat this only as a potential resume; continue the collision checks below.
-   - **Exactly another implementer:** stop before planning or edits and report `Issue #N is already taken by @login` with the Issue URL.
-   - **Multiple assignees:** stop as an ownership collision. Seyal implementation Issues have exactly one active implementer.
-5. After any assignment write, re-fetch the Issue and require the current implementer to be the **sole** assignee. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
-6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. If the parent is assigned to another implementer, stop with `BLOCKED` unless an explicit parent/slice handoff has already released that parent claim. After the child claim write and again after creating `issue/<number>`, re-fetch both parent and child. If they are assigned to different implementers, stop with `BLOCKED` and do not edit.
-7. Do not clear, replace, or steal another implementer's assignment. Ownership transfer requires an explicit handoff/reassignment under `ISSUE-PROTOCOL.md`.
+4. Inspect the complete **human owner-record state**: assignees plus maintainer-acknowledged `Owner: @login` claims.
+   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login` and require a maintainer acknowledgement before continuing.
+   - **Exactly the current human owner:** treat this only as a potential resume; continue the deterministic-branch checks below.
+   - **Exactly another human owner:** stop before planning or edits and report `Issue #N is already taken by @login` with the Issue URL.
+   - **Agent/bot owner record:** stop as `BLOCKED`; Seyal work ownership must be transferred to a human before implementation.
+   - **Conflicting records:** multiple assignees, multiple acknowledged owner claims, or disagreement between assignee and acknowledged claim is an ownership collision. Seyal implementation Issues have exactly one active human owner.
+5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and a maintainer-acknowledged `Owner: @login` claim names that human. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
+6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. A **planning/umbrella parent is not an ownership lock** for an independently scoped child. Stop with `BLOCKED` only when parent and child overlap the same implementation slice or the parent explicitly owns/releases that slice. After the child claim write and again after creating `<human-login>/issue/<number>`, re-fetch both parent and child and verify there is no duplicate ownership of the same slice.
+7. Do not clear, replace, or steal another human's owner record. Ownership transfer requires an explicit human-to-human handoff under `ISSUE-PROTOCOL.md`.
 
-The GitHub assignee is the human-visible ownership claim. Project status such as `In Progress` is lifecycle metadata and must never substitute for the assignee check.
+The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
+
+## Human owner and agent delegation
+
+The work owner is always a human GitHub contributor.
+
+- A coding agent may execute implementation steps only on behalf of the sole human Issue owner.
+- New branches use `<human-login>/issue/<number>`; agent/vendor names are not branch ownership namespaces.
+- If an agent changes (for example Cursor → Codex), the Issue owner and branch stay unchanged.
+- Agent assistance may be credited in the PR body and/or with a real `Co-authored-by:` trailer. Do not invent attribution identities.
+- A bot-authored review/comment is supplemental analysis only. Required independent review must be owned by a human GitHub reviewer.
 
 ## Plan first
 
@@ -64,22 +75,22 @@ Anything that can reach `master` must be production-grade for its intended repos
 - Do not copy exploratory implementation wholesale into a production branch. Re-implement the accepted production solution cleanly so review can establish that every merged path is intentional and supportable.
 - If a requested feature cannot yet be implemented production-grade because architecture or dependencies are unresolved, stop and route the uncertainty instead of creating a temporary production path.
 
-## Deterministic branch collision backstop
+## Deterministic branch audit/resume backstop
 
-After the plan is confirmed but before creating the worktree or editing production files, use the exact remote branch name `issue/<number>` for new implementation pickups.
+After the plan is confirmed but before creating the worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record prevents two people from owning the same implementation Issue at once**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
 
 1. Fetch remote refs immediately before branch creation.
-2. If `origin/issue/<number>` already exists, **do not create another implementation worktree or alternate branch**. Stop and report that the Issue has an active/resumable branch. Resume that branch only when the user explicitly asked to continue/resume the existing work and the fresh GitHub Issue read still shows the current implementer as sole assignee.
-3. If the branch does not exist, create `issue/<number>` from the current accepted `master`. Branch creation is the collision backstop: failure because the ref appeared concurrently means another pickup won the race; stop rather than selecting a different branch name.
-4. Immediately after successfully creating the branch, fetch the Issue again and require the current implementer to remain the sole assignee. If assignment and branch state disagree, stop before production edits and surface the collision for explicit resolution.
-5. Create the isolated worktree from that exact branch only after both the assignee claim and deterministic branch checks pass.
+2. If the human owner's deterministic `<human-login>/issue/<number>` branch already exists in the canonical repository or the contributor's declared fork, **do not create another implementation worktree or alternate branch**. Stop and report that the Issue has active/resumable work. Resume only when the human owner explicitly asked to continue/resume and the fresh Issue read still proves that same human is the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim.
+3. If the branch does not exist, create `<human-login>/issue/<number>` from the current accepted `master`. If that same human-namespaced ref appears concurrently, stop and re-run owner/branch preflight rather than selecting a different branch name. Do **not** treat branch creation as the mechanism that prevents two humans from claiming the same Issue: two different human namespaces can both be created, so the owner record must already have excluded that race.
+4. Immediately after successfully creating the branch, fetch the Issue again and require the same human to remain the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim. If ownership and branch state disagree, stop before production edits and surface the collision for explicit resolution.
+5. Create the isolated worktree from that exact branch only after both the **unique human owner-record check** and deterministic branch audit/resume check pass.
 
-Legacy implementation branches already created as `issue/<number>-<short-name>` may be completed under their existing owning Issue. Do not create new branches in that legacy form after this rule is merged.
+Legacy implementation branches already created as `issue/<number>`, `issue/<number>-<short-name>`, or under agent/vendor namespaces such as `cursor/`, `codex/`, `claude/`, or `copilot/` require explicit human-owner disposition before they continue. Do not create new branches in those legacy forms after this rule is merged.
 
 Then apply only these Seyal-specific rules on top of the generic procedure:
 
 1. The GitHub Issue must already be **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Re-run `development-readiness` if scope, authority, dependencies, or acceptance changed materially.
-2. Use one Issue → one sole GitHub assignee → one isolated worktree → deterministic `issue/<number>` → one scoped PR. When the work is a GitHub sub-issue slice, claim and branch that sub-issue only after the parent/slice handoff check above passes; do not steal the parent's assignee. If the user asked for a parent end-to-end outcome that still has multiple sub-issues, implement the claimed slice Issue only and keep other slices on their own Issues/PRs.
+2. Use one Issue → one sole **human GitHub owner** → one isolated worktree → deterministic `<human-login>/issue/<number>` → one scoped PR. Prefer sole assignment when assignable; otherwise use the acknowledged external-owner claim. Coding agents may act on behalf of that human and may be credited as co-authors/tooling provenance; they never become the ownership identity. When the work is a GitHub sub-issue slice, claim and branch that sub-issue only after the parent/slice overlap check above passes; do not duplicate ownership of the same implementation slice. If the user asked for a parent end-to-end outcome that still has multiple sub-issues, implement the claimed slice Issue only and keep other slices on their own Issues/PRs.
 3. Before implementation, classify the work as **production** or **exploratory**. Mergeable Issue branches are production only. A spike/prototype/POC must use an explicitly isolated non-mergeable branch/worktree and must never be promoted wholesale into `master`.
 4. MVP is valid only when it is a narrow slice of the permanent architecture. Never add fake UI/data, temporary VT/renderer/runtime, duplicate state, alternate implementation, compatibility shim, feature-flag POC, or parallel old/new production path merely to demonstrate progress or bridge an unready dependency.
 5. If the permanent production path is blocked by an unresolved dependency/architecture question, stop. Route to `development-readiness`, `architecture-change`, or isolated evidence work instead of coding a temporary production path.
@@ -96,11 +107,11 @@ Then apply only these Seyal-specific rules on top of the generic procedure:
 
 ## Claim handoff and release
 
-- **Normal completion:** keep the sole assignee through review/validation so ownership remains visible; the Issue closes through the verified closing PR.
-- **Explicit mid-work handoff:** current owner stops editing, records the exact branch/PR/check state, and the Issue is explicitly reassigned to the new GitHub login. The new implementer re-runs the full claim/readiness preflight and resumes the existing `issue/<number>` branch; no second branch is created.
-- **Abandoned before implementation:** remove the unused deterministic branch if it was created, then explicitly unassign/reassign the Issue. Do not leave an assignee or branch that falsely advertises active work.
-- **Stale claim suspected:** never self-clear it. Report the assignee/branch and require explicit ownership resolution.
+- **Normal completion:** keep the same unique human owner record through review/validation — sole assignee when assignable, otherwise the maintainer-acknowledged external-owner claim — so ownership remains visible; the Issue closes through the verified closing PR.
+- **Explicit mid-work handoff:** current human owner stops editing, records the exact branch/PR/check state, and ownership is explicitly transferred to the new human GitHub login through reassignment when possible or a maintainer-acknowledged owner-claim handoff for an external contributor. The new owner re-runs the full claim/readiness preflight. If branch namespace migration is required, copy the exact current head to `<new-human-login>/issue/<number>`, record the handoff, then retire the old ref; no parallel implementation branch is created.
+- **Abandoned before implementation:** remove the unused deterministic branch if it was created, then explicitly clear or transfer the human owner record using the same dual path (assignment when assignable; maintainer-acknowledged `Owner: @login` handoff/cleanup otherwise). Do not leave an owner record or branch that falsely advertises active work.
+- **Stale claim suspected:** never self-clear it. Report the current human owner record and branch state and require explicit ownership resolution.
 
 Useful findings from an isolated POC may be carried forward as measurements, docs, ADR evidence, fixtures, or independently valid tests. Production code must then be implemented cleanly from the accepted architecture/specification after readiness passes.
 
-If a reusable implementation-rule defect is found, fix it in `ai-sdlc` rather than expanding this facade into a second generic implementation skill. The generic exclusive-claim contract is tracked in `mahboobmonnamd/ai-sdlc#10`; this facade owns only Seyal's GitHub-specific identity, assignee, deterministic-branch, and handoff mapping.
+If a reusable implementation-rule defect is found, fix it in `ai-sdlc` rather than expanding this facade into a second generic implementation skill. The generic exclusive-claim contract is tracked in `mahboobmonnamd/ai-sdlc#10`; this facade owns only Seyal's GitHub-specific identity, human owner-record, deterministic-branch, and handoff mapping.

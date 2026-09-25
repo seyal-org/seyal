@@ -428,6 +428,43 @@ fn zero_output_commands_complete_and_later_blocks_stay_exact() {
 }
 
 #[test]
+fn shell_and_child_stderr_reach_the_terminal() {
+    // #1046: the bootstrap closed the nonce descriptor with a bare
+    // `exec {fd}<&- 2>/dev/null`, which made /dev/null the shell's stderr for
+    // its whole lifetime. Every command's stderr silently disappeared.
+    let mut h = spawn("stderr", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("printf 'CHILD_OUT_1046\\n'; printf 'CHILD_ERR_1046\\n' >&2; print -u2 SHELL_ERR_1046; ls /seyal-1046-no-such-dir"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert!(matches!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(status)
+        } if status != 0
+    ));
+    h.wait_at_prompt();
+    let text = h.text();
+    let lines: Vec<&str> = text.lines().collect();
+    let position = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.trim_end() == needle)
+            .unwrap_or_else(|| panic!("{needle} missing from terminal text:\n{text}"))
+    };
+    let out = position("CHILD_OUT_1046");
+    let child_err = position("CHILD_ERR_1046");
+    let shell_err = position("SHELL_ERR_1046");
+    let ls_err = position("ls: /seyal-1046-no-such-dir: No such file or directory");
+    assert!(
+        out < child_err && child_err < shell_err && shell_err < ls_err,
+        "stdout and stderr must interleave in write order:\n{text}"
+    );
+    h.assert_no_instrumentation_visible();
+}
+
+#[test]
 fn aliased_command_and_real_exit_status_are_reported() {
     let mut h = spawn("alias", PLAIN_RC, None);
     h.wait_at_prompt();

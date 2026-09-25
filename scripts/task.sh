@@ -70,6 +70,8 @@ case "$cmd" in
     python3 scripts/test-harnesses.py
     python3 scripts/fuzz-smoke.py
     python3 scripts/test-ci-validators.py
+    python3 scripts/test-m002-app-identity.py
+    python3 scripts/test-m002-controlled-mode.py
     cargo_pinned fmt --all -- --check
     cargo_pinned clippy --workspace --all-targets --all-features -- -D warnings
     cargo_pinned test --workspace --locked

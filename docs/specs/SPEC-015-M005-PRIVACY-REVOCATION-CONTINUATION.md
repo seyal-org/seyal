@@ -56,7 +56,7 @@ Only an authenticated, currently authorized authority may commit revocation for 
 - an authorized user action;
 - current policy/security authority;
 - the owning `MemoryStore` transition authority;
-- the Runtime/domain authority acting on an accepted typed request.
+- the Agent Backend/domain authority acting on an accepted typed request under ADR-016.
 
 A model, provider, tool, terminal stream, stale worker or adapter may report an observation or request, but cannot directly mutate revocation authority.
 
@@ -177,7 +177,9 @@ complete RevocationFence vector is current
 provider continuation checkpoint is eligible, if used
 ```
 
-The Runtime/privacy authority owns one serializable provider-handoff gate for revocable payload. Implementations may realize it with a lock, generation lease, one-shot fence token or equivalent, but semantics are mandatory:
+Under ADR-016, the **Agent Backend privacy authority** owns one serializable provider-handoff gate for revocable agent-context payload. Provider/API dispatch must not depend on a Terminal Runtime being present. A Terminal Runtime or other resource executor that participates in a handoff consumes the same backend-owned fence through an authenticated, generation-bound bridge; it does not create a second privacy gate. If that bridge cannot enforce the same serialization order, the handoff fails closed.
+
+Implementations may realize the backend serialization domain with a lock, generation lease, one-shot fence token or equivalent, but semantics are mandatory:
 
 1. under the same serialization domain used by revocation commit, validate the exact current `RevocationFence` and acquire a one-shot handoff fence bound to the exact AgentRun binding, bundle/payload identity, provider adapter identity/version, vector and finite expiry;
 2. the adapter must cross the irreversible local transport boundary only while that fence is current; it must not release bytes using a detached check-then-send path after the fence is released;
@@ -431,7 +433,7 @@ Physical cleanup state and logical eligibility remain distinct.
 
 A failure that is authoritatively proven to occur **before** the durable revocation commit boundary leaves the request in `RevocationRequested`; no authoritative revocation has committed. Retry is permitted only within a finite attempt/deadline budget, after which the request becomes `RevocationRequestDegraded`.
 
-A timeout/crash/persistence error for which the system cannot prove whether the durable commit boundary was crossed becomes `RevocationCommitUnknown`. Do not infer “not committed” from missing acknowledgement. Affected material fails closed while the Runtime/owning revocation authority reconciles the current durable generation/vector. If reconciliation proves the event committed, enter `RevocationCommitted`; if it proves it did not commit, return to `RevocationRequested` only when retry budget remains, otherwise `RevocationRequestDegraded`. No duplicate semantic revocation decision is created merely because an acknowledgement was lost.
+A timeout/crash/persistence error for which the system cannot prove whether the durable commit boundary was crossed becomes `RevocationCommitUnknown`. Do not infer “not committed” from missing acknowledgement. Affected material fails closed while the Agent Backend/owning revocation authority reconciles the current durable generation/vector. If reconciliation proves the event committed, enter `RevocationCommitted`; if it proves it did not commit, return to `RevocationRequested` only when retry budget remains, otherwise `RevocationRequestDegraded`. No duplicate semantic revocation decision is created merely because an acknowledgement was lost.
 
 ### After revocation commit
 
@@ -488,7 +490,7 @@ Concrete budgets are calibrated under #681 before implementation readiness.
 ### Bundle/provider handoff
 
 - bundle built at vector `V`, revocation advances to `V+` before handoff fence -> send prevented;
-- revocation races final provider handoff -> deterministic winner at the Runtime/privacy serialization gate;
+- revocation races final provider handoff -> deterministic winner at the Agent Backend privacy serialization gate;
 - adapter cannot release bytes after fence invalidation or outside the one-shot exact payload/AgentRun binding;
 - adapter without enforceable handoff fence -> fail closed for revocable payload;
 - effectful tool cannot bypass ADR-014 via provider handoff path.
@@ -547,7 +549,7 @@ SPEC-015 is acceptable only when:
 - revocation authority and scope mutation are authenticated and explicit;
 - complete applicable revocation-generation vectors are canonical and fail closed when incomplete;
 - logical denial is immediate after known commit, and unknown commit outcomes fail closed pending reconciliation;
-- provider handoff has a deterministic serializable race/linearization contract owned by Runtime/privacy authority;
+- provider handoff has a deterministic serializable race/linearization contract owned by the Agent Backend privacy authority;
 - effectful tools cannot bypass ADR-014;
 - continuations are exact-AgentRun-bound by default and safely re-attested after revocation only with authoritative provider evidence;
 - unsafe late continuation payload cannot survive through ordinary quarantine;
