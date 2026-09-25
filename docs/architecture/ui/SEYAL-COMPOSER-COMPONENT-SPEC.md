@@ -124,10 +124,12 @@ If no source is available, omit the chip. Prompt scraping is never a source.
 Composer cwd/Git chips never populate Block or Workspace authority, whichever
 class their source is in.
 
-**Prerequisite:** Runtime process-metadata cwd (trusted source 1) is not yet a
-specified Runtime capability. Until an implementation Issue specifies and
-lands it, no trusted source exists, and the Git chip is read-only or omitted
-(§5).
+**Prerequisite:** Runtime process-metadata cwd (trusted source 1) is not yet an
+accepted trust source under ADR-009. Enabling Git branch listing/switching from
+that source **requires an ADR-009 amendment** (reopen #686) that explicitly
+accepts Runtime process-metadata cwd as trusted for Composer chip purposes.
+Until that amendment is accepted, no trusted source exists, and the Git chip is
+read-only or omitted (§5).
 
 ## 5. Git context chip
 
@@ -315,9 +317,9 @@ Before branch mutation, Rust revalidates the actionable context against a
 the Pane, execution, location, or repository identity changed, cancel the
 pending action and refresh instead of switching a branch in the wrong
 repository. Revalidation and the ADR-009 eligibility check happen in the same
-Rust admission step, so no input can be admitted between them. While the state
-is `AtPrompt` with no admitted input, the shell cannot have changed directory
-since the observation.
+Rust admission step, so no input can be admitted between them. Rely on that
+fresh trusted observation taken in the admission step; do not assume the shell
+cwd is frozen merely because the integration state is `AtPrompt`.
 
 ## 14. Remote, detached and reconnect behavior
 
