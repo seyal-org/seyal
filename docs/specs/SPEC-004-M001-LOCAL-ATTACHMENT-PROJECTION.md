@@ -152,15 +152,21 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
 | 39 | R→C | `TerminateExecutionResult` — M003 disposition (§18) |
 
-M001 server capability bits are:
+M001 / live capability bits (master + open claims), for allocation hygiene:
 
 - bit 0: binary display snapshot/delta transport;
 - bit 1: observer role;
-- bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — accepted by Pass 7 / SPEC-006 / PR #703;
-- bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703;
+- bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — Pass 7 / SPEC-006;
+- bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — Pass 7 / SPEC-006;
+- bit 4: command blocks (`CAP_COMMAND_BLOCKS`);
+- bit 5: block metadata (`CAP_BLOCK_METADATA`);
+- bit 6: grapheme display (`CAP_GRAPHEME_DISPLAY`);
+- bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
+- bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
+- bit 9: claimed by open PR #1058 (#865, `CAP_VIEWPORT_LINE_IDS`);
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 Pass 8 `BlockState` (block metadata, not a control `MessageType`), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and capability **bit 9** are claimed by open PR #1058 (#865, `ViewportLineIds` / `CAP_VIEWPORT_LINE_IDS`). Capability **bit 8** is reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code). Capability bits 0–7 are allocated on `master` (0 binary display, 1 observer, 2 semantic terminal key, 3 correlated resize, 4 command blocks, 5 block metadata, 6 grapheme display, 7 extended terminal key). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is claimed by open PR #1058 (`ViewportLineIds`). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
