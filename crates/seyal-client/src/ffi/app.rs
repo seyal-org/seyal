@@ -1915,7 +1915,10 @@ mod tests {
         // CreateTab (23) and SplitFocused (25) reach the M001 default policy
         // that disallows composition growth until a distinct execution
         // route exists; they fail closed rather than no-op silently.
-        assert_eq!(unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) }, -4);
+        assert_eq!(
+            unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
+            -4
+        );
         assert_eq!(seyal_app_last_error(handle), 28, "TabCreationUnavailable");
         let mut split = identity_fence(25, &snap);
         split.reserved = 1; // SplitAxis::Down
