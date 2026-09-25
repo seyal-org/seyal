@@ -133,7 +133,7 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted; collector times input admission to first DisplayCache generation containing the sample's unique marker (responder row outside the flood scroll region) with per-sample DONE-not-observed proof; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted; collector times input admission to first DisplayCache generation containing the sample's unique marker (responder row outside the flood scroll region); post-cohort assert_responder_flood_live requires >=5 further flood generations with no client input so retained samples overlap a live stream; this host is uncontrolled-developer-host"
 
 [families.resource_scaling_rss]
 gate_status = "accepted"
