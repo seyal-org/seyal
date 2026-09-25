@@ -629,7 +629,11 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             preparationSucceeded = true
             lastPreparedFrame = frame
             // Damage-free: reuse live-tail buffers unless clip membership changed.
-            try refreshLiveTailClips(backingScale: scale, damage: DamageMask(), force: false)
+            do {
+                try refreshLiveTailClips(backingScale: scale, damage: DamageMask(), force: false)
+            } catch {
+                failClosedLiveTail(error: error)
+            }
             return .updated
         }
 
@@ -685,7 +689,11 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         }
         preparationSucceeded = true
         lastPreparedFrame = frame
-        try refreshLiveTailClips(backingScale: scale, damage: damage, force: false)
+        do {
+            try refreshLiveTailClips(backingScale: scale, damage: damage, force: false)
+        } catch {
+            failClosedLiveTail(error: error)
+        }
         return .updated
     }
 
@@ -784,11 +792,23 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             let cells = rowCount * frame.columns
             guard cells > 0 else { continue }
             let byteCount = cells * MemoryLayout<TerminalInstance>.stride
-            guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared)
-            else {
-                throw MetalTerminalRendererError.unavailableBuffer
+            // Reuse capacity-stable buffers; allocate only on growth / first use.
+            let buffer: MTLBuffer
+            if let existing = liveTailRegions[blockID],
+               existing.buffer.length >= byteCount
+            {
+                buffer = existing.buffer
+            } else {
+                guard let allocated = device.makeBuffer(
+                    length: byteCount,
+                    options: .storageModeShared
+                ) else {
+                    throw MetalTerminalRendererError.unavailableBuffer
+                }
+                allocated.label = "Seyal Flow Live-Tail Instances"
+                buffer = allocated
+                stats.instanceBufferAllocations &+= 1
             }
-            buffer.label = "Seyal Flow Live-Tail Instances"
             let pointer = buffer.contents().bindMemory(to: TerminalInstance.self, capacity: cells)
             var outputIndex = 0
             for rowOffset in 0..<rowCount {
@@ -881,20 +901,13 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         return false
     }
 
-    /// Fail closed: drop live-tail draws and surface the persistent failure.
+    /// Fail closed: drop live-tail draws so the next Flow present clears stale
+    /// clips. Do not latch `persistentDisplayFailure` — that would freeze the
+    /// last presented pixels on screen.
     private func failClosedLiveTail(error: Error) {
+        _ = error
         liveTailRegions.removeAll(keepingCapacity: false)
         needsPresent = true
-        let failure: MetalTerminalRendererError
-        if let metal = error as? MetalTerminalRendererError {
-            failure = metal
-        } else if let atlas = error as? GlyphAtlasError {
-            failure = .glyphAtlas(atlas)
-        } else {
-            failure = .invalidFrame
-        }
-        persistentDisplayFailure = failure
-        onPersistentDisplayFailure?(failure)
     }
 
     private func applyHistoryPrepare(

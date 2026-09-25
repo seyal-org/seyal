@@ -1999,17 +1999,26 @@ impl ViewportLineIds {
             line_ids.push(id);
             offset += 8;
         }
-        Ok(Self {
+        let message = Self {
             generation,
             line_ids,
-        })
+        };
+        message.validate()?;
+        Ok(message)
     }
 
     fn validate(&self) -> Result<(), FramingError> {
+        if self.generation == 0 {
+            return Err(FramingError::MalformedPayload);
+        }
         if self.line_ids.is_empty() || self.line_ids.len() > usize::from(MAX_DISPLAY_ROWS) {
             return Err(FramingError::MalformedPayload);
         }
         if self.line_ids.contains(&0) {
+            return Err(FramingError::MalformedPayload);
+        }
+        // LineIds must be strictly increasing (primary scrollback order).
+        if self.line_ids.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err(FramingError::MalformedPayload);
         }
         Ok(())
@@ -2066,6 +2075,34 @@ mod viewport_line_ids_tests {
         }
         .encode();
         encoded[10..12].copy_from_slice(&1u16.to_le_bytes());
+        assert_eq!(
+            ViewportLineIds::decode(&encoded),
+            Err(FramingError::MalformedPayload)
+        );
+    }
+
+    #[test]
+    fn viewport_line_ids_reject_generation_zero() {
+        let mut encoded = ViewportLineIds {
+            generation: 1,
+            line_ids: vec![1, 2],
+        }
+        .encode();
+        encoded[0..8].copy_from_slice(&0u64.to_le_bytes());
+        assert_eq!(
+            ViewportLineIds::decode(&encoded),
+            Err(FramingError::MalformedPayload)
+        );
+    }
+
+    #[test]
+    fn viewport_line_ids_reject_non_increasing() {
+        let mut encoded = ViewportLineIds {
+            generation: 1,
+            line_ids: vec![1, 2, 3],
+        }
+        .encode();
+        encoded[12 + 8..12 + 16].copy_from_slice(&1u64.to_le_bytes());
         assert_eq!(
             ViewportLineIds::decode(&encoded),
             Err(FramingError::MalformedPayload)

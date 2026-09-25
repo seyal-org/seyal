@@ -34,7 +34,8 @@ pub const CAP_COMMAND_BLOCKS: u32 = 1 << 4;
 pub const CAP_GRAPHEME_DISPLAY: u32 = 1 << 6;
 /// Peer accepts Runtime→client primary viewport LineId vectors (type 35) so
 /// Flow live-tail can map Block `start_line` onto prepared-frame rows.
-pub const CAP_VIEWPORT_LINE_IDS: u32 = 1 << 8;
+/// Bit 8 is reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION`.
+pub const CAP_VIEWPORT_LINE_IDS: u32 = 1 << 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]

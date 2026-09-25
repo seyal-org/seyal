@@ -17,7 +17,7 @@ fn attachment_id() -> AttachmentId {
 fn pass7_capabilities_and_message_ids_are_stable() {
     assert_eq!(CAP_SEMANTIC_TERMINAL_KEY, 1 << 2);
     assert_eq!(CAP_CORRELATED_RESIZE, 1 << 3);
-    assert_eq!(CAP_VIEWPORT_LINE_IDS, 1 << 8);
+    assert_eq!(CAP_VIEWPORT_LINE_IDS, 1 << 9);
     assert_eq!(MessageType::from_u16(17), Some(MessageType::TerminalKey));
     assert_eq!(MessageType::from_u16(18), Some(MessageType::ResizeRequest));
     assert_eq!(MessageType::from_u16(19), Some(MessageType::ResizeResult));

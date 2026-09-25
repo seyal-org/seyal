@@ -287,6 +287,10 @@ final class ProductChromeHostView: NSView {
         }
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
+            // Frame advances (and ViewportLineIds remaps) arrive here via
+            // ThinPaneHostView.onFrameChanged — keep running PRIMARY_CLIP
+            // membership and card height in sync with each prepared generation.
+            self?.refreshRunningBlockOutput()
         }
         NotificationCenter.default.addObserver(
             self,

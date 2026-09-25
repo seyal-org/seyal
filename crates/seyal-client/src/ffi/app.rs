@@ -879,7 +879,11 @@ pub extern "C" fn seyal_app_block_projection(handle: u64, index: u32) -> SeyalAp
             block.start_line,
             block.end_line,
             block.state == BlockPresentationState::Running,
-            state.root.viewport_line_ids(),
+            // Production Blocks arrive via the process-global active LocalDisplayClient
+            // (timeline poll). ApplicationRoot.client is only set by attach_client in
+            // tests — never in the macOS FFI path — so projection must read LineIds
+            // from the same active client that owns display/timeline state.
+            &viewport_line_ids_from_active_client(),
         ) {
             LiveTailProjection::PrimaryFrame(clip) => SeyalAppBlockProjection {
                 kind: SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP,
@@ -965,6 +969,24 @@ fn runtime_blocks_from_active_client() -> Vec<RuntimeBlockRecord> {
             .iter()
             .map(runtime_block_from_command)
             .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Primary viewport LineIds from the active display client (production path).
+fn viewport_line_ids_from_active_client() -> Vec<u64> {
+    with_active_client(|client| {
+        let ids = client.viewport_line_ids();
+        let rows = client.cache().rows;
+        // Fail closed when the vector is not paired with the committed display.
+        if client.viewport_line_ids_generation() == 0
+            || rows == 0
+            || client.viewport_line_ids_generation() != client.cache().generation
+            || ids.len() != usize::from(rows)
+        {
+            return Vec::new();
+        }
+        ids.to_vec()
     })
     .unwrap_or_default()
 }
@@ -2139,6 +2161,28 @@ mod tests {
         assert_eq!(running.kind, SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED);
         assert_eq!(running.end_line, 0, "must not invent a history end");
 
+        // Production path: LineIds come from the active LocalDisplayClient, not
+        // ApplicationRoot.client. Install a paired fixture and expect PRIMARY_CLIP.
+        let (stream, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut client = crate::local::tests::test_client_for_ffi(stream);
+        client.set_paired_viewport_line_ids_for_test(7, vec![10, 20, 21, 22]);
+        let bridge = allocate_handle();
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().insert(bridge, Box::new(client));
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(bridge));
+
+        let clipped = seyal_app_block_projection(handle, 1);
+        assert_eq!(clipped.kind, SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP);
+        assert_eq!(clipped.start_line, 20);
+        assert_eq!(clipped.reserved0, 1, "skip preceding line 10");
+        assert_eq!(clipped.reserved1, 3);
+        assert_eq!(clipped.end_line, 0);
+
+        crate::ffi::CLIENTS.with(|clients| {
+            clients.borrow_mut().remove(&bridge);
+        });
+        crate::ffi::ACTIVE_HANDLE.with(|active| active.set(0));
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 

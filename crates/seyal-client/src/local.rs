@@ -233,6 +233,20 @@ impl LocalDisplayClient {
         self.viewport_line_ids_generation = 0;
     }
 
+    /// Test-only: pair LineIds with a committed display generation for FFI
+    /// projection checks (production path uses Runtime ViewportLineIds frames).
+    #[cfg(test)]
+    pub(crate) fn set_paired_viewport_line_ids_for_test(
+        &mut self,
+        generation: u64,
+        line_ids: Vec<u64>,
+    ) {
+        self.cache.generation = generation;
+        self.cache.rows = line_ids.len() as u16;
+        self.viewport_line_ids_generation = generation;
+        self.viewport_line_ids = line_ids;
+    }
+
     /// Drops one copied history response after the native consumer has
     /// materialized its rows. The block/request pair is required so an older
     /// overlapping range can never consume a newer response.
@@ -482,7 +496,23 @@ impl LocalDisplayClient {
                     MessageType::ViewportLineIds => {
                         let message = ViewportLineIds::decode(&frame[HEADER_LEN..])
                             .map_err(|_| ClientError::Protocol)?;
-                        if message.generation >= self.viewport_line_ids_generation {
+                        // LineIds are sent after the matching display frame. Reject
+                        // unpaired / conflicting vectors; ignore strictly older gens.
+                        if message.generation < self.viewport_line_ids_generation {
+                            // stale
+                        } else if message.generation == self.viewport_line_ids_generation
+                            && message.line_ids != self.viewport_line_ids
+                        {
+                            return Err(ClientError::Protocol);
+                        } else if message.generation != self.cache.generation
+                            || message.line_ids.len() != usize::from(self.cache.rows)
+                        {
+                            // Unpaired with committed display: clear and continue.
+                            if !self.viewport_line_ids.is_empty() {
+                                self.clear_viewport_line_ids();
+                                metadata_changed = true;
+                            }
+                        } else {
                             if self.viewport_line_ids_generation != message.generation
                                 || self.viewport_line_ids != message.line_ids
                             {
@@ -533,6 +563,15 @@ impl LocalDisplayClient {
         }
 
         self.compact_buffer();
+        // Display may have advanced without a matching ViewportLineIds frame
+        // (capability off, collect skipped). Drop unpaired LineIds so projection
+        // cannot pair a new generation's cells with a previous vector.
+        if self.viewport_line_ids_generation != 0
+            && self.viewport_line_ids_generation != self.cache.generation
+        {
+            self.clear_viewport_line_ids();
+            metadata_changed = true;
+        }
         if !committed_any && !metadata_changed {
             return Ok(None);
         }
@@ -595,13 +634,17 @@ pub(crate) fn validate_composer_status(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use seyal_runtime::local_ipc::framing::{ErrorCode, ErrorMessage, MessageType};
     use seyal_runtime::pass8::CAP_BLOCK_METADATA;
     use std::io::{Read, Write};
 
     fn test_client(stream: UnixStream) -> LocalDisplayClient {
+        test_client_for_ffi(stream)
+    }
+
+    pub(crate) fn test_client_for_ffi(stream: UnixStream) -> LocalDisplayClient {
         LocalDisplayClient {
             stream,
             buffered: Vec::new(),

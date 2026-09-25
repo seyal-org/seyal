@@ -1114,6 +1114,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(renderer.liveTailRegionCount, 1)
         // Only the mapped slice (2 rows × 2 cols), not the full 3-row viewport.
         XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        let allocationsAfterClip = renderer.stats.instanceBufferAllocations
         let inspection = renderer.inspectPresentation()
         XCTAssertEqual(inspection.mode, .flow)
         XCTAssertFalse(inspection.drawsLiveGrid)
@@ -1126,7 +1127,8 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(paint.historyInstanceCount, 4)
         XCTAssertEqual(paint.instancesOutsideClips, 0)
 
-        // Damage-free update must reuse the live-tail clip (still 4 instances).
+        // Damage-free update must reuse the live-tail clip (still 4 instances)
+        // without allocating another live-tail buffer.
         damage = DamageMask()
         let reused = try cells.withUnsafeBufferPointer { buffer in
             try renderer.update(
@@ -1143,6 +1145,11 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         XCTAssertEqual(reused, .updated)
         XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        XCTAssertEqual(
+            renderer.stats.instanceBufferAllocations,
+            allocationsAfterClip,
+            "damage-free live-tail refresh must not allocate"
+        )
 
         // Clearing live-tail must not re-enable Pane-wide live grid.
         renderer.setLiveTailBlocks([:])
