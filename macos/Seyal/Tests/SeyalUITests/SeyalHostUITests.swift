@@ -447,9 +447,9 @@ final class SeyalHostUITests: XCTestCase {
             120,
             "Flow transcript must fill the Pane; a short or hidden transcript is a raw-terminal launch"
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
-            "Flow shows composer and Blocks only"
+            "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"
         )
     }
 
