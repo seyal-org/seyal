@@ -6,12 +6,11 @@
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 - **Coordinates with:** #994 (pane/tab → `TerminalExecution` provisioning contract), #922, #923, #928, #936, #929
 - **Numbering note:** Provisional allocation across concurrent M003 refinements
-  (checkable at this PR's head): this document is **ADR-018**; #1004 / PR #1038
-  proposes **ADR-019** (local Resource Addressing); ADR-017 is currently vacant
-  and reserved for #994 (execution provisioning / disposition) so that sibling
-  does not also claim ADR-019. Numbers remain provisional until merge order is
-  settled. Complementary scopes: #994 owns how a leaf obtains an execution; this
-  ADR owns how windows/tabs are identified, ordered and destroyed.
+  (checkable at this PR's head): #994 → **ADR-017** (PR #1056), #1000 → **ADR-018**
+  (this PR), #1004 → **ADR-019** (PR #1057), #1003 → **ADR-020** (PR #1050).
+  Numbers remain provisional until merge order is settled. Complementary scopes:
+  #994 owns how a leaf obtains an execution; this ADR owns how windows/tabs are
+  identified, ordered and destroyed.
 
 ## Context
 
