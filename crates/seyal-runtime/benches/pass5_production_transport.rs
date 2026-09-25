@@ -24,7 +24,7 @@ use seyal_exec::{CommandSpec, WindowSize};
 use seyal_runtime::{
     display::{
         benchmark_display_counters, decode_chunk, empty_cache, reset_benchmark_display_counters,
-        DecodedDisplayChunk, DisplayCache,
+        DecodedDisplayChunk, DisplayAttributes, DisplayCache, DisplayCell, DisplayColor,
     },
     local_ipc::{
         fd_transfer::{benchmark_syscall_counters, reset_benchmark_syscall_counters},
@@ -64,6 +64,12 @@ enum Workload {
     Token,
     Burst,
     Sustained,
+    /// The Sustained flood confined to a DECSTBM region below row 1, plus a
+    /// foreground responder that writes each admitted input line to row 1
+    /// (tty echo off). Used by the `high_output_responsiveness` contract gate
+    /// so an input marker stays visible under the flood instead of scrolling
+    /// out of the viewport before any generation containing it is committed.
+    SustainedResponder,
     TuiPartial,
     Tui,
     Alternate,
@@ -78,6 +84,7 @@ impl Workload {
             Self::Token => "token_stream",
             Self::Burst => "burst_scroll",
             Self::Sustained => "sustained_high_output_2s",
+            Self::SustainedResponder => "sustained_high_output_2s_responder",
             Self::TuiPartial => "tui_partial_redraw",
             Self::Tui => "tui_full_redraw",
             Self::Alternate => "alternate_screen",
@@ -91,6 +98,7 @@ impl Workload {
             "token_stream" => Self::Token,
             "burst_scroll" => Self::Burst,
             "sustained_high_output_2s" => Self::Sustained,
+            "sustained_high_output_2s_responder" => Self::SustainedResponder,
             "tui_partial_redraw" => Self::TuiPartial,
             "tui_full_redraw" => Self::Tui,
             "alternate_screen" => Self::Alternate,
@@ -302,7 +310,57 @@ fn sample_high_output_responsiveness(
         }
         .encode(),
     );
-    sample_damage_to_client_cache(session, marker)
+    sample_input_to_marker_generation(session, marker)
+}
+
+/// Times from this sample's input admission until the first committed cache
+/// generation that visibly contains `marker`. Under a sustained flood every
+/// other generation is flood output, so neither a bare generation bump nor a
+/// flood generation's source timestamp is input-correlated evidence.
+#[cfg(target_os = "macos")]
+fn sample_input_to_marker_generation(session: &mut ContractSession, marker: &[u8]) -> f64 {
+    let mut line = marker.to_vec();
+    line.push(b'\r');
+    let before = session.clients[0].cache.generation;
+    let started = Instant::now();
+    send_client_frame(
+        &mut session.runtime,
+        &mut session.clients[0],
+        MessageType::Input,
+        &InputRef {
+            attachment_id: session.controller_attachment,
+            bytes: &line,
+        }
+        .encode(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        session
+            .runtime
+            .poll_once(Some(Duration::from_millis(1)))
+            .expect("Runtime poll");
+        session.clients[0].drain_available().expect("client drain");
+        if marker_generation_observed(&session.clients[0].cache, before, marker) {
+            return started.elapsed().as_secs_f64() * 1_000.0;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "high_output_responsiveness admitted-input generation timed out"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn marker_generation_observed(cache: &DisplayCache, before: u64, marker: &[u8]) -> bool {
+    cache.generation > before && cache_contains_ascii(cache, marker)
+}
+
+/// True while the Sustained workload's child stream has not yet produced its
+/// terminal `DONE` marker. Checked per retained sample: total session elapsed
+/// time does not prove any individual sample overlapped live stream output.
+#[cfg(target_os = "macos")]
+fn sustained_stream_active(session: &ContractSession) -> bool {
+    !cache_contains_ascii(&session.clients[0].cache, b"DONE")
 }
 
 #[cfg(target_os = "macos")]
@@ -330,21 +388,31 @@ fn run_m002_contract_cohort() {
             finish_contract_session(session);
         }
         "high_output_responsiveness" => {
-            let mut session = start_contract_session(Workload::Sustained, 80, 24);
+            let mut session = start_contract_session(Workload::SustainedResponder, 80, 24);
             start_sustained_stream(&mut session);
             let stream_started = Instant::now();
-            let flood_before = session.clients[0].cache.generation;
             for index in 0..warmups {
                 let marker = format!("W{index:03}");
                 let _ = sample_high_output_responsiveness(&mut session, false, marker.as_bytes());
+                assert!(
+                    sustained_stream_active(&session),
+                    "high_output_responsiveness warmup {index} ran after the sustained stream \
+                     finished (DONE observed)"
+                );
             }
             for index in 0..samples {
                 let marker = format!("H{index:03}");
-                retained.push(sample_high_output_responsiveness(
+                let sample = sample_high_output_responsiveness(
                     &mut session,
                     index % 8 == 0,
                     marker.as_bytes(),
-                ));
+                );
+                assert!(
+                    sustained_stream_active(&session),
+                    "high_output_responsiveness sample {index} ran after the sustained stream \
+                     finished (DONE observed); a retained sample must overlap live stream output"
+                );
+                retained.push(sample);
             }
             while stream_started.elapsed() < Duration::from_secs(2) {
                 session
@@ -353,10 +421,6 @@ fn run_m002_contract_cohort() {
                     .expect("keep stream alive");
                 let _ = session.clients[0].drain_available();
             }
-            assert!(
-                session.clients[0].cache.generation > flood_before,
-                "high-output stream did not sustain independent output generations"
-            );
             finish_contract_session(session);
         }
         other => panic!("unsupported M002 contract gate {other:?}"),
@@ -371,6 +435,10 @@ fn run_m002_contract_cohort() {
 fn run_macos() {
     if m002_contract_gate().is_some() {
         run_m002_contract_cohort();
+        return;
+    }
+    if env::args().nth(1).as_deref() == Some("--selftest-correlation") {
+        selftest_correlation();
         return;
     }
     if env::args().nth(1).as_deref() == Some("--worker") {
@@ -467,6 +535,72 @@ fn run_worker(executable: &std::path::Path, case: Case) {
         status.success(),
         "Pass-5 production benchmark worker failed"
     );
+}
+
+/// Proves, without spawning a Runtime/PTY, that (1) an unrelated or stale
+/// cache generation cannot be mistaken for this sample's input-correlated
+/// generation, and (2) the sustained-stream predicate distinguishes a cache
+/// that has not yet observed the workload's `DONE` marker from one that has.
+#[cfg(target_os = "macos")]
+fn selftest_correlation() {
+    let unrelated = cache_with_row_text(2, "unrelated-content", 80);
+    assert!(
+        !marker_generation_observed(&unrelated, 1, b"H001"),
+        "FAIL: an unrelated generation bump was accepted as correlated with the marker"
+    );
+
+    let stale = cache_with_row_text(1, "H001", 80);
+    assert!(
+        !marker_generation_observed(&stale, 1, b"H001"),
+        "FAIL: a stale generation carrying the marker was accepted as a new response"
+    );
+
+    let correlated = cache_with_row_text(2, "H001", 80);
+    assert!(
+        marker_generation_observed(&correlated, 1, b"H001"),
+        "FAIL: a new generation carrying the marker was rejected"
+    );
+
+    let still_streaming = cache_with_row_text(3, "0004096", 80);
+    assert!(
+        !cache_contains_ascii(&still_streaming, b"DONE"),
+        "FAIL: a cache without DONE was treated as stream-finished"
+    );
+
+    let finished = cache_with_row_text(4, "DONE", 80);
+    assert!(
+        cache_contains_ascii(&finished, b"DONE"),
+        "FAIL: a cache carrying DONE was treated as stream-active"
+    );
+
+    println!("pass5_production_transport selftest_correlation PASSED performance_claim=false");
+}
+
+#[cfg(target_os = "macos")]
+fn cache_with_row_text(generation: u64, text: &str, columns: u16) -> DisplayCache {
+    let mut cells = vec![DisplayCell::blank(); columns as usize];
+    for (index, byte) in text.bytes().enumerate() {
+        if index >= cells.len() {
+            break;
+        }
+        cells[index] = DisplayCell::lead_scalar(
+            byte as char,
+            1,
+            DisplayColor::Default,
+            DisplayColor::Default,
+            DisplayAttributes::default(),
+        );
+    }
+    DisplayCache {
+        generation,
+        rows: 1,
+        columns,
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_visible: true,
+        alternate_screen: false,
+        cells,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -783,6 +917,10 @@ fn workload_command(workload: Workload) -> CommandSpec {
             "-c",
             "read _; i=0; while [ $i -lt 220 ]; do printf '%04096d\r\n' 0; sleep 0.01; i=$((i+1)); done; printf 'DONE\r\n'; sleep 1",
         ]),
+        Workload::SustainedResponder => CommandSpec::new("/bin/sh").args([
+            "-c",
+            "stty -echo; read _; ( i=0; while [ $i -lt 220 ]; do printf '\x1b[2r\x1b[999;1H%04096d\r\n' 0; sleep 0.01; i=$((i+1)); done; printf 'DONE\r\n' ) & while IFS= read -r line; do printf '\x1b7\x1b[1;1H\x1b[2K%s\x1b8' \"$line\"; done",
+        ]),
         Workload::TuiPartial => CommandSpec::new("/bin/sh").args([
             "-c",
             "read _; printf '\x1b[2J'; i=0; while [ $i -lt 100 ]; do printf '\x1b[2;1HPART%04d' \"$i\"; printf '\x1b[10;1Hvalue%04d' \"$i\"; sleep 0.01; i=$((i+1)); done; printf '\x1b[1;1HDONE'; sleep 1",
@@ -918,7 +1056,7 @@ fn measure_streaming(
     // percentile calculations unchanged.
     let deadline = Instant::now()
         + match workload {
-            Workload::Sustained => Duration::from_secs(20),
+            Workload::Sustained | Workload::SustainedResponder => Duration::from_secs(20),
             Workload::Token | Workload::TuiPartial | Workload::Tui | Workload::Alternate => {
                 Duration::from_secs(12)
             }

@@ -133,7 +133,7 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted; collector must correlate unique input/resize under flood; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted; collector times input admission to first DisplayCache generation containing the sample's unique marker (responder row outside the flood scroll region) with per-sample DONE-not-observed proof; this host is uncontrolled-developer-host"
 
 [families.resource_scaling_rss]
 gate_status = "accepted"
@@ -151,7 +151,7 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted for population=1; 50/100 may be PLATFORM_LIMITED; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted for population=1; benchmark-process RSS in execution-only-headless-not-full-app topology, child RSS reported separately; 50/100 may be PLATFORM_LIMITED; this host is uncontrolled-developer-host"
 
 [families.resource_scaling_fds]
 gate_status = "accepted"
@@ -169,7 +169,7 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted for population=1; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted for population=1; benchmark-process value in execution-only-headless-not-full-app topology, child fds/threads reported separately; this host is uncontrolled-developer-host"
 
 [families.resource_scaling_threads]
 gate_status = "accepted"
@@ -187,7 +187,7 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted for population=1; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted for population=1; benchmark-process value in execution-only-headless-not-full-app topology, child fds/threads reported separately; this host is uncontrolled-developer-host"
 
 [families.startup]
 gate_status = "accepted"
@@ -205,7 +205,7 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted; measures spawn to first usable ready-prompt TerminalExecution; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted; collector publishes submetric startup_child_ready_ms (spawn to benchmark-authored printf ready bytes), not a prompt or first-usable state; this host is uncontrolled-developer-host"
 
 [families.idle_cpu]
 gate_status = "accepted"
@@ -241,4 +241,4 @@ harness_status = "ready"
 evidence = "none"
 environment = "PLATFORM_LIMITED"
 numeric_status = "unknown"
-platform_limit_reason = "ceiling accepted; terminate+reap+resource-return collector; this host is uncontrolled-developer-host"
+platform_limit_reason = "ceiling accepted; timed terminate through confirmed reap, with PID-gone and FD/RSS return-to-baseline asserted outside the timer; this host is uncontrolled-developer-host"

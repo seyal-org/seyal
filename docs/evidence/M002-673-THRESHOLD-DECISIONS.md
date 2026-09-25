@@ -16,14 +16,14 @@ HistoryStore ceilings stay frozen: active `2/4/8 ms`, sealed `1/2/4 ms`.
 | `input_visible_proxy` | 8 | 16 | 33 | ms | less_equal | Named DisplayCache-generation proxy under one 60 Hz frame, two-frame p99. Not key-to-photon / scanout. |
 | `pty_to_terminal_state` | 1 | 2 | 4 | ms | less_equal | Same order as SPEC-010 sealed-segment local mutation for a 64-byte PTY echo that feeds canonical `TerminalState`. |
 | `damage_to_client_cache` | 4 | 8 | 16 | ms | less_equal | PERFORMANCE.md Pass 5.1 16-viewer update-to-cache p95 `3.2–6.3 ms` / p99 `3.7–6.8 ms`, plus technical-preview headroom. |
-| `high_output_responsiveness` | 8 | 16 | 33 | ms | less_equal | Input-correlated response while output is sustained ≥2 s; one-to-two frame budget. |
-| `resource_scaling_rss` | 67108864 | 100663296 | 134217728 | bytes | less_equal | 64/96/128 MiB process RSS at population=1. Must stay below #818 history/cache caps plus process overhead. |
-| `resource_scaling_fds` | 64 | 96 | 128 | count | less_equal | Population=1 harness process including the live PTY. |
-| `resource_scaling_threads` | 16 | 24 | 32 | count | less_equal | Population=1 Runtime + PTY + collector threads. |
-| `startup` | 50 | 100 | 200 | ms | less_equal | Spawn to first usable ready-prompt `TerminalExecution`. Child-ready bytes remain a published submetric. |
+| `high_output_responsiveness` | 8 | 16 | 33 | ms | less_equal | Input admission to the first committed client `DisplayCache` generation containing that sample's unique marker, while a ≥2 s flood is live (per-sample `DONE`-not-observed proof). One-to-two frame budget. |
+| `resource_scaling_rss` | 67108864 | 100663296 | 134217728 | bytes | less_equal | 64/96/128 MiB benchmark-process RSS at population=1 in the `execution-only-headless-not-full-app` topology (`TerminalExecution` + PTY + `TerminalState` in-process; not Seyal.app or Runtime). Child `/bin/sh` RSS/fds/threads are reported separately, never summed. |
+| `resource_scaling_fds` | 64 | 96 | 128 | count | less_equal | Population=1 benchmark process including the live PTY, same execution-only topology; child fds reported separately. |
+| `resource_scaling_threads` | 16 | 24 | 32 | count | less_equal | Population=1 benchmark process in the execution-only topology (no Runtime or app threads); child threads reported separately. |
+| `startup` | 50 | 100 | 200 | ms | less_equal | Submetric `startup_child_ready_ms`: `TerminalExecution::spawn` until the benchmark-authored `printf ready` bytes are read. No shell prompt or first-usable-state concept is measured. |
 | `idle_cpu` | 1 | 3 | 5 | percent | less_equal | After a specified idle interval of at least 1000 ms. |
 | `renderer_prepare_submission` | 8 | 16 | 33 | ms | less_equal | Prepare through Metal submit, not scanout. |
-| `teardown_recovery` | 50 | 150 | 500 | ms | less_equal | Terminate + reap + resource-return observation. |
+| `teardown_recovery` | 50 | 150 | 500 | ms | less_equal | Timed from terminate through confirmed reap. The child PID being gone and the benchmark-process FD/RSS returning to baseline are asserted outside the timed window. |
 
 Relative allowance remains 10% versus a distinct accepted baseline SHA. Same-SHA
 A/A is diagnostic repeatability only. Zero-baseline relative comparison is
