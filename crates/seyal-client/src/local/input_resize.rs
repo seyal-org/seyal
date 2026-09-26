@@ -900,6 +900,7 @@ impl LocalDisplayClient {
 
     pub(crate) fn request_resync(&mut self) -> Result<(), ClientError> {
         self.resync_needed = true;
+        self.clear_viewport_line_ids();
         self.try_queue_resync()
     }
 

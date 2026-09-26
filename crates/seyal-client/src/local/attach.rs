@@ -94,9 +94,10 @@ fn classify_resync_scan_frame(frame: &[u8]) -> Result<ResyncScanFrame, ClientErr
         MessageType::DisplayDelta | MessageType::DisplayDeltaV2 => {
             Ok(ResyncScanFrame::DisplayRemainder)
         }
-        MessageType::BlockTimeline | MessageType::Lifecycle | MessageType::CopiedText => {
-            Ok(ResyncScanFrame::DeferredControl)
-        }
+        MessageType::BlockTimeline
+        | MessageType::Lifecycle
+        | MessageType::CopiedText
+        | MessageType::ViewportLineIds => Ok(ResyncScanFrame::DeferredControl),
         _ => Err(ClientError::Protocol),
     }
 }
@@ -535,6 +536,8 @@ impl LocalDisplayClient {
             last_sent_v2_action_id: 0,
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
+            viewport_line_ids: Vec::new(),
+            viewport_line_ids_generation: 0,
         })
     }
 }
@@ -944,6 +947,7 @@ mod tests {
         let execution_id = ExecutionId::from_bytes([11; 16]);
         let attachment_id = AttachmentId::from_bytes([12; 16]);
         let (release_server, hold_server) = std::sync::mpsc::sync_channel(0);
+        let (timeline_written, wait_timeline) = std::sync::mpsc::sync_channel(0);
         let server_thread = std::thread::spawn(move || {
             let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
             assert_eq!(kind, MessageType::Attach);
@@ -975,6 +979,9 @@ mod tests {
                 server
                     .write_all(&block_timeline(7))
                     .expect("queued block timeline");
+                timeline_written
+                    .send(())
+                    .expect("signal timeline write completed");
             }
             hold_server.recv().expect("client release");
         });
@@ -992,9 +999,29 @@ mod tests {
         .expect("valid control frame must not poison bounded resync");
         assert_eq!(attached.cache().generation, 5);
         assert_eq!(attached.cache().cells[0].scalar, 'V');
-        attached
-            .poll_prepare()
-            .expect("retained timeline should reach normal consumer");
+        // When the timeline is written after the snapshot, wait for the server
+        // write barrier before draining so the poll loop is not racing the
+        // producer (avoids a fixed-deadline flake under CI load).
+        if !timeline_before_snapshot {
+            wait_timeline
+                .recv()
+                .expect("server must signal timeline write completion");
+        }
+        let deadline = std::time::Instant::now() + Duration::from_millis(250);
+        loop {
+            attached
+                .poll_prepare()
+                .expect("retained timeline should reach normal consumer");
+            if attached.block_timeline().revision == 7 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "block timeline revision stayed {}; expected 7",
+                attached.block_timeline().revision
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert_eq!(attached.block_timeline().revision, 7);
         release_server.send(()).expect("release server");
         server_thread.join().expect("server thread");

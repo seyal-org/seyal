@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 /// Headed HistoryStore / reflow evidence for #842. Metal does not expose PTY
@@ -39,6 +40,74 @@ final class SeyalHostHistoryUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed on wide resize")
         assertFlowBlocksOrFail(in: app)
         attachScreenshot(app, name: "842-history-wide")
+    }
+
+    /// #865: a long running normal-screen command must stay on one Flow Block
+    /// surface under the Pane scroll owner (no Pane-wide live grid chrome).
+    /// Uses a paced producer so the capture lands while the Block is still
+    /// running (PRIMARY_CLIP), then waits for completion handoff.
+    func testRunningSeqLiveTailStaysOnFlowBlocks() throws {
+        // The headed host spawns the account pw_shell. Only trusted zsh
+        // integration publishes a Block (OSC 133). Bash CI accounts never
+        // get one; skipping here matches testComposerReadsBusyWhileCommandRunsAndAvailableAtNextPrompt.
+        // Clip geometry on that path is SeyalHostComponentTests.
+        guard loginShellIsZsh() else {
+            throw XCTSkip(
+                "Running Block live-tail requires a zsh pw_shell. Hosted runners use bash, so no OSC 133 Block is published."
+            )
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+
+        // Paced seq stays running long enough for the body-height check.
+        submitComposerCommand(
+            app,
+            "for i in $(seq 1 1000); do printf '%s\\n' \"$i\"; sleep 0.01; done"
+        )
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while seq live-tail ran")
+        assertFlowBlocksOrFail(in: app)
+        let runningBody = app.descendants(matching: .any)["seyal-block-0-body"]
+        XCTAssertTrue(
+            runningBody.waitForExistence(timeout: 12),
+            "zsh integration must publish a running Block body"
+        )
+        XCTAssertGreaterThan(
+            runningBody.frame.height,
+            8,
+            "running live-tail body must be taller than a one-line stub while seq runs"
+        )
+        attachScreenshot(app, name: "865-live-tail-running-seq")
+
+        // Completion handoff must remain on Flow Blocks, not a raw Metal viewport.
+        // seq 1 1000 @ 10ms ≈ 10s; allow headroom under CI load.
+        waitBriefly(14.0)
+        XCTAssertEqual(app.state, .runningForeground)
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "865-live-tail-after-seq")
+    }
+
+    /// #865: a second running command must keep Flow Blocks (preceding output
+    /// stays owned by earlier Block chrome, not a Pane-wide live grid).
+    func testSequentialCommandsKeepFlowLiveTailOnBlocks() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+
+        submitComposerCommand(app, "printf 'seyal-865-first\\n'")
+        waitBriefly(0.8)
+        assertFlowBlocksOrFail(in: app)
+
+        submitComposerCommand(
+            app,
+            "for i in $(seq 1 80); do printf 'second-%s\\n' \"$i\"; sleep 0.02; done"
+        )
+        waitBriefly(0.5)
+        XCTAssertEqual(app.state, .runningForeground)
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "865-live-tail-second-command")
+
+        waitBriefly(3.0)
+        assertFlowBlocksOrFail(in: app)
+        attachScreenshot(app, name: "865-live-tail-after-second")
     }
 
     func testAlternateScreenExitRestoresFlowHistorySurface() throws {
@@ -126,5 +195,13 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
     private func waitBriefly(_ seconds: TimeInterval) {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// Same predicate as shell-integration support: account `pw_shell`, not `SHELL`.
+    private func loginShellIsZsh() -> Bool {
+        guard let account = getpwuid(geteuid()), let shell = account.pointee.pw_shell else {
+            return false
+        }
+        return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
 }

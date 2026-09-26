@@ -12,6 +12,7 @@ pub mod app;
 pub mod chrome;
 pub mod composer;
 pub mod input_policy;
+pub mod live_tail;
 pub mod palette;
 pub mod presentation;
 pub mod recovery;
@@ -53,11 +54,12 @@ mod ffi;
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use ffi::{
-    seyal_app_accessibility, seyal_app_apply, seyal_app_block_row, seyal_app_block_span,
-    seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette,
-    seyal_app_palette_row, seyal_app_recovery_param, seyal_app_shell, seyal_app_shell_row,
-    seyal_app_snapshot, seyal_app_theme, seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle,
-    seyal_bridge_ensure_prepared, seyal_bridge_frame, seyal_bridge_poll, seyal_bridge_select,
-    seyal_bridge_set_runtime_dir, test_register_pending_client,
+    seyal_app_accessibility, seyal_app_apply, seyal_app_block_projection, seyal_app_block_row,
+    seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer,
+    seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_last_error,
+    seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row, seyal_app_recovery_param,
+    seyal_app_shell, seyal_app_shell_row, seyal_app_snapshot, seyal_app_theme,
+    seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle, seyal_bridge_ensure_prepared,
+    seyal_bridge_frame, seyal_bridge_poll, seyal_bridge_select, seyal_bridge_set_runtime_dir,
+    test_register_pending_client,
 };

@@ -95,7 +95,8 @@ impl Runtime {
             & !(CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
-                | framing::CAP_EXTENDED_TERMINAL_KEY)
+                | framing::CAP_EXTENDED_TERMINAL_KEY
+                | framing::CAP_VIEWPORT_LINE_IDS)
             != 0
         {
             self.send_error(
@@ -114,7 +115,8 @@ impl Runtime {
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
-                | framing::CAP_GRAPHEME_DISPLAY,
+                | framing::CAP_GRAPHEME_DISPLAY
+                | framing::CAP_VIEWPORT_LINE_IDS,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };
@@ -257,6 +259,12 @@ impl Runtime {
             self.close_local_connection(token);
             return;
         }
+        self.maybe_send_viewport_line_ids(
+            token,
+            attach.execution_id,
+            snapshot.source_damage_generation,
+            snapshot.rows,
+        );
         if !self.sync_local_writable(token) {
             return;
         }

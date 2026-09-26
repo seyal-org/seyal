@@ -14,6 +14,7 @@ use seyal_runtime::{
             encode_frame, ClientHello, ErrorCode, ErrorMessage, MessageType, ServerHello,
             CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS, CAP_CORRELATED_RESIZE,
             CAP_EXTENDED_TERMINAL_KEY, CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY,
+            CAP_VIEWPORT_LINE_IDS,
         },
     },
     pass8::CAP_BLOCK_METADATA,
@@ -221,9 +222,15 @@ pub(crate) fn classify_connect_error(error: std::io::Error) -> ClientError {
 pub(crate) fn requested_capabilities(
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
+    request_viewport_line_ids: bool,
 ) -> u32 {
     CAP_COMMAND_BLOCKS
         | CAP_GRAPHEME_DISPLAY
+        | if request_viewport_line_ids {
+            CAP_VIEWPORT_LINE_IDS
+        } else {
+            0
+        }
         | if request_extended_terminal_key {
             CAP_EXTENDED_TERMINAL_KEY
         } else {
@@ -245,10 +252,14 @@ pub(crate) fn hello_until(
     interactive: bool,
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
+    request_viewport_line_ids: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
-    let client_capabilities =
-        requested_capabilities(request_block_metadata, request_extended_terminal_key);
+    let client_capabilities = requested_capabilities(
+        request_block_metadata,
+        request_extended_terminal_key,
+        request_viewport_line_ids,
+    );
     send_control_until(
         stream,
         MessageType::ClientHello,
@@ -279,22 +290,53 @@ pub(crate) fn hello_until(
     Ok(hello)
 }
 
-/// SPEC-006 §21.5: a new client may use M001 input against an old Runtime.
-/// Pre-V2 `handle_hello` rejects unknown ClientHello bits as `MalformedPayload`
-/// instead of ignoring them. Retry once on a fresh stream without
-/// `CAP_EXTENDED_TERMINAL_KEY`. One reconnect only.
+/// New clients advertise newer optional bits; older Runtimes reject unknown
+/// ClientHello bits as `MalformedPayload` instead of ignoring them.
+///
+/// Ordered reconnect fallback (bounded; each step at most once):
+/// 1. Full advertise (viewport LineIds + extended key).
+/// 2. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime allowlist).
+/// 3. Also drop `CAP_EXTENDED_TERMINAL_KEY` (SPEC-006 §21.5 / pre-V2).
 pub(crate) fn hello_until_with_legacy_key_fallback(
     stream: &mut UnixStream,
-    reconnect: impl FnOnce() -> Result<UnixStream, ClientError>,
+    mut reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
     interactive: bool,
     request_block_metadata: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
-    match hello_until(stream, interactive, request_block_metadata, true, deadline) {
+    match hello_until(
+        stream,
+        interactive,
+        request_block_metadata,
+        true,
+        true,
+        deadline,
+    ) {
         Ok(hello) => Ok(hello),
         Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
             *stream = reconnect()?;
-            hello_until(stream, interactive, request_block_metadata, false, deadline)
+            match hello_until(
+                stream,
+                interactive,
+                request_block_metadata,
+                true,
+                false,
+                deadline,
+            ) {
+                Ok(hello) => Ok(hello),
+                Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
+                    *stream = reconnect()?;
+                    hello_until(
+                        stream,
+                        interactive,
+                        request_block_metadata,
+                        false,
+                        false,
+                        deadline,
+                    )
+                }
+                Err(error) => Err(error),
+            }
         }
         Err(error) => Err(error),
     }
@@ -369,6 +411,7 @@ mod connect_error_tests {
             true,
             true,
             true,
+            true,
             Instant::now() + Duration::from_secs(1),
         )
         .expect("old server hello remains usable");
@@ -385,7 +428,16 @@ mod connect_error_tests {
             .read_exact(&mut payload)
             .expect("client hello payload");
         let hello = ClientHello::decode(&payload).expect("client hello");
-        if hello.client_capabilities & CAP_EXTENDED_TERMINAL_KEY != 0 {
+        // Pre-V2 allowlist: reject any bit outside the M001 known set, including
+        // both CAP_EXTENDED_TERMINAL_KEY and CAP_VIEWPORT_LINE_IDS.
+        let unknown = hello.client_capabilities
+            & !(CAP_COMMAND_BLOCKS
+                | seyal_runtime::pass8::CAP_BLOCK_METADATA
+                | CAP_GRAPHEME_DISPLAY
+                | CAP_BINARY_DISPLAY
+                | CAP_SEMANTIC_TERMINAL_KEY
+                | CAP_CORRELATED_RESIZE);
+        if unknown != 0 {
             let error = ErrorMessage {
                 error_code: ErrorCode::MalformedPayload as u16,
                 offending_message_type: MessageType::ClientHello as u16,
@@ -398,8 +450,10 @@ mod connect_error_tests {
         }
         assert!(
             accept_without_v2,
-            "legacy fallback must omit CAP_EXTENDED_TERMINAL_KEY"
+            "legacy fallback must omit CAP_EXTENDED_TERMINAL_KEY and CAP_VIEWPORT_LINE_IDS"
         );
+        assert_eq!(hello.client_capabilities & CAP_EXTENDED_TERMINAL_KEY, 0);
+        assert_eq!(hello.client_capabilities & CAP_VIEWPORT_LINE_IDS, 0);
         let hello = ServerHello {
             runtime_id: 1,
             server_capabilities: CAP_BINARY_DISPLAY
@@ -413,15 +467,72 @@ mod connect_error_tests {
             .expect("pre-v2 server hello");
     }
 
+    /// Pre-#865 Runtime: knows extended key, rejects CAP_VIEWPORT_LINE_IDS.
+    fn pre_viewport_line_ids_runtime_hello(mut server: UnixStream, accept_without_line_ids: bool) {
+        let mut header = [0_u8; HEADER_LEN];
+        server.read_exact(&mut header).expect("client hello header");
+        let payload_len = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
+        let mut payload = vec![0_u8; payload_len];
+        server
+            .read_exact(&mut payload)
+            .expect("client hello payload");
+        let hello = ClientHello::decode(&payload).expect("client hello");
+        let unknown = hello.client_capabilities
+            & !(CAP_COMMAND_BLOCKS
+                | seyal_runtime::pass8::CAP_BLOCK_METADATA
+                | CAP_GRAPHEME_DISPLAY
+                | CAP_EXTENDED_TERMINAL_KEY);
+        if unknown != 0 {
+            let error = ErrorMessage {
+                error_code: ErrorCode::MalformedPayload as u16,
+                offending_message_type: MessageType::ClientHello as u16,
+                detail_code: 0,
+            };
+            server
+                .write_all(&encode_frame(MessageType::Error, &error.encode()))
+                .expect("reject CAP_VIEWPORT_LINE_IDS");
+            return;
+        }
+        assert!(
+            accept_without_line_ids,
+            "viewport LineIds fallback must omit CAP_VIEWPORT_LINE_IDS"
+        );
+        assert_eq!(hello.client_capabilities & CAP_VIEWPORT_LINE_IDS, 0);
+        let hello = ServerHello {
+            runtime_id: 1,
+            server_capabilities: CAP_BINARY_DISPLAY
+                | CAP_SEMANTIC_TERMINAL_KEY
+                | CAP_CORRELATED_RESIZE
+                | CAP_EXTENDED_TERMINAL_KEY
+                | CAP_COMMAND_BLOCKS
+                | CAP_GRAPHEME_DISPLAY,
+            max_frame_payload: MAX_FRAME_PAYLOAD,
+            max_input_payload: 65_536,
+        };
+        server
+            .write_all(&encode_frame(MessageType::ServerHello, &hello.encode()))
+            .expect("pre-viewport-line-ids server hello");
+    }
+
     #[test]
     fn requested_capabilities_can_omit_extended_key_for_old_runtimes() {
-        let with_v2 = requested_capabilities(true, true);
-        let without_v2 = requested_capabilities(true, false);
+        let with_v2 = requested_capabilities(true, true, true);
+        let without_v2 = requested_capabilities(true, false, true);
         assert_ne!(with_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_eq!(without_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_ne!(without_v2 & CAP_COMMAND_BLOCKS, 0);
         assert_ne!(without_v2 & CAP_GRAPHEME_DISPLAY, 0);
+        assert_ne!(without_v2 & CAP_VIEWPORT_LINE_IDS, 0);
         assert_ne!(without_v2 & seyal_runtime::pass8::CAP_BLOCK_METADATA, 0);
+    }
+
+    #[test]
+    fn requested_capabilities_can_omit_viewport_line_ids() {
+        let with = requested_capabilities(true, true, true);
+        let without = requested_capabilities(true, true, false);
+        assert_ne!(with & CAP_VIEWPORT_LINE_IDS, 0);
+        assert_eq!(without & CAP_VIEWPORT_LINE_IDS, 0);
+        assert_ne!(without & CAP_EXTENDED_TERMINAL_KEY, 0);
     }
 
     #[test]
@@ -430,6 +541,7 @@ mod connect_error_tests {
         let rejector = std::thread::spawn(move || pre_v2_runtime_hello(rejected_server, false));
         let error = hello_until(
             &mut rejected_client,
+            true,
             true,
             true,
             true,
@@ -446,6 +558,7 @@ mod connect_error_tests {
             true,
             true,
             false,
+            false,
             Instant::now() + Duration::from_secs(1),
         )
         .expect("M001 hello is accepted by a pre-v2 Runtime");
@@ -454,20 +567,47 @@ mod connect_error_tests {
     }
 
     #[test]
-    fn hello_fallback_reconnects_once_when_old_runtime_rejects_v2_capability() {
+    fn hello_fallback_reconnects_when_old_runtime_rejects_newer_capabilities() {
+        // Pre-V2 path needs two reconnects: drop VIEWPORT_LINE_IDS, then drop EXTENDED_KEY.
         let (mut client, first_server) = UnixStream::pair().expect("first pair");
-        let (fallback_client, second_server) = UnixStream::pair().expect("second pair");
+        let (second_client, second_server) = UnixStream::pair().expect("second pair");
+        let (third_client, third_server) = UnixStream::pair().expect("third pair");
         let rejector = std::thread::spawn(move || pre_v2_runtime_hello(first_server, false));
-        let acceptor = std::thread::spawn(move || pre_v2_runtime_hello(second_server, true));
+        let rejector2 = std::thread::spawn(move || pre_v2_runtime_hello(second_server, false));
+        let acceptor = std::thread::spawn(move || pre_v2_runtime_hello(third_server, true));
+        let mut fallbacks = vec![second_client, third_client].into_iter();
         let hello = hello_until_with_legacy_key_fallback(
             &mut client,
-            || Ok(fallback_client),
+            || fallbacks.next().ok_or(ClientError::Io),
             true,
             true,
             Instant::now() + Duration::from_secs(1),
         )
         .expect("SPEC-006 §21.5 new client may use M001 on an old server");
         assert!(!extended_terminal_key_supported(hello.server_capabilities));
+        rejector.join().expect("rejector thread");
+        rejector2.join().expect("rejector2 thread");
+        acceptor.join().expect("acceptor thread");
+    }
+
+    #[test]
+    fn hello_fallback_drops_viewport_line_ids_against_pre_865_runtime() {
+        let (mut client, first_server) = UnixStream::pair().expect("first pair");
+        let (fallback_client, second_server) = UnixStream::pair().expect("second pair");
+        let rejector =
+            std::thread::spawn(move || pre_viewport_line_ids_runtime_hello(first_server, false));
+        let acceptor =
+            std::thread::spawn(move || pre_viewport_line_ids_runtime_hello(second_server, true));
+        let mut fallbacks = Some(fallback_client);
+        let hello = hello_until_with_legacy_key_fallback(
+            &mut client,
+            || fallbacks.take().ok_or(ClientError::Io),
+            true,
+            true,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .expect("pre-#865 Runtime accepts hello without CAP_VIEWPORT_LINE_IDS");
+        assert!(extended_terminal_key_supported(hello.server_capabilities));
         rejector.join().expect("rejector thread");
         acceptor.join().expect("acceptor thread");
     }

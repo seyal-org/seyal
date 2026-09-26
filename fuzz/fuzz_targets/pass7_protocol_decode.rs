@@ -56,6 +56,9 @@ fn decode_pass7_payload(kind: MessageType, payload: &[u8]) {
         MessageType::TerminalMouse => {
             let _ = seyal_protocol::framing::TerminalMouse::decode(payload);
         }
+        MessageType::ViewportLineIds => {
+            let _ = seyal_protocol::framing::ViewportLineIds::decode(payload);
+        }
         _ => {}
     }
 }
@@ -107,4 +110,5 @@ fuzz_target!(|data: &[u8]| {
     decode_pass7_payload(MessageType::CopiedText, data);
     decode_pass7_payload(MessageType::HostSearch, data);
     decode_pass7_payload(MessageType::TerminalMouse, data);
+    decode_pass7_payload(MessageType::ViewportLineIds, data);
 });
