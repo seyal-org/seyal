@@ -93,12 +93,6 @@ issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
 
 [[grandfathered]]
-path = "crates/seyal-terminal/src/terminal.rs"
-ceiling_loc = 2716
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
 ceiling_loc = 1201
 issue = 1021
@@ -162,3 +156,11 @@ path = "crates/seyal-terminal/src/history/tests.rs"
 acknowledged_loc = 827
 issue = 1020
 reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains HistoryStore across store/query/reflow/wrap/eviction. Ceiling matches rustfmt-normalized LOC after the split."
+
+# #1020 TerminalState façade split: VT performer stays one cohesive module above
+# hard_loc; further CSI-family extraction is tracked as follow-on (finding A4).
+[[exception]]
+path = "crates/seyal-terminal/src/terminal/vt.rs"
+ceiling_loc = 1076
+issue = 1020
+responsibility = "TerminalCore VT performer (print/execute/CSI/OSC/Actions) kept together after TerminalState responsibility split; one authority type, no second state engine."
