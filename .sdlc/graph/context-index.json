@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "95a5e0c50a6c636798a764f9809c6d081543829a"
+          "fingerprint": "105266dc95d1c91391dc6edd8d06510439dfab8e"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "95a5e0c50a6c636798a764f9809c6d081543829a"
+          "fingerprint": "105266dc95d1c91391dc6edd8d06510439dfab8e"
         }
       ],
       "relationships": [
@@ -138,7 +138,7 @@
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
-          "fingerprint": "6836906bf11d4f48c8e7918615105a166d5dfe28"
+          "fingerprint": "dd2e11bd8f7947808fa63658adeeccb6be8c66d4"
         },
         {
           "path": "docs/architecture/ADR-015-RUST-PRODUCT-UI-THIN-SWIFT-HOST.md",

@@ -11,6 +11,7 @@
 - **Pass 8 authority:** reviewed head `54b3a1748effc7c47c409d1f7cfdcbd547e8d1cc`, merged by PR #721 as `d9d21187e8429bbd3dbeb3e1c7cc4d05c1d147e6`
 - **Pass 9 authority:** #719 closed Done; PR #743 / PR #745; review candidate `1005bc42397aac485b1aeff08cafd0f67790d969`
 - **Numbering note:** SPEC-008 is already the active M003 command-Blocks/composer specification and is intentionally not a Pass 9 dependency historically. SPEC-008 governs presentation selection/routing when this reconnect contract is used by Flow/Raw/TUI.
+- **Proposed M003 amendment:** §8.2.1 multi-execution resolution under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
 
 ## 0. Presentation-mode applicability of the accepted ADR-009 amendment
 
@@ -342,6 +343,29 @@ M001 historically demonstrated one product terminal surface and did not add dura
 For the user-visible Pass 9 proof, exactly one eligible surviving interactive execution must be resolved automatically. If multiple eligible executions exist, the client must not guess, terminate extras or silently select by unstable list order. Tests/callers may specify an exact `ExecutionId`; richer selection belongs to later workspace UI.
 
 If no eligible execution survives, continuity is not claimed. Creating a new execution is a separate path with a new `ExecutionId`.
+
+#### 8.2.1 Multi-execution resolution (proposed M003 amendment)
+
+- **Status:** proposed amendment; **normative only on ADR-017 acceptance** (Issue #994, ADR-017). It narrows resolution; it does not weaken any Pass 9 continuity requirement.
+
+Once client-requested provisioning exists, several live executions are ordinary
+rather than exceptional. Resolution therefore becomes:
+
+- within one live client session, a Pane reconnects by the exact `ExecutionId`
+  recorded in portable Rust product state. "First/only running execution"
+  resolution must not be the headed production path;
+- a fresh client process with exactly one eligible surviving execution still
+  adopts it for its initial Pane, preserving the §8.2 proof above;
+- a fresh client process with more than one eligible surviving execution must not
+  guess, must not select by list order and must not terminate extras. It
+  provisions a new execution for its initial Pane and leaves the survivors
+  unreferenced, live and enumerable;
+- presentation/layout persistence stays out of scope (ADR-007 class P4), so a
+  fresh process cannot rebuild Pane→execution bindings; a truthful session
+  inventory/adoption surface is separate later work (#929);
+- closing a Pane, Tab or window remains §6 detach. Ending an execution is the
+  explicitly requested, Controller-fenced operation in SPEC-004 §18 and is never
+  a consequence of closing presentation.
 
 ### 8.3 Controller reacquisition race
 
