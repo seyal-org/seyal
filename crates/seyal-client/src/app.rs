@@ -69,6 +69,10 @@ pub enum AppError {
     UnknownBlock,
     /// Rerun refused: the Block's command is still running.
     BlockRunning,
+    /// Rerun refused: composer is not Available (same gate as block_actions).
+    ComposerUnavailable,
+    /// Rerun refused: a non-empty draft would be overwritten.
+    ComposerDraftOccupied,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -870,6 +874,18 @@ impl ApplicationRoot {
             .ok_or(AppError::UnknownBlock)?;
         if block.state == crate::composer::BlockPresentationState::Running {
             return Err(AppError::BlockRunning);
+        }
+        let snap = self
+            .composer
+            .snapshot(fence.pane)
+            .map_err(|_| AppError::ComposerUnavailable)?;
+        // Same gate as `block_actions`: Rerun only when the composer can take
+        // a submit. Fail closed before touching the draft.
+        if snap.mode != crate::composer::ComposerMode::Available {
+            return Err(AppError::ComposerUnavailable);
+        }
+        if !snap.draft.is_empty() {
+            return Err(AppError::ComposerDraftOccupied);
         }
         self.composer
             .apply(ComposerAction::SetDraft {
@@ -2228,6 +2244,8 @@ mod tests {
         );
         assert_eq!(root.snapshot().composer.unwrap().draft, "");
 
+        runtime_available(&mut root, 1);
+        let epoch = root.snapshot().composer.unwrap().epoch;
         root.apply(AppAction::RerunBlock {
             fence: root.fence(),
             id: done,
@@ -2239,6 +2257,134 @@ mod tests {
             "cargo test -p seyal-client",
             "Rerun loads the Runtime-published command, never host text"
         );
+    }
+
+    #[test]
+    fn rerun_block_fails_closed_when_composer_unavailable() {
+        use seyal_core::BlockId;
+
+        let mut root = ApplicationRoot::new();
+        let done = BlockId::from_bytes([0x71; 16]);
+        root.apply(AppAction::Bind {
+            fence: root.fence(),
+            evidence: evidence(8, true, false),
+        })
+        .unwrap();
+        // Bound but Runtime has not published Available — composer is Busy.
+        root.apply(AppAction::ApplyRuntimeBlocks {
+            fence: root.fence(),
+            records: vec![RuntimeBlockRecord {
+                id: done,
+                command: "echo keep-me".into(),
+                start_line: 1,
+                end_line: Some(1),
+                running: false,
+                exit_status: Some(0),
+            }],
+        })
+        .unwrap();
+        let epoch = root.snapshot().composer.unwrap().epoch;
+        root.apply(AppAction::SetComposerDraft {
+            fence: root.fence(),
+            text: "user typing".into(),
+            composer_epoch: epoch,
+        })
+        .unwrap();
+        let before = root.snapshot().composer.unwrap().draft.clone();
+        assert_eq!(
+            root.apply(AppAction::RerunBlock {
+                fence: root.fence(),
+                id: done,
+                composer_epoch: root.snapshot().composer.unwrap().epoch,
+            }),
+            Err(AppError::ComposerUnavailable)
+        );
+        assert_eq!(
+            root.snapshot().composer.unwrap().draft,
+            before,
+            "not-Available must not change the draft"
+        );
+    }
+
+    #[test]
+    fn rerun_block_refuses_a_non_empty_draft() {
+        use seyal_core::BlockId;
+
+        let mut root = ApplicationRoot::new();
+        let done = BlockId::from_bytes([0x72; 16]);
+        root.apply(AppAction::Bind {
+            fence: root.fence(),
+            evidence: evidence(8, true, false),
+        })
+        .unwrap();
+        runtime_available(&mut root, 1);
+        root.apply(AppAction::ApplyRuntimeBlocks {
+            fence: root.fence(),
+            records: vec![RuntimeBlockRecord {
+                id: done,
+                command: "echo rerun".into(),
+                start_line: 1,
+                end_line: Some(1),
+                running: false,
+                exit_status: Some(0),
+            }],
+        })
+        .unwrap();
+        let epoch = root.snapshot().composer.unwrap().epoch;
+        root.apply(AppAction::SetComposerDraft {
+            fence: root.fence(),
+            text: "in progress draft".into(),
+            composer_epoch: epoch,
+        })
+        .unwrap();
+        let epoch = root.snapshot().composer.unwrap().epoch;
+        assert_eq!(
+            root.apply(AppAction::RerunBlock {
+                fence: root.fence(),
+                id: done,
+                composer_epoch: epoch,
+            }),
+            Err(AppError::ComposerDraftOccupied)
+        );
+        assert_eq!(
+            root.snapshot().composer.unwrap().draft,
+            "in progress draft",
+            "occupied draft must be preserved"
+        );
+    }
+
+    #[test]
+    fn rerun_block_succeeds_when_available_with_empty_draft() {
+        use seyal_core::BlockId;
+
+        let mut root = ApplicationRoot::new();
+        let done = BlockId::from_bytes([0x73; 16]);
+        root.apply(AppAction::Bind {
+            fence: root.fence(),
+            evidence: evidence(8, true, false),
+        })
+        .unwrap();
+        runtime_available(&mut root, 1);
+        root.apply(AppAction::ApplyRuntimeBlocks {
+            fence: root.fence(),
+            records: vec![RuntimeBlockRecord {
+                id: done,
+                command: "echo ok".into(),
+                start_line: 1,
+                end_line: Some(1),
+                running: false,
+                exit_status: Some(0),
+            }],
+        })
+        .unwrap();
+        let epoch = root.snapshot().composer.unwrap().epoch;
+        root.apply(AppAction::RerunBlock {
+            fence: root.fence(),
+            id: done,
+            composer_epoch: epoch,
+        })
+        .unwrap();
+        assert_eq!(root.snapshot().composer.unwrap().draft, "echo ok");
     }
 
     #[test]

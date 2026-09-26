@@ -47,9 +47,6 @@ final class ProductChromeHostView: NSView {
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
     private var chromeNeedsReconcile = false
     private var blockCards: [UInt64: CommandBlockView] = [:]
-    /// Pending Block Copy intents (#1010), keyed by Block; the text is built
-    /// by Rust from the Block's history and arrives on `onHistoryCopy`.
-    private var pendingBlockCopies: [UInt64: (kind: UInt16, command: String)] = [:]
     private var transcriptFrameRevision: UInt64 = 0
     private var paneFollowsTranscript: [NSLayoutConstraint] = []
     private var paneFillsCenter: [NSLayoutConstraint] = []
@@ -317,8 +314,8 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
             self?.refreshRunningBlockOutput()
         }
-        pane.inputSurface.onHistoryCopy = { [weak self] blockID, text in
-            self?.completeBlockCopy(blockID: blockID, output: text)
+        pane.inputSurface.onHistoryCopy = { [weak self] _, text in
+            self?.writePasteboard(text)
         }
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
             self?.applyHistoryRange(range)
@@ -667,7 +664,7 @@ final class ProductChromeHostView: NSView {
                 self?.selectBlock(idLo: idLo, idHi: idHi, deselect: selected)
             }
             card.onAction = { [weak self] action in
-                self?.performBlockAction(action, idLo: idLo, idHi: idHi, command: title, span: span)
+                self?.performBlockAction(action, blockIndex: UInt32(index), idLo: idLo, idHi: idHi)
             }
             blocks.addArrangedSubview(card)
             if blockID != 0 {
@@ -703,26 +700,20 @@ final class ProductChromeHostView: NSView {
     }
 
     /// Routes a Rust action kind. Availability was already decided by Rust;
-    /// disabled actions are never delivered by the view.
+    /// disabled actions are never delivered by the view. Copy output kinds go
+    /// through `seyal_app_request_block_copy` so span/composition stay in Rust.
     private func performBlockAction(
         _ kind: UInt16,
+        blockIndex: UInt32,
         idLo: UInt64,
-        idHi: UInt64,
-        command: String,
-        span: SeyalAppBlockSpan
+        idHi: UInt64
     ) {
         switch UInt32(kind) {
         case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND:
-            writePasteboard(command)
+            let row = seyal_app_block_row(pane.appHandle, blockIndex)
+            writePasteboard(copyUTF8(row.title, row.title_len) ?? "")
         case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
-            guard span.start_line > 0 else { return }
-            let end = span.end_line >= span.start_line ? span.end_line : span.start_line &+ 511
-            pendingBlockCopies[idLo] = (kind, command)
-            if pane.inputSurface.requestHistoryCopy(
-                startLine: span.start_line, endLine: end, blockID: idLo) != 0
-            {
-                pendingBlockCopies.removeValue(forKey: idLo)
-            }
+            _ = seyal_app_request_block_copy(pane.appHandle, blockIndex, kind)
         case SEYAL_APP_BLOCK_ACTION_RERUN:
             let snapshot = seyal_app_snapshot(pane.appHandle)
             var rerun = SeyalAppAction()
@@ -739,16 +730,6 @@ final class ProductChromeHostView: NSView {
             selectBlock(idLo: idLo, idHi: idHi, deselect: false)
         default:
             break
-        }
-    }
-
-    private func completeBlockCopy(blockID: UInt64, output: String) {
-        guard let pending = pendingBlockCopies.removeValue(forKey: blockID) else { return }
-        switch UInt32(pending.kind) {
-        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
-            writePasteboard(output.isEmpty ? pending.command : pending.command + "\n" + output)
-        default:
-            writePasteboard(output)
         }
     }
 

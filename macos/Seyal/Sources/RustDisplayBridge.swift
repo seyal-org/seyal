@@ -488,9 +488,7 @@ final class RustDisplayBridge {
   private var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   private var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
-  /// Block Copy (#1010) requests: Rust-built text accumulated per chunk and
-  /// the last line it ended on. Delivered to `onHistoryCopy`, never rendered.
-  private var historyCopyRequests: [PaneHistoryRequestKey: (text: String, lastLine: UInt64)] = [:]
+  /// Delivered when Rust finishes a Block pasteboard copy (#1010).
   var onHistoryCopy: ((UInt64, String) -> Void)?
   private var lastComposerResultRequestID: UInt64 = 0
   private var lastComposerStatusRevision: UInt64 = 0
@@ -729,7 +727,6 @@ final class RustDisplayBridge {
     requestedHistoryRanges.removeAll(keepingCapacity: false)
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
-    historyCopyRequests.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
     lastComposerResultRequestID = 0
     clearComposerStatus()
@@ -774,7 +771,6 @@ final class RustDisplayBridge {
     requestedHistoryRanges.removeAll(keepingCapacity: false)
     historyRevisions.removeAll(keepingCapacity: false)
     historyContinuations.removeAll(keepingCapacity: false)
-    historyCopyRequests.removeAll(keepingCapacity: false)
     lastTimelineRevision = 0
     lastComposerResultRequestID = 0
     clearComposerStatus()
@@ -947,18 +943,6 @@ final class RustDisplayBridge {
     return result
   }
 
-  /// Request one Block's history for pasteboard copy (#1010). The reply is
-  /// delivered as Rust-built text through `onHistoryCopy`, not to the renderer.
-  @discardableResult
-  func requestHistoryCopy(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    let requestID = seyal_bridge_next_history_request_id()
-    let result = requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID)
-    if result == 0, requestID != 0 {
-      historyCopyRequests[PaneHistoryRequestKey(paneID: paneID, requestID: requestID)] = ("", 0)
-    }
-    return result
-  }
-
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
     requestedHistoryRanges = requestedHistoryRanges.filter { blockIDs.contains($0.value.blockID) }
     historyRevisions = historyRevisions.filter { requestKey, _ in
@@ -967,9 +951,15 @@ final class RustDisplayBridge {
     historyContinuations = historyContinuations.filter { requestKey, _ in
       requestedHistoryRanges[requestKey] != nil
     }
-    historyCopyRequests = historyCopyRequests.filter { requestKey, _ in
-      requestedHistoryRanges[requestKey] != nil
-    }
+  }
+
+  /// Deliver a completed Rust-owned Block pasteboard string, if any.
+  private func publishBlockCopy() {
+    guard isConnected, selectClient() else { return }
+    let copy = seyal_bridge_take_block_copy()
+    guard copy.len > 0, let bytes = copy.utf8 else { return }
+    let text = String(decoding: UnsafeBufferPointer(start: bytes, count: Int(copy.len)), as: UTF8.self)
+    onHistoryCopy?(copy.block_id, text)
   }
 
   private func publishHistoryRanges() {
@@ -1021,16 +1011,6 @@ final class RustDisplayBridge {
       let previous = historyContinuations[requestKey]
       let merged = mergeHistoryRange(previous?.range, chunk)
       let leads = historyLeadCount(rows)
-      let copy = historyCopyRequests.removeValue(forKey: requestKey).map { prior in
-        let chunk = seyal_bridge_history_range_text_for(metadata.block_id, metadata.request_id)
-        let text = chunk.len > 0 && chunk.bytes != nil
-          ? String(decoding: UnsafeBufferPointer(start: chunk.bytes, count: Int(chunk.len)), as: UTF8.self)
-          : ""
-        // A truncated reply can split one line across chunks; only a new
-        // line starts a new text line.
-        let separator = prior.text.isEmpty || metadata.start_line == prior.lastLine ? "" : "\n"
-        return (text: prior.text + separator + text, lastLine: metadata.end_line)
-      }
       _ = seyal_bridge_history_range_consume(metadata.block_id, metadata.request_id)
       requestedHistoryRanges.removeValue(forKey: requestKey)
       historyRevisions.removeValue(forKey: requestKey)
@@ -1047,16 +1027,9 @@ final class RustDisplayBridge {
             let nextKey = PaneHistoryRequestKey(paneID: paneID, requestID: nextID)
             requestedHistoryRanges[nextKey] = request
             historyContinuations[nextKey] = (nextStart, merged)
-            if let copy {
-              historyCopyRequests[nextKey] = copy
-              continue
-            }
+            continue
           }
         }
-      }
-      if let copy {
-        onHistoryCopy?(metadata.block_id, copy.text)
-        continue
       }
       onHistory(merged)
     }
@@ -1337,6 +1310,7 @@ final class RustDisplayBridge {
       let result = seyal_bridge_poll()
       runtimeBlockMetadata = currentBlockMetadata()
       publishHistoryRanges()
+      publishBlockCopy()
       publishComposerResult()
       publishComposerStatus()
       if let text = copiedText() {

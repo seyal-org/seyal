@@ -79,12 +79,15 @@ final class SeyalBlockComponentTests: XCTestCase {
         windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
 
     func testThemePacksRustBlockRoles() {
-        let theme = seyal_app_theme(0)
+        let theme = seyal_app_theme(0, 0)
         XCTAssertEqual(MemoryLayout<SeyalAppTheme>.size, 36)
         XCTAssertNotEqual(theme.block_focus, theme.accent, "Block focus is its own Rust role")
         XCTAssertEqual(dark.blockFocus, NativeThemeRealization.color(theme.block_focus))
         XCTAssertEqual(dark.blockSuccess, NativeThemeRealization.color(theme.success))
         XCTAssertEqual(dark.blockDanger, NativeThemeRealization.color(theme.danger))
+        XCTAssertEqual(theme.reserved & 1, 1, "default signals allow motion")
+        let reduced = seyal_app_theme(0, 1)
+        XCTAssertEqual(reduced.reserved & 1, 0, "reduce_motion clears allows_motion")
     }
 
     func testRestBlockHidesActionsAndUsesRestSeam() {
@@ -135,6 +138,42 @@ final class SeyalBlockComponentTests: XCTestCase {
             "running hides the status icon")
         let spinner = descendant(running, "seyal-block-status", as: NSProgressIndicator.self)
         XCTAssertEqual(spinner?.accessibilityLabel(), "Rust:Running", "the spinner carries the status")
+    }
+
+    func testReduceMotionStopsRunningSpinner() {
+        let theme = NativeTheme(
+            canvas: dark.canvas, container: dark.container, utility: dark.utility,
+            elevated: dark.elevated, text: dark.text, secondary: dark.secondary, muted: dark.muted,
+            accent: dark.accent, seam: dark.seam, success: dark.success, warning: dark.warning,
+            danger: dark.danger, blockFocus: dark.blockFocus, blockSeamRest: dark.blockSeamRest,
+            blockSeamHover: dark.blockSeamHover, blockSuccess: dark.blockSuccess,
+            blockDanger: dark.blockDanger, allowsMotion: false, appearance: dark.appearance,
+            uiFontSize: dark.uiFontSize, terminalFontSize: dark.terminalFontSize,
+            windowPadding: dark.windowPadding, terminalPadding: dark.terminalPadding,
+            reduceMaterial: dark.reduceMaterial, utilityMaterial: dark.utilityMaterial,
+            utilityOpacity: dark.utilityOpacity)
+        let view = block(
+            state: SEYAL_APP_BLOCK_STATE_RUNNING, canRerun: false, statusLabel: "Rust:Running")
+        view.apply(theme: theme)
+        let spinner = descendant(view, "seyal-block-status", as: NSProgressIndicator.self)
+        XCTAssertEqual(spinner?.isDisplayedWhenStopped, true)
+        XCTAssertFalse(spinner?.isHidden ?? true)
+    }
+
+    func testSelectedBlockActionsAreInKeyViewLoop() {
+        let view = block(selected: true)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 120),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view.superview
+        windows.append(window)
+        XCTAssertTrue(view.acceptsFirstResponder)
+        XCTAssertTrue(window.makeFirstResponder(view))
+        let copy = descendant(view, "seyal-block-action-copy", as: NSButton.self)
+        XCTAssertNotNil(copy)
+        XCTAssertFalse(copy?.refusesFirstResponder ?? true)
+        XCTAssertEqual(copy?.accessibilityLabel(), "Rust:Copy")
+        XCTAssertTrue(view.accessibilityPerformPress())
     }
 
     func testRerunAvailabilityIsProjectedFromRust() {

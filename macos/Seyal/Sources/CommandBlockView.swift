@@ -164,6 +164,24 @@ final class CommandBlockView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onSelect?(row.isSelected)
+        window?.makeFirstResponder(self)
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        // Space/Return select or toggle via Rust SelectBlock; no ⌘↑/⌘↓
+        // (Block-to-Block navigation is deferred to a SPEC-024 amendment).
+        if event.charactersIgnoringModifiers == " " || event.keyCode == 36 {
+            onSelect?(row.isSelected)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onSelect?(row.isSelected)
+        return true
     }
 
     override func updateTrackingAreas() {
@@ -223,10 +241,18 @@ final class CommandBlockView: NSView {
     private func applyStatus(_ theme: NativeTheme) {
         guard row.state != UInt16(SEYAL_APP_BLOCK_STATE_RUNNING) else {
             statusIcon.isHidden = true
-            spinner.startAnimation(nil)
+            // Design §8: spinner stops under Reduce Motion (Rust-projected).
+            if theme.allowsMotion {
+                spinner.isDisplayedWhenStopped = false
+                spinner.startAnimation(nil)
+            } else {
+                spinner.stopAnimation(nil)
+                spinner.isDisplayedWhenStopped = true
+            }
             return
         }
         spinner.stopAnimation(nil)
+        spinner.isDisplayedWhenStopped = false
         statusIcon.isHidden = false
         let (symbol, tint): (String, NSColor)
         switch row.state {
@@ -287,6 +313,9 @@ final class CommandBlockView: NSView {
         button.toolTip = action.label
         button.setAccessibilityLabel(action.label)
         button.setAccessibilityIdentifier("seyal-block-action-\(Self.identifier(action.kind))")
+        // Selected Block actions stay in the key-view loop (design §6).
+        button.refusesFirstResponder = false
+        button.focusRingType = .exterior
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             button.widthAnchor.constraint(equalToConstant: 24),

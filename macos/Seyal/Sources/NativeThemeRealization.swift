@@ -20,6 +20,8 @@ struct NativeTheme {
     let blockSeamHover: NSColor
     let blockSuccess: NSColor
     let blockDanger: NSColor
+    /// Rust-resolved motion: false under Reduce Motion (design §8).
+    let allowsMotion: Bool
     let appearance: NSAppearance
     let uiFontSize: CGFloat
     let terminalFontSize: CGFloat
@@ -69,10 +71,19 @@ enum NativeThemeRealization {
     }
 
     static func theme(for appearance: NSAppearance) -> NativeTheme {
-        theme(from: visual(for: appearance))
+        theme(from: visual(for: appearance), accessibilityFlags: accessibilityFlags())
     }
 
-    static func theme(from packed: SeyalAppVisual) -> NativeTheme {
+    /// Host-forwarded OS accessibility bits for Rust resolve (bit0 reduce_motion).
+    static func accessibilityFlags() -> UInt16 {
+        var flags: UInt16 = 0
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            flags |= 1
+        }
+        return flags
+    }
+
+    static func theme(from packed: SeyalAppVisual, accessibilityFlags: UInt16 = 0) -> NativeTheme {
         let canvas = color(packed.canvas)
         let text = color(packed.text)
         let accent = color(packed.accent)
@@ -80,7 +91,7 @@ enum NativeThemeRealization {
         let resolvedLight = packed.appearance == 1
         // Block Component roles (#1010) remain on seyal_app_theme; both paths
         // resolve through Rust process UI configuration (ADR-015 / #993).
-        let blockPacked = seyal_app_theme(packed.appearance)
+        let blockPacked = seyal_app_theme(packed.appearance, accessibilityFlags)
         return NativeTheme(
             canvas: canvas,
             container: container,
@@ -100,6 +111,7 @@ enum NativeThemeRealization {
             blockSeamHover: color(blockPacked.seam_hover),
             blockSuccess: color(blockPacked.success),
             blockDanger: color(blockPacked.danger),
+            allowsMotion: blockPacked.reserved & 1 != 0,
             appearance: resolvedLight
                 ? NSAppearance(named: .aqua)!
                 : NSAppearance(named: .darkAqua)!,
@@ -117,7 +129,7 @@ enum NativeThemeRealization {
     @discardableResult
     static func apply(to view: NSView, material: NSVisualEffectView, appearance: NSAppearance) -> NativeTheme {
         let packed = visual(for: appearance)
-        let theme = theme(from: packed)
+        let theme = theme(from: packed, accessibilityFlags: accessibilityFlags())
         applyMaterial(material, theme: theme)
         view.window?.appearance = theme.appearance
         view.appearance = theme.appearance

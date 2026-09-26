@@ -228,6 +228,14 @@ SeyalHistorySidecar seyal_bridge_history_range_sidecar_for(uint64_t block_id, ui
 /* Plain UTF-8 text of a held history response for Block Copy (#1010); same
  * borrowed-bytes shape as the sidecar, valid until the next call. */
 SeyalHistorySidecar seyal_bridge_history_range_text_for(uint64_t block_id, uint64_t request_id);
+typedef struct SeyalBlockCopy {
+    uint64_t block_id;
+    const uint8_t *utf8;
+    uint32_t len;
+    uint32_t reserved;
+} SeyalBlockCopy;
+/* Completed Rust-composed Block pasteboard text; empty when none ready. */
+SeyalBlockCopy seyal_bridge_take_block_copy(void);
 uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_id);
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);

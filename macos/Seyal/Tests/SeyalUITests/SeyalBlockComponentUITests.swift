@@ -85,6 +85,34 @@ final class SeyalBlockComponentUITests: XCTestCase {
         app.typeKey("c", modifierFlags: [.control])
     }
 
+    /// Keyboard reachability: select a Block via AX press (Rust SelectBlock),
+    /// then confirm seam actions are labelled and in the accessibility tree.
+    /// Block-to-Block ⌘↑/⌘↓ is deliberately not covered — deferred to SPEC-024.
+    func testBlockKeyboardAndVoiceOverReachability() throws {
+        try requireZshLoginShell()
+        let app = XCUIApplication()
+        app.launchIsolatedHost()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf 'seyal-1010-a11y\\n'")
+        let first = app.descendants(matching: .any)["seyal-block-0"].firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "first Block missing")
+        XCTAssertFalse(first.label.isEmpty, "VoiceOver label must come from the Block command")
+        first.press(forDuration: 0.05)
+        let selected = NSPredicate(format: "value == 'selected'")
+        let becameSelected = expectation(for: selected, evaluatedWith: first, handler: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [becameSelected], timeout: 5), .completed)
+        let copy = first.descendants(matching: .any)["seyal-block-action-copy"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 3), "selected Block must expose actions")
+        XCTAssertEqual(copy.label, "Copy")
+        let rerun = first.descendants(matching: .any)["seyal-block-action-rerun"].firstMatch
+        XCTAssertTrue(rerun.waitForExistence(timeout: 2))
+        XCTAssertEqual(rerun.label, "Rerun")
+        // Tab into the key-view loop of the selected Block's actions.
+        app.typeKey("\t", modifierFlags: [])
+        XCTAssertTrue(copy.exists)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// Blocks exist only under Seyal's trusted zsh integration (ADR-009
     /// mechanism 6); any other login shell stays on the raw path by design.
     /// Hosted runners log in with bash, so their Block evidence is the Rust

@@ -24,7 +24,7 @@ use crate::input_policy::process_input_policy;
 use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryEffect, RecoveryStage};
 use crate::shell::SplitAxis;
 
-use super::{allocate_handle, with_active_client};
+use super::{allocate_handle, with_active_client, with_active_client_mut};
 
 const FLAG_HAS_EXECUTION: u16 = 1;
 const FLAG_HAS_ATTACHMENT: u16 = 2;
@@ -724,6 +724,44 @@ pub extern "C" fn seyal_app_block_action_row(
     })
 }
 
+/// Start a Rust-owned Block pasteboard copy (#1010). Resolves the Block's
+/// history span and command from the application root, then asks the active
+/// display client to fetch and compose one final UTF-8 string. The host only
+/// writes that string to the pasteboard when `seyal_bridge_take_block_copy`
+/// returns it. Returns 0 on accept, negative on refuse.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_request_block_copy(
+    handle: u64,
+    block_index: u32,
+    kind: u16,
+) -> i32 {
+    use crate::history_text::{copy_end_line, BlockCopyKind};
+    let Some(copy_kind) = BlockCopyKind::from_u16(kind) else {
+        return -6;
+    };
+    let prepared = APPS.with(|apps| {
+        let apps = apps.borrow();
+        let state = apps.get(&handle)?;
+        let snap = state.root.snapshot();
+        let composer = snap.composer?;
+        let block = composer.blocks.get(block_index as usize)?;
+        let end = copy_end_line(block.start_line, block.end_line)?;
+        let bytes = block.id.to_bytes();
+        let block_id = u64::from_le_bytes(bytes[..8].try_into().ok()?);
+        if block_id == 0 {
+            return None;
+        }
+        Some((block_id, block.command.clone(), block.start_line, end))
+    });
+    let Some((block_id, command, start_line, end_line)) = prepared else {
+        return -4;
+    };
+    with_active_client_mut(|client| {
+        client.begin_block_copy(block_id, copy_kind, command, start_line, end_line)
+    })
+    .map_or(-1, |result| result.map_or_else(super::error_code, |_| 0))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_composer_history(handle: u64) -> SeyalAppComposerHistory {
     APPS.with(|apps| {
@@ -916,6 +954,7 @@ pub struct SeyalAppTheme {
     pub text: u32,
     pub accent: u32,
     pub appearance: u16,
+    /// Bit 0 = `allows_motion` after Rust resolves accessibility signals.
     pub reserved: u16,
     /// Block Component roles (#1010): focus border, rest/hover seam and
     /// status colors. Resolved here so the host never invents palette values.
@@ -1008,27 +1047,41 @@ fn material_code(intent: crate::theme::MaterialIntent) -> u16 {
     }
 }
 
-fn resolve_process_visual(platform_appearance_code: u16) -> crate::theme::ResolvedVisual {
-    use crate::theme::{process_ui_configuration, resolve, AccessibilitySignals};
+fn resolve_process_visual(
+    platform_appearance_code: u16,
+    accessibility: crate::theme::AccessibilitySignals,
+) -> crate::theme::ResolvedVisual {
+    use crate::theme::{process_ui_configuration, resolve};
     let cold = process_ui_configuration();
     resolve(
         cold.settings().clone(),
         platform_appearance(platform_appearance_code),
-        AccessibilitySignals::default(),
+        accessibility,
         cold.diagnostics().clone(),
     )
 }
 
+fn accessibility_from_flags(flags: u16) -> crate::theme::AccessibilitySignals {
+    crate::theme::AccessibilitySignals {
+        reduce_motion: flags & 1 != 0,
+        reduce_transparency: flags & 2 != 0,
+        increase_contrast: flags & 4 != 0,
+    }
+}
+
+/// `accessibility_flags`: bit 0 = reduce_motion, bit 1 = reduce_transparency,
+/// bit 2 = increase_contrast. The host forwards OS signals; Rust resolves
+/// through process UI configuration (ADR-015 / #993), not a Swift palette.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_theme(appearance: u16) -> SeyalAppTheme {
+pub extern "C" fn seyal_app_theme(appearance: u16, accessibility_flags: u16) -> SeyalAppTheme {
     use crate::theme::ColorRole;
-    let visual = resolve_process_visual(appearance);
+    let visual = resolve_process_visual(appearance, accessibility_from_flags(accessibility_flags));
     SeyalAppTheme {
         canvas: pack_srgb(visual.colors.get(ColorRole::Canvas)),
         text: pack_srgb(visual.colors.get(ColorRole::TextPrimary)),
         accent: pack_srgb(visual.colors.get(ColorRole::Focus)),
         appearance: resolved_appearance_code(visual.appearance),
-        reserved: 0,
+        reserved: u16::from(visual.motion.allows_motion),
         block_focus: pack_srgb(visual.colors.get(ColorRole::BlockFocus)),
         seam_rest: pack_srgb(visual.colors.get(ColorRole::SeamRest)),
         seam_hover: pack_srgb(visual.colors.get(ColorRole::SeamHover)),
@@ -1039,8 +1092,8 @@ pub extern "C" fn seyal_app_theme(appearance: u16) -> SeyalAppTheme {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_visual(platform_appearance: u16) -> SeyalAppVisual {
-    use crate::theme::{ColorRole, DepthLevel};
-    let visual = resolve_process_visual(platform_appearance);
+    use crate::theme::{AccessibilitySignals, ColorRole, DepthLevel};
+    let visual = resolve_process_visual(platform_appearance, AccessibilitySignals::default());
     let mut scratch = visual_scratch()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1928,6 +1981,8 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::BlockRunning => 33,
+        AppError::ComposerUnavailable => 34,
+        AppError::ComposerDraftOccupied => 35,
     }
 }
 
@@ -2773,7 +2828,7 @@ mod tests {
             (0, ResolvedAppearance::Dark),
             (1, ResolvedAppearance::Light),
         ] {
-            let theme = seyal_app_theme(appearance);
+            let theme = seyal_app_theme(appearance, 0);
             let visual = canonical(resolved, AccessibilitySignals::default());
             assert_eq!(
                 theme.block_focus,
