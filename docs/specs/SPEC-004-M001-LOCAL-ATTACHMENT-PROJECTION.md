@@ -2,8 +2,8 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) is a **proposed** #865 amendment and is not accepted until the docs PR that adds it merges.
-- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) accepted 2026-09-26 via PR #1060 (#865).
+- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #865 (§8.1 ViewportLineIds)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
 - **Proposed M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
@@ -147,6 +147,7 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
+| 35 | R→C | `ViewportLineIds` — §8.1 |
 | 36 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
 | 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
@@ -163,14 +164,14 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 6: grapheme display (`CAP_GRAPHEME_DISPLAY`);
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
-- bit 9: primary viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, normative on acceptance of this amendment;
+- bit 9: primary viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1;
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
 Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is `ViewportLineIds` (§8.1). §18 therefore assigns the next free types after that allocation, **36–39**, and the next free capability bit, **bit 10**.
 
 ### 8.1 Viewport LineIds (#865)
 
-Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS`). It carries the primary viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule. This section is the wire contract. It is normative only when this amendment is accepted. Until then, implementations must not treat SPEC-008 as defining the message.
+Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS`). It carries the primary viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only. This section is the normative wire contract.
 
 Payload, little-endian:
 
