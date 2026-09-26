@@ -159,6 +159,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         NSPasteboard.general.setString(text, forType: .string)
       }
       self.bridge = bridge
+      bridge.continuityAppHandle = recoveryAppHandle
       // A production surface must not perform a synchronous pre-attempt on the
       // AppKit thread. Visibility starts the one authoritative recovery episode
       // so startup, retries and cancellation share the exact seven-attempt/

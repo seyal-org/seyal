@@ -11,7 +11,7 @@ mod visual;
 #[cfg(test)]
 mod tests;
 
-use std::{cell::RefCell, collections::HashMap, ptr};
+use std::{cell::RefCell, collections::HashMap, ptr, sync::atomic::{AtomicU64, Ordering}};
 
 use crate::app::{AppError, ApplicationRoot, APP_ABI_VERSION};
 use crate::chrome::{InspectorMode, LeftPanelMode};
@@ -56,6 +56,9 @@ const ROW_SELECTED: u16 = 1;
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
 const BLOCK_STATE_MASK: u16 = 7;
 const BLOCK_SELECTED: u16 = 8;
+
+/// Counts `seyal_app_snapshot` calls for steady-state frame-path proofs.
+static SNAPSHOT_CALLS: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -405,6 +408,7 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
+    SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let Some(state) = apps.get_mut(&handle) else {
@@ -414,6 +418,18 @@ pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
         state.output = snap.output_utf8.as_bytes().to_vec();
         encode_snapshot(&snap, &state.output)
     })
+}
+
+/// Test/harness only: snapshot FFI call count since last reset.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_snapshot_call_count() -> u64 {
+    SNAPSHOT_CALLS.load(Ordering::Relaxed)
+}
+
+/// Test/harness only: reset the snapshot FFI call counter.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_reset_snapshot_call_count() {
+    SNAPSHOT_CALLS.store(0, Ordering::Relaxed);
 }
 
 #[unsafe(no_mangle)]

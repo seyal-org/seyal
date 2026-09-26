@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::recovery::{AttemptOutcome, LaunchResult};
+use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult};
 
 impl ApplicationRoot {
     pub(super) fn begin_recovery(&mut self, now: Duration) -> Result<(), AppError> {
@@ -55,7 +55,10 @@ impl ApplicationRoot {
 
     pub(super) fn cancel_recovery(&mut self) -> Result<(), AppError> {
         self.recovery.cancel();
-        self.pending_recovery.clear();
+        // Keep DisposeHandle effects so a cancelled episode still drops any
+        // opened-but-not-adopted client; hosts must not rely on drain order.
+        self.pending_recovery
+            .retain(|effect| matches!(effect, RecoveryEffect::DisposeHandle(_)));
         Ok(())
     }
 
@@ -68,5 +71,36 @@ impl ApplicationRoot {
         } else {
             Err(AppError::InvalidPayload)
         }
+    }
+
+    pub(super) fn begin_reconstruction_attempt(&mut self) -> Result<(), AppError> {
+        self.reconstruction.begin_attempt();
+        Ok(())
+    }
+
+    pub(super) fn commit_reconstruction(
+        &mut self,
+        runtime: ContinuityIdentity,
+        execution: ContinuityIdentity,
+        attachment: ContinuityIdentity,
+        controller_authority_committed: bool,
+        authoritative_snapshot_committed: bool,
+    ) -> Result<(), AppError> {
+        if self.reconstruction.commit(
+            runtime,
+            execution,
+            attachment,
+            controller_authority_committed,
+            authoritative_snapshot_committed,
+        ) {
+            Ok(())
+        } else {
+            Err(AppError::InvalidPayload)
+        }
+    }
+
+    pub(super) fn disconnect_reconstruction(&mut self) -> Result<(), AppError> {
+        self.reconstruction.disconnect();
+        Ok(())
     }
 }

@@ -86,6 +86,10 @@ impl ReconstructionState {
         self.stage == ReconstructionStage::Usable
     }
 
+    pub fn expected_execution(&self) -> Option<ContinuityIdentity> {
+        self.expected_execution
+    }
+
     pub fn begin_attempt(&mut self) {
         self.stage = ReconstructionStage::AwaitingAuthoritativeSnapshot;
     }
@@ -141,6 +145,25 @@ pub enum AttemptOutcome {
     Retryable,
     ControllerBusy,
     Blocked,
+}
+
+/// Classify a bridge open failure from `SeyalRecoveryResult` failure_class /
+/// retryable bits. Hosts must not reinterpret these classes in Swift.
+///
+/// Class 1 is a missing leaf. Class 2 is refused/disappeared: a dead
+/// `control.sock` looks like an unready listener, and only a Runtime
+/// singleton contender may replace it (SPEC-009). Both map to the
+/// one-launch-per-episode path; Rust launch-once accounting still prevents
+/// a second spawn while a just-started helper binds the canonical endpoint.
+pub fn classify_open_result(failure_class: u8, retryable: bool) -> AttemptOutcome {
+    if !retryable {
+        return AttemptOutcome::Blocked;
+    }
+    match failure_class {
+        1 | 2 => AttemptOutcome::EndpointMissing,
+        3 => AttemptOutcome::ControllerBusy,
+        _ => AttemptOutcome::Retryable,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

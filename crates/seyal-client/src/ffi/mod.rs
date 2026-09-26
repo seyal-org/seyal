@@ -47,8 +47,9 @@ pub use app::{
     seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
     seyal_app_destroy, seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette,
     seyal_app_palette_row, seyal_app_recovery_param, seyal_app_shell, seyal_app_shell_row,
-    seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
-    seyal_app_visual_warning,
+    seyal_app_snapshot, seyal_app_test_reload_ui_configuration,
+    seyal_app_test_reset_snapshot_call_count, seyal_app_test_snapshot_call_count, seyal_app_theme,
+    seyal_app_visual, seyal_app_visual_warning,
 };
 #[allow(unused_imports)]
 pub use display::{
@@ -63,7 +64,7 @@ pub use display::{
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]
 pub use errors::{
-    seyal_bridge_input_failure, seyal_bridge_last_recovery_result,
+    seyal_bridge_classify_open_result, seyal_bridge_input_failure, seyal_bridge_last_recovery_result,
     seyal_bridge_pass9_diag_snapshot, seyal_bridge_resize_failure,
 };
 #[allow(unused_imports)]

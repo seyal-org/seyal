@@ -229,6 +229,8 @@ uint8_t seyal_bridge_history_range_consume(uint64_t block_id, uint64_t request_i
 SeyalComposerResult seyal_bridge_composer_result(void);
 SeyalComposerStatus seyal_bridge_composer_status(void);
 SeyalRecoveryResult seyal_bridge_last_recovery_result(void);
+/** Classify a failed open into a SeyalAppRecoveryOutcome code (Rust-owned). */
+uint32_t seyal_bridge_classify_open_result(uint8_t failure_class, uint8_t retryable);
 SeyalPass9DiagSnapshot seyal_bridge_pass9_diag_snapshot(void);
 int32_t seyal_bridge_submit_key(uint16_t kind, uint32_t scalar);
 uint8_t seyal_bridge_supports_key_v2(void);

@@ -183,3 +183,72 @@ fn recovery_endpoint_missing_launches_once_then_seven_attempts() {
     assert_eq!(root.snapshot().recovery_stage, RecoveryStage::Exhausted);
     assert_eq!(RETRY_DELAYS.len() as u32 + 1, MAXIMUM_ATTEMPTS);
 }
+
+#[test]
+fn reconstruction_commit_through_app_root_is_sole_fencing_authority() {
+    use crate::recovery::ContinuityIdentity;
+
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::BeginReconstructionAttempt).unwrap();
+    let runtime = ContinuityIdentity { low: 1, high: 2 };
+    let execution = ContinuityIdentity { low: 3, high: 4 };
+    let first = ContinuityIdentity { low: 5, high: 6 };
+    let second = ContinuityIdentity { low: 7, high: 8 };
+    root.apply(AppAction::CommitReconstruction {
+        runtime,
+        execution,
+        attachment: first,
+        controller_authority_committed: true,
+        authoritative_snapshot_committed: true,
+    })
+    .unwrap();
+    assert!(root.reconstruction.can_mutate());
+    root.apply(AppAction::DisconnectReconstruction).unwrap();
+    root.apply(AppAction::BeginReconstructionAttempt).unwrap();
+    root.apply(AppAction::CommitReconstruction {
+        runtime,
+        execution,
+        attachment: second,
+        controller_authority_committed: true,
+        authoritative_snapshot_committed: true,
+    })
+    .unwrap();
+    root.apply(AppAction::DisconnectReconstruction).unwrap();
+    root.apply(AppAction::BeginReconstructionAttempt).unwrap();
+    assert_eq!(
+        root.apply(AppAction::CommitReconstruction {
+            runtime: ContinuityIdentity { low: 99, high: 2 },
+            execution,
+            attachment: ContinuityIdentity { low: 9, high: 10 },
+            controller_authority_committed: true,
+            authoritative_snapshot_committed: true,
+        }),
+        Err(AppError::InvalidPayload)
+    );
+    assert!(!root.reconstruction.can_mutate());
+}
+
+#[test]
+fn cancel_recovery_retains_queued_dispose_handle_effects() {
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    // Stale completion against a cancelled episode still emits DisposeHandle;
+    // cancel must not drop those disposal effects.
+    root.apply(AppAction::AckRecoveryEffect).unwrap();
+    root.pending_recovery
+        .push(RecoveryEffect::DisposeHandle(42));
+    root.pending_recovery.push(RecoveryEffect::Schedule {
+        generation,
+        delay: Duration::from_millis(10),
+    });
+    root.apply(AppAction::CancelRecovery).unwrap();
+    assert_eq!(
+        root.snapshot().recovery_effect,
+        Some(RecoveryEffect::DisposeHandle(42))
+    );
+    assert_eq!(root.snapshot().recovery_stage, RecoveryStage::Disconnected);
+}

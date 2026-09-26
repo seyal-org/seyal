@@ -9,7 +9,7 @@ use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
-use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryStage};
+use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
 use super::{
@@ -247,6 +247,28 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 _ => return Err(-6),
             },
         }),
+        // Continuity-identity fencing (ADR-015 / #1065). fence_execution_* is
+        // the Runtime pin; target_execution_* / target_attachment_* are the
+        // execution and attachment pins. reserved bit0 = controller committed,
+        // bit1 = authoritative snapshot committed.
+        55 => Ok(AppAction::BeginReconstructionAttempt),
+        56 => Ok(AppAction::CommitReconstruction {
+            runtime: ContinuityIdentity {
+                low: action.fence_execution_lo,
+                high: action.fence_execution_hi,
+            },
+            execution: ContinuityIdentity {
+                low: action.target_execution_lo,
+                high: action.target_execution_hi,
+            },
+            attachment: ContinuityIdentity {
+                low: action.target_attachment_lo,
+                high: action.target_attachment_hi,
+            },
+            controller_authority_committed: action.reserved & 1 != 0,
+            authoritative_snapshot_committed: action.reserved & 2 != 0,
+        }),
+        57 => Ok(AppAction::DisconnectReconstruction),
         _ => Err(-6),
     }
 }
