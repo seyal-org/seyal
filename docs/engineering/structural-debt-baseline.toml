@@ -20,9 +20,9 @@ hard_loc = 1000
 # architecture-gated under #882 and was not touched).
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 955
-issue = 1020
-reason = "CAMetalLayer surface, bridge recovery coordinator ownership, and terminal-bridge forwarding stay one thin host type after recovery-state and display-link extraction; E1 dual-recovery deletion (#882) is architecture-gated so coordinator wiring remains here. Ceiling matches post-split LOC."
+acknowledged_loc = 877
+issue = 1065
+reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator so the file only ratchets down."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -34,13 +34,13 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 773
-issue = 1020
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session apply-path extraction; further fragmentation would separate the fence/generation authority. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 785
+issue = 1065
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session apply-path extraction; #1065 adds only the CancelRecovery/AdvanceRecoveryStage action variants and dispatch arms that make Rust the sole recovery owner. Further fragmentation would separate the fence/generation authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 935
+acknowledged_loc = 817
 issue = 1020
 reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
 

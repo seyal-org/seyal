@@ -83,30 +83,39 @@ def native_host_present() -> bool:
 def validate_native_recovery_ownership(errors: list[str]) -> None:
     if not native_host_present():
         return
-    surface_relpath = "macos/Seyal/Sources/MetalSurfaceView.swift"
-    surface_path = ROOT / surface_relpath
-    if not surface_path.exists():
-        errors.append(f"missing guarded native lifecycle file: {surface_relpath}")
-        return
-    surface = surface_path.read_text(encoding="utf-8")
-
-    # Pass 9 gives the lifecycle coordinator sole production ownership of the
-    # startup/recovery connect sequence. A direct bridge.start() from AppKit
-    # creates an extra connection attempt and a fresh timeout outside the
-    # exact seven-attempt/one-second episode, and may block the main actor.
-    if re.search(r"\bbridge\??\.start\s*\(", surface):
-        errors.append(
-            f"{surface_relpath} performs a direct bridge.start(); production startup/recovery must be coordinator-owned"
-        )
-    for required in (
-        "bridgeRecoveryCoordinator.beginEpisode()",
-        "bridgeRecoveryCoordinator.retry()",
-        "startAutomaticBridgeRecoveryIfNeeded()",
-    ):
-        if required not in surface:
+    # Pass 9 recovery policy is owned by the Rust RecoveryCoordinator (#1065).
+    # The surface only requests/cancels episodes and reports presentation
+    # stages; the chrome effect executor opens/adopts and reports outcomes.
+    guarded: dict[str, tuple[str, ...]] = {
+        "macos/Seyal/Sources/MetalSurfaceView.swift": (),
+        "macos/Seyal/Sources/MetalSurfaceView+Recovery.swift": (
+            "SEYAL_APP_ACTION_BEGIN_RECOVERY",
+            "SEYAL_APP_ACTION_CANCEL_RECOVERY",
+            "SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE",
+            "func startAutomaticBridgeRecoveryIfNeeded()",
+        ),
+        "macos/Seyal/Sources/ProductChromeHostView+Recovery.swift": (
+            "SEYAL_APP_ACTION_COMPLETE_RECOVERY",
+            "openRuntimeRecoveryHandle(",
+            "adoptRecoveredHandle(",
+        ),
+    }
+    for relpath, required_tokens in guarded.items():
+        path = ROOT / relpath
+        if not path.exists():
+            errors.append(f"missing guarded native lifecycle file: {relpath}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        # A direct bridge.start() from AppKit creates an extra connection
+        # attempt and a fresh timeout outside the exact seven-attempt/
+        # one-second episode, and may block the main actor.
+        if re.search(r"\bbridge\??\.start\s*\(", text):
             errors.append(
-                f"{surface_relpath} is missing coordinator recovery boundary {required!r}"
+                f"{relpath} performs a direct bridge.start(); production startup/recovery must be RecoveryCoordinator-owned"
             )
+        for required in required_tokens:
+            if required not in text:
+                errors.append(f"{relpath} is missing Rust recovery boundary {required!r}")
 
     bridge_relpath = "macos/Seyal/Sources/RustDisplayBridge.swift"
     bridge_path = ROOT / bridge_relpath
@@ -117,10 +126,10 @@ def validate_native_recovery_ownership(errors: list[str]) -> None:
 
     # RustDisplayBridge owns one disposable client/socket only. It must never
     # remember or execute a self-reconnect request after teardown; otherwise a
-    # dead live socket can bypass the coordinator and receive a fresh timeout.
+    # dead live socket can bypass the RecoveryCoordinator and receive a fresh timeout.
     if "reconnectRequested" in bridge:
         errors.append(
-            f"{bridge_relpath} retains bridge-owned reconnect state; lifecycle recovery must be coordinator-owned"
+            f"{bridge_relpath} retains bridge-owned reconnect state; lifecycle recovery must be Rust RecoveryCoordinator-owned"
         )
     teardown_match = re.search(
         r"private\s+func\s+teardownCompleted\s*\(\s*\)\s*\{(?P<body>.*?)\n\s*\}",
@@ -133,6 +142,7 @@ def validate_native_recovery_ownership(errors: list[str]) -> None:
         errors.append(
             f"{bridge_relpath}::teardownCompleted reopens a client; it may only publish teardown completion"
         )
+
 
 
 def main() -> None:

@@ -13,6 +13,8 @@ mod recovery_apply;
 mod session;
 
 #[cfg(test)]
+mod recovery_tests;
+#[cfg(test)]
 mod tests;
 
 use std::time::Duration;

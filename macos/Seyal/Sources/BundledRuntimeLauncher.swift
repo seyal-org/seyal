@@ -32,7 +32,7 @@ private final class BundledRuntimeLaunchErrorBox: NSObject {
 }
 
 /// Launches the one permanent Runtime helper without transferring Runtime or
-/// execution lifetime to the GUI. The recovery coordinator owns episode-level
+/// execution lifetime to the GUI. The Rust RecoveryCoordinator owns episode-level
 /// launch-once accounting; this type owns package trust and spawn hygiene.
 final class BundledRuntimeLauncher {
   static let helperIdentifier = "dev.seyal.Seyal.runtime"

@@ -440,7 +440,8 @@ final class SeyalHostComponentTests: XCTestCase {
             // retry boundary available to the host once; do not poll a terminal
             // recovery state for the full 30-second test timeout.
             if !connectedOnce, !didRetryExhaustedRecovery,
-                view.runtimeRecoveryState.stage == .exhausted
+                seyal_app_snapshot(pane.appHandle).recovery_stage
+                    == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
             {
                 didRetryExhaustedRecovery = true
                 _ = view.retryRuntimeConnection()

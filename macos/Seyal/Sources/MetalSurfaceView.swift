@@ -20,27 +20,16 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   let metalDevice: any MTLDevice
   let renderer: MetalTerminalRenderer
   var bridge: RustDisplayBridge?
-  private lazy var bridgeRecoveryCoordinator = RuntimeLifecycleRecoveryCoordinator(
-    clock: { CACurrentMediaTime() },
-    scheduler: { delay, operation in
-      let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
-        seyalRunAsMainActorFromMainQueue { operation() }
-      }
-      let timerBox = RuntimeRecoveryTimerBox(timer: timer)
-      return { timerBox.timer.invalidate() }
-    },
-    launcher: { [weak self] in self?.bridge?.launchBundledRuntime() },
-    attempt: { [requestedExecutionIdentity, allowsImplicitExecutionBootstrap] in
-      openRuntimeRecoveryHandle(
-        executionIdentity: requestedExecutionIdentity,
-        allowsImplicitExecutionBootstrap: allowsImplicitExecutionBootstrap
-      )
-    },
-    handleAdopter: { [weak self] opened in
-      self?.bridge?.adoptRecoveredHandle(opened) ?? false
-    }
-  )
-  var runtimeRecoveryState: RuntimeRecoveryState { bridgeRecoveryCoordinator.state }
+  /// Rust application root whose `RecoveryCoordinator` owns this surface's
+  /// recovery episodes. Zero means the surface has no recovery owner and never
+  /// starts an episode.
+  var recoveryAppHandle: UInt64 { 0 }
+  /// Rust accepted a recovery action; the host effect executor must drain
+  /// the pending recovery effects.
+  var onRecoveryEffectsPending: (() -> Void)?
+  /// An adopted handle still has to report SPEC-009 §10 Restoring/Usable
+  /// presentation progress to Rust.
+  var recoveryPresentationPending = false
   /// When true, the surface still supports first-responder / AX / IME restore
   /// (SPEC §10) but does not begin automatic Runtime recovery. Used by the
   /// Pass 9 native_ready probe so it does not open a second client alongside
@@ -174,7 +163,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       // AppKit thread. Visibility starts the one authoritative recovery episode
       // so startup, retries and cancellation share the exact seven-attempt/
       // one-second contract instead of creating an eighth attempt with a fresh
-      // timeout before the lifecycle coordinator begins.
+      // timeout before the Rust RecoveryCoordinator episode begins.
 
     case .nativeInteractionProbe:
       // SPEC §10 probe: InteractiveMetalSurfaceView restore only. The Pass 9
@@ -458,39 +447,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     return !window.isMiniaturized
   }
 
-  func cancelBridgeReconnect() {
-    bridgeRecoveryCoordinator.cancel()
-  }
-
-  func startAutomaticBridgeRecoveryIfNeeded() {
-    guard !suppressesAutomaticBridgeRecovery,
-      !isDetachingRuntimeConnection,
-      shouldAttachRuntime,
-      bridge?.isConnected == false,
-      // stop() keeps the old clientHandle until both dispatch-source cancel
-      // handlers complete. Waiting for zero prevents consuming a retry on our
-      // own in-progress detach/controller cleanup.
-      bridge?.clientHandle == 0,
-      !bridgeRecoveryCoordinator.isActive,
-      runtimeRecoveryState.stage != .exhausted,
-      runtimeRecoveryState.stage != .blocked
-    else { return }
-    bridgeRecoveryCoordinator.beginEpisode()
-  }
-
-  /// Explicit user retry starts a new bounded foreground recovery episode.
-  /// Automatic exhaustion never invokes this method recursively.
-  @discardableResult
-  func retryRuntimeConnection() -> Bool {
-    guard shouldAttachRuntime,
-      bridge?.isConnected != true,
-      bridge?.clientHandle == 0,
-      runtimeRecoveryState.stage != .blocked
-    else { return bridge?.isConnected == true }
-    bridgeRecoveryCoordinator.retry()
-    return bridge?.isConnected == true
-  }
-
   /// AppKit can finish attaching a scroll-view sibling to its window after
   /// `viewDidMoveToWindow` has already run. Re-evaluate the lifecycle boundary
   /// after the shell's window has been ordered front so Runtime discovery is
@@ -576,9 +532,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       if result == .updated {
         forceNextFrame = false
         hasPreparedState = true
-        if runtimeRecoveryState.stage != .usable {
-          bridgeRecoveryCoordinator.transition(to: .restoringInteraction)
-        }
         // Candidate-D can continue advancing while an exhausted GPU
         // display failure is latched. A successful CPU preparation must
         // not erase that asynchronous display diagnostic.
@@ -588,21 +541,8 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
           lastRenderError = nil
         }
         resetPreparationRecovery()
-        if shouldRender,
-          bridge?.isConnected == true,
-          hasPreparedState,
-          !presentationState.exhausted,
-          runtimeRecoveryState.stage != .usable
-        {
-          // SPEC-009 §10: first-responder / accessibility / IME must be restored
-          // before Usable when this surface owns the native interaction seam.
-          // After Usable, leave the first responder alone so the Flow composer
-          // can keep Enter and paste.
-          guard restoreNativeInteractionAfterRendererReady() else {
-            return
-          }
-          bridgeRecoveryCoordinator.transition(to: .usable)
-          refreshRecoveryAccessibilityValue()
+        guard advanceRecoveryPresentationIfReady() else {
+          return
         }
         if shouldRender,
           renderer.persistentDisplayFailure == nil,
@@ -689,6 +629,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       return
     }
     lastProposedGeometry = .null
+    recoveryPresentationPending = false
     // History/composer/display correlations are disposable connection state;
     // logical pane and Block identity remain owned by Runtime and are not
     // cleared here.
@@ -717,25 +658,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   var terminalBridgeIsConnected: Bool {
     bridge?.isConnected == true
-  }
-
-  /// A command entered while disconnected is an explicit recovery action, but
-  /// it must never synchronously connect/handshake/attach on the AppKit thread.
-  /// The Pane composer keeps the draft when this returns false; the coordinator
-  /// owns the bounded episode and the user can submit once the surface is usable.
-  @discardableResult
-  func ensureTerminalBridgeConnected() -> Bool {
-    guard bridge?.isConnected != true else { return true }
-    guard !isDetachingRuntimeConnection,
-      shouldAttachRuntime,
-      bridge?.clientHandle == 0
-    else { return false }
-    if !bridgeRecoveryCoordinator.isActive,
-      runtimeRecoveryState.stage != .blocked
-    {
-      bridgeRecoveryCoordinator.retry()
-    }
-    return false
   }
 
   @discardableResult
@@ -796,7 +718,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     bridge?.supportsKeyV2() ?? false
   }
 
-  /// Stop the current attachment so the existing recovery coordinator can
+  /// Stop the current attachment so the Rust RecoveryCoordinator can
   /// establish a fresh connection. Used when V2 action IDs are exhausted.
   func terminalStopForProtocolRecovery() {
     bridge?.stop()
