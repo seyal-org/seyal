@@ -20,7 +20,7 @@
 		A10000000000000000000011 /* RendererValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* RendererValidation.swift */; };
 		A10000000000000000000013 /* CoreText.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* CoreText.framework */; };
 		A10000000000000000000014 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* CoreGraphics.framework */; };
-		A10000000000000000000025 /* RuntimeLifecycleRecoveryCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* RuntimeLifecycleRecoveryCoordinator.swift */; };
+		A10000000000000000000025 /* RuntimeRecoveryGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* RuntimeRecoveryGlue.swift */; };
 		A10000000000000000000026 /* BundledRuntimeLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* BundledRuntimeLauncher.swift */; };
 		A10000000000000000000049 /* IsolatedRuntimeDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000049 /* IsolatedRuntimeDirectory.swift */; };
 		A10000000000000000000027 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000027 /* Security.framework */; };
@@ -63,6 +63,7 @@
 		A10000000000000000000066 /* RustDisplayBridge+History.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000066 /* RustDisplayBridge+History.swift */; };
 		A10000000000000000000067 /* RustDisplayBridge+Input.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000067 /* RustDisplayBridge+Input.swift */; };
 		A10000000000000000000068 /* RustDisplayBridge+Frame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000068 /* RustDisplayBridge+Frame.swift */; };
+		A10000000000000000000069 /* MetalSurfaceView+Recovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000069 /* MetalSurfaceView+Recovery.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -107,7 +108,7 @@
 		A20000000000000000000015 /* SeyalBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SeyalBridge.h; sourceTree = "<group>"; };
 		A20000000000000000000016 /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = System/Library/Frameworks/CoreText.framework; sourceTree = SDKROOT; };
 		A20000000000000000000017 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
-		A20000000000000000000025 /* RuntimeLifecycleRecoveryCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeLifecycleRecoveryCoordinator.swift; sourceTree = "<group>"; };
+		A20000000000000000000025 /* RuntimeRecoveryGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeRecoveryGlue.swift; sourceTree = "<group>"; };
 		A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalAccessibilityAnnouncement.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* BundledRuntimeLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledRuntimeLauncher.swift; sourceTree = "<group>"; };
 		A20000000000000000000049 /* IsolatedRuntimeDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedRuntimeDirectory.swift; sourceTree = "<group>"; };
@@ -145,6 +146,7 @@
 		A20000000000000000000066 /* RustDisplayBridge+History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RustDisplayBridge+History.swift"; sourceTree = "<group>"; };
 		A20000000000000000000067 /* RustDisplayBridge+Input.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RustDisplayBridge+Input.swift"; sourceTree = "<group>"; };
 		A20000000000000000000068 /* RustDisplayBridge+Frame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RustDisplayBridge+Frame.swift"; sourceTree = "<group>"; };
+		A20000000000000000000069 /* MetalSurfaceView+Recovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+Recovery.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -211,7 +213,7 @@
 				A20000000000000000000013 /* RendererValidation.swift */,
 				A20000000000000000000014 /* TerminalShaders.metal */,
 				A20000000000000000000015 /* SeyalBridge.h */,
-				A20000000000000000000025 /* RuntimeLifecycleRecoveryCoordinator.swift */,
+				A20000000000000000000025 /* RuntimeRecoveryGlue.swift */,
 				A20000000000000000000026 /* BundledRuntimeLauncher.swift */,
 				A20000000000000000000049 /* IsolatedRuntimeDirectory.swift */,
 				A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */,
@@ -239,6 +241,7 @@
 				A20000000000000000000066 /* RustDisplayBridge+History.swift */,
 				A20000000000000000000067 /* RustDisplayBridge+Input.swift */,
 				A20000000000000000000068 /* RustDisplayBridge+Frame.swift */,
+				A20000000000000000000069 /* MetalSurfaceView+Recovery.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -420,7 +423,7 @@
 				A10000000000000000000040 /* NativeFontSpec.swift in Sources */,
 				A10000000000000000000003 /* MetalSurfaceView.swift in Sources */,
 				A1000000000000000000000B /* TerminalSurfaceHostView.swift in Sources */,
-				A10000000000000000000025 /* RuntimeLifecycleRecoveryCoordinator.swift in Sources */,
+				A10000000000000000000025 /* RuntimeRecoveryGlue.swift in Sources */,
 				A1000000000000000000002C /* SeyalAccessibilityAnnouncement.swift in Sources */,
 				A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */,
 				A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */,
@@ -446,6 +449,7 @@
 				A10000000000000000000066 /* RustDisplayBridge+History.swift in Sources */,
 				A10000000000000000000067 /* RustDisplayBridge+Input.swift in Sources */,
 				A10000000000000000000068 /* RustDisplayBridge+Frame.swift in Sources */,
+				A10000000000000000000069 /* MetalSurfaceView+Recovery.swift in Sources */,
 				A10000000000000000000026 /* BundledRuntimeLauncher.swift in Sources */,
 				A10000000000000000000049 /* IsolatedRuntimeDirectory.swift in Sources */,
 				A1000000000000000000000E /* RustDisplayBridge.swift in Sources */,

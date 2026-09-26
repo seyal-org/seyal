@@ -11,6 +11,10 @@ use crate::app::AppAction;
 use crate::composer::RuntimeBlockRecord;
 
 use super::decode::runtime_block_from_command;
+use super::encode::{
+    BLOCK_SELECTED, BLOCK_STATE_MASK, ROW_SELECTED, SNAP_COMPOSER, SNAP_CONTROLLER,
+    SNAP_HAS_ATTACHMENT, SNAP_HAS_EXECUTION,
+};
 use super::visual::SeyalAppTheme;
 
 fn fence_action(kind: u16, root: &ApplicationRoot) -> SeyalAppAction {

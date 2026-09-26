@@ -15,6 +15,20 @@ pub extern "C" fn seyal_bridge_last_recovery_result() -> SeyalRecoveryResult {
     LAST_RECOVERY_RESULT.with(Cell::get)
 }
 
+/// Classify a failed bridge open into a `SeyalAppRecoveryOutcome` code.
+/// Rust owns the failure_class → outcome mapping (ADR-015 / #1065).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_classify_open_result(failure_class: u8, retryable: u8) -> u32 {
+    use crate::recovery::{classify_open_result, AttemptOutcome};
+    match classify_open_result(failure_class, retryable != 0) {
+        AttemptOutcome::EndpointMissing => 3,
+        AttemptOutcome::Retryable => 4,
+        AttemptOutcome::ControllerBusy => 5,
+        AttemptOutcome::Blocked => 6,
+        AttemptOutcome::Connected | AttemptOutcome::Opened { .. } => 6,
+    }
+}
+
 /// Quiescent-only Pass 9 diagnostic. Callers must not invoke this from poll,
 /// input, resize, or render hot paths.
 #[unsafe(no_mangle)]

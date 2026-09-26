@@ -96,7 +96,25 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /** Cancel the active recovery episode (generation bump → Disconnected). */
+    SEYAL_APP_ACTION_CANCEL_RECOVERY = 53,
+    /**
+     * Advance presentation stage after connect.
+     * reserved = SEYAL_APP_RECOVERY_RESTORING (5) or SEYAL_APP_RECOVERY_USABLE (6).
+     */
+    SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE = 54,
+    /** Begin a continuity-identity commit attempt. */
+    SEYAL_APP_ACTION_BEGIN_RECONSTRUCTION = 55,
+    /**
+     * Commit Runtime/execution continuity and a fresh attachment (Rust-owned).
+     * fence_execution_* = Runtime pin; target_execution_* = execution pin;
+     * target_attachment_* = attachment pin; reserved bit0 = controller,
+     * bit1 = authoritative snapshot.
+     */
+    SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
+    /** Mark reconstruction disconnected after the host drops the live client. */
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -495,6 +513,9 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+/* Test/harness only: seyal_app_snapshot call accounting for frame-path proofs. */
+uint64_t seyal_app_test_snapshot_call_count(void);
+void seyal_app_test_reset_snapshot_call_count(void);
 
 int32_t seyal_app_last_error(uint64_t handle);
 

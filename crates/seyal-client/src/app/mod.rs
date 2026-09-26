@@ -6,12 +6,17 @@
 //! implement chrome/inspector (#880). Hosts inject clock, launch, attach, and
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
+mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod palette_apply;
 mod recovery_apply;
 mod session;
 
+use accessibility::accessibility_nodes;
+
+#[cfg(test)]
+mod recovery_tests;
 #[cfg(test)]
 mod tests;
 
@@ -32,7 +37,8 @@ use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
 use crate::recovery::{
-    AttemptOutcome, LaunchResult, RecoveryCoordinator, RecoveryEffect, RecoveryStage,
+    AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
+    RecoveryEffect, RecoveryStage,
 };
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
@@ -143,6 +149,24 @@ pub enum AppAction {
         now: Duration,
     },
     AckRecoveryEffect,
+    CancelRecovery,
+    /// Host presentation progress after connect (`RestoringInteraction` / `Usable`).
+    AdvanceRecoveryStage {
+        stage: RecoveryStage,
+    },
+    /// Begin a continuity-identity commit attempt (pins retained across episodes).
+    BeginReconstructionAttempt,
+    /// Commit Runtime/execution continuity and a fresh attachment. Rust is the
+    /// sole fencing authority (ADR-015 / #1065).
+    CommitReconstruction {
+        runtime: ContinuityIdentity,
+        execution: ContinuityIdentity,
+        attachment: ContinuityIdentity,
+        controller_authority_committed: bool,
+        authoritative_snapshot_committed: bool,
+    },
+    /// Mark reconstruction disconnected after the host drops the live client.
+    DisconnectReconstruction,
     SetComposerDraft {
         fence: AppFence,
         text: String,
@@ -327,6 +351,7 @@ pub struct ApplicationRoot {
     frozen: bool,
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
+    reconstruction: ReconstructionState,
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
@@ -362,6 +387,7 @@ impl ApplicationRoot {
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
+            reconstruction: ReconstructionState::default(),
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
@@ -442,7 +468,11 @@ impl ApplicationRoot {
         if self.frozen
             && !matches!(
                 action,
-                AppAction::AckEffect | AppAction::AckRecoveryEffect | AppAction::Quit
+                AppAction::AckEffect
+                    | AppAction::AckRecoveryEffect
+                    | AppAction::CancelRecovery
+                    | AppAction::DisconnectReconstruction
+                    | AppAction::Quit
             )
         {
             return self.fail(AppError::Frozen);
@@ -468,6 +498,23 @@ impl ApplicationRoot {
                 self.fire_scheduled_recovery(generation, now)
             }
             AppAction::AckRecoveryEffect => self.ack_recovery_effect(),
+            AppAction::CancelRecovery => self.cancel_recovery(),
+            AppAction::AdvanceRecoveryStage { stage } => self.advance_recovery_stage(stage),
+            AppAction::BeginReconstructionAttempt => self.begin_reconstruction_attempt(),
+            AppAction::CommitReconstruction {
+                runtime,
+                execution,
+                attachment,
+                controller_authority_committed,
+                authoritative_snapshot_committed,
+            } => self.commit_reconstruction(
+                runtime,
+                execution,
+                attachment,
+                controller_authority_committed,
+                authoritative_snapshot_committed,
+            ),
+            AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
             AppAction::SetComposerDraft {
                 fence,
                 text,
@@ -680,94 +727,4 @@ pub(super) fn composer_error(error: ComposerError) -> AppError {
         ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
         ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
     }
-}
-
-pub(super) fn accessibility_nodes(
-    shell: &ShellSnapshot,
-    eligibility: PresentationEligibility,
-    composer_eligible: bool,
-    output: &str,
-) -> Vec<AccessibilityNode> {
-    let pane_title = shell
-        .panes
-        .iter()
-        .find(|pane| pane.id == shell.focused_pane)
-        .map(|pane| pane.title.clone())
-        .unwrap_or_else(|| "Pane".to_owned());
-    let mut nodes = vec![
-        AccessibilityNode {
-            id: 1,
-            parent: None,
-            role: AccessibilityRole::Application,
-            label: "Seyal".to_owned(),
-            value: String::new(),
-            help: "Seyal application root".to_owned(),
-            enabled: true,
-            selected: false,
-            focused: false,
-            actions: 0,
-        },
-        AccessibilityNode {
-            id: 2,
-            parent: Some(1),
-            role: AccessibilityRole::Pane,
-            label: pane_title,
-            value: String::new(),
-            help: "Terminal pane".to_owned(),
-            enabled: true,
-            selected: true,
-            focused: true,
-            actions: 1,
-        },
-    ];
-    match eligibility {
-        PresentationEligibility::Unbound => {}
-        PresentationEligibility::Flow if composer_eligible => nodes.push(AccessibilityNode {
-            id: 3,
-            parent: Some(2),
-            role: AccessibilityRole::Composer,
-            label: "Composer".to_owned(),
-            value: String::new(),
-            help: "Flow composer is eligible; draft lifecycle is #881".to_owned(),
-            enabled: true,
-            selected: false,
-            focused: false,
-            actions: 0,
-        }),
-        PresentationEligibility::Flow => {}
-        PresentationEligibility::Raw | PresentationEligibility::Tui => {
-            nodes.push(AccessibilityNode {
-                id: 3,
-                parent: Some(2),
-                role: AccessibilityRole::Terminal,
-                label: "Terminal".to_owned(),
-                value: output.to_owned(),
-                help: "Direct terminal presentation".to_owned(),
-                enabled: true,
-                selected: false,
-                focused: true,
-                actions: 0,
-            })
-        }
-    }
-    nodes
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
-    use seyal_runtime::display::DisplayCellRole;
-    let mut text = String::new();
-    for (index, cell) in cache.cells.iter().enumerate() {
-        if cell.role == DisplayCellRole::Lead {
-            if !cell.text.is_empty() {
-                text.push_str(&String::from_utf8_lossy(&cell.text));
-            } else if cell.scalar != ' ' && cell.scalar != '\0' {
-                text.push(cell.scalar);
-            }
-        }
-        if cache.columns > 0 && (index + 1) % usize::from(cache.columns) == 0 {
-            text.push('\n');
-        }
-    }
-    text
 }

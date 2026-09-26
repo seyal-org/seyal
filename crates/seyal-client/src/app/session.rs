@@ -148,3 +148,22 @@ impl ApplicationRoot {
         Ok(())
     }
 }
+
+#[cfg(target_os = "macos")]
+pub(super) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
+    use seyal_runtime::display::DisplayCellRole;
+    let mut text = String::new();
+    for (index, cell) in cache.cells.iter().enumerate() {
+        if cell.role == DisplayCellRole::Lead {
+            if !cell.text.is_empty() {
+                text.push_str(&String::from_utf8_lossy(&cell.text));
+            } else if cell.scalar != ' ' && cell.scalar != '\0' {
+                text.push(cell.scalar);
+            }
+        }
+        if cache.columns > 0 && (index + 1) % usize::from(cache.columns) == 0 {
+            text.push('\n');
+        }
+    }
+    text
+}
