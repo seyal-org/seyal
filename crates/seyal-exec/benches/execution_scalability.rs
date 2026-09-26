@@ -262,7 +262,12 @@ mod macos {
                     executions.push(execution);
                 }
                 if gate == "idle_cpu" {
-                    std::thread::sleep(Duration::from_millis(50));
+                    let idle_ms = std::env::var("SEYAL_M002_IDLE_MS")
+                        .ok()
+                        .and_then(|value| value.parse().ok())
+                        .filter(|value: &u64| *value > 0)
+                        .unwrap_or(1000);
+                    std::thread::sleep(Duration::from_millis(idle_ms));
                 }
                 // Harness (benchmark-process) metrics: this is what Seyal's
                 // own in-process TerminalExecution/PTY/TerminalState state
@@ -309,7 +314,25 @@ mod macos {
         for _ in 0..samples {
             retained.push(sample_contract(&gate, population));
         }
-        m002_write_cohort_file(&out, cohort, &retained);
+        let population_line = format!("population = {population}");
+        let submetric_line = format!(
+            "submetric = \"{}\"",
+            if gate == "startup" {
+                "startup_child_ready_ms"
+            } else {
+                gate.as_str()
+            }
+        );
+        m002_write_cohort_file_with_lines(
+            &out,
+            cohort,
+            &retained,
+            &[
+                &population_line,
+                &submetric_line,
+                "topology = \"execution-only-headless-not-full-app\"",
+            ],
+        );
         println!(
             "[seyal scalability] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} population={population} out={out} performance_claim=false"
         );
@@ -657,11 +680,18 @@ mod macos {
         let output = Command::new("ps")
             .args(["-p", &pid.to_string(), "-o", "rss=,pcpu="])
             .output()?;
+        // Dead/reaped PIDs make `ps` exit non-zero with empty stdout.
+        if !output.status.success() {
+            return Err(io::Error::other(format!("ps -p {pid} failed")));
+        }
         let fields = String::from_utf8_lossy(&output.stdout)
             .split_whitespace()
             .map(str::parse::<f64>)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| io::Error::other(e.to_string()))?;
+        if fields.len() < 2 {
+            return Err(io::Error::other(format!("ps -p {pid} returned no metrics")));
+        }
         let threads = Command::new("ps")
             .args(["-M", &pid.to_string()])
             .output()?
