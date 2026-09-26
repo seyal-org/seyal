@@ -1,3 +1,19 @@
+//! Runtime façade: one authoritative [`Runtime`] type with responsibility modules.
+//!
+//! **Module map (#1068 — cohesion, not a second authority):**
+//! - [`config`] — `RuntimeConfig` / local-IPC mode
+//! - [`entry`] — per-execution entry + summaries
+//! - [`lifecycle`] — execution lifecycle stages
+//! - [`deadlines`] — graceful/forced reap / drain deadlines
+//! - [`registry`] — execution create/lookup/remove helpers
+//! - [`reactor_io`] — reactor poll / read buffer handling
+//! - [`shell_integration`] — shell-integration event wiring
+//! - [`local`] (macOS) — local IPC listener/session (already split further)
+//! - [`integration_state`] (macOS) — integration bookkeeping
+//!
+//! PTY/VT/canonical terminal state remain owned by each `TerminalExecution`.
+//! Do not introduce a second Runtime registry or lifecycle state engine here.
+
 use std::{
     collections::HashMap,
     sync::{
