@@ -15,48 +15,6 @@ hard_loc = 1000
 # foo_1/foo_2 siblings, or partN/ directories (review-rejected even when the detector misses).
 
 [[grandfathered]]
-path = "crates/seyal-client/src/app.rs"
-ceiling_loc = 2250
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020. Ceiling realigned to master tip after #1054 landed with a stale freeze measurement."
-
-[[grandfathered]]
-path = "crates/seyal-client/src/chrome.rs"
-ceiling_loc = 1210
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020. Ceiling realigned to master tip after #1054 landed with a stale freeze measurement."
-
-[[grandfathered]]
-path = "crates/seyal-client/src/composer/mod.rs"
-ceiling_loc = 1443
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "crates/seyal-client/src/ffi/app.rs"
-ceiling_loc = 2274
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "crates/seyal-client/src/local.rs"
-ceiling_loc = 1049
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "crates/seyal-client/src/local/attach.rs"
-ceiling_loc = 1012
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "crates/seyal-client/src/local/input_resize.rs"
-ceiling_loc = 1248
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
 ceiling_loc = 1201
 issue = 1021
@@ -95,17 +53,42 @@ note = "Pre-existing handwritten production debt recorded by #1021; decompositio
 # #993 cold UI config / theme FFI and thin-host probe realization grew these
 # grandfathered files; exceptions pin the post-merge exact LOC (no silent headroom).
 [[exception]]
-path = "crates/seyal-client/src/ffi/app.rs"
-ceiling_loc = 2576
-issue = 993
-responsibility = "Cold UI configuration / theme FFI export surface for Rust-owned settings snapshot."
-
-[[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
 ceiling_loc = 1247
 issue = 993
 responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (fonts/padding/material probe)."
 
+# #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
+# and relocated unit-test modules land in the cohesion-review band by design.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/mod.rs"
+acknowledged_loc = 773
+issue = 1020
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session apply-path extraction; further fragmentation would separate the fence/generation authority. Ceiling matches rustfmt-normalized LOC after the split."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/tests.rs"
+acknowledged_loc = 935
+issue = 1020
+reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/mod.rs"
+acknowledged_loc = 927
+issue = 1020
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction; symbols remain re-exported at the prior paths. Ceiling matches rustfmt-normalized LOC after the split."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/tests.rs"
+acknowledged_loc = 769
+issue = 1020
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module without behavioral change. Ceiling matches rustfmt-normalized LOC after the split."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/composer/tests.rs"
+acknowledged_loc = 856
+issue = 1020
+reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production composer reducer stays under review_loc. Ceiling matches rustfmt-normalized LOC after the split."
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
