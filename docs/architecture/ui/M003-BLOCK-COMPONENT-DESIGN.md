@@ -1,8 +1,10 @@
 # M003 Seyal Block Component — Design
 
-**Status:** Proposed design authority for #1010 (image-to-code Gates 1–4). Supersedes the Block chrome portion of the VF-5 plan (#934 / original #1010 body): the 3px accent and radius-free seam styling are replaced by the approved visual below.
+**Status:** Proposed design authority for #1010 (image-to-code Gates 1–4). It becomes the Accepted Block chrome design authority when this document's PR merges, by owner decision (@crdileep82). #1044 implements against the merged, Accepted text only.
 
 Higher authority is unchanged: ADR-009, ADR-015, SPEC-008 and `M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §6–8 win wherever this document is silent or conflicting.
+
+**Relationship to `M003-COMMAND-BLOCKS-REFERENCE-DESIGN.md`.** That Accepted document remains the design authority for Flow, the Pane composer, the compositor and presentation transitions. This document refines only its Block chrome rows — `completed-block`, `running-block` and the Block part of `focus` — into a concrete component: anatomy, tokens, seam actions and states. It does not supersede anything else in that document. Where the two differ on Block chrome detail, this document is the more specific authority. The VF-5 plan text in #934 and the original #1010 body carry no document authority; their Block chrome styling (3px accent, radius-free seam) is replaced by this document.
 
 ## 1. Source visual
 
@@ -43,9 +45,9 @@ Measured on the board's dark anatomy block (903 px wide, output row pitch ≈20 
 | Token | Board measurement | Normalized value | Notes |
 |---|---|---|---|
 | `block.radius` | ≈6 px | 6 pt | "minimal radius, no heavy card styling" |
-| `block.border` | 1 px hairline | 1 pt `seam_rest` | rest state |
-| `block.border.hover` | 1 px, brighter | 1 pt `seam_hover` | pointer hover |
-| `block.focus.border` | ≈1.5 px blue | 1.5 pt `block_focus` | focused/selected |
+| `block.border` | 1 px hairline | 1 pt `SeamRest` | rest state |
+| `block.border.hover` | 1 px, brighter | 1 pt `SeamHover` | pointer hover |
+| `block.focus.border` | ≈1.5 px blue | 1.5 pt `SeamFocus` | focused/selected; board blue not adopted, see §9 |
 | `block.focus.fill` | `#0f386f` over `#151a24` | none | see §9 |
 | `block.surface` | dark `#151a24`, light `#fbfdfd` | terminal canvas | must equal Metal cell background |
 | `block.gap` | ≈8 px | 8 pt | vertical rhythm between Blocks |
@@ -54,16 +56,31 @@ Measured on the board's dark anatomy block (903 px wide, output row pitch ≈20 
 | `topline.height` | ≈1.2 rows | max(cell height, 24 pt) + 4 pt | |
 | `seam.icon` | ≈14 px glyph | 12 pt SF Symbol in a 24×22 pt hit target | |
 | `seam.status` | ≈14 px filled circle | 13 pt SF Symbol, semibold | |
-| `seam.duration` | mono ≈12 px | 12 pt monospaced, `secondary` | #1043 |
+| `seam.duration` | mono ≈12 px | 12 pt monospaced, `TextSecondary` | #1043 |
 | `seam.spacing` | ≈2 px / ≈8 px | 2 pt between actions, 8 pt before status | |
 
-Colors come from Rust-resolved theme tokens (`NativeThemeRealization`). Three new Rust color roles are introduced for the Block: `block_focus` (`ColorRole::BlockFocus`, the blue family shown on the board, ≈`#3b82f6`), `seam_rest` (`ColorRole::SeamRest`) and `seam_hover` (`ColorRole::SeamHover`). They are distinct from the global `accent` and the shell `seam`, which are unchanged. Swift maps them; it never derives them. Status colors: success `success`, failed `danger`, running `block_focus`, unknown `muted`.
+**Colors.** No new color role is introduced. The Block uses the existing Rust `ColorRole`s in `crates/seyal-client/src/theme/tokens.rs`. The seam roles are the shared semantic-seam grammar (`SEYAL-UNIVERSAL-COMPONENT-CONTRACT.md` C08: "the same seam grammar is reused for Block boundaries, Pane splits, …"), so a Block border using them is the intended use, not an alias of a shell-only color.
+
+| Block use | Existing role |
+|---|---|
+| Border, rest | `SeamRest` |
+| Border, hover | `SeamHover` (its Increase Contrast adjustment stays in Rust) |
+| Border, selected | `SeamFocus` (same value as `Focus`, the reference design's "accent border") |
+| Running status glyph / spinner tint | `SeamRunning` |
+| Success status glyph | `Success` |
+| Failed status glyph | `Danger` |
+| Unknown status glyph | `TextMuted` |
+| Duration, staged command label | `TextSecondary` |
+
+`SeamAttention` is not used by #1010; attention edges stay with their own Issues. Running and failed Blocks keep the rest border; only the seam status changes (C08: status, not the whole object).
+
+Today the native host receives only `Canvas`, `TextPrimary` and `Focus` (as `accent`) across `seyal_app_theme`. It derives `seam`, `secondary` and `muted` by mixing in Swift and hard-codes `success`, `warning` and `danger` (`NativeThemeRealization.swift`). That is a known ADR-015 gap. Block chrome must not use those Swift-derived values. #1010 exports the roles in the table above across the theme FFI so Swift only maps them. Replacing the other Swift-derived values used by existing shell chrome is a separate ADR-015 cleanup outside #1010.
 
 ## 4. Typography and icons
 
 - Terminal rows use the terminal font (Metal). Seam text uses the system monospaced font at 12 pt.
 - SF Symbols: `doc.on.doc` (Copy), `play` (Rerun), `ellipsis` (More), `checkmark.circle.fill`, `xmark.circle.fill`, `questionmark.circle`; running uses a small `NSProgressIndicator` spinner.
-- Copy menu rows show the shortcut hints ⌘C / ⇧⌘C / ⌥⌘C.
+- Copy menu rows show no key equivalents. SPEC-024 §4.2 reserves `cmd+c`, and no Block copy command id exists. Hints appear only when Block copy commands are bound under SPEC-024 (see §9).
 
 ## 5. Component contracts and runtime-state mapping
 
@@ -77,7 +94,7 @@ Colors come from Rust-resolved theme tokens (`NativeThemeRealization`). Three ne
 | Selected Block | chrome `selected_block` | Rust client (#935) |
 | Action set, labels, enablement | Block action projection | Rust client (#1010) |
 | Copy text (range, chunk assembly, trim) | Block copy request | Rust client (#1010) |
-| Keyboard Block selection | SPEC-024 `flow` bindings → `SelectBlock` | Rust client (#1010) |
+| Keyboard Block-to-Block navigation | not in #1010; needs a SPEC-024 amendment (§6) | — |
 | Hover | transient pointer state | Swift host, view-local (not product state) |
 
 Swift renders and routes only (ADR-015). Pasteboard writes are the only OS side effect.
@@ -87,11 +104,23 @@ Swift renders and routes only (ADR-015). Pasteboard writes are the only OS side 
 - Clicking a Block selects it; clicking the selected Block deselects it (existing #935 path). Seam buttons keep their own clicks.
 - Actions appear on pointer hover or while the Block is selected (board rule 3).
 - **Copy** opens a menu: Copy command, Copy output, Copy command + output. The Rust client owns the whole copy: it resolves the Block's full canonical row range (`[start_line, end_line]` for output; the command text from the Block projection), fetches every history chunk the range needs, joins them in order, and trims trailing whitespace once over the assembled text, so blank lines at chunk boundaries survive. Swift receives only the final string and writes it to the pasteboard. Swift never chooses a range, caps it, keeps pending copy state, joins parts or trims.
-- **Rerun** submits the Block's command through the Rust composer path (ADR-009 submission). Rust decides enablement and fails closed. Rerun is disabled while that Block is running, while the composer is not eligible, and while the composer holds a non-empty draft. It never overwrites or restores a user's draft. The action projection carries the disabled reason for the tooltip and accessibility help.
-- **More**: Inspect, Copy command, Copy output, Rerun. **Inspect** is `ChromeAction::SelectBlock`, which binds and reveals the Block Details inspector (`M001-BLOCK-DETAILS-INSPECTOR.md`). It is a named entry point to that existing path, not a separate inspector.
+- **Rerun** re-submits the Block's recorded command through the same Rust execute admission as a composer Return: SPEC-008 §3.5 eligibility fence and §4 execute rules, with a new Block created by Runtime on successful admission. No spec yet defines Rerun (SPEC-007 lists Block rerun as not implemented; SPEC-008 is silent). Until one does, this document is the authority for the Rerun rules below, and they may only narrow SPEC-008 §4, never widen it. Rust decides enablement and fails closed. Rerun is disabled while:
+  - this Block is running;
+  - the composer is not eligible under SPEC-008 §3.5/§4, which includes the Pane's shell being busy with a different running Block, and any secret, raw, interactive or TUI state;
+  - the composer holds a non-empty draft.
+
+  Rerun never overwrites or restores a user's draft. A failed admission changes nothing and surfaces the SPEC-008 §4 functional error. The action projection carries the disabled reason for the tooltip and accessibility help.
+- **Selection reveals the inspector.** `ChromeAction::SelectBlock` always switches the inspector to Block mode and makes it visible (`crates/seyal-client/src/chrome.rs`). #1010 keeps that existing #935 behavior; it does not split selection from inspector reveal.
+- **More**: Inspect, Copy command, Copy output, Rerun. **Inspect** dispatches `ChromeAction::SelectBlock` for this Block, the same action as a click (`M001-BLOCK-DETAILS-INSPECTOR.md`). It is not a separate inspector. It is the only way to reveal the inspector for a Block that is already selected after the user hid the inspector, because clicking a selected Block deselects it. It also gives keyboard and VoiceOver users a menu path to the inspector.
 - VoiceOver: the Block is a group labelled with its command, value `selected` when selected. Its press action (`AXPress`) toggles selection through the same Rust path as a click. The status image carries its state name. Every action has a label and identifier `seyal-block-action-<id>`.
-- Keyboard selection is Rust-routed through SPEC-024 in the `flow` context: ⌘↑ selects the previous Block (from no selection, the most recent Block) and ⌘↓ selects the next Block. ⌘↓ past the most recent Block clears the selection and returns focus to the composer. These are `cmd` strokes, so they never shadow terminal input. Selection moves go through `ChromeAction::SelectBlock` / `ClearBlockSelection`; Swift keeps no selection cursor.
-- Keyboard actions: the selected Block's seam actions are in the key-view loop; Escape closes an open Block menu and is otherwise not consumed by the Block.
+- Keyboard actions: the selected Block's seam actions are in the key-view loop; Escape closes an open Block menu and is otherwise not consumed by the Block. #1010 adds no key binding.
+- **Keyboard Block-to-Block navigation is out of #1010.** SPEC-024 is Proposed, and its closed `WorkspaceCommandId` vocabulary has no Block-selection command. A design document cannot add commands or default bindings. The feature needs a SPEC-024 amendment under #1002 first, and that amendment must decide:
+  - the command ids and default chords (the board implies ⌘↑ / ⌘↓);
+  - precedence against the `composer` context: SPEC-024 §6 ranks `composer` above `flow`, and ⌘↑ / ⌘↓ are standard AppKit start/end-of-document moves in the composer text view;
+  - the focus transition when navigation moves past the most recent Block;
+  - whether a navigation step reveals the inspector, which today would require splitting selection from `SelectBlock`'s inspector reveal.
+
+  Until that amendment is Accepted, #1044 must not implement Block navigation keys.
 
 ## 7. Scrolling, clipping, overlays, z-order
 
@@ -103,17 +132,19 @@ Swift renders and routes only (ADR-015). Pasteboard writes are the only OS side 
 
 | State | Border | Seam | Board column |
 |---|---|---|---|
-| Rest | 1 pt `seam_rest` | status (+duration) | Rest / Success / Failed |
-| Hover | 1 pt `seam_hover` | actions + status | Hover / actions revealed |
-| Selected | 1.5 pt `block_focus` | actions + status | Focused / selected |
-| Running | as rest | spinner (+live duration) | Running |
-| Failed | as rest | ✕ `danger` | Failed |
+| Rest | 1 pt `SeamRest` | status (+duration) | Rest / Success / Failed |
+| Hover | 1 pt `SeamHover` | actions + status | Hover / actions revealed |
+| Selected | 1.5 pt `SeamFocus` | actions + status | Focused / selected |
+| Running | as rest | `SeamRunning` spinner (+live duration) | Running |
+| Failed | as rest | ✕ `Danger` | Failed |
 
 Hover and selection changes are immediate. The only motion is the running spinner. Under Reduce Motion (the Rust-projected `reduce_motion` preference) the spinner is replaced by a static running glyph.
 
 ## 9. Intentional deviations
 
 - **No selection fill tint.** Metal paints each terminal cell background in the canvas color, so any tint shows patches behind glyphs. Selection uses the border only.
+- **Selected border uses `SeamFocus`, not the board's blue.** The board shows a blue focus border (≈`#3b82f6`). Seyal's focus role is the shared `Focus` / `SeamFocus` family, and a second, Block-only focus color would split the focus language. Changing the focus family is a theme decision outside #1010.
+- **No shortcut hints in the Copy menu.** The board shows ⌘C / ⇧⌘C / ⌥⌘C. `cmd+c` is reserved (SPEC-024 §4.2), and no Block copy command is bound.
 - **Staged features are not shown.** Filter, Search-in-Block, Pin, Collapse, Workflow promotion, Attach-as-context and the TUI placeholder are not rendered until their own Issues land. No disabled placeholder buttons.
 - Duration and context line are staged behind #1043 and #1042.
 
@@ -127,16 +158,16 @@ Hover and selection changes are immediate. The only motion is the running spinne
 
 States: rest · hover · selected · running · success · failed · copy menu open. Compare component by component against the board columns in §8 and record rasterization tolerances.
 
-The #1010 implementation PR must deliver this evidence:
+The #1010 implementation PR must deliver this evidence. Test and attachment names are left to that PR.
 
-- **Chrome matrix, dark and light.** `SeyalBlockComponentTests.testBlockChromeStateMatrixRendersInDarkAndLight` must render every state with each Rust palette in an offscreen window and attach `1010-matrix-<theme>-<state>` images. This is how the light theme is covered, because the shipping window is pinned to dark (`AppDelegate` sets `darkAqua`); that is a product decision outside #1010.
-- **Behavior tests.** Rust tests must cover: copy of a multi-chunk output range that keeps a blank line at a chunk boundary; Rerun refused while running, while the composer is ineligible and while a draft is non-empty (draft unchanged); ⌘↑/⌘↓ selection order and clear-past-end; Reduce Motion selecting the static running glyph. XCUI must select a Block and reach its actions by keyboard only, and via VoiceOver `AXPress`.
-- **Headed capture, dark.** `SeyalBlockComponentUITests` must attach `1010-rest/hover/copy-menu/selected/running` from the real app with Metal-composited output. It will need a zsh login shell, since Blocks exist only under trusted zsh integration; hosted runners use bash and will skip it.
+- **Chrome matrix, dark and light.** A native test renders every state above with each Rust palette in an offscreen window and attaches one image per theme and state. This is how the light theme is covered, because the shipping window is pinned to dark (`AppDelegate` sets `darkAqua`); that pin is a product decision outside #1010. It interprets #1010's "captured in dark and light" criterion as this offscreen light render, and the #1010 Done review should read it that way.
+- **Behavior tests.** Rust tests cover: copy of a multi-chunk output range that keeps a blank line at a chunk boundary; Rerun refused while this Block is running, while a different Block occupies the shell, while the composer is otherwise ineligible and while a draft is non-empty, with the draft unchanged in every case; the theme export of every role in §3; Reduce Motion selecting the static running glyph. XCUI selects a Block through VoiceOver `AXPress` and reaches its seam actions through the key-view loop without the pointer.
+- **Headed capture, dark.** A UI test attaches rest, hover, copy-menu-open, selected and running captures from the real app with Metal-composited output. It needs a zsh login shell, because Blocks exist only under trusted zsh integration. Hosted runners use bash and skip it, so a skipped run is an evidence limit on #1010, not the dark matrix.
 
 ## 12. Implementation dependency graph
 
 ```text
-#1015 / PR #1019 (correct Block ranges)
+#1015 correct Block ranges (done; PR #1019 merged)
       └─► #1010 Block chrome (this document)
 #1041 ADR-009 amendment ─► #1042 context line ─► remove staged command label
 #1043 duration ───────────────────────────────► C-SEAM-DURATION
