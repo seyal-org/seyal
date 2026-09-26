@@ -87,12 +87,6 @@ issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
 
 [[grandfathered]]
-path = "crates/seyal-terminal/src/history.rs"
-ceiling_loc = 3362
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
 path = "crates/seyal-terminal/src/screen.rs"
 ceiling_loc = 1545
 issue = 1021
@@ -154,3 +148,17 @@ ceiling_loc = 1247
 issue = 993
 responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (fonts/padding/material probe)."
 
+
+# #1020 HistoryStore responsibility split: wrap occupancy math and the former
+# in-file unit-test module land in the cohesion-review band by design.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-terminal/src/history/wrap.rs"
+acknowledged_loc = 948
+issue = 1020
+reason = "Wrap occupancy/pattern/spine free functions stay one cohesive math module after HistoryStore split; further fragmentation would separate tightly coupled SPEC-010 §7 helpers."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-terminal/src/history/tests.rs"
+acknowledged_loc = 826
+issue = 1020
+reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains HistoryStore across store/query/reflow/wrap/eviction."
