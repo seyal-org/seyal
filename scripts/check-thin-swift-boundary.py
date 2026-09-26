@@ -33,10 +33,12 @@ PRODUCT_AUTHORITY = (
     "SeyalShellPreviewFactory",
     "SeyalShellProductionFactory",
     "PanePresentationSession",
-    "ComposerRequestCorrelation",
     "enum InspectorMode",
     "enum LeftPanelMode",
     "func appendCommand(",
+    # Dead remnant deleted in #1020/E7; keep scanning so a non-allowlisted host
+    # file cannot reintroduce the portable composer-correlation product type.
+    "ComposerRequestCorrelation",
 )
 
 

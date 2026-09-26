@@ -178,6 +178,16 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(terminal.exists)
     }
 
+    /// #1020: after Swift cohesion splits, headed chrome/Metal surfaces stay mounted.
+    func testCohesionSplitKeepsProductChromeAndMetalSurfacesMounted() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-product-chrome"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["terminal-input"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-thin-pane"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testFlowSurfaceIsComposerAndBlocksAlongsideCoreTerminalChrome() throws {
         let app = hostedApp()
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 10))
