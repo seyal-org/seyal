@@ -290,8 +290,9 @@ final class RustDisplayBridge {
     return true
   }
 
-  /// Starts only the trusted helper packaged inside Seyal.app. Episode-level
-  /// launch-once ownership belongs to RuntimeLifecycleRecoveryCoordinator.
+  /// Starts only the trusted helper packaged inside Seyal.app. Called only
+  /// when executing a Rust `RecoveryCoordinator` LaunchHelper effect, which
+  /// owns episode-level launch-once accounting.
   @discardableResult
   func launchBundledRuntime() -> Bool {
     let result = runtimeLauncher.launch()
@@ -359,8 +360,8 @@ final class RustDisplayBridge {
 
   /// Tears down only the disposable socket/client side of the Pane. The
   /// `reconnect` spelling is retained for source compatibility with older
-  /// callers, but replacement scheduling/opening belongs exclusively to
-  /// RuntimeLifecycleRecoveryCoordinator.
+  /// callers, but replacement scheduling/opening belongs exclusively to the
+  /// Rust `RecoveryCoordinator` and its host effect loop.
   func stop(reconnect _: Bool = false) {
     if teardown.disconnectPending {
       // Prior stop armed teardown; finish CLIENT drop on this MainActor turn.

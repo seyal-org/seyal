@@ -19,12 +19,18 @@ impl ApplicationRoot {
         launch: Option<LaunchResult>,
     ) -> Result<(), AppError> {
         let stale = generation != self.recovery.state().generation;
-        self.pending_recovery = self
+        let effects = self
             .recovery
             .complete_attempt(generation, outcome, now, launch);
         if stale {
+            // A late completion may only dispose its own handle; the current
+            // episode's queued effects stay behind that disposal.
+            let current = std::mem::take(&mut self.pending_recovery);
+            self.pending_recovery = effects;
+            self.pending_recovery.extend(current);
             return Err(AppError::StaleRecoveryGeneration);
         }
+        self.pending_recovery = effects;
         Ok(())
     }
 

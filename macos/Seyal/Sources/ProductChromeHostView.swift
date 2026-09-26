@@ -34,6 +34,16 @@ final class ProductChromeHostView: NSView {
     let inspectorColumn = NSView()
     let centerColumn = NSView()
     var recoveryTimer: Timer?
+    var recoveryTimerGeneration: UInt64 = 0
+    /// Rust recovery generation whose PerformAttempt is running on the
+    /// lifecycle queue; the effect stays queued in Rust until CompleteRecovery.
+    var recoveryAttemptInFlight: UInt64?
+    /// Blocking hello/attach runs here so the AppKit actor never becomes the
+    /// lifecycle I/O executor.
+    let recoveryLifecycleQueue = DispatchQueue(
+        label: "com.seyal.runtime.lifecycle-recovery",
+        qos: .userInitiated
+    )
     var lastSnapshotGeneration: UInt64 = .max
     var lastEligibility: UInt16 = .max
     var lastProjectedExecution = (lo: UInt64(0), hi: UInt64(0))
@@ -299,6 +309,9 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
             self?.composer.focusEditor()
         }
+        pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
+            self?.reconcileChrome()
+        }
         composer.onHistoryOpened = { [weak self] in
             self?.reconcileChrome()
         }
@@ -356,7 +369,8 @@ final class ProductChromeHostView: NSView {
     var inputSurface: InteractiveMetalSurfaceView { pane.inputSurface }
 
     func activateAfterWindowPresentation() {
-        beginRecovery()
+        // The surface is the single BeginRecovery requester; its effects
+        // reach `driveRecovery` through `onRecoveryEffectsPending`.
         pane.activateAfterWindowPresentation()
         reconcileChrome()
         applyTheme()
@@ -397,6 +411,7 @@ final class ProductChromeHostView: NSView {
             historyOverlay.reconcile()
             commandPalette.reconcile()
             driveRecovery()
+            recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
             return
         }
         lastSnapshotGeneration = snapshot.generation
@@ -420,11 +435,11 @@ final class ProductChromeHostView: NSView {
             rebuildBlocks()
         }
         applyTranscriptPresentation(snapshot)
-        recoveryLabel.stringValue = recoveryText(snapshot)
         composer.reconcile()
         historyOverlay.reconcile()
         commandPalette.reconcile()
         driveRecovery()
+        recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
         if eligibilityChanged {
             routeFocus()
         }

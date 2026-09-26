@@ -26,6 +26,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         setAccessibilityElement(true)
     }
 
+    override var recoveryAppHandle: UInt64 { appHandle }
+
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
         if seyal_app_snapshot(appHandle).eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
             onRequestComposerFocus?()
