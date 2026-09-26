@@ -102,3 +102,29 @@ fn application_root_projects_real_pty_output_through_one_execution() {
     drop(root);
     runtime.join().expect("Runtime thread");
 }
+
+#[test]
+fn application_root_live_client_owns_only_clients_registry_entry() {
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-C2'; sleep 1");
+    let client = LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+        .expect("attach production client");
+
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), client)
+        .expect("bind live client");
+    let handle = root
+        .live_client_handle_for_test()
+        .expect("root must retain registry handle only");
+    assert!(
+        seyal_client::ffi_test_client_registry_contains(handle),
+        "live client must reside in the sole CLIENTS registry"
+    );
+
+    root.poll_client(root.fence()).expect("poll via registry");
+    drop(root);
+    assert!(
+        !seyal_client::ffi_test_client_registry_contains(handle),
+        "drop must unregister the sole registry entry"
+    );
+    runtime.join().expect("Runtime thread");
+}
