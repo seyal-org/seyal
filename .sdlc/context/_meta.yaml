@@ -9,7 +9,7 @@ schema:
 framework:
   name: "ai-sdlc"
   source: ".sdlc/framework"
-  pinned_revision: "8d329477e41f00e82435fe47d49cfedd724aefc5"
+  pinned_revision: "21459b36b3ee351e35af9bfb613a8660033b7590"
 
 profile:
   active: "high_rigor"

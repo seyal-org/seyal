@@ -2,19 +2,19 @@
 
 ## Purpose
 
-Seyal is the first real consumer of AI-SDLC's generic project-context and core development-loop skills. This document records the integration boundary and the concrete Seyal scenarios used to prove that the generic procedures can be consumed without importing Seyal/terminal knowledge into AI-SDLC.
+Seyal is a reference consumer of AI-SDLC's generic project-context and core development-loop skills. This document records the integration boundary and the concrete Seyal mappings used to prove that generic procedures can be consumed without importing terminal/product policy into AI-SDLC.
 
-This is **reference-consumer integration evidence**, not the model/evaluation benchmark required before AI-SDLC is promoted on skills.sh.
+This is **reference-consumer integration evidence**, not the model/evaluation benchmark required before AI-SDLC is broadly published.
 
 ## Pinned framework
 
 Seyal consumes AI-SDLC `main` at exact commit:
 
 ```text
-8d329477e41f00e82435fe47d49cfedd724aefc5
+21459b36b3ee351e35af9bfb613a8660033b7590
 ```
 
-This is the merge commit for AI-SDLC PR #12, which folds skip-gated working-loop rules (clarify only when needed, vertical slices, quoted proof, checkable Done) into the existing generic skills. It sits on top of PR #9's `pr-review` orchestrator; focused `code-review` and criterion-level `verification` remain separate reusable capabilities.
+This pin contains the merged deterministic review-routing work from AI-SDLC PR #13, the validator correction from #19, plan-acceptance authority/revision work from #18, and resumability/candidate validation from #20. It introduces `implementation-planning` and `address-pr-review`, makes `pr-review` the single generic review/re-review entrypoint, removes generic `code-review`, requires implementation to use the exact current accepted plan, and validates resume against plan/claim/candidate state.
 
 The pin is developer tooling only and is materialized by `make bootstrap-agents` under ignored `.sdlc/framework/`. Product build/test/runtime paths do not depend on it.
 
@@ -23,92 +23,84 @@ The pin is developer tooling only and is materialized by `make bootstrap-agents`
 | Seyal entrypoint | Generic authority | Seyal-only delta |
 | --- | --- | --- |
 | `project-context` | AI-SDLC `project-context` | Seyal context/index + authority chain |
-| `development-readiness` | AI-SDLC `development-readiness` | `ISSUE-PROTOCOL.md` Ready checklist and architecture triggers |
-| `issue-refinement` | AI-SDLC `work-item-design` | GitHub Issue fields, milestone frontier, terminal evidence classification, parent/sub-issue slice claim mapping |
-| `implement-issue` | AI-SDLC `implementation` | one Issue/worktree/branch/PR, `make check`, docs/domain gates, sub-issue claim/branch mapping |
-| `code-review` | AI-SDLC `code-review` | focused terminal architecture/hot-path implementation review |
-| `verification` | AI-SDLC `verification` | Seyal Issue criterion/evidence and repository/domain gates |
-| `pr-review` | AI-SDLC `pr-review` | final terminal architecture, exact-head, performance/security/evidence and Issue-state merge gates |
-| `milestone-validation` | AI-SDLC `verification` | aggregate milestone criteria and milestone sequencing |
+| `issue-refinement` | AI-SDLC `work-item-design` | GitHub Issue fields, milestone frontier, terminal evidence classification, parent/sub-issue slice mapping |
+| `implementation-planning` | AI-SDLC `implementation-planning` | permanent terminal architecture path, Seyal evidence/domain gates; never claims the Issue or accepts the plan |
+| `development-readiness` | AI-SDLC `development-readiness` | exact accepted plan + `ISSUE-PROTOCOL.md` Ready checklist and architecture triggers |
+| `implement-issue` | AI-SDLC `implementation` | human GitHub owner, deterministic branch/worktree, same-candidate resume, repository/domain gates |
+| `verification` | AI-SDLC `verification` | Seyal Issue/candidate criterion evidence and repository/domain gates |
+| `pr-review` | AI-SDLC `pr-review` | full-candidate terminal architecture/hot-path/evidence merge gates |
+| `address-pr-review` | AI-SDLC `address-pr-review` | complete GitHub review/check inventory, bounded root-cause remediation on the same PR |
+| `milestone-validation` | AI-SDLC `verification` | aggregate milestone criteria and sequencing |
 
-`code-review` and `pr-review` are intentionally separate. `code-review` answers the narrow implementation/diff question and returns an implementation-review handoff such as `APPROVE_FOR_VERIFICATION`; `pr-review` answers whether the exact merge candidate is genuinely ready to merge and orchestrates or consumes code review, verification and risk-based specialist evidence.
+There is intentionally **no Seyal `code-review` adapter**. All review/re-review requests use `pr-review`. Review-stage remediation uses `address-pr-review`; unfinished accepted-scope work remains under `implement-issue`.
 
-Seyal intentionally does not add separate local `work-item-design` or `implementation` aliases because the existing Seyal facades remain the project discovery surface for those activities.
+Seyal intentionally does not add separate local `work-item-design` or `implementation` aliases because `issue-refinement` and `implement-issue` remain the project discovery surfaces for those activities.
 
-## Reference scenario 1 — work-item design and readiness
-
-The reference-consumer pattern begins with a bounded developer-tooling work item:
-
-- accepted outcome is explicit;
-- runtime/product behavior is an explicit non-goal unless the owning Issue says otherwise;
-- dependencies and ownership boundaries are known;
-- acceptance is measurable through deterministic pin/discovery/integration evidence.
-
-`issue-refinement` delegates generic work-item structure to AI-SDLC `work-item-design`; `development-readiness` then adds the Seyal Ready checklist. Missing architecture or an unexpected proposal to change terminal/runtime behavior routes out of the tooling work item instead of being absorbed silently.
-
-## Reference scenario 2 — implementation handoff
-
-A framework-integration Issue is constrained to developer-workflow surfaces such as:
+## Canonical Seyal consumer flow
 
 ```text
-scripts/bootstrap-dev.sh
-scripts/test-tooling.sh
-.agents/skills/* adapters/facades
-.claude/skills/* adapters
-.sdlc/context + derived index pin metadata
-docs/engineering/*
+issue-refinement
+  → AI-SDLC work-item-design
+implementation-planning
+  → PROPOSED plan_id + plan_revision
+project-defined technical-authority plan acceptance
+development-readiness
+  → READY only with exact accepted plan + Seyal Ready gates
+implement-issue
+  → NEW or same authorized IMPLEMENTATION_IN_PROGRESS candidate
+pr-review
+  → full current-candidate review
+  ├─ READY_TO_MERGE
+  └─ CHANGES_REQUIRED → address-pr-review → full pr-review
 ```
 
-The generic AI-SDLC implementation procedure supplies scope/evidence/stop semantics. `implement-issue` adds Seyal's repository workflow and required checks.
+A proposed plan is not implementation authority. Plan acceptance is distinct from planning. Seyal must never substitute a chat outline, latest plan, or related plan for the exact accepted `plan_id + plan_revision`.
 
-A correct implementation handoff is `IMPLEMENTED_FOR_REVIEW`, not `VERIFIED` or `READY_TO_MERGE`. Any discovered need to change terminal/runtime code, architecture ownership, or product behavior is a scope/authority conflict and must stop the tooling Issue.
+## Reference scenario 1 — work-item design, planning and readiness
 
-## Reference scenario 3 — focused code review
+`issue-refinement` produces one planning-ready GitHub Issue with accepted outcome, scope, acceptance, dependencies, ownership boundary and required evidence. It then hands off to `implementation-planning`, not directly to implementation.
 
-`code-review` delegates focused implementation-review discipline to AI-SDLC `code-review` and adds Seyal-specific blocking checks. It must reject at least these classes of defect when applicable:
+`implementation-planning` inspects only the code/context needed to define the permanent production path, records tests/evidence/failure paths and returns a durable **PROPOSED** plan. It does not claim the Issue, create a branch, edit production code or accept the plan.
 
-- production Rust/Swift/PTY/VT/renderer/runtime changes hidden in a tooling Issue;
-- a copied generic SDLC procedure that creates a second authoritative workflow;
-- a bootstrap pin that does not match `.sdlc` metadata/index;
-- missing generic skill files at the pinned revision;
-- incorrect facade mapping;
-- weakened tooling checks that allow drift silently.
+Only the project-defined technical-authority path may accept that exact plan revision. `development-readiness` then applies the generic readiness gate plus Seyal's `ISSUE-PROTOCOL.md` checklist.
 
-A clean focused review is only `APPROVE_FOR_VERIFICATION`; it is not a final merge verdict.
+## Reference scenario 2 — implementation and same-candidate continuation
+
+`implement-issue` maps the generic implementation preflight onto GitHub:
+
+- resolve the exact accepted plan and acceptance evidence;
+- establish exactly one human GitHub owner;
+- resolve any open candidate for the same Issue before branch/worktree creation;
+- resume the same authorized `IMPLEMENTATION_IN_PROGRESS` candidate rather than create another PR;
+- route an `IN_REVIEW` candidate with review/check remediation to `address-pr-review`;
+- block on `UNKNOWN`, conflicting ownership or multiple active candidates.
+
+A correct implementation handoff is implemented-for-review on a concrete candidate, never a self-issued verification/merge verdict.
+
+## Reference scenario 3 — PR review and remediation
+
+`pr-review` is the only review/re-review entrypoint. Every pass reviews the full current candidate, not just the latest delta, and continues after blockers to report the complete material blocker set found in that pass.
+
+For Seyal it additionally enforces terminal/runtime ownership, hot-path constraints, permanent production architecture, tests/evidence, measurements, security/domain gates and truthful Issue/PR state.
+
+When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories all unresolved review findings and failing required checks, batches root-cause remediation on the same candidate, reruns affected evidence, then returns the **entire current candidate** to `pr-review`.
 
 ## Reference scenario 4 — verification
 
-`verification` applies the AI-SDLC criterion/evidence contract to the owning Issue. Repository evidence for this integration includes:
+`verification` provides exact-revision criterion evidence for a work item or merge candidate. It cannot bypass a required `pr-review`.
+
+Repository integration evidence includes:
 
 - `scripts/test-tooling.sh` checks the exact full-SHA framework pin;
-- all required generic AI-SDLC skills are declared and verified by bootstrap;
-- the project-context tool and derived-index validation remain required;
-- `issue-refinement`, `implement-issue`, `code-review`, `pr-review`, and `milestone-validation` point to their intended generic AI-SDLC authorities;
-- direct `project-context`, `development-readiness`, `code-review`, and `verification` adapters exist for `.agents` and Claude discovery;
+- all required generic skills are declared and verified by bootstrap;
+- obsolete generic/local `code-review` discovery surfaces are absent;
+- `issue-refinement`, `implementation-planning`, `implement-issue`, `address-pr-review`, `pr-review`, and `milestone-validation` map to the intended generic authorities;
 - `.sdlc/context/_meta.yaml` and `.sdlc/graph/context-index.json` match the bootstrap pin;
 - generic procedures are not duplicated in Seyal;
 - normal product build/test/runtime commands remain independent of AI-SDLC.
 
-A passing verification proves the mapped acceptance criteria represented by that evidence; it still does not by itself issue the final exact-head merge-readiness verdict.
-
-## Reference scenario 5 — final PR review
-
-`pr-review` delegates the generic merge-readiness orchestration to AI-SDLC `pr-review` and adds Seyal's terminal/domain gates.
-
-The facade must ensure or consume:
-
-1. focused `code-review` for non-trivial production changes;
-2. criterion-level `verification` for every mandatory acceptance gate;
-3. only the specialist reviews required by the Issue/spec/risk profile;
-4. exact-head CI/check freshness;
-5. truthful benchmark/resource boundaries and exact-revision evidence where required;
-6. accurate PR/Issue/docs claims and post-merge Issue state;
-7. a final re-resolution of the PR head before `READY_TO_MERGE`.
-
-Green CI is evidence, not proof of unrepresented behavior. Hosted-environment limitations must be classified explicitly and cannot become a pass unless project-authorized alternate evidence proves the criterion on the applicable exact revision.
-
 ## What this evidence does not prove
 
-This integration does not by itself prove that AI-SDLC is ready for skills.sh. AI-SDLC still requires its declared evaluation thresholds, model/agent runs, security/privacy review, licensing/versioning decision, and clean skills CLI installation smoke before broad promotion.
+This integration does not itself make AI-SDLC product/runtime authority and does not prove publication readiness. Generic framework defects belong in `ai-sdlc`; Seyal-specific terminal/product rules remain local.
 
-Reusable defects found while operating these facades must be fixed in `ai-sdlc` first. Seyal-specific terminal/product rules remain local.
+As of this pin, AI-SDLC PR #21 (behavioral evaluation runtime) is still open upstream and therefore is **not** included in this exact commit. Pin it only after it merges and passes a separate Seyal consumer update/review.

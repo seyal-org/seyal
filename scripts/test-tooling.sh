@@ -23,10 +23,10 @@ done
 grep -q 'XCODEBUILD_MCP_VERSION=' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP is not pinned"
 grep -q 'AI_SDLC_REPO=' scripts/bootstrap-dev.sh || fail "AI-SDLC repository is not declared"
 grep -Eq 'AI_SDLC_COMMIT="[0-9a-f]{40}"' scripts/bootstrap-dev.sh || fail "AI-SDLC must be pinned by full commit SHA"
-grep -q 'AI_SDLC_COMMIT="8d329477e41f00e82435fe47d49cfedd724aefc5"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include merged working-loop revision"
+grep -q 'AI_SDLC_COMMIT="21459b36b3ee351e35af9bfb613a8660033b7590"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include merged deterministic review/plan-acceptance revision"
 grep -q '^AI_SDLC_SKILLS=(' scripts/bootstrap-dev.sh || fail "AI-SDLC skill manifest is missing"
 grep -q '^ensure_ai_sdlc()' scripts/bootstrap-dev.sh || fail "AI-SDLC materialization is missing"
-for generic_skill in project-context development-readiness work-item-design implementation code-review verification pr-review; do
+for generic_skill in project-context work-item-design implementation-planning development-readiness implementation verification pr-review address-pr-review; do
   grep -q "  ${generic_skill}$" scripts/bootstrap-dev.sh || fail "AI-SDLC generic skill is not pinned: ${generic_skill}"
 done
 grep -q 'tools/project_context.py' scripts/bootstrap-dev.sh || fail "AI-SDLC project-context tool verification is missing"
@@ -42,20 +42,23 @@ grep -q 'servers\["xcode"\]' scripts/bootstrap-dev.sh || fail "Cursor Xcode MCP 
 grep -q 'servers\["xcodebuild"\]' scripts/bootstrap-dev.sh || fail "Cursor XcodeBuildMCP setup is missing"
 grep -q 'if has claude || has codex || has cursor; then' scripts/bootstrap-dev.sh || fail "external GitHub MCP should only be provisioned for clients that need it"
 
-for adapter in project-context development-readiness verification code-review; do
+for adapter in project-context implementation-planning development-readiness verification address-pr-review; do
   [[ -f ".agents/skills/${adapter}/SKILL.md" ]] || fail "Seyal ${adapter} adapter is missing"
   [[ -f ".claude/skills/${adapter}/SKILL.md" ]] || fail "Claude ${adapter} adapter is missing"
 done
 
 [[ -f .agents/skills/pr-review/SKILL.md ]] || fail "Seyal pr-review facade is missing"
 [[ -f .claude/skills/pr-review/SKILL.md ]] || fail "Claude pr-review adapter is missing"
+[[ ! -e .agents/skills/code-review/SKILL.md ]] || fail "obsolete Seyal code-review adapter must be removed"
+[[ ! -e .claude/skills/code-review/SKILL.md ]] || fail "obsolete Claude code-review adapter must be removed"
 
 grep -q '.sdlc/framework/skills/work-item-design/SKILL.md' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must delegate to AI-SDLC work-item-design"
+grep -q '.sdlc/framework/skills/implementation-planning/SKILL.md' .agents/skills/implementation-planning/SKILL.md || fail "implementation-planning must delegate to AI-SDLC"
 grep -q '.sdlc/framework/skills/implementation/SKILL.md' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must delegate to AI-SDLC implementation"
-grep -q '.sdlc/framework/skills/code-review/SKILL.md' .agents/skills/code-review/SKILL.md || fail "code-review must delegate to AI-SDLC code-review"
+grep -q '.sdlc/framework/skills/address-pr-review/SKILL.md' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must delegate to AI-SDLC"
 grep -q '.sdlc/framework/skills/pr-review/SKILL.md' .agents/skills/pr-review/SKILL.md || fail "pr-review must delegate to AI-SDLC pr-review"
 if grep -q '.sdlc/framework/skills/code-review/SKILL.md' .agents/skills/pr-review/SKILL.md; then
-  fail "pr-review must not regress to the focused AI-SDLC code-review authority"
+  fail "pr-review must not reference removed generic code-review authority"
 fi
 grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/milestone-validation/SKILL.md || fail "milestone-validation must build on AI-SDLC verification"
 grep -q '.sdlc/framework/skills/development-readiness/SKILL.md' .agents/skills/development-readiness/SKILL.md || fail "development-readiness adapter must delegate to AI-SDLC"
