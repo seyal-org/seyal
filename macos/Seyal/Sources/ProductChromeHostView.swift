@@ -1154,7 +1154,9 @@ private final class CommandBlockView: NSView {
     }
 
     override func accessibilityChildren() -> [Any]? {
-        [body]
+        // Body is the XCUI live-tail target. Header labels stay in the
+        // accessibility tree so VoiceOver still hears prompt, command, and status.
+        [prompt, command, status, body]
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
