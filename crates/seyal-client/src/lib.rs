@@ -66,3 +66,7 @@ pub use ffi::{
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use ffi::client_registry_contains as ffi_test_client_registry_contains;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::client_registry_has_execution as ffi_test_client_registry_has_execution;
