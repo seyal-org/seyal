@@ -499,6 +499,20 @@ final class SeyalHostUITests: XCTestCase {
             .completed,
             "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
         )
+        // #1065: Rust RecoveryCoordinator owns reconnect policy; the host only
+        // executes effects (driveRecovery PerformAttempt/adopt) and projects
+        // `seyal_app_snapshot.recovery_stage` onto seyal-recovery. Usable PTY
+        // after launch (including any exhausted→explicit-retry path) must land
+        // on Connected ("connected"), not a Swift-owned recovery ladder.
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 5), "seyal-recovery AX missing")
+        let connected = NSPredicate(format: "value == %@", "connected")
+        let recoveryArrived = expectation(for: connected, evaluatedWith: recovery, handler: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [recoveryArrived], timeout: min(timeout, 10)),
+            .completed,
+            "Rust recovery stage never reached Connected; seyal-recovery AX=\(recovery.value ?? "nil")"
+        )
         assertFlowBlocksOrFail(in: app)
     }
 
