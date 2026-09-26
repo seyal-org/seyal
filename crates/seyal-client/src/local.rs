@@ -23,9 +23,7 @@ use seyal_runtime::{
 };
 
 use crate::block_cache::{quarantine_epoch, BlockApply, BlockCache};
-use crate::history_text::{
-    append_chunk, compose_block_copy, lead_cell_count, BlockCopyKind,
-};
+use crate::history_text::{append_chunk, compose_block_copy, lead_cell_count, BlockCopyKind};
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{
@@ -295,7 +293,8 @@ impl LocalDisplayClient {
             let leads = lead_cell_count(&range);
             let status = range.status;
             let pending = self.pending_block_copy.as_mut().expect("pending checked");
-            pending.last_line = append_chunk(&mut pending.text, pending.last_line, &range, chunk_start);
+            pending.last_line =
+                append_chunk(&mut pending.text, pending.last_line, &range, chunk_start);
             match status {
                 HistoryRangeStatus::Truncated if leads > 0 => {
                     let next_unit = pending.start_unit.saturating_add(leads);

@@ -262,9 +262,6 @@ mod tests {
     fn running_copy_end_caps_at_start_plus_cap() {
         assert_eq!(copy_end_line(0, None), None);
         assert_eq!(copy_end_line(4, Some(6)), Some(6));
-        assert_eq!(
-            copy_end_line(4, None),
-            Some(4 + RUNNING_COPY_LINE_CAP)
-        );
+        assert_eq!(copy_end_line(4, None), Some(4 + RUNNING_COPY_LINE_CAP));
     }
 }

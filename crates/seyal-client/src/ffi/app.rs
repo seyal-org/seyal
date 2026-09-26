@@ -730,11 +730,7 @@ pub extern "C" fn seyal_app_block_action_row(
 /// writes that string to the pasteboard when `seyal_bridge_take_block_copy`
 /// returns it. Returns 0 on accept, negative on refuse.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_request_block_copy(
-    handle: u64,
-    block_index: u32,
-    kind: u16,
-) -> i32 {
+pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, kind: u16) -> i32 {
     use crate::history_text::{copy_end_line, BlockCopyKind};
     let Some(copy_kind) = BlockCopyKind::from_u16(kind) else {
         return -6;
