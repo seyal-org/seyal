@@ -74,10 +74,6 @@ func openRuntimeRecoveryHandle(
   let result = seyal_bridge_last_recovery_result()
   return .opened(RuntimeRecoveryOpenedHandle(
     handle: handle,
-    stage: result.stage,
-    failureClass: result.failure_class,
-    retryable: result.retryable != 0,
-    connectionOrigin: result.connection_origin,
     runtimeIDLow: result.runtime_id_low,
     runtimeIDHigh: result.runtime_id_high,
     executionIDLow: result.execution_id_low,
@@ -132,10 +128,6 @@ private func runtimeRecoveryExecutionWords(_ value: String) -> (low: UInt64, hig
 
 struct RuntimeRecoveryOpenedHandle: Equatable, Sendable {
   let handle: UInt64
-  let stage: UInt8
-  let failureClass: UInt8
-  let retryable: Bool
-  let connectionOrigin: UInt8
   let runtimeIDLow: UInt64
   let runtimeIDHigh: UInt64
   let executionIDLow: UInt64

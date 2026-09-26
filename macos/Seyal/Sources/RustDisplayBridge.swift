@@ -11,10 +11,6 @@ final class RustDisplayBridge {
   typealias StatusHandler = @MainActor () -> Void
 
   struct RecoveryResult: Equatable {
-    let stage: UInt8
-    let failureClass: UInt8
-    let retryable: Bool
-    let connectionOrigin: UInt8
     let handle: UInt64
     let runtimeIDLow: UInt64
     let runtimeIDHigh: UInt64
@@ -24,10 +20,6 @@ final class RustDisplayBridge {
     let attachmentIDHigh: UInt64
 
     init(
-      stage: UInt8,
-      failureClass: UInt8,
-      retryable: Bool,
-      connectionOrigin: UInt8,
       handle: UInt64,
       runtimeIDLow: UInt64,
       runtimeIDHigh: UInt64,
@@ -36,10 +28,6 @@ final class RustDisplayBridge {
       attachmentIDLow: UInt64,
       attachmentIDHigh: UInt64
     ) {
-      self.stage = stage
-      self.failureClass = failureClass
-      self.retryable = retryable
-      self.connectionOrigin = connectionOrigin
       self.handle = handle
       self.runtimeIDLow = runtimeIDLow
       self.runtimeIDHigh = runtimeIDHigh
@@ -52,10 +40,6 @@ final class RustDisplayBridge {
     static func current() -> RecoveryResult {
       let result = seyal_bridge_last_recovery_result()
       return RecoveryResult(
-        stage: result.stage,
-        failureClass: result.failure_class,
-        retryable: result.retryable != 0,
-        connectionOrigin: result.connection_origin,
         handle: result.handle,
         runtimeIDLow: result.runtime_id_low,
         runtimeIDHigh: result.runtime_id_high,
@@ -68,10 +52,6 @@ final class RustDisplayBridge {
 
     init(opened: RuntimeRecoveryOpenedHandle) {
       self.init(
-        stage: opened.stage,
-        failureClass: opened.failureClass,
-        retryable: opened.retryable,
-        connectionOrigin: opened.connectionOrigin,
         handle: opened.handle,
         runtimeIDLow: opened.runtimeIDLow,
         runtimeIDHigh: opened.runtimeIDHigh,

@@ -299,6 +299,7 @@ fn reconstruction_commit_facts(
         let Ok(clients) = clients.try_borrow() else {
             return (false, false);
         };
+        let mut evidence = None;
         for client in clients.values() {
             let (runtime_low, runtime_high) = crate::ffi::identity_words(client.runtime_id());
             let same_client = ContinuityIdentity {
@@ -310,11 +311,16 @@ fn reconstruction_commit_facts(
             if !same_client {
                 continue;
             }
+            // Two live clients for one continuity triple is ambiguous. Fail
+            // closed instead of trusting HashMap order.
+            if evidence.is_some() {
+                return (false, false);
+            }
             let controller = client.role() == seyal_protocol::framing::Role::Controller;
             let cache = client.cache();
-            return (controller, cache.rows > 0 && cache.columns > 0);
+            evidence = Some((controller, cache.rows > 0 && cache.columns > 0));
         }
-        (false, false)
+        evidence.unwrap_or((false, false))
     })
 }
 
@@ -552,6 +558,37 @@ mod reconstruction_facts_tests {
         let _restored = probe(Role::Controller, 24, 80, runtime_id, execution_id, restored);
         assert_eq!(
             unsafe { seyal_app_apply(app, &commit_action(runtime, execution, restored_pin, 0),) },
+            0
+        );
+        assert_eq!(seyal_app_destroy(app), 0);
+    }
+
+    #[test]
+    fn two_live_clients_for_one_continuity_triple_fail_closed() {
+        let runtime_id = 0x22u128;
+        let execution_id = ExecutionId::from_bytes([0x21; 16]);
+        let attachment = AttachmentId::from_bytes([0x22; 16]);
+        let runtime = runtime_words(runtime_id);
+        let execution = words(execution_id.to_bytes());
+        let pin = words(attachment.to_bytes());
+        let app = seyal_app_create();
+        apply_begin(app);
+        let _first = probe(
+            Role::Controller,
+            24,
+            80,
+            runtime_id,
+            execution_id,
+            attachment,
+        );
+        let _second = probe(Role::Observer, 24, 80, runtime_id, execution_id, attachment);
+        assert_eq!(
+            unsafe { seyal_app_apply(app, &commit_action(runtime, execution, pin, 1 | 2)) },
+            -4
+        );
+        drop(_second);
+        assert_eq!(
+            unsafe { seyal_app_apply(app, &commit_action(runtime, execution, pin, 0)) },
             0
         );
         assert_eq!(seyal_app_destroy(app), 0);
