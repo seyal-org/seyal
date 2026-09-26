@@ -5,7 +5,7 @@ use super::types::{Segment, HISTORY_PER_EXECUTION_BYTE_CAP};
 use crate::LineId;
 use std::mem::size_of;
 
-pub const MAX_EVICTED_ID_RANGES: usize = 1_024;
+pub(crate) const MAX_EVICTED_ID_RANGES: usize = 1_024;
 pub(super) const MAX_EVICTED_BITMAP_BITS: u64 = 65_536;
 pub(super) const MAX_EVICTED_BITMAPS: usize = 8;
 pub(super) const MAX_EVICTED_OVERFLOW_RANGES: usize = 1_024;

@@ -14,8 +14,6 @@ mod wrap;
 #[cfg(test)]
 mod tests;
 
-// Retained as `history::MAX_EVICTED_ID_RANGES` for crate-internal callers.
-pub(crate) use eviction::MAX_EVICTED_ID_RANGES;
 pub use reflow::ReflowRow;
 pub use types::{
     HistoryAnchor, HistoryAnchorResolution, HistoryBreakAfter, HistoryMatch, HistoryRangeError,
