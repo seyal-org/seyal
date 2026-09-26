@@ -57,18 +57,6 @@ issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
 
 [[grandfathered]]
-path = "crates/seyal-render/src/lib.rs"
-ceiling_loc = 1051
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "crates/seyal-runtime/src/display.rs"
-ceiling_loc = 1103
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
 ceiling_loc = 1201
 issue = 1021
