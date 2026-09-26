@@ -16,8 +16,55 @@ use crate::app::APP_ABI_VERSION;
 /// Counts `seyal_app_snapshot` calls for steady-state frame-path proofs.
 static SNAPSHOT_CALLS: AtomicU64 = AtomicU64::new(0);
 
+/// Lib tests share one process, and other tests also call `seyal_app_snapshot`.
+/// The proof test holds this lock so those calls cannot change the count mid-assert.
+#[cfg(test)]
+static SNAPSHOT_COUNT_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+thread_local! {
+    static SNAPSHOT_COUNT_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 pub(super) fn note_snapshot_call() {
-    SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(test)]
+    {
+        if SNAPSHOT_COUNT_HELD.with(|held| held.get()) {
+            SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+        } else {
+            let _guard = SNAPSHOT_COUNT_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    #[cfg(not(test))]
+    {
+        SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+struct SnapshotCountHold {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl SnapshotCountHold {
+    fn acquire() -> Self {
+        let guard = SNAPSHOT_COUNT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        SNAPSHOT_COUNT_HELD.with(|held| held.set(true));
+        Self { _guard: guard }
+    }
+}
+
+#[cfg(test)]
+impl Drop for SnapshotCountHold {
+    fn drop(&mut self) {
+        SNAPSHOT_COUNT_HELD.with(|held| held.set(false));
+    }
 }
 
 /// Test/harness only: snapshot FFI call count since last reset.
@@ -279,6 +326,7 @@ mod tests {
 
     #[test]
     fn snapshot_call_counter_tracks_seyal_app_snapshot() {
+        let _hold = super::SnapshotCountHold::acquire();
         seyal_app_test_reset_snapshot_call_count();
         let handle = seyal_app_create();
         let baseline = seyal_app_test_snapshot_call_count();
