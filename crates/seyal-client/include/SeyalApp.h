@@ -109,8 +109,11 @@ enum SeyalAppActionKind {
     /**
      * Commit Runtime/execution continuity and a fresh attachment (Rust-owned).
      * fence_execution_* = Runtime pin; target_execution_* = execution pin;
-     * target_attachment_* = attachment pin; reserved bit0 = controller,
-     * bit1 = authoritative snapshot.
+     * target_attachment_* = attachment pin. `reserved` is ignored.
+     * Controller authority and authoritative-snapshot commitment are derived
+     * from the live CLIENTS entry whose identities match those pins. A missing,
+     * non-controller, or snapshot-less client fails closed. SeyalAppAction
+     * layout is unchanged.
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
@@ -513,9 +516,13 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
-/* Test/harness only: seyal_app_snapshot call accounting for frame-path proofs. */
+/* Test/harness only: seyal_app_snapshot call accounting for frame-path proofs.
+ * Lock and unlock bracket the reset/read window on the calling thread so other
+ * threads cannot change the count mid-assert. Not re-entrant. */
 uint64_t seyal_app_test_snapshot_call_count(void);
 void seyal_app_test_reset_snapshot_call_count(void);
+void seyal_app_test_lock_snapshot_call_count(void);
+void seyal_app_test_unlock_snapshot_call_count(void);
 
 int32_t seyal_app_last_error(uint64_t handle);
 

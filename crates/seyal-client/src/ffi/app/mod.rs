@@ -30,8 +30,9 @@ use encode::{
 };
 
 pub use visual::{
-    seyal_app_test_reload_ui_configuration, seyal_app_test_reset_snapshot_call_count,
-    seyal_app_test_snapshot_call_count, seyal_app_theme, seyal_app_visual,
+    seyal_app_test_lock_snapshot_call_count, seyal_app_test_reload_ui_configuration,
+    seyal_app_test_reset_snapshot_call_count, seyal_app_test_snapshot_call_count,
+    seyal_app_test_unlock_snapshot_call_count, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
 };
 

@@ -9,14 +9,21 @@ extension ProductChromeHostView {
     func recoveryText(_ snapshot: SeyalAppSnapshot) -> String {
         let stage: String
         switch snapshot.recovery_stage {
-        case 6: stage = "connected"
-        case 7: stage = "recovery exhausted"
-        case 8: stage = "blocked"
-        case 4, 5: stage = "restoring"
-        case 0: stage = "disconnected"
-        default: stage = "connecting"
+        case UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue):
+            stage = "connected"
+        case UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue):
+            stage = "recovery exhausted"
+        case UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue):
+            stage = "blocked"
+        case UInt16(SEYAL_APP_RECOVERY_RECONSTRUCTING.rawValue),
+            UInt16(SEYAL_APP_RECOVERY_RESTORING.rawValue):
+            stage = "restoring"
+        case UInt16(SEYAL_APP_RECOVERY_DISCONNECTED.rawValue):
+            stage = "disconnected"
+        default:
+            stage = "connecting"
         }
-        if snapshot.recovery_stage == 6 {
+        if snapshot.recovery_stage == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue) {
             return stage
         }
         return "\(stage) · attempts \(snapshot.recovery_attempts)"

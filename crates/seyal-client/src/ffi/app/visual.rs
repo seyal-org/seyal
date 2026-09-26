@@ -1,13 +1,17 @@
 //! Cold theme / visual FFI export for the thin AppKit host (#993).
 //!
 //! Also owns the test-only `seyal_app_snapshot` call counter used to prove
-//! steady-state frames make zero snapshot FFI (#1065).
+//! steady-state frames make zero snapshot FFI (#1065). Lib tests and the
+//! macOS component test share one process-global counter with other snapshot
+//! callers. A hold excludes those callers for the assertion window. Snapshot
+//! accounting is cold app state, not the frame loop.
 
 use std::{
+    cell::RefCell,
     ptr,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex, OnceLock,
+        Mutex, MutexGuard, OnceLock,
     },
 };
 
@@ -16,47 +20,48 @@ use crate::app::APP_ABI_VERSION;
 /// Counts `seyal_app_snapshot` calls for steady-state frame-path proofs.
 static SNAPSHOT_CALLS: AtomicU64 = AtomicU64::new(0);
 
-/// Lib tests share one process, and other tests also call `seyal_app_snapshot`.
-/// The proof test holds this lock so those calls cannot change the count mid-assert.
-#[cfg(test)]
+/// Process-global hold for snapshot-call proofs. Present in every build
+/// because the Swift component test links this library, not the `cfg(test)`
+/// artifact. The holder thread sets [`SNAPSHOT_COUNT_HELD`] so its own
+/// snapshots still count without re-locking.
 static SNAPSHOT_COUNT_LOCK: Mutex<()> = Mutex::new(());
 
-#[cfg(test)]
 thread_local! {
     static SNAPSHOT_COUNT_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SNAPSHOT_COUNT_GUARD: RefCell<Option<MutexGuard<'static, ()>>> =
+        const { RefCell::new(None) };
+}
+
+fn lock_snapshot_count() -> MutexGuard<'static, ()> {
+    let guard = SNAPSHOT_COUNT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    SNAPSHOT_COUNT_HELD.with(|held| held.set(true));
+    guard
 }
 
 pub(super) fn note_snapshot_call() {
-    #[cfg(test)]
-    {
-        if SNAPSHOT_COUNT_HELD.with(|held| held.get()) {
-            SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
-        } else {
-            let _guard = SNAPSHOT_COUNT_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-    #[cfg(not(test))]
-    {
+    if SNAPSHOT_COUNT_HELD.with(|held| held.get()) {
         SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+        return;
     }
+    let _guard = SNAPSHOT_COUNT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
 }
 
 #[cfg(test)]
 struct SnapshotCountHold {
-    _guard: std::sync::MutexGuard<'static, ()>,
+    _guard: MutexGuard<'static, ()>,
 }
 
 #[cfg(test)]
 impl SnapshotCountHold {
     fn acquire() -> Self {
-        let guard = SNAPSHOT_COUNT_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        SNAPSHOT_COUNT_HELD.with(|held| held.set(true));
-        Self { _guard: guard }
+        Self {
+            _guard: lock_snapshot_count(),
+        }
     }
 }
 
@@ -77,6 +82,28 @@ pub extern "C" fn seyal_app_test_snapshot_call_count() -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_test_reset_snapshot_call_count() {
     SNAPSHOT_CALLS.store(0, Ordering::Relaxed);
+}
+
+/// Test/harness only: hold [`SNAPSHOT_COUNT_LOCK`] on this thread until
+/// [`seyal_app_test_unlock_snapshot_call_count`]. Other threads' snapshot
+/// calls block, so a reset/read pair cannot observe them. The holder thread's
+/// own snapshots still increment the counter. Not re-entrant.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_lock_snapshot_call_count() {
+    let guard = lock_snapshot_count();
+    SNAPSHOT_COUNT_GUARD.with(|slot| {
+        *slot.borrow_mut() = Some(guard);
+    });
+}
+
+/// Test/harness only: release a hold taken by
+/// [`seyal_app_test_lock_snapshot_call_count`] on this thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_unlock_snapshot_call_count() {
+    SNAPSHOT_COUNT_HELD.with(|held| held.set(false));
+    SNAPSHOT_COUNT_GUARD.with(|slot| {
+        slot.borrow_mut().take();
+    });
 }
 
 #[repr(C)]
@@ -335,6 +362,21 @@ mod tests {
         assert_eq!(seyal_app_test_snapshot_call_count(), baseline + 2);
         seyal_app_test_reset_snapshot_call_count();
         assert_eq!(seyal_app_test_snapshot_call_count(), 0);
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn snapshot_count_ffi_hold_roundtrips_on_the_caller_thread() {
+        super::seyal_app_test_lock_snapshot_call_count();
+        seyal_app_test_reset_snapshot_call_count();
+        let handle = seyal_app_create();
+        let baseline = seyal_app_test_snapshot_call_count();
+        let _ = seyal_app_snapshot(handle);
+        assert_eq!(seyal_app_test_snapshot_call_count(), baseline + 1);
+        super::seyal_app_test_unlock_snapshot_call_count();
+        // A second acquire must not deadlock after unlock.
+        super::seyal_app_test_lock_snapshot_call_count();
+        super::seyal_app_test_unlock_snapshot_call_count();
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

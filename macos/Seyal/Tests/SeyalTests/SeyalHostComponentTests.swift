@@ -638,6 +638,8 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         view.suppressesAutomaticBridgeRecovery = true
         view.recoveryPresentationPending = false
+        seyal_app_test_lock_snapshot_call_count()
+        defer { seyal_app_test_unlock_snapshot_call_count() }
         seyal_app_test_reset_snapshot_call_count()
         XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
         XCTAssertTrue(view.advanceRecoveryPresentationIfReady())

@@ -88,7 +88,9 @@ func openRuntimeRecoveryHandle(
 }
 
 /// Asks Rust `ReconstructionState` to fence continuity identity. Returns true
-/// only when the commit succeeds; identity mismatch fails closed in Rust.
+/// only when the commit succeeds. Controller authority and the authoritative
+/// snapshot are taken from the live `CLIENTS` entry matching these pins;
+/// identity mismatch or a missing client fails closed in Rust.
 @discardableResult
 func commitRuntimeReconstruction(
   _ appHandle: UInt64,
@@ -108,8 +110,6 @@ func commitRuntimeReconstruction(
     $0.target_execution_hi = executionHigh
     $0.target_attachment_lo = attachmentLow
     $0.target_attachment_hi = attachmentHigh
-    // bit0 = controller authority, bit1 = authoritative snapshot.
-    $0.reserved = 1 | 2
   }
   return result == 0
 }

@@ -560,5 +560,76 @@ pub(crate) fn validate_composer_status(
         && current.is_none_or(|current| status.revision > current.revision)
 }
 
+/// In-process client for reconstruction-fact tests. Rows and columns are the
+/// same gate `finish_attach` uses for a committed snapshot (`> 0`).
+#[cfg(test)]
+pub(crate) fn reconstruction_probe_client(
+    role: Role,
+    rows: u16,
+    columns: u16,
+    runtime_id: u128,
+    execution_id: ExecutionId,
+    attachment_id: AttachmentId,
+) -> LocalDisplayClient {
+    let (stream, _peer) = UnixStream::pair().expect("probe socket");
+    let mut cache = seyal_runtime::display::empty_cache();
+    cache.rows = rows;
+    cache.columns = columns;
+    LocalDisplayClient {
+        stream,
+        buffered: Vec::new(),
+        read_offset: 0,
+        pending_batch: display_apply::PendingDisplayBatch::default(),
+        outbound: VecDeque::new(),
+        outbound_wire_bytes: 0,
+        runtime_id,
+        execution_id,
+        attachment_id,
+        role,
+        block_metadata_negotiated: false,
+        extended_terminal_key_supported: false,
+        block_cache: BlockCache::default(),
+        cache,
+        prepared: PreparedSurface::default(),
+        last_preparation: PreparationResult {
+            generation: 0,
+            rebuilt_rows: RowDamage::none(),
+            rebuilt_row_count: 0,
+            rebuilt_cell_count: 0,
+            full_rebuild: false,
+        },
+        needs_initial_prepare: false,
+        next_resize_request_id: 1,
+        desired_geometry: None,
+        committed_geometry: GridGeometry {
+            rows: 1,
+            columns: 1,
+        },
+        unresolved_resizes: VecDeque::new(),
+        applied_awaiting_projection: None,
+        retry_suppression: None,
+        resync_needed: false,
+        input_failure: None,
+        resize_failure: None,
+        block_timeline: BlockTimeline {
+            revision: 0,
+            records: Vec::new(),
+        },
+        command_blocks_supported: false,
+        last_composer_result: None,
+        composer_status: None,
+        pending_composer_requests: std::collections::HashSet::new(),
+        next_composer_request_id: 1,
+        history_ranges: HashMap::new(),
+        history_requests: HashMap::new(),
+        next_history_request_id: 1,
+        copied_text: Vec::new(),
+        last_admitted_v2_action_id: 0,
+        last_sent_v2_action_id: 0,
+        highest_v2_error_id: 0,
+        last_admitted_mouse_action_id: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests;
