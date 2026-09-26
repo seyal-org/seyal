@@ -1,13 +1,14 @@
-use super::types::{HistoryUnit, SegmentLine, SegmentUnit};
-use super::*;
 use super::eviction::{
-    MAX_EVICTED_BITMAP_BITS, MAX_EVICTED_BITMAPS, MAX_EVICTED_ID_RANGES, MAX_EVICTED_OVERFLOW_RANGES,
+    MAX_EVICTED_BITMAPS, MAX_EVICTED_BITMAP_BITS, MAX_EVICTED_ID_RANGES,
+    MAX_EVICTED_OVERFLOW_RANGES,
 };
 use super::reflow::reflow_rows_allocated_bytes;
+use super::types::{HistoryUnit, SegmentLine, SegmentUnit};
 use super::wrap::{
     wrap_occupancy, wrap_repeating_period, wrap_runs_unit_sum, APERIODIC_EXTEND_CELL_FACTOR,
     APERIODIC_INLINE_RUN_BOUND, WRAP_PATTERN_MAX,
 };
+use super::*;
 use crate::{LineId, Style};
 use std::mem::size_of;
 

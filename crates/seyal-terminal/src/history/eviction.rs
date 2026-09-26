@@ -1,9 +1,7 @@
 //! Evicted identity ranges and sparse eviction bitmaps.
 
 use super::store::HistoryStore;
-use super::types::{
-    HISTORY_PER_EXECUTION_BYTE_CAP, Segment,
-};
+use super::types::{Segment, HISTORY_PER_EXECUTION_BYTE_CAP};
 use crate::LineId;
 use std::mem::size_of;
 
@@ -136,7 +134,6 @@ impl EvictedBitmap {
         }
     }
 }
-
 
 impl HistoryStore {
     pub(super) fn evict_to_cap(&mut self) {
@@ -333,7 +330,11 @@ impl HistoryStore {
             .is_some_and(|range| line_id >= range.first)
     }
 
-    pub(super) fn overflow_intersects(start: LineId, end: LineId, ranges: &[EvictedIdRange]) -> bool {
+    pub(super) fn overflow_intersects(
+        start: LineId,
+        end: LineId,
+        ranges: &[EvictedIdRange],
+    ) -> bool {
         let index = ranges.partition_point(|range| range.last < start);
         ranges.get(index).is_some_and(|range| range.first <= end)
     }
@@ -377,5 +378,4 @@ impl HistoryStore {
         }
         Self::overflow_contains(line_id, &self.evicted_id_ranges)
     }
-
 }

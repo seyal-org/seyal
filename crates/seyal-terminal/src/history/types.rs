@@ -244,7 +244,6 @@ pub(crate) enum HistoryLineRef<'a> {
     Tail(&'a HistoryLine),
 }
 
-
 #[derive(Clone, Copy)]
 pub(super) enum HistoryUnitRef<'a> {
     Sealed(&'a Segment, &'a SegmentUnit),
@@ -410,4 +409,3 @@ impl<'a> HistoryLineRef<'a> {
         cells
     }
 }
-

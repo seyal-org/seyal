@@ -8,7 +8,7 @@ use super::types::{
     HISTORY_TAIL_PAYLOAD_LIMIT, NEXT_SEGMENT_AGE,
 };
 use super::wrap::{
-    wrap_chain_pattern, APERIODIC_EXTEND_CELL_FACTOR, APERIODIC_INLINE_RUN_BOUND, WrapChain,
+    wrap_chain_pattern, WrapChain, APERIODIC_EXTEND_CELL_FACTOR, APERIODIC_INLINE_RUN_BOUND,
 };
 use crate::{grapheme_store::GraphemeStore, Cell, LineId};
 use std::cell::RefCell;
@@ -48,7 +48,6 @@ pub(crate) struct HistoryStore {
     /// Derived (§9.1), not resident source; closed hard-broken rows are omitted.
     pub(super) wrap_chains: VecDeque<WrapChain>,
 }
-
 
 impl HistoryStore {
     pub(crate) fn entries(&self) -> impl Iterator<Item = HistoryLineRef<'_>> {
@@ -219,7 +218,6 @@ impl HistoryStore {
         };
         (collected, from, start_col)
     }
-
 
     pub(crate) fn truncate_from(&mut self, from: HistoryAnchor) {
         self.reflow_cache.get_mut().take();
@@ -508,6 +506,4 @@ impl HistoryStore {
                     .sum::<usize>(),
             );
     }
-
-
 }

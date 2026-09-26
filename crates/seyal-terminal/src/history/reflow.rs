@@ -49,7 +49,6 @@ pub(super) fn reflow_rows_allocated_bytes(rows: &Vec<ReflowRow>) -> usize {
         )
 }
 
-
 impl HistoryStore {
     pub(crate) fn reflow(&self, cols: u16, max_rows: usize) -> Vec<ReflowRow> {
         self.reflow_from(cols, max_rows, 0)
@@ -185,5 +184,4 @@ impl HistoryStore {
         }
         rows
     }
-
 }

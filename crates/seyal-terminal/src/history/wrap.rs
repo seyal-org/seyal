@@ -95,7 +95,11 @@ pub(super) fn wrap_chain_pattern(chain: &WrapChain) -> Option<&[(u8, u32)]> {
     }
 }
 
-pub(super) fn wrap_chain_is_compacted(chain: &WrapChain, run_units: u32, virtual_units: u32) -> bool {
+pub(super) fn wrap_chain_is_compacted(
+    chain: &WrapChain,
+    run_units: u32,
+    virtual_units: u32,
+) -> bool {
     let k = chain.pattern_len as usize;
     chain.pattern_len >= 2 && k > 0 && chain.runs.len() <= k && run_units < virtual_units
 }
@@ -172,7 +176,11 @@ pub(super) fn wrap_pattern_slice(pattern: &[(u8, u32)], start: u32, count: u32) 
     runs
 }
 
-pub(super) fn append_compacted_wrap_runs(chain: &mut WrapChain, units: &[HistoryUnit], prefix_units: u32) {
+pub(super) fn append_compacted_wrap_runs(
+    chain: &mut WrapChain,
+    units: &[HistoryUnit],
+    prefix_units: u32,
+) {
     for (index, unit) in units.iter().enumerate() {
         let width = unit.width.max(1);
         let unit_index = chain
@@ -379,7 +387,11 @@ pub(super) fn note_pattern_after_suffix_trim(chain: &mut WrapChain) {
     }
 }
 
-pub(super) fn note_pattern_after_prefix_trim(chain: &mut WrapChain, drop_units: u32, period_units: u32) {
+pub(super) fn note_pattern_after_prefix_trim(
+    chain: &mut WrapChain,
+    drop_units: u32,
+    period_units: u32,
+) {
     let n = chain.runs.len();
     if n <= 1 {
         chain.pattern_len = n as u32;
@@ -495,7 +507,11 @@ pub(super) fn line_wholly_before(entry: HistoryLineRef<'_>, from: HistoryAnchor)
 
 /// Occupancy of the SoftWrap chain containing `from` when the derived wrap
 /// index is absent. Walks only that chain, not all retained history.
-pub(super) fn wrap_occupancy_from_canonical(store: &HistoryStore, from: HistoryAnchor, cols: usize) -> usize {
+pub(super) fn wrap_occupancy_from_canonical(
+    store: &HistoryStore,
+    from: HistoryAnchor,
+    cols: usize,
+) -> usize {
     let mut fragments_rev: Vec<Vec<(u8, u32)>> = Vec::new();
     let mut saw_soft = false;
     for entry in store.reverse_entries() {
@@ -589,7 +605,11 @@ pub(super) fn wrap_occupancy_for_runs(runs: &[(u8, u32)], cols: usize, unit_limi
     }
 }
 
-pub(super) fn wrap_occupancy_with_ephemeral_spine(runs: &[(u8, u32)], cols: usize, unit_limit: u32) -> usize {
+pub(super) fn wrap_occupancy_with_ephemeral_spine(
+    runs: &[(u8, u32)],
+    cols: usize,
+    unit_limit: u32,
+) -> usize {
     if cols == 0 || unit_limit == 0 || runs.is_empty() {
         return 0;
     }
@@ -629,7 +649,11 @@ pub(super) fn wrap_occupancy_runs(runs: &[(u8, u32)], cols: usize, unit_limit: u
     used.min(cols)
 }
 
-pub(super) fn wrap_occupancy_repeating(pattern: &[(u8, u32)], cols: usize, unit_limit: u32) -> usize {
+pub(super) fn wrap_occupancy_repeating(
+    pattern: &[(u8, u32)],
+    cols: usize,
+    unit_limit: u32,
+) -> usize {
     let pattern_units = pattern
         .iter()
         .map(|(_, count)| *count)
@@ -694,7 +718,6 @@ pub(super) fn wrap_occupancy(unit_widths: &[u8], cols: usize) -> usize {
         u32::try_from(unit_widths.len()).unwrap_or(u32::MAX),
     )
 }
-
 
 impl HistoryStore {
     /// Display column at `from` for a new width. Repeating mixed-width
@@ -944,5 +967,4 @@ impl HistoryStore {
                     .sum::<usize>(),
             )
     }
-
 }

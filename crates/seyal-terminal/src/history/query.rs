@@ -164,5 +164,4 @@ impl HistoryStore {
         }
         Ok(selected)
     }
-
 }
