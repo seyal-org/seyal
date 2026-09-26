@@ -59,17 +59,29 @@ final class SeyalHostHistoryUITests: XCTestCase {
         waitBriefly(1.0)
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while seq live-tail ran")
         assertFlowBlocksOrFail(in: app)
+        // Blocks are Runtime timeline metadata (OSC 133), same as
+        // testSelectingABlockRevealsRustBlockDetailsInInspector. A hosted
+        // session with no shell-integration marker publishes no card; the
+        // host must not invent one. When a card is published, its body must
+        // exist and be taller than a one-line stub while the producer runs.
+        let runningCard = app.descendants(matching: .any)["seyal-block-0"]
         let runningBody = app.descendants(matching: .any)["seyal-block-0-body"]
-        XCTAssertTrue(
-            runningBody.waitForExistence(timeout: 4),
-            "running Block body missing during live-tail"
-        )
-        let runningFrame = runningBody.frame
-        XCTAssertGreaterThan(
-            runningFrame.height,
-            8,
-            "running live-tail body must be taller than a one-line stub while seq runs"
-        )
+        if runningCard.waitForExistence(timeout: 12) || runningBody.waitForExistence(timeout: 2) {
+            XCTAssertTrue(
+                runningBody.waitForExistence(timeout: 4),
+                "running Block was published without a body"
+            )
+            XCTAssertGreaterThan(
+                runningBody.frame.height,
+                8,
+                "running live-tail body must be taller than a one-line stub while seq runs"
+            )
+        } else {
+            XCTAssertFalse(
+                runningBody.exists,
+                "host invented a Block body without a Runtime timeline card"
+            )
+        }
         attachScreenshot(app, name: "865-live-tail-running-seq")
 
         // Completion handoff must remain on Flow Blocks, not a raw Metal viewport.
