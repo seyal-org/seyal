@@ -96,7 +96,14 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /** Cancel the active recovery episode (generation bump → Disconnected). */
+    SEYAL_APP_ACTION_CANCEL_RECOVERY = 53,
+    /**
+     * Advance presentation stage after connect.
+     * reserved = SEYAL_APP_RECOVERY_RESTORING (5) or SEYAL_APP_RECOVERY_USABLE (6).
+     */
+    SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE = 54
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */

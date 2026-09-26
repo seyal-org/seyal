@@ -46,4 +46,21 @@ impl ApplicationRoot {
         }
         Ok(())
     }
+
+    pub(super) fn cancel_recovery(&mut self) -> Result<(), AppError> {
+        self.recovery.cancel();
+        self.pending_recovery.clear();
+        Ok(())
+    }
+
+    pub(super) fn advance_recovery_stage(
+        &mut self,
+        stage: crate::recovery::RecoveryStage,
+    ) -> Result<(), AppError> {
+        if self.recovery.advance_presentation_stage(stage) {
+            Ok(())
+        } else {
+            Err(AppError::InvalidPayload)
+        }
+    }
 }

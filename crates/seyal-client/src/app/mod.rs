@@ -143,6 +143,11 @@ pub enum AppAction {
         now: Duration,
     },
     AckRecoveryEffect,
+    CancelRecovery,
+    /// Host presentation progress after connect (`RestoringInteraction` / `Usable`).
+    AdvanceRecoveryStage {
+        stage: RecoveryStage,
+    },
     SetComposerDraft {
         fence: AppFence,
         text: String,
@@ -442,7 +447,10 @@ impl ApplicationRoot {
         if self.frozen
             && !matches!(
                 action,
-                AppAction::AckEffect | AppAction::AckRecoveryEffect | AppAction::Quit
+                AppAction::AckEffect
+                    | AppAction::AckRecoveryEffect
+                    | AppAction::CancelRecovery
+                    | AppAction::Quit
             )
         {
             return self.fail(AppError::Frozen);
@@ -468,6 +476,8 @@ impl ApplicationRoot {
                 self.fire_scheduled_recovery(generation, now)
             }
             AppAction::AckRecoveryEffect => self.ack_recovery_effect(),
+            AppAction::CancelRecovery => self.cancel_recovery(),
+            AppAction::AdvanceRecoveryStage { stage } => self.advance_recovery_stage(stage),
             AppAction::SetComposerDraft {
                 fence,
                 text,

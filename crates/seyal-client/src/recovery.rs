@@ -215,6 +215,21 @@ impl RecoveryCoordinator {
         self.state.cancel();
     }
 
+    /// Host reports presentation progress after connect (SPEC-009 §10).
+    /// Only RestoringInteraction and Usable are accepted, and only after
+    /// Reconstructing (or RestoringInteraction → Usable).
+    pub fn advance_presentation_stage(&mut self, stage: RecoveryStage) -> bool {
+        match (self.state.stage, stage) {
+            (RecoveryStage::Reconstructing, RecoveryStage::RestoringInteraction)
+            | (RecoveryStage::Reconstructing, RecoveryStage::Usable)
+            | (RecoveryStage::RestoringInteraction, RecoveryStage::Usable) => {
+                self.state.stage = stage;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn scheduled_fire(&mut self, generation: u64, now: Duration) -> Vec<RecoveryEffect> {
         if generation != self.state.generation {
             return Vec::new();
@@ -648,4 +663,31 @@ mod tests {
         assert!(!state.commit(runtime, execution, attachment, true, true));
         assert_eq!(state.stage, ReconstructionStage::BlockedIdentityMismatch);
     }
+
+
+    #[test]
+    fn advance_presentation_stage_after_connect() {
+        let mut c = RecoveryCoordinator::default();
+        let now = Duration::ZERO;
+        let _ = c.begin_episode(now);
+        let generation = c.state().generation;
+        let _ = c.complete_attempt(generation, AttemptOutcome::Connected, now, None);
+        assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
+        assert!(c.advance_presentation_stage(RecoveryStage::RestoringInteraction));
+        assert_eq!(c.state().stage, RecoveryStage::RestoringInteraction);
+        assert!(c.advance_presentation_stage(RecoveryStage::Usable));
+        assert_eq!(c.state().stage, RecoveryStage::Usable);
+        assert!(!c.advance_presentation_stage(RecoveryStage::Discovering));
+    }
+
+    #[test]
+    fn cancel_clears_active_episode() {
+        let mut c = RecoveryCoordinator::default();
+        let _ = c.begin_episode(Duration::ZERO);
+        assert!(c.is_active());
+        c.cancel();
+        assert!(!c.is_active());
+        assert_eq!(c.state().stage, RecoveryStage::Disconnected);
+    }
+
 }
