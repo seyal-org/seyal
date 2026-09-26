@@ -57,18 +57,6 @@ issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
 
 [[grandfathered]]
-path = "crates/seyal-protocol/src/framing.rs"
-ceiling_loc = 1107
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "crates/seyal-protocol/src/pass7.rs"
-ceiling_loc = 1940
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
 path = "crates/seyal-render/src/lib.rs"
 ceiling_loc = 1051
 issue = 1021
