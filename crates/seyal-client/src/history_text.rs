@@ -2,15 +2,20 @@
 //! (#1010 Block Copy). Reads only the canonical rows Runtime already sent;
 //! never a second terminal model.
 //!
+//! Runtime omits rows that hold no cells, so a blank terminal row reaches the
+//! client only as a gap in `LineId`s. Line breaks therefore come from the ids,
+//! not from the row count. Multi-chunk replies accumulate into one
+//! [`BlockCopyText`] and trim trailing whitespace once over the whole range
+//! (M003-BLOCK-COMPONENT-DESIGN §6).
+//!
 //! Known limit: history rows carry no soft-wrap flag, so a wrapped logical
-//! line copies as one line per terminal row. Multi-chunk replies accumulate
-//! here and trim only once over the whole range (ADR-015).
+//! line copies as one line per terminal row.
 
 use seyal_protocol::local_ipc::framing::{HistoryRangeSnapshot, HISTORY_CELL_CONTINUATION_FLAG};
 
-/// Running Blocks have no end line yet; Copy output is capped at this many
-/// lines from the start anchor so the request stays bounded.
-pub(crate) const RUNNING_COPY_LINE_CAP: u64 = 511;
+/// Upper bound on one Block copy, matching the Runtime per-execution history
+/// byte cap. A range that would exceed it fails closed instead of growing.
+pub(crate) const MAX_BLOCK_COPY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Copy kind matching `SEYAL_APP_BLOCK_ACTION_COPY_*` for output-bearing copies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,96 +35,109 @@ impl BlockCopyKind {
     }
 }
 
-/// End line for a Block copy request. Finished Blocks use the Runtime end;
-/// running Blocks fall back to `start + RUNNING_COPY_LINE_CAP`.
-pub(crate) fn copy_end_line(start_line: u64, end_line: Option<u64>) -> Option<u64> {
-    if start_line == 0 {
-        return None;
-    }
-    Some(match end_line {
-        Some(end) if end >= start_line => end,
-        _ => start_line.saturating_add(RUNNING_COPY_LINE_CAP),
-    })
+/// A reply that cannot be placed in the requested range: a row outside
+/// `[start_line, end_line]`, a row id that moves backwards, or text above
+/// [`MAX_BLOCK_COPY_BYTES`]. The copy is abandoned rather than guessed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CopyTextRejected;
+
+/// Output text for one `[start_line, end_line]` range, built across every
+/// history chunk the range needs.
+#[derive(Clone, Debug)]
+pub(crate) struct BlockCopyText {
+    text: String,
+    start_line: u64,
+    end_line: u64,
+    /// Id of the row the text currently ends in; 0 before the first row.
+    last_line: u64,
 }
 
-/// One history chunk as plain text with per-row trailing spaces trimmed, but
-/// **without** dropping trailing empty rows — those are owned by the whole
-/// range and removed only in [`finalize_plain_text`].
-pub(crate) fn chunk_plain_text(range: &HistoryRangeSnapshot) -> String {
-    let mut text = String::new();
-    for (index, row) in range.rows.iter().enumerate() {
-        if index > 0 {
-            text.push('\n');
+impl BlockCopyText {
+    pub(crate) fn new(start_line: u64, end_line: u64) -> Self {
+        Self {
+            text: String::new(),
+            start_line,
+            end_line,
+            last_line: 0,
         }
-        let row_start = text.len();
-        for cell in &row.cells {
-            if cell.flags & HISTORY_CELL_CONTINUATION_FLAG != 0 {
-                continue;
+    }
+
+    /// Append one reply. Rows sharing the previous row's id continue that row
+    /// (a row split across chunks). Every id step is one line break, so rows
+    /// Runtime omitted as blank come back as empty lines. A row's trailing
+    /// spaces are trimmed only once the next row starts, so spaces at a chunk
+    /// boundary survive.
+    pub(crate) fn append(&mut self, range: &HistoryRangeSnapshot) -> Result<(), CopyTextRejected> {
+        for row in &range.rows {
+            let id = row.line_id;
+            if id < self.start_line || id > self.end_line || id < self.last_line {
+                return Err(CopyTextRejected);
             }
-            match cell.sidecar_utf8(&range.sidecar) {
-                Ok(Some(bytes)) => text.push_str(std::str::from_utf8(bytes).unwrap_or(" ")),
-                _ => text.push(
-                    char::from_u32(cell.scalar)
-                        .filter(|c| *c != '\0')
-                        .unwrap_or(' '),
-                ),
+            if id != self.last_line {
+                let breaks = if self.last_line == 0 {
+                    id - self.start_line
+                } else {
+                    trim_last_line(&mut self.text);
+                    id - self.last_line
+                };
+                let breaks = usize::try_from(breaks).map_err(|_| CopyTextRejected)?;
+                if breaks > MAX_BLOCK_COPY_BYTES - self.text.len() {
+                    return Err(CopyTextRejected);
+                }
+                self.text.extend(std::iter::repeat_n('\n', breaks));
+                self.last_line = id;
+            }
+            for cell in &row.cells {
+                if cell.flags & HISTORY_CELL_CONTINUATION_FLAG != 0 {
+                    continue;
+                }
+                match cell.sidecar_utf8(&range.sidecar) {
+                    Ok(Some(bytes)) => self
+                        .text
+                        .push_str(std::str::from_utf8(bytes).unwrap_or(" ")),
+                    _ => self.text.push(
+                        char::from_u32(cell.scalar)
+                            .filter(|c| *c != '\0')
+                            .unwrap_or(' '),
+                    ),
+                }
+            }
+            if self.text.len() > MAX_BLOCK_COPY_BYTES {
+                return Err(CopyTextRejected);
             }
         }
-        let trimmed = text[row_start..].trim_end().len();
-        text.truncate(row_start + trimmed);
+        Ok(())
     }
-    text
+
+    /// The assembled output with trailing whitespace trimmed once.
+    pub(crate) fn finish(mut self) -> String {
+        let trimmed = self.text.trim_end().len();
+        self.text.truncate(trimmed);
+        self.text
+    }
 }
 
-/// Append one chunk onto an accumulator. When the prior chunk ended on the
-/// same line the next starts on, the chunks share a line and no `\n` is
-/// inserted; otherwise a newline separates them.
-pub(crate) fn append_chunk(
-    dest: &mut String,
-    prior_last_line: u64,
-    chunk: &HistoryRangeSnapshot,
-    chunk_start_line: u64,
-) -> u64 {
-    let piece = chunk_plain_text(chunk);
-    if piece.is_empty() {
-        return if chunk_start_line == 0 {
-            prior_last_line
-        } else {
-            chunk
-                .rows
-                .last()
-                .map(|row| row.line_id)
-                .unwrap_or(chunk_start_line)
-        };
-    }
-    if !dest.is_empty() && !(prior_last_line != 0 && chunk_start_line == prior_last_line) {
-        dest.push('\n');
-    }
-    dest.push_str(&piece);
-    chunk
-        .rows
-        .last()
-        .map(|row| row.line_id)
-        .unwrap_or(chunk_start_line)
+fn trim_last_line(text: &mut String) {
+    let line_start = text.rfind('\n').map_or(0, |index| index + 1);
+    let trimmed = text[line_start..].trim_end().len();
+    text.truncate(line_start + trimmed);
 }
 
-/// Drop trailing empty lines once the whole range is assembled.
-pub(crate) fn finalize_plain_text(mut text: String) -> String {
-    let trimmed = text.trim_end_matches('\n').len();
-    text.truncate(trimmed);
-    text
-}
-
-/// Full single-range projection: chunk text plus a final trailing trim.
+/// Full single-range projection, starting at the reply's first row.
 pub(crate) fn plain_text(range: &HistoryRangeSnapshot) -> String {
-    finalize_plain_text(chunk_plain_text(range))
+    let Some(first) = range.rows.first() else {
+        return String::new();
+    };
+    let mut text = BlockCopyText::new(first.line_id, u64::MAX);
+    match text.append(range) {
+        Ok(()) => text.finish(),
+        Err(CopyTextRejected) => String::new(),
+    }
 }
 
-/// Compose the pasteboard string for a Block copy kind. Output-only kinds
-/// return the finalized output; command+output joins with a single `\n`
-/// when both sides are non-empty.
+/// Compose the pasteboard string for a Block copy kind. Command+output joins
+/// with a single `\n` when both sides are non-empty.
 pub(crate) fn compose_block_copy(kind: BlockCopyKind, command: &str, output: String) -> String {
-    let output = finalize_plain_text(output);
     match kind {
         BlockCopyKind::Output => output,
         BlockCopyKind::CommandAndOutput => {
@@ -195,7 +213,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_interior_blank_rows_and_blank_cells() {
+    fn blank_rows_omitted_by_runtime_come_back_from_line_id_gaps() {
+        // Runtime sends no row for a blank terminal row: `printf 'a\n\nb c\n\n\nz'`
+        // arrives as ids 1, 3, 6.
         let mut sidecar = Vec::new();
         let mut first = row(1, "a", &mut sidecar);
         first
@@ -204,8 +224,17 @@ mod tests {
         first
             .cells
             .push(HistoryCell::from_text("b", 0, 0, 0, &mut sidecar).unwrap());
-        let rows = vec![first, row(2, "", &mut sidecar), row(3, "c", &mut sidecar)];
-        assert_eq!(plain_text(&range(rows, sidecar)), "a b\n\nc");
+        let rows = vec![first, row(3, "c", &mut sidecar), row(6, "z", &mut sidecar)];
+        assert_eq!(plain_text(&range(rows, sidecar)), "a b\n\nc\n\n\nz");
+    }
+
+    #[test]
+    fn leading_blank_output_rows_count_from_the_block_start_line() {
+        let mut sidecar = Vec::new();
+        let chunk = range(vec![row(12, "x", &mut sidecar)], sidecar);
+        let mut text = BlockCopyText::new(10, 20);
+        text.append(&chunk).unwrap();
+        assert_eq!(text.finish(), "\n\nx");
     }
 
     #[test]
@@ -232,36 +261,72 @@ mod tests {
 
     #[test]
     fn multi_chunk_keeps_blank_line_and_trailing_spaces_at_boundary() {
-        // Chunk 1 ends with a blank row and a row that had trailing spaces;
-        // chunk 2 continues. Per-chunk finalize would drop the blank and the
-        // boundary space; whole-range finalize must keep both until the end.
+        // Chunk 1 ends on row 10 split mid-row after "alpha "; chunk 2 carries
+        // the rest of row 10, then row 12 after an omitted blank row 11.
         let mut sidecar_a = Vec::new();
-        let chunk_a = range(
-            vec![
-                row(10, "alpha   ", &mut sidecar_a),
-                row(11, "", &mut sidecar_a),
-            ],
-            sidecar_a,
-        );
+        let chunk_a = range(vec![row(10, "alpha ", &mut sidecar_a)], sidecar_a);
         let mut sidecar_b = Vec::new();
-        let chunk_b = range(vec![row(12, "beta", &mut sidecar_b)], sidecar_b);
+        let chunk_b = range(
+            vec![
+                row(10, "beta   ", &mut sidecar_b),
+                row(12, "gamma  ", &mut sidecar_b),
+            ],
+            sidecar_b,
+        );
 
-        let mut acc = String::new();
-        let last = append_chunk(&mut acc, 0, &chunk_a, 10);
-        assert_eq!(acc, "alpha\n");
-        let last = append_chunk(&mut acc, last, &chunk_b, 12);
-        assert_eq!(last, 12);
-        assert_eq!(finalize_plain_text(acc.clone()), "alpha\n\nbeta");
+        let mut text = BlockCopyText::new(10, 12);
+        text.append(&chunk_a).unwrap();
+        text.append(&chunk_b).unwrap();
+        let output = text.finish();
+        assert_eq!(output, "alpha beta\n\ngamma");
         assert_eq!(
-            compose_block_copy(BlockCopyKind::CommandAndOutput, "printf", acc),
-            "printf\nalpha\n\nbeta"
+            compose_block_copy(BlockCopyKind::CommandAndOutput, "printf", output),
+            "printf\nalpha beta\n\ngamma"
         );
     }
 
     #[test]
-    fn running_copy_end_caps_at_start_plus_cap() {
-        assert_eq!(copy_end_line(0, None), None);
-        assert_eq!(copy_end_line(4, Some(6)), Some(6));
-        assert_eq!(copy_end_line(4, None), Some(4 + RUNNING_COPY_LINE_CAP));
+    fn rows_outside_the_range_or_out_of_order_are_rejected() {
+        let mut sidecar = Vec::new();
+        let before = range(vec![row(4, "x", &mut sidecar)], sidecar.clone());
+        assert_eq!(
+            BlockCopyText::new(5, 9).append(&before),
+            Err(CopyTextRejected)
+        );
+        let after = range(vec![row(10, "x", &mut sidecar)], sidecar.clone());
+        assert_eq!(
+            BlockCopyText::new(5, 9).append(&after),
+            Err(CopyTextRejected)
+        );
+        let backwards = range(
+            vec![row(7, "x", &mut sidecar), row(6, "y", &mut sidecar)],
+            sidecar,
+        );
+        assert_eq!(
+            BlockCopyText::new(5, 9).append(&backwards),
+            Err(CopyTextRejected)
+        );
+    }
+
+    #[test]
+    fn an_id_gap_beyond_the_byte_cap_is_rejected_without_allocating_it() {
+        let mut sidecar = Vec::new();
+        let far = range(vec![row(u64::MAX - 1, "x", &mut sidecar)], sidecar);
+        assert_eq!(
+            BlockCopyText::new(1, u64::MAX).append(&far),
+            Err(CopyTextRejected)
+        );
+    }
+
+    #[test]
+    fn command_and_output_skips_the_separator_for_an_empty_side() {
+        assert_eq!(
+            compose_block_copy(BlockCopyKind::CommandAndOutput, "true", String::new()),
+            "true"
+        );
+        assert_eq!(
+            compose_block_copy(BlockCopyKind::Output, "true", "out".into()),
+            "out"
+        );
     }
 }

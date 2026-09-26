@@ -731,7 +731,7 @@ pub extern "C" fn seyal_app_block_action_row(
 /// returns it. Returns 0 on accept, negative on refuse.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, kind: u16) -> i32 {
-    use crate::history_text::{copy_end_line, BlockCopyKind};
+    use crate::history_text::BlockCopyKind;
     let Some(copy_kind) = BlockCopyKind::from_u16(kind) else {
         return -6;
     };
@@ -741,19 +741,28 @@ pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, ki
         let snap = state.root.snapshot();
         let composer = snap.composer?;
         let block = composer.blocks.get(block_index as usize)?;
-        let end = copy_end_line(block.start_line, block.end_line)?;
+        if block.start_line == 0 {
+            return None;
+        }
+        // Running: through the current tail, no line cap (design §6).
+        // Finished before its start: no output rows.
+        let output_range = match block.end_line {
+            None => Some((block.start_line, u64::MAX)),
+            Some(end) if end >= block.start_line => Some((block.start_line, end)),
+            Some(_) => None,
+        };
         let bytes = block.id.to_bytes();
         let block_id = u64::from_le_bytes(bytes[..8].try_into().ok()?);
         if block_id == 0 {
             return None;
         }
-        Some((block_id, block.command.clone(), block.start_line, end))
+        Some((block_id, block.command.clone(), output_range))
     });
-    let Some((block_id, command, start_line, end_line)) = prepared else {
+    let Some((block_id, command, output_range)) = prepared else {
         return -4;
     };
     with_active_client_mut(|client| {
-        client.begin_block_copy(block_id, copy_kind, command, start_line, end_line)
+        client.begin_block_copy(block_id, copy_kind, command, output_range)
     })
     .map_or(-1, |result| result.map_or_else(super::error_code, |_| 0))
 }
@@ -2776,9 +2785,10 @@ mod tests {
             "in the Copy menu"
         );
         assert_eq!(copy_text(copy_command), "Copy command");
-        let hint =
-            unsafe { slice::from_raw_parts(copy_command.detail, copy_command.detail_len as usize) };
-        assert_eq!(hint, b"cmd+c");
+        assert_eq!(
+            copy_command.detail_len, 0,
+            "no Copy shortcut hint: cmd+c is reserved (design §9)"
+        );
         assert_eq!(
             seyal_app_block_action_row(handle, 0, 10).kind,
             0,

@@ -1,4 +1,5 @@
 mod attach;
+mod block_copy;
 mod discovery;
 mod display_apply;
 mod input_resize;
@@ -15,15 +16,15 @@ use seyal_runtime::{
     display::{decode_chunk, DisplayCache},
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus, ErrorCode,
-        FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, HistoryRangeStatus, InputRef,
-        Lifecycle, MessageType, ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle, MessageType,
+        ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
 };
 
 use crate::block_cache::{quarantine_epoch, BlockApply, BlockCache};
-use crate::history_text::{append_chunk, compose_block_copy, lead_cell_count, BlockCopyKind};
+use block_copy::PendingBlockCopy;
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{
@@ -79,20 +80,6 @@ pub(crate) fn server_error(code: u16) -> ClientError {
     ErrorCode::from_u16(code)
         .map(ClientError::Server)
         .unwrap_or(ClientError::Protocol)
-}
-
-/// In-flight Block pasteboard copy (#1010). Product text authority stays here.
-#[derive(Clone, Debug)]
-pub(crate) struct PendingBlockCopy {
-    pub(crate) block_id: u64,
-    pub(crate) kind: BlockCopyKind,
-    pub(crate) command: String,
-    pub(crate) start_line: u64,
-    pub(crate) end_line: u64,
-    pub(crate) request_id: u64,
-    pub(crate) start_unit: u32,
-    pub(crate) text: String,
-    pub(crate) last_line: u64,
 }
 
 pub struct LocalDisplayClient {
@@ -243,87 +230,6 @@ impl LocalDisplayClient {
         let range = self.history_ranges.get(&(block_id, request_id))?;
         self.history_copy_text = crate::history_text::plain_text(range);
         Some(&self.history_copy_text)
-    }
-
-    /// Start a Rust-owned Block pasteboard copy. Resolves nothing about the
-    /// Block list — callers pass the Runtime-projected span and command.
-    pub(crate) fn begin_block_copy(
-        &mut self,
-        block_id: u64,
-        kind: BlockCopyKind,
-        command: String,
-        start_line: u64,
-        end_line: u64,
-    ) -> Result<(), ClientError> {
-        if block_id == 0 || start_line == 0 || end_line < start_line {
-            return Err(ClientError::Protocol);
-        }
-        self.pending_block_copy = None;
-        self.completed_block_copy = None;
-        let request_id = self.next_history_request_id;
-        self.request_history_range(block_id, start_line, end_line, 512, 131_072, 0)?;
-        self.pending_block_copy = Some(PendingBlockCopy {
-            block_id,
-            kind,
-            command,
-            start_line,
-            end_line,
-            request_id,
-            start_unit: 0,
-            text: String::new(),
-            last_line: 0,
-        });
-        Ok(())
-    }
-
-    /// Ingest any held history reply that belongs to the pending Block copy.
-    /// Continues truncated ranges and finalizes one pasteboard string when
-    /// complete. Safe to call on every poll.
-    pub(crate) fn advance_block_copy(&mut self) -> Result<(), ClientError> {
-        loop {
-            let Some(pending) = self.pending_block_copy.as_ref() else {
-                return Ok(());
-            };
-            let key = (pending.block_id, pending.request_id);
-            let Some(range) = self.history_ranges.remove(&key) else {
-                return Ok(());
-            };
-            self.history_requests.remove(&range.request_id);
-            let chunk_start = range.rows.first().map(|row| row.line_id).unwrap_or(0);
-            let leads = lead_cell_count(&range);
-            let status = range.status;
-            let pending = self.pending_block_copy.as_mut().expect("pending checked");
-            pending.last_line =
-                append_chunk(&mut pending.text, pending.last_line, &range, chunk_start);
-            match status {
-                HistoryRangeStatus::Truncated if leads > 0 => {
-                    let next_unit = pending.start_unit.saturating_add(leads);
-                    let block_id = pending.block_id;
-                    let start_line = pending.start_line;
-                    let end_line = pending.end_line;
-                    let next_request = self.next_history_request_id;
-                    self.request_history_range(
-                        block_id, start_line, end_line, 512, 131_072, next_unit,
-                    )?;
-                    let pending = self.pending_block_copy.as_mut().expect("pending checked");
-                    pending.request_id = next_request;
-                    pending.start_unit = next_unit;
-                    // Another reply may already be buffered; keep draining.
-                    continue;
-                }
-                _ => {
-                    let finished = self.pending_block_copy.take().expect("pending checked");
-                    let text = compose_block_copy(finished.kind, &finished.command, finished.text);
-                    self.completed_block_copy = Some((finished.block_id, text));
-                    return Ok(());
-                }
-            }
-        }
-    }
-
-    /// Take a completed Block copy for the host pasteboard. Clears the slot.
-    pub(crate) fn take_block_copy(&mut self) -> Option<(u64, String)> {
-        self.completed_block_copy.take()
     }
 
     /// Drops one copied history response after the native consumer has
@@ -683,7 +589,7 @@ mod tests {
     use seyal_runtime::pass8::CAP_BLOCK_METADATA;
     use std::io::{Read, Write};
 
-    fn test_client(stream: UnixStream) -> LocalDisplayClient {
+    pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         LocalDisplayClient {
             stream,
             buffered: Vec::new(),

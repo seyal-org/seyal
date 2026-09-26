@@ -27,7 +27,7 @@ final class SeyalBlockComponentTests: XCTestCase {
             row(SEYAL_APP_BLOCK_ACTION_RERUN, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:Rerun", enabled: canRerun),
             row(SEYAL_APP_BLOCK_ACTION_MORE_MENU, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:More"),
             row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
-                "Rust:Copy command", "cmd+c"),
+                "Rust:Copy command"),
             row(SEYAL_APP_BLOCK_ACTION_INSPECT, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU, "Rust:Inspect"),
         ]
     }

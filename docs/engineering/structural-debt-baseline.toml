@@ -159,15 +159,15 @@ responsibility = "Re-export Block quick-action projection module for Rust-owned 
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app.rs"
-ceiling_loc = 2917
+ceiling_loc = 2927
 issue = 1010
-responsibility = "Block action/row FFI plus #993 cold visual/theme export surface after rebase onto origin/master."
+responsibility = "Block action/row and Block copy request FFI plus #993 cold visual/theme export surface after rebase onto origin/master."
 
 [[exception]]
 path = "crates/seyal-client/src/local.rs"
-ceiling_loc = 1168
+ceiling_loc = 1074
 issue = 1010
-responsibility = "History-range text path supporting Block Copy output."
+responsibility = "History-range text path supporting Block Copy output; the copy state machine lives in local/block_copy.rs."
 
 [[exception]]
 path = "crates/seyal-client/src/local/attach.rs"

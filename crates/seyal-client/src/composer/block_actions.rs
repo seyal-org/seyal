@@ -35,7 +35,9 @@ pub struct BlockActionProjection {
     pub kind: BlockActionKind,
     pub placement: BlockActionPlacement,
     pub label: &'static str,
-    /// Portable shortcut hint (`cmd+c`, `shift+cmd+c`); empty when none.
+    /// Portable shortcut hint (`shift+cmd+c`); empty when none. No Block
+    /// action is bound yet: `cmd+c` is reserved (SPEC-024 §4.2) and hints
+    /// appear only once Block copy commands are bound (design §9).
     pub shortcut: &'static str,
     pub enabled: bool,
 }
@@ -64,19 +66,19 @@ pub fn block_actions(
         action(K::CopyMenu, P::Seam, "Copy", "", true),
         action(K::Rerun, P::Seam, "Rerun", "", can_rerun),
         action(K::MoreMenu, P::Seam, "More", "", true),
-        action(K::CopyCommand, P::CopyMenu, "Copy command", "cmd+c", true),
+        action(K::CopyCommand, P::CopyMenu, "Copy command", "", true),
         action(
             K::CopyOutput,
             P::CopyMenu,
             "Copy output",
-            "shift+cmd+c",
+            "",
             has_output_anchor,
         ),
         action(
             K::CopyCommandAndOutput,
             P::CopyMenu,
             "Copy command + output",
-            "alt+cmd+c",
+            "",
             has_output_anchor,
         ),
         action(K::Inspect, P::MoreMenu, "Inspect", "", true),
@@ -134,9 +136,9 @@ mod tests {
         assert_eq!(
             copy,
             [
-                ("Copy command", "cmd+c"),
-                ("Copy output", "shift+cmd+c"),
-                ("Copy command + output", "alt+cmd+c"),
+                ("Copy command", ""),
+                ("Copy output", ""),
+                ("Copy command + output", ""),
             ]
         );
         let more: Vec<_> = actions
