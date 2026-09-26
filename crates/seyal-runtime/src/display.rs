@@ -4,6 +4,10 @@
 //! schema, decoder and disposable client cache live in `seyal-protocol`; this
 //! module only converts authoritative projection snapshots/updates into protocol
 //! batches without introducing a second terminal state.
+//!
+//! **Ownership (#1067):** accepted layout keeps `DisplayCache` in `seyal-protocol`.
+//! This module re-exports it for Runtime callers and remains the sole encode/publish
+//! authority — do not relocate the cache type here without a new architecture decision.
 
 use std::sync::Arc;
 
