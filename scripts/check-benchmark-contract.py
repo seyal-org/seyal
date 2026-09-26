@@ -39,7 +39,10 @@ def main() -> None:
 
     native_renderer = ROOT / "macos/Seyal/Sources/RendererValidation.swift"
     if native_renderer.exists():
-        source = native_renderer.read_text(encoding="utf-8")
+        # Tokens may live in sibling responsibility files after cohesion splits;
+        # the façade path must still exist as the public harness entry.
+        sibling_sources = sorted(native_renderer.parent.glob("RendererValidation*.swift"))
+        source = "\n".join(path.read_text(encoding="utf-8") for path in sibling_sources)
         rel = native_renderer.relative_to(ROOT)
         for token in UNICODE_RENDERER_TOKENS:
             if token not in source:

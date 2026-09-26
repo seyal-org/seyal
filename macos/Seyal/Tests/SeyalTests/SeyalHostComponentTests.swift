@@ -635,10 +635,12 @@ final class SeyalHostComponentTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("Sources", isDirectory: true)
-        let validation = try String(
-            contentsOf: sourceRoot.appendingPathComponent("RendererValidation.swift"),
-            encoding: .utf8
-        )
+        let validationFiles = try FileManager.default.contentsOfDirectory(
+            at: sourceRoot,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("RendererValidation") && $0.pathExtension == "swift" }
+        let validation = try validationFiles.map { try String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
         XCTAssertTrue(validation.contains("SEYAL_M002_CONTRACT_GATE"))
         XCTAssertTrue(validation.contains("renderer_prepare_submission"))
         XCTAssertTrue(validation.contains("runM002ContractCohort"))
@@ -664,6 +666,35 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(body.contains("cohort = 1"))
         XCTAssertTrue(body.contains("samples = ["))
         XCTAssertEqual(body.split(separator: ",").count, 2)
+    }
+
+    /// #1020: Swift cohesion split keeps public self-test / teardown entrypoints
+    /// on the production types while moving harness/helpers into sibling files.
+    @MainActor
+    func testCohesionSplitKeepsPublicSelfTestEntrypoints() {
+        XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
+        XCTAssertTrue(RustDisplayBridge.pasteAdmissionSelfTest())
+        XCTAssertTrue(RustDisplayBridge.teardownReconnectStateSelfTest())
+        XCTAssertTrue(MetalTerminalRenderer.gpuCompletionFailureRecoverySelfTest())
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        for required in [
+            "InteractiveMetalSurfaceView+InputSelfTests.swift",
+            "MetalTerminalRenderer+Encode.swift",
+            "RustDisplayBridge+Input.swift",
+            "ProductChromeBlockViews.swift",
+            "MetalSurfaceRecoveryState.swift",
+            "RendererValidation+Benchmark.swift",
+        ] {
+            let path = sourceRoot.appendingPathComponent(required)
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: path.path),
+                "missing cohesion sibling \(required)"
+            )
+        }
     }
 
     func testTranscriptFrameRejectsZeroBlockIdentity() {

@@ -14,49 +14,21 @@ hard_loc = 1000
 # Do not add skip=true escapes. Split by responsibility — never part1/part2 fragments,
 # foo_1/foo_2 siblings, or partN/ directories (review-rejected even when the detector misses).
 
-[[grandfathered]]
-path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
-ceiling_loc = 1201
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
+# #1020 macOS Swift responsibility split: former #1021 grandfathered surface /
+# renderer / bridge / chrome / validation sources cleared hard_loc via
+# sibling-type and harness extraction (E1 dual-recovery deletion remains
+# architecture-gated under #882 and was not touched).
+[[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-ceiling_loc = 1309
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+acknowledged_loc = 955
+issue = 1020
+reason = "CAMetalLayer surface, bridge recovery coordinator ownership, and terminal-bridge forwarding stay one thin host type after recovery-state and display-link extraction; E1 dual-recovery deletion (#882) is architecture-gated so coordinator wiring remains here. Ceiling matches post-split LOC."
 
-[[grandfathered]]
+[[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
-ceiling_loc = 1612
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1127
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "macos/Seyal/Sources/RendererValidation.swift"
-ceiling_loc = 1705
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
-path = "macos/Seyal/Sources/RustDisplayBridge.swift"
-ceiling_loc = 1357
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020. Ceiling ratcheted down after #1020 deleted unused ComposerRequestCorrelation (#881 remnant)."
-
-# #993 cold UI config / theme FFI and thin-host probe realization grew these
-# grandfathered files; exceptions pin the post-merge exact LOC (no silent headroom).
-[[exception]]
-path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1247
-issue = 993
-responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (fonts/padding/material probe)."
+acknowledged_loc = 800
+issue = 1020
+reason = "Metal update/present lifecycle stays one main-queue presenter after types, encode/rebuild, and GPU-completion self-test extraction; further fragmentation would separate tightly coupled in-flight/deferred-history authority. Ceiling matches post-split LOC."
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
