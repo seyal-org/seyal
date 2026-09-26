@@ -9,7 +9,7 @@ use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
-use crate::recovery::{AttemptOutcome, LaunchResult};
+use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
 use super::{
@@ -238,6 +238,14 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 _ => return Err(-6),
             },
             revision: action.target_execution_lo,
+        }),
+        53 => Ok(AppAction::CancelRecovery),
+        54 => Ok(AppAction::AdvanceRecoveryStage {
+            stage: match action.reserved & 0xffff {
+                5 => RecoveryStage::RestoringInteraction,
+                6 => RecoveryStage::Usable,
+                _ => return Err(-6),
+            },
         }),
         _ => Err(-6),
     }
