@@ -45,9 +45,9 @@ Measured on the board's dark anatomy block (903 px wide, output row pitch ≈20 
 | Token | Board measurement | Normalized value | Notes |
 |---|---|---|---|
 | `block.radius` | ≈6 px | 6 pt | "minimal radius, no heavy card styling" |
-| `block.border` | 1 px hairline | 1 pt `SeamRest` | rest state |
-| `block.border.hover` | 1 px, brighter | 1 pt `SeamHover` | pointer hover |
-| `block.focus.border` | ≈1.5 px blue | 1.5 pt `SeamFocus` | focused/selected; board blue not adopted, see §9 |
+| `block.border` | 1 px hairline | 1 pt `BlockBorderRest` | rest state |
+| `block.border.hover` | 1 px, brighter | 1 pt `BlockBorderHover` | pointer hover |
+| `block.focus.border` | ≈1.5 px blue | 1.5 pt `BlockFocus` | focused/selected; board blue family, see §9 |
 | `block.focus.fill` | `#0f386f` over `#151a24` | none | see §9 |
 | `block.surface` | dark `#151a24`, light `#fbfdfd` | terminal canvas | must equal Metal cell background |
 | `block.gap` | ≈8 px | 8 pt | vertical rhythm between Blocks |
@@ -59,22 +59,22 @@ Measured on the board's dark anatomy block (903 px wide, output row pitch ≈20 
 | `seam.duration` | mono ≈12 px | 12 pt monospaced, `TextSecondary` | #1043 |
 | `seam.spacing` | ≈2 px / ≈8 px | 2 pt between actions, 8 pt before status | |
 
-**Colors.** No new color role is introduced. The Block uses the existing Rust `ColorRole`s in `crates/seyal-client/src/theme/tokens.rs`. The seam roles are the shared semantic-seam grammar (`SEYAL-UNIVERSAL-COMPONENT-CONTRACT.md` C08: "the same seam grammar is reused for Block boundaries, Pane splits, …"), so a Block border using them is the intended use, not an alias of a shell-only color.
+**Colors.** Block chrome introduces **new** Rust `ColorRole`s for its borders and focus. They are Block-specific and must not alias or reuse the existing shell seam palette (`SeamRest`, `SeamHover`, `SeamFocus`, `SeamRunning`, `SeamAttention`) or any Swift-derived `seam` mix. Status text/glyph roles that already exist stay shared.
 
-| Block use | Existing role |
-|---|---|
-| Border, rest | `SeamRest` |
-| Border, hover | `SeamHover` (its Increase Contrast adjustment stays in Rust) |
-| Border, selected | `SeamFocus` (same value as `Focus`, the reference design's "accent border") |
-| Running status glyph / spinner tint | `SeamRunning` |
-| Success status glyph | `Success` |
-| Failed status glyph | `Danger` |
-| Unknown status glyph | `TextMuted` |
-| Duration, staged command label | `TextSecondary` |
+| Block use | Role | Notes |
+|---|---|---|
+| Border, rest | `BlockBorderRest` | **new** |
+| Border, hover | `BlockBorderHover` | **new**; Increase Contrast adjustment stays in Rust |
+| Border, selected | `BlockFocus` | **new**; board blue family ≈`#3b82f6`, distinct from purple `Focus` / `SeamFocus` (see §9) |
+| Running status glyph / spinner tint | `BlockFocus` | same new role as the selected border |
+| Success status glyph | `Success` | existing |
+| Failed status glyph | `Danger` | existing |
+| Unknown status glyph | `TextMuted` | existing |
+| Duration, staged command label | `TextSecondary` | existing |
 
-`SeamAttention` is not used by #1010; attention edges stay with their own Issues. Running and failed Blocks keep the rest border; only the seam status changes (C08: status, not the whole object).
+`SeamAttention` and the other shell seam roles are not used by #1010 Block chrome. Running and failed Blocks keep the rest border (`BlockBorderRest`); only the seam status changes (C08: status, not the whole object).
 
-Today the native host receives only `Canvas`, `TextPrimary` and `Focus` (as `accent`) across `seyal_app_theme`. It derives `seam`, `secondary` and `muted` by mixing in Swift and hard-codes `success`, `warning` and `danger` (`NativeThemeRealization.swift`). That is a known ADR-015 gap. Block chrome must not use those Swift-derived values. #1010 exports the roles in the table above across the theme FFI so Swift only maps them. Replacing the other Swift-derived values used by existing shell chrome is a separate ADR-015 cleanup outside #1010.
+Today the native host receives only `Canvas`, `TextPrimary` and `Focus` (as `accent`) across `seyal_app_theme`. It derives `seam`, `secondary` and `muted` by mixing in Swift and hard-codes `success`, `warning` and `danger` (`NativeThemeRealization.swift`). That is a known ADR-015 gap. Block chrome must not use those Swift-derived values, and must not paint borders from the existing `Seam*` roles. #1010 adds and exports `BlockBorderRest`, `BlockBorderHover` and `BlockFocus` (plus the existing status roles in the table) across the theme FFI so Swift only maps them. Replacing the other Swift-derived values used by existing shell chrome is a separate ADR-015 cleanup outside #1010.
 
 ## 4. Typography and icons
 
@@ -132,10 +132,10 @@ Swift renders and routes only (ADR-015). Pasteboard writes are the only OS side 
 
 | State | Border | Seam | Board column |
 |---|---|---|---|
-| Rest | 1 pt `SeamRest` | status (+duration) | Rest / Success / Failed |
-| Hover | 1 pt `SeamHover` | actions + status | Hover / actions revealed |
-| Selected | 1.5 pt `SeamFocus` | actions + status | Focused / selected |
-| Running | as rest | `SeamRunning` spinner (+live duration) | Running |
+| Rest | 1 pt `BlockBorderRest` | status (+duration) | Rest / Success / Failed |
+| Hover | 1 pt `BlockBorderHover` | actions + status | Hover / actions revealed |
+| Selected | 1.5 pt `BlockFocus` | actions + status | Focused / selected |
+| Running | as rest | `BlockFocus` spinner (+live duration) | Running |
 | Failed | as rest | ✕ `Danger` | Failed |
 
 Hover and selection changes are immediate. The only motion is the running spinner. Under Reduce Motion (the Rust-projected `reduce_motion` preference) the spinner is replaced by a static running glyph.
@@ -143,7 +143,7 @@ Hover and selection changes are immediate. The only motion is the running spinne
 ## 9. Intentional deviations
 
 - **No selection fill tint.** Metal paints each terminal cell background in the canvas color, so any tint shows patches behind glyphs. Selection uses the border only.
-- **Selected border uses `SeamFocus`, not the board's blue.** The board shows a blue focus border (≈`#3b82f6`). Seyal's focus role is the shared `Focus` / `SeamFocus` family, and a second, Block-only focus color would split the focus language. Changing the focus family is a theme decision outside #1010.
+- **Selected border uses board-blue `BlockFocus`, not purple shell `SeamFocus` / `Focus`.** The board's blue focus border (≈`#3b82f6`) is the value of the new `BlockFocus` role. The shell seam focus family stays purple. Block chrome must not alias its selected border to `SeamFocus` or `Focus`.
 - **No shortcut hints in the Copy menu.** The board shows ⌘C / ⇧⌘C / ⌥⌘C. `cmd+c` is reserved (SPEC-024 §4.2), and no Block copy command is bound.
 - **Staged features are not shown.** Filter, Search-in-Block, Pin, Collapse, Workflow promotion, Attach-as-context and the TUI placeholder are not rendered until their own Issues land. No disabled placeholder buttons.
 - Duration and context line are staged behind #1043 and #1042.
