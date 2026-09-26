@@ -87,12 +87,6 @@ issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
 
 [[grandfathered]]
-path = "crates/seyal-terminal/src/screen.rs"
-ceiling_loc = 1545
-issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
-
-[[grandfathered]]
 path = "macos/Seyal/Sources/InteractiveMetalSurfaceView.swift"
 ceiling_loc = 1201
 issue = 1021
@@ -156,6 +150,15 @@ path = "crates/seyal-terminal/src/history/tests.rs"
 acknowledged_loc = 827
 issue = 1020
 reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains HistoryStore across store/query/reflow/wrap/eviction. Ceiling matches rustfmt-normalized LOC after the split."
+
+# #1020 Screen responsibility split: edit/scroll/cursor mutations land in the
+# cohesion-review band by design; resize planner and Screen façade stay under
+# review_loc.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-terminal/src/screen/ops.rs"
+acknowledged_loc = 881
+issue = 1020
+reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl block after the resize-planner extraction; further fragmentation would separate tightly coupled DECSTBM region helpers. Ceiling matches rustfmt-normalized LOC after the split."
 
 # #1020 TerminalState façade split: VT performer stays one cohesive module above
 # hard_loc; further CSI-family extraction is tracked as follow-on (finding A4).
