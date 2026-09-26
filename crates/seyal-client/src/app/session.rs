@@ -25,7 +25,6 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    #[cfg(target_os = "macos")]
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
@@ -44,7 +43,9 @@ impl ApplicationRoot {
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())
     }
+}
 
+impl ApplicationRoot {
     pub(super) fn focus(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
         self.shell

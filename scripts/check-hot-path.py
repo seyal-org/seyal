@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT = Path(os.environ.get("SEYAL_VALIDATION_ROOT", Path(__file__).resolve().parents[1])).resolve()
 
 HOT_FUNCTIONS = {
-    "crates/seyal-terminal/src/terminal.rs": ["feed", "finish_input"],
+    # TerminalState feed/finish after #1020 responsibility split (was terminal.rs).
+    "crates/seyal-terminal/src/terminal/state.rs": ["feed", "finish_input"],
     # Runtime dispatch ownership after #799: poll_once remains in the facade,
     # while control/read/write service loops live in reactor_io.
     "crates/seyal-runtime/src/runtime/mod.rs": ["poll_once"],
@@ -18,11 +19,13 @@ HOT_FUNCTIONS = {
         "service_writes",
     ],
     "crates/seyal-runtime/src/input.rs": ["try_submit"],
-    # Candidate-D display encode/publish (Runtime → UDS presentation).
-    "crates/seyal-runtime/src/display.rs": [
+    # Candidate-D display encode/publish after #1020 split (was display.rs).
+    "crates/seyal-runtime/src/display/encode_v1.rs": [
         "encode_snapshot",
         "encode_delta",
         "encode_rows",
+    ],
+    "crates/seyal-runtime/src/display/encode_v2.rs": [
         "encode_snapshot_v2",
         "encode_delta_v2",
         "encode_cells_v2",
