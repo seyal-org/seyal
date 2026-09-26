@@ -19,10 +19,40 @@ struct NativeTheme {
     let terminalFontSize: CGFloat
     let windowPadding: CGFloat
     let terminalPadding: CGFloat
+    /// True when Rust resolved reduced material / reduced transparency.
     let reduceMaterial: Bool
+    /// Rust `utility_material`: 0 opaque, 1 tonal, 2 frosted.
+    let utilityMaterial: UInt16
+    let utilityOpacity: CGFloat
+
+    /// Utility chrome should show the host material effect (frosted, not reduced).
+    var usesFrostedUtilityMaterial: Bool {
+        utilityMaterial == 2 && !reduceMaterial
+    }
 }
 
 enum NativeThemeRealization {
+    private final class ColdDiagnosticsGate: @unchecked Sendable {
+        static let shared = ColdDiagnosticsGate()
+        private let lock = NSLock()
+        private var surfaced = false
+
+        func runOnce(_ body: () -> Void) {
+            lock.lock()
+            let already = surfaced
+            if !already { surfaced = true }
+            lock.unlock()
+            guard !already else { return }
+            body()
+        }
+
+        func resetForTests() {
+            lock.lock()
+            surfaced = false
+            lock.unlock()
+        }
+    }
+
     /// Platform appearance input for Rust resolve: 0 dark, 1 light.
     static func platformAppearanceCode(for appearance: NSAppearance) -> UInt16 {
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua ? 1 : 0
@@ -62,7 +92,9 @@ enum NativeThemeRealization {
             terminalFontSize: CGFloat(packed.terminal_font_size),
             windowPadding: CGFloat(packed.window_padding),
             terminalPadding: CGFloat(packed.terminal_padding),
-            reduceMaterial: (packed.flags & 1) != 0
+            reduceMaterial: (packed.flags & 1) != 0,
+            utilityMaterial: packed.utility_material,
+            utilityOpacity: CGFloat(packed.utility_opacity)
         )
     }
 
@@ -71,15 +103,54 @@ enum NativeThemeRealization {
     static func apply(to view: NSView, material: NSVisualEffectView, appearance: NSAppearance) -> NativeTheme {
         let packed = visual(for: appearance)
         let theme = theme(from: packed)
-        view.window?.backgroundColor = theme.canvas
+        applyMaterial(material, theme: theme, window: view.window)
         view.window?.appearance = theme.appearance
         view.appearance = theme.appearance
         view.wantsLayer = true
-        view.layer?.backgroundColor = theme.canvas.cgColor
-        material.isHidden = true
+        // Truth/canvas stays opaque; frosted utility lets the material effect show through.
+        if theme.usesFrostedUtilityMaterial {
+            view.window?.isOpaque = false
+            view.window?.backgroundColor = .clear
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+        } else {
+            view.window?.isOpaque = true
+            view.window?.backgroundColor = theme.canvas
+            view.layer?.backgroundColor = theme.canvas.cgColor
+        }
         applyColors(in: view, theme: theme)
-        surfaceDiagnosticsIfNeeded(from: packed)
         return theme
+    }
+
+    /// Map Rust utility material intent onto the host effect view.
+    @MainActor
+    static func applyMaterial(_ material: NSVisualEffectView, theme: NativeTheme, window: NSWindow?) {
+        material.blendingMode = .behindWindow
+        material.state = .active
+        material.appearance = theme.appearance
+        if theme.usesFrostedUtilityMaterial {
+            material.isHidden = false
+            material.material = .underWindowBackground
+            material.alphaValue = max(min(theme.utilityOpacity, 1), 0.35)
+            window?.isOpaque = false
+        } else {
+            // Opaque / tonal / reduced-material: no frost; solid colors own the chrome.
+            material.isHidden = true
+            material.alphaValue = 1
+            window?.isOpaque = true
+        }
+    }
+
+    /// Emit non-secret config diagnostics once per process cold load.
+    @MainActor
+    static func surfaceColdDiagnosticsOnce(for appearance: NSAppearance) {
+        ColdDiagnosticsGate.shared.runOnce {
+            surfaceDiagnostics(from: visual(for: appearance))
+        }
+    }
+
+    /// Test hook: allow a subsequent cold-load surface after config reload.
+    static func resetColdDiagnosticsSurfacedForTests() {
+        ColdDiagnosticsGate.shared.resetForTests()
     }
 
     static func utf8String(_ pointer: UnsafePointer<UInt8>?, length: UInt32) -> String {
@@ -97,7 +168,7 @@ enum NativeThemeRealization {
         }
     }
 
-    static func surfaceDiagnosticsIfNeeded(from visual: SeyalAppVisual) {
+    static func surfaceDiagnostics(from visual: SeyalAppVisual) {
         let messages = diagnosticMessages(from: visual)
         guard !messages.isEmpty || (visual.flags & 2) != 0 else { return }
         var lines = messages

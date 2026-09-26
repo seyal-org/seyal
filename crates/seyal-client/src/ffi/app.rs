@@ -1037,6 +1037,7 @@ pub extern "C" fn seyal_app_visual_warning(index: u32) -> SeyalAppVisualWarning 
 /// - When `path_len != 0`, `path` must be non-null and address `path_len`
 ///   readable UTF-8 bytes for the full duration of this call.
 /// - The path is copied synchronously; nothing is retained after return.
+#[doc(hidden)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn seyal_app_test_reload_ui_configuration(
     path: *const u8,

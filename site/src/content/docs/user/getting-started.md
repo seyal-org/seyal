@@ -40,7 +40,7 @@ At cold startup the production app loads local UI configuration once through the
 
 Missing or unreadable files keep built-in defaults and the app still starts. Invalid TOML keeps the same full-default fallback and surfaces bounded, non-secret diagnostics (for example via system log). There is no live reload in this slice: restart the app to pick up changes.
 
-Accepted user-facing keys:
+Accepted user-facing keys that this cold-start slice realizes in the production app:
 
 ```toml
 [ui]
@@ -50,23 +50,19 @@ utility-opacity = 1.0
 window-padding = 0
 
 [ui.font]
-family = ""
 size = 12
-fallbacks = ["SF Pro Text"]
 
 [terminal]
 padding = 8
 
 [terminal.font]
-family = "Menlo"
 size = 14
-fallbacks = ["SF Mono", "Menlo"]
 
 [input]
 option_as_alt = false
 ```
 
-Invalid keys or values are ignored or clamped; Seyal always starts from a complete resolved snapshot. Appearance preference (system/light/dark) is resolved in Rust; AppKit only maps the typed visual values to native fonts, colors, and materials. There is still no settings UI, cloud sync, or Lua overlay.
+Invalid keys or values are ignored or clamped; Seyal always starts from a complete resolved snapshot. Appearance preference (system/light/dark) and material intent (`reduced-material` / `utility-opacity`) are resolved in Rust; AppKit maps the typed appearance, font **sizes**, padding, and utility material preference onto native presentation. Font **family** / fallback lists may be present in the file for forward compatibility but are not applied by the host in this slice (system / monospaced system fonts are used). There is still no settings UI, cloud sync, or Lua overlay.
 
 For a one-off override without editing a file, launch with `open --env` (shell `VAR=value open …` does not pass environment into the app):
 

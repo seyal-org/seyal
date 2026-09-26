@@ -5,6 +5,16 @@ import XCTest
 @testable import Seyal
 
 final class SeyalHostComponentTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // Pin process cold config to a missing path so tests are hermetic and
+        // do not inherit the developer's ~/.config/seyal/config.toml.
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-test-missing-\(UUID().uuidString).toml")
+        XCTAssertEqual(reloadUiConfig(path: missing.path), 0)
+        NativeThemeRealization.resetColdDiagnosticsSurfacedForTests()
+    }
+
     func testApplicationRootABIMatchesPublishedHeader() {
         XCTAssertEqual(MemoryLayout<SeyalAppAction>.size, Int(MemoryLayout<SeyalAppAction>.stride))
         XCTAssertGreaterThanOrEqual(MemoryLayout<SeyalAppAction>.size, 80)
@@ -1065,6 +1075,8 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(visual.terminal_font_size, 18, accuracy: 0.01)
         XCTAssertEqual(visual.window_padding, 12, accuracy: 0.01)
         XCTAssertEqual(visual.terminal_padding, 14, accuracy: 0.01)
+        XCTAssertEqual(visual.utility_material, 2, "default cold config allows frosted utility")
+        XCTAssertEqual(visual.flags & 1, 0)
 
         let theme = NativeThemeRealization.theme(from: visual)
         XCTAssertEqual(theme.appearance.name, NSAppearance.Name.aqua)
@@ -1072,6 +1084,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(theme.terminalFontSize, 18, accuracy: 0.01)
         XCTAssertEqual(theme.windowPadding, 12, accuracy: 0.01)
         XCTAssertEqual(theme.terminalPadding, 14, accuracy: 0.01)
+        XCTAssertTrue(theme.usesFrostedUtilityMaterial)
 
         let invalid = dir.appendingPathComponent("bad.toml")
         try "this is not = toml [".write(to: invalid, atomically: true, encoding: .utf8)
@@ -1080,6 +1093,49 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(fallback.flags & 2, 2, "full-default fallback flag")
         XCTAssertEqual(fallback.ui_font_size, 12, accuracy: 0.01)
         XCTAssertGreaterThan(fallback.warning_count, 0)
+    }
+
+    @MainActor
+    func testColdConfigMaterialPreferenceRealizesOnVisualEffectView() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seyal-993-material-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            let missing = dir.appendingPathComponent("restore-missing.toml")
+            reloadUiConfig(path: missing.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+
+        let frosted = dir.appendingPathComponent("frosted.toml")
+        try """
+        [ui]
+        appearance = "dark"
+        reduced-material = false
+        utility-opacity = 0.85
+        """.write(to: frosted, atomically: true, encoding: .utf8)
+        XCTAssertEqual(reloadUiConfig(path: frosted.path), 0)
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let material = NSVisualEffectView(frame: host.bounds)
+        host.addSubview(material)
+        let dark = NSAppearance(named: .darkAqua)!
+        let frostedTheme = NativeThemeRealization.apply(to: host, material: material, appearance: dark)
+        XCTAssertTrue(frostedTheme.usesFrostedUtilityMaterial)
+        XCTAssertFalse(material.isHidden, "frosted utility material must be visible")
+        XCTAssertEqual(material.material, .underWindowBackground)
+        XCTAssertEqual(frostedTheme.utilityOpacity, 0.85, accuracy: 0.01)
+
+        let reduced = dir.appendingPathComponent("reduced.toml")
+        try """
+        [ui]
+        appearance = "dark"
+        reduced-material = true
+        """.write(to: reduced, atomically: true, encoding: .utf8)
+        XCTAssertEqual(reloadUiConfig(path: reduced.path), 0)
+        let reducedTheme = NativeThemeRealization.apply(to: host, material: material, appearance: dark)
+        XCTAssertFalse(reducedTheme.usesFrostedUtilityMaterial)
+        XCTAssertTrue(material.isHidden, "reduced-material must hide the frost effect")
+        XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
 }

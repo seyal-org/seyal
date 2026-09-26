@@ -112,7 +112,7 @@ final class SeyalHostUITests: XCTestCase {
     }
 
     /// #993: cold `SEYAL_CONFIG` TOML must drive Rust-resolved appearance /
-    /// font / padding into the headed host (thin AppKit realization only).
+    /// font size / padding / material preference into the headed host.
     func testColdConfigTomlDrivesVisibleAppearanceFontsAndPadding() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("seyal-993-ui-\(UUID().uuidString)", isDirectory: true)
@@ -122,6 +122,7 @@ final class SeyalHostUITests: XCTestCase {
         try """
         [ui]
         appearance = "light"
+        reduced-material = false
         window-padding = 12
         [ui.font]
         size = 16
@@ -136,19 +137,21 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let chrome = app.descendants(matching: .any)["seyal-product-chrome"]
         XCTAssertTrue(chrome.waitForExistence(timeout: 10))
-        // Probe format: appearance|uiFont|terminalFont|windowPad|terminalPad
-        let expected = "light|16|18|12|14"
+        // Probe lives on a dedicated AX element (not the chrome group value).
+        let expectedId = "seyal-cold-visual-probe.light.16.18.12.14.frosted"
+        let probe = app.descendants(matching: .any)[expectedId]
         let deadline = Date().addingTimeInterval(8)
-        var observed = ""
         while Date() < deadline {
-            observed = (chrome.firstMatch.value as? String) ?? ""
-            if observed == expected { break }
+            if probe.exists { break }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
-        XCTAssertEqual(
-            observed,
-            expected,
-            "headed host must realize Rust cold-config visual snapshot"
+        XCTAssertTrue(
+            probe.exists,
+            "headed host must realize Rust cold-config visual snapshot (\(expectedId))"
+        )
+        XCTAssertNil(
+            chrome.firstMatch.value as? String,
+            "product chrome must not expose the encoded test probe as its AX value"
         )
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.state, .runningForeground)

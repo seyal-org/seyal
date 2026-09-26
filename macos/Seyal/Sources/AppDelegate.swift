@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.minSize = NSSize(width: 960, height: 640)
         // Appearance comes from Rust-resolved visual preference at host apply.
         let platform = NSApp.effectiveAppearance
+        // Bounded non-secret diagnostics once per cold load — not on every chrome reconcile.
+        NativeThemeRealization.surfaceColdDiagnosticsOnce(for: platform)
         let resolved = NativeThemeRealization.theme(for: platform)
         window.appearance = resolved.appearance
         window.contentView = host

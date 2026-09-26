@@ -5,6 +5,9 @@ import AppKit
 final class ProductChromeHostView: NSView {
     let pane: ThinPaneHostView
     private let material = NSVisualEffectView()
+    /// Headed/component probe for cold visual snapshot. Identifier-encoded so
+    /// VoiceOver does not hear a pipe-delimited token string as the chrome value.
+    private let coldVisualProbe = NSView()
     private let tabStrip = NSView()
     private let tabTitle = NSTextField(labelWithString: "Terminal")
     private let left = NSView()
@@ -63,6 +66,13 @@ final class ProductChromeHostView: NSView {
         material.blendingMode = .behindWindow
         material.state = .active
         addSubview(material)
+
+        coldVisualProbe.translatesAutoresizingMaskIntoConstraints = false
+        coldVisualProbe.setAccessibilityElement(true)
+        coldVisualProbe.setAccessibilityRole(.group)
+        coldVisualProbe.setAccessibilityLabel("Cold-start visual configuration")
+        coldVisualProbe.setAccessibilityIdentifier("seyal-cold-visual-probe")
+        addSubview(coldVisualProbe)
 
         configureChromeButtons()
         tabStrip.translatesAutoresizingMaskIntoConstraints = false
@@ -175,6 +185,11 @@ final class ProductChromeHostView: NSView {
             material.trailingAnchor.constraint(equalTo: trailingAnchor),
             material.topAnchor.constraint(equalTo: topAnchor),
             material.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            coldVisualProbe.widthAnchor.constraint(equalToConstant: 1),
+            coldVisualProbe.heightAnchor.constraint(equalToConstant: 1),
+            coldVisualProbe.leadingAnchor.constraint(equalTo: leadingAnchor),
+            coldVisualProbe.topAnchor.constraint(equalTo: topAnchor),
 
             tabStrip.leadingAnchor.constraint(equalTo: leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -723,9 +738,17 @@ final class ProductChromeHostView: NSView {
             material: material,
             appearance: effectiveAppearance
         )
-        left.layer?.backgroundColor = theme.utility.cgColor
-        inspectorColumn.layer?.backgroundColor = theme.utility.cgColor
-        tabStrip.layer?.backgroundColor = theme.container.cgColor
+        // Frosted utility chrome lets the window material show through; tonal /
+        // opaque / reduced-material keep solid fills so content stays readable.
+        if theme.usesFrostedUtilityMaterial {
+            left.layer?.backgroundColor = NSColor.clear.cgColor
+            inspectorColumn.layer?.backgroundColor = NSColor.clear.cgColor
+            tabStrip.layer?.backgroundColor = NSColor.clear.cgColor
+        } else {
+            left.layer?.backgroundColor = theme.utility.cgColor
+            inspectorColumn.layer?.backgroundColor = theme.utility.cgColor
+            tabStrip.layer?.backgroundColor = theme.container.cgColor
+        }
         centerColumn.layer?.backgroundColor = theme.canvas.cgColor
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
@@ -737,18 +760,27 @@ final class ProductChromeHostView: NSView {
             bottom: theme.terminalPadding,
             right: theme.windowPadding
         )
-        let appearanceToken = theme.appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
-            ? "light"
-            : "dark"
-        setAccessibilityValue(
-            "\(appearanceToken)|\(Int(theme.uiFontSize))|\(Int(theme.terminalFontSize))|\(Int(theme.windowPadding))|\(Int(theme.terminalPadding))"
-        )
+        updateColdVisualProbe(theme)
         composer.apply(theme: theme)
         historyOverlay.apply(theme: theme)
         commandPalette.apply(theme: theme)
         for view in blocks.arrangedSubviews {
             (view as? CommandBlockView)?.apply(theme: theme)
         }
+    }
+
+    private func updateColdVisualProbe(_ theme: NativeTheme) {
+        let appearanceToken = theme.appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? "light"
+            : "dark"
+        let materialToken = theme.usesFrostedUtilityMaterial ? "frosted" : "solid"
+        // Machine probe lives only in the identifier; label stays human-readable.
+        coldVisualProbe.setAccessibilityIdentifier(
+            "seyal-cold-visual-probe.\(appearanceToken).\(Int(theme.uiFontSize)).\(Int(theme.terminalFontSize)).\(Int(theme.windowPadding)).\(Int(theme.terminalPadding)).\(materialToken)"
+        )
+        coldVisualProbe.setAccessibilityLabel(
+            "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
+        )
     }
 
     private func recoveryText(_ snapshot: SeyalAppSnapshot) -> String {
