@@ -140,17 +140,56 @@ ceiling_loc = 1382
 issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
 
-# #993 cold UI config / theme FFI and thin-host probe realization grew these
-# grandfathered files; exceptions pin the post-merge exact LOC (no silent headroom).
+# #1010 Block Component grows these grandfathered modules (and absorbs the
+# prior #993 cold visual FFI growth into the same single-path exceptions —
+# duplicate exception paths are rejected). Ceilings match post-rebase tip
+# LOC exactly (no silent headroom). Prefer later extraction under #1020.
+
+[[exception]]
+path = "crates/seyal-client/src/app.rs"
+ceiling_loc = 2518
+issue = 1010
+responsibility = "Block Component Rerun/copy product actions and fail-closed composer gates (Rust-owned)."
+
+[[exception]]
+path = "crates/seyal-client/src/composer/mod.rs"
+ceiling_loc = 1457
+issue = 1010
+responsibility = "Re-export Block quick-action projection module for Rust-owned seam/menu rows."
+
 [[exception]]
 path = "crates/seyal-client/src/ffi/app.rs"
-ceiling_loc = 2576
-issue = 993
-responsibility = "Cold UI configuration / theme FFI export surface for Rust-owned settings snapshot."
+ceiling_loc = 2921
+issue = 1010
+responsibility = "Block action/row FFI plus #993 cold visual/theme export surface after rebase onto origin/master."
+
+[[exception]]
+path = "crates/seyal-client/src/local.rs"
+ceiling_loc = 1169
+issue = 1010
+responsibility = "History-range text path supporting Block Copy output."
+
+[[exception]]
+path = "crates/seyal-client/src/local/attach.rs"
+ceiling_loc = 1015
+issue = 1010
+responsibility = "Attach-side wiring for history-range copy used by Block chrome."
+
+[[exception]]
+path = "macos/Seyal/Sources/MetalSurfaceView.swift"
+ceiling_loc = 1313
+issue = 1010
+responsibility = "Thin host hooks for Block chrome compositing over Metal."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1247
-issue = 993
-responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (fonts/padding/material probe)."
+ceiling_loc = 1177
+issue = 1010
+responsibility = "Hosts Block chrome after CommandBlockView extraction; applies Rust-resolved cold visual snapshot."
+
+[[exception]]
+path = "macos/Seyal/Sources/RustDisplayBridge.swift"
+ceiling_loc = 1395
+issue = 1010
+responsibility = "History copy request bridge for Rust-built Block pasteboard text."
 
