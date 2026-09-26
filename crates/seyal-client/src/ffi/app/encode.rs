@@ -9,9 +9,19 @@ use crate::recovery::{RecoveryEffect, RecoveryStage};
 
 use super::{
     error_number, push_text, AppHandle, SeyalAppAccessibility, SeyalAppAxNode, SeyalAppRow,
-    SeyalAppSnapshot, BLOCK_SELECTED, BLOCK_STATE_MASK, ROW_SELECTED, SNAP_COMPOSER,
-    SNAP_CONTROLLER, SNAP_FROZEN, SNAP_HAS_ATTACHMENT, SNAP_HAS_EXECUTION,
+    SeyalAppSnapshot,
 };
+
+pub(crate) const SNAP_COMPOSER: u16 = 1;
+pub(crate) const SNAP_CONTROLLER: u16 = 2;
+pub(crate) const SNAP_FROZEN: u16 = 4;
+pub(crate) const SNAP_HAS_EXECUTION: u16 = 8;
+pub(crate) const SNAP_HAS_ATTACHMENT: u16 = 16;
+pub(crate) const ROW_SELECTED: u16 = 1;
+/// Block-row `flags`: low bits are the presentation state (1..3); bit 3 marks
+/// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
+pub(crate) const BLOCK_STATE_MASK: u16 = 7;
+pub(crate) const BLOCK_SELECTED: u16 = 8;
 
 pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnapshot {
     let pane = snap.pane.to_bytes();

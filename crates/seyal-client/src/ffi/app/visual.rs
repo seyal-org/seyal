@@ -1,11 +1,36 @@
 //! Cold theme / visual FFI export for the thin AppKit host (#993).
+//!
+//! Also owns the test-only `seyal_app_snapshot` call counter used to prove
+//! steady-state frames make zero snapshot FFI (#1065).
 
 use std::{
     ptr,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
 };
 
 use crate::app::APP_ABI_VERSION;
+
+/// Counts `seyal_app_snapshot` calls for steady-state frame-path proofs.
+static SNAPSHOT_CALLS: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn note_snapshot_call() {
+    SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Test/harness only: snapshot FFI call count since last reset.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_snapshot_call_count() -> u64 {
+    SNAPSHOT_CALLS.load(Ordering::Relaxed)
+}
+
+/// Test/harness only: reset the snapshot FFI call counter.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_reset_snapshot_call_count() {
+    SNAPSHOT_CALLS.store(0, Ordering::Relaxed);
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -245,4 +270,23 @@ fn pack_srgb(color: crate::theme::Srgb) -> u32 {
     let blue = (color.blue.clamp(0.0, 1.0) * 255.0).round() as u32;
     let alpha = (color.alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
     (red << 24) | (green << 16) | (blue << 8) | alpha
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{seyal_app_test_reset_snapshot_call_count, seyal_app_test_snapshot_call_count};
+    use crate::ffi::app::{seyal_app_create, seyal_app_destroy, seyal_app_snapshot};
+
+    #[test]
+    fn snapshot_call_counter_tracks_seyal_app_snapshot() {
+        seyal_app_test_reset_snapshot_call_count();
+        let handle = seyal_app_create();
+        let baseline = seyal_app_test_snapshot_call_count();
+        let _ = seyal_app_snapshot(handle);
+        let _ = seyal_app_snapshot(handle);
+        assert_eq!(seyal_app_test_snapshot_call_count(), baseline + 2);
+        seyal_app_test_reset_snapshot_call_count();
+        assert_eq!(seyal_app_test_snapshot_call_count(), 0);
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
 }
