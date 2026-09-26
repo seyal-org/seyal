@@ -1,11 +1,8 @@
 //! Candidate-D presentation-neutral display wire types, decoder and disposable client cache.
 //!
-//! This module owns protocol/value validation only. It owns no PTY, VT, canonical
-//! terminal state, Runtime registry, renderer, or platform UI state.
-//!
-//! **Ownership (#1067):** `DisplayCache` is defined here as the single disposable
-//! client-side cache type. Runtime (`seyal-runtime::display`) owns encode/publish
-//! into wire batches and may re-export this type; it must not define a second cache.
+//! Owns protocol/value validation only (no PTY, VT, Runtime, renderer, or UI state).
+//! `DisplayCache` is the sole disposable client cache type (#1067); Runtime may
+//! re-export it for encode/publish and must not define a second cache.
 
 mod v1;
 mod v2;
@@ -261,7 +258,7 @@ impl DisplayCell {
     }
 }
 
-/// Disposable client-side display cache (single type; defined in protocol — #1067).
+/// Disposable client-side display cache (sole type; protocol-owned — #1067).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayCache {
     pub generation: u64,

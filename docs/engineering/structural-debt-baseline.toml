@@ -88,3 +88,10 @@ reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
 # partitioned into print / execute / csi / osc siblings; all landed ≤ review_loc,
 # so no [[exception]] or [[cohesion_acknowledgement]] remains for this surface.
+
+# #1067 docs-only ownership note on the protocol DisplayCache module (review band).
+[[cohesion_acknowledgement]]
+path = "crates/seyal-protocol/src/display/mod.rs"
+acknowledged_loc = 868
+issue = 1067
+reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
