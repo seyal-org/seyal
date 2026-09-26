@@ -266,7 +266,9 @@ Lane B (native workspace) and lane A/C (terminal + performance) may run together
 
 The pane/tab execution provisioning seam required by that decomposition is refined under #994: [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md) (Proposed) with child drafts in [`M003-674-EXECUTION-PROVISIONING-CHILDREN.md`](M003-674-EXECUTION-PROVISIONING-CHILDREN.md). No child is Ready before that ADR and its SPEC-003/004/009 amendments are accepted.
 
-The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 **Proposed** on `master` via merged #1057). Window/tab lifecycle remains #1000 (open PR #1055). Execution provisioning remains #994 (open PR #1056). ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
+The window/tab half of that missing contract is refined by #1000: [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md) (**Proposed** on `master` via merged #1055) with child decomposition in [`../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md`](../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md). A child must not code window/tab lifecycle behavior before ADR-018 acceptance.
+
+The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 **Proposed** on `master` via merged #1057). Window/tab lifecycle is ADR-018 **Proposed** on `master` via merged #1055. Execution provisioning remains #994 (open PR #1056). ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
 
 ### 6.3 #923 — split-tree projection after #922
 
@@ -291,6 +293,10 @@ Current production `ShellState` deliberately keeps tab creation and pane splitti
 ### 6.8 Closed M001.1 corrective work
 
 #890 and #904 are closed. They are historical corrective authority/evidence, not remaining M003 work and not implementation pickups.
+
+### 6.7 #676 / #1003 — startup launch policy (refinement)
+
+Umbrella #676 remains unassigned and is not a pickup. The startup shell/environment/CWD half of that umbrella is refined by #1003: [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md) (**Proposed**) and [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (**Proposed**), with child drafts in [`../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md`](../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md). The typed `EffectiveLaunchPolicy` is the input the #994 / proposed ADR-017 (PR #1056) provisioning seam resolves for profile `0`. No launch-policy child is Ready before ADR-020 / SPEC-023 acceptance; provisioning consume paths also wait on ADR-017. Themes/fonts/keybindings and broader TOML schema remain separate #676 follow-ons. Do not assign #676 from this refinement.
 
 ---
 
