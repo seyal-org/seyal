@@ -15,6 +15,7 @@ Apply only these Seyal-specific rules on top of the generic procedure:
 4. For terminal/runtime work, classify required unit/integration/fixture/conformance/fuzz/failure/performance evidence and identify any applicable domain skill such as `vt-tdd`, `terminal-conformance`, `performance-gate`, `metal-renderer`, or `security-review`.
 5. Classify performance, memory, security, and documentation impact. `Documentation impact: none` requires a concrete reason.
 6. Respect the active milestone/dependency frontier. Groom enough bounded contributor-ready work ahead of demand, but do not pre-create speculative downstream implementation merely to inflate ticket count. Distinguish start dependencies from merge dependencies so stacked work can proceed at stable seams.
-7. After the work item is designed, run the `development-readiness` skill. Set Project status to **Ready** only when its generic verdict is `READY` and every Seyal Ready checkbox in `ISSUE-PROTOCOL.md` also passes.
+7. Work-item design makes the Issue **planning-ready**, not implementation-ready. Next run `implementation-planning` for the exact Issue. Keep the resulting plan `PROPOSED`; do not claim the Issue or start production work from planning.
+8. The exact `plan_id + plan_revision` must then be accepted through the project-defined technical-authority path. Only after that acceptance exists should `development-readiness` run. Set Project status to **Ready** only when its generic verdict is `READY` and every Seyal Ready checkbox in `ISSUE-PROTOCOL.md` also passes.
 
 If generic AI-SDLC behavior is insufficient, record the reusable defect in `ai-sdlc`; do not permanently fork the generic procedure here.

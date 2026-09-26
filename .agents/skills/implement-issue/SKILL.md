@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Seyal facade for AI-SDLC implementation, adding mandatory GitHub issue claiming, plan-first confirmation, the one-Issue/worktree/PR workflow, and terminal-specific engineering gates.
+description: Seyal facade for AI-SDLC implementation, adding mandatory human GitHub ownership, accepted-plan/candidate mapping, the one-Issue/worktree/PR workflow, and terminal-specific engineering gates.
 ---
 
 # Implement Issue
@@ -11,7 +11,7 @@ Follow the canonical generic procedure in `.sdlc/framework/skills/implementation
 
 ## Exclusive GitHub Issue claim
 
-Claiming the Issue is a coordination preflight, not implementation permission. Perform it before planning, worktree/branch creation, generated files, or production edits.
+Claiming the Issue is a coordination preflight, not implementation permission. Implementation planning happens before final readiness and does not claim ownership. Perform the human-owner claim before implementation branch/worktree creation, generated files, or production edits.
 
 1. Resolve the responsible **human GitHub owner** using the project-approved GitHub tooling and the fresh complete Issue owner-record state (assignees plus any maintainer-acknowledged `Owner: @login` claim). Coding-agent/bot identities are not valid Seyal owners. Do not guess from git author name, OS username, chat name, agent/vendor identity, or repository ownership. If the human owner cannot be resolved uniquely, stop with `BLOCKED: human implementation owner unavailable` and do not claim or edit the Issue.
 2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for owner-record state.
@@ -38,16 +38,18 @@ The work owner is always a human GitHub contributor.
 - Agent assistance may be credited in the PR body and/or with a real `Co-authored-by:` trailer. Do not invent attribution identities.
 - A bot-authored review/comment is supplemental analysis only. Required independent review must be owned by a human GitHub reviewer.
 
-## Plan first
+## Accepted plan and candidate preflight
 
-Do not create the implementation worktree/branch, generate files, or start production edits until the implementation approach is confirmed in chat. Ready/claimed status is not permission to skip the plan.
+Do not create or switch the implementation worktree/branch, generate files, or start production edits until the generic implementation preflight can resolve the exact current accepted plan and candidate state.
 
-1. Restate the owning Issue, in/out scope, production vs exploratory classification, and the concrete production path you will change.
-2. If the request is ambiguous or the Issue leaves a material choice open, ask before assuming scope. Do not silently pick architecture, file layout, or extra work.
-3. If the work needs more than about three file changes, or any new module/boundary, outline the plan in chat first: files, tests/evidence, and risks. Wait for confirmation before generating files.
-4. After the plan is confirmed, deliver execution-ready implementation. Do not leave scaffolds, placeholder modules, or outline-only trees as the result.
-5. Flag uncertainty explicitly rather than resolving it silently. If two approaches are viable, state the tradeoff and ask.
-6. When iterating, make targeted corrections to the agreed plan. Do not rewrite the whole change unless the plan itself changed.
+1. Resolve the Issue's exact accepted `plan_id + plan_revision` and acceptance evidence. A chat outline, related plan, latest plan, or merely `PROPOSED` plan is not implementation authority.
+2. If the accepted plan is missing, stale, or no longer matches scope/architecture/dependencies, stop and route to `implementation-planning`, project-defined plan acceptance, then `development-readiness`. Do not repair the plan inside `implement-issue`.
+3. Re-state the accepted implementation slice and permanent production path before edits. Ask the user only when an unresolved product/architecture/authority decision remains; do not create a second ad-hoc plan in chat.
+4. Resolve any open PR for this same owning Issue before creating a branch/worktree:
+   - same human owner + `IMPLEMENTATION_IN_PROGRESS` → resume that exact candidate/branch; CI failures and early feedback needed to finish accepted scope remain under `implement-issue`;
+   - `IN_REVIEW` + reviewer feedback or required-check remediation → use `address-pr-review`, then full `pr-review`;
+   - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.
+5. New implementation begins only after the Issue is Ready, the accepted plan is current, the human owner claim is valid, and no conflicting candidate owns the same slice.
 
 ## Failure remediation loop
 
@@ -77,7 +79,7 @@ Anything that can reach `master` must be production-grade for its intended repos
 
 ## Deterministic branch audit/resume backstop
 
-After the plan is confirmed but before creating the worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record prevents two people from owning the same implementation Issue at once**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
+After accepted-plan/readiness/candidate preflight and before creating a new worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record prevents two people from owning the same implementation Issue at once**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
 
 1. Fetch remote refs immediately before branch creation.
 2. If the human owner's deterministic `<human-login>/issue/<number>` branch already exists in the canonical repository or the contributor's declared fork, **do not create another implementation worktree or alternate branch**. Stop and report that the Issue has active/resumable work. Resume only when the human owner explicitly asked to continue/resume and the fresh Issue read still proves that same human is the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim.
@@ -89,7 +91,7 @@ Legacy implementation branches already created as `issue/<number>`, `issue/<numb
 
 Then apply only these Seyal-specific rules on top of the generic procedure:
 
-1. The GitHub Issue must already be **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Re-run `development-readiness` if scope, authority, dependencies, or acceptance changed materially.
+1. The GitHub Issue must already be **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`, with the exact current accepted `plan_id + plan_revision` and acceptance evidence resolvable. If scope, authority, dependencies, acceptance, or governing architecture changed materially, route through `implementation-planning` → project-defined plan acceptance → `development-readiness` before further production edits.
 2. Use one Issue → one sole **human GitHub owner** → one isolated worktree → deterministic `<human-login>/issue/<number>` → one scoped PR. Prefer sole assignment when assignable; otherwise use the acknowledged external-owner claim. Coding agents may act on behalf of that human and may be credited as co-authors/tooling provenance; they never become the ownership identity. When the work is a GitHub sub-issue slice, claim and branch that sub-issue only after the parent/slice overlap check above passes; do not duplicate ownership of the same implementation slice. If the user asked for a parent end-to-end outcome that still has multiple sub-issues, implement the claimed slice Issue only and keep other slices on their own Issues/PRs.
 3. Before implementation, classify the work as **production** or **exploratory**. Mergeable Issue branches are production only. A spike/prototype/POC must use an explicitly isolated non-mergeable branch/worktree and must never be promoted wholesale into `master`.
 4. MVP is valid only when it is a narrow slice of the permanent architecture. Never add fake UI/data, temporary VT/renderer/runtime, duplicate state, alternate implementation, compatibility shim, feature-flag POC, or parallel old/new production path merely to demonstrate progress or bridge an unready dependency.
@@ -102,7 +104,7 @@ Then apply only these Seyal-specific rules on top of the generic procedure:
 11. Every mergeable PR must name exactly one **owning Issue** in the PR's `## Issue` section. Use `Closes #N`, `Fixes #N`, or `Resolves #N` only when this PR, once merged, satisfies that owning Issue's acceptance criteria and Definition of Done. If the PR is refinement, evidence, a partial implementation, a prerequisite, or otherwise does not make the Issue Done, use a non-closing reference such as `Refs #N` or `Part of #N`. Never use a closing keyword merely because the PR works on the Issue.
 12. Before opening the PR, compare the final diff/evidence against the owning Issue. If acceptance criteria changed during implementation, update/refine the Issue first; do not make the PR description silently redefine Done.
 13. Open the PR with `.github/pull_request_template.md`, preserve the exact owning-Issue reference, and provide reproducible evidence. The implementation handoff is **implemented for review**, never final verification.
-14. Do not self-approve core/high-risk work. Route next to `pr-review`, then `verification` as required.
+14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, mark/resolve the candidate as `IN_REVIEW` and route to full `pr-review`; the generic review consumes exact-revision `verification` and applicable specialist evidence. Review-stage remediation routes through `address-pr-review` and then full `pr-review` again.
 15. At final verification/merge handoff, explicitly verify the owning Issue's state: a closing PR may close it only if all Done gates are evidenced; a non-closing PR must leave it open. Also correct stale Issue status/checklist text when it would contradict the verified state.
 
 ## Claim handoff and release

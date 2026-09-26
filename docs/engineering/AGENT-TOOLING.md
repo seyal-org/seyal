@@ -14,11 +14,12 @@ Codex and GitHub Copilot CLI both discover project skills directly from `.agents
 | --- | --- |
 | Seyal architecture | `AGENTS.md` + `architecture-change` |
 | Project-context retrieval | thin `project-context` adapter → pinned AI-SDLC `project-context` |
-| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC `development-readiness` + Seyal Ready gate |
 | Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `work-item-design` + GitHub/Seyal deltas |
-| Implementation | `implement-issue` facade → pinned AI-SDLC `implementation` + Seyal branch/test/docs gates |
-| Focused code review | thin `code-review` adapter → pinned AI-SDLC `code-review` + Seyal architecture/terminal diff-review gates |
-| PR merge-readiness review | `pr-review` facade → pinned AI-SDLC `pr-review` + Seyal architecture/terminal/evidence merge gates |
+| Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `implementation-planning` + Seyal architecture/evidence planning gates |
+| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC `development-readiness` + accepted-plan + Seyal Ready gate |
+| Implementation | `implement-issue` facade → pinned AI-SDLC `implementation` + Seyal human-owner/branch/test/docs/candidate gates |
+| PR review/re-review | `pr-review` facade → pinned AI-SDLC `pr-review` + Seyal architecture/terminal/evidence merge gates |
+| Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `address-pr-review` + Seyal one-PR/root-cause/check gates |
 | Change verification | thin `verification` adapter → pinned AI-SDLC `verification` + Seyal evidence gates |
 | Milestone validation | `milestone-validation` facade → pinned AI-SDLC `verification` + Seyal aggregate milestone rules |
 | Native macOS design | `macos-native-design` |
@@ -45,12 +46,13 @@ The consumed generic layer is:
 ```text
 ai-sdlc
   project-context
-  development-readiness
   work-item-design
+  implementation-planning
+  development-readiness
   implementation
-  code-review
   verification
   pr-review
+  address-pr-review
         ↓ exact reviewed pin materialized by make bootstrap-agents
 Seyal/.sdlc/framework/
         ↓
@@ -63,10 +65,10 @@ Seyal owns project knowledge and project/domain policy. AI-SDLC owns the reusabl
 
 The integration forms are deliberate:
 
-- **direct adapters** keep the generic capability name when Seyal adds a narrow local gate (`project-context`, `development-readiness`, `code-review`, `verification`);
-- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `work-item-design`, `implement-issue` → `implementation`, `pr-review` → `pr-review`, `milestone-validation` → `verification`).
+- **direct adapters** keep the generic capability name when Seyal adds a narrow local gate (`project-context`, `implementation-planning`, `development-readiness`, `verification`, `address-pr-review`);
+- **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `work-item-design`, `implement-issue` → `implementation`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
 
-`code-review` and `pr-review` are intentionally separate discovery surfaces. Use `code-review` for focused implementation/diff defects and regressions. Use `pr-review` when the user asks whether an exact merge candidate is genuinely ready to merge; generic `pr-review` orchestrates or consumes `code-review`, `verification`, and risk-based specialist review before issuing the final merge-readiness verdict.
+`pr-review` is the single review/re-review discovery surface. It performs the full current-candidate implementation and merge-readiness review, consumes `verification`, and requests specialist review only when risk/policy requires it. `address-pr-review` is the separate remediation entrypoint for an `IN_REVIEW` candidate and must return to a full `pr-review`; unfinished accepted scope remains under `implement-issue`.
 
 Do not also add local `work-item-design` or `implementation` aliases merely to mirror AI-SDLC. That would create overlapping discovery surfaces with the established Seyal facades. The generic source remains under `.sdlc/framework/` and the project facade/adapter contains only the Seyal-specific delta.
 
