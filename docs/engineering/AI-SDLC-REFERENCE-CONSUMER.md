@@ -43,7 +43,7 @@ issue-refinement
   → AI-SDLC work-item-design
 implementation-planning
   → PROPOSED plan_id + plan_revision
-project-defined technical-authority plan acceptance
+human seyal-plan-acceptance comment (ISSUE-PROTOCOL.md)
 development-readiness
   → READY only with exact accepted plan + Seyal Ready gates
 implement-issue
@@ -62,17 +62,17 @@ A proposed plan is not implementation authority. Plan acceptance is distinct fro
 
 `implementation-planning` inspects only the code/context needed to define the permanent production path, records tests/evidence/failure paths and returns a durable **PROPOSED** plan. It does not claim the Issue, create a branch, edit production code or accept the plan.
 
-Only the project-defined technical-authority path may accept that exact plan revision. `development-readiness` then applies the generic readiness gate plus Seyal's `ISSUE-PROTOCOL.md` checklist.
+Only the human `<!-- seyal-plan-acceptance -->` comment in `ISSUE-PROTOCOL.md` may accept that exact plan revision. `development-readiness` then applies the generic readiness gate plus Seyal's Ready checklist, including that comment.
 
 ## Reference scenario 2 — implementation and same-candidate continuation
 
 `implement-issue` maps the generic implementation preflight onto GitHub:
 
-- resolve the exact accepted plan and acceptance evidence;
+- resolve the exact accepted plan from the `<!-- seyal-plan-acceptance -->` comment;
 - establish exactly one human GitHub owner;
 - resolve any open candidate for the same Issue before branch/worktree creation;
-- resume the same authorized `IMPLEMENTATION_IN_PROGRESS` candidate rather than create another PR;
-- route an `IN_REVIEW` candidate with review/check remediation to `address-pr-review`;
+- treat a draft PR as `IMPLEMENTATION_IN_PROGRESS` and resume it rather than create another PR;
+- treat a ready-for-review PR as `IN_REVIEW` and route review/check remediation to `address-pr-review` on that same PR;
 - block on `UNKNOWN`, conflicting ownership or multiple active candidates.
 
 A correct implementation handoff is implemented-for-review on a concrete candidate, never a self-issued verification/merge verdict.

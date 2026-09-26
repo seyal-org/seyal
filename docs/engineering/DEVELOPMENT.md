@@ -26,7 +26,7 @@ Default distributed-development unit:
 ```text
 one Ready Issue
 → one authenticated **human** GitHub owner (assignee when assignable; acknowledged Owner claim otherwise)
-→ one confirmed implementation plan
+→ one accepted plan comment on the Issue
 → one deterministic <human-login>/issue/<number> branch
 → coding agent may act only as delegated tool/co-author
 → one isolated worktree
@@ -43,14 +43,14 @@ The Issue has exactly one **human owner**. The sole assignee is the preferred ow
 2. Refine the Issue using `.agents/skills/issue-refinement/SKILL.md`.
 3. Set Project status to **Ready** only after the readiness checklist in `ISSUE-PROTOCOL.md` passes.
 4. Any request to implement/fix/finish/code a specific GitHub Issue must enter `.agents/skills/implement-issue/SKILL.md`. Resolve the authenticated **human GitHub owner** and fresh-read assignee/owner-claim state before planning or production work. Prefer sole assignment when GitHub permits it; otherwise require a maintainer-acknowledged external-contributor owner claim. A Cursor/Codex/Claude/Copilot/bot identity is never the work owner. Assigned-to-other, multiple-assignee, bot-owned, or identity-unavailable cases stop as `BLOCKED`.
-5. Confirm the implementation plan in chat. Claim/Ready state is not permission to skip plan-first review.
-6. After plan confirmation, create the exact branch `<human-login>/issue/<number>` from current accepted `master`, where the login is the sole human owner. The branch may live in the upstream repository or the contributor's fork; ownership identity is still the human login. If that branch already exists, stop unless the human owner explicitly requested resume/continue of that existing work. Re-read the Issue after branch creation and require the same human to remain the unique owner through sole assignment or the acknowledged external-owner claim before creating the worktree or editing production files.
+5. Require the accepted-plan comment in `ISSUE-PROTOCOL.md` before implementation. A chat outline is not that record. Claim/Ready state is not permission to skip it.
+6. After that acceptance comment exists, create the exact branch `<human-login>/issue/<number>` from current accepted `master`, where the login is the sole human owner. The branch may live in the upstream repository or the contributor's fork; ownership identity is still the human login. If that branch already exists, stop unless the human owner explicitly requested resume/continue of that existing work. Re-read the Issue after branch creation and require the same human to remain the unique owner through sole assignment or the acknowledged external-owner claim before creating the worktree or editing production files.
 7. Create one isolated worktree from the deterministic Issue branch.
 8. Use tests/fixtures first for core behavior.
 9. Implement only the Issue scope.
 10. Assess **Documentation impact** before final validation. Run the `docs-authoring` skill and update the User Guide and/or Developer Guide in the same Issue/PR when applicable. If no documentation is needed, record a concrete `N/A` rationale in the PR.
 11. Run `make check` plus issue-specific tests/benchmarks/security checks. When documentation changed, also run `make docs-check` and `make docs-build`.
-12. Open a PR using the repository template, including documentation evidence or the `N/A` rationale.
+12. Open one draft PR using the repository template while accepted scope is still incomplete. Mark that same PR ready for review only when the scope is complete, and include documentation evidence or the `N/A` rationale. Do not open a second PR to answer review comments.
 13. Require CI evidence; high-risk/core work gets independent review.
 14. Move to Validation where milestone/demo/performance evidence is required.
 15. Merge only after required gates pass. Do not start a dependent milestone early.

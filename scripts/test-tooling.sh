@@ -107,6 +107,21 @@ grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metada
 grep -Fq 'Status never overrides the **human-owner rule**' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must preserve the external-owner fallback"
 grep -Fq 'single human owner record prevents two people from owning the same implementation Issue at once' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must make the owner record authoritative across contributors"
 grep -Fq 'branch is only that owner' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define human-namespaced branches as audit/resume backstops"
+grep -Fq '<!-- seyal-plan-acceptance -->' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define the accepted-plan comment"
+grep -Fq 'accepted_by' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must record accepted_by"
+grep -Fq 'candidate_lifecycle_stage' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define candidate lifecycle stage"
+grep -Fq 'A chat outline is not an implementation plan.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must reject a chat-only plan"
+grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must resolve the accepted-plan comment"
+grep -Fq '<!-- seyal-candidate-stage -->' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must persist candidate stage on the PR"
+grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must require the accepted-plan comment"
+grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must name the acceptance comment"
+grep -Fq '<!-- seyal-plan -->' .agents/skills/implementation-planning/SKILL.md || fail "implementation-planning must post the proposed-plan comment"
+grep -Fq 'ready-for-review PR is `IN_REVIEW`' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must map IN_REVIEW to ready-for-review"
+if grep -Fq 'Confirm the implementation plan in chat.' docs/engineering/DEVELOPMENT.md \
+  || grep -Fq 'Confirm the implementation plan in chat.' AGENTS.md \
+  || grep -Fq 'Confirm the implementation plan in chat.' docs/engineering/ISSUE-PROTOCOL.md; then
+  fail "chat plan confirmation must not outrank the accepted-plan comment"
+fi
 grep -Fq 'Exactly one human owns an implementation Issue at a time' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document single-human ownership"
 grep -Fq 'branch is only an audit/resume backstop for that human' site/src/content/docs/developer/index.mdx || fail "Developer Guide must not make the branch the ownership authority"
 

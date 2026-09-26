@@ -42,13 +42,14 @@ The work owner is always a human GitHub contributor.
 
 Do not create or switch the implementation worktree/branch, generate files, or start production edits until the generic implementation preflight can resolve the exact current accepted plan and candidate state.
 
-1. Resolve the Issue's exact accepted `plan_id + plan_revision` and acceptance evidence. A chat outline, related plan, latest plan, or merely `PROPOSED` plan is not implementation authority.
-2. If the accepted plan is missing, stale, or no longer matches scope/architecture/dependencies, stop and route to `implementation-planning`, project-defined plan acceptance, then `development-readiness`. Do not repair the plan inside `implement-issue`.
+1. Resolve the Issue's exact accepted `plan_id + plan_revision` from the `<!-- seyal-plan-acceptance -->` comment in `docs/engineering/ISSUE-PROTOCOL.md`, including `plan_content_ref`, `accepted_by`, and `accepted_at`. A chat outline, related plan, latest plan, or merely `PROPOSED` `<!-- seyal-plan -->` comment is not implementation authority.
+2. If the accepted plan is missing, stale, or no longer matches scope/architecture/dependencies, stop and route to `implementation-planning`, the human acceptance comment in `ISSUE-PROTOCOL.md`, then `development-readiness`. Do not repair the plan inside `implement-issue`.
 3. Re-state the accepted implementation slice and permanent production path before edits. Ask the user only when an unresolved product/architecture/authority decision remains; do not create a second ad-hoc plan in chat.
-4. Resolve any open PR for this same owning Issue before creating a branch/worktree:
-   - same human owner + `IMPLEMENTATION_IN_PROGRESS` → resume that exact candidate/branch; CI failures and early feedback needed to finish accepted scope remain under `implement-issue`;
-   - `IN_REVIEW` + reviewer feedback or required-check remediation → use `address-pr-review`, then full `pr-review`;
+4. Resolve any open PR for this same owning Issue before creating a branch/worktree. Read `candidate_lifecycle_stage` from the draft flag and optional `<!-- seyal-candidate-stage -->` block in `ISSUE-PROTOCOL.md`:
+   - same human owner + `IMPLEMENTATION_IN_PROGRESS` (draft) → resume that exact candidate/branch; CI failures and early feedback needed to finish accepted scope remain under `implement-issue`; keep the PR draft and keep `<!-- seyal-candidate-stage -->` aligned, with `stage_set_by: implementation`;
+   - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review`, then full `pr-review`; do not open a second PR;
    - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.
+   When accepted scope is complete, mark that same PR ready for review and set the body block to `IN_REVIEW`. Only this skill may change the draft flag or that block.
 5. New implementation begins only after the Issue is Ready, the accepted plan is current, the human owner claim is valid, and no conflicting candidate owns the same slice.
 
 ## Failure remediation loop

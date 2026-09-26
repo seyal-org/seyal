@@ -68,7 +68,9 @@ The integration forms are deliberate:
 - **direct adapters** keep the generic capability name when Seyal adds a narrow local gate (`project-context`, `implementation-planning`, `development-readiness`, `verification`, `address-pr-review`);
 - **Seyal facades** preserve an established project workflow entrypoint or add a larger project-domain acceptance layer while delegating the reusable procedure (`issue-refinement` → `work-item-design`, `implement-issue` → `implementation`, `pr-review` → `pr-review`, `milestone-validation` → `verification`). Planning and review-remediation keep their generic names because their routing boundaries are explicit.
 
-`pr-review` is the single review/re-review discovery surface. It performs the full current-candidate implementation and merge-readiness review, consumes `verification`, and requests specialist review only when risk/policy requires it. `address-pr-review` is the separate remediation entrypoint for an `IN_REVIEW` candidate and must return to a full `pr-review`; unfinished accepted scope remains under `implement-issue`.
+`pr-review` is the single review/re-review discovery surface. It performs the full current-candidate implementation and merge-readiness review, consumes `verification`, and requests specialist review only when risk/policy requires it. There is no lighter diff-only `code-review` pass. `address-pr-review` is the separate remediation entrypoint for an `IN_REVIEW` candidate and must return to one full `pr-review` on that same PR; unfinished accepted scope remains under `implement-issue`.
+
+The accepted-plan comment and the draft/ready candidate stage are defined in `docs/engineering/ISSUE-PROTOCOL.md`. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
 
 Do not also add local `work-item-design` or `implementation` aliases merely to mirror AI-SDLC. That would create overlapping discovery surfaces with the established Seyal facades. The generic source remains under `.sdlc/framework/` and the project facade/adapter contains only the Seyal-specific delta.
 

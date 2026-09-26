@@ -36,7 +36,7 @@ The pickup contract is:
 fresh open Ready Issue
 → resolve authenticated **human** GitHub owner
 → exactly one human owner = sole assignee when assignable, otherwise acknowledged `Owner: @login`
-→ plan confirmed
+→ accepted plan comment on the Issue
 → create exact branch <human-login>/issue/<number>
 → re-read Issue and verify the same unique human owner record
 → coding agent may act only on behalf of that human owner
@@ -55,7 +55,7 @@ Rules:
 - If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the **human-owner rule**.
 - For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record prevents two people from owning the same implementation Issue at once**; the human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
-- Branch creation happens only after the implementation plan is confirmed. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim.
+- Branch creation happens only after the accepted-plan comment in this document exists. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim.
 - If concurrent owner-record or branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid owner record to win a race.
 - Legacy `issue/<number>`, `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other pre-policy/agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
 
@@ -132,6 +132,58 @@ Every implementation Issue must state:
 
 `Documentation impact` must identify whether the change affects User Guide, Developer Guide, authoritative engineering docs, media/screenshots, or none. `None` is valid only with a reason.
 
+## Accepted implementation plan
+
+A chat outline is not an implementation plan. The durable plan for an implementation Issue is two GitHub Issue comments. Each revision is a new comment. Do not edit a plan or acceptance comment after it is posted. If GitHub reports `updated_at` later than `created_at`, that comment is not a resolvable revision.
+
+`plan_id` is `issue-<number>`. `plan_revision` is a positive integer. The first proposal is `1`. A refresh keeps `plan_id` and uses the next integer.
+
+The proposed plan is one Issue comment whose body starts with `<!-- seyal-plan -->` and includes:
+
+```text
+plan_id: issue-<number>
+plan_revision: <integer>
+plan_status: PROPOSED
+```
+
+The rest of that comment is the plan. After the comment exists, its URL is `plan_content_ref` for that exact revision.
+
+Acceptance is a later Issue comment whose body starts with `<!-- seyal-plan-acceptance -->` and includes:
+
+```text
+plan_id: issue-<number>
+plan_revision: <integer>
+plan_content_ref: <URL of the matching unedited seyal-plan comment>
+accepted_by: @<human-login>
+accepted_at: <UTC timestamp>
+```
+
+Technical authority for that comment is a human GitHub account with write access to this repository. Coding-agent and bot accounts are not technical authority and must not be `accepted_by`. An agent may post the acceptance comment only when that human explicitly directs the exact acceptance; the agent must not accept a plan on its own. The newest acceptance comment whose `plan_content_ref` still matches an unedited `<!-- seyal-plan -->` comment with the same `plan_id` and `plan_revision` is the accepted-plan pointer. A `PROPOSED` comment without that pointer is not acceptance.
+
+`implementation-planning` may post only the `<!-- seyal-plan -->` comment. It must not post `<!-- seyal-plan-acceptance -->` and must not mark the Issue Ready.
+
+## Candidate lifecycle stage
+
+The stage of the implementation candidate is the draft state of the single open pull request for that Issue. Count an open PR when its head branch is `<human-login>/issue/<number>` or its body references the Issue with `Closes`, `Fixes`, `Resolves`, `Refs`, or `Part of`.
+
+- no such open PR: `NONE`
+- exactly one, and it is a draft: `IMPLEMENTATION_IN_PROGRESS`
+- exactly one, and it is ready for review: `IN_REVIEW`
+- more than one, or the draft flag cannot be read: `UNKNOWN`
+
+Only `implement-issue` may change this stage. While accepted scope is incomplete, the PR stays a draft. When accepted scope is complete, `implement-issue` marks that same PR ready for review. It does not open a second PR. When it changes the stage, it keeps this block in the PR body aligned with the draft flag:
+
+```text
+<!-- seyal-candidate-stage -->
+candidate_lifecycle_stage: IMPLEMENTATION_IN_PROGRESS
+stage_set_by: implementation
+stage_set_at: <UTC timestamp>
+```
+
+Use `IN_REVIEW` in that block only when the PR is ready for review. If the block is absent, the draft flag alone is the stage, including for PRs opened before this record existed. If the block is present and disagrees with the draft flag, the stage is `UNKNOWN` until the human owner makes them agree. `address-pr-review` and `pr-review` must not change the draft flag or this block.
+
+Review findings on an `IN_REVIEW` PR are fixed on that same PR through `address-pr-review`, then handed back to one full `pr-review`. Do not open a replacement PR, and do not start a new implementation, for the same review round.
+
 ## Ready gate
 
 An Issue is Ready only when all are true:
@@ -146,6 +198,7 @@ An Issue is Ready only when all are true:
 - [ ] documentation impact is classified
 - [ ] no unresolved architecture question remains
 - [ ] the mergeable implementation is a permanent production path, not a POC/spike/temporary parallel implementation
+- [ ] the exact plan revision is accepted by a `<!-- seyal-plan-acceptance -->` comment (`plan_content_ref`, `accepted_by`, and `accepted_at`). A chat outline or a `PROPOSED` plan comment alone is not acceptance
 
 If any item is false, return the Issue to Refinement or Blocked. An agent must not silently fill the gap.
 
