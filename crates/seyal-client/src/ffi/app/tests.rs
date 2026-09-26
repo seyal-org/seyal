@@ -58,6 +58,19 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(offset_of!(SeyalAppComposerHistory, query_utf8), 16);
 }
 
+#[test]
+fn snapshot_call_counter_tracks_seyal_app_snapshot() {
+    seyal_app_test_reset_snapshot_call_count();
+    let handle = seyal_app_create();
+    let baseline = seyal_app_test_snapshot_call_count();
+    let _ = seyal_app_snapshot(handle);
+    let _ = seyal_app_snapshot(handle);
+    assert_eq!(seyal_app_test_snapshot_call_count(), baseline + 2);
+    seyal_app_test_reset_snapshot_call_count();
+    assert_eq!(seyal_app_test_snapshot_call_count(), 0);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
 fn bound_handle() -> (u64, SeyalAppSnapshot) {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);

@@ -143,6 +143,36 @@ def validate_native_recovery_ownership(errors: list[str]) -> None:
             f"{bridge_relpath}::teardownCompleted reopens a client; it may only publish teardown completion"
         )
 
+    # Steady-state Candidate-D frames must not call seyal_app_snapshot. The
+    # presentation advance path gates on recoveryPresentationPending alone
+    # before any snapshot FFI (#1065 review).
+    recovery_relpath = "macos/Seyal/Sources/MetalSurfaceView+Recovery.swift"
+    recovery_path = ROOT / recovery_relpath
+    if not recovery_path.exists():
+        errors.append(f"missing guarded native recovery file: {recovery_relpath}")
+        return
+    recovery_source = recovery_path.read_text(encoding="utf-8")
+    advance_body = extract_function(recovery_source, "advanceRecoveryPresentationIfReady")
+    if advance_body is None:
+        errors.append(
+            f"{recovery_relpath} is missing advanceRecoveryPresentationIfReady()"
+        )
+    else:
+        pending_guard = re.search(
+            r"guard\s+recoveryPresentationPending\b",
+            advance_body,
+        )
+        first_snapshot = advance_body.find("seyal_app_snapshot")
+        if pending_guard is None:
+            errors.append(
+                f"{recovery_relpath}::advanceRecoveryPresentationIfReady must gate on "
+                "recoveryPresentationPending before any work"
+            )
+        elif first_snapshot != -1 and pending_guard.start() > first_snapshot:
+            errors.append(
+                f"{recovery_relpath}::advanceRecoveryPresentationIfReady calls "
+                "seyal_app_snapshot before the recoveryPresentationPending guard"
+            )
 
 
 def main() -> None:

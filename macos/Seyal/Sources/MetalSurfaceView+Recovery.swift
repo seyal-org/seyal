@@ -86,6 +86,7 @@ extension MetalSurfaceView {
 
   @discardableResult
   func adoptRecoveredHandle(_ opened: RuntimeRecoveryOpenedHandle) -> Bool {
+    bridge?.continuityAppHandle = recoveryAppHandle
     let adopted = bridge?.adoptRecoveredHandle(opened) ?? false
     if adopted {
       recoveryPresentationPending = true
@@ -94,17 +95,21 @@ extension MetalSurfaceView {
   }
 
   /// SPEC-009 §10: Restoring then Usable after connect + native restore.
+  /// Steady-state frames (pending == false) return immediately with zero
+  /// `seyal_app_snapshot` FFI; only an adopted-but-not-yet-Usable surface
+  /// continues into presentation advancement.
   @discardableResult
   func advanceRecoveryPresentationIfReady() -> Bool {
+    guard recoveryPresentationPending else { return true }
     guard recoveryAppHandle != 0,
       bridge?.isConnected == true,
-      hasPreparedState,
-      recoveryPresentationPending || runtimeRecoveryStage
-        == UInt16(SEYAL_APP_RECOVERY_RECONSTRUCTING.rawValue)
-        || runtimeRecoveryStage == UInt16(SEYAL_APP_RECOVERY_RESTORING.rawValue)
+      hasPreparedState
     else { return true }
 
-    if runtimeRecoveryStage == UInt16(SEYAL_APP_RECOVERY_RECONSTRUCTING.rawValue) {
+    // One snapshot for this pending turn; never re-enter via the stage property.
+    let stage = seyal_app_snapshot(recoveryAppHandle).recovery_stage
+
+    if stage == UInt16(SEYAL_APP_RECOVERY_RECONSTRUCTING.rawValue) {
       _ = applyRuntimeRecoveryAction(
         recoveryAppHandle,
         kind: SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE
@@ -113,10 +118,11 @@ extension MetalSurfaceView {
       }
     }
 
+    let afterRestore = seyal_app_snapshot(recoveryAppHandle).recovery_stage
     guard shouldRender,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
+      afterRestore != UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
     else {
-      if runtimeRecoveryStage == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue) {
+      if afterRestore == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue) {
         recoveryPresentationPending = false
       }
       return true

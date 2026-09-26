@@ -55,16 +55,17 @@ func openRuntimeRecoveryHandle(
   }
   guard handle != 0 else {
     let result = seyal_bridge_last_recovery_result()
-    // Class 1 is a missing leaf. Class 2 is refused/disappeared: a dead
-    // `control.sock` looks like an unready listener, and only a Runtime
-    // singleton contender may replace it (SPEC-009). Map both to the
-    // one-launch-per-episode path; Rust launch-once accounting still prevents
-    // a second spawn while a just-started helper binds the canonical endpoint.
-    if result.retryable != 0, result.failure_class == 1 || result.failure_class == 2 {
+    // Rust owns failure_class → outcome mapping (ADR-015 / #1065).
+    switch seyal_bridge_classify_open_result(result.failure_class, result.retryable) {
+    case UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue):
       return .endpointMissing
+    case UInt32(SEYAL_APP_RECOVERY_CONTROLLER_BUSY.rawValue):
+      return .controllerBusy
+    case UInt32(SEYAL_APP_RECOVERY_RETRYABLE.rawValue):
+      return .retryable
+    default:
+      return .blocked
     }
-    if result.failure_class == 3, result.retryable != 0 { return .controllerBusy }
-    return result.retryable != 0 ? .retryable : .blocked
   }
   // `LAST_RECOVERY_RESULT` is executor-local in the Rust bridge. Capture the
   // accepted attachment identities on this lifecycle queue and carry them to
@@ -84,6 +85,38 @@ func openRuntimeRecoveryHandle(
     attachmentIDLow: result.attachment_id_low,
     attachmentIDHigh: result.attachment_id_high
   ))
+}
+
+/// Asks Rust `ReconstructionState` to fence continuity identity. Returns true
+/// only when the commit succeeds; identity mismatch fails closed in Rust.
+@discardableResult
+func commitRuntimeReconstruction(
+  _ appHandle: UInt64,
+  runtimeLow: UInt64,
+  runtimeHigh: UInt64,
+  executionLow: UInt64,
+  executionHigh: UInt64,
+  attachmentLow: UInt64,
+  attachmentHigh: UInt64
+) -> Bool {
+  guard appHandle != 0 else { return false }
+  _ = applyRuntimeRecoveryAction(appHandle, kind: SEYAL_APP_ACTION_BEGIN_RECONSTRUCTION)
+  let result = applyRuntimeRecoveryAction(appHandle, kind: SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION) {
+    $0.fence_execution_lo = runtimeLow
+    $0.fence_execution_hi = runtimeHigh
+    $0.target_execution_lo = executionLow
+    $0.target_execution_hi = executionHigh
+    $0.target_attachment_lo = attachmentLow
+    $0.target_attachment_hi = attachmentHigh
+    // bit0 = controller authority, bit1 = authoritative snapshot.
+    $0.reserved = 1 | 2
+  }
+  return result == 0
+}
+
+func disconnectRuntimeReconstruction(_ appHandle: UInt64) {
+  guard appHandle != 0 else { return }
+  _ = applyRuntimeRecoveryAction(appHandle, kind: SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION)
 }
 
 private func runtimeRecoveryExecutionWords(_ value: String) -> (low: UInt64, high: UInt64)? {
@@ -117,65 +150,4 @@ enum RuntimeRecoveryAttemptOutcome: Equatable, Sendable {
   case retryable
   case controllerBusy
   case blocked
-}
-
-struct RuntimeContinuityIdentity: Equatable {
-  let low: UInt64
-  let high: UInt64
-
-  static let none = RuntimeContinuityIdentity(low: 0, high: 0)
-  var isValid: Bool { self != .none }
-}
-
-enum ReconnectReconstructionStage: Equatable {
-  case disconnected
-  case awaitingAuthoritativeSnapshot
-  case usable
-  case blockedIdentityMismatch
-}
-
-/// Pins the Runtime/execution continuity claim while treating every attachment
-/// and all client-side reconstruction state as disposable.
-struct ReconnectReconstructionState: Equatable {
-  private(set) var stage: ReconnectReconstructionStage = .disconnected
-  private(set) var expectedRuntime: RuntimeContinuityIdentity?
-  private(set) var expectedExecution: RuntimeContinuityIdentity?
-  private(set) var lastAttachment: RuntimeContinuityIdentity?
-
-  var canMutate: Bool { stage == .usable }
-
-  mutating func beginAttempt() {
-    stage = .awaitingAuthoritativeSnapshot
-  }
-
-  mutating func commit(
-    runtime: RuntimeContinuityIdentity,
-    execution: RuntimeContinuityIdentity,
-    attachment: RuntimeContinuityIdentity,
-    controllerAuthorityCommitted: Bool,
-    authoritativeSnapshotCommitted: Bool
-  ) -> Bool {
-    guard runtime.isValid, execution.isValid, attachment.isValid,
-      expectedRuntime.map({ $0 == runtime }) ?? true,
-      expectedExecution.map({ $0 == execution }) ?? true,
-      lastAttachment.map({ $0 != attachment }) ?? true
-    else {
-      stage = .blockedIdentityMismatch
-      return false
-    }
-    guard controllerAuthorityCommitted, authoritativeSnapshotCommitted else {
-      stage = .awaitingAuthoritativeSnapshot
-      return false
-    }
-
-    expectedRuntime = runtime
-    expectedExecution = execution
-    lastAttachment = attachment
-    stage = .usable
-    return true
-  }
-
-  mutating func disconnect() {
-    stage = .disconnected
-  }
 }

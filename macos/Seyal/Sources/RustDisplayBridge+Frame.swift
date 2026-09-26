@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 extension RustDisplayBridge {
   func currentFrame() -> SeyalPreparedFrame? {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return nil }
+    guard isConnected, selectClient() else { return nil }
     let frame = seyal_bridge_frame()
     guard frame.cells != nil, frame.cell_count > 0 else { return nil }
     return frame
@@ -12,7 +12,7 @@ extension RustDisplayBridge {
   /// Builds the initial PreparedSurface after attach. Idempotent.
   @discardableResult
   func ensurePreparedSurface() -> Bool {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return false }
+    guard isConnected, selectClient() else { return false }
     return seyal_bridge_ensure_prepared() == 0
   }
 
@@ -24,7 +24,7 @@ extension RustDisplayBridge {
   /// Minimal read-only Pass 8 presentation seam. The rich command transcript
   /// remains the independent Pass 7.1 timeline above.
   func currentBlockMetadata() -> RuntimeBlockMetadata? {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return nil }
+    guard isConnected, selectClient() else { return nil }
     let value = seyal_bridge_execution_block_metadata()
     guard value.revision > 0,
       value.start_line_id > 0,
@@ -40,7 +40,7 @@ extension RustDisplayBridge {
   }
 
   func currentTimeline() -> [NativeBlockRecord] {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return [] }
+    guard isConnected, selectClient() else { return [] }
     let count = Int(seyal_bridge_block_count())
     return (0..<count).compactMap { index in
       let record = seyal_bridge_block_record(UInt32(index))
@@ -65,14 +65,14 @@ extension RustDisplayBridge {
   }
 
   func nextComposerRequestID() -> UInt64 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return 0 }
+    guard isConnected, selectClient() else { return 0 }
     return seyal_bridge_next_composer_request_id()
   }
 
   /// Relay a newer Runtime composer eligibility. Only the revision decides
   /// novelty; the host never interprets the eligibility code.
   func publishComposerStatus() {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return }
+    guard isConnected, selectClient() else { return }
     let status = seyal_bridge_composer_status()
     guard status.revision != 0, status.revision != lastComposerStatusRevision else { return }
     lastComposerStatusRevision = status.revision
@@ -87,7 +87,7 @@ extension RustDisplayBridge {
   }
 
   func publishComposerResult() {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return }
+    guard isConnected, selectClient() else { return }
     let result = seyal_bridge_composer_result()
     guard result.request_id != 0,
       result.request_id != lastComposerResultRequestID

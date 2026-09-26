@@ -34,7 +34,8 @@ use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
 use crate::recovery::{
-    AttemptOutcome, LaunchResult, RecoveryCoordinator, RecoveryEffect, RecoveryStage,
+    AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
+    RecoveryEffect, RecoveryStage,
 };
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
@@ -150,6 +151,19 @@ pub enum AppAction {
     AdvanceRecoveryStage {
         stage: RecoveryStage,
     },
+    /// Begin a continuity-identity commit attempt (pins retained across episodes).
+    BeginReconstructionAttempt,
+    /// Commit Runtime/execution continuity and a fresh attachment. Rust is the
+    /// sole fencing authority (ADR-015 / #1065).
+    CommitReconstruction {
+        runtime: ContinuityIdentity,
+        execution: ContinuityIdentity,
+        attachment: ContinuityIdentity,
+        controller_authority_committed: bool,
+        authoritative_snapshot_committed: bool,
+    },
+    /// Mark reconstruction disconnected after the host drops the live client.
+    DisconnectReconstruction,
     SetComposerDraft {
         fence: AppFence,
         text: String,
@@ -334,6 +348,7 @@ pub struct ApplicationRoot {
     frozen: bool,
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
+    reconstruction: ReconstructionState,
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
@@ -369,6 +384,7 @@ impl ApplicationRoot {
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
+            reconstruction: ReconstructionState::default(),
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
@@ -452,6 +468,7 @@ impl ApplicationRoot {
                 AppAction::AckEffect
                     | AppAction::AckRecoveryEffect
                     | AppAction::CancelRecovery
+                    | AppAction::DisconnectReconstruction
                     | AppAction::Quit
             )
         {
@@ -480,6 +497,21 @@ impl ApplicationRoot {
             AppAction::AckRecoveryEffect => self.ack_recovery_effect(),
             AppAction::CancelRecovery => self.cancel_recovery(),
             AppAction::AdvanceRecoveryStage { stage } => self.advance_recovery_stage(stage),
+            AppAction::BeginReconstructionAttempt => self.begin_reconstruction_attempt(),
+            AppAction::CommitReconstruction {
+                runtime,
+                execution,
+                attachment,
+                controller_authority_committed,
+                authoritative_snapshot_committed,
+            } => self.commit_reconstruction(
+                runtime,
+                execution,
+                attachment,
+                controller_authority_committed,
+                authoritative_snapshot_committed,
+            ),
+            AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
             AppAction::SetComposerDraft {
                 fence,
                 text,

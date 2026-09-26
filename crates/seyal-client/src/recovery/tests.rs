@@ -310,6 +310,25 @@ fn cancel_clears_active_episode() {
 }
 
 #[test]
+fn classify_open_result_maps_bridge_failure_classes() {
+    assert_eq!(
+        classify_open_result(1, true),
+        AttemptOutcome::EndpointMissing
+    );
+    assert_eq!(
+        classify_open_result(2, true),
+        AttemptOutcome::EndpointMissing
+    );
+    assert_eq!(
+        classify_open_result(3, true),
+        AttemptOutcome::ControllerBusy
+    );
+    assert_eq!(classify_open_result(4, true), AttemptOutcome::Retryable);
+    assert_eq!(classify_open_result(1, false), AttemptOutcome::Blocked);
+    assert_eq!(classify_open_result(3, false), AttemptOutcome::Blocked);
+}
+
+#[test]
 fn advance_presentation_stage_rejects_unconnected_and_terminal_stages() {
     let mut c = RecoveryCoordinator::default();
     assert!(!c.advance_presentation_stage(RecoveryStage::Usable));

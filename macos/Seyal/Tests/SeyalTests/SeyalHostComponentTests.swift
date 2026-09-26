@@ -626,6 +626,24 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
     }
 
+    /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
+    /// once recovery presentation is no longer pending (#1065).
+    @MainActor
+    func testAdvanceRecoveryPresentationMakesNoSnapshotCallsWhenNotPending() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        view.recoveryPresentationPending = false
+        seyal_app_test_reset_snapshot_call_count()
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertEqual(seyal_app_test_snapshot_call_count(), 0)
+    }
+
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.

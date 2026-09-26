@@ -15,7 +15,7 @@ extension RustDisplayBridge {
       onStatusChanged()
       return admission
     }
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -40,7 +40,7 @@ extension RustDisplayBridge {
     endCol: UInt16 = 0,
     endRow: UInt16 = 0
   ) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -51,7 +51,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitHostSearch(_ needle: String, forward: Bool) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -87,7 +87,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitComposerCommand(_ text: String) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -109,7 +109,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitKey(kind: UInt16, scalar: UInt32) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -123,7 +123,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitKeyV2(kind: UInt16, modifiers: UInt16, value: UInt32, event: UInt8, shiftedASCII: UInt32, actionID: UInt32) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -166,7 +166,7 @@ extension RustDisplayBridge {
     row: UInt16,
     actionID: UInt32
   ) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -183,7 +183,7 @@ extension RustDisplayBridge {
     cellHeight: Double,
     meaningfulLayoutEpoch: Bool
   ) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -202,7 +202,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func retryResize() -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
@@ -210,12 +210,12 @@ extension RustDisplayBridge {
   }
 
   func inputFailureCode() -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return 4 }
+    guard isConnected, selectClient() else { return 4 }
     return seyal_bridge_input_failure()
   }
 
   func resizeFailureCode() -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return 201 }
+    guard isConnected, selectClient() else { return 201 }
     return seyal_bridge_resize_failure()
   }
 

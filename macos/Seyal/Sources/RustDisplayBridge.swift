@@ -104,7 +104,8 @@ final class RustDisplayBridge {
   var lastLaunchError: BundledRuntimeLaunchError?
   var runtimeIdentityWords: (low: UInt64, high: UInt64) = (0, 0)
   var attachmentIdentityWords: (low: UInt64, high: UInt64) = (0, 0)
-  var reconstructionState = ReconnectReconstructionState()
+  /// ApplicationRoot that owns Rust `ReconstructionState` fencing for this Pane.
+  var continuityAppHandle: UInt64 = 0
   var runtimeBlockMetadata: RuntimeBlockMetadata?
   let runtimeLauncher = BundledRuntimeLauncher()
   var lastTimelineRevision: UInt64 = 0
@@ -159,15 +160,12 @@ final class RustDisplayBridge {
     // never queues a second open while the previous socket is tearing down.
     guard !teardown.disconnectPending else { return false }
     lastLaunchError = nil
-    reconstructionState.beginAttempt()
 
     let handle: UInt64
     if let executionIdentity = requestedExecutionIdentity,
       let (low, high) = Self.executionWords(from: executionIdentity)
     {
       handle = seyal_bridge_open_execution(low, high)
-    } else if let execution = reconstructionState.expectedExecution {
-      handle = seyal_bridge_open_execution(execution.low, execution.high)
     } else if allowsImplicitExecutionBootstrap {
       handle = seyal_bridge_open_first()
     } else {
@@ -200,7 +198,6 @@ final class RustDisplayBridge {
       return false
     }
     lastLaunchError = nil
-    reconstructionState.beginAttempt()
     guard seyal_bridge_adopt_handle(handle) == 0 else {
       seyal_bridge_disconnect_handle(handle)
       onError(-1)
@@ -225,28 +222,19 @@ final class RustDisplayBridge {
 
   @discardableResult
   func finishAdoptedHandle(_ handle: UInt64, recoveryResult: RecoveryResult) -> Bool {
-    let runtime = RuntimeContinuityIdentity(
-      low: recoveryResult.runtimeIDLow,
-      high: recoveryResult.runtimeIDHigh
-    )
-    let execution = RuntimeContinuityIdentity(
-      low: recoveryResult.executionIDLow,
-      high: recoveryResult.executionIDHigh
-    )
-    let attachment = RuntimeContinuityIdentity(
-      low: recoveryResult.attachmentIDLow,
-      high: recoveryResult.attachmentIDHigh
-    )
     // A Rust client handle is published only after finish_attach has validated
     // Controller authority and atomically committed the complete initial
-    // snapshot. Identity drift or attachment reuse fails closed here before
-    // AppKit can submit input or expose stale presentation.
-    guard reconstructionState.commit(
-      runtime: runtime,
-      execution: execution,
-      attachment: attachment,
-      controllerAuthorityCommitted: true,
-      authoritativeSnapshotCommitted: true
+    // snapshot. Identity drift or attachment reuse fails closed in Rust
+    // ReconstructionState before AppKit can submit input or expose stale
+    // presentation.
+    guard commitRuntimeReconstruction(
+      continuityAppHandle,
+      runtimeLow: recoveryResult.runtimeIDLow,
+      runtimeHigh: recoveryResult.runtimeIDHigh,
+      executionLow: recoveryResult.executionIDLow,
+      executionHigh: recoveryResult.executionIDHigh,
+      attachmentLow: recoveryResult.attachmentIDLow,
+      attachmentHigh: recoveryResult.attachmentIDHigh
     ) else {
       seyal_bridge_disconnect_handle(handle)
       onError(-4)
@@ -255,8 +243,8 @@ final class RustDisplayBridge {
     }
     clientHandle = handle
     handleBox.value = handle
-    runtimeIdentityWords = (runtime.low, runtime.high)
-    attachmentIdentityWords = (attachment.low, attachment.high)
+    runtimeIdentityWords = (recoveryResult.runtimeIDLow, recoveryResult.runtimeIDHigh)
+    attachmentIdentityWords = (recoveryResult.attachmentIDLow, recoveryResult.attachmentIDHigh)
 
     let fileDescriptor = seyal_bridge_socket_fd()
     guard fileDescriptor >= 0 else {
@@ -330,7 +318,7 @@ final class RustDisplayBridge {
       _ = Darwin.shutdown(socketFileDescriptor, SHUT_RDWR)
     }
     isConnected = false
-    reconstructionState.disconnect()
+    disconnectRuntimeReconstruction(continuityAppHandle)
     runtimeBlockMetadata = nil
     requestedHistoryRanges.removeAll(keepingCapacity: false)
     historyRevisions.removeAll(keepingCapacity: false)
@@ -371,7 +359,7 @@ final class RustDisplayBridge {
     guard isConnected || socketFileDescriptor >= 0 else { return }
 
     isConnected = false
-    reconstructionState.disconnect()
+    disconnectRuntimeReconstruction(continuityAppHandle)
     runtimeBlockMetadata = nil
     // All request/display correlations are connection-local. A reconnect
     // receives a fresh attachment and must never reuse pending history,

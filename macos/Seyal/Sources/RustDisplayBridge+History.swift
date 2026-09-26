@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 extension RustDisplayBridge {
   func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient(),
+    guard isConnected, selectClient(),
       blockID > 0, startLine > 0, endLine >= startLine
     else { return -4 }
     let requestID = seyal_bridge_next_history_request_id()
@@ -28,7 +28,7 @@ extension RustDisplayBridge {
   }
 
   func publishHistoryRanges() {
-    guard isConnected, reconstructionState.canMutate, selectClient() else { return }
+    guard isConnected, selectClient() else { return }
     for (requestKey, request) in Array(requestedHistoryRanges) {
       let metadata = seyal_bridge_history_range_peek_for(request.blockID, requestKey.requestID)
       guard metadata.block_id != 0,
@@ -81,7 +81,7 @@ extension RustDisplayBridge {
       historyRevisions.removeValue(forKey: requestKey)
       historyContinuations.removeValue(forKey: requestKey)
       let truncated = metadata.reserved == 1
-      if truncated, leads > 0, reconstructionState.canMutate, selectClient() {
+      if truncated, leads > 0, isConnected, selectClient() {
         let nextStart = (previous?.startUnit ?? 0) + leads
         let nextID = seyal_bridge_next_history_request_id()
         if nextID != 0 {
@@ -101,7 +101,7 @@ extension RustDisplayBridge {
 
   @discardableResult
   func submitCommittedText(_ text: String) -> Int32 {
-    guard isConnected, reconstructionState.canMutate, selectClient() else {
+    guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }

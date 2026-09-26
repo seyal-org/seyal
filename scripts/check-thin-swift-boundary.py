@@ -44,6 +44,9 @@ PRODUCT_AUTHORITY = (
 # file, including the deprecated allowlist, so no Swift episode owner returns.
 RECOVERY_POLICY = (
     "RuntimeLifecycleRecoveryCoordinator",
+    "ReconnectReconstructionState",
+    "ReconnectReconstructionStage",
+    "RuntimeContinuityIdentity",
     "retryDelays",
     "episodeDeadline",
     "maximumAttempts",
