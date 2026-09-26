@@ -1,6 +1,7 @@
 #ifndef SEYAL_APP_H
 #define SEYAL_APP_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -450,6 +451,51 @@ SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
+
+/*
+ * Resolved visual snapshot from Rust cold TOML/theme authority (#993 / ADR-015).
+ * `platform_appearance`: 0 = dark, 1 = light (host system appearance input).
+ * Returned `appearance` is the Rust-resolved value after applying preference.
+ * Font family pointers and warnings are borrowed until the next seyal_app_visual*.
+ * flags: bit0 reduced material/transparency, bit1 full-default fallback,
+ *        bit2 warnings present.
+ * utility_material: 0 opaque, 1 tonal, 2 frosted.
+ * preference: 0 system, 1 light, 2 dark.
+ */
+typedef struct SeyalAppVisual {
+    uint16_t version;
+    uint16_t size;
+    uint16_t appearance;
+    uint16_t preference;
+    uint32_t canvas;
+    uint32_t text;
+    uint32_t accent;
+    uint32_t container;
+    double ui_font_size;
+    double terminal_font_size;
+    double window_padding;
+    double terminal_padding;
+    double utility_opacity;
+    uint32_t flags;
+    uint16_t utility_material;
+    uint16_t warning_count;
+    const uint8_t *ui_font_family;
+    uint32_t ui_font_family_len;
+    const uint8_t *terminal_font_family;
+    uint32_t terminal_font_family_len;
+} SeyalAppVisual;
+
+typedef struct SeyalAppVisualWarning {
+    const uint8_t *text;
+    uint32_t text_len;
+    uint32_t reserved;
+} SeyalAppVisualWarning;
+
+SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
+SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
+/* Test/native harness only: reload cold UI config from path (len 0 = default). */
+int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+
 int32_t seyal_app_last_error(uint64_t handle);
 
 #ifdef __cplusplus

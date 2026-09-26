@@ -130,8 +130,11 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     func apply(theme: NativeTheme) {
         self.theme = theme
         placeholder.textColor = theme.muted
+        placeholder.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .regular)
         textView.textColor = theme.text
+        textView.font = .monospacedSystemFont(ofSize: theme.terminalFontSize, weight: .regular)
         textView.insertionPointColor = theme.accent
+        execute.font = .systemFont(ofSize: theme.uiFontSize, weight: .medium)
         paintChrome()
     }
 

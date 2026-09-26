@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::theme::{parse_toml, TomlError, ENV_CONFIG};
+use crate::theme::{parse_toml, ui_config_path, TomlError};
 
 /// Immutable routing intent consumed by the native keyboard classifier.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -56,14 +56,7 @@ pub fn load_input_policy(toml_text: Option<&str>) -> (InputPolicy, Vec<String>) 
 
 /// Same file as visual config: `SEYAL_CONFIG` or `~/.config/seyal/config.toml`.
 pub fn input_policy_config_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var(ENV_CONFIG) {
-        let path = PathBuf::from(path);
-        if !path.as_os_str().is_empty() {
-            return Some(path);
-        }
-    }
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config/seyal/config.toml"))
+    ui_config_path()
 }
 
 pub fn load_input_policy_from_path(path: Option<&Path>) -> (InputPolicy, Vec<String>) {
@@ -71,20 +64,21 @@ pub fn load_input_policy_from_path(path: Option<&Path>) -> (InputPolicy, Vec<Str
     load_input_policy(text.as_deref())
 }
 
-fn loaded_input_policy() -> &'static (InputPolicy, Vec<String>) {
-    static LOADED: std::sync::OnceLock<(InputPolicy, Vec<String>)> = std::sync::OnceLock::new();
-    LOADED.get_or_init(|| load_input_policy_from_path(input_policy_config_path().as_deref()))
-}
-
-/// Process-wide immutable result captured once at first native query.
+/// Process-wide immutable result captured once with visual cold configuration.
 pub fn process_input_policy() -> InputPolicy {
-    loaded_input_policy().0
+    crate::theme::process_ui_configuration().input
 }
 
-/// Non-secret `[input]` diagnostics from the same cold load. The typed policy
+/// Non-secret `[input]` diagnostics from the shared cold load. The typed policy
 /// stays immutable; callers must not reinterpret these strings as policy.
-pub fn process_input_policy_warnings() -> &'static [String] {
-    loaded_input_policy().1.as_slice()
+pub fn process_input_policy_warnings() -> Vec<String> {
+    crate::theme::process_ui_configuration()
+        .diagnostics()
+        .warnings
+        .iter()
+        .filter(|warning| warning.starts_with("input") || warning.starts_with("unknown key input."))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]

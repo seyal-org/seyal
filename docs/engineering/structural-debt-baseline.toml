@@ -16,15 +16,15 @@ hard_loc = 1000
 
 [[grandfathered]]
 path = "crates/seyal-client/src/app.rs"
-ceiling_loc = 2142
+ceiling_loc = 2250
 issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020. Ceiling realigned to master tip after #1054 landed with a stale freeze measurement."
 
 [[grandfathered]]
 path = "crates/seyal-client/src/chrome.rs"
-ceiling_loc = 1195
+ceiling_loc = 1210
 issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020. Ceiling realigned to master tip after #1054 landed with a stale freeze measurement."
 
 [[grandfathered]]
 path = "crates/seyal-client/src/composer/mod.rs"
@@ -139,4 +139,18 @@ path = "macos/Seyal/Sources/RustDisplayBridge.swift"
 ceiling_loc = 1382
 issue = 1021
 note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+
+# #993 cold UI config / theme FFI and thin-host probe realization grew these
+# grandfathered files; exceptions pin the post-merge exact LOC (no silent headroom).
+[[exception]]
+path = "crates/seyal-client/src/ffi/app.rs"
+ceiling_loc = 2576
+issue = 993
+responsibility = "Cold UI configuration / theme FFI export surface for Rust-owned settings snapshot."
+
+[[exception]]
+path = "macos/Seyal/Sources/ProductChromeHostView.swift"
+ceiling_loc = 1247
+issue = 993
+responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (fonts/padding/material probe)."
 
