@@ -1,123 +1,43 @@
 //! Cold theme / visual FFI export for the thin AppKit host (#993).
 //!
-//! Also owns the test-only `seyal_app_snapshot` call counter used to prove
-//! steady-state frames make zero snapshot FFI (#1065). Lib tests and the
-//! macOS component test share one process-global counter with other snapshot
-//! callers. A hold excludes those callers for the assertion window. Snapshot
-//! accounting is cold app state, not the frame loop.
+//! Rust lib tests count `seyal_app_snapshot` calls on a thread-local cell.
+//! Production and Debug app builds compile that note to an empty inline:
+//! the macOS component test links this library, and the snapshot path must
+//! not take a lock or export a test counter (#1020). The steady-state frame
+//! proof is the `recoveryPresentationPending` guard, checked by
+//! `scripts/check-hot-path.py`.
 
 use std::{
-    cell::RefCell,
     ptr,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex, MutexGuard, OnceLock,
-    },
+    sync::{Mutex, OnceLock},
 };
 
 use crate::app::APP_ABI_VERSION;
 
-/// Counts `seyal_app_snapshot` calls for steady-state frame-path proofs.
-static SNAPSHOT_CALLS: AtomicU64 = AtomicU64::new(0);
-
-/// Process-global hold for snapshot-call proofs. Present in every build
-/// because the Swift component test links this library, not the `cfg(test)`
-/// artifact. The holder thread sets [`SNAPSHOT_COUNT_HELD`] so its own
-/// snapshots still count without re-locking.
-static SNAPSHOT_COUNT_LOCK: Mutex<()> = Mutex::new(());
-
+#[cfg(test)]
 thread_local! {
-    static SNAPSHOT_COUNT_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static SNAPSHOT_COUNT_GUARD: RefCell<Option<MutexGuard<'static, ()>>> =
-        const { RefCell::new(None) };
+    static SNAPSHOT_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-fn lock_snapshot_count() -> MutexGuard<'static, ()> {
-    let guard = SNAPSHOT_COUNT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    SNAPSHOT_COUNT_HELD.with(|held| held.set(true));
-    guard
-}
-
-pub(super) fn note_snapshot_call() {
-    if SNAPSHOT_COUNT_HELD.with(|held| held.get()) {
-        SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
-        return;
-    }
-    let _guard = SNAPSHOT_COUNT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
-}
-
-#[cfg(test)]
-struct SnapshotCountHold {
-    _guard: MutexGuard<'static, ()>,
-}
-
-#[cfg(test)]
-impl SnapshotCountHold {
-    fn acquire() -> Self {
-        Self {
-            _guard: lock_snapshot_count(),
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for SnapshotCountHold {
-    fn drop(&mut self) {
-        SNAPSHOT_COUNT_HELD.with(|held| held.set(false));
-    }
-}
-
-/// Test/harness only: snapshot FFI call count since last reset.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_snapshot_call_count() -> u64 {
-    SNAPSHOT_CALLS.load(Ordering::Relaxed)
-}
-
-/// Test/harness only: reset the snapshot FFI call counter.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_reset_snapshot_call_count() {
-    SNAPSHOT_CALLS.store(0, Ordering::Relaxed);
-}
-
-/// Test/harness only: hold [`SNAPSHOT_COUNT_LOCK`] on this thread until
-/// [`seyal_app_test_unlock_snapshot_call_count`]. Other threads' snapshot
-/// calls block, so a reset/read pair cannot observe them. The holder thread's
-/// own snapshots still increment the counter. A second lock on that thread
-/// is a no-op so the non-recursive mutex cannot deadlock.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_lock_snapshot_call_count() {
-    if SNAPSHOT_COUNT_GUARD.with(|slot| slot.borrow().is_some()) {
-        return;
-    }
-    let guard = lock_snapshot_count();
-    SNAPSHOT_COUNT_GUARD.with(|slot| {
-        *slot.borrow_mut() = Some(guard);
-    });
-}
-
-/// Test/harness only: release a hold taken by
-/// [`seyal_app_test_lock_snapshot_call_count`] on this thread.
+/// Records one `seyal_app_snapshot` call for Rust lib tests.
 ///
-/// A call from a thread that does not hold the guard leaves both the lock and
-/// that thread's reentrancy flag alone.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_unlock_snapshot_call_count() {
-    let released = SNAPSHOT_COUNT_GUARD.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            return false;
-        }
-        slot.take();
-        true
-    });
-    if released {
-        SNAPSHOT_COUNT_HELD.with(|held| held.set(false));
-    }
+/// Non-test builds compile this to nothing. The test counter is thread-local,
+/// matching `APPS`, so parallel `cargo test` threads do not share it and this
+/// path never locks.
+#[inline(always)]
+pub(super) fn note_snapshot_call() {
+    #[cfg(test)]
+    SNAPSHOT_CALLS.with(|calls| calls.set(calls.get().wrapping_add(1)));
+}
+
+#[cfg(test)]
+fn snapshot_call_count() -> u64 {
+    SNAPSHOT_CALLS.with(|calls| calls.get())
+}
+
+#[cfg(test)]
+fn reset_snapshot_call_count() {
+    SNAPSHOT_CALLS.with(|calls| calls.set(0));
 }
 
 #[repr(C)]
@@ -362,70 +282,42 @@ fn pack_srgb(color: crate::theme::Srgb) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::mpsc, thread, time::Duration};
+    use std::thread;
 
-    use super::{seyal_app_test_reset_snapshot_call_count, seyal_app_test_snapshot_call_count};
+    use super::{reset_snapshot_call_count, snapshot_call_count};
     use crate::ffi::app::{seyal_app_create, seyal_app_destroy, seyal_app_snapshot};
 
     #[test]
     fn snapshot_call_counter_tracks_seyal_app_snapshot() {
-        let _hold = super::SnapshotCountHold::acquire();
-        seyal_app_test_reset_snapshot_call_count();
+        reset_snapshot_call_count();
         let handle = seyal_app_create();
-        let baseline = seyal_app_test_snapshot_call_count();
+        let baseline = snapshot_call_count();
         let _ = seyal_app_snapshot(handle);
         let _ = seyal_app_snapshot(handle);
-        assert_eq!(seyal_app_test_snapshot_call_count(), baseline + 2);
-        seyal_app_test_reset_snapshot_call_count();
-        assert_eq!(seyal_app_test_snapshot_call_count(), 0);
+        assert_eq!(snapshot_call_count(), baseline + 2);
+        reset_snapshot_call_count();
+        assert_eq!(snapshot_call_count(), 0);
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 
     #[test]
-    fn snapshot_count_ffi_hold_roundtrips_on_the_caller_thread() {
-        super::seyal_app_test_lock_snapshot_call_count();
-        // Second lock on the holder must not deadlock.
-        super::seyal_app_test_lock_snapshot_call_count();
-        seyal_app_test_reset_snapshot_call_count();
+    fn snapshot_call_counter_stays_on_the_calling_thread() {
+        reset_snapshot_call_count();
         let handle = seyal_app_create();
-        let baseline = seyal_app_test_snapshot_call_count();
         let _ = seyal_app_snapshot(handle);
-        assert_eq!(seyal_app_test_snapshot_call_count(), baseline + 1);
-        super::seyal_app_test_unlock_snapshot_call_count();
-        // A second acquire must not deadlock after unlock.
-        super::seyal_app_test_lock_snapshot_call_count();
-        super::seyal_app_test_unlock_snapshot_call_count();
-        assert_eq!(seyal_app_destroy(handle), 0);
-    }
+        assert_eq!(snapshot_call_count(), 1);
 
-    #[test]
-    fn snapshot_count_ffi_hold_blocks_other_threads_until_unlock() {
-        super::seyal_app_test_lock_snapshot_call_count();
-        seyal_app_test_reset_snapshot_call_count();
-        thread::spawn(|| super::seyal_app_test_unlock_snapshot_call_count())
-            .join()
-            .expect("wrong-thread unlock");
-
-        let (at_snapshot_tx, at_snapshot_rx) = mpsc::channel();
-        let (done_tx, done_rx) = mpsc::channel();
-        let worker = thread::spawn(move || {
-            at_snapshot_tx.send(()).expect("worker reached snapshot");
+        let observed = thread::spawn(|| {
+            reset_snapshot_call_count();
+            assert_eq!(snapshot_call_count(), 0);
             let _ = seyal_app_snapshot(0);
-            done_tx.send(()).expect("worker finished");
-        });
-        at_snapshot_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("worker started");
-        thread::sleep(Duration::from_millis(200));
-        assert!(
-            done_rx.try_recv().is_err(),
-            "another thread's snapshot must wait until unlock"
-        );
-        assert_eq!(seyal_app_test_snapshot_call_count(), 0);
-        super::seyal_app_test_unlock_snapshot_call_count();
-        done_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("unlock unblocks the other snapshot");
-        worker.join().expect("worker");
+            snapshot_call_count()
+        })
+        .join()
+        .expect("worker");
+
+        assert_eq!(observed, 1);
+        assert_eq!(snapshot_call_count(), 1);
+        assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

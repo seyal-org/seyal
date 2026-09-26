@@ -175,6 +175,37 @@ def validate_native_recovery_ownership(errors: list[str]) -> None:
             )
 
 
+def validate_snapshot_call_accounting(errors: list[str]) -> None:
+    """`seyal_app_snapshot` is on the keyDown/scrollWheel path.
+
+    Test accounting must not take a lock or add C exports to the production
+    library. The file is absent only in synthetic validator fixtures.
+    """
+    relpath = "crates/seyal-client/src/ffi/app/visual.rs"
+    path = ROOT / relpath
+    if not path.exists():
+        return
+    source = path.read_text(encoding="utf-8")
+    note_body = extract_function(source, "note_snapshot_call")
+    if note_body is None:
+        errors.append(f"{relpath} is missing note_snapshot_call()")
+    else:
+        for pattern in (".lock()", "Mutex", "RwLock", "SNAPSHOT_COUNT_LOCK"):
+            if pattern in note_body:
+                errors.append(
+                    f"{relpath}::note_snapshot_call contains forbidden "
+                    f"hot-path primitive {pattern!r}"
+                )
+    for symbol in (
+        "seyal_app_test_snapshot_call_count",
+        "seyal_app_test_reset_snapshot_call_count",
+        "seyal_app_test_lock_snapshot_call_count",
+        "seyal_app_test_unlock_snapshot_call_count",
+    ):
+        if symbol in source:
+            errors.append(f"{relpath} exports test snapshot-counter symbol {symbol}")
+
+
 def main() -> None:
     errors: list[str] = []
     registry = dict(HOT_FUNCTIONS)
@@ -199,6 +230,7 @@ def main() -> None:
                         )
 
     validate_native_recovery_ownership(errors)
+    validate_snapshot_call_accounting(errors)
 
     if errors:
         print("Hot-path performance guardrail violations:")

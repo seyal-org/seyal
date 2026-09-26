@@ -46,9 +46,9 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 919
+acknowledged_loc = 917
 issue = 1020
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. The one-line growth re-exports the test-only snapshot-count hold used by the Swift steady-state proof; product decode/encode stays in the sibling modules."
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. Snapshot-call metering is cfg(test) thread-local state in visual.rs and is not part of this façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

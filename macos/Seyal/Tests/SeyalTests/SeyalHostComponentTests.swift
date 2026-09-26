@@ -628,8 +628,36 @@ final class SeyalHostComponentTests: XCTestCase {
 
     /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
     /// once recovery presentation is no longer pending (#1065).
+    ///
+    /// The production library does not export a snapshot-call counter. This
+    /// test checks the same structure as `scripts/check-hot-path.py`: the
+    /// pending guard returns before any snapshot FFI. A pending=false call
+    /// still returns without entering that work.
     @MainActor
     func testAdvanceRecoveryPresentationMakesNoSnapshotCallsWhenNotPending() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let recovery = sourceRoot.appendingPathComponent("MetalSurfaceView+Recovery.swift")
+        let text = (try? String(contentsOf: recovery, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "MetalSurfaceView+Recovery.swift must be readable")
+        guard let functionStart = text.range(of: "func advanceRecoveryPresentationIfReady()") else {
+            return XCTFail("missing advanceRecoveryPresentationIfReady()")
+        }
+        let body = text[functionStart.lowerBound...]
+        guard let pendingGuard = body.range(of: "guard recoveryPresentationPending") else {
+            return XCTFail("advanceRecoveryPresentationIfReady must gate on recoveryPresentationPending")
+        }
+        if let snapshot = body.range(of: "seyal_app_snapshot") {
+            XCTAssertGreaterThan(
+                snapshot.lowerBound,
+                pendingGuard.lowerBound,
+                "seyal_app_snapshot must follow the recoveryPresentationPending guard"
+            )
+        }
+
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         let view = InteractiveMetalSurfaceView(
@@ -638,12 +666,9 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         view.suppressesAutomaticBridgeRecovery = true
         view.recoveryPresentationPending = false
-        seyal_app_test_lock_snapshot_call_count()
-        defer { seyal_app_test_unlock_snapshot_call_count() }
-        seyal_app_test_reset_snapshot_call_count()
         XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
         XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
-        XCTAssertEqual(seyal_app_test_snapshot_call_count(), 0)
+        XCTAssertFalse(view.recoveryPresentationPending)
     }
 
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
