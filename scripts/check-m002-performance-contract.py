@@ -16,7 +16,7 @@ SCHEMA = ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml"
 INVENTORY = ROOT / "docs/evidence/m002-673-family-inventory.toml"
 RETAINED_ACTIVE_MD = ROOT / "docs/evidence/m002-673-history-reflow-20260916T171837Z.md"
 
-REQUIRED = ("Status: proposed contract for Issue #673", "exact production SHA", "baseline SHA", "nearest-rank")
+REQUIRED = ("Issue #673", "exact production SHA", "baseline SHA", "nearest-rank", "does not declare any product gate as passing")
 CLASSES = {"CI", "SYNTHETIC", "NATIVE_HEADED", "PHYSICAL_ARM64"}
 REQUIRED_GATES = {
     "history_active_reflow_ms", "history_sealed_segment_reflow_ms", "input_visible_proxy",
@@ -28,12 +28,23 @@ MISSING_METRIC_VALUES = {"unknown", "not-instrumented"}
 ACCEPTED_GATE_CEILINGS = {
     "history_active_reflow_ms": {"p50": 2, "p95": 4, "p99": 8},
     "history_sealed_segment_reflow_ms": {"p50": 1, "p95": 2, "p99": 4},
+    "input_visible_proxy": {"p50": 8, "p95": 16, "p99": 33},
+    "pty_to_terminal_state": {"p50": 1, "p95": 2, "p99": 4},
+    "damage_to_client_cache": {"p50": 4, "p95": 8, "p99": 16},
+    "high_output_responsiveness": {"p50": 8, "p95": 16, "p99": 33},
+    "resource_scaling_rss": {"p50": 67108864, "p95": 100663296, "p99": 134217728},
+    "resource_scaling_fds": {"p50": 64, "p95": 96, "p99": 128},
+    "resource_scaling_threads": {"p50": 16, "p95": 24, "p99": 32},
+    "startup": {"p50": 50, "p95": 100, "p99": 200},
+    "idle_cpu": {"p50": 1, "p95": 3, "p99": 5},
+    "renderer_prepare_submission": {"p50": 8, "p95": 16, "p99": 33},
+    "teardown_recovery": {"p50": 50, "p95": 150, "p99": 500},
 }
 CONTROLLED_PROVENANCE_MANIFEST_NAME = "controlled-provenance-manifest.json"
 CONTROLLED_PROVENANCE_MANIFEST_SCHEMA = "seyal.m002.controlled-provenance-manifest"
 
 
-def check_accepted_gate_ceilings(gates: dict, registry: dict) -> None:
+def check_accepted_gate_ceilings(gates: dict, registry: dict, *, schema_status: str) -> None:
     """Freeze every registered accepted gate's ceiling; reject unregistered acceptance.
 
     This is the single mechanism protecting ANY accepted M002 gate, not just
@@ -47,10 +58,17 @@ def check_accepted_gate_ceilings(gates: dict, registry: dict) -> None:
        cannot silently weaken (or unaccept) a gate once it is registered.
     2. No gate may carry `status = "accepted"` in the live schema unless it
        is registered here — otherwise it would be accepted but unprotected.
+
+    A schema still marked `proposed` may keep individual gates `proposed` so
+    record evaluation can reject them with "cannot evaluate a proposed gate".
+    An `accepted-thresholds` schema may not demote any registered gate.
     """
     for name, expected in registry.items():
         gate = gates.get(name, {})
-        if gate.get("status", "accepted") != "accepted":
+        gate_status = gate.get("status", "accepted")
+        if schema_status == "proposed" and gate_status == "proposed":
+            continue
+        if gate_status != "accepted":
             raise SystemExit(f"M002 performance gate {name} must remain accepted")
         for key, ceiling in expected.items():
             if gate.get(key) != ceiling:
@@ -158,8 +176,8 @@ def validate_contract_shape(text: str, schema: dict, schema_text: str) -> None:
         raise SystemExit("M002 performance contract missing: " + ", ".join(repr(token) for token in missing))
     if schema.get("schema") != "seyal.m002.performance-contract" or schema.get("version") != 1:
         raise SystemExit("M002 performance schema has unsupported identity")
-    if schema.get("status") != "proposed":
-        raise SystemExit("M002 performance schema must remain proposed until accepted")
+    if schema.get("status") not in {"proposed", "accepted-thresholds"}:
+        raise SystemExit("M002 performance schema has unsupported status")
     if schema.get("percentile_method") != "nearest-rank":
         raise SystemExit("M002 performance schema must use nearest-rank percentiles")
     if schema.get("cohorts") != 5 or schema.get("warmups_per_cohort") != 20 or schema.get("samples_per_cohort") != 100:
@@ -201,7 +219,9 @@ def validate_contract_shape(text: str, schema: dict, schema_text: str) -> None:
     for name, gate in gates.items():
         if gate.get("status", "accepted") == "accepted" and "source" not in gate:
             raise SystemExit(f"accepted M002 performance gate {name} is missing authority source")
-    check_accepted_gate_ceilings(gates, ACCEPTED_GATE_CEILINGS)
+    check_accepted_gate_ceilings(
+        gates, ACCEPTED_GATE_CEILINGS, schema_status=str(schema.get("status"))
+    )
     matrix = schema.get("matrix", {})
     if (
         matrix.get("retained_content") != [10000, 100000, 1000000]
@@ -363,6 +383,8 @@ def validate_family_inventory(schema: dict) -> None:
             raise SystemExit(f"M002 family {name} evidence class does not match the contract")
         if family.get("boundary") != gate.get("boundary"):
             raise SystemExit(f"M002 family {name} boundary does not match the contract")
+        if gate.get("status", "accepted") == "accepted" and family.get("gate_status") != "accepted":
+            raise SystemExit(f"M002 family {name} gate_status must match the accepted contract")
 
 
 def self_test() -> None:
@@ -433,13 +455,17 @@ def self_test() -> None:
         name: {"status": "accepted", "source": "TEST FIXTURE", **ceilings}
         for name, ceilings in synthetic_registry.items()
     }
-    check_accepted_gate_ceilings(synthetic_gates, synthetic_registry)
+    check_accepted_gate_ceilings(
+        synthetic_gates, synthetic_registry, schema_status="accepted-thresholds"
+    )
     exercised = 0
     for weakened_name in synthetic_registry:
         weakened_gates = {name: dict(gate) for name, gate in synthetic_gates.items()}
         weakened_gates[weakened_name]["p50"] += 100
         try:
-            check_accepted_gate_ceilings(weakened_gates, synthetic_registry)
+            check_accepted_gate_ceilings(
+                weakened_gates, synthetic_registry, schema_status="accepted-thresholds"
+            )
         except SystemExit:
             exercised += 1
         else:

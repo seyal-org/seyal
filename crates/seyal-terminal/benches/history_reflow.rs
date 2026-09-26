@@ -96,11 +96,9 @@ fn sample_ms(gate: &str, terminal: &mut TerminalState, columns: u16) -> f64 {
 /// A single cohort file's matrix identity: exactly which point of the
 /// accepted retained_content x execution_populations x columns x workloads
 /// matrix (docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml `[matrix]`) this
-/// cohort's samples were collected at. The contract-gate cohort collector
-/// always operates on a single execution's HistoryStore (history reflow is
-/// a per-execution cost, not a population-scaling one), so `executions` is
-/// always 1 here -- that is the correct/only valid value for this family,
-/// not an unmeasured placeholder.
+/// cohort's samples were collected at. `executions` is the number of
+/// resident populated `TerminalState`s (`SEYAL_M002_POPULATION`); samples are
+/// taken from the first one while the others stay resident.
 struct MatrixPoint {
     lines: usize,
     columns: u16,
@@ -138,24 +136,36 @@ fn run_contract_cohort() {
     let lines = parse_scales("SEYAL_HISTORY_BENCH_LINES", &[10_000])[0];
     let columns = parse_scales("SEYAL_HISTORY_BENCH_COLUMNS", &[80])[0];
     let workload = workload_names()[0];
+    let population = parse_usize_env("SEYAL_M002_POPULATION", 1);
+    assert!(population >= 1, "history contract population must be >= 1");
     let point = MatrixPoint {
         lines,
         columns,
         workload,
-        executions: 1,
+        executions: population,
     };
-    let mut terminal = populate(lines, workload);
+    let mut terminals: Vec<TerminalState> =
+        (0..population).map(|_| populate(lines, workload)).collect();
+    let terminal = &mut terminals[0];
     for _ in 0..warmups {
-        let _ = sample_ms(&gate, &mut terminal, columns);
+        let _ = sample_ms(&gate, terminal, columns);
     }
     let mut retained = Vec::with_capacity(samples);
     for _ in 0..samples {
-        retained.push(sample_ms(&gate, &mut terminal, columns));
+        retained.push(sample_ms(&gate, terminal, columns));
     }
     let commit = benchmark_commit();
     write_cohort_file(&out, cohort, &point, &commit, &retained);
+    let retained_history_bytes: usize = terminals
+        .iter()
+        .map(TerminalState::primary_history_resident_bytes)
+        .sum();
+    let derived_cache_bytes: usize = terminals
+        .iter()
+        .map(TerminalState::primary_history_derived_cache_bytes)
+        .sum();
     println!(
-        "[seyal history benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} lines={lines} columns={columns} workload={workload} out={out}"
+        "[seyal history benchmark] m002_contract gate={gate} cohort={cohort} warmups={warmups} samples={samples} lines={lines} columns={columns} workload={workload} population={population} commit={commit} retained_history_bytes={retained_history_bytes} derived_cache_bytes={derived_cache_bytes} out={out}"
     );
 }
 
