@@ -1,3 +1,26 @@
+//! Runtime façade: one authoritative [`Runtime`] type with responsibility modules.
+//!
+//! **Module map (#1068 — cohesion, not a second authority):**
+//! - `mod.rs` — `Runtime` struct, `new` (local-IPC bind), `poll_once` event loop,
+//!   history/derived-cache budget enforcement, `kill_unpublished` /
+//!   `reap_failed_creations`
+//! - [`config`] — `RuntimeConfig` / local-IPC mode; reap/retry/backoff constants;
+//!   `PtyEofReapProbe`
+//! - [`entry`] — per-execution entry + summaries
+//! - [`lifecycle`] — execution lifecycle stages
+//! - [`deadlines`] — graceful/forced reap / drain deadline tracking
+//! - [`registry`] — public Runtime API: create/attach/detach/resize/input,
+//!   terminate/shutdown/finalize, lookup, benchmark diagnostics
+//! - [`reactor_io`] — reactor poll / read buffer handling
+//! - [`shell_integration`] — shell-integration event wiring
+//! - `local` (macOS) — listener/session plus ingress, display_publish,
+//!   history_blocks, resize_resync, composer_status, send, connection
+//! - `integration_state` (macOS) — per-execution shell-integration state machine
+//!   (ADR-009 mechanism 5); separate from [`ExecutionLifecycle`]
+//!
+//! PTY/VT/canonical terminal state remain owned by each `TerminalExecution`.
+//! Do not introduce a second Runtime registry or lifecycle state engine here.
+
 use std::{
     collections::HashMap,
     sync::{
