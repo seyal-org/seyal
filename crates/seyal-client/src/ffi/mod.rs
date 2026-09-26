@@ -64,8 +64,9 @@ pub use display::{
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]
 pub use errors::{
-    seyal_bridge_classify_open_result, seyal_bridge_input_failure, seyal_bridge_last_recovery_result,
-    seyal_bridge_pass9_diag_snapshot, seyal_bridge_resize_failure,
+    seyal_bridge_classify_open_result, seyal_bridge_input_failure,
+    seyal_bridge_last_recovery_result, seyal_bridge_pass9_diag_snapshot,
+    seyal_bridge_resize_failure,
 };
 #[allow(unused_imports)]
 pub use input::{

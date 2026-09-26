@@ -614,7 +614,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     preparationState.resetForLifecycleRecovery()
   }
 
-
   func terminalBridgeDidFail(_ code: Int32) {
     _ = code
   }

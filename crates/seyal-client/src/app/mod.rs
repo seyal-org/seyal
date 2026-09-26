@@ -6,11 +6,14 @@
 //! implement chrome/inspector (#880). Hosts inject clock, launch, attach, and
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
+mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod palette_apply;
 mod recovery_apply;
 mod session;
+
+use accessibility::accessibility_nodes;
 
 #[cfg(test)]
 mod recovery_tests;
@@ -724,94 +727,4 @@ pub(super) fn composer_error(error: ComposerError) -> AppError {
         ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
         ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
     }
-}
-
-pub(super) fn accessibility_nodes(
-    shell: &ShellSnapshot,
-    eligibility: PresentationEligibility,
-    composer_eligible: bool,
-    output: &str,
-) -> Vec<AccessibilityNode> {
-    let pane_title = shell
-        .panes
-        .iter()
-        .find(|pane| pane.id == shell.focused_pane)
-        .map(|pane| pane.title.clone())
-        .unwrap_or_else(|| "Pane".to_owned());
-    let mut nodes = vec![
-        AccessibilityNode {
-            id: 1,
-            parent: None,
-            role: AccessibilityRole::Application,
-            label: "Seyal".to_owned(),
-            value: String::new(),
-            help: "Seyal application root".to_owned(),
-            enabled: true,
-            selected: false,
-            focused: false,
-            actions: 0,
-        },
-        AccessibilityNode {
-            id: 2,
-            parent: Some(1),
-            role: AccessibilityRole::Pane,
-            label: pane_title,
-            value: String::new(),
-            help: "Terminal pane".to_owned(),
-            enabled: true,
-            selected: true,
-            focused: true,
-            actions: 1,
-        },
-    ];
-    match eligibility {
-        PresentationEligibility::Unbound => {}
-        PresentationEligibility::Flow if composer_eligible => nodes.push(AccessibilityNode {
-            id: 3,
-            parent: Some(2),
-            role: AccessibilityRole::Composer,
-            label: "Composer".to_owned(),
-            value: String::new(),
-            help: "Flow composer is eligible; draft lifecycle is #881".to_owned(),
-            enabled: true,
-            selected: false,
-            focused: false,
-            actions: 0,
-        }),
-        PresentationEligibility::Flow => {}
-        PresentationEligibility::Raw | PresentationEligibility::Tui => {
-            nodes.push(AccessibilityNode {
-                id: 3,
-                parent: Some(2),
-                role: AccessibilityRole::Terminal,
-                label: "Terminal".to_owned(),
-                value: output.to_owned(),
-                help: "Direct terminal presentation".to_owned(),
-                enabled: true,
-                selected: false,
-                focused: true,
-                actions: 0,
-            })
-        }
-    }
-    nodes
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
-    use seyal_runtime::display::DisplayCellRole;
-    let mut text = String::new();
-    for (index, cell) in cache.cells.iter().enumerate() {
-        if cell.role == DisplayCellRole::Lead {
-            if !cell.text.is_empty() {
-                text.push_str(&String::from_utf8_lossy(&cell.text));
-            } else if cell.scalar != ' ' && cell.scalar != '\0' {
-                text.push(cell.scalar);
-            }
-        }
-        if cache.columns > 0 && (index + 1) % usize::from(cache.columns) == 0 {
-            text.push('\n');
-        }
-    }
-    text
 }

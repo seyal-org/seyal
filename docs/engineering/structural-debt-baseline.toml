@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 785
+acknowledged_loc = 730
 issue = 1065
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session apply-path extraction; #1065 adds only the CancelRecovery/AdvanceRecoveryStage action variants and dispatch arms that make Rust the sole recovery owner. Further fragmentation would separate the fence/generation authority."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. Accessibility projection moved to a sibling so the façade only ratchets for required recovery surface growth."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -46,15 +46,15 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 927
-issue = 1020
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction; symbols remain re-exported at the prior paths. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 918
+issue = 1065
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction; #1065 moves snapshot-call metering and encode-only SNAP/block-row flags into the visual/encode siblings so the façade ratchets down while Rust owns recovery/continuity fencing."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 769
-issue = 1020
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module without behavioral change. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 773
+issue = 1065
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1065 imports encode-owned SNAP/block-row flag constants after those flags moved out of the façade, and the steady-state snapshot call-counter proof lives beside the counter in visual.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

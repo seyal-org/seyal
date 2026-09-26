@@ -1,8 +1,7 @@
 //! Versioned one-Pane application-root C ABI.
 //!
-//! C entry points stay in this module. Action decode, snapshot/row encode, and
-//! cold visual export live in sibling modules so each responsibility stays
-//! reviewable without changing the published symbols.
+//! C entry points stay here; decode/encode/visual siblings keep each
+//! responsibility reviewable without changing published symbols.
 
 mod decode;
 mod encode;
@@ -11,7 +10,7 @@ mod visual;
 #[cfg(test)]
 mod tests;
 
-use std::{cell::RefCell, collections::HashMap, ptr, sync::atomic::{AtomicU64, Ordering}};
+use std::{cell::RefCell, collections::HashMap, ptr};
 
 use crate::app::{AppError, ApplicationRoot, APP_ABI_VERSION};
 use crate::chrome::{InspectorMode, LeftPanelMode};
@@ -31,7 +30,8 @@ use encode::{
 };
 
 pub use visual::{
-    seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
+    seyal_app_test_reload_ui_configuration, seyal_app_test_reset_snapshot_call_count,
+    seyal_app_test_snapshot_call_count, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
 };
 
@@ -40,25 +40,12 @@ const FLAG_HAS_ATTACHMENT: u16 = 2;
 const FLAG_CONTROLLER: u16 = 4;
 const FLAG_ALTERNATE_SCREEN: u16 = 8;
 const FLAG_TARGET_CONTROLLER: u16 = 16;
-const SNAP_COMPOSER: u16 = 1;
-const SNAP_CONTROLLER: u16 = 2;
-const SNAP_FROZEN: u16 = 4;
-const SNAP_HAS_EXECUTION: u16 = 8;
-const SNAP_HAS_ATTACHMENT: u16 = 16;
 const HISTORY_OPEN: u16 = 1;
 const HISTORY_HAS_ENTRIES: u16 = 2;
 const SHELL_FLAG_ALLOWS_TAB_CREATION: u16 = 1;
 const SHELL_FLAG_ALLOWS_PANE_SPLITTING: u16 = 2;
 const SHELL_FLAG_ALLOWS_TAB_CLOSE: u16 = 4;
 const SHELL_FLAG_ALLOWS_PANE_CLOSE: u16 = 8;
-const ROW_SELECTED: u16 = 1;
-/// Block-row `flags`: low bits are the presentation state (1..3); bit 3 marks
-/// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
-const BLOCK_STATE_MASK: u16 = 7;
-const BLOCK_SELECTED: u16 = 8;
-
-/// Counts `seyal_app_snapshot` calls for steady-state frame-path proofs.
-static SNAPSHOT_CALLS: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -408,7 +395,7 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
-    SNAPSHOT_CALLS.fetch_add(1, Ordering::Relaxed);
+    visual::note_snapshot_call();
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let Some(state) = apps.get_mut(&handle) else {
@@ -418,18 +405,6 @@ pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
         state.output = snap.output_utf8.as_bytes().to_vec();
         encode_snapshot(&snap, &state.output)
     })
-}
-
-/// Test/harness only: snapshot FFI call count since last reset.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_snapshot_call_count() -> u64 {
-    SNAPSHOT_CALLS.load(Ordering::Relaxed)
-}
-
-/// Test/harness only: reset the snapshot FFI call counter.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_test_reset_snapshot_call_count() {
-    SNAPSHOT_CALLS.store(0, Ordering::Relaxed);
 }
 
 #[unsafe(no_mangle)]
