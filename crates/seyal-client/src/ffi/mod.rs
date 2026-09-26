@@ -27,13 +27,42 @@ mod types;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex, OnceLock,
     },
 };
 
+use seyal_core::ExecutionId;
+
 use crate::LocalDisplayClient;
+
+/// Thread-local `CLIENTS` registry handle. `!Send`/`!Sync` so an owning
+/// `ApplicationRoot` cannot cross executor threads while still naming a TLS entry.
+///
+/// Handle values share the process-wide `NEXT_HANDLE` space with bridge pane
+/// handles: `seyal_bridge_select` / `seyal_bridge_disconnect_handle` can activate
+/// or remove a root-held client. After an external disconnect the root must
+/// treat the handle as stale (`NoLiveClient`) and clear it.
+#[derive(Debug)]
+pub(crate) struct ClientRegistryHandle {
+    raw: u64,
+    _not_send_sync: PhantomData<*const ()>,
+}
+
+impl ClientRegistryHandle {
+    pub(crate) fn new(raw: u64) -> Self {
+        Self {
+            raw,
+            _not_send_sync: PhantomData,
+        }
+    }
+
+    pub(crate) fn raw(&self) -> u64 {
+        self.raw
+    }
+}
 
 pub(crate) use types::{
     SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus, SeyalCopiedText,
@@ -180,20 +209,39 @@ pub(crate) fn with_client_mut<R>(
 }
 
 /// Insert an ApplicationRoot-owned live client into the sole attach registry.
-pub(crate) fn register_app_client(client: LocalDisplayClient) -> u64 {
+///
+/// Rejects a second live registration for the same [`ExecutionId`] so this path
+/// cannot bypass `PENDING_CLIENTS` / adopt bookkeeping by stacking another
+/// attach beside an already-adopted bridge client (#1066 locked design §3).
+pub(crate) fn register_app_client(client: LocalDisplayClient) -> Result<ClientRegistryHandle, ()> {
+    let execution = client.execution_id();
     let handle = allocate_handle();
     CLIENTS.with(|clients| {
-        clients.borrow_mut().insert(handle, Box::new(client));
-    });
-    handle
+        let mut clients = clients.borrow_mut();
+        if clients
+            .values()
+            .any(|existing| existing.execution_id() == execution)
+        {
+            return Err(());
+        }
+        clients.insert(handle, Box::new(client));
+        ACTIVE_HANDLE.with(|active| active.set(handle));
+        Ok(ClientRegistryHandle::new(handle))
+    })
 }
 
 /// Remove a live client from the sole attach registry (ApplicationRoot detach/drop).
+///
+/// Uses `try_with` so TLS teardown at thread exit cannot abort under
+/// `panic = "abort"` when a root inside `APPS` is dropped after `CLIENTS`.
 pub(crate) fn unregister_client(handle: u64) -> Option<Box<LocalDisplayClient>> {
     if handle == 0 {
         return None;
     }
-    CLIENTS.with(|clients| clients.borrow_mut().remove(&handle))
+    CLIENTS
+        .try_with(|clients| clients.borrow_mut().remove(&handle))
+        .ok()
+        .flatten()
 }
 
 /// Test/diagnostic: whether `handle` is present in the sole attach registry.
@@ -202,7 +250,22 @@ pub fn client_registry_contains(handle: u64) -> bool {
     if handle == 0 {
         return false;
     }
-    CLIENTS.with(|clients| clients.borrow().contains_key(&handle))
+    CLIENTS
+        .try_with(|clients| clients.borrow().contains_key(&handle))
+        .unwrap_or(false)
+}
+
+/// Test/diagnostic: whether any live registry entry owns `execution`.
+#[doc(hidden)]
+pub fn client_registry_has_execution(execution: ExecutionId) -> bool {
+    CLIENTS
+        .try_with(|clients| {
+            clients
+                .borrow()
+                .values()
+                .any(|client| client.execution_id() == execution)
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

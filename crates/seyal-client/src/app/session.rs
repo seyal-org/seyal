@@ -6,16 +6,48 @@ use super::*;
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
         if let Some(handle) = self.client_handle.take() {
-            let _ = crate::ffi::unregister_client(handle);
+            let _ = crate::ffi::unregister_client(handle.raw());
         }
     }
 }
 
 #[cfg(target_os = "macos")]
 impl ApplicationRoot {
-    /// Attach the existing Candidate-D client for this Pane. Ownership of the
-    /// live client is registered in the sole FFI `CLIENTS` map (#1066); this
-    /// root stores only the handle.
+    /// Attach by borrowing an already-adopted registry handle (sole live client).
+    ///
+    /// Does not insert into `CLIENTS`; the handle must already be present from
+    /// bridge adopt / a prior sole registration (#1066 locked design §3).
+    pub fn attach_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
+        let Some((evidence, output)) = crate::ffi::with_client(handle, |client| {
+            let evidence = BindingEvidence {
+                execution: client.execution_id(),
+                attachment: client.attachment_id(),
+                controller: matches!(
+                    client.role(),
+                    seyal_runtime::local_ipc::framing::Role::Controller
+                ),
+                pty_generation: client.cache().generation.max(1),
+                alternate_screen: client.cache().alternate_screen,
+            };
+            (evidence, project_cache_text(client.cache()))
+        }) else {
+            return self.fail(AppError::NoLiveClient);
+        };
+        self.apply(AppAction::Bind { fence, evidence })?;
+        self.output_utf8 = output;
+        if let Some(previous) = self.client_handle.take()
+            && previous.raw() != handle
+        {
+            let _ = crate::ffi::unregister_client(previous.raw());
+        }
+        self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        Ok(())
+    }
+
+    /// Attach a freshly connected client by registering it as the sole live entry.
+    ///
+    /// Rejects when `CLIENTS` already holds a live client for the same
+    /// `ExecutionId` (use [`Self::attach_handle`] for an already-adopted handle).
     pub fn attach_client(
         &mut self,
         fence: AppFence,
@@ -31,12 +63,20 @@ impl ApplicationRoot {
             pty_generation: client.cache().generation.max(1),
             alternate_screen: client.cache().alternate_screen,
         };
-        self.apply(AppAction::Bind { fence, evidence })?;
-        self.output_utf8 = project_cache_text(client.cache());
-        if let Some(previous) = self.client_handle.take() {
-            let _ = crate::ffi::unregister_client(previous);
+        let output = project_cache_text(client.cache());
+        let registered = match crate::ffi::register_app_client(client) {
+            Ok(handle) => handle,
+            Err(()) => return self.fail(AppError::AlreadyBound),
+        };
+        if let Err(error) = self.apply(AppAction::Bind { fence, evidence }) {
+            let _ = crate::ffi::unregister_client(registered.raw());
+            return self.fail(error);
         }
-        self.client_handle = Some(crate::ffi::register_app_client(client));
+        self.output_utf8 = output;
+        if let Some(previous) = self.client_handle.take() {
+            let _ = crate::ffi::unregister_client(previous.raw());
+        }
+        self.client_handle = Some(registered);
         Ok(())
     }
 
@@ -44,20 +84,36 @@ impl ApplicationRoot {
     #[doc(hidden)]
     pub fn live_client_handle_for_test(&self) -> Option<u64> {
         self.client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
     }
 
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
-        let handle = self.client_handle.ok_or(AppError::NoLiveClient)?;
-        let (alternate, generation, output) = crate::ffi::with_client_mut(handle, |client| {
+        let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        else {
+            return self.fail(AppError::NoLiveClient);
+        };
+        let Some(result) = crate::ffi::with_client_mut(handle, |client| {
             client.poll_prepare().map_err(|_| AppError::NoLiveClient)?;
             let alternate = client.cache().alternate_screen;
             let generation = client.cache().generation.max(1);
             let output = project_cache_text(client.cache());
             Ok::<_, AppError>((alternate, generation, output))
-        })
-        .ok_or(AppError::NoLiveClient)??;
+        }) else {
+            // External bridge disconnect can remove the shared-handle entry
+            // while the root still caches the id; clear the stale name (N2).
+            self.client_handle = None;
+            return self.fail(AppError::NoLiveClient);
+        };
+        let (alternate, generation, output) = match result {
+            Ok(value) => value,
+            Err(error) => return self.fail(error),
+        };
         self.output_utf8 = output;
         if let Some(bound) = self.authority.as_mut() {
             bound.pty_generation = generation;
@@ -119,16 +175,22 @@ impl ApplicationRoot {
     ) -> Result<(), AppError> {
         self.require_fence(fence)?;
         #[cfg(target_os = "macos")]
-        if let Some(handle) = self.client_handle
-            && let Some(output) = crate::ffi::with_client(handle, |client| {
+        if let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        {
+            if let Some(output) = crate::ffi::with_client(handle, |client| {
                 (
                     project_cache_text(client.cache()),
                     client.cache().alternate_screen,
                 )
-            })
-        {
-            self.output_utf8 = output.0;
-            return self.derive_presentation(output.1);
+            }) {
+                self.output_utf8 = output.0;
+                return self.derive_presentation(output.1);
+            }
+            // Shared-handle disconnect left a stale id; clear before fallback (N2).
+            self.client_handle = None;
         }
         self.derive_presentation(alternate_screen)
     }
@@ -151,13 +213,24 @@ impl ApplicationRoot {
         }
         #[cfg(target_os = "macos")]
         {
-            let handle = self.client_handle.ok_or(AppError::NoLiveClient)?;
-            crate::ffi::with_client_mut(handle, |client| {
+            let Some(handle) = self
+                .client_handle
+                .as_ref()
+                .map(crate::ffi::ClientRegistryHandle::raw)
+            else {
+                return Err(AppError::NoLiveClient);
+            };
+            match crate::ffi::with_client_mut(handle, |client| {
                 client
                     .submit_committed_text(text)
                     .map_err(|_| AppError::InvalidPayload)
-            })
-            .ok_or(AppError::NoLiveClient)?
+            }) {
+                Some(result) => result,
+                None => {
+                    self.client_handle = None;
+                    Err(AppError::NoLiveClient)
+                }
+            }
         }
         #[cfg(not(target_os = "macos"))]
         {
