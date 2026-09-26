@@ -234,31 +234,6 @@ struct NativeTranscriptFrame: Equatable {
   }
 }
 
-/// Composer acceptance is correlated by the Runtime request ID. A command
-/// string is intentionally not an identity: two successive submissions may be
-/// identical and must still settle independently.
-struct ComposerRequestCorrelation {
-  private(set) var pendingRequestID: UInt64?
-  private var nextRequestID: UInt64 = 1
-
-  var isSettled: Bool { pendingRequestID == nil }
-
-  mutating func begin(command: String) -> UInt64 {
-    let requestID = nextRequestID
-    nextRequestID = requestID == UInt64.max ? 1 : requestID + 1
-    pendingRequestID = requestID
-    _ = command
-    return requestID
-  }
-
-  mutating func accepts(requestID: UInt64) -> Bool {
-    guard let pendingRequestID, pendingRequestID == requestID
-    else { return false }
-    self.pendingRequestID = nil
-    return true
-  }
-}
-
 // Cancellation handlers may outlive RustDisplayBridge and deinit is
 // nonisolated in Swift 6. The coordinator serializes its accounting and
 // schedules the thread-local Rust disconnect on the main queue.

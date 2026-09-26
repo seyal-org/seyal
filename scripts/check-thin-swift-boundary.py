@@ -33,7 +33,6 @@ PRODUCT_AUTHORITY = (
     "SeyalShellPreviewFactory",
     "SeyalShellProductionFactory",
     "PanePresentationSession",
-    "ComposerRequestCorrelation",
     "enum InspectorMode",
     "enum LeftPanelMode",
     "func appendCommand(",

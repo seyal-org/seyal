@@ -11,14 +11,29 @@ Use this baseline when starting M002+ work so agents and humans land in the corr
 |---|---|
 | Constitution / agent invariants | `AGENTS.md` |
 | Development workflow / unit of work | `docs/engineering/DEVELOPMENT.md` |
-| Issue Ready/Done | `docs/engineering/ISSUE-PROTOCOL.md` |
+| Issue Ready/Done / claim / Closes vs Refs | `docs/engineering/ISSUE-PROTOCOL.md` |
 | PR / CI / review | `docs/engineering/GITHUB-WORKFLOW.md` |
 | Testing / TDD / fuzz harness | `docs/engineering/TESTING.md` |
 | Performance / hot-path / budgets | `docs/engineering/PERFORMANCE.md` |
 | Security / privacy | `docs/engineering/SECURITY.md` |
 | Repository layout | `docs/engineering/REPOSITORY-STRUCTURE.md` |
+| Module cohesion / structural-debt ratchet | this doc + `scripts/check-structural-debt.py` + `docs/engineering/structural-debt-baseline.toml` |
+| Adversarial Runtime/reactor merge gates | `docs/engineering/RUNTIME-ADVERSARIAL-REVIEW.md` |
 | Agent tooling / skills | `docs/engineering/AGENT-TOOLING.md` |
 | OSS ↛ commercial | `AGENTS.md` + commercial overlay (never invert) |
+
+## Module cohesion and structural-debt ratchet
+
+Handwritten production modules should stay single-responsibility with explicit ownership boundaries. Roughly 700 physical lines is a cohesion-review trigger; files at or above 1,000 lines need explicit PR justification and should normally be decomposed before merge. Split by responsibility and stable seams — never `part1`/`part2`, numbered siblings, or equivalent. Generated tables/data, Unicode data, protocol fixtures, and comparable machine-oriented artifacts are exempt. Review guidance also lives in `docs/engineering/M001-PASS10-CODE-QUALITY-REVIEW.md`.
+
+The machine gate is `scripts/check-structural-debt.py` (invoked by `make check` / Foundation Quality). It measures physical LOC for handwritten production Rust/Swift/Metal/C under crate and `macos/Seyal` roots and ratchets against `docs/engineering/structural-debt-baseline.toml`:
+
+- new unrecorded production files at or above 700 lines fail;
+- recorded files must not exceed their ceiling / acknowledged bound;
+- grandfathered and `[[exception]]` debt must ratchet ceilings down on reduction (silent headroom is rejected);
+- changed files in the 700–999 band need a fresh `[[cohesion_acknowledgement]]`.
+
+Do not invent a second structure checker. Do not grow grandfathered modules by convenience or add hot-path indirection solely to satisfy the LOC gate. Baseline edits are the explicit PR review surface for cohesion exceptions.
 
 ## Baseline rules (derive; do not reinterpret)
 
@@ -37,7 +52,7 @@ Use this baseline when starting M002+ work so agents and humans land in the corr
 
 - Bounded queues; backpressure is visible; no unbounded wake loops after persistent failure.
 - Detach ≠ terminate. Explicit terminate must reap and return resources to baseline.
-- Late lifecycle fixes require first-principles re-review of the affected state matrix (`AGENTS.md` merge gates).
+- Late lifecycle fixes require first-principles re-review of the affected state matrix (`RUNTIME-ADVERSARIAL-REVIEW.md` merge gates).
 
 ### Hot path / performance
 

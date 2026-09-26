@@ -30,12 +30,12 @@ The Developer Guide explains **how to navigate and contribute to Seyal**. It doe
 
 ## Claim an implementation Issue
 
-Seyal uses exclusive **human** implementation ownership so parallel contributors and their coding agents do not unknowingly implement the same ticket.
+Seyal uses exclusive **human** ownership so parallel contributors and coding agents do not unknowingly implement the same ticket:
 
 ```text
 Ready Issue
 → authenticated human GitHub developer
-→ sole human owner (assignee when assignable, acknowledged Owner claim otherwise)
+→ sole human owner
 → confirmed plan
 → <human-login>/issue/<number> branch
 → coding agent may assist as delegated tool/co-author
@@ -43,8 +43,6 @@ Ready Issue
 → implementation
 ```
 
-Exactly one human owns an implementation Issue at a time: the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @username` claim. If another human already owns the Issue, assignee/owner-claim records conflict, the human owner cannot be resolved, or that same owner's deterministic `<human-login>/issue/<number>` branch already exists for work you were not explicitly asked to resume, stop and report the collision. The branch is only an audit/resume backstop for that human; the Issue owner record is what prevents duplicate human ownership. External contributors who cannot be assigned may use a maintainer-acknowledged `Owner: @username` Issue claim. Cursor/Codex/Claude Code/Copilot/bot identities are not work owners and must not be used as new branch namespaces.
-
-Ownership transfer is explicit and human-to-human: stop current edits, record the existing branch/PR/check state, transfer the assignee when possible or the acknowledged external-owner claim otherwise, and have the new human owner re-run the implementation preflight. Switching coding agents does not transfer ownership. Agents may be credited in PR tooling provenance or as real co-authors, but a bot-authored review does not satisfy a required independent human review.
+Full claim, collision, handoff, attribution, production-vs-POC, and `Closes`/`Refs` rules live in `docs/engineering/ISSUE-PROTOCOL.md`. Execute them through `.agents/skills/implement-issue/SKILL.md`.
 
 When this guide conflicts with an accepted source-of-truth document, the source-of-truth document wins and this guide must be corrected.

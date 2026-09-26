@@ -61,12 +61,42 @@ grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/milestone-
 grep -q '.sdlc/framework/skills/development-readiness/SKILL.md' .agents/skills/development-readiness/SKILL.md || fail "development-readiness adapter must delegate to AI-SDLC"
 grep -q '.sdlc/framework/skills/verification/SKILL.md' .agents/skills/verification/SKILL.md || fail "verification adapter must delegate to AI-SDLC"
 
-# Parallel-development safety: implementation pickup must be an exclusive,
-# verified GitHub claim before any production branch/worktree/edit path.
+# Instruction layering for claim/ownership:
+# - AGENTS routes implement → implement-issue and claim/closure → ISSUE-PROTOCOL
+# - ISSUE-PROTOCOL owns complete owner-record semantics once
+# - implement-issue keeps executable claim/re-fetch/parent-overlap/branch preflight
+# - DEVELOPMENT + Developer Guide summarize and link; no sentence-level clones
 claim_skill=.agents/skills/implement-issue/SKILL.md
+issue_protocol=docs/engineering/ISSUE-PROTOCOL.md
+dev_workflow=docs/engineering/DEVELOPMENT.md
+dev_site=site/src/content/docs/developer/index.mdx
+
+# AGENTS: mandatory implement route + claim/closure authority pointer
+grep -Fq 'Any request to **implement, fix, finish, code, or complete a specific GitHub Issue** must enter through' AGENTS.md || fail "AGENTS.md must route implementation requests through implement-issue"
+grep -Fq '.agents/skills/implement-issue/SKILL.md' AGENTS.md || fail "AGENTS.md must name the implement-issue skill path"
+grep -Fq 'docs/engineering/ISSUE-PROTOCOL.md' AGENTS.md || fail "AGENTS.md must route claim/closure detail to ISSUE-PROTOCOL"
+grep -Fq 'Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners.' AGENTS.md || fail "AGENTS.md must reject agent ownership"
+grep -Fq 'New implementation branches are named `<human-login>/issue/<number>`' AGENTS.md || fail "AGENTS.md must human-namespace branches"
+grep -Fq 'Agent assistance may be credited' AGENTS.md || fail "AGENTS.md must allow agent co-authorship/provenance"
+grep -Fq 'must not replace the human owner record' AGENTS.md || fail "AGENTS.md must preserve the human owner-record authority"
+if grep -Fq 'must not replace the human assignee' AGENTS.md; then
+  fail "AGENTS.md drops the acknowledged external-owner path"
+fi
+
+# ISSUE-PROTOCOL: complete owner-record semantics (single authority)
+grep -Fq 'record `Owner: @login` in an Issue comment and require a maintainer acknowledgement' "$issue_protocol" || fail "Issue protocol must support non-assignable external human contributors"
+grep -Fq 'durable ownership identity is always a human GitHub account' "$issue_protocol" || fail "Issue protocol must require human ownership"
+grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock' "$issue_protocol" || fail "Issue protocol must not use Project status as the ownership lock"
+grep -Fq 'Status never overrides the **human-owner rule**' "$issue_protocol" || fail "Issue protocol must preserve the external-owner fallback"
+grep -Fq 'single human owner record prevents two people from owning the same implementation Issue at once' "$issue_protocol" || fail "Issue protocol must make the owner record authoritative across contributors"
+grep -Fq 'branch is only that owner' "$issue_protocol" || fail "Issue protocol must define human-namespaced branches as audit/resume backstops"
+grep -Fq 'Closes #N' "$issue_protocol" || fail "Issue protocol must define Closes vs Refs closure honesty"
+grep -Fq 'Refs #N' "$issue_protocol" || fail "Issue protocol must define non-closing Refs relationships"
+
+# implement-issue: executable claim / re-fetch / parent-overlap / branch preflight
 grep -Fq 'mandatory entrypoint for production implementation of a Seyal GitHub Issue' "$claim_skill" || fail "implement-issue must be the mandatory production entrypoint"
 grep -Fq 'responsible **human GitHub owner**' "$claim_skill" || fail "implement-issue must resolve a human GitHub owner"
-grep -Fq 'Issue #N is already taken by @login' "$claim_skill" || fail "implement-issue must report the existing assignee and stop"
+grep -Fq 'Issue #N is already taken by @login' "$claim_skill" || fail "implement-issue must report the existing owner and stop"
 grep -Fq 'multiple assignees, multiple acknowledged owner claims' "$claim_skill" || fail "implement-issue must fail closed on conflicting human owner records"
 grep -Fq 'exact branch name `<human-login>/issue/<number>`' "$claim_skill" || fail "implement-issue must use the human-owned deterministic issue branch"
 grep -Fq 'unique owner through either sole assignment' "$claim_skill" || fail "implement-issue must keep external-owner fallback valid after branch creation"
@@ -83,44 +113,43 @@ grep -Fq 'planning/umbrella parent is not an ownership lock' "$claim_skill" || f
 grep -Fq 're-fetch both parent and child' "$claim_skill" || fail "implement-issue must re-fetch parent and child after claim and branch creation"
 grep -Fq 'claim and branch that sub-issue only after the parent/slice overlap check' "$claim_skill" || fail "implement-issue must check parent/child slice overlap before claiming child work"
 grep -Fq 'do not duplicate ownership of the same implementation slice' "$claim_skill" || fail "implement-issue must prevent duplicate slice ownership"
+grep -Fq 'A bot-authored review/comment is supplemental analysis only.' "$claim_skill" || fail "implement-issue must not count bot review as human independent review"
+grep -Fq 'docs/engineering/ISSUE-PROTOCOL.md' "$claim_skill" || fail "implement-issue must point to ISSUE-PROTOCOL for claim/closure policy detail"
+
 refine_skill=.agents/skills/issue-refinement/SKILL.md
 grep -Fq 'recommend GitHub sub-issues (one per slice)' "$refine_skill" || fail "issue-refinement must recommend one GitHub sub-issue per slice"
 grep -Fq 'parent and child must not represent the same implementation slice concurrently' "$refine_skill" || fail "issue-refinement must prevent duplicate parent/child implementation ownership"
-grep -Fq 'Any request to **implement, fix, finish, code, or complete a specific GitHub Issue** must enter through' AGENTS.md || fail "AGENTS.md must route implementation requests through implement-issue"
-grep -Fq 'one deterministic <human-login>/issue/<number> branch' docs/engineering/DEVELOPMENT.md || fail "development workflow must use the human-owned deterministic issue branch"
-if grep -Eq '→ (issue/<number>-<short-name>|cursor/|codex/|claude/|copilot/)' docs/engineering/DEVELOPMENT.md; then
+
+# DEVELOPMENT + site: short workflow summary + authority link (not essay clones)
+grep -Fq 'docs/engineering/ISSUE-PROTOCOL.md' "$dev_workflow" || fail "DEVELOPMENT.md must link claim/ownership detail to ISSUE-PROTOCOL"
+grep -Fq '<human-login>/issue/<number>' "$dev_workflow" || fail "development workflow must use the human-owned deterministic issue branch"
+grep -Fq 'human owner' "$dev_workflow" || fail "development workflow must require a human owner"
+if grep -Eq '→ (issue/<number>-<short-name>|cursor/|codex/|claude/|copilot/)' "$dev_workflow"; then
   fail "new development workflow must not use legacy or agent-owned branch conventions"
 fi
-grep -Fq 'Issue has exactly one **human owner**' docs/engineering/DEVELOPMENT.md || fail "development workflow must make human ownership authoritative"
-grep -Fq 'unique owner record is what prevents two people from owning the same implementation Issue at once' docs/engineering/DEVELOPMENT.md || fail "development workflow must make owner records authoritative across contributors"
-grep -Fq 'Transfer the **human owner record** explicitly' docs/engineering/DEVELOPMENT.md || fail "development workflow must support assignee and external-owner handoff"
-grep -Fq 'record `Owner: @login` in an Issue comment and require a maintainer acknowledgement' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must support non-assignable external human contributors"
-grep -Fq 'durable ownership identity is always a human GitHub account' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must require human ownership"
-grep -Fq 'Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners.' AGENTS.md || fail "AGENTS.md must reject agent ownership"
-grep -Fq 'New implementation branches are named `<human-login>/issue/<number>`' AGENTS.md || fail "AGENTS.md must human-namespace branches"
-grep -Fq 'Agent assistance may be credited' AGENTS.md || fail "AGENTS.md must allow agent co-authorship/provenance"
-grep -Fq 'A bot-authored review/comment is supplemental analysis only.' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must not count bot review as human independent review"
-grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not use Project status as the ownership lock"
-grep -Fq 'Status never overrides the **human-owner rule**' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must preserve the external-owner fallback"
-grep -Fq 'single human owner record prevents two people from owning the same implementation Issue at once' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must make the owner record authoritative across contributors"
-grep -Fq 'branch is only that owner' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define human-namespaced branches as audit/resume backstops"
-grep -Fq 'Exactly one human owns an implementation Issue at a time' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document single-human ownership"
-grep -Fq 'branch is only an audit/resume backstop for that human' site/src/content/docs/developer/index.mdx || fail "Developer Guide must not make the branch the ownership authority"
+grep -Fq 'docs/engineering/ISSUE-PROTOCOL.md' "$dev_site" || fail "Developer Guide must link claim/ownership detail to ISSUE-PROTOCOL"
+grep -Fq '<human-login>/issue/<number>' "$dev_site" || fail "Developer Guide must document human-namespaced branches"
+grep -Fq 'human' "$dev_site" || fail "Developer Guide must document human ownership"
 
-# Regression guards for the pre-human-owner wording that caused contradictory
-# external-contributor and collision semantics.
-for stale in   'Status never overrides the assignee rule'   'Branch creation is the collision backstop'   'both the assignee claim and deterministic branch checks pass'   'may never substitute for the human assignee'   'GitHub assignment is explicitly transferred'   'assignee state is the human-visible claim'   'deterministic implementation branch is the collision backstop'
+# Reject stale assignee-only / agent-owner / legacy branch-as-lock wording across routed surfaces
+routed_surfaces=(AGENTS.md "$issue_protocol" "$claim_skill" "$dev_workflow" "$dev_site")
+for stale in \
+  'Status never overrides the assignee rule' \
+  'Branch creation is the collision backstop' \
+  'both the assignee claim and deterministic branch checks pass' \
+  'may never substitute for the human assignee' \
+  'GitHub assignment is explicitly transferred' \
+  'assignee state is the human-visible claim' \
+  'deterministic implementation branch is the collision backstop' \
+  'agent owns the Issue' \
+  'bot is the work owner'
 do
-  if grep -Fq "$stale" docs/engineering/ISSUE-PROTOCOL.md     || grep -Fq "$stale" "$claim_skill"     || grep -Fq "$stale" docs/engineering/DEVELOPMENT.md     || grep -Fq "$stale" site/src/content/docs/developer/index.mdx; then
-    fail "stale assignee-era ownership wording remains: $stale"
-  fi
+  for surface in "${routed_surfaces[@]}"; do
+    if grep -Fq "$stale" "$surface"; then
+      fail "stale assignee-era or agent-owner wording remains in ${surface}: $stale"
+    fi
+  done
 done
-
-# AGENTS must preserve the same dual human-owner record terminology.
-if grep -Fq 'must not replace the human assignee' AGENTS.md; then
-  fail "AGENTS.md drops the acknowledged external-owner path"
-fi
-grep -Fq 'must not replace the human owner record' AGENTS.md || fail "AGENTS.md must preserve the human owner-record authority"
 
 [[ -f .sdlc/context/_meta.yaml ]] || fail "Seyal SDLC context metadata is missing"
 [[ -f .sdlc/graph/context-index.json ]] || fail "Seyal derived context index is missing"

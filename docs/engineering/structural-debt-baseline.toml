@@ -136,9 +136,9 @@ note = "Pre-existing handwritten production debt recorded by #1021; decompositio
 
 [[grandfathered]]
 path = "macos/Seyal/Sources/RustDisplayBridge.swift"
-ceiling_loc = 1382
+ceiling_loc = 1357
 issue = 1021
-note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020."
+note = "Pre-existing handwritten production debt recorded by #1021; decomposition tracked under parent #1020. Ceiling ratcheted down after #1020 deleted unused ComposerRequestCorrelation (#881 remnant)."
 
 # #993 cold UI config / theme FFI and thin-host probe realization grew these
 # grandfathered files; exceptions pin the post-merge exact LOC (no silent headroom).

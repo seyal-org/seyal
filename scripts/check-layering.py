@@ -29,30 +29,45 @@ AGENT_EXTERNAL_FORBIDDEN = {
     "objc2-app-kit",
 }
 
+# Terminal/runtime/UI stack must not take a production dependency on Agent
+# Backend crates (reverse of AGENT_EXTERNAL_FORBIDDEN). Keep this set shared so
+# a newly added seyal-agent-* package cannot be forgotten on one side only.
+AGENT_PACKAGES = {
+    "seyal-agent-core",
+    "seyal-agent-protocol",
+    "seyal-agent-store",
+    "seyal-agent-backend",
+    "seyal-agent-client",
+}
+
 RULES = {
     "seyal-core": {
         "seyal-terminal", "seyal-exec", "seyal-protocol", "seyal-runtime",
         "seyal-render", "seyal-client", "seyal-workspace",
-    },
+    } | AGENT_PACKAGES,
     "seyal-terminal": {
         "seyal-exec", "seyal-protocol", "seyal-runtime", "seyal-render",
         "seyal-client", "seyal-workspace",
-    },
+    } | AGENT_PACKAGES,
     "seyal-exec": {
         "seyal-protocol", "seyal-runtime", "seyal-render", "seyal-client",
         "seyal-workspace",
-    },
+    } | AGENT_PACKAGES,
     "seyal-protocol": {
         "seyal-terminal", "seyal-exec", "seyal-runtime", "seyal-render",
         "seyal-client", "seyal-workspace",
-    },
-    "seyal-runtime": {"seyal-render", "seyal-client", "seyal-workspace"},
+    } | AGENT_PACKAGES,
+    "seyal-runtime": {"seyal-render", "seyal-client", "seyal-workspace"} | AGENT_PACKAGES,
     "seyal-render": {
         "seyal-terminal", "seyal-exec", "seyal-runtime", "seyal-client",
         "seyal-workspace",
-    },
-    "seyal-client": {"seyal-terminal", "seyal-exec", "seyal-runtime", "seyal-workspace"},
-    "seyal-workspace": {"seyal-exec", "seyal-runtime", "seyal-render", "seyal-client"},
+    } | AGENT_PACKAGES,
+    "seyal-client": {
+        "seyal-terminal", "seyal-exec", "seyal-runtime", "seyal-workspace",
+    } | AGENT_PACKAGES,
+    "seyal-workspace": {
+        "seyal-exec", "seyal-runtime", "seyal-render", "seyal-client",
+    } | AGENT_PACKAGES,
     "seyal-agent-core": AGENT_EXTERNAL_FORBIDDEN | {
         "seyal-agent-protocol", "seyal-agent-store", "seyal-agent-backend",
         "seyal-agent-client",

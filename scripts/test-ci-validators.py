@@ -309,6 +309,18 @@ def main() -> None:
             "seyal-agent-core has forbidden dependencies: seyal-runtime",
         )
 
+        # Reverse firewall: terminal stack must not depend on seyal-agent-*.
+        terminal_agent = base / "layering-terminal-agent"
+        write(
+            terminal_agent / "crates/seyal-terminal/Cargo.toml",
+            '[package]\nname = "seyal-terminal"\nversion = "0.0.0"\n\n[dependencies]\nseyal-agent-core = { path = "../seyal-agent-core" }\n',
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-layering.py")],
+            terminal_agent,
+            "seyal-terminal has forbidden dependencies: seyal-agent-core",
+        )
+
         unknown_layering = base / "layering-unknown"
         write(unknown_layering / "crates/seyal-mystery/Cargo.toml", '[package]\nname = "seyal-mystery"\nversion = "0.0.0"\n')
         run_negative(["python3", str(ROOT / "scripts/check-layering.py")], unknown_layering, "seyal-mystery has no architecture layering rule")
