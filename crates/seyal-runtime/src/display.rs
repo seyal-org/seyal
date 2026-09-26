@@ -1,13 +1,9 @@
 //! Candidate-D display producer adapter owned by Runtime.
 //!
-//! Terminal authority remains in `TerminalExecution`. The versioned wire/value
-//! schema, decoder and disposable client cache live in `seyal-protocol`; this
-//! module only converts authoritative projection snapshots/updates into protocol
-//! batches without introducing a second terminal state.
-//!
-//! **Ownership (#1067):** accepted layout keeps `DisplayCache` in `seyal-protocol`.
-//! This module re-exports it for Runtime callers and remains the sole encode/publish
-//! authority — do not relocate the cache type here without a new architecture decision.
+//! Terminal authority remains in `TerminalExecution`. Wire schema, decoder, and the
+//! sole `DisplayCache` type live in `seyal-protocol` (#1067); this module re-exports
+//! that cache and remains the sole encode/publish authority — do not relocate the
+//! cache here without a new architecture decision.
 
 use std::sync::Arc;
 

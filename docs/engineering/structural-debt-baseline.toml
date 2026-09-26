@@ -154,3 +154,10 @@ ceiling_loc = 1247
 issue = 993
 responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (fonts/padding/material probe)."
 
+# #1067 docs-only ownership note on the protocol DisplayCache module (review band).
+[[cohesion_acknowledgement]]
+path = "crates/seyal-protocol/src/display/mod.rs"
+acknowledged_loc = 868
+issue = 1067
+reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
