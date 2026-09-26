@@ -331,7 +331,7 @@ pub struct ApplicationRoot {
     chrome: ChromeState,
     palette: PaletteState,
     #[cfg(target_os = "macos")]
-    client: Option<LocalDisplayClient>,
+    client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
 
 impl Default for ApplicationRoot {
@@ -366,7 +366,7 @@ impl ApplicationRoot {
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
             #[cfg(target_os = "macos")]
-            client: None,
+            client_handle: None,
         }
     }
 

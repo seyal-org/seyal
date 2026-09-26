@@ -102,3 +102,157 @@ fn application_root_projects_real_pty_output_through_one_execution() {
     drop(root);
     runtime.join().expect("Runtime thread");
 }
+
+#[test]
+fn application_root_live_client_owns_only_clients_registry_entry() {
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-C2'; sleep 1");
+    let client = LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+        .expect("attach production client");
+
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), client)
+        .expect("bind live client");
+    let handle = root
+        .live_client_handle_for_test()
+        .expect("root must retain registry handle only");
+    assert!(
+        seyal_client::ffi_test_client_registry_contains(handle),
+        "live client must reside in the sole CLIENTS registry"
+    );
+
+    root.poll_client(root.fence()).expect("poll via registry");
+    drop(root);
+    assert!(
+        !seyal_client::ffi_test_client_registry_contains(handle),
+        "drop must unregister the sole registry entry"
+    );
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn poll_client_without_live_client_sets_last_error() {
+    let mut root = ApplicationRoot::new();
+    let err = root.poll_client(root.fence()).expect_err("no live client");
+    assert_eq!(err, seyal_client::app::AppError::NoLiveClient);
+    assert_eq!(
+        root.snapshot().last_error,
+        Some(seyal_client::app::AppError::NoLiveClient)
+    );
+}
+
+#[test]
+fn attach_client_rejects_second_live_client_for_same_execution() {
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-B3'; sleep 1");
+    let first = LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+        .expect("first observer");
+    let second = LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+        .expect("second observer");
+
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), first)
+        .expect("first attach owns the sole registry slot");
+    assert!(seyal_client::ffi_test_client_registry_has_execution(
+        execution_id
+    ));
+
+    let mut other = ApplicationRoot::new();
+    let err = other
+        .attach_client(other.fence(), second)
+        .expect_err("second live client for same ExecutionId must fail");
+    assert_eq!(err, seyal_client::app::AppError::AlreadyBound);
+    assert_eq!(other.live_client_handle_for_test(), None);
+
+    drop(root);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn attach_handle_binds_already_registered_client_without_second_insert() {
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-HND'; sleep 1");
+    let client = LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+        .expect("attach production client");
+    let handle =
+        seyal_client::test_register_pending_client(client, 9).expect("register pending handle");
+    assert_eq!(
+        seyal_client::seyal_bridge_adopt_handle(handle),
+        0,
+        "adopt into CLIENTS"
+    );
+
+    let mut root = ApplicationRoot::new();
+    root.attach_handle(root.fence(), handle)
+        .expect("borrow adopted handle");
+    assert_eq!(root.live_client_handle_for_test(), Some(handle));
+    assert!(seyal_client::ffi_test_client_registry_contains(handle));
+    root.poll_client(root.fence())
+        .expect("poll via adopted handle");
+
+    drop(root);
+    assert!(
+        !seyal_client::ffi_test_client_registry_contains(handle),
+        "root drop still tears down the sole registry entry"
+    );
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn application_root_registry_handle_is_thread_affine() {
+    // Inverse of the B2 Send leak: ClientRegistryHandle is !Send/!Sync, so the
+    // root cannot migrate to another executor. TLS affinity is proven by
+    // registering on a worker and observing the handle absent on this thread.
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-B2'; sleep 1");
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let client =
+            LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+                .expect("attach on worker");
+        let mut root = ApplicationRoot::new();
+        root.attach_client(root.fence(), client)
+            .expect("register on worker TLS");
+        let handle = root.live_client_handle_for_test().expect("handle");
+        ready_tx.send(handle).expect("send handle");
+        done_rx
+            .recv()
+            .expect("keep root alive until probe finishes");
+        drop(root);
+    });
+
+    let handle = ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("worker registered");
+    assert!(
+        !seyal_client::ffi_test_client_registry_contains(handle),
+        "origin-thread CLIENTS entry must not be visible on this thread"
+    );
+    done_tx.send(()).expect("release worker");
+    worker.join().expect("worker");
+    assert!(
+        !seyal_client::ffi_test_client_registry_contains(handle),
+        "worker drop must unregister on its own TLS map"
+    );
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn bridge_disconnect_clears_stale_root_handle() {
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-N2'; sleep 1");
+    let client = LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
+        .expect("attach production client");
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), client)
+        .expect("bind live client");
+    let handle = root.live_client_handle_for_test().expect("handle");
+    assert_eq!(seyal_client::seyal_bridge_select(handle), 0);
+    seyal_client::seyal_bridge_disconnect_handle(handle);
+    let err = root
+        .poll_client(root.fence())
+        .expect_err("disconnected handle");
+    assert_eq!(err, seyal_client::app::AppError::NoLiveClient);
+    assert_eq!(root.live_client_handle_for_test(), None);
+    assert_eq!(
+        root.snapshot().last_error,
+        Some(seyal_client::app::AppError::NoLiveClient)
+    );
+    runtime.join().expect("Runtime thread");
+}
