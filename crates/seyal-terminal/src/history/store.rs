@@ -219,6 +219,7 @@ impl HistoryStore {
         (collected, from, start_col)
     }
 
+    /// Drop source units at/after `from` without rewriting older segments.
     pub(crate) fn truncate_from(&mut self, from: HistoryAnchor) {
         self.reflow_cache.get_mut().take();
         while let Some(last) = self.tail.last() {

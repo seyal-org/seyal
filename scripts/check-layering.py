@@ -32,6 +32,13 @@ AGENT_EXTERNAL_FORBIDDEN = {
 # Terminal/runtime/UI stack must not take a production dependency on Agent
 # Backend crates (reverse of AGENT_EXTERNAL_FORBIDDEN). Keep this set shared so
 # a newly added seyal-agent-* package cannot be forgotten on one side only.
+#
+# Authority for the reverse firewall (F2 / #1020): AGENTS.md non-negotiable
+# invariants require terminal fundamentals to stay license/cloud/agent
+# independent; ADR-012 / agent R&D keep Agent Backend off the PTY→VT→damage
+# and headed-client hot path. Blocking `seyal-client`/`seyal-workspace` →
+# `seyal-agent-*` (including `seyal-agent-client`) prevents a second product
+# authority path into agent domain crates from the portable GUI client.
 AGENT_PACKAGES = {
     "seyal-agent-core",
     "seyal-agent-protocol",
