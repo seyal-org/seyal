@@ -3,7 +3,19 @@
 use super::*;
 
 #[cfg(target_os = "macos")]
+impl Drop for ApplicationRoot {
+    fn drop(&mut self) {
+        if let Some(handle) = self.client_handle.take() {
+            let _ = crate::ffi::unregister_client(handle);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 impl ApplicationRoot {
+    /// Attach the existing Candidate-D client for this Pane. Ownership of the
+    /// live client is registered in the sole FFI `CLIENTS` map (#1066); this
+    /// root stores only the handle.
     pub fn attach_client(
         &mut self,
         fence: AppFence,
@@ -21,20 +33,32 @@ impl ApplicationRoot {
         };
         self.apply(AppAction::Bind { fence, evidence })?;
         self.output_utf8 = project_cache_text(client.cache());
-        self.client = Some(client);
+        if let Some(previous) = self.client_handle.take() {
+            let _ = crate::ffi::unregister_client(previous);
+        }
+        self.client_handle = Some(crate::ffi::register_app_client(client));
         Ok(())
+    }
+
+    /// Diagnostic: handle registered in the sole `CLIENTS` attach map (#1066).
+    #[doc(hidden)]
+    pub fn live_client_handle_for_test(&self) -> Option<u64> {
+        self.client_handle
     }
 
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
-        let Some(client) = self.client.as_mut() else {
-            return self.fail(AppError::NoLiveClient);
-        };
-        client.poll_prepare().map_err(|_| AppError::NoLiveClient)?;
-        let alternate = client.cache().alternate_screen;
-        let generation = client.cache().generation.max(1);
-        self.output_utf8 = project_cache_text(client.cache());
+        let handle = self.client_handle.ok_or(AppError::NoLiveClient)?;
+        let (alternate, generation, output) = crate::ffi::with_client_mut(handle, |client| {
+            client.poll_prepare().map_err(|_| AppError::NoLiveClient)?;
+            let alternate = client.cache().alternate_screen;
+            let generation = client.cache().generation.max(1);
+            let output = project_cache_text(client.cache());
+            Ok::<_, AppError>((alternate, generation, output))
+        })
+        .ok_or(AppError::NoLiveClient)??;
+        self.output_utf8 = output;
         if let Some(bound) = self.authority.as_mut() {
             bound.pty_generation = generation;
         }
@@ -95,9 +119,16 @@ impl ApplicationRoot {
     ) -> Result<(), AppError> {
         self.require_fence(fence)?;
         #[cfg(target_os = "macos")]
-        if let Some(client) = self.client.as_ref() {
-            self.output_utf8 = project_cache_text(client.cache());
-            return self.derive_presentation(client.cache().alternate_screen);
+        if let Some(handle) = self.client_handle {
+            if let Some(output) = crate::ffi::with_client(handle, |client| {
+                (
+                    project_cache_text(client.cache()),
+                    client.cache().alternate_screen,
+                )
+            }) {
+                self.output_utf8 = output.0;
+                return self.derive_presentation(output.1);
+            }
         }
         self.derive_presentation(alternate_screen)
     }
@@ -120,12 +151,13 @@ impl ApplicationRoot {
         }
         #[cfg(target_os = "macos")]
         {
-            let Some(client) = self.client.as_mut() else {
-                return Err(AppError::NoLiveClient);
-            };
-            client
-                .submit_committed_text(text)
-                .map_err(|_| AppError::InvalidPayload)
+            let handle = self.client_handle.ok_or(AppError::NoLiveClient)?;
+            crate::ffi::with_client_mut(handle, |client| {
+                client
+                    .submit_committed_text(text)
+                    .map_err(|_| AppError::InvalidPayload)
+            })
+            .ok_or(AppError::NoLiveClient)?
         }
         #[cfg(not(target_os = "macos"))]
         {

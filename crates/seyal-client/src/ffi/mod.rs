@@ -144,12 +144,65 @@ pub(crate) fn with_active_client_mut<R>(
     operation: impl FnOnce(&mut LocalDisplayClient) -> R,
 ) -> Option<R> {
     let handle = active_handle();
+    with_client_mut(handle, operation)
+}
+
+/// Borrow a live client from the sole attach registry by handle.
+pub(crate) fn with_client<R>(
+    handle: u64,
+    operation: impl FnOnce(&LocalDisplayClient) -> R,
+) -> Option<R> {
+    if handle == 0 {
+        return None;
+    }
+    CLIENTS.with(|clients| {
+        clients
+            .borrow()
+            .get(&handle)
+            .map(|client| operation(client))
+    })
+}
+
+/// Mutably borrow a live client from the sole attach registry by handle.
+pub(crate) fn with_client_mut<R>(
+    handle: u64,
+    operation: impl FnOnce(&mut LocalDisplayClient) -> R,
+) -> Option<R> {
+    if handle == 0 {
+        return None;
+    }
     CLIENTS.with(|clients| {
         clients
             .borrow_mut()
             .get_mut(&handle)
             .map(|client| operation(client))
     })
+}
+
+/// Insert an ApplicationRoot-owned live client into the sole attach registry.
+pub(crate) fn register_app_client(client: LocalDisplayClient) -> u64 {
+    let handle = allocate_handle();
+    CLIENTS.with(|clients| {
+        clients.borrow_mut().insert(handle, Box::new(client));
+    });
+    handle
+}
+
+/// Remove a live client from the sole attach registry (ApplicationRoot detach/drop).
+pub(crate) fn unregister_client(handle: u64) -> Option<Box<LocalDisplayClient>> {
+    if handle == 0 {
+        return None;
+    }
+    CLIENTS.with(|clients| clients.borrow_mut().remove(&handle))
+}
+
+/// Test/diagnostic: whether `handle` is present in the sole attach registry.
+#[doc(hidden)]
+pub fn client_registry_contains(handle: u64) -> bool {
+    if handle == 0 {
+        return false;
+    }
+    CLIENTS.with(|clients| clients.borrow().contains_key(&handle))
 }
 
 #[cfg(test)]
