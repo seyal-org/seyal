@@ -99,14 +99,19 @@ final class SeyalHostUITests: XCTestCase {
             120,
             "Flow transcript must fill the Pane, not sit above a Metal viewport"
         )
+        XCTAssertLessThan(
+            transcript.firstMatch.frame.width,
+            chrome.firstMatch.frame.width,
+            "Core Terminal left panel/inspector are visible by default and reclaim real width"
+        )
         XCTAssertGreaterThan(
             transcript.firstMatch.frame.width,
-            chrome.firstMatch.frame.width * 0.7,
-            "Flow transcript must use the Pane width; sidebar/inspector stay receded"
+            300,
+            "Flow transcript must remain a usable center column width"
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
-            "Flow shows composer and Blocks only"
+            "Core Terminal left panel is visible by default (#922)"
         )
         waitForUsablePty(in: app)
     }
@@ -125,14 +130,16 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(terminal.exists)
     }
 
-    func testFlowSurfaceIsComposerAndBlocks() throws {
+    func testFlowSurfaceIsComposerAndBlocksAlongsideCoreTerminalChrome() throws {
         let app = hostedApp()
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["seyal-blocks-scroll"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["seyal-blocks"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-inspector"].firstMatch.isHittable)
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-tab-strip"].firstMatch.isHittable)
-        XCTAssertFalse(app.descendants(matching: .any)["seyal-left-tabs"].firstMatch.isHittable)
+        // Core Terminal chrome (#922): left panel, tab strip, and inspector
+        // are visible by default alongside the Flow composer/Blocks surface.
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-inspector"].firstMatch.isHittable)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-tab-strip"].firstMatch.isHittable)
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-left-tabs"].firstMatch.isHittable)
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
@@ -327,8 +334,14 @@ final class SeyalHostUITests: XCTestCase {
         let composerReady = NSPredicate(format: "value == 'available'")
         let becameReady = expectation(for: composerReady, evaluatedWith: composer, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [becameReady], timeout: 12), .completed)
+        // The inspector is visible by default (#922); "no Block selected" is
+        // proven by the absence of Block-details rows, not by hittability.
         let inspector = app.descendants(matching: .any)["seyal-inspector"]
-        XCTAssertFalse(inspector.firstMatch.isHittable, "inspector is receded before any selection")
+        let commandRow = inspector.descendants(matching: .staticText)["Block · Command"]
+        XCTAssertFalse(commandRow.exists, "no Block details before any selection")
+        // Hide the inspector through Rust first so "selecting a Block reveals
+        // the inspector" below observes a real hidden -> visible transition.
+        hideInspectorThroughPalette(in: app, inspector: inspector)
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         editor.firstMatch.click()
@@ -357,7 +370,7 @@ final class SeyalHostUITests: XCTestCase {
             )
         ).firstMatch
         guard card.waitForExistence(timeout: 10) else {
-            XCTAssertFalse(inspector.firstMatch.isHittable, "no Block, no Block details")
+            XCTAssertFalse(commandRow.exists, "no Block, no Block details")
             return
         }
         // Async history-range replies grow earlier cards after the initial
@@ -379,7 +392,6 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [revealed], timeout: 5), .completed, "selecting a Block reveals the inspector")
         let selected = expectation(for: NSPredicate(format: "value == 'selected'"), evaluatedWith: card, handler: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 5), .completed, "card reflects the Rust selected flag")
-        let commandRow = inspector.descendants(matching: .staticText)["Block · Command"]
         XCTAssertTrue(commandRow.waitForExistence(timeout: 5), "inspector shows Rust Block rows")
         XCTAssertTrue(inspector.descendants(matching: .staticText)[submitted].waitForExistence(timeout: 5))
         XCTAssertFalse(inspector.descendants(matching: .staticText)["Block · Duration"].exists, "no fabricated telemetry")
@@ -389,6 +401,27 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [deselected], timeout: 5), .completed, "clicking again clears the selection")
         XCTAssertFalse(commandRow.exists, "Block rows leave with the selection")
         XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    private func hideInspectorThroughPalette(in app: XCUIApplication, inspector: XCUIElement) {
+        XCTAssertTrue(inspector.firstMatch.isHittable, "Core Terminal inspector is visible by default (#922)")
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "⌘K opens the Rust-backed palette")
+        let query = app.descendants(matching: .any)["seyal-command-palette-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.firstMatch.click()
+        query.firstMatch.typeText("Hide Inspector")
+        let row = app.descendants(matching: .any)["seyal-command-palette-row-0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertEqual(row.label, "Hide Inspector")
+        app.typeKey("\r", modifierFlags: [])
+        let hidden = expectation(
+            for: NSPredicate(format: "isHittable == false"),
+            evaluatedWith: inspector.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, "Rust hid the inspector before selection")
     }
 
     private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
@@ -438,9 +471,9 @@ final class SeyalHostUITests: XCTestCase {
             120,
             "Flow transcript must fill the Pane; a short or hidden transcript is a raw-terminal launch"
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             app.descendants(matching: .any)["seyal-left-workspaces"].firstMatch.isHittable,
-            "Flow shows composer and Blocks only"
+            "Core Terminal left panel stays visible alongside Flow composer/Blocks (#922)"
         )
     }
 
@@ -668,7 +701,7 @@ final class SeyalHostUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
         let inspector = app.descendants(matching: .any)["seyal-inspector"]
-        XCTAssertFalse(inspector.firstMatch.isHittable, "inspector is receded before any command runs")
+        XCTAssertTrue(inspector.firstMatch.isHittable, "Core Terminal inspector is visible by default (#922)")
 
         let palette = app.descendants(matching: .any)["seyal-command-palette"]
         app.typeKey("k", modifierFlags: .command)
@@ -678,7 +711,9 @@ final class SeyalHostUITests: XCTestCase {
         let query = app.descendants(matching: .any)["seyal-command-palette-query"]
         XCTAssertTrue(query.waitForExistence(timeout: 5))
         query.firstMatch.click()
-        query.firstMatch.typeText("Show Inspector")
+        // The available toggle command is "Hide Inspector" since the
+        // inspector is already visible by default.
+        query.firstMatch.typeText("Hide Inspector")
         let row = app.descendants(matching: .any)["seyal-command-palette-row-0"]
         let filtered = expectation(
             for: NSPredicate(format: "exists == true"),
@@ -686,7 +721,7 @@ final class SeyalHostUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [filtered], timeout: 5), .completed, "type-to-filter runs in Rust")
-        XCTAssertEqual(row.label, "Show Inspector")
+        XCTAssertEqual(row.label, "Hide Inspector")
 
         app.typeKey("\r", modifierFlags: [])
         let dismissed = expectation(
@@ -695,13 +730,13 @@ final class SeyalHostUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed, "Enter runs the row and closes")
-        let revealed = expectation(
-            for: NSPredicate(format: "isHittable == true"),
+        let hidden = expectation(
+            for: NSPredicate(format: "isHittable == false"),
             evaluatedWith: inspector.firstMatch,
             handler: nil
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [revealed], timeout: 5),
+            XCTWaiter.wait(for: [hidden], timeout: 5),
             .completed,
             "the resolved command actually ran, not just an overlay animation"
         )

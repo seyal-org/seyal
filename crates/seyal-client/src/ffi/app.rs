@@ -16,6 +16,7 @@ use crate::composer::{
 };
 use crate::input_policy::process_input_policy;
 use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryEffect, RecoveryStage};
+use crate::shell::SplitAxis;
 
 use super::{allocate_handle, with_active_client};
 
@@ -31,6 +32,10 @@ const SNAP_HAS_EXECUTION: u16 = 8;
 const SNAP_HAS_ATTACHMENT: u16 = 16;
 const HISTORY_OPEN: u16 = 1;
 const HISTORY_HAS_ENTRIES: u16 = 2;
+const SHELL_FLAG_ALLOWS_TAB_CREATION: u16 = 1;
+const SHELL_FLAG_ALLOWS_PANE_SPLITTING: u16 = 2;
+const SHELL_FLAG_ALLOWS_TAB_CLOSE: u16 = 4;
+const SHELL_FLAG_ALLOWS_PANE_CLOSE: u16 = 8;
 const ROW_SELECTED: u16 = 1;
 /// Block-row `flags`: low bits are the presentation state (1..3); bit 3 marks
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
@@ -570,13 +575,26 @@ pub extern "C" fn seyal_app_shell(handle: u64) -> SeyalAppShell {
         let workspace = split_id(shell.active_workspace.to_bytes());
         let tab = split_id(shell.active_tab.to_bytes());
         let pane = split_id(shell.focused_pane.to_bytes());
+        let mut flags = 0u16;
+        if shell.allows_tab_creation {
+            flags |= SHELL_FLAG_ALLOWS_TAB_CREATION;
+        }
+        if shell.allows_pane_splitting {
+            flags |= SHELL_FLAG_ALLOWS_PANE_SPLITTING;
+        }
+        if shell.allows_tab_close {
+            flags |= SHELL_FLAG_ALLOWS_TAB_CLOSE;
+        }
+        if shell.allows_pane_close {
+            flags |= SHELL_FLAG_ALLOWS_PANE_CLOSE;
+        }
         SeyalAppShell {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppShell>() as u16,
             workspace_count: shell.workspaces.len() as u16,
             tab_count: shell.tabs.len() as u16,
             pane_count: shell.panes.len() as u16,
-            flags: 0,
+            flags,
             reserved: 0,
             active_workspace_lo: workspace.0,
             active_workspace_hi: workspace.1,
@@ -1027,6 +1045,26 @@ fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             left: action.reserved & 1 != 0,
             inspector: action.reserved & 2 != 0,
             tab_strip: action.reserved & 4 != 0,
+        }),
+        23 => Ok(AppAction::CreateTab),
+        24 => Ok(AppAction::CloseTab {
+            id: TabId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        25 => Ok(AppAction::SplitFocused {
+            axis: if action.reserved == 1 {
+                SplitAxis::Down
+            } else {
+                SplitAxis::Right
+            },
+        }),
+        26 => Ok(AppAction::ClosePane {
+            id: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
         }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {
@@ -1561,6 +1599,8 @@ fn error_number(error: AppError) -> i32 {
         AppError::TabCreationUnavailable => 28,
         AppError::PaneSplitUnavailable => 29,
         AppError::UnknownBlock => 30,
+        AppError::CannotCloseLastTab => 31,
+        AppError::CannotCloseLastPane => 32,
     }
 }
 
@@ -1833,11 +1873,11 @@ mod tests {
     }
 
     #[test]
-    fn first_ui_chrome_ffi_is_receded() {
+    fn core_terminal_chrome_ffi_is_visible_by_default_and_can_be_hidden() {
         let handle = seyal_app_create();
         let chrome = seyal_app_chrome(handle);
-        assert_eq!(chrome.reserved, 0);
-        let mut show = SeyalAppAction {
+        assert_eq!(chrome.reserved, 1 | 2 | 4);
+        let mut hide = SeyalAppAction {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppAction>() as u16,
             kind: 22,
@@ -1856,16 +1896,61 @@ mod tests {
             target_pty_generation: 0,
             payload: ptr::null(),
             payload_len: 0,
-            reserved: 1 | 2 | 4,
+            reserved: 0,
         };
-        assert_eq!(unsafe { seyal_app_apply(handle, &show) }, 0);
+        assert_eq!(unsafe { seyal_app_apply(handle, &hide) }, 0);
+        assert_eq!(seyal_app_chrome(handle).reserved, 0);
+        hide.reserved = 1 | 2 | 4;
+        assert_eq!(unsafe { seyal_app_apply(handle, &hide) }, 0);
         let shown = seyal_app_chrome(handle);
         assert_eq!(shown.reserved & 1, 1);
         assert_eq!(shown.reserved & 2, 2);
         assert_eq!(shown.reserved & 4, 4);
-        show.reserved = 0;
-        assert_eq!(unsafe { seyal_app_apply(handle, &show) }, 0);
-        assert_eq!(seyal_app_chrome(handle).reserved, 0);
+        assert_eq!(seyal_app_destroy(handle), 0);
+    }
+
+    #[test]
+    fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
+        // CreateTab/CloseTab/SplitFocused/ClosePane (#922) are new at the FFI
+        // boundary; this proves each code decodes into the right AppAction
+        // and actually reaches ShellState rather than being silently
+        // unwired or misdecoded into a different action.
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let tab_row = seyal_app_shell_row(handle, 1, 0);
+        let pane_row = seyal_app_shell_row(handle, 2, 0);
+
+        // CreateTab (23) and SplitFocused (25) reach the M001 default policy
+        // that disallows composition growth until a distinct execution
+        // route exists; they fail closed rather than no-op silently.
+        assert_eq!(
+            unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
+            -4
+        );
+        assert_eq!(seyal_app_last_error(handle), 28, "TabCreationUnavailable");
+        let mut split = identity_fence(25, &snap);
+        split.reserved = 1; // SplitAxis::Down
+        assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
+
+        // CloseTab (24) / ClosePane (26) on the sole Tab/Pane reach
+        // ShellState's last-of-one guard, whether the id is real or not.
+        let mut close_tab = identity_fence(24, &snap);
+        close_tab.target_execution_lo = tab_row.id_lo;
+        close_tab.target_execution_hi = tab_row.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 31, "CannotCloseLastTab");
+
+        let mut close_pane = identity_fence(26, &snap);
+        close_pane.target_execution_lo = pane_row.id_lo;
+        close_pane.target_execution_hi = pane_row.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 32, "CannotCloseLastPane");
+
+        // Shell composition is unchanged by every rejected action above.
+        let shell = seyal_app_shell(handle);
+        assert_eq!(shell.tab_count, 1);
+        assert_eq!(shell.pane_count, 1);
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 
@@ -1876,6 +1961,11 @@ mod tests {
         assert_eq!(shell.workspace_count, 1);
         assert_eq!(shell.tab_count, 1);
         assert_eq!(shell.pane_count, 1);
+        assert_eq!(
+            shell.flags, 0,
+            "M001 default shell policy disallows tab creation/pane splitting, \
+             and the sole Tab/Pane cannot be closed"
+        );
         let workspace = seyal_app_shell_row(handle, 0, 0);
         assert_eq!(workspace.flags & 1, 1);
         let title = unsafe {
@@ -2092,8 +2182,10 @@ mod tests {
         assert_eq!(opened.flags & PALETTE_OPEN, PALETTE_OPEN);
         assert!(opened.row_count > 0);
 
+        // Core Terminal chrome is visible by default, so the available
+        // toggle command is "Hide Inspector", not "Show Inspector".
         let mut filter = identity_fence(48, &snap);
-        let query = b"Show Inspector";
+        let query = b"Hide Inspector";
         filter.payload = query.as_ptr();
         filter.payload_len = query.len() as u32;
         assert_eq!(unsafe { seyal_app_apply(handle, &filter) }, 0);
@@ -2101,10 +2193,10 @@ mod tests {
         assert_eq!(filtered.row_count, 1);
         assert_eq!(
             utf8(filtered.query_utf8, filtered.query_utf8_len),
-            "Show Inspector"
+            "Hide Inspector"
         );
         let row = seyal_app_palette_row(handle, 0);
-        assert_eq!(utf8(row.title, row.title_len), "Show Inspector");
+        assert_eq!(utf8(row.title, row.title_len), "Hide Inspector");
         assert_eq!(utf8(row.detail, row.detail_len), "View");
         assert_eq!(
             seyal_app_palette_row(handle, 1).title_len,
@@ -2134,10 +2226,10 @@ mod tests {
             "Run closes the palette"
         );
         let chrome = seyal_app_chrome(handle);
-        assert_ne!(
+        assert_eq!(
             chrome.reserved & 2,
             0,
-            "SEYAL_APP_CHROME_INSPECTOR_VISIBLE bit"
+            "SEYAL_APP_CHROME_INSPECTOR_VISIBLE bit cleared by Hide Inspector"
         );
 
         assert_eq!(seyal_app_destroy(handle), 0);

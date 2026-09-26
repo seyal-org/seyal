@@ -27,10 +27,17 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 64)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 56)
         let live = seyal_app_create()
+        // Core Terminal chrome is visible by default (#922).
         let chrome = seyal_app_chrome(live)
-        XCTAssertEqual(chrome.reserved & UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE), 0)
-        XCTAssertEqual(chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE), 0)
-        XCTAssertEqual(chrome.reserved & UInt32(SEYAL_APP_CHROME_TAB_STRIP_VISIBLE), 0)
+        XCTAssertEqual(chrome.reserved & UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE), UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE))
+        XCTAssertEqual(
+            chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE),
+            UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE)
+        )
+        XCTAssertEqual(
+            chrome.reserved & UInt32(SEYAL_APP_CHROME_TAB_STRIP_VISIBLE),
+            UInt32(SEYAL_APP_CHROME_TAB_STRIP_VISIBLE)
+        )
         let shell = seyal_app_shell(live)
         XCTAssertEqual(shell.workspace_count, 1)
         let workspace = seyal_app_shell_row(live, UInt16(SEYAL_APP_ROW_WORKSPACE), 0)
@@ -77,7 +84,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(shell.pane_count, 1)
         let chrome = seyal_app_chrome(handle)
         XCTAssertEqual(chrome.left_panel, 0)
-        XCTAssertEqual(chrome.reserved, 0)
+        XCTAssertEqual(chrome.reserved, UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE | SEYAL_APP_CHROME_INSPECTOR_VISIBLE | SEYAL_APP_CHROME_TAB_STRIP_VISIBLE))
         let composer = seyal_app_composer(handle)
         XCTAssertEqual(composer.mode, UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
         let placeholder = seyal_app_copy(handle, UInt16(SEYAL_APP_COPY_COMPOSER_PLACEHOLDER))
@@ -129,6 +136,29 @@ final class SeyalHostComponentTests: XCTestCase {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
         view.reconcileChrome()
+    }
+
+    @MainActor
+    func testShellCompositionControlsAreOmittedWhenRustPolicyDisallowsThem() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        // M001 production policy: no tab creation/pane splitting, and the sole
+        // Tab/Pane cannot be closed. Rust reports all four as unset flags.
+        let shell = seyal_app_shell(view.pane.appHandle)
+        for bit in [
+            SEYAL_APP_SHELL_ALLOWS_TAB_CREATION,
+            SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING,
+            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
+            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
+        ] {
+            XCTAssertEqual(shell.flags & UInt16(bit), 0)
+        }
+        for identifier in [
+            "seyal-new-tab", "seyal-close-tab", "seyal-split-right", "seyal-split-down", "seyal-close-pane",
+        ] {
+            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
+            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
+        }
     }
 
     @MainActor
@@ -997,6 +1027,8 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(UInt16(SEYAL_APP_INSPECTOR_BLOCK.rawValue), 4)
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let inspectorVisibleBeforeSelect =
+            seyal_app_chrome(handle).reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE)
         var snap = seyal_app_snapshot(handle)
         var bind = SeyalAppAction()
         bind.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -1023,7 +1055,11 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_last_error(handle), 30)
         let chrome = seyal_app_chrome(handle)
         XCTAssertEqual(chrome.inspector_mode, UInt16(SEYAL_APP_INSPECTOR_CONTEXT.rawValue))
-        XCTAssertEqual(chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE), 0, "rejected select does not reveal")
+        XCTAssertEqual(
+            chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE),
+            inspectorVisibleBeforeSelect,
+            "rejected select does not change inspector visibility"
+        )
         for index in 0..<Int(chrome.inspector_row_count) {
             let row = seyal_app_chrome_row(handle, UInt16(SEYAL_APP_ROW_INSPECTOR), UInt32(index))
             XCTAssertFalse(utf8(row).hasPrefix("Block ·"), "no Block rows without a Block list")
