@@ -50,7 +50,7 @@ The Issue has exactly one **human owner**. The sole assignee is the preferred ow
 9. Implement only the Issue scope.
 10. Assess **Documentation impact** before final validation. Run the `docs-authoring` skill and update the User Guide and/or Developer Guide in the same Issue/PR when applicable. If no documentation is needed, record a concrete `N/A` rationale in the PR.
 11. Run `make check` plus issue-specific tests/benchmarks/security checks. When documentation changed, also run `make docs-check` and `make docs-build`.
-12. Open one draft PR using the repository template while accepted scope is still incomplete. Mark that same PR ready for review only when the scope is complete, and include documentation evidence or the `N/A` rationale. Do not open a second PR to answer review comments.
+12. When accepted scope is complete, open one ready-for-review PR using the repository template, including documentation evidence or the `N/A` rationale. Do not open a pull request for unfinished scope. Fix review comments on that same PR.
 13. Require CI evidence; high-risk/core work gets independent review.
 14. Move to Validation where milestone/demo/performance evidence is required.
 15. Merge only after required gates pass. Do not start a dependent milestone early.

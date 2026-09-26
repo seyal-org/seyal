@@ -71,7 +71,8 @@ Only the human `<!-- seyal-plan-acceptance -->` comment in `ISSUE-PROTOCOL.md` m
 - resolve the exact accepted plan from the `<!-- seyal-plan-acceptance -->` comment;
 - establish exactly one human GitHub owner;
 - resolve any open candidate for the same Issue before branch/worktree creation;
-- treat a draft PR as `IMPLEMENTATION_IN_PROGRESS` and resume it rather than create another PR;
+- do not open a pull request while accepted scope is incomplete;
+- treat an existing draft PR as `IMPLEMENTATION_IN_PROGRESS` and resume it rather than create another PR;
 - treat a ready-for-review PR as `IN_REVIEW` and route review/check remediation to `address-pr-review` on that same PR;
 - block on `UNKNOWN`, conflicting ownership or multiple active candidates.
 

@@ -164,25 +164,20 @@ Technical authority for that comment is a human GitHub account with write access
 
 ## Candidate lifecycle stage
 
-The stage of the implementation candidate is the draft state of the single open pull request for that Issue. Count an open PR when its head branch is `<human-login>/issue/<number>` or its body references the Issue with `Closes`, `Fixes`, `Resolves`, `Refs`, or `Part of`.
+The `candidate_lifecycle_stage` of the implementation candidate is the draft state of the single open pull request for that Issue. Count an open PR when its head branch is `<human-login>/issue/<number>` or its body references the Issue with `Closes`, `Fixes`, `Resolves`, `Refs`, or `Part of`.
 
 - no such open PR: `NONE`
 - exactly one, and it is a draft: `IMPLEMENTATION_IN_PROGRESS`
 - exactly one, and it is ready for review: `IN_REVIEW`
 - more than one, or the draft flag cannot be read: `UNKNOWN`
 
-Only `implement-issue` may change this stage. While accepted scope is incomplete, the PR stays a draft. When accepted scope is complete, `implement-issue` marks that same PR ready for review. It does not open a second PR. When it changes the stage, it keeps this block in the PR body aligned with the draft flag:
+Do not open a pull request while accepted scope is incomplete. Until then the stage is `NONE` and work stays on the branch.
 
-```text
-<!-- seyal-candidate-stage -->
-candidate_lifecycle_stage: IMPLEMENTATION_IN_PROGRESS
-stage_set_by: implementation
-stage_set_at: <UTC timestamp>
-```
+When accepted scope is complete and no pull request exists, `implement-issue` opens one pull request ready for review. That stage is `IN_REVIEW`.
 
-Use `IN_REVIEW` in that block only when the PR is ready for review. If the block is absent, the draft flag alone is the stage, including for PRs opened before this record existed. If the block is present and disagrees with the draft flag, the stage is `UNKNOWN` until the human owner makes them agree. `address-pr-review` and `pr-review` must not change the draft flag or this block.
+If a draft pull request already exists, leave it a draft until accepted scope is complete, then mark that same pull request ready for review. Do not open a second pull request. Only `implement-issue` may open the pull request or change it from draft to ready for review. `address-pr-review` and `pr-review` must not change the draft flag.
 
-Review findings on an `IN_REVIEW` PR are fixed on that same PR through `address-pr-review`, then handed back to one full `pr-review`. Do not open a replacement PR, and do not start a new implementation, for the same review round.
+Review findings on an `IN_REVIEW` pull request are fixed on that same pull request through `address-pr-review`, then handed back to one full `pr-review`.
 
 ## Ready gate
 

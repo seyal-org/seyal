@@ -45,11 +45,12 @@ Do not create or switch the implementation worktree/branch, generate files, or s
 1. Resolve the Issue's exact accepted `plan_id + plan_revision` from the `<!-- seyal-plan-acceptance -->` comment in `docs/engineering/ISSUE-PROTOCOL.md`, including `plan_content_ref`, `accepted_by`, and `accepted_at`. A chat outline, related plan, latest plan, or merely `PROPOSED` `<!-- seyal-plan -->` comment is not implementation authority.
 2. If the accepted plan is missing, stale, or no longer matches scope/architecture/dependencies, stop and route to `implementation-planning`, the human acceptance comment in `ISSUE-PROTOCOL.md`, then `development-readiness`. Do not repair the plan inside `implement-issue`.
 3. Re-state the accepted implementation slice and permanent production path before edits. Ask the user only when an unresolved product/architecture/authority decision remains; do not create a second ad-hoc plan in chat.
-4. Resolve any open PR for this same owning Issue before creating a branch/worktree. Read `candidate_lifecycle_stage` from the draft flag and optional `<!-- seyal-candidate-stage -->` block in `ISSUE-PROTOCOL.md`:
-   - same human owner + `IMPLEMENTATION_IN_PROGRESS` (draft) → resume that exact candidate/branch; CI failures and early feedback needed to finish accepted scope remain under `implement-issue`; keep the PR draft and keep `<!-- seyal-candidate-stage -->` aligned, with `stage_set_by: implementation`;
+4. Resolve any open PR for this same owning Issue before creating a branch/worktree. Read `candidate_lifecycle_stage` from the draft flag in `docs/engineering/ISSUE-PROTOCOL.md`:
+   - `NONE` → keep implementing on the branch. Do not open a pull request while accepted scope is incomplete. When it is complete, open one pull request ready for review;
+   - same human owner + `IMPLEMENTATION_IN_PROGRESS` (an existing draft) → resume that exact candidate/branch; keep it a draft until accepted scope is complete, then mark that same PR ready for review;
    - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review`, then full `pr-review`; do not open a second PR;
    - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.
-   When accepted scope is complete, mark that same PR ready for review and set the body block to `IN_REVIEW`. Only this skill may change the draft flag or that block.
+   Only this skill may open the pull request or change it from draft to ready for review.
 5. New implementation begins only after the Issue is Ready, the accepted plan is current, the human owner claim is valid, and no conflicting candidate owns the same slice.
 
 ## Failure remediation loop

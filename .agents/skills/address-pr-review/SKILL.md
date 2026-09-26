@@ -11,7 +11,7 @@ Use this only for an existing Seyal PR whose candidate lifecycle stage is `IN_RE
 
 Apply only these Seyal-specific deltas:
 
-1. Map `merge_candidate_id` to the exact GitHub PR, current head SHA, owning Issue, deterministic human-owned branch, and modification authority. Read `candidate_lifecycle_stage` from `docs/engineering/ISSUE-PROTOCOL.md`: a draft PR is `IMPLEMENTATION_IN_PROGRESS`; a ready-for-review PR is `IN_REVIEW`. If `<!-- seyal-candidate-stage -->` disagrees with that draft flag, the stage is `UNKNOWN`. Do not change the draft flag or that block.
+1. Map `merge_candidate_id` to the exact GitHub PR, current head SHA, owning Issue, deterministic human-owned branch, and modification authority. Read `candidate_lifecycle_stage` from `docs/engineering/ISSUE-PROTOCOL.md`: a draft PR is `IMPLEMENTATION_IN_PROGRESS`; a ready-for-review PR is `IN_REVIEW`. Do not change the draft flag.
 2. Fetch the **complete** unresolved review/comment set plus all required failing checks. Never fix only the newest comment.
 3. Build one remediation ledger, group duplicate symptoms by root cause, and fix the complete known in-scope blocker set on the **same PR/branch**. Never create a replacement implementation PR merely for remediation.
 4. Preserve Seyal architecture and hot-path invariants. A remediation that requires a new product/architecture/security authority decision stops and routes to that authority instead of being improvised in code.
