@@ -4,6 +4,8 @@
 **Parent:** `M001-CORE-TERMINAL-REFERENCE-SCREEN.md`  
 **Scope:** Pane-scoped multiline composer and history discovery
 
+> **Non-normative pointer.** Proposed Composer extensions such as cwd/Git context chips, branch switching, and shell-aware completion are **not M001 scope** and do not amend this frozen specification. See the Proposed `SEYAL-COMPOSER-COMPONENT-SPEC.md`.
+
 ## 1. Purpose
 
 The Pane composer is a keyboard-first multiline command editor. History fuzzy search lets power users recall and reuse commands without leaving the focused Pane.

@@ -2,10 +2,11 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703; M003 Flow live-tail capability bit 9 / message type 35 (#865)
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
+- **Proposed M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -146,15 +147,26 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
-| 35 | R→C | `ViewportLineIds` — M003 Flow live-tail (#865); gated on `CAP_VIEWPORT_LINE_IDS` (bit 9). Primary viewport LineIds for one display generation: `generation(u64)` + `row_count(u16)` + `reserved(u16=0)` + `row_count` little-endian `u64` ids. Ids are non-zero and unique within the viewport; they are **not** required to be monotonic (insert-line / reverse-index / CSI T may reorder rows). |
+| 36 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
+| 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
+| 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
+| 39 | R→C | `TerminateExecutionResult` — M003 disposition (§18) |
 
-M001 server capability bits are:
+M001 / live capability bits (master + open claims), for allocation hygiene:
 
 - bit 0: binary display snapshot/delta transport;
 - bit 1: observer role;
-- bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — accepted by Pass 7 / SPEC-006 / PR #703;
-- bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — accepted by Pass 7 / SPEC-006 / PR #703;
-- bit 9: primary viewport LineIds (`CAP_VIEWPORT_LINE_IDS`) — M003 Flow live-tail under SPEC-008 §5.2 Approach B / #865; clients that do not advertise the bit never receive type 35.
+- bit 2: semantic terminal-key input (`CAP_SEMANTIC_TERMINAL_KEY`) — Pass 7 / SPEC-006;
+- bit 3: correlated native resize (`CAP_CORRELATED_RESIZE`) — Pass 7 / SPEC-006;
+- bit 4: command blocks (`CAP_COMMAND_BLOCKS`);
+- bit 5: block metadata (`CAP_BLOCK_METADATA`);
+- bit 6: grapheme display (`CAP_GRAPHEME_DISPLAY`);
+- bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
+- bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
+- bit 9: claimed by open PR #1058 (#865, `CAP_VIEWPORT_LINE_IDS`);
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is claimed by open PR #1058 (`ViewportLineIds`). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
@@ -427,6 +439,15 @@ M001 defines:
 
 These numeric meanings are reused by `ResizeResult.result_code` values 1–14. `ResizeResult.result_code = 0` uniquely means `Applied`.
 
+§18 additionally defines, normative only on ADR-017 acceptance:
+
+```text
+15 InvalidWorkspace
+16 UnsupportedLaunchProfile
+```
+
+Both are additive. A client must treat an unrecognized result code as a non-retryable failure and must not infer success from it.
+
 Semantic errors do not mutate canonical state before validation succeeds. Fatal framing/version/ancillary failures close the connection after bounded cleanup. SPEC-006 classifies resize failures, forbids immediate automatic resend loops and treats result/projection generation inconsistency as protocol failure.
 
 ## 16. Validation requirements
@@ -479,3 +500,203 @@ Pass 5 may leave draft only when production code no longer uses per-attachment s
 The Pass 7 semantic-key and correlated-resize extension contract is accepted via SPEC-006 / PR #703. Production Pass 7 completed when #706 / PR #707 satisfied SPEC-006's implementation Definition of Done and required independent review/evidence; #706 is **closed/merged** (historical).
 
 Comparator/reference shared-projection code may remain only if isolated from production and clearly labelled non-production evidence. It must not be reachable as a hidden text-grid fallback.
+
+## 18. M003 execution provisioning and disposition extension
+
+- **Status:** proposed amendment; **normative only on ADR-017 acceptance**.
+- **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
+- **Nature:** additive, capability-gated. Framing version remains `1.0`. Nothing in §1–§17 changes.
+
+This section adds the only permitted way for a client to ask Runtime to create a
+new `TerminalExecution` for a new Tab/split Pane, and to ask Runtime to end one.
+It does not move PTY, child, VT or `TerminalState` ownership: §2 invariants 1–3
+remain in force, and every execution is still created by the SPEC-003 §7
+transaction.
+
+### 18.1 Capability and connection state
+
+`CAP_EXECUTION_PROVISIONING = 1 << 10`. Runtime must not send types 37/39 to a
+peer that did not advertise the capability, and must reject types 36/38 from such
+a peer with `UnknownMessage`. A client must not probe an older Runtime by
+sending an unknown message type.
+
+Types 36 and 38 are legal in connection states `Ready` and `Attached`.
+Provisioning is **connection-scoped**: it creates no attachment, grants no
+authority over any existing execution, cannot preempt a Controller and returns
+no display state. Disposition (type 38) is **execution-scoped** and legal only
+for the current attached Controller of the target execution.
+
+### 18.2 `CreateExecutionRequest` — exactly 32 bytes
+
+```text
+u128 workspace_id
+u64  request_id
+u16  launch_profile
+u16  rows
+u16  columns
+u16  reserved = 0
+```
+
+Rules, validated in this order before any process or terminal mutation:
+
+1. capability negotiated, otherwise `UnknownMessage`;
+2. connection state `Ready` or `Attached`, otherwise `InvalidState`;
+3. exact payload length and `reserved == 0`, otherwise `MalformedPayload`;
+4. `request_id != 0`, strictly increasing within the live connection; reuse or
+   wrap is malformed, exactly as §9 requires for `ResizeRequest`. Reconnect
+   starts a fresh request-ID space because the connection is new. Types 36 and 38
+   share one connection-local request-ID space that is separate from the
+   correlated-resize space, because correlation is per message-type pair and the
+   existing resize bookkeeping is unchanged;
+5. outstanding-request budget available (§18.6), otherwise `Backpressure`;
+6. `workspace_id` selects the owning Workspace association. **M003:** only
+   `workspace_id == 0` is accepted and means the Runtime's single
+   implicit/default Workspace (ADR-007 §2). Every nonzero value fails closed
+   with `InvalidWorkspace`. Runtime never creates a Workspace as a side effect
+   and clients need no wire-visible durable `WorkspaceId` in M003;
+7. `launch_profile` is implemented by this Runtime, otherwise
+   `UnsupportedLaunchProfile`. `0` is the default interactive shell profile;
+   all other values are reserved and must fail closed rather than fall back;
+8. geometry is nonzero and within the §5 maxima, otherwise `InvalidGeometry`;
+9. Runtime is not shutting down and the registry is below its SPEC-003 §5
+   maximum, otherwise `InvalidState` or `CapacityExceeded`.
+
+The request carries no program, argv, environment, path or working directory.
+Program, argv, environment, `TERM`/terminfo and shell-integration injection are
+resolved solely by Runtime under ADR-005 / ADR-008 / ADR-009. `TabId` and
+`PaneId` are never transmitted; request-to-Pane correlation is client-local.
+
+### 18.3 `CreateExecutionResult` — exactly 32 bytes
+
+```text
+u128 execution_id
+u64  request_id
+u16  result_code
+u16  reserved0 = 0
+u32  detail_code = 0
+```
+
+- `result_code = 0` uniquely means `Created`; 1–16 reuse §15 numeric meanings.
+- On `Created`, `execution_id` is a published live execution with exactly one
+  owning Workspace association, observable through `ListExecutions`, and
+  attachable by `Attach`.
+- On failure, `execution_id` is all zero and no execution, registration or
+  Workspace association exists.
+- Exactly one result is queued for every structurally valid request whose
+  request identity Runtime can trust. If framing corruption prevents trustworthy
+  request-ID extraction, the existing `Error`/fatal path applies and the client
+  must not guess correlation.
+- Results are mandatory bounded control output: never presentation-superseded,
+  and terminal progress never waits for a client to read one.
+- No attachment is created and no display state is queued by creation.
+- `detail_code` is `0` unless a later accepted specification assigns a bounded
+  non-secret reason.
+
+### 18.4 `TerminateExecutionRequest` — exactly 40 bytes
+
+```text
+u128 attachment_id
+u128 execution_id
+u64  request_id
+```
+
+Rules, validated in this order:
+
+1. capability negotiated, otherwise `UnknownMessage`;
+2. connection state `Attached`, otherwise `InvalidState`;
+3. exact payload length, otherwise `MalformedPayload`;
+4. `request_id` obeys the same nonzero/strictly-increasing rules as §18.2 in the
+   same connection-local request-ID space;
+5. `attachment_id` is this connection's current live attachment. An all-zero
+   `attachment_id` (never a valid identity) is `InvalidAttachment`; any other
+   value that is not the current live attachment (previously released,
+   issued to another connection, or never issued) is `StaleIdentity`;
+6. `execution_id` matches that attachment's execution, otherwise
+   `StaleIdentity`;
+7. the attachment holds the Controller lease, otherwise `PermissionDenied`.
+
+The request carries no termination policy. Runtime applies its own configured
+SIGTERM grace and post-SIGKILL reap bounds under ADR-005 and SPEC-003 §11.
+
+### 18.5 `TerminateExecutionResult` — exactly 32 bytes
+
+```text
+u128 attachment_id
+u64  request_id
+u16  result_code
+u16  reserved0 = 0
+u32  detail_code = 0
+```
+
+- `result_code = 0` means `TerminationRequested`: the request was accepted and
+  the SPEC-003 §11 nonblocking termination state machine has begun. It does not
+  claim the child is dead.
+- Termination completion is observed only through the existing `Lifecycle`
+  finalization path. Runtime never blocks the reactor and never waits for the
+  client to consume a result.
+- Failure codes reuse §15 meanings.
+
+Exact outcomes for the non-fresh cases (rules evaluated in §18.4 order; each
+case has exactly one `result_code`):
+
+| Execution / attachment state when the request is validated | `result_code` | Effect |
+|---|---|---|
+| live, not terminating (fresh request) | `0 TerminationRequested` | §11 state machine starts |
+| already `TerminatingGraceful` or `TerminatingForced` (duplicate terminate) | `0 TerminationRequested` | idempotent: no additional signal, no deadline reset, no change to escalation |
+| primary child reaped, execution in `DrainingAfterPrimaryExit`, attachment still live | `0 TerminationRequested` | idempotent: no signal after reap; the existing SPEC-003 §10 finalization deadline is neither shortened nor extended |
+| finalization completed and released the attachment; connection has no current attachment | `3 InvalidState` (rule 2) | none |
+| finalization released the attachment; connection has since attached elsewhere | `6 StaleIdentity` (rule 5) | none |
+
+In every case lifecycle finalization is emitted exactly once and no signal is
+sent after primary reap. `detail_code` is `0` in all rows.
+
+### 18.6 Bounds and hot-path constraints
+
+- At most **4** outstanding (unresolved) type-36 requests per connection and at
+  most **8** Runtime-wide. Excess is rejected with `Backpressure` before any
+  spawn work starts.
+- At most **one** execution is created per Runtime reactor dispatch turn, so a
+  burst of requests cannot monopolize the event loop.
+- The §5 maxima are unchanged. With one connection and one attachment per Pane,
+  at most 16 Panes may be simultaneously attached even though SPEC-003 permits
+  up to 512 live executions.
+- Provisioning and disposition never synchronously gate another execution's
+  PTY → VT → canonical state → damage progress.
+
+### 18.7 Privacy
+
+Type 36–39 payloads are fixed-width and contain no strings, paths, environment
+data, terminal content or secrets. Provisioning/disposition logging carries only
+bounded structured codes; program names, argv, environment names/values, cwd,
+shell contents, terminal cells and input bytes must never be logged, matching
+the SPEC-009 §8.1.1 redaction contract.
+
+### 18.8 Required validation
+
+The owning production child Issues must prove:
+
+- capability negotiation: an older/non-advertising peer is never sent types
+  37/39, and existing Pass 5/6/7 clients tolerate capability bit 10;
+- exact 32/32/40/32-byte fixtures for types 36/37/38/39 plus malformed,
+  truncated, oversized, nonzero-reserved and fuzz coverage;
+- `request_id` nonzero/strictly-increasing/duplicate-rejection/wrap/reconnect-reset
+  behavior in the shared connection-local space;
+- exactly one result per trustworthy structurally valid request, with exact
+  correlation under interleaved `Input`/`TerminalKey`/`ResizeRequest` traffic;
+- `Created` only after publication, carrying an `ExecutionId` that
+  `ListExecutions` reports and `Attach` accepts;
+- every failure path leaves no execution, registration, descriptor, child or
+  Workspace association behind, with counters returning to baseline;
+- `InvalidWorkspace` and `UnsupportedLaunchProfile` fail closed with no
+  fallback to a default;
+- geometry validation rejects zero and out-of-maxima requests before spawn;
+- provisioning from a connection that is not Controller of anything cannot
+  reach, mutate or observe another execution;
+- termination requires Controller authority, rejects Observer and stale/foreign
+  attachment identity, and never signals after reap;
+- outstanding-request and per-dispatch bounds hold under a burst, while an
+  unrelated execution keeps producing output without a fairness regression;
+- persistent injected spawn failure produces one result per request, no
+  automatic retry loop, and no resource growth;
+- privacy tests proving no program/argv/environment/cwd/terminal content appears
+  in logs or error payloads.

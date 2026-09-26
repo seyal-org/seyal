@@ -1107,6 +1107,8 @@ private final class CommandBlockView: NSView {
         body.layer?.backgroundColor = NSColor.clear.cgColor
         body.setAccessibilityElement(true)
         body.setAccessibilityRole(.group)
+        // The card is itself an accessibility element. Without an explicit
+        // child list, XCUI cannot see the body identifier.
         header.addSubview(self.prompt)
         header.addSubview(command)
         header.addSubview(status)
@@ -1149,6 +1151,10 @@ private final class CommandBlockView: NSView {
 
     func setOutputLines(_ lines: Int, cellHeight: CGFloat) {
         bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        [body]
     }
 
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must

@@ -4,7 +4,7 @@
 //! derives how the Pane compositor may project one Block's output:
 //!
 //! - **Running** Blocks use a damage-driven clip of the prepared primary frame
-//!   into the Block output region (Approach B). Hosts must not invent a history
+//!   into the Block output region (SPEC-008 §5.2). Hosts must not invent a history
 //!   range such as `start + 511`.
 //! - Clip rows are derived from Runtime viewport `LineId`s: only primary rows
 //!   whose line id is `>= start_line` are drawn. Preceding prompts/output still
@@ -57,11 +57,20 @@ pub fn map_primary_clip(start_line: u64, viewport_line_ids: &[u64]) -> Option<(u
     if viewport_line_ids.contains(&0) {
         return None;
     }
-    let first = viewport_line_ids.iter().position(|&id| id >= start_line)? as u16;
-    let row_count = (viewport_line_ids.len() as u16).saturating_sub(first);
+    let first_index = viewport_line_ids.iter().position(|&id| id >= start_line)?;
+    // Contiguous owned run only. A later row with id < start_line (CSI T /
+    // reverse-index) must not be drawn inside this Block; stop before it.
+    let mut row_count: u16 = 0;
+    for id in viewport_line_ids.iter().skip(first_index) {
+        if *id < start_line {
+            break;
+        }
+        row_count = row_count.saturating_add(1);
+    }
     if row_count == 0 {
         return None;
     }
+    let first = u16::try_from(first_index).ok()?;
     Some((first, row_count))
 }
 
@@ -124,6 +133,14 @@ mod tests {
         // row order. Mapping still starts at the first id >= start_line.
         let ids = [1_u64, 4, 2];
         assert_eq!(map_primary_clip(2, &ids), Some((1, 2)));
+    }
+
+    #[test]
+    fn reordered_preceding_row_is_not_drawn_inside_running_block() {
+        // CSI T / reverse-index can place an older line between owned rows.
+        // The clip stops before that row instead of painting it in the Block.
+        let ids = [30_u64, 10, 31];
+        assert_eq!(map_primary_clip(30, &ids), Some((0, 1)));
     }
 
     #[test]
