@@ -1019,12 +1019,23 @@ Keep the Block output range exactly as defined (`[start_line, end_line]` from
    Today Runtime clamps `end_line` to `start_line` so the Block completes
    (#1015), and that single row later shows the next prompt. The extended
    record therefore also carries `output_empty: bool`. It is set when, at
-   trusted `D` recognition, the cursor is at column 0 on the `start_line` row.
-   This one condition covers both the case where the parser's completion line
-   backs up before `start_line` and the top-screen-row case (`cursor.row ==
-   0`) where the completion line cannot back up and would otherwise equal
-   `start_line`. Clients then present a Block with no output region, and never
-   request or draw its range.
+   trusted `D` recognition, both hold:
+   - the cursor is at column 0 on the `start_line` row; and
+   - every cell of the `start_line` row is blank (a space or empty cell with
+     default attributes).
+
+   The cursor test alone is not enough: output that ends in a bare carriage
+   return (`printf 'abc\r'`) also leaves the cursor at column 0 on
+   `start_line`, but that row holds the output. The blank-row test rejects
+   that case. Together the two conditions cover both the case where the
+   parser's completion line backs up before `start_line` and the
+   top-screen-row case (`cursor.row == 0`) where the completion line cannot
+   back up and would otherwise equal `start_line`. `output_empty` describes
+   what the output region shows at `D`, not how many bytes were written.
+   Output that is later erased (`printf 'abc\r\033[K'`) leaves nothing to
+   present or copy, so it is also empty. The check is one bounded scan of one
+   row at `D` recognition, not per-byte tracking. Clients then present a Block
+   with no output region, and never request or draw its range.
 
 ### Record and wire shape
 
@@ -1047,7 +1058,8 @@ Per-record growth is bounded to one optional `LineId` and one flag byte.
   `prompt_line`. Forged or unauthenticated `A`, direct-input Blocks and
   unsupported shells yield `None`.
 - There is no synchronous work on the PTY → VT → render hot path beyond storing
-  one already-computed line id at `A` recognition.
+  one already-computed line id at `A` recognition and one bounded scan of the
+  `start_line` row at `D` recognition (decision 8).
 
 ### Accepted-text changes on acceptance
 
@@ -1074,7 +1086,8 @@ that ADR-009 never states both rules at once:
 - Multi-line command submission (continuation-prompt rows inside the context
   region).
 - `PROMPT_SP` and partial-line output; output ending in a bare carriage
-  return.
+  return (`printf 'abc\r'` must give `output_empty == false`; `printf
+  'abc\r\033[K'` gives `true`).
 - Transient and right prompts.
 - `clear` or `reset` between `A` and `C`.
 - `A`, `C` and `D` parsed in one PTY read.
