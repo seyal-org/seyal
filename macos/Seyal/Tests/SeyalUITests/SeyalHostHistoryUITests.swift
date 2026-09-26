@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 /// Headed HistoryStore / reflow evidence for #842. Metal does not expose PTY
@@ -46,42 +47,35 @@ final class SeyalHostHistoryUITests: XCTestCase {
     /// Uses a paced producer so the capture lands while the Block is still
     /// running (PRIMARY_CLIP), then waits for completion handoff.
     func testRunningSeqLiveTailStaysOnFlowBlocks() throws {
+        // The headed host spawns the account pw_shell. Only trusted zsh
+        // integration publishes a Block (OSC 133). Bash CI accounts never
+        // get one; skipping here matches testComposerReadsBusyWhileCommandRunsAndAvailableAtNextPrompt.
+        // Clip geometry on that path is SeyalHostComponentTests.
+        guard loginShellIsZsh() else {
+            throw XCTSkip(
+                "Running Block live-tail requires a zsh pw_shell. Hosted runners use bash, so no OSC 133 Block is published."
+            )
+        }
         let app = hostedApp()
         waitForUsablePty(in: app)
 
-        // ~10s paced seq 1 1000 keeps PRIMARY_CLIP active for mid-run capture
-        // (Issue acceptance workload class). Assert running body exists and is
-        // taller than a single line while the producer is still live.
+        // Paced seq stays running long enough for the body-height check.
         submitComposerCommand(
             app,
             "for i in $(seq 1 1000); do printf '%s\\n' \"$i\"; sleep 0.01; done"
         )
-        waitBriefly(1.0)
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while seq live-tail ran")
         assertFlowBlocksOrFail(in: app)
-        // Blocks are Runtime timeline metadata (OSC 133), same as
-        // testSelectingABlockRevealsRustBlockDetailsInInspector. A hosted
-        // session with no shell-integration marker publishes no card; the
-        // host must not invent one. When a card is published, its body must
-        // exist and be taller than a one-line stub while the producer runs.
-        let runningCard = app.descendants(matching: .any)["seyal-block-0"]
         let runningBody = app.descendants(matching: .any)["seyal-block-0-body"]
-        if runningCard.waitForExistence(timeout: 12) || runningBody.waitForExistence(timeout: 2) {
-            XCTAssertTrue(
-                runningBody.waitForExistence(timeout: 4),
-                "running Block was published without a body"
-            )
-            XCTAssertGreaterThan(
-                runningBody.frame.height,
-                8,
-                "running live-tail body must be taller than a one-line stub while seq runs"
-            )
-        } else {
-            XCTAssertFalse(
-                runningBody.exists,
-                "host invented a Block body without a Runtime timeline card"
-            )
-        }
+        XCTAssertTrue(
+            runningBody.waitForExistence(timeout: 12),
+            "zsh integration must publish a running Block body"
+        )
+        XCTAssertGreaterThan(
+            runningBody.frame.height,
+            8,
+            "running live-tail body must be taller than a one-line stub while seq runs"
+        )
         attachScreenshot(app, name: "865-live-tail-running-seq")
 
         // Completion handoff must remain on Flow Blocks, not a raw Metal viewport.
@@ -201,5 +195,13 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
     private func waitBriefly(_ seconds: TimeInterval) {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// Same predicate as shell-integration support: account `pw_shell`, not `SHELL`.
+    private func loginShellIsZsh() -> Bool {
+        guard let account = getpwuid(geteuid()), let shell = account.pointee.pw_shell else {
+            return false
+        }
+        return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
 }
