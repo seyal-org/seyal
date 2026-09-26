@@ -85,10 +85,6 @@ acknowledged_loc = 881
 issue = 1020
 reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl block after the resize-planner extraction; further fragmentation would separate tightly coupled DECSTBM region helpers. Ceiling matches rustfmt-normalized LOC after the split."
 
-# #1020 TerminalState façade split: VT performer stays one cohesive module above
-# hard_loc; further CSI-family extraction is tracked as follow-on (finding A4).
-[[exception]]
-path = "crates/seyal-terminal/src/terminal/vt.rs"
-ceiling_loc = 1076
-issue = 1020
-responsibility = "TerminalCore VT performer (print/execute/CSI/OSC/Actions) kept together after TerminalState responsibility split; one authority type, no second state engine."
+# #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
+# partitioned into print / execute / csi / osc siblings; all landed ≤ review_loc,
+# so no [[exception]] or [[cohesion_acknowledgement]] remains for this surface.
