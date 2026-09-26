@@ -164,7 +164,7 @@ Technical authority for that comment is a human GitHub account with write access
 
 ## Candidate lifecycle stage
 
-The `candidate_lifecycle_stage` of the implementation candidate is the draft state of the single open pull request for that Issue. Count an open PR when its head branch is `<human-login>/issue/<number>` or its body references the Issue with `Closes`, `Fixes`, `Resolves`, `Refs`, or `Part of`.
+The `candidate_lifecycle_stage` of the implementation candidate is the draft state of the single open pull request for that Issue. Count a pull request only when its head branch is exactly `<human-login>/issue/<number>` or legacy `issue/<number>`, or its body uses `Closes`, `Fixes`, or `Resolves` for this Issue. `Refs` and `Part of` do not make a pull request the candidate.
 
 - no such open PR: `NONE`
 - exactly one, and it is a draft: `IMPLEMENTATION_IN_PROGRESS`

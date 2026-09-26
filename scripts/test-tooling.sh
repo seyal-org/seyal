@@ -112,6 +112,7 @@ grep -Fq 'accepted_by' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protoco
 grep -Fq 'candidate_lifecycle_stage' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define candidate lifecycle stage"
 grep -Fq 'A chat outline is not an implementation plan.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must reject a chat-only plan"
 grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must resolve the accepted-plan comment"
+grep -Fq 'Refs` and `Part of` do not make a pull request the candidate.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not treat Refs or Part of as the implementation candidate"
 grep -Fq 'Do not open a pull request while accepted scope is incomplete.' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must not open a PR for unfinished scope"
 grep -Fq 'Do not open a pull request while accepted scope is incomplete.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not require a PR for unfinished scope"
 grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must require the accepted-plan comment"
