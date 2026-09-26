@@ -43,10 +43,11 @@ pub(crate) use types::{
 
 #[allow(unused_imports)]
 pub use app::{
-    seyal_app_accessibility, seyal_app_apply, seyal_app_block_row, seyal_app_block_span,
-    seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette,
-    seyal_app_palette_row, seyal_app_recovery_param, seyal_app_shell, seyal_app_shell_row,
+    seyal_app_accessibility, seyal_app_apply, seyal_app_block_action_count,
+    seyal_app_block_action_row, seyal_app_block_row, seyal_app_block_span, seyal_app_chrome,
+    seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create, seyal_app_destroy,
+    seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row,
+    seyal_app_recovery_param, seyal_app_request_block_copy, seyal_app_shell, seyal_app_shell_row,
     seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
 };
@@ -57,8 +58,9 @@ pub use display::{
     seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable, seyal_bridge_frame,
     seyal_bridge_history_range_consume, seyal_bridge_history_range_peek_for,
     seyal_bridge_history_range_row_for, seyal_bridge_history_range_sidecar_for,
-    seyal_bridge_next_composer_request_id, seyal_bridge_next_history_request_id, seyal_bridge_poll,
-    seyal_bridge_request_history_range, seyal_bridge_wants_write,
+    seyal_bridge_history_range_text_for, seyal_bridge_next_composer_request_id,
+    seyal_bridge_next_history_request_id, seyal_bridge_poll, seyal_bridge_request_history_range,
+    seyal_bridge_take_block_copy, seyal_bridge_wants_write,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]

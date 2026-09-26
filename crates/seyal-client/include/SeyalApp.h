@@ -96,7 +96,16 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /*
+     * Block Rerun (#1010). target_execution_lo/hi = BlockId,
+     * target_pty_generation = composer epoch. Rust loads that focused-Pane
+     * Block's command as the composer draft only when the composer is
+     * Available and the draft is empty; the host then submits through the
+     * ordinary composer path. Error 30 = UnknownBlock, 33 = BlockRunning,
+     * 34 = ComposerUnavailable, 35 = ComposerDraftOccupied.
+     */
+    SEYAL_APP_ACTION_RERUN_BLOCK = 53
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -271,7 +280,9 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_COPY_COMPOSER_HISTORY_PLACEHOLDER 4u
 
 /*
- * seyal_app_block_row flags: state in the low three bits, plus
+ * seyal_app_block_row: title = command, detail = Rust status name for the
+ * status icon ("Running", "Succeeded", "Failed", "Status unknown").
+ * flags: state in the low three bits, plus
  * SEYAL_APP_BLOCK_SELECTED when that Block is bound to the inspector (#935).
  * Hosts must mask with SEYAL_APP_BLOCK_STATE_MASK before comparing states.
  */
@@ -282,6 +293,26 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_BLOCK_STATE_UNKNOWN 4u
 #define SEYAL_APP_BLOCK_STATE_MASK 7u
 #define SEYAL_APP_BLOCK_SELECTED 8u
+/*
+ * Block quick actions (#1010), from seyal_app_block_action_row. Rust owns the
+ * action set, order, labels (title), shortcut hints (detail, e.g. "cmd+c")
+ * and availability; the host only draws them and routes `kind` back.
+ * row.kind = SEYAL_APP_BLOCK_ACTION_*; row.flags = ENABLED bit plus placement
+ * ((flags & PLACEMENT_MASK) >> PLACEMENT_SHIFT) = SEAM / COPY_MENU / MORE_MENU.
+ */
+#define SEYAL_APP_BLOCK_ACTION_COPY_MENU 1u
+#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND 2u
+#define SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT 3u
+#define SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT 4u
+#define SEYAL_APP_BLOCK_ACTION_RERUN 5u
+#define SEYAL_APP_BLOCK_ACTION_MORE_MENU 6u
+#define SEYAL_APP_BLOCK_ACTION_INSPECT 7u
+#define SEYAL_APP_BLOCK_ACTION_ENABLED 1u
+#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT 4u
+#define SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK 0x30u
+#define SEYAL_APP_BLOCK_ACTION_SEAM 0u
+#define SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU 1u
+#define SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU 2u
 
 typedef struct SeyalAppComposer {
     uint16_t version;
@@ -350,7 +381,14 @@ typedef struct SeyalAppTheme {
     uint32_t text;
     uint32_t accent;
     uint16_t appearance;
+    /* Bit 0 set when Rust resolved allows_motion after accessibility flags. */
     uint16_t reserved;
+    /* Block Component roles (#1010), packed RGBA like the fields above. */
+    uint32_t block_focus;
+    uint32_t seam_rest;
+    uint32_t seam_hover;
+    uint32_t success;
+    uint32_t danger;
 } SeyalAppTheme;
 
 /*
@@ -448,9 +486,18 @@ typedef struct SeyalAppBlockSpan {
 } SeyalAppBlockSpan;
 
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
+uint32_t seyal_app_block_action_count(uint64_t handle, uint32_t block_index);
+SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, uint32_t action_index);
+/* Rust-owned Block pasteboard copy (#1010). kind = COPY_OUTPUT or
+ * COPY_COMMAND_AND_OUTPUT. Resolves span/command in Rust; final text arrives
+ * via seyal_bridge_take_block_copy after poll. */
+int32_t seyal_app_request_block_copy(uint64_t handle, uint32_t block_index, uint16_t kind);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
-SeyalAppTheme seyal_app_theme(uint16_t appearance);
+/* appearance: 0 dark / 1 light. accessibility_flags bit0 = reduce_motion,
+ * bit1 = reduce_transparency, bit2 = increase_contrast. Host forwards OS
+ * signals; Rust resolves motion/colors through process UI configuration. */
+SeyalAppTheme seyal_app_theme(uint16_t appearance, uint16_t accessibility_flags);
 
 /*
  * Resolved visual snapshot from Rust cold TOML/theme authority (#993 / ADR-015).
@@ -495,7 +542,6 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
-
 int32_t seyal_app_last_error(uint64_t handle);
 
 #ifdef __cplusplus

@@ -61,10 +61,12 @@ pub enum ColorRole {
     Information,
     AgentActivity,
     RemoteDegraded,
+    /// Focused/selected Block border (Seyal Block Component, #1010).
+    BlockFocus,
 }
 
 impl ColorRole {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Canvas,
         Self::Container,
         Self::UtilityReceded,
@@ -89,6 +91,7 @@ impl ColorRole {
         Self::Information,
         Self::AgentActivity,
         Self::RemoteDegraded,
+        Self::BlockFocus,
     ];
 }
 
@@ -140,6 +143,7 @@ fn dark(role: ColorRole) -> Srgb {
         ColorRole::Information => Srgb::from_u8(94.0, 160.0, 255.0),
         ColorRole::AgentActivity => Srgb::from_u8(132.0, 100.0, 232.0),
         ColorRole::RemoteDegraded => Srgb::from_u8(245.0, 165.0, 36.0),
+        ColorRole::BlockFocus => Srgb::from_u8(59.0, 130.0, 246.0),
     }
 }
 
@@ -169,6 +173,7 @@ fn light(role: ColorRole) -> Srgb {
         ColorRole::Information => Srgb::from_u8(40.0, 110.0, 190.0),
         ColorRole::AgentActivity => Srgb::from_u8(92.0, 70.0, 180.0),
         ColorRole::RemoteDegraded => Srgb::from_u8(180.0, 110.0, 12.0),
+        ColorRole::BlockFocus => Srgb::from_u8(37.0, 99.0, 235.0),
     }
 }
 

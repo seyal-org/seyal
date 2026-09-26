@@ -488,6 +488,8 @@ final class RustDisplayBridge {
   private var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   private var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
+  /// Delivered when Rust finishes a Block pasteboard copy (#1010).
+  var onHistoryCopy: ((UInt64, String) -> Void)?
   private var lastComposerResultRequestID: UInt64 = 0
   private var lastComposerStatusRevision: UInt64 = 0
 
@@ -951,6 +953,15 @@ final class RustDisplayBridge {
     }
   }
 
+  /// Deliver a completed Rust-owned Block pasteboard string, if any.
+  private func publishBlockCopy() {
+    guard isConnected, selectClient() else { return }
+    let copy = seyal_bridge_take_block_copy()
+    guard copy.len > 0, let bytes = copy.utf8 else { return }
+    let text = String(decoding: UnsafeBufferPointer(start: bytes, count: Int(copy.len)), as: UTF8.self)
+    onHistoryCopy?(copy.block_id, text)
+  }
+
   private func publishHistoryRanges() {
     guard isConnected, reconstructionState.canMutate, selectClient() else { return }
     for (requestKey, request) in Array(requestedHistoryRanges) {
@@ -1016,6 +1027,7 @@ final class RustDisplayBridge {
             let nextKey = PaneHistoryRequestKey(paneID: paneID, requestID: nextID)
             requestedHistoryRanges[nextKey] = request
             historyContinuations[nextKey] = (nextStart, merged)
+            continue
           }
         }
       }
@@ -1298,6 +1310,7 @@ final class RustDisplayBridge {
       let result = seyal_bridge_poll()
       runtimeBlockMetadata = currentBlockMetadata()
       publishHistoryRanges()
+      publishBlockCopy()
       publishComposerResult()
       publishComposerStatus()
       if let text = copiedText() {

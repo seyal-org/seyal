@@ -153,6 +153,67 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
     .unwrap_or_else(SeyalHistorySidecar::empty)
 }
 
+/// Plain UTF-8 text of a held history response for Block Copy (#1010). The
+/// pointer stays valid until the next call or disconnect; the host copies it
+/// to the pasteboard before returning to the run loop. `len == 0` when the
+/// response is not held or has no text.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_history_range_text_for(
+    block_id: u64,
+    request_id: u64,
+) -> SeyalHistorySidecar {
+    with_active_client_mut(
+        |client| match client.history_range_text(block_id, request_id) {
+            Some(text) => SeyalHistorySidecar {
+                bytes: text.as_ptr(),
+                len: text.len() as u32,
+                reserved: 0,
+            },
+            None => SeyalHistorySidecar::empty(),
+        },
+    )
+    .unwrap_or_else(SeyalHistorySidecar::empty)
+}
+
+/// Completed Rust-owned Block pasteboard text (#1010). The host copies the
+/// UTF-8 synchronously; `block_id` names the Block that was copied.
+#[repr(C)]
+pub struct SeyalBlockCopy {
+    pub block_id: u64,
+    pub utf8: *const u8,
+    pub len: u32,
+    pub reserved: u32,
+}
+
+impl SeyalBlockCopy {
+    const fn empty() -> Self {
+        Self {
+            block_id: 0,
+            utf8: core::ptr::null(),
+            len: 0,
+            reserved: 0,
+        }
+    }
+}
+
+/// Take one completed Block pasteboard string. Empty when none is ready.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_take_block_copy() -> SeyalBlockCopy {
+    with_active_client_mut(|client| match client.take_block_copy() {
+        Some((block_id, text)) => {
+            client.history_copy_text = text;
+            SeyalBlockCopy {
+                block_id,
+                utf8: client.history_copy_text.as_ptr(),
+                len: client.history_copy_text.len() as u32,
+                reserved: 0,
+            }
+        }
+        None => SeyalBlockCopy::empty(),
+    })
+    .unwrap_or_else(SeyalBlockCopy::empty)
+}
+
 /// Consumes a previously peeked response after its rows have been copied by
 /// the native consumer. Identity is always the typed block/request pair.
 #[unsafe(no_mangle)]

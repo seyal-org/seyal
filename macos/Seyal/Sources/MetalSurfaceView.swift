@@ -360,6 +360,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
       }
+      bridge.onHistoryCopy = { [weak self] blockID, text in
+        self?.onHistoryCopy?(blockID, text)
+      }
       self.bridge = bridge
       // A production surface must not perform a synchronous pre-attempt on the
       // AppKit thread. Visibility starts the one authoritative recovery episode
@@ -429,6 +432,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var onFrameChanged: ((NativePreparedFrame) -> Void)?
   var onTimelineChanged: (() -> Void)?
   var onHistoryRangeChanged: ((NativeHistoryRange) -> Void)?
+  var onHistoryCopy: ((UInt64, String) -> Void)?
   var onComposerResultChanged: ((NativeComposerResult) -> Void)?
   var onComposerStatusChanged: ((NativeComposerStatus) -> Void)?
 

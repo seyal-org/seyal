@@ -295,6 +295,18 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         }
     }
 
+    /// Block Rerun (#1010): Rust has already loaded the Block's command as the
+    /// draft. Mirror that Rust draft and submit it through the ordinary path.
+    func submitRustDraft() {
+        let composer = seyal_app_composer(appHandle)
+        guard composer.draft_utf8_len > 0, let bytes = composer.draft_utf8 else { return }
+        textView.string = String(
+            decoding: UnsafeBufferPointer(start: bytes, count: Int(composer.draft_utf8_len)),
+            as: UTF8.self
+        )
+        submit()
+    }
+
     private func submit() {
         pushDraft()
         let composer = seyal_app_composer(appHandle)

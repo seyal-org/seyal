@@ -1,4 +1,5 @@
 mod attach;
+mod block_copy;
 mod discovery;
 mod display_apply;
 mod input_resize;
@@ -23,6 +24,7 @@ use seyal_runtime::{
 };
 
 use crate::block_cache::{quarantine_epoch, BlockApply, BlockCache};
+use block_copy::PendingBlockCopy;
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{
@@ -128,6 +130,15 @@ pub struct LocalDisplayClient {
     pub(crate) history_requests: HashMap<u64, (u64, u64, u64)>,
     pub(crate) next_history_request_id: u64,
     pub(crate) copied_text: Vec<u8>,
+    /// Last Block-copy text built from a held history range (#1010). Borrowed
+    /// by the host until the next build; never rendered.
+    pub(crate) history_copy_text: String,
+    /// In-flight Block pasteboard copy (#1010). Range, kind, command and
+    /// multi-chunk accumulation stay in Rust; the host only writes the final
+    /// string to the pasteboard (ADR-015).
+    pub(crate) pending_block_copy: Option<PendingBlockCopy>,
+    /// Completed Block copy awaiting host pasteboard write.
+    pub(crate) completed_block_copy: Option<(u64, String)>,
     /// Connection-local SPEC-006 §21.5 sent/highest-error bounds. Zero means none.
     /// `last_admitted` is the highest V2 ID accepted into the outbound FIFO.
     /// `last_sent` advances only after that frame is fully written to the socket.
@@ -211,6 +222,14 @@ impl LocalDisplayClient {
         request_id: u64,
     ) -> Option<&HistoryRangeSnapshot> {
         self.history_ranges.get(&(block_id, request_id))
+    }
+
+    /// Builds the pasteboard text for one held history response (#1010 Block
+    /// Copy). `None` when the response is not held.
+    pub fn history_range_text(&mut self, block_id: u64, request_id: u64) -> Option<&str> {
+        let range = self.history_ranges.get(&(block_id, request_id))?;
+        self.history_copy_text = crate::history_text::plain_text(range);
+        Some(&self.history_copy_text)
     }
 
     /// Drops one copied history response after the native consumer has
@@ -499,6 +518,9 @@ impl LocalDisplayClient {
         }
 
         self.compact_buffer();
+        // Block-copy replies may arrive without a display commit; always try
+        // to drain a pending pasteboard accumulation after the read turn.
+        self.advance_block_copy()?;
         if !committed_any && !metadata_changed {
             return Ok(None);
         }
@@ -567,7 +589,7 @@ mod tests {
     use seyal_runtime::pass8::CAP_BLOCK_METADATA;
     use std::io::{Read, Write};
 
-    fn test_client(stream: UnixStream) -> LocalDisplayClient {
+    pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         LocalDisplayClient {
             stream,
             buffered: Vec::new(),
@@ -617,6 +639,9 @@ mod tests {
             history_requests: HashMap::new(),
             next_history_request_id: 1,
             copied_text: Vec::new(),
+            history_copy_text: String::new(),
+            pending_block_copy: None,
+            completed_block_copy: None,
             last_admitted_v2_action_id: 0,
             last_sent_v2_action_id: 0,
             highest_v2_error_id: 0,
