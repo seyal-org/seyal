@@ -58,11 +58,9 @@ extension ProductChromeHostView {
             }
             let launched = pane.inputSurface.bridge?.launchBundledRuntime() ?? false
             ackRecovery()
-            let helperMissing =
-                !launched
-                && (pane.inputSurface.bridge?.lastLaunchError == .helperMissing
-                    || BundledRuntimeLauncher.consumeLastLaunchError() == .helperMissing)
-            if helperMissing {
+            // Any failed launch (missing, untrusted, denied, spawn failure)
+            // blocks the episode; retrying cannot produce a Runtime.
+            if !launched {
                 completeRecovery(
                     generation: generation,
                     outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING,
