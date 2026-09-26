@@ -38,6 +38,7 @@ case "$cmd" in
     bash scripts/test-tooling.sh
     python3 scripts/test-workspace.py
     python3 scripts/test-harnesses.py
+    python3 scripts/test-m003-presentation-fixtures.py
     python3 scripts/fuzz-smoke.py
     bash scripts/check-toolchain.sh
     cargo_pinned test --workspace --locked
@@ -65,11 +66,16 @@ case "$cmd" in
     python3 scripts/check-ui-test-policy.py
     python3 scripts/check-host-product-fixtures.py
     python3 scripts/check-thin-swift-boundary.py
+    python3 scripts/check-structural-debt.py
+    python3 scripts/check-structural-debt.py --self-test
     bash scripts/test-tooling.sh
     python3 scripts/test-workspace.py
     python3 scripts/test-harnesses.py
+    python3 scripts/test-m003-presentation-fixtures.py
     python3 scripts/fuzz-smoke.py
     python3 scripts/test-ci-validators.py
+    python3 scripts/test-m002-app-identity.py
+    python3 scripts/test-m002-controlled-mode.py
     cargo_pinned fmt --all -- --check
     cargo_pinned clippy --workspace --all-targets --all-features -- -D warnings
     cargo_pinned test --workspace --locked

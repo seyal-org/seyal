@@ -1,0 +1,472 @@
+# SPEC-020 — M005 deterministic routing and fallback
+
+- **Status:** Accepted on merge
+- **Issue:** #838
+- **Research:** #55
+- **Architecture:** ADR-016
+- **Consumes:** SPEC-017, SPEC-018, SPEC-019, SPEC-021, SPEC-013–015
+- **Consumer:** #681
+
+## 1. Goal
+
+For identical immutable routing inputs and router version, produce the same eligibility result, score/order, selected RouteOffering and explanation.
+
+The router selects the best valid route for the current task and constraints, not a universal best model.
+
+**V1 is a deterministic policy/enforcement and calibration baseline, not Seyal's permanent ranking strategy.**
+
+The architectural invariant is:
+
+```text
+hard policy / security / capability constraints
+        ↓
+eligible RouteOfferings
+        ↓
+replaceable ranking strategy
+        ↓
+RoutingDecision
+        ↓
+deterministic dispatch/fallback enforcement
+```
+
+V1 uses transparent deterministic scoring so Seyal can collect trustworthy outcome, cost, latency and retry evidence before introducing learned ranking. Future learned estimators or ranking policies may replace the soft-ranking stage without replacing hard constraints, provenance, explanation, immutable RoutingDecision history or failure/effect safety.
+
+## 2. Routing input snapshot
+
+A decision freezes:
+- RouteRequest;
+- deterministic TaskProfile;
+- effective hard constraints;
+- routing policy/profile version;
+- CapabilitySnapshot/RouteOffering generations;
+- ConnectionStatus snapshot;
+- evidence snapshot;
+- pricing snapshot;
+- health snapshot;
+- context/request-shape estimate.
+
+Historical evidence or provider state changing later never rewrites the decision.
+
+## 3. TaskProfile
+
+V1 is deterministic and multi-label.
+
+It captures:
+- software-engineering task classes;
+- required/preferred capabilities;
+- context requirement;
+- mutation scope;
+- risk and urgency classes;
+- expected tool classes;
+- language/platform/resource hints;
+- evidence refs.
+
+Task classes include architecture/design, implementation/refactor, debugging, testing/QA, review, security, performance/reliability, database/data migration, CI/CD/release, IaC/cloud/Kubernetes/container work, observability/incidents, docs/specification, SCM and governance/policy.
+
+### 3.1 Pre-routing requirement assessment
+
+A short prompt is not itself sufficient evidence that a task is simple or text-only. Before route eligibility/scoring, the Agent Backend performs a bounded requirement assessment over the authorized current work scope.
+
+The assessment preserves:
+- original user intent/ref;
+- explicit attachment, terminal selection, artifact and resource bindings;
+- repository/worktree identity and relevant source state;
+- current diagnostic/test/build/log/CI evidence when applicable;
+- original image/screenshot/media evidence and permitted derivatives when applicable;
+- evidence refs and source/policy generations;
+- required/preferred capabilities and context fidelity;
+- uncertainty and missing-required-context state;
+- assessment/compiler version.
+
+The Local Context Engine / SoftwareEngineeringGraphSource may be queried only within the already-authorized scope and with bounded traversal/retrieval. Repository text, logs, screenshots, OCR and other derived content remain evidence, not instruction authority.
+
+Deterministic/local extraction is the V1 default. Any optional model-assisted classification/enrichment is itself a policy-governed billable operation: its route, egress, privacy, capability and budget constraints are checked before that call and its output remains derived evidence rather than authority.
+
+If material evidence required to establish capabilities/context fidelity is missing or ambiguous, the router must not silently classify the task as ordinary text-only work. It must choose one of:
+- bounded authorized discovery/retrieval;
+- explicit clarification/attention when the user must decide;
+- a conservative route only when that route satisfies every known hard requirement, can deliver all bound raw evidence, and the unknown does not concern a policy/security/effect requirement;
+- explicit NoRoute/undispatchable state when safe adequacy cannot be established.
+
+A material evidence-generation change creates a new versioned assessment and, when routing changes, a new immutable RoutingDecision. Historical assessment/decision records are never rewritten.
+
+## 4. RouteOffering only
+
+Routing candidates are adapter-advertised compatible RouteOfferings, never arbitrary harness x provider x model combinations.
+
+Offerings record model/provider selection authority and request-assembly authority from SPEC-018.
+
+## 5. Hard constraints
+
+Hard constraints are binary and never weighted:
+- security/policy;
+- provider/harness/model pin/allow/deny;
+- execution target;
+- region/residency;
+- network egress;
+- filesystem/resource scope;
+- required tools/capabilities;
+- permission class;
+- context capacity;
+- hard budget;
+- auth/connection eligibility.
+
+Each security-sensitive property carries an enforcement class. A hard constraint declares the accepted enforcement classes/evidence level for that specific dimension; enforcement classes are not one global strength ordering.
+
+Declared/Observed/Unknown guarantees cannot silently satisfy stronger requirements.
+
+Conflict or inability to prove a required guarantee => explicit NoRoute. If a hard cost/latency bound cannot be conservatively established from current evidence, the route is ineligible unless the policy explicitly defines an allowed unknown/degraded mode.
+
+## 6. Adequacy floors
+
+Policy may define minimum floors for:
+- task quality;
+- reliability;
+- context fit;
+- tooling fit.
+
+Floors are versioned policy/calibration. Missing evidence satisfies a floor only when policy explicitly allows a conservative prior.
+
+## 7. Soft factors
+
+V1 weighted factors:
+
+```text
+Q task quality/effectiveness
+C context fit
+T tooling/harness fit
+R technical reliability
+K expected-total-cost desirability
+L latency desirability
+P locality/preference desirability
+```
+
+All are normalized to [0,1], where 1 is better.
+
+Retry risk is not a separate weighted factor; it remains explicit evidence and contributes to expected cost/fallback planning.
+
+## 8. Evidence and confidence
+
+Evidence remains separated by subject:
+- model quality;
+- harness/tool execution quality;
+- provider reliability/latency/cost;
+- complete-route outcome;
+- local runtime/environment behavior.
+
+Task cohorts include task class, language/platform, context bucket, tool needs, risk class where relevant.
+
+Model self-report is never quality evidence.
+
+For acceptance-like evidence, a transparent prior/posterior estimate may use a Beta-style prior:
+
+```text
+posterior = (successes + alpha) / (samples + alpha + beta)
+```
+
+alpha/beta are versioned policy, not hidden constants.
+
+Confidence is explicit and may use:
+
+```text
+sample_confidence = n / (n + k)
+
+confidence =
+  sample_confidence
+  * cohort_similarity
+  * evidence_freshness
+  * provenance_quality
+```
+
+Observed estimates shrink toward a versioned prior:
+
+```text
+adjusted = confidence * observed + (1-confidence) * prior
+```
+
+Unknown evidence is low confidence, not zero.
+
+## 9. Policy-anchored normalization
+
+Cost/latency desirability must not depend on what unrelated candidates are present.
+
+Cost policy defines:
+- preferred cost;
+- soft limit;
+- hard cap;
+- curve version.
+
+Behavior:
+- <= preferred -> desirability 1;
+- preferred..soft -> monotonic decay;
+- soft..hard -> stronger decay;
+- > hard cap -> ineligible.
+
+Latency uses task/profile-specific policy bands with the same principle.
+
+Candidate-relative min/max normalization is forbidden for winner selection.
+
+## 10. Expected total cost
+
+Optimize expected cost to an acceptable outcome, not first-call price.
+
+Use the bounded allowed fallback chain:
+
+```text
+E(route_i) =
+  DirectExpectedCost(route_i)
+  + sum over fallback-causing failure classes f [
+      P(f | route_i) * E(next_allowed_route(route_i, f))
+    ]
+```
+
+The recursion is bounded by explicit retry/fallback budget and typed failure transitions. Failure classes with no allowed next route are terminal branches and remain explicit rather than being treated as successful or free.
+
+Unknown failure/acceptance probability uses conservative prior/confidence handling.
+
+### 10.1 Cumulative hard budget and deadline
+
+Expected cost is a ranking input, not a spending ceiling.
+
+When policy declares a hard routed-work cap, the Agent Backend owns a durable budget scope, normally bound to the WorkItem unless policy explicitly defines a narrower scope. A new Attempt, RoutingDecision, fallback or backend restart does not replenish that scope.
+
+Before every billable assessment/enrichment, model/provider invocation, billable tool/harness operation, evaluation invocation or retry/fallback admission:
+
+```text
+settled spend
++ outstanding conservative reservations
++ conservative upper bound for the proposed invocation
+<= hard cap
+```
+
+Admission/reservation is atomic across concurrent consumers of the same budget scope. Unknown/unsettled provider charges retain a conservative reservation until reconciled; they are never treated as zero. A route without an enforceable conservative per-invocation upper bound is ineligible when the hard cap requires one.
+
+If policy promises a hard end-to-end deadline, the same scope carries a shared monotonic deadline. Retries, enrichment and fallback consume the remaining deadline; a new decision/Attempt does not reset it.
+
+Expected fallback-chain cost remains useful for ranking but cannot authorize spending beyond the durable hard scope.
+
+## 11. Policy profiles
+
+Profiles adjust soft weights only; hard constraints/floors never change.
+
+Supported baseline profiles:
+- Balanced;
+- QualityFirst;
+- CostAware;
+- LatencySensitive;
+- LocalFirst.
+
+Exact default weights live in versioned calibration evidence/config and must sum to 1 over Q/C/T/R/K/L/P.
+
+Automatic profile selection is deterministic and explainable. Explicit policy/user profile may override it.
+
+## 12. Final score
+
+```text
+S(r) =
+  wQ*Q_adj + wC*C_adj + wT*T_adj + wR*R_adj
+  + wK*K_adj + wL*L_adj + wP*P_adj
+```
+
+Do not multiply again by an overall confidence score; factor-level shrinkage already accounts for uncertainty.
+
+## 13. Tie-break
+
+Within versioned epsilon:
+1. explicit policy/user preference rank;
+2. higher minimum factor confidence;
+3. higher quality confidence;
+4. lower expected total cost;
+5. lower expected latency;
+6. stronger current health/reliability;
+7. stable RouteOfferingId order.
+
+No randomness outside explicit recorded experiment mode.
+
+## 14. Request-shape validation
+
+Routing initially uses an estimated request shape.
+
+After selection, SPEC-018 exact compile/delivery validation may return typed incompatibility such as RequestTooLarge or UnsupportedModality.
+
+Policy may rebuild context or produce one new immutable RoutingDecision within a bounded budget. No unbounded route/compile loop.
+
+## 15. Failure-class fallback
+
+Classify first:
+- TransientTransport;
+- RateLimited;
+- ProviderUnavailable;
+- AuthenticationRequired;
+- ContextTooLarge;
+- CapabilityMismatch;
+- PolicyChanged;
+- PermissionDenied;
+- EvaluationRejected;
+- ExternalEffectUnknown;
+- UnknownFailure.
+
+Rules:
+- transient transport may use bounded same-invocation retry;
+- availability/rate-limit may choose another eligible route;
+- auth requires reauth or another authorized connection;
+- context overflow rebuilds/reduces context or chooses a compatible larger route;
+- capability mismatch invalidates stale capability evidence;
+- policy/permission never silently relaxes;
+- EvaluationRejected creates a new Attempt + RoutingDecision when budget/policy allows;
+- ExternalEffectUnknown requires reconciliation, never another agent replay;
+- unknown failure is conservative and non-blind.
+
+Every material reroute creates a new immutable RoutingDecision.
+
+## 16. Cold start and evidence aging
+
+With no local evidence, routing uses a versioned **BaselineCalibrationArtifact** rather than unsupported quality constants.
+
+The artifact is:
+- integrity-verified and versioned;
+- distributable with the OSS router for offline use;
+- derived only from rights-cleared, reproducible evaluation evidence;
+- explicit about task/route cohorts, model/provider/harness versions, context/request-compiler versions, sample counts, uncertainty, coverage and known exclusions;
+- explicit Unknown for unsupported cohorts rather than inventing quality.
+
+A clean installation and an installation with local routing learning disabled use the same qualified baseline for equal frozen inputs. No private user/project upload or mandatory global learning service is required for V1.
+
+Capability metadata and static provider/model metadata may establish eligibility facts, but they are not substitutes for task-quality evidence. Held-out cold-start evaluation must include short context-dependent tasks and multimodal/visual tasks where those cohorts are claimed.
+
+Permitted local adaptation is calibration against this baseline, not an unqualified replacement for it. Local evidence must pass applicability/freshness/confidence checks; sparse or incompatible evidence shrinks toward the baseline. A local learned/calibrated artifact that demonstrates regression against its qualified validation criteria is rolled back/disabled for that cohort.
+
+Evidence is partitioned/aged after model/harness/provider/context-pipeline/version or environment changes. Incompatible generations are not silently mixed.
+
+## 17. Explainability
+
+For every candidate record:
+- eligibility/exclusion reasons;
+- raw factor;
+- evidence source/cohort;
+- sample count;
+- confidence;
+- prior;
+- adjusted factor;
+- weight;
+- weighted contribution;
+- enforcement source for hard guarantees;
+- allowed fallback.
+
+"Why this model/route?" is rendered from this backend record.
+
+## 18. Required fixtures
+
+1. high-quality route excluded by privacy;
+2. cheap route loses due expected fallback cost;
+3. low-sample high score shrinks below mature route;
+4. profiles choose differently while preserving hard policy;
+5. quality floor removes weak route;
+6. unknown cost is not zero;
+7. cold start deterministic;
+8. model version prevents incompatible evidence reuse;
+9. irrelevant candidate cannot change A-vs-B ranking through normalization;
+10. exact-score tie follows stable order;
+11. rate limit reroutes;
+12. policy denial never relaxes;
+13. EvaluationRejected creates new Attempt when allowed;
+14. EffectUnknown never duplicates external mutation;
+15. no-network hard policy rejects unenforced harness;
+16. same frozen fixture reproduces the same canonical decision fields;
+17. identical short prompts bound to a compiler diagnostic, deployment log and layout screenshot produce different evidence-backed requirements;
+18. missing required evidence cannot silently produce a normal text-only dispatch;
+19. a 6-unit attempt plus proposed 6-unit fallback under a 10-unit hard cap blocks the fallback, including under concurrent reservations;
+20. clean install and local-learning-disabled install use the same integrity-verified qualified baseline for equal inputs.
+
+## 19. Routing-strategy evolution
+
+The weighted V1 scorer is intentionally replaceable.
+
+Recommended evolution:
+
+```text
+V1
+deterministic rules + evidence/confidence scoring
+        ↓
+collect trustworthy task/route/outcome/cost/latency/retry evidence
+
+V2
+learned quality / retry / cost / latency estimators
+inside the deterministic policy envelope
+        ↓
+
+V3
+contextual bandit or learning-to-rank
+over already-eligible RouteOfferings
+        ↓
+
+future
+user/org-adaptive ranking where policy allows
+```
+
+The following remain deterministic authority across all phases:
+- policy/security precedence;
+- allow/deny/pin constraints;
+- residency/egress/permission enforcement requirements;
+- capability/context hard requirements;
+- hard budget ceilings;
+- immutable RoutingDecision provenance;
+- dispatch-time revalidation;
+- typed failure/effect handling;
+- no-blind-retry guarantees.
+
+### 19.1 Learned estimators
+
+A learned/fast decision model may estimate:
+- task class/complexity;
+- task-quality probability;
+- retry/fallback probability;
+- cost/latency priors;
+- ranking residuals.
+
+Its output is provenance-bound evidence with model/version/confidence. It cannot self-authorize a route.
+
+### 19.2 Contextual bandit / learning-to-rank
+
+A future bandit/ranker may choose among the already-valid candidate set using observed outcomes such as:
+- accepted result;
+- first-attempt acceptance;
+- total cost;
+- latency;
+- retry/fallback behavior.
+
+Exploration is explicit experiment mode only, bounded by policy, and recorded in RoutingDecision. Security/privacy constraints are never exploration dimensions.
+
+### 19.3 Jev-like decision models
+
+A Jev-like fast decision model is a possible implementation of the learned-estimator/ranker stage, not a special architectural dependency.
+
+Adoption requires benchmark evidence showing materially better accepted-outcome/cost/latency performance after including the router model's own inference and operational cost.
+
+It never bypasses hard constraints/floors, policy precedence, enforcement requirements or deterministic fallback, and its version/confidence/provenance must be visible.
+
+### 19.4 Compatibility requirement
+
+Changing ranking strategy must not require changing:
+- RouteRequest;
+- RouteOffering capability/enforcement contracts;
+- Evaluation/Outcome evidence authority;
+- RoutingDecision provenance/explanation contract;
+- failure-class fallback semantics.
+
+This keeps V1 data useful for later learned routing instead of making the deterministic implementation a dead end.
+
+## 20. Calibration gate
+
+Before production, calibrate profiles against a frozen corpus using:
+- acceptance rate;
+- first-attempt acceptance;
+- attempts per accepted WorkItem;
+- total AI cost per accepted WorkItem;
+- elapsed time;
+- fallback/retry rate;
+- no-route correctness;
+- confidence calibration;
+- explanation stability.
+
+Do not hand-tune weights to selected examples.

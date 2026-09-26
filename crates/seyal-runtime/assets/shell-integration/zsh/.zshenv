@@ -12,7 +12,10 @@
 typeset -g _seyal_nonce=
 if [[ -n "${SEYAL_NONCE_FD-}" && "${SEYAL_NONCE_FD}" == <-> ]]; then
   IFS= builtin read -r _seyal_nonce <&"${SEYAL_NONCE_FD}" 2>/dev/null
-  builtin exec {SEYAL_NONCE_FD}<&- 2>/dev/null
+  # Silence only the close. A bare `exec` makes its redirections permanent,
+  # so `2>/dev/null` on the exec itself would discard the shell's stderr
+  # for its whole lifetime (#1046).
+  { builtin exec {SEYAL_NONCE_FD}<&- } 2>/dev/null
 fi
 builtin unset SEYAL_NONCE_FD
 if [[ ${#_seyal_nonce} -ne 32 || "${_seyal_nonce}" == *[^0-9a-f]* ]]; then

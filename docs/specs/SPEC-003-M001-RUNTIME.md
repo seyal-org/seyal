@@ -2,8 +2,9 @@
 
 - **Status:** Active; hardened by #80 and constrained for workspace/continuity by #82 when ADR-007 is accepted
 - **Date:** 2026-08-24
-- **Issues:** #70, #80, #82
+- **Issues:** #70, #80, #82; #994 proposes §4.1 and §5.2
 - **Architecture:** Foundation Architecture + ADR-005 + ADR-006 + ADR-007
+- **Proposed M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative only on ADR-017 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -65,6 +66,36 @@ Pass 4 must demonstrate:
 
 M001 does not claim that a Runtime crash preserves arbitrary live PTYs.
 
+### 4.1 Runtime process lifetime versus live-execution count
+
+- **Status:** proposed amendment; **normative only on ADR-017 acceptance** (Issue #994, ADR-017).
+
+Runtime process lifetime is independent of the live-execution count. **Zero live
+executions is a valid steady state**: the Runtime keeps its singleton endpoint,
+its `RuntimeId` and its idle reactor wait. It must not exit merely because the
+last live execution finalized.
+
+**Who may end the Runtime process on the production path:**
+
+- an OS signal that the process is required to honor;
+- an explicit controlled shutdown under §16, invoked only by a future
+  authenticated same-UID control path that this amendment does **not** invent.
+  Until that control path is accepted (tracked as a follow-on under #674 / M004
+  market-ready Runtime lifecycle, not by #994 children P1–M1), the production
+  client-launched Runtime is **resident for the local user scope** after first
+  launch: headed GUI quit (ADR-018 / #1000) never terminates the Runtime and
+  never invokes §16.
+
+Idle CPU and wake behavior at zero live executions must match the existing idle
+requirements in §18; an idle Runtime must not poll.
+
+On the production client-launched path the Runtime is started with an empty
+argument list (SPEC-009 §8.1.1) and must therefore create **no** execution from
+its own startup: provisioning intent has exactly one owner, and a startup-created
+execution would compete with it. A Runtime started explicitly with a command by a
+developer or a test harness may still create that execution as its own
+composition, which is not a second product authority.
+
 ## 5. Execution registry
 
 The Runtime provides an internal typed API sufficient to exercise these operations before Pass 5 transport exists:
@@ -94,6 +125,51 @@ The association must be independently queryable/changeable by future workspace-d
 Closing/hiding presentation or detaching the last client does not remove the Workspace association and does not terminate a live primary execution.
 
 Pass 4 does not implement named Workspace CRUD, Workspace deletion, layout persistence or a production Workspace database.
+
+### 5.2 M003 client-requested provisioning and disposition
+
+- **Status:** proposed amendment; **normative only on ADR-017 acceptance**.
+- **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994. Wire contract is SPEC-004 §18.
+
+An authenticated same-UID local client may request execution creation and, as
+Controller, request explicit termination. This adds callers, not a second
+creation path:
+
+1. client-requested provisioning uses the same §7 create transaction, so
+   capacity validation, `TERM`/terminfo selection, shell-integration injection,
+   immediate-exit reconciliation, publication and rollback are identical for
+   every execution;
+2. the request supplies only a launch-profile selector, the owning `WorkspaceId`,
+   a connection-local request identity and the initial `WindowSize`. Program,
+   argv, environment, working directory and capability profile remain
+   Runtime-owned;
+3. `TabId`/`PaneId` are never received, stored or resolvable. §2 invariant 10
+   remains absolute;
+4. provisioning and disposition are bounded control work on the reactor owner
+   under §9. At most one execution is created per dispatch turn, and outstanding
+   requests are bounded before any spawn work begins;
+5. explicit termination drives the existing §11 state machine with the Runtime's
+   own configured `TerminationPolicy`. The client supplies no grace or kill
+   duration and cannot wait for completion; §10 finalization and lifecycle
+   notification are unchanged;
+6. closing or losing presentation remains logical detach under §6. An execution
+   whose last client reference disappears stays live and enumerable; Runtime adds
+   no hidden claim deadline, lifetime timer or auto-termination.
+
+Additional required tests for the owning implementation child:
+
+- N concurrent provisioning requests create N distinct `ExecutionId`s with no
+  shared or reused identity;
+- a provisioning failure at any stage leaves no published execution, no
+  registration, no descriptor, no child and no Workspace association;
+- a client that disconnects after sending a request cannot leave a half-created
+  execution, and a completed one remains live and enumerable;
+- one spawn per dispatch turn holds under a burst while another execution keeps
+  producing output, with read/write fairness evidence;
+- persistent injected spawn failure is bounded, produces one result per request
+  and does not stall unrelated PTY progress;
+- explicit termination after primary reap sends no signal and finalizes exactly
+  once.
 
 ## 6. Logical attachment semantics
 

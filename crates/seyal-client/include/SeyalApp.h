@@ -46,6 +46,20 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS_PANE = 21,
     SEYAL_APP_ACTION_SET_SHELL_CHROME = 22,
     /*
+     * Workspace/Tab/Pane composition mutations (#922). CREATE_TAB/CLOSE_TAB/
+     * SPLIT_FOCUSED/CLOSE_PANE route through the same Rust ShellState as
+     * SELECT_WORKSPACE/SELECT_TAB/FOCUS_PANE; they fail closed (do not
+     * mutate) rather than silently no-op. CLOSE_TAB/CLOSE_PANE:
+     * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
+     * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
+     * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
+     * 32 = CannotCloseLastPane.
+     */
+    SEYAL_APP_ACTION_CREATE_TAB = 23,
+    SEYAL_APP_ACTION_CLOSE_TAB = 24,
+    SEYAL_APP_ACTION_SPLIT_FOCUSED = 25,
+    SEYAL_APP_ACTION_CLOSE_PANE = 26,
+    /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
      * MOVE_COMPOSER_HISTORY_SELECTION: reserved = signed row delta (int32).
@@ -311,7 +325,11 @@ typedef struct SeyalAppChrome {
     uint32_t agent_count;
     uint32_t attention_count;
     uint32_t inspector_row_count;
-    /* SEYAL_APP_CHROME_* visibility bits. Zero is M001 first-UI receded chrome. */
+    /*
+     * SEYAL_APP_CHROME_* visibility bits. All three bits set (left, inspector,
+     * tab strip visible) is the Core Terminal default; SET_SHELL_CHROME may
+     * still recede any of them.
+     */
     uint32_t reserved;
 } SeyalAppChrome;
 
@@ -334,6 +352,22 @@ typedef struct SeyalAppTheme {
     uint16_t appearance;
     uint16_t reserved;
 } SeyalAppTheme;
+
+/*
+ * SeyalAppShell.flags: whether CREATE_TAB/SPLIT_FOCUSED would currently be
+ * accepted. Hosts must omit the "+"/split control when the bit is unset
+ * rather than show one that always fails closed (mirrors the command
+ * palette's own omission of "New Tab"/"Split"; see build_commands).
+ */
+#define SEYAL_APP_SHELL_ALLOWS_TAB_CREATION 1u
+#define SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING 2u
+/*
+ * Whether CLOSE_TAB of the active Tab / CLOSE_PANE of the focused Pane would
+ * currently be accepted (Rust rejects closing the last Tab/Pane). Hosts omit
+ * the close control when the bit is unset instead of re-deriving the rule.
+ */
+#define SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE 4u
+#define SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE 8u
 
 typedef struct SeyalAppShell {
     uint16_t version;

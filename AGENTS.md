@@ -51,11 +51,12 @@ An Issue or PR cannot override architecture/specification. Existing code is neve
 - For handwritten production code, roughly 500–700 lines in one file is a **cohesion review trigger**, not a hard limit. Review whether responsibilities should be separated.
 - Handwritten production files above 1,000 lines require explicit PR justification and should normally be decomposed before merge.
 - Generated tables/data, Unicode data, protocol fixtures, exhaustive conformance vectors, and comparable machine-oriented artifacts are exempt from the line-count guidance.
-- Split by responsibility and stable boundaries, never into arbitrary numbered files such as `part1`, `part2`, or equivalent.
+- Split by responsibility and stable boundaries, never into arbitrary numbered files such as `part1`, `part2`, or equivalent. Numbered siblings (`foo_1.rs` / `foo_2.rs`) and `partN/` directories are likewise review-rejected even when the automated detector does not match.
 - Avoid god objects/types that own unrelated terminal, runtime, renderer, persistence, agent, or UI concerns.
 - Prefer composition and narrow interfaces. Avoid factories, service layers, dependency-injection frameworks, or other indirection unless they materially improve the design.
 - Structural refactoring must not add synchronous IPC, serialization, copies, allocations, locks, thread/process hops, or language round-trips to terminal hot paths merely to satisfy code organization rules.
 - These rules apply to Rust and native macOS Swift/Metal code equally.
+- `scripts/check-structural-debt.py` (via `make check` / Foundation Quality) continuously enforces the ratchet against `docs/engineering/structural-debt-baseline.toml`: new >1,000 LOC handwritten production files fail; grandfathered and `[[exception]]` debt cannot grow silently and must ratchet ceilings down on reduction; changed 700–1,000 LOC files need a `[[cohesion_acknowledgement]]` with an `acknowledged_loc` bound. Before finalizing a PR, inspect structural impact; do not grow grandfathered modules by convenience; prefer responsibility-based extraction with narrow interfaces; do not create new crates or add hot-path indirection/allocations solely to satisfy the LOC gate.
 
 ## Implementation pickup
 
@@ -65,16 +66,19 @@ Seyal uses an exclusive active-work claim:
 
 ```text
 fresh Ready Issue
-→ authenticated GitHub login
-→ exactly one assignee (current implementer)
+→ authenticated **human** GitHub owner
+→ exactly one human owner (sole assignee when assignable; otherwise maintainer-acknowledged `Owner: @login` claim)
 → confirmed implementation plan
-→ deterministic remote branch issue/<number>
+→ deterministic remote branch <human-login>/issue/<number>
+→ coding agent may act only as delegated tool/co-author
 → isolated worktree
 → production edits
-→ one scoped PR
+→ one scoped PR owned by the human
 ```
 
-If the Issue is assigned to another GitHub login, has multiple assignees, the authenticated implementer identity cannot be established, or `issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Project status fields are lifecycle metadata, not an ownership lock.
+If another human already owns the Issue, assignment/owner-claim records conflict, the human owner identity cannot be established, or `<human-login>/issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They may be credited as co-authors/tooling provenance, but must not replace the human owner record, branch owner, PR owner, durable handoff identity, or independent reviewer. Project status fields are lifecycle metadata, not an ownership lock.
+
+New implementation branches are named `<human-login>/issue/<number>`; agent/vendor namespaces are forbidden. Agent assistance may be credited as tooling provenance or valid co-authorship, but required owner/reviewer records stay human. See `ISSUE-PROTOCOL.md` for external-contributor owner claims, handoff, legacy-branch disposition, and attribution details.
 
 ## Before changing code
 
@@ -85,7 +89,7 @@ If the Issue is assigned to another GitHub login, has multiple assignees, the au
 5. Verify dependencies are complete and ownership/module boundary is explicit.
 6. If architecture is missing or contradictory: **STOP** and use the `architecture-change` skill. Do not invent a workaround. Never amend an ADR inside an implementation PR; ADR create/amendment is always a separate PR.
 7. Confirm the requested work is production implementation rather than a spike/POC. If it is exploratory, isolate it on a non-mergeable path and do not open a mergeable production PR from that code.
-8. Use one Issue → one sole assignee/agent → one isolated worktree → one deterministic `issue/<number>` branch → one PR.
+8. Use one Issue → one sole **human GitHub owner** → one isolated worktree → one deterministic `<human-login>/issue/<number>` branch → one PR. Use the sole assignee when assignable; otherwise use a maintainer-acknowledged human owner claim for external contributors. Coding agents may implement on that human owner's behalf and may be credited as co-authors; they never become the ownership identity.
 9. Core behavior is test-first. Do not weaken tests to make code pass.
 10. Do not refactor unrelated code. Create/link another Issue instead.
 11. If an approved screenshot/mockup is visual authority for native UI, run the `image-to-code` skill before implementation. Complete its forensic design/component inventory and issue plan first; split the work into multiple Issues when the visual spans independently reviewable boundaries.
@@ -139,7 +143,7 @@ make bench
 
 ## Pull requests
 
-Every implementation PR has exactly one **owning Issue**, stays inside that Issue's scope, cites architecture/spec authority, includes required tests and measurable evidence, states security/docs implications, and gives a reproducible verification procedure. CI evidence is required. Core/high-risk changes require independent review; implementers do not self-approve.
+Every implementation PR has exactly one **owning Issue**, stays inside that Issue's scope, cites architecture/spec authority, includes required tests and measurable evidence, states security/docs implications, and gives a reproducible verification procedure. CI evidence is required. Core/high-risk changes require independent review; implementers do not self-approve. Independent review ownership is also human: an agent may assist analysis, but a Cursor/Codex/Claude/Copilot bot identity does not satisfy the required independent human reviewer/owner record.
 
 The PR must state the Issue relationship explicitly. Use `Closes #N`, `Fixes #N`, or `Resolves #N` only when merging that PR will satisfy the owning Issue's acceptance criteria and Definition of Done. Refinement, evidence, prerequisite, partial-implementation, or otherwise incomplete PRs must use a non-closing relationship such as `Refs #N` or `Part of #N`. A PR must never close an Issue merely because it worked on that Issue.
 
