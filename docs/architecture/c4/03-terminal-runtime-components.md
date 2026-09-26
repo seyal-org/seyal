@@ -93,4 +93,10 @@ client display cache/UI      seyal-client
 native AppKit/Metal surface  macOS host
 ```
 
+`DisplayCache` is not a split-brain: `seyal-protocol` defines the type and its
+apply/decode logic (wire/projection schema), while `seyal-client` owns the live
+instance and its lifetime (`crates/seyal-client/src/local.rs`). Runtime encodes
+and publishes Candidate-D frames and may re-export the type; it does not own a
+second cache.
+
 When code appears to need two authoritative owners for one row, stop and resolve the ownership conflict through the accepted architecture/specification process.
