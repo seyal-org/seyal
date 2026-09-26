@@ -40,14 +40,17 @@ The work owner is always a human GitHub contributor.
 
 ## Plan first
 
-Do not create the implementation worktree/branch, generate files, or start production edits until the implementation approach is confirmed in chat. Ready/claimed status is not permission to skip the plan.
+Do not create the implementation worktree/branch, generate files, or start production edits until the implementation approach is confirmed. Ready/claimed status is not permission to skip the plan.
+
+Prefer the AI-SDLC path when durable planning artifacts are in use: run `implementation-planning` to produce a **PROPOSED** plan, then require human/project technical-authority acceptance (`accepted_by` / `accepted_at`) before `development-readiness` / production edits. Chat confirmation alone must not silently substitute for that acceptance evidence on the full loop.
 
 1. Restate the owning Issue, in/out scope, production vs exploratory classification, and the concrete production path you will change.
 2. If the request is ambiguous or the Issue leaves a material choice open, ask before assuming scope. Do not silently pick architecture, file layout, or extra work.
-3. If the work needs more than about three file changes, or any new module/boundary, outline the plan in chat first: files, tests/evidence, and risks. Wait for confirmation before generating files.
-4. After the plan is confirmed, deliver execution-ready implementation. Do not leave scaffolds, placeholder modules, or outline-only trees as the result.
+3. If the work needs more than about three file changes, or any new module/boundary, produce/refresh the proposed plan (via `implementation-planning` or an equivalent durable plan record) and wait for acceptance before generating files.
+4. After the plan is accepted, deliver execution-ready implementation. Do not leave scaffolds, placeholder modules, or outline-only trees as the result.
 5. Flag uncertainty explicitly rather than resolving it silently. If two approaches are viable, state the tradeoff and ask.
 6. When iterating, make targeted corrections to the agreed plan. Do not rewrite the whole change unless the plan itself changed.
+7. If an open PR already exists for this Issue, route by durable candidate stage: incomplete implementation stays here; `IN_REVIEW` remediation uses `address-pr-review`, then `pr-review`.
 
 ## Failure remediation loop
 

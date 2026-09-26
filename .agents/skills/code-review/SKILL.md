@@ -1,23 +1,16 @@
 ---
 name: code-review
-description: Seyal adapter for focused AI-SDLC implementation/diff review with terminal architecture, hot-path, repository, and specialist-risk rules.
+description: Compatibility entry — AI-SDLC no longer ships a separate code-review skill; use Seyal pr-review for implementation + merge-readiness review.
 ---
 
-# Code review
+# Code review (compatibility redirect)
 
-Follow the canonical focused procedure in `.sdlc/framework/skills/code-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
+Pinned AI-SDLC removed the generic `code-review` skill. Implementation-defect review and merge-readiness review are owned by **`pr-review`**.
 
-Use this skill when the requested question is specifically whether an implementation/diff contains defects, regressions, unsafe behavior, architecture drift, weakened tests, or evidence problems. It is not the final merge-readiness gate; use `pr-review` for that.
+For Seyal:
 
-Apply only these Seyal-specific rules on top of the generic procedure:
+1. Use `.agents/skills/pr-review/SKILL.md` for any request to review a PR/diff/merge candidate.
+2. Use `.agents/skills/address-pr-review/SKILL.md` only to remediate an `IN_REVIEW` candidate, then return to `pr-review`.
+3. Do not reintroduce a competing focused review procedure that duplicates `pr-review`.
 
-1. Read the linked owning Issue, `AGENTS.md`, and governing architecture/ADR/spec/milestone sources before accepting implementation rationale.
-2. Enforce the Issue's in/out scope and Seyal's single-authoritative-state rules. Duplicate PTY/VT/grid/runtime authority, temporary production paths, or architecture-by-precedent are blocking. Any ADR create/amend/reopen/supersede in an implementation PR is blocking; ADR changes must land in a separate Architecture/R&D PR first.
-3. Treat new synchronous terminal hot-path dependencies, unnecessary IPC/serialization/allocations/locks/language round trips, or licensing/cloud coupling as architecture/performance risks requiring explicit authority and evidence.
-4. Inspect affected production paths beyond the diff when surrounding lifecycle, concurrency, ownership, failure or backpressure state controls correctness.
-5. Inspect applicable conformance, fuzz/regression, PTY/integration/failure, renderer/native, benchmark, security/privacy and macOS/accessibility tests instead of trusting test names or green CI alone.
-6. Require specialist review only where the Issue/risk classification makes it material; do not duplicate specialist procedures in this adapter.
-7. A clean result maps to generic `APPROVE_FOR_VERIFICATION`. It does not mean the PR is ready to merge and it does not mark the Issue/milestone Done.
-8. Core/high-risk work must retain the independent-review requirement in `docs/engineering/ISSUE-PROTOCOL.md`.
-
-If a reusable review-rule defect is found, fix it in `ai-sdlc` rather than duplicating generic code-review procedure here.
+This file remains only so existing discovery surfaces that still name `code-review` route correctly. Prefer invoking `pr-review` directly.
