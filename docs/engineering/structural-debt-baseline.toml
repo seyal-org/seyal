@@ -5,8 +5,14 @@ hard_loc = 1000
 
 # Grandfathered handwritten production debt at the #1021 freeze tip.
 # Increasing ceiling_loc requires a narrowly scoped [[exception]] tied to an owning Issue.
-# Reducing a file requires lowering ceiling_loc in the same change (ratchet down).
-# Do not add skip=true escapes. Split by responsibility — never part1/part2 fragments.
+# Reducing a grandfathered or [[exception]] file requires lowering ceiling_loc (or
+# removing the entry once <= hard_loc) in the same change — silent headroom is rejected.
+# [[cohesion_acknowledgement]] rows require acknowledged_loc in review_loc..hard_loc;
+# growth past acknowledged_loc needs a fresh re-ack, and an ack is stale below review_loc.
+# Generated/fixture exclusions use directory rules, `_generated`/`_test(s)` suffixes, or
+# path-specific [[excluded]] rows with a reason — never rename to escape the gate.
+# Do not add skip=true escapes. Split by responsibility — never part1/part2 fragments,
+# foo_1/foo_2 siblings, or partN/ directories (review-rejected even when the detector misses).
 
 [[grandfathered]]
 path = "crates/seyal-client/src/app.rs"
