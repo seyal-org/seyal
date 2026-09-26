@@ -574,6 +574,23 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(RustDisplayBridge.pasteAdmissionSelfTest())
     }
 
+    /// E7 / #1020: ComposerRequestCorrelation was a dead Swift product-shaped
+    /// remnant. Composer acceptance stays correlated by the Runtime request ID
+    /// on the Rust side; the thin host must not reintroduce this type.
+    @MainActor
+    func testRustDisplayBridgeDoesNotOwnComposerRequestCorrelation() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let bridge = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
+        let text = (try? String(contentsOf: bridge, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "RustDisplayBridge.swift must be readable from the test bundle")
+        XCTAssertFalse(text.contains("struct ComposerRequestCorrelation"))
+        XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
+    }
+
     @MainActor
     func testXtermButtonMapDropsButtonsBeyondRight() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
