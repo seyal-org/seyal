@@ -149,9 +149,11 @@ final class SeyalHostUITests: XCTestCase {
             probe.exists,
             "headed host must realize Rust cold-config visual snapshot (\(expectedId))"
         )
-        XCTAssertNil(
-            chrome.firstMatch.value as? String,
-            "product chrome must not expose the encoded test probe as its AX value"
+        // AppKit often exposes an empty string rather than nil for unset AX values.
+        let chromeValue = (chrome.firstMatch.value as? String) ?? ""
+        XCTAssertTrue(
+            chromeValue.isEmpty || !chromeValue.contains("seyal-cold-visual-probe"),
+            "product chrome must not expose the encoded test probe as its AX value; got \(chromeValue)"
         )
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.state, .runningForeground)

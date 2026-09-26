@@ -103,40 +103,36 @@ enum NativeThemeRealization {
     static func apply(to view: NSView, material: NSVisualEffectView, appearance: NSAppearance) -> NativeTheme {
         let packed = visual(for: appearance)
         let theme = theme(from: packed)
-        applyMaterial(material, theme: theme, window: view.window)
+        applyMaterial(material, theme: theme)
         view.window?.appearance = theme.appearance
         view.appearance = theme.appearance
         view.wantsLayer = true
-        // Truth/canvas stays opaque; frosted utility lets the material effect show through.
-        if theme.usesFrostedUtilityMaterial {
-            view.window?.isOpaque = false
-            view.window?.backgroundColor = .clear
-            view.layer?.backgroundColor = NSColor.clear.cgColor
-        } else {
-            view.window?.isOpaque = true
-            view.window?.backgroundColor = theme.canvas
-            view.layer?.backgroundColor = theme.canvas.cgColor
-        }
+        // Keep the window opaque with a solid canvas fill. Frosted utility material is
+        // realized on the in-window effect view under clear utility chrome — not by
+        // making the window transparent (which can break headed attach on CI).
+        view.window?.isOpaque = true
+        view.window?.backgroundColor = theme.canvas
+        view.layer?.backgroundColor = theme.canvas.cgColor
         applyColors(in: view, theme: theme)
         return theme
     }
 
     /// Map Rust utility material intent onto the host effect view.
     @MainActor
-    static func applyMaterial(_ material: NSVisualEffectView, theme: NativeTheme, window: NSWindow?) {
-        material.blendingMode = .behindWindow
+    static func applyMaterial(_ material: NSVisualEffectView, theme: NativeTheme) {
         material.state = .active
         material.appearance = theme.appearance
         if theme.usesFrostedUtilityMaterial {
+            // Within-window frost under clear utility columns; do not clear window opacity.
             material.isHidden = false
+            material.blendingMode = .withinWindow
             material.material = .underWindowBackground
             material.alphaValue = max(min(theme.utilityOpacity, 1), 0.35)
-            window?.isOpaque = false
         } else {
             // Opaque / tonal / reduced-material: no frost; solid colors own the chrome.
             material.isHidden = true
+            material.blendingMode = .behindWindow
             material.alphaValue = 1
-            window?.isOpaque = true
         }
     }
 

@@ -1116,6 +1116,13 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(reloadUiConfig(path: frosted.path), 0)
 
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 120),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: true
+        )
+        window.contentView = host
         let material = NSVisualEffectView(frame: host.bounds)
         host.addSubview(material)
         let dark = NSAppearance(named: .darkAqua)!
@@ -1123,6 +1130,8 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(frostedTheme.usesFrostedUtilityMaterial)
         XCTAssertFalse(material.isHidden, "frosted utility material must be visible")
         XCTAssertEqual(material.material, .underWindowBackground)
+        XCTAssertEqual(material.blendingMode, .withinWindow)
+        XCTAssertTrue(window.isOpaque, "frosted utility must not clear window opacity")
         XCTAssertEqual(frostedTheme.utilityOpacity, 0.85, accuracy: 0.01)
 
         let reduced = dir.appendingPathComponent("reduced.toml")
@@ -1135,6 +1144,7 @@ final class SeyalHostComponentTests: XCTestCase {
         let reducedTheme = NativeThemeRealization.apply(to: host, material: material, appearance: dark)
         XCTAssertFalse(reducedTheme.usesFrostedUtilityMaterial)
         XCTAssertTrue(material.isHidden, "reduced-material must hide the frost effect")
+        XCTAssertTrue(window.isOpaque)
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
