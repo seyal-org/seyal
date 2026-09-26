@@ -5,7 +5,7 @@
 
 Seyal's normal acceptance tests prove represented behavior. They do not prove that adjacent Unix/macOS states are impossible. High-risk Runtime changes therefore require an explicit adversarial state review before merge.
 
-`AGENTS.md` routes high-risk Runtime/reactor work here. This document is the sole detailed state-matrix and event-loop merge-gate procedure. Architecture and accepted ADR/spec authority remain higher priority.
+This document elaborates the mandatory rules in the repository `AGENTS.md`. Architecture and accepted ADR/spec authority remain higher priority.
 
 ## 1. Orthogonal state matrix
 
