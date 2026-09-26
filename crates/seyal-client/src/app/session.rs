@@ -119,16 +119,16 @@ impl ApplicationRoot {
     ) -> Result<(), AppError> {
         self.require_fence(fence)?;
         #[cfg(target_os = "macos")]
-        if let Some(handle) = self.client_handle {
-            if let Some(output) = crate::ffi::with_client(handle, |client| {
+        if let Some(handle) = self.client_handle
+            && let Some(output) = crate::ffi::with_client(handle, |client| {
                 (
                     project_cache_text(client.cache()),
                     client.cache().alternate_screen,
                 )
-            }) {
-                self.output_utf8 = output.0;
-                return self.derive_presentation(output.1);
-            }
+            })
+        {
+            self.output_utf8 = output.0;
+            return self.derive_presentation(output.1);
         }
         self.derive_presentation(alternate_screen)
     }
