@@ -197,6 +197,11 @@ pub struct RecoveryCoordinator {
     attempt_count: u32,
     scheduled: bool,
     blocked_launch: bool,
+    /// True after `PerformAttempt` is emitted until `complete_attempt` (or
+    /// cancel/exhaust) clears it. Duplicate/late completions without an
+    /// outstanding attempt only dispose handles — they must not advance the
+    /// episode (AGENTS.md level-trigger / ADR-015).
+    attempt_outstanding: bool,
 }
 
 impl RecoveryCoordinator {
@@ -235,7 +240,12 @@ impl RecoveryCoordinator {
         self.launch_claimed = false;
         self.blocked_launch = false;
         self.attempt_count = 0;
+        self.attempt_outstanding = false;
         self.state.cancel();
+    }
+
+    pub fn has_outstanding_attempt(&self) -> bool {
+        self.attempt_outstanding
     }
 
     /// Host reports presentation progress after connect (SPEC-009 §10).
@@ -271,6 +281,26 @@ impl RecoveryCoordinator {
         if generation != self.state.generation {
             return self.dispose_opened(outcome);
         }
+        if !self.attempt_outstanding {
+            // Late LaunchHelper failure is reported through CompleteRecovery
+            // without a new PerformAttempt (host claimed launch, then helper
+            // missing). That is not a duplicate open; block the episode.
+            if matches!(outcome, AttemptOutcome::EndpointMissing)
+                && launch == Some(LaunchResult::HelperMissing)
+                && self.launch_claimed
+                && !self.blocked_launch
+            {
+                self.scheduled = false;
+                self.deadline = None;
+                self.blocked_launch = true;
+                self.state.stage = RecoveryStage::Blocked;
+                return Vec::new();
+            }
+            // No claimed attempt for this generation: ignore episode
+            // transitions; only dispose a handle the host may still hold.
+            return self.dispose_opened(outcome);
+        }
+        self.attempt_outstanding = false;
         let Some(deadline) = self.deadline else {
             return self.dispose_opened(outcome);
         };
@@ -330,6 +360,7 @@ impl RecoveryCoordinator {
     fn replace_generation(&mut self, stage: RecoveryStage) {
         self.scheduled = false;
         self.deadline = None;
+        self.attempt_outstanding = false;
         self.state.begin();
         self.state.stage = stage;
     }
@@ -346,6 +377,7 @@ impl RecoveryCoordinator {
             return self.exhaust(generation);
         }
         self.attempt_count += 1;
+        self.attempt_outstanding = true;
         let remaining = deadline.saturating_sub(now);
         vec![RecoveryEffect::PerformAttempt {
             generation,
@@ -378,6 +410,7 @@ impl RecoveryCoordinator {
         }
         self.scheduled = false;
         self.deadline = None;
+        self.attempt_outstanding = false;
         self.state.stage = RecoveryStage::Reconstructing;
         Vec::new()
     }
@@ -388,6 +421,7 @@ impl RecoveryCoordinator {
         }
         self.scheduled = false;
         self.deadline = None;
+        self.attempt_outstanding = false;
         self.state.stage = RecoveryStage::Exhausted;
         Vec::new()
     }

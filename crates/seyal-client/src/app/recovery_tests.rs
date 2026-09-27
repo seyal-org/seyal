@@ -252,3 +252,60 @@ fn cancel_recovery_retains_queued_dispose_handle_effects() {
     );
     assert_eq!(root.snapshot().recovery_stage, RecoveryStage::Disconnected);
 }
+
+#[test]
+fn claiming_perform_attempt_clears_effect_before_complete() {
+    // Host re-entry model: adopt → first frame → reconcile → driveRecovery.
+    // Acking PerformAttempt when claimed removes the level-triggered effect so
+    // a nested drive cannot open a second attempt; CompleteRecovery still
+    // consumes the outstanding attempt bit in RecoveryCoordinator.
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    assert!(matches!(
+        root.snapshot().recovery_effect,
+        Some(RecoveryEffect::PerformAttempt { .. })
+    ));
+    root.apply(AppAction::AckRecoveryEffect).unwrap();
+    assert_eq!(root.snapshot().recovery_effect, None);
+    assert!(root.recovery.has_outstanding_attempt());
+
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::Opened {
+            handle: 7,
+            adopted: true,
+        },
+        now: Duration::ZERO,
+        launch: None,
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().recovery_stage,
+        RecoveryStage::Reconstructing
+    );
+    assert!(!root.recovery.has_outstanding_attempt());
+
+    // Nested/late complete after the attempt was already consumed.
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::Opened {
+            handle: 8,
+            adopted: false,
+        },
+        now: Duration::from_millis(1),
+        launch: None,
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().recovery_effect,
+        Some(RecoveryEffect::DisposeHandle(8))
+    );
+    assert_eq!(
+        root.snapshot().recovery_stage,
+        RecoveryStage::Reconstructing
+    );
+}

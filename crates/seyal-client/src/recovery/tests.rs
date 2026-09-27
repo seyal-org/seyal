@@ -397,3 +397,40 @@ fn helper_missing_reported_after_claimed_launch_blocks() {
     assert!(!c.has_scheduled_attempt());
     assert!(!c.is_active());
 }
+
+#[test]
+fn duplicate_complete_without_outstanding_attempt_only_disposes() {
+    let mut c = RecoveryCoordinator::default();
+    let started = c.begin_episode(Duration::ZERO);
+    let RecoveryEffect::PerformAttempt { generation, .. } = started[0] else {
+        panic!("expected PerformAttempt");
+    };
+    assert!(c.has_outstanding_attempt());
+    let first = c.complete_attempt(
+        generation,
+        AttemptOutcome::Opened {
+            handle: 11,
+            adopted: true,
+        },
+        Duration::ZERO,
+        None,
+    );
+    assert!(first.is_empty());
+    assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
+    assert!(!c.has_outstanding_attempt());
+
+    // Late/duplicate completion for the same generation must not flip stage
+    // or reopen the episode; it may only dispose the reported handle.
+    let duplicate = c.complete_attempt(
+        generation,
+        AttemptOutcome::Opened {
+            handle: 12,
+            adopted: false,
+        },
+        Duration::from_millis(1),
+        None,
+    );
+    assert_eq!(duplicate, vec![RecoveryEffect::DisposeHandle(12)]);
+    assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
+    assert!(!c.has_outstanding_attempt());
+}
