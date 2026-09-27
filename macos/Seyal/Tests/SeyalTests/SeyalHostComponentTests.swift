@@ -197,6 +197,28 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testSinglePaneProjectsNoSplitDividerAndRatioActionFailsClosed() throws {
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 48)
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_pane_divider(handle, 0).size, 0)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        let row = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_PANE), 0)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SET_SPLIT_RATIO.rawValue)
+        action.target_execution_lo = row.id_lo
+        action.target_execution_hi = row.id_hi
+        action.reserved = Float(0.3).bitPattern
+        XCTAssertNotEqual(seyal_app_apply(handle, &action), 0)
+        XCTAssertEqual(seyal_app_last_error(handle), 34, "NoSplitDivider")
+        XCTAssertEqual(seyal_app_pane_region(handle, 0).width, 1.0, "rejected resize leaves the region full")
+    }
+
+    @MainActor
     func testNestedProductChangeDuringReconcileStillHidesComposerForTui() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         let handle = view.pane.appHandle

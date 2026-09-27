@@ -29,6 +29,8 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppRow) == 56);
     REQUIRE(sizeof(SeyalAppPaneRegion) == 40);
     REQUIRE(offsetof(SeyalAppPaneRegion, x) == 24);
+    REQUIRE(sizeof(SeyalAppPaneDivider) == 48);
+    REQUIRE(offsetof(SeyalAppPaneDivider, ratio) == 40);
     REQUIRE(sizeof(SeyalAppAction) != 0);
     puts("seyal_app_layout ok");
     return 0;

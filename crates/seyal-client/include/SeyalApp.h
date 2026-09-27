@@ -54,7 +54,8 @@ enum SeyalAppActionKind {
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
-     * bound to an execution; disposition is not yet available).
+     * bound to an execution; disposition is not yet available),
+     * 34 = NoSplitDivider (SET_SPLIT_RATIO).
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -97,7 +98,15 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /*
+     * Resize one Split (#928). target_execution_lo/hi = the divider's
+     * leading PaneId (SeyalAppPaneDivider.leading_pane_*); reserved = the new
+     * first-child share as IEEE-754 f32 bits. Rust clamps it to 0.1...0.9;
+     * NaN/infinity return -6. Unknown PaneId = UnknownPane; a Pane that leads
+     * no divider = 34 (NoSplitDivider).
+     */
+    SEYAL_APP_ACTION_SET_SPLIT_RATIO = 53
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -411,6 +420,30 @@ typedef struct SeyalAppPaneRegion {
     float height;
 } SeyalAppPaneRegion;
 
+/*
+ * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
+ * (outer Split first). x/y/width/height is the unit rect of the whole area
+ * the Split divides; the divider sits at ratio along `axis` (0 = side by
+ * side / vertical divider, 1 = stacked / horizontal divider). Hosts map a
+ * drag position to a ratio within that area and dispatch
+ * SEYAL_APP_ACTION_SET_SPLIT_RATIO; Rust clamps and re-projects. Out-of-range
+ * indices return size == 0.
+ */
+typedef struct SeyalAppPaneDivider {
+    uint16_t version;
+    uint16_t size;
+    uint16_t axis;
+    uint16_t reserved;
+    uint64_t leading_pane_lo;
+    uint64_t leading_pane_hi;
+    float x;
+    float y;
+    float width;
+    float height;
+    float ratio;
+    uint32_t reserved1;
+} SeyalAppPaneDivider;
+
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
 #define SEYAL_APP_ROW_PANE 2u
@@ -461,6 +494,7 @@ SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
+SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);

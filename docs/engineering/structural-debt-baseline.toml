@@ -144,13 +144,13 @@ note = "Pre-existing handwritten production debt recorded by #1021; decompositio
 # grandfathered files; exceptions pin the post-merge exact LOC (no silent headroom).
 [[exception]]
 path = "crates/seyal-client/src/ffi/app.rs"
-ceiling_loc = 2676
-issue = 923
-responsibility = "Cold UI configuration / theme FFI export surface (#993) and the Pane-region layout projection export (#923)."
+ceiling_loc = 2781
+issue = 928
+responsibility = "Cold UI configuration / theme FFI export surface (#993), the Pane-region layout projection export (#923), and split-divider projection / SET_SPLIT_RATIO decoding (#928)."
 
 [[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-ceiling_loc = 1270
+ceiling_loc = 1269
 issue = 923
 responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (#993) and hosts the live Pane surface inside Rust-projected Pane regions (#923; region layout lives in PaneLayoutView.swift)."
 
@@ -159,13 +159,13 @@ responsibility = "Thin AppKit host applies Rust-resolved cold visual snapshot (#
 # Pane. Region geometry/tests live in pane_layout.rs; exact post-change LOC.
 [[exception]]
 path = "crates/seyal-client/src/app.rs"
-ceiling_loc = 2267
-issue = 923
-responsibility = "Application root exposes Rust-owned Pane-region projection and keeps the snapshot fence on the execution-bound Pane."
+ceiling_loc = 2285
+issue = 928
+responsibility = "Application root exposes Rust-owned Pane-region and split-divider projection (#923/#928), routes SetSplitRatio, and keeps the snapshot fence on the execution-bound Pane."
 
 [[exception]]
 path = "crates/seyal-client/src/shell.rs"
-ceiling_loc = 1049
-issue = 923
-responsibility = "ShellState PaneTree composition rejects closing an execution-bound Pane until execution disposition (#994) exists."
+ceiling_loc = 1107
+issue = 928
+responsibility = "ShellState PaneTree composition: rejects closing an execution-bound Pane until execution disposition (#994) exists (#923) and owns per-Split ratio storage/SetSplitRatio (#928)."
 

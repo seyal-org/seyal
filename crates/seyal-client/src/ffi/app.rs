@@ -21,6 +21,7 @@ use crate::composer::{
     COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL, COMPOSER_HISTORY_PLACEHOLDER,
 };
 use crate::input_policy::process_input_policy;
+use crate::pane_layout::SplitRatio;
 use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryEffect, RecoveryStage};
 use crate::shell::SplitAxis;
 
@@ -694,6 +695,75 @@ pub extern "C" fn seyal_app_pane_region(handle: u64, index: u32) -> SeyalAppPane
             y: region.rect.y,
             width: region.rect.width,
             height: region.rect.height,
+        }
+    })
+}
+
+/// One Split divider of the active Tab (#928), pre-order; there are always
+/// `pane_count - 1`. `x/y/width/height` is the whole area the Split divides.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppPaneDivider {
+    pub version: u16,
+    pub size: u16,
+    pub axis: u16,
+    pub reserved: u16,
+    pub leading_pane_lo: u64,
+    pub leading_pane_hi: u64,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub ratio: f32,
+    pub reserved1: u32,
+}
+
+impl SeyalAppPaneDivider {
+    const fn empty() -> Self {
+        Self {
+            version: APP_ABI_VERSION,
+            size: 0,
+            axis: 0,
+            reserved: 0,
+            leading_pane_lo: 0,
+            leading_pane_hi: 0,
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            ratio: 0.0,
+            reserved1: 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_divider(handle: u64, index: u32) -> SeyalAppPaneDivider {
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return SeyalAppPaneDivider::empty();
+        };
+        let Some(divider) = state.root.pane_dividers().get(index as usize).copied() else {
+            return SeyalAppPaneDivider::empty();
+        };
+        let (leading_pane_lo, leading_pane_hi) = split_id(divider.leading.to_bytes());
+        SeyalAppPaneDivider {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppPaneDivider>() as u16,
+            axis: match divider.axis {
+                SplitAxis::Right => 0,
+                SplitAxis::Down => 1,
+            },
+            reserved: 0,
+            leading_pane_lo,
+            leading_pane_hi,
+            x: divider.area.x,
+            y: divider.area.y,
+            width: divider.area.width,
+            height: divider.area.height,
+            ratio: divider.ratio.fraction(),
+            reserved1: 0,
         }
     })
 }
@@ -1378,6 +1448,13 @@ fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         50 => Ok(AppAction::RunPalette { fence }),
         51 => Ok(AppAction::ClosePalette { fence }),
+        53 => Ok(AppAction::SetSplitRatio {
+            pane: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            ratio: SplitRatio::from_fraction(f32::from_bits(action.reserved)).ok_or(-6)?,
+        }),
         52 => Ok(AppAction::ApplyRuntimeComposerStatus {
             fence,
             eligibility: match action.reserved {
@@ -1881,6 +1958,7 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
+        AppError::NoSplitDivider => 34,
     }
 }
 
@@ -1929,6 +2007,8 @@ mod tests {
         assert_eq!(size_of::<SeyalAppShell>(), 64);
         assert_eq!(size_of::<SeyalAppRow>(), 56);
         assert_eq!(size_of::<SeyalAppPaneRegion>(), 40);
+        assert_eq!(size_of::<SeyalAppPaneDivider>(), 48);
+        assert_eq!(offset_of!(SeyalAppPaneDivider, ratio), 40);
         assert_eq!(offset_of!(SeyalAppPaneRegion, x), 24);
         assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
         assert_eq!(size_of::<SeyalAppTheme>(), 16);
@@ -2262,6 +2342,31 @@ mod tests {
         );
         assert_eq!(seyal_app_destroy(handle), 0);
         assert_eq!(seyal_app_pane_region(handle, 0).size, 0);
+    }
+
+    #[test]
+    fn set_split_ratio_decodes_and_fails_closed_on_single_pane_and_non_finite() {
+        let handle = seyal_app_create();
+        let snap = seyal_app_snapshot(handle);
+        let pane_row = seyal_app_shell_row(handle, 2, 0);
+        assert_eq!(
+            seyal_app_pane_divider(handle, 0).size,
+            0,
+            "one Pane, no divider"
+        );
+
+        let mut resize = identity_fence(53, &snap);
+        resize.target_execution_lo = pane_row.id_lo;
+        resize.target_execution_hi = pane_row.id_hi;
+        resize.reserved = 0.3f32.to_bits();
+        assert_eq!(unsafe { seyal_app_apply(handle, &resize) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 34, "NoSplitDivider");
+
+        resize.reserved = f32::NAN.to_bits();
+        assert_eq!(unsafe { seyal_app_apply(handle, &resize) }, -6);
+        assert_eq!(seyal_app_shell(handle).pane_count, 1);
+        assert_eq!(seyal_app_destroy(handle), 0);
+        assert_eq!(seyal_app_pane_divider(handle, 0).size, 0);
     }
 
     #[test]

@@ -210,6 +210,11 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(composer.isHittable, "live composer stays interactive inside the region")
         XCTAssertTrue(region.frame.contains(composer.frame), "composer sits in the live region")
         XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
+        // #928: a single-leaf tree has no Split, so no divider is projected.
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-divider-0"].exists,
+            "no split divider without a Split"
+        )
     }
 
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {

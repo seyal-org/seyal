@@ -19,7 +19,7 @@ use crate::composer::{
     RuntimeComposerEligibility,
 };
 use crate::palette::{PaletteAction, PaletteCommand, PaletteError, PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion};
+use crate::pane_layout::{self, PaneDivider, PaneRegion, SplitRatio};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
@@ -69,6 +69,7 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    NoSplitDivider,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,6 +199,11 @@ pub enum AppAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    /// Resize the Split whose divider follows `pane` (#928).
+    SetSplitRatio {
+        pane: PaneId,
+        ratio: SplitRatio,
     },
     SetShellVisibility {
         left: bool,
@@ -372,6 +378,11 @@ impl ApplicationRoot {
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
         pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+    }
+
+    /// Active Tab's Split dividers (#928), pre-order.
+    pub fn pane_dividers(&self) -> Vec<PaneDivider> {
+        pane_layout::dividers(&self.shell.snapshot().tree)
     }
 
     pub fn fence(&self) -> AppFence {
@@ -552,6 +563,13 @@ impl ApplicationRoot {
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
+            AppAction::SetSplitRatio { pane, ratio } => self
+                .shell
+                .apply(ShellAction::SetSplitRatio { pane, ratio })
+                .map_err(|error| match error {
+                    ShellError::NoSplitDivider => AppError::NoSplitDivider,
+                    _ => AppError::UnknownPane,
+                }),
             AppAction::SetShellVisibility {
                 left,
                 inspector,

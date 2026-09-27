@@ -10,6 +10,8 @@ use std::fmt;
 
 use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
 
+use crate::pane_layout::SplitRatio;
+
 /// Horizontal or vertical split of one Tab's pane tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SplitAxis {
@@ -25,6 +27,7 @@ pub enum PaneTree {
         axis: SplitAxis,
         first: Box<PaneTree>,
         second: Box<PaneTree>,
+        ratio: SplitRatio,
     },
 }
 
@@ -37,10 +40,12 @@ impl PaneTree {
                 axis,
                 first,
                 second,
+                ratio,
             } => Self::Split {
                 axis: *axis,
                 first: Box::new(first.replacing(target, replacement.clone())),
                 second: Box::new(second.replacing(target, replacement)),
+                ratio: *ratio,
             },
         }
     }
@@ -58,16 +63,46 @@ impl PaneTree {
                 axis,
                 first,
                 second,
+                ratio,
             } => match (first.removing(target), second.removing(target)) {
                 (Some(left), Some(right)) => Some(Self::Split {
                     axis: *axis,
                     first: Box::new(left),
                     second: Box::new(right),
+                    ratio: *ratio,
                 }),
                 (Some(left), None) => Some(left),
                 (None, Some(right)) => Some(right),
                 (None, None) => None,
             },
+        }
+    }
+
+    /// Set the ratio of the one Split whose divider follows `leading` (the
+    /// last leaf of that Split's `first` child). Every leaf but the tree's
+    /// last leads exactly one divider; returns false when none does.
+    fn set_ratio(&mut self, leading: PaneId, value: SplitRatio) -> bool {
+        match self {
+            Self::Leaf(_) => false,
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                if first.last_pane() == leading {
+                    *ratio = value;
+                    return true;
+                }
+                first.set_ratio(leading, value) || second.set_ratio(leading, value)
+            }
+        }
+    }
+
+    pub(crate) fn last_pane(&self) -> PaneId {
+        match self {
+            Self::Leaf(id) => *id,
+            Self::Split { second, .. } => second.last_pane(),
         }
     }
 
@@ -123,6 +158,7 @@ pub enum ShellError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     CannotCloseBoundPane,
+    NoSplitDivider,
     ExecutionAlreadyBound,
     EmptyShell,
 }
@@ -144,6 +180,7 @@ impl ShellError {
             Self::CannotCloseBoundPane => {
                 "A Pane bound to an execution cannot be closed until execution disposition is available."
             }
+            Self::NoSplitDivider => "This Pane does not lead a split divider.",
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
         }
@@ -181,6 +218,11 @@ pub enum ShellAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    /// Resize the Split whose divider follows `pane` (see `PaneTree`).
+    SetSplitRatio {
+        pane: PaneId,
+        ratio: SplitRatio,
     },
     BindExecution {
         pane: PaneId,
@@ -420,6 +462,7 @@ impl ShellState {
             ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
             ShellAction::ClosePane { id } => self.close_pane(id),
             ShellAction::FocusPane { id } => self.focus_pane(id),
+            ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         };
         match result {
@@ -511,6 +554,7 @@ impl ShellState {
                 axis,
                 first: Box::new(PaneTree::Leaf(pane_id)),
                 second: Box::new(PaneTree::Leaf(id)),
+                ratio: SplitRatio::HALF,
             },
         );
         tab.focused = id;
@@ -554,6 +598,19 @@ impl ShellState {
         }
         tab.focused = id;
         Ok(())
+    }
+
+    fn set_split_ratio(&mut self, pane: PaneId, ratio: SplitRatio) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if !tab.panes.contains_key(&pane) {
+            return Err(ShellError::UnknownPane);
+        }
+        if tab.root.set_ratio(pane, ratio) {
+            Ok(())
+        } else {
+            Err(ShellError::NoSplitDivider)
+        }
     }
 
     fn bind_execution(
@@ -1041,6 +1098,7 @@ mod tests {
                 axis: SplitAxis::Right,
                 first: Box::new(PaneTree::Leaf(a)),
                 second: Box::new(PaneTree::Leaf(b)),
+                ratio: SplitRatio::HALF,
             },
         );
         assert_eq!(tree.pane_ids(), vec![a, b]);

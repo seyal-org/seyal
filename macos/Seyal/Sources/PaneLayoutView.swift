@@ -1,12 +1,17 @@
 import AppKit
 
-/// Thin AppKit projection of the active Tab's Pane regions (#923).
+/// Thin AppKit projection of the active Tab's Pane regions (#923) and split
+/// dividers (#928).
 ///
-/// Geometry, focus and live-surface placement come from Rust
-/// (`seyal_app_pane_region`); this view only positions frames. The one live
-/// terminal/Metal/composer container (`liveContent`) sits in the LIVE region and
-/// is hidden when no region is LIVE. Every leaf is a focusable region bound to
-/// its real PaneId; focusing dispatches Rust `FOCUS_PANE` through `onFocusPane`.
+/// Geometry, focus, ratios and live-surface placement come from Rust
+/// (`seyal_app_pane_region` / `seyal_app_pane_divider`); this view only
+/// positions frames. The one live terminal/Metal/composer container
+/// (`liveContent`) sits in the LIVE region and is hidden when no region is
+/// LIVE. Every leaf is a focusable region bound to its real PaneId; focusing
+/// dispatches Rust `FOCUS_PANE` through `onFocusPane`. Dragging a divider maps
+/// the pointer to a ratio within the Rust-given Split area and dispatches
+/// `SET_SPLIT_RATIO`; Rust clamps and this view re-reads only the Pane
+/// projection, so a drag never rebuilds Blocks on every mouse move.
 @MainActor
 final class PaneLayoutView: NSView {
     struct Region: Equatable {
@@ -17,14 +22,37 @@ final class PaneLayoutView: NSView {
         let focused: Bool
         let live: Bool
         let title: String
+
+        /// Everything but geometry: a change here rebuilds region views.
+        var identity: Region {
+            Region(paneLo: paneLo, paneHi: paneHi, rect: .zero, focused: focused, live: live, title: title)
+        }
+    }
+
+    struct Divider: Equatable {
+        let leadingLo: UInt64
+        let leadingHi: UInt64
+        /// Side-by-side Split: the divider is vertical and drags horizontally.
+        let vertical: Bool
+        /// Unit rect of the whole area the Split divides.
+        let area: CGRect
+        let ratio: CGFloat
+
+        var identity: Divider {
+            Divider(leadingLo: leadingLo, leadingHi: leadingHi, vertical: vertical, area: .zero, ratio: 0)
+        }
     }
 
     /// Container for the single live Pane surface; owned by the caller's
     /// constraints internally, positioned here by frame.
     let liveContent = NSView()
     var onFocusPane: ((UInt64, UInt64) -> Void)?
+    /// Rust application root the projection is read from; 0 until wired.
+    var appHandle: UInt64 = 0
     private(set) var regions: [Region] = []
+    private(set) var dividers: [Divider] = []
     private var regionViews: [PaneRegionView] = []
+    private var dividerViews: [PaneDividerView] = []
     private var theme: NativeTheme?
 
     override var isFlipped: Bool { true }
@@ -42,9 +70,52 @@ final class PaneLayoutView: NSView {
         fatalError("PaneLayoutView is programmatic")
     }
 
-    /// Read every region for `paneCount` leaves. A zero-size row means Rust
-    /// no longer has that index (stale count); stop rather than guess.
-    static func readRegions(appHandle: UInt64, paneCount: Int) -> [Region] {
+    /// Re-read every region for `paneCount` leaves and its `paneCount - 1`
+    /// dividers from Rust and apply them. A zero-size row means Rust no longer
+    /// has that index (stale count); reading stops rather than guessing.
+    func reconcile(paneCount: Int) {
+        apply(
+            Self.readRegions(appHandle: appHandle, paneCount: paneCount),
+            dividers: Self.readDividers(appHandle: appHandle, count: max(paneCount - 1, 0))
+        )
+    }
+
+    private func setSplitRatio(_ divider: Divider, ratio: CGFloat) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SET_SPLIT_RATIO.rawValue)
+        action.target_execution_lo = divider.leadingLo
+        action.target_execution_hi = divider.leadingHi
+        action.reserved = Float(ratio).bitPattern
+        guard seyal_app_apply(appHandle, &action) == 0 else { return }
+        reconcile(paneCount: Int(seyal_app_shell(appHandle).pane_count))
+    }
+
+    private static func readDividers(appHandle: UInt64, count: Int) -> [Divider] {
+        var dividers: [Divider] = []
+        for index in 0..<count {
+            let raw = seyal_app_pane_divider(appHandle, UInt32(index))
+            guard raw.size != 0 else { break }
+            dividers.append(
+                Divider(
+                    leadingLo: raw.leading_pane_lo,
+                    leadingHi: raw.leading_pane_hi,
+                    vertical: raw.axis == 0,
+                    area: CGRect(
+                        x: CGFloat(raw.x),
+                        y: CGFloat(raw.y),
+                        width: CGFloat(raw.width),
+                        height: CGFloat(raw.height)
+                    ),
+                    ratio: CGFloat(raw.ratio)
+                )
+            )
+        }
+        return dividers
+    }
+
+    private static func readRegions(appHandle: UInt64, paneCount: Int) -> [Region] {
         var regions: [Region] = []
         for index in 0..<paneCount {
             let raw = seyal_app_pane_region(appHandle, UInt32(index))
@@ -75,9 +146,16 @@ final class PaneLayoutView: NSView {
         return regions
     }
 
-    func apply(_ next: [Region]) {
-        guard next != regions else { return }
+    func apply(_ next: [Region], dividers nextDividers: [Divider]) {
+        guard next != regions || nextDividers != dividers else { return }
+        let rebuild = next.map(\.identity) != regions.map(\.identity)
+            || nextDividers.map(\.identity) != dividers.map(\.identity)
         regions = next
+        dividers = nextDividers
+        needsLayout = true
+        // Geometry-only change (a ratio drag): keep the views, including the
+        // divider being dragged, and just relayout.
+        guard rebuild else { return }
         regionViews.forEach { $0.removeFromSuperview() }
         let split = next.count > 1
         regionViews = next.enumerated().map { index, region in
@@ -91,12 +169,23 @@ final class PaneLayoutView: NSView {
             return view
         }
         liveContent.isHidden = !next.contains(where: \.live)
-        needsLayout = true
+        dividerViews.forEach { $0.removeFromSuperview() }
+        dividerViews = nextDividers.enumerated().map { index, divider in
+            let view = PaneDividerView(index: index, vertical: divider.vertical)
+            view.onDrag = { [weak self] ratio in
+                self?.setSplitRatio(divider, ratio: ratio)
+            }
+            if let theme { view.apply(theme: theme) }
+            // Dividers sit above the live container so its edge stays draggable.
+            addSubview(view, positioned: .above, relativeTo: liveContent)
+            return view
+        }
     }
 
     func apply(theme: NativeTheme) {
         self.theme = theme
         regionViews.forEach { $0.apply(theme: theme) }
+        dividerViews.forEach { $0.apply(theme: theme) }
     }
 
     override func layout() {
@@ -109,6 +198,17 @@ final class PaneLayoutView: NSView {
         let live = regions.first(where: \.live)?.rect ?? CGRect(x: 0, y: 0, width: 1, height: 1)
         let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
         liveContent.frame = scaled(live).insetBy(dx: inset, dy: inset)
+        for (view, divider) in zip(dividerViews, dividers) {
+            let area = scaled(divider.area)
+            let half = PaneDividerView.thickness / 2
+            view.area = area
+            view.ratio = divider.ratio
+            view.frame = divider.vertical
+                ? CGRect(x: area.minX + area.width * divider.ratio - half, y: area.minY,
+                         width: PaneDividerView.thickness, height: area.height)
+                : CGRect(x: area.minX, y: area.minY + area.height * divider.ratio - half,
+                         width: area.width, height: PaneDividerView.thickness)
+        }
     }
 
     private func scaled(_ unit: CGRect) -> CGRect {
@@ -176,5 +276,56 @@ private final class PaneRegionView: NSView {
         guard !region.focused else { return false }
         onFocus?()
         return true
+    }
+}
+
+/// One Split divider hit zone. Dragging reports the pointer's position within
+/// the Split's area as a first-child share; Rust owns clamping and layout.
+@MainActor
+private final class PaneDividerView: NSView {
+    static let thickness: CGFloat = 6
+
+    var onDrag: ((CGFloat) -> Void)?
+    /// The Split's whole area in the parent's (flipped) coordinates.
+    var area: CGRect = .zero
+    var ratio: CGFloat = 0.5 {
+        didSet { setAccessibilityValue(String(format: "%.2f", ratio)) }
+    }
+    private let vertical: Bool
+
+    init(index: Int, vertical: Bool) {
+        self.vertical = vertical
+        super.init(frame: .zero)
+        wantsLayer = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.splitter)
+        setAccessibilityIdentifier("seyal-pane-divider-\(index)")
+        setAccessibilityOrientation(vertical ? .vertical : .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("PaneDividerView is programmatic")
+    }
+
+    func apply(theme: NativeTheme) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: vertical ? .resizeLeftRight : .resizeUpDown)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Swallow so the Pane beneath does not take focus from a drag start.
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let parent = superview, area.width > 0, area.height > 0 else { return }
+        let point = parent.convert(event.locationInWindow, from: nil)
+        let share = vertical
+            ? (point.x - area.minX) / area.width
+            : (point.y - area.minY) / area.height
+        onDrag?(share)
     }
 }

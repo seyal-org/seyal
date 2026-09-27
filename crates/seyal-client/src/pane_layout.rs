@@ -1,14 +1,43 @@
-//! Rust-owned projection of one Tab's [`PaneTree`] into host Pane regions.
+//! Rust-owned projection of one Tab's [`PaneTree`] into host Pane regions
+//! and split dividers.
 //!
-//! Hosts position one region per tree leaf and never derive geometry, focus,
-//! or live-surface placement themselves (ADR-015). Regions are unit fractions
-//! of the Tab's center area with a top-left origin. Splits are equal halves
-//! until split ratios exist (#928). Chrome path only: never call this from the
+//! Hosts position one region per tree leaf and one divider per Split, and
+//! never derive geometry, focus, or live-surface placement themselves
+//! (ADR-015). Rects are unit fractions of the Tab's center area with a
+//! top-left origin; each Split divides its area by its stored [`SplitRatio`]
+//! (#928, SPEC-025 `ratio`). Chrome path only: never call this from the
 //! PTY→VT→damage path.
 
 use seyal_core::PaneId;
 
 use crate::shell::{PaneTree, SplitAxis};
+
+/// Share of a Split's extent given to its `first` child
+/// (`first / (first + second)`), in basis points so snapshots compare
+/// exactly. Clamped to `MIN..=MAX` so neither side collapses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplitRatio(u16);
+
+impl SplitRatio {
+    pub const HALF: Self = Self(5_000);
+    pub const MIN: Self = Self(1_000);
+    pub const MAX: Self = Self(9_000);
+
+    /// Clamp a finite fraction into `MIN..=MAX`; NaN/infinity fail closed.
+    pub fn from_fraction(value: f32) -> Option<Self> {
+        if !value.is_finite() {
+            return None;
+        }
+        let basis_points = (value * 10_000.0)
+            .round()
+            .clamp(f32::from(Self::MIN.0), f32::from(Self::MAX.0));
+        Some(Self(basis_points as u16))
+    }
+
+    pub fn fraction(self) -> f32 {
+        f32::from(self.0) / 10_000.0
+    }
+}
 
 /// Unit-space rectangle, origin top-left, all fields in `0.0..=1.0`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,26 +56,27 @@ impl PaneRect {
         height: 1.0,
     };
 
-    fn halves(self, axis: SplitAxis) -> (Self, Self) {
+    fn divided(self, axis: SplitAxis, ratio: SplitRatio) -> (Self, Self) {
+        let share = ratio.fraction();
         match axis {
             SplitAxis::Right => {
-                let width = self.width / 2.0;
+                let width = self.width * share;
                 (
                     Self { width, ..self },
                     Self {
                         x: self.x + width,
-                        width,
+                        width: self.width - width,
                         ..self
                     },
                 )
             }
             SplitAxis::Down => {
-                let height = self.height / 2.0;
+                let height = self.height * share;
                 (
                     Self { height, ..self },
                     Self {
                         y: self.y + height,
-                        height,
+                        height: self.height - height,
                         ..self
                     },
                 )
@@ -66,12 +96,23 @@ pub struct PaneRegion {
     pub live: bool,
 }
 
+/// One Split's divider. `leading` names it for `SetSplitRatio`: the last leaf
+/// of the Split's `first` child. `area` is the whole rect the Split divides,
+/// so a host maps a drag position to a ratio without owning layout math.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaneDivider {
+    pub leading: PaneId,
+    pub axis: SplitAxis,
+    pub area: PaneRect,
+    pub ratio: SplitRatio,
+}
+
 /// Regions in tree (depth-first, first-before-second) order, matching
 /// [`crate::shell::ShellSnapshot::panes`]. `live_pane` is the Pane the one
 /// live execution surface belongs to; it is shown only while focused.
 pub fn project(tree: &PaneTree, focused: PaneId, live_pane: PaneId) -> Vec<PaneRegion> {
     let mut regions = Vec::new();
-    collect(tree, PaneRect::FULL, &mut regions);
+    collect(tree, PaneRect::FULL, &mut regions, &mut Vec::new());
     for region in &mut regions {
         region.focused = region.pane == focused;
         region.live = region.focused && region.pane == live_pane;
@@ -79,9 +120,21 @@ pub fn project(tree: &PaneTree, focused: PaneId, live_pane: PaneId) -> Vec<PaneR
     regions
 }
 
-fn collect(tree: &PaneTree, rect: PaneRect, out: &mut Vec<PaneRegion>) {
+/// Dividers in pre-order (outer Split before the Splits nested inside it).
+pub fn dividers(tree: &PaneTree) -> Vec<PaneDivider> {
+    let mut dividers = Vec::new();
+    collect(tree, PaneRect::FULL, &mut Vec::new(), &mut dividers);
+    dividers
+}
+
+fn collect(
+    tree: &PaneTree,
+    rect: PaneRect,
+    regions: &mut Vec<PaneRegion>,
+    dividers: &mut Vec<PaneDivider>,
+) {
     match tree {
-        PaneTree::Leaf(pane) => out.push(PaneRegion {
+        PaneTree::Leaf(pane) => regions.push(PaneRegion {
             pane: *pane,
             rect,
             focused: false,
@@ -91,10 +144,17 @@ fn collect(tree: &PaneTree, rect: PaneRect, out: &mut Vec<PaneRegion>) {
             axis,
             first,
             second,
+            ratio,
         } => {
-            let (a, b) = rect.halves(*axis);
-            collect(first, a, out);
-            collect(second, b, out);
+            dividers.push(PaneDivider {
+                leading: first.last_pane(),
+                axis: *axis,
+                area: rect,
+                ratio: *ratio,
+            });
+            let (a, b) = rect.divided(*axis, *ratio);
+            collect(first, a, regions, dividers);
+            collect(second, b, regions, dividers);
         }
     }
 }
@@ -138,6 +198,7 @@ mod tests {
             axis: SplitAxis::Right,
             first: leaf(a),
             second: leaf(b),
+            ratio: SplitRatio::HALF,
         };
         let regions = project(&right, a, a);
         assert_eq!(regions[0].rect, rect(0.0, 0.0, 0.5, 1.0));
@@ -147,6 +208,7 @@ mod tests {
             axis: SplitAxis::Down,
             first: leaf(a),
             second: leaf(b),
+            ratio: SplitRatio::HALF,
         };
         let regions = project(&down, a, a);
         assert_eq!(regions[0].rect, rect(0.0, 0.0, 1.0, 0.5));
@@ -163,7 +225,9 @@ mod tests {
                 axis: SplitAxis::Down,
                 first: leaf(b),
                 second: leaf(c),
+                ratio: SplitRatio::HALF,
             }),
+            ratio: SplitRatio::HALF,
         };
         let regions = project(&tree, c, a);
         let ids: Vec<_> = regions.iter().map(|region| region.pane).collect();
@@ -178,12 +242,92 @@ mod tests {
     }
 
     #[test]
+    fn split_ratio_clamps_finite_fractions_and_rejects_non_finite() {
+        assert_eq!(SplitRatio::from_fraction(0.5), Some(SplitRatio::HALF));
+        assert_eq!(SplitRatio::from_fraction(0.05), Some(SplitRatio::MIN));
+        assert_eq!(SplitRatio::from_fraction(-3.0), Some(SplitRatio::MIN));
+        assert_eq!(SplitRatio::from_fraction(0.95), Some(SplitRatio::MAX));
+        assert_eq!(SplitRatio::from_fraction(0.25).unwrap().fraction(), 0.25);
+        assert_eq!(SplitRatio::from_fraction(f32::NAN), None);
+        assert_eq!(SplitRatio::from_fraction(f32::INFINITY), None);
+    }
+
+    #[test]
+    fn regions_and_dividers_follow_the_stored_ratio() {
+        let (a, b) = (PaneId::new(), PaneId::new());
+        let ratio = SplitRatio::from_fraction(0.25).unwrap();
+        let tree = PaneTree::Split {
+            axis: SplitAxis::Right,
+            first: leaf(a),
+            second: leaf(b),
+            ratio,
+        };
+        let regions = project(&tree, a, a);
+        assert_eq!(regions[0].rect, rect(0.0, 0.0, 0.25, 1.0));
+        assert_eq!(regions[1].rect, rect(0.25, 0.0, 0.75, 1.0));
+        assert_eq!(
+            dividers(&tree),
+            vec![PaneDivider {
+                leading: a,
+                axis: SplitAxis::Right,
+                area: PaneRect::FULL,
+                ratio,
+            }]
+        );
+        assert!(dividers(&PaneTree::Leaf(a)).is_empty());
+    }
+
+    #[test]
+    fn each_divider_is_led_by_the_last_leaf_of_its_first_child() {
+        let (a, b, c) = (PaneId::new(), PaneId::new(), PaneId::new());
+        // Nested in the second child: Right(A, Down(B, C)).
+        let right_nested = PaneTree::Split {
+            axis: SplitAxis::Right,
+            first: leaf(a),
+            second: Box::new(PaneTree::Split {
+                axis: SplitAxis::Down,
+                first: leaf(b),
+                second: leaf(c),
+                ratio: SplitRatio::HALF,
+            }),
+            ratio: SplitRatio::HALF,
+        };
+        let found = dividers(&right_nested);
+        assert_eq!(
+            found.iter().map(|d| d.leading).collect::<Vec<_>>(),
+            vec![a, b]
+        );
+        assert_eq!(found[1].area, rect(0.5, 0.0, 0.5, 1.0));
+        assert_eq!(found[1].axis, SplitAxis::Down);
+
+        // Nested in the first child: Down(Right(A, B), C).
+        let first_nested = PaneTree::Split {
+            axis: SplitAxis::Down,
+            first: Box::new(PaneTree::Split {
+                axis: SplitAxis::Right,
+                first: leaf(a),
+                second: leaf(b),
+                ratio: SplitRatio::HALF,
+            }),
+            second: leaf(c),
+            ratio: SplitRatio::HALF,
+        };
+        let found = dividers(&first_nested);
+        assert_eq!(
+            found.iter().map(|d| d.leading).collect::<Vec<_>>(),
+            vec![b, a]
+        );
+        assert_eq!(found[1].area, rect(0.0, 0.0, 1.0, 0.5));
+    }
+
+    #[test]
     fn live_surface_is_shown_only_on_the_focused_live_pane() {
         let (a, b) = (PaneId::new(), PaneId::new());
         let tree = PaneTree::Split {
             axis: SplitAxis::Right,
             first: leaf(a),
             second: leaf(b),
+            ratio: SplitRatio::HALF,
         };
         let focused_live = project(&tree, a, a);
         assert!(focused_live[0].focused && focused_live[0].live);
@@ -202,7 +346,7 @@ mod tests {
 mod root_tests {
     use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId, WorkspaceId};
 
-    use super::PaneRect;
+    use super::{PaneRect, SplitRatio};
     use crate::app::{AppAction, AppError, ApplicationRoot, BindingEvidence};
     use crate::shell::{ShellState, SplitAxis};
 
@@ -246,6 +390,85 @@ mod root_tests {
         )
         .expect("fixture");
         ApplicationRoot::with_shell(shell)
+    }
+
+    #[test]
+    fn set_split_ratio_resizes_clamps_and_fails_closed() {
+        let mut root = split_enabled_root();
+        let a = root.snapshot().shell.focused_pane;
+        assert_eq!(
+            root.apply(AppAction::SetSplitRatio {
+                pane: a,
+                ratio: SplitRatio::HALF,
+            }),
+            Err(AppError::NoSplitDivider),
+            "a single Pane has no divider"
+        );
+        root.apply(AppAction::SplitFocused {
+            axis: SplitAxis::Right,
+        })
+        .unwrap();
+        let b = root.snapshot().shell.focused_pane;
+        root.apply(AppAction::SplitFocused {
+            axis: SplitAxis::Down,
+        })
+        .unwrap();
+        let c = root.snapshot().shell.focused_pane;
+
+        let quarter = SplitRatio::from_fraction(0.25).unwrap();
+        root.apply(AppAction::SetSplitRatio {
+            pane: a,
+            ratio: quarter,
+        })
+        .unwrap();
+        root.apply(AppAction::SetSplitRatio {
+            pane: b,
+            ratio: SplitRatio::from_fraction(0.95).unwrap(),
+        })
+        .unwrap();
+        let dividers = root.pane_dividers();
+        assert_eq!((dividers[0].leading, dividers[0].ratio), (a, quarter));
+        assert_eq!(
+            (dividers[1].leading, dividers[1].ratio),
+            (b, SplitRatio::MAX)
+        );
+        let regions = root.pane_regions();
+        assert_eq!(regions[0].rect.width, 0.25);
+        assert_eq!(regions[1].rect.height, 0.9);
+
+        // The last leaf leads no divider; stale ids fail closed. Neither
+        // rejection changes the projection.
+        let before = (root.pane_regions(), root.pane_dividers());
+        assert_eq!(
+            root.apply(AppAction::SetSplitRatio {
+                pane: c,
+                ratio: SplitRatio::HALF,
+            }),
+            Err(AppError::NoSplitDivider)
+        );
+        assert_eq!(
+            root.apply(AppAction::SetSplitRatio {
+                pane: PaneId::new(),
+                ratio: SplitRatio::HALF,
+            }),
+            Err(AppError::UnknownPane)
+        );
+        assert_eq!((root.pane_regions(), root.pane_dividers()), before);
+
+        // Collapsing the inner Split keeps the outer ratio; last-pane rules
+        // are unchanged.
+        root.apply(AppAction::ClosePane { id: c }).unwrap();
+        assert_eq!(root.pane_dividers().len(), 1);
+        assert_eq!(root.pane_dividers()[0].ratio, quarter);
+        assert_eq!(
+            root.pane_regions()[1].rect,
+            super::PaneRect {
+                x: 0.25,
+                y: 0.0,
+                width: 0.75,
+                height: 1.0,
+            }
+        );
     }
 
     #[test]
