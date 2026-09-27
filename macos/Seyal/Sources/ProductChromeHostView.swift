@@ -35,8 +35,10 @@ final class ProductChromeHostView: NSView {
     let centerColumn = NSView()
     var recoveryTimer: Timer?
     var recoveryTimerGeneration: UInt64 = 0
-    /// Rust recovery generation whose PerformAttempt is running on the
-    /// lifecycle queue; the effect stays queued in Rust until CompleteRecovery.
+    /// Rust recovery generation whose PerformAttempt is open on the lifecycle
+    /// queue or still completing on MainActor (adopt + CompleteRecovery).
+    /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
+    /// second open while PerformAttempt remains the pending Rust effect.
     var recoveryAttemptInFlight: UInt64?
     /// Blocking hello/attach runs here so the AppKit actor never becomes the
     /// lifecycle I/O executor.

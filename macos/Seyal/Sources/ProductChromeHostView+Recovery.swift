@@ -116,8 +116,15 @@ extension ProductChromeHostView {
     }
 
     func finishRecoveryAttempt(_ outcome: RuntimeRecoveryAttemptOutcome, generation: UInt64) {
-        if recoveryAttemptInFlight == generation {
-            recoveryAttemptInFlight = nil
+        // Keep the in-flight fence until CompleteRecovery replaces PerformAttempt.
+        // Clearing it before adopt let publishCurrentFrame → chrome reconcile →
+        // driveRecovery start a second open for the same effect (main-thread
+        // spin, empty Blocks, inactive composer).
+        let ownedInFlight = recoveryAttemptInFlight == generation
+        defer {
+            if ownedInFlight, recoveryAttemptInFlight == generation {
+                recoveryAttemptInFlight = nil
+            }
         }
         let current = seyal_app_snapshot(pane.appHandle).recovery_generation == generation
         var adopted = false
