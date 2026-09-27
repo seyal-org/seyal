@@ -202,6 +202,10 @@ pub struct RecoveryCoordinator {
     /// outstanding attempt only dispose handles — they must not advance the
     /// episode (AGENTS.md level-trigger / ADR-015).
     attempt_outstanding: bool,
+    /// Remaining episode budget captured when `PerformAttempt` was emitted.
+    /// Survives host Ack of the effect so `seyal_app_recovery_param` still
+    /// returns a non-zero open budget after claim.
+    claimed_remaining: Option<Duration>,
 }
 
 impl RecoveryCoordinator {
@@ -241,11 +245,22 @@ impl RecoveryCoordinator {
         self.blocked_launch = false;
         self.attempt_count = 0;
         self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.cancel();
     }
 
     pub fn has_outstanding_attempt(&self) -> bool {
         self.attempt_outstanding
+    }
+
+    /// Open budget for the claimed attempt, even after the host Acked the
+    /// `PerformAttempt` effect out of the pending queue.
+    pub fn claimed_attempt_remaining(&self) -> Option<Duration> {
+        if self.attempt_outstanding {
+            self.claimed_remaining
+        } else {
+            None
+        }
     }
 
     /// Host reports presentation progress after connect (SPEC-009 §10).
@@ -289,6 +304,8 @@ impl RecoveryCoordinator {
                 && launch == Some(LaunchResult::HelperMissing)
                 && self.launch_claimed
                 && !self.blocked_launch
+                && self.deadline.is_some()
+                && self.state.stage == RecoveryStage::StartingRuntime
             {
                 self.scheduled = false;
                 self.deadline = None;
@@ -301,6 +318,7 @@ impl RecoveryCoordinator {
             return self.dispose_opened(outcome);
         }
         self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         let Some(deadline) = self.deadline else {
             return self.dispose_opened(outcome);
         };
@@ -361,6 +379,7 @@ impl RecoveryCoordinator {
         self.scheduled = false;
         self.deadline = None;
         self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.begin();
         self.state.stage = stage;
     }
@@ -377,8 +396,9 @@ impl RecoveryCoordinator {
             return self.exhaust(generation);
         }
         self.attempt_count += 1;
-        self.attempt_outstanding = true;
         let remaining = deadline.saturating_sub(now);
+        self.attempt_outstanding = true;
+        self.claimed_remaining = Some(remaining);
         vec![RecoveryEffect::PerformAttempt {
             generation,
             remaining,
@@ -411,6 +431,7 @@ impl RecoveryCoordinator {
         self.scheduled = false;
         self.deadline = None;
         self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.stage = RecoveryStage::Reconstructing;
         Vec::new()
     }
@@ -422,6 +443,7 @@ impl RecoveryCoordinator {
         self.scheduled = false;
         self.deadline = None;
         self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.stage = RecoveryStage::Exhausted;
         Vec::new()
     }

@@ -87,11 +87,13 @@ extension ProductChromeHostView {
     func performRecoveryAttempt(generation: UInt64) {
         guard recoveryAttemptInFlight != generation else { return }
         recoveryAttemptInFlight = generation
-        // Claim the level-triggered PerformAttempt in Rust's pending queue
-        // before any MainActor hop. Adopt publishes a frame that re-enters
-        // driveRecovery; without this ack the same effect would open again.
-        ackRecovery()
+        // Capture the Rust-issued remaining budget BEFORE Ack. Acking pops
+        // PerformAttempt from the pending queue; reading after Ack used to
+        // return 0 and short-circuit every open to `.retryable` (no attach).
         let remainingMs = seyal_app_recovery_param(pane.appHandle)
+        // Claim the level-triggered PerformAttempt so adopt → frame →
+        // reconcile → driveRecovery cannot start a second open.
+        ackRecovery()
         let issuedAt = ProcessInfo.processInfo.systemUptime
         let executionIdentity = pane.inputSurface.requestedExecutionIdentity
         let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap

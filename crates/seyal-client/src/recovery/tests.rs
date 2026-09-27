@@ -434,3 +434,23 @@ fn duplicate_complete_without_outstanding_attempt_only_disposes() {
     assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
     assert!(!c.has_outstanding_attempt());
 }
+
+#[test]
+fn late_helper_missing_ignored_after_successful_connect() {
+    let mut c = RecoveryCoordinator::default();
+    let started = c.begin_episode(Duration::ZERO);
+    let RecoveryEffect::PerformAttempt { generation, .. } = started[0] else {
+        panic!("expected PerformAttempt");
+    };
+    let _ = c.complete_attempt(generation, AttemptOutcome::Connected, Duration::ZERO, None);
+    assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
+    let ignored = c.complete_attempt(
+        generation,
+        AttemptOutcome::EndpointMissing,
+        Duration::from_millis(1),
+        Some(LaunchResult::HelperMissing),
+    );
+    assert!(ignored.is_empty());
+    assert_eq!(c.state().stage, RecoveryStage::Reconstructing);
+    assert!(!c.blocked_launch());
+}

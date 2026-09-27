@@ -25,7 +25,7 @@ use super::allocate_handle;
 use decode::decode_action;
 use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, recovery_param,
+    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
     split_id,
 };
 
@@ -841,7 +841,7 @@ pub extern "C" fn seyal_app_recovery_param(handle: u64) -> u64 {
     APPS.with(|apps| {
         apps.borrow()
             .get(&handle)
-            .map(|state| recovery_param(state.root.snapshot().recovery_effect))
+            .map(|state| state.root.recovery_open_budget_millis())
             .unwrap_or(0)
     })
 }

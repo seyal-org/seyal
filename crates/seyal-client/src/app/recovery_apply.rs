@@ -53,6 +53,24 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Host open budget: pending `PerformAttempt` remaining, or the claimed
+    /// budget after Ack drained that effect.
+    pub(crate) fn recovery_open_budget_millis(&self) -> u64 {
+        match self.pending_recovery.first() {
+            Some(RecoveryEffect::PerformAttempt { remaining, .. }) => {
+                return remaining.as_millis() as u64;
+            }
+            Some(RecoveryEffect::Schedule { delay, .. }) => return delay.as_millis() as u64,
+            Some(RecoveryEffect::DisposeHandle(handle)) => return *handle,
+            Some(RecoveryEffect::LaunchHelper { generation }) => return *generation,
+            None => {}
+        }
+        self.recovery
+            .claimed_attempt_remaining()
+            .map(|remaining| remaining.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
     pub(super) fn cancel_recovery(&mut self) -> Result<(), AppError> {
         self.recovery.cancel();
         // Keep DisposeHandle effects so a cancelled episode still drops any

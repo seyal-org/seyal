@@ -309,3 +309,25 @@ fn claiming_perform_attempt_clears_effect_before_complete() {
         RecoveryStage::Reconstructing
     );
 }
+
+#[test]
+fn open_budget_survives_ack_of_perform_attempt() {
+    // Host must Ack PerformAttempt to stop re-entry, then still read a
+    // non-zero open budget. Reading only from the pending effect returns 0
+    // after Ack and exhausts recovery without ever opening.
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let before = root.recovery_open_budget_millis();
+    assert!(before > 0, "PerformAttempt must publish a remaining budget");
+    root.apply(AppAction::AckRecoveryEffect).unwrap();
+    assert_eq!(root.snapshot().recovery_effect, None);
+    assert_eq!(
+        root.recovery_open_budget_millis(),
+        before,
+        "claimed budget must survive Ack"
+    );
+    assert!(root.recovery.has_outstanding_attempt());
+}
