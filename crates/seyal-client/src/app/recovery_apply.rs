@@ -55,6 +55,7 @@ impl ApplicationRoot {
 
     /// Host open budget: pending `PerformAttempt` remaining, or the claimed
     /// budget after Ack drained that effect.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn recovery_open_budget_millis(&self) -> u64 {
         match self.pending_recovery.first() {
             Some(RecoveryEffect::PerformAttempt { remaining, .. }) => {
