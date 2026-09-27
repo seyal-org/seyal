@@ -122,6 +122,7 @@ pub enum ShellError {
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
+    CannotCloseBoundPane,
     ExecutionAlreadyBound,
     EmptyShell,
 }
@@ -140,6 +141,9 @@ impl ShellError {
             }
             Self::CannotCloseLastTab => "The last Tab cannot be closed.",
             Self::CannotCloseLastPane => "The last Pane cannot be closed.",
+            Self::CannotCloseBoundPane => {
+                "A Pane bound to an execution cannot be closed until execution disposition is available."
+            }
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
         }
@@ -202,7 +206,8 @@ pub struct ShellSnapshot {
     pub allows_tab_creation: bool,
     pub allows_pane_splitting: bool,
     /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close).
+    /// Pane would currently be accepted (the last Tab/Pane cannot close, and
+    /// neither can an execution-bound Pane).
     /// Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
@@ -398,7 +403,7 @@ impl ShellState {
             allows_tab_creation: self.allows_tab_creation,
             allows_pane_splitting: self.allows_pane_splitting,
             allows_tab_close: workspace.allows_tab_close(),
-            allows_pane_close: tab.allows_pane_close(),
+            allows_pane_close: tab.allows_focused_pane_close(),
         }
     }
 
@@ -518,8 +523,14 @@ impl ShellState {
         if !tab.allows_pane_close() {
             return Err(ShellError::CannotCloseLastPane);
         }
-        if !tab.panes.contains_key(&pane_id) {
+        let Some(pane) = tab.panes.get(&pane_id) else {
             return Err(ShellError::UnknownPane);
+        };
+        // Closing would orphan the bound execution's authority; what happens
+        // to that execution is the unaccepted provisioning/disposition
+        // contract (#994), so fail closed instead of inventing it here.
+        if pane.execution.is_some() {
+            return Err(ShellError::CannotCloseBoundPane);
         }
         let Some(root) = tab.root.removing(pane_id) else {
             return Err(ShellError::CannotCloseLastPane);
@@ -687,6 +698,16 @@ impl Tab {
     /// The last Pane of a Tab cannot be closed.
     fn allows_pane_close(&self) -> bool {
         self.panes.len() > 1
+    }
+
+    /// `ClosePane` of the focused Pane would be accepted: not the last Pane
+    /// and not bound to an execution.
+    fn allows_focused_pane_close(&self) -> bool {
+        self.allows_pane_close()
+            && self
+                .panes
+                .get(&self.focused)
+                .is_some_and(|pane| pane.execution.is_none())
     }
 }
 
@@ -896,6 +917,44 @@ mod tests {
         assert_eq!(
             shell.apply(ShellAction::ClosePane { id: original }),
             Err(ShellError::CannotCloseLastPane)
+        );
+    }
+
+    #[test]
+    fn execution_bound_pane_cannot_be_closed() {
+        let mut shell = seed_two_workspaces();
+        let bound = shell.snapshot().focused_pane;
+        shell
+            .apply(ShellAction::BindExecution {
+                pane: bound,
+                execution: ExecutionId::from_bytes([7; 16]),
+            })
+            .expect("bind");
+        shell
+            .apply(ShellAction::SplitFocused {
+                axis: SplitAxis::Right,
+            })
+            .expect("split");
+        let created = shell.snapshot().focused_pane;
+        assert!(shell.snapshot().allows_pane_close);
+        shell
+            .apply(ShellAction::FocusPane { id: bound })
+            .expect("focus bound");
+        assert!(!shell.snapshot().allows_pane_close);
+        assert_eq!(
+            shell.apply(ShellAction::ClosePane { id: bound }),
+            Err(ShellError::CannotCloseBoundPane)
+        );
+        assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
+        shell
+            .apply(ShellAction::ClosePane { id: created })
+            .expect("close unbound");
+        let snap = shell.snapshot();
+        assert_eq!(snap.layout, LayoutDescription::Single);
+        assert_eq!(snap.focused_pane, bound);
+        assert_eq!(
+            snap.panes[0].execution,
+            Some(ExecutionId::from_bytes([7; 16]))
         );
     }
 

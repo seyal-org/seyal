@@ -19,6 +19,7 @@ use crate::composer::{
     RuntimeComposerEligibility,
 };
 use crate::palette::{PaletteAction, PaletteCommand, PaletteError, PaletteSnapshot, PaletteState};
+use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
@@ -67,6 +68,7 @@ pub enum AppError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     UnknownBlock,
+    CannotCloseBoundPane,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -333,7 +335,10 @@ impl Default for ApplicationRoot {
 
 impl ApplicationRoot {
     pub fn new() -> Self {
-        let shell = ShellState::m001_local("local");
+        Self::with_shell(ShellState::m001_local("local"))
+    }
+
+    pub(crate) fn with_shell(shell: ShellState) -> Self {
         let pane = shell.snapshot().focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
@@ -359,6 +364,14 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             client: None,
         }
+    }
+
+    /// Active Tab's Pane regions (#923). The one live surface belongs to the
+    /// execution-bound Pane, or before any bind to the focused Pane (where
+    /// `Bind` will land); it is shown only while that Pane is focused.
+    pub fn pane_regions(&self) -> Vec<PaneRegion> {
+        let shell = self.shell.snapshot();
+        pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
     }
 
     pub fn fence(&self) -> AppFence {
@@ -401,7 +414,10 @@ impl ApplicationRoot {
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
         AppSnapshot {
             generation: self.snapshot_generation,
-            pane: shell.focused_pane,
+            // The fence Pane, not the focused one: host actions fenced from
+            // this snapshot must keep reaching the bound execution while
+            // another split leaf is focused.
+            pane: self.fence().pane,
             execution: self.authority.map(|bound| bound.execution),
             attachment: self.authority.map(|bound| bound.attachment),
             controller: self.authority.is_some_and(|bound| bound.controller),
@@ -1193,6 +1209,7 @@ fn close_tab_error(error: ShellError) -> AppError {
 fn close_pane_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
+        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
         _ => AppError::UnknownPane,
     }
 }

@@ -172,6 +172,31 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testProductionPaneTreeProjectsOneLiveFocusedRegion() throws {
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneRegion>.size, 40)
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let shell = seyal_app_shell(view.pane.appHandle)
+        XCTAssertEqual(shell.pane_count, 1)
+        let region = seyal_app_pane_region(view.pane.appHandle, 0)
+        XCTAssertEqual(region.pane_lo, shell.focused_pane_lo)
+        XCTAssertEqual(region.pane_hi, shell.focused_pane_hi)
+        XCTAssertEqual(region.flags, UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE))
+        XCTAssertEqual(seyal_app_pane_region(view.pane.appHandle, 1).size, 0, "out of range fails closed")
+
+        let regionView = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0"))
+        XCTAssertEqual(regionView.accessibilityValue() as? String, "focused")
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        // The single live leaf hosts the terminal surface across the whole
+        // center region, exactly as before multipane projection.
+        let live = try XCTUnwrap(view.pane.superview)
+        XCTAssertFalse(live.isHidden)
+        XCTAssertEqual(live.frame, regionView.frame)
+        XCTAssertGreaterThan(live.frame.width, 0)
+    }
+
+    @MainActor
     func testNestedProductChangeDuringReconcileStillHidesComposerForTui() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         let handle = view.pane.appHandle

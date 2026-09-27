@@ -32,7 +32,10 @@ final class ProductChromeHostView: NSView {
     private let recoveryLabel = NSTextField(labelWithString: "")
     private let leftItems = NSStackView()
     private let inspectorColumn = NSView()
-    private let centerColumn = NSView()
+    /// Rust-projected Pane regions (#923); the live surface sits in
+    /// `centerColumn.liveContent`.
+    private let centerColumn = PaneLayoutView()
+    private var liveContent: NSView { centerColumn.liveContent }
     private var recoveryTimer: Timer?
     private var lastSnapshotGeneration: UInt64 = .max
     private var lastEligibility: UInt16 = .max
@@ -159,10 +162,13 @@ final class ProductChromeHostView: NSView {
         // Transcript chrome sits under the Pane Metal compositor. Flow clears
         // the drawable to transparent and paints only Block-body clips, so
         // command headers remain AppKit while output glyphs composite on top.
-        centerColumn.addSubview(transcript)
-        centerColumn.addSubview(pane)
-        centerColumn.addSubview(composer)
-        centerColumn.addSubview(historyOverlay)
+        liveContent.addSubview(transcript)
+        liveContent.addSubview(pane)
+        liveContent.addSubview(composer)
+        liveContent.addSubview(historyOverlay)
+        centerColumn.onFocusPane = { [weak self] lo, hi in
+            self?.focusPaneRegion(lo: lo, hi: hi)
+        }
 
         addSubview(tabStrip)
         addSubview(left)
@@ -252,14 +258,14 @@ final class ProductChromeHostView: NSView {
             recoveryLabel.heightAnchor.constraint(equalToConstant: 1),
 
             centerColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
-            transcript.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor, constant: 20),
-            transcript.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor, constant: -20),
-            transcript.topAnchor.constraint(equalTo: centerColumn.topAnchor, constant: 16),
+            transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
+            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
+            transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            composer.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor, constant: -24),
+            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
+            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
             composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.bottomAnchor.constraint(equalTo: centerColumn.bottomAnchor, constant: -16),
+            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -282,10 +288,10 @@ final class ProductChromeHostView: NSView {
             pane.bottomAnchor.constraint(equalTo: transcript.bottomAnchor),
         ]
         paneFillsCenter = [
-            pane.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor),
-            pane.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor),
-            pane.topAnchor.constraint(equalTo: centerColumn.topAnchor),
-            pane.bottomAnchor.constraint(equalTo: centerColumn.bottomAnchor),
+            pane.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor),
+            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor),
+            pane.topAnchor.constraint(equalTo: liveContent.topAnchor),
+            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor),
         ]
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
@@ -414,6 +420,9 @@ final class ProductChromeHostView: NSView {
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildTabStrip(shell: shell)
+        centerColumn.apply(
+            PaneLayoutView.readRegions(appHandle: pane.appHandle, paneCount: Int(shell.pane_count))
+        )
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
@@ -787,6 +796,7 @@ final class ProductChromeHostView: NSView {
             tabStrip.layer?.backgroundColor = theme.container.cgColor
         }
         centerColumn.layer?.backgroundColor = theme.canvas.cgColor
+        centerColumn.apply(theme: theme)
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
         tabTitle.font = .systemFont(ofSize: theme.uiFontSize, weight: .semibold)
@@ -937,6 +947,19 @@ final class ProductChromeHostView: NSView {
 
     @objc private func focusPane(_ sender: NSButton) {
         applyIdentity(UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue), button: sender)
+    }
+
+    /// Pane-region click (#923): Rust validates the PaneId and owns focus.
+    private func focusPaneRegion(lo: UInt64, hi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+        action.target_execution_lo = lo
+        action.target_execution_hi = hi
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+        routeFocus()
     }
 
     @objc private func createTab() {
