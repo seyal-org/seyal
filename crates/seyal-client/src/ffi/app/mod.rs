@@ -25,8 +25,7 @@ use super::allocate_handle;
 use decode::decode_action;
 use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
-    split_id,
+    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
 pub use visual::{
