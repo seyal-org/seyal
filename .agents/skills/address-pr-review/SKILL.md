@@ -7,11 +7,11 @@ description: Seyal adapter for AI-SDLC review-stage remediation, adding GitHub P
 
 Follow the canonical generic procedure in `.sdlc/framework/skills/address-pr-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
-Use this only for an existing Seyal PR whose candidate lifecycle stage is `IN_REVIEW`. Unfinished accepted-scope implementation remains under `implement-issue`.
+Use this for an existing Seyal PR whose candidate lifecycle stage is `IN_REVIEW` or `CLOSED_UNMERGED`. Reopen or rebase a closed unmerged head on that same pull request. Unfinished accepted-scope implementation remains under `implement-issue`. A decision blocker keeps this pull request and names the other one.
 
 Apply only these Seyal-specific deltas:
 
-1. Map `merge_candidate_id` to the exact GitHub PR, current head SHA, owning Issue, deterministic human-owned branch, and modification authority. Read `candidate_lifecycle_stage` from `docs/engineering/ISSUE-PROTOCOL.md`: a draft PR is `IMPLEMENTATION_IN_PROGRESS`; a ready-for-review PR is `IN_REVIEW`. Do not change the draft flag.
+1. Map `merge_candidate_id` to the exact GitHub PR, current head SHA, owning Issue, deterministic human-owned branch, and modification authority. Read `candidate_lifecycle_stage` from `docs/engineering/ISSUE-PROTOCOL.md`: a draft PR is `IMPLEMENTATION_IN_PROGRESS`; a ready-for-review PR is `IN_REVIEW`; a closed unmerged PR that was not architecture-rejected is `CLOSED_UNMERGED`. Do not change the draft flag. Do not open a replacement PR.
 2. Fetch the **complete** unresolved review/comment set plus all required failing checks. Never fix only the newest comment.
 3. Build one remediation ledger, group duplicate symptoms by root cause, and fix the complete known in-scope blocker set on the **same PR/branch**. Never create a replacement implementation PR merely for remediation.
 4. Preserve Seyal architecture and hot-path invariants. A remediation that requires a new product/architecture/security authority decision stops and routes to that authority instead of being improvised in code.

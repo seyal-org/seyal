@@ -9,7 +9,7 @@ AI_SDLC_DIR="${ROOT}/.sdlc/framework"
 # Reviewed/pinned developer-tool inputs. Update only through a normal Seyal PR.
 XCODEBUILD_MCP_VERSION="2.7.0"
 AI_SDLC_REPO="https://github.com/mahboobmonnamd/ai-sdlc.git"
-AI_SDLC_COMMIT="21459b36b3ee351e35af9bfb613a8660033b7590"
+AI_SDLC_COMMIT="8d1cac09aef61bb3fb1431c35a114ef047aca12c"
 AI_SDLC_SKILLS=(
   project-context
   work-item-design

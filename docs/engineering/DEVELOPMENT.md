@@ -26,7 +26,7 @@ Default distributed-development unit:
 ```text
 one Ready Issue
 → one authenticated **human** GitHub owner (assignee when assignable; acknowledged Owner claim otherwise)
-→ one accepted plan comment on the Issue
+→ the Issue body is the plan
 → one deterministic <human-login>/issue/<number> branch
 → coding agent may act only as delegated tool/co-author
 → one isolated worktree

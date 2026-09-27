@@ -23,7 +23,7 @@ done
 grep -q 'XCODEBUILD_MCP_VERSION=' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP is not pinned"
 grep -q 'AI_SDLC_REPO=' scripts/bootstrap-dev.sh || fail "AI-SDLC repository is not declared"
 grep -Eq 'AI_SDLC_COMMIT="[0-9a-f]{40}"' scripts/bootstrap-dev.sh || fail "AI-SDLC must be pinned by full commit SHA"
-grep -q 'AI_SDLC_COMMIT="21459b36b3ee351e35af9bfb613a8660033b7590"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include merged deterministic review/plan-acceptance revision"
+grep -q 'AI_SDLC_COMMIT="8d1cac09aef61bb3fb1431c35a114ef047aca12c"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include the work-item-is-the-plan revision"
 grep -q '^AI_SDLC_SKILLS=(' scripts/bootstrap-dev.sh || fail "AI-SDLC skill manifest is missing"
 grep -q '^ensure_ai_sdlc()' scripts/bootstrap-dev.sh || fail "AI-SDLC materialization is missing"
 for generic_skill in project-context work-item-design implementation-planning development-readiness implementation verification pr-review address-pr-review; do
@@ -107,38 +107,34 @@ grep -Fq 'Project status (`Ready`, `In Progress`, and so on) is lifecycle metada
 grep -Fq 'Status never overrides the **human-owner rule**' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must preserve the external-owner fallback"
 grep -Fq 'single human owner record prevents two people from owning the same implementation Issue at once' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must make the owner record authoritative across contributors"
 grep -Fq 'branch is only that owner' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define human-namespaced branches as audit/resume backstops"
-grep -Fq '<!-- seyal-plan-acceptance -->' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define the accepted-plan comment"
-grep -Fq 'accepted_by' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must record accepted_by"
+grep -Fq 'The Issue body is the implementation plan' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must treat the Issue body as the plan"
+grep -Fq 'A separate plan comment is not required.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not require a separate plan comment"
 grep -Fq 'candidate_lifecycle_stage' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must define candidate lifecycle stage"
+grep -Fq 'CLOSED_UNMERGED' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must keep a closed unmerged candidate"
 grep -Fq 'A chat outline is not an implementation plan.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must reject a chat-only plan"
-grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must resolve the accepted-plan comment"
+grep -Fq 'The Issue body is the plan' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must use the Issue body as the plan"
+grep -Fq 'CLOSED_UNMERGED' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must resume a closed unmerged candidate"
 grep -Fq 'Refs` and `Part of` do not make a pull request the candidate.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not treat Refs or Part of as the implementation candidate"
 grep -Fq 'Do not open a pull request while accepted scope is incomplete.' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must not open a PR for unfinished scope"
 grep -Fq 'Do not open a pull request while accepted scope is incomplete.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not require a PR for unfinished scope"
-grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must require the accepted-plan comment"
-grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must name the acceptance comment"
-grep -Fq '<!-- seyal-plan -->' .agents/skills/implementation-planning/SKILL.md || fail "implementation-planning must post the proposed-plan comment"
+grep -Fq 'A separate plan comment is not required.' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must not require a separate plan comment"
+grep -Fq 'A separate plan comment is not required.' .agents/skills/issue-refinement/SKILL.md || fail "issue-refinement must not require a separate plan comment"
+grep -Fq 'Do not post a separate plan comment.' .agents/skills/implementation-planning/SKILL.md || fail "implementation-planning must not post a separate plan comment"
 grep -Fq 'ready-for-review PR is `IN_REVIEW`' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must map IN_REVIEW to ready-for-review"
+grep -Fq 'CLOSED_UNMERGED' .agents/skills/address-pr-review/SKILL.md || fail "address-pr-review must resume a closed unmerged candidate"
 if grep -Fq 'Confirm the implementation plan in chat.' docs/engineering/DEVELOPMENT.md \
   || grep -Fq 'Confirm the implementation plan in chat.' AGENTS.md \
   || grep -Fq 'Confirm the implementation plan in chat.' docs/engineering/ISSUE-PROTOCOL.md; then
-  fail "chat plan confirmation must not outrank the accepted-plan comment"
+  fail "chat plan confirmation must not replace the Issue body"
 fi
-grep -Fq 'collaborator-permission API' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must verify plan-comment authors with the collaborator-permission API"
-grep -Fq 'acceptance comment'"'"'s GitHub author must be the login in `accepted_by`' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must require the acceptance author to be accepted_by"
-grep -Fq 'Ignore every other marker comment.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must ignore marker comments from authors without write access"
-grep -Fq 'IssueComment.lastEditedAt' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must detect a body edit with IssueComment.lastEditedAt"
-grep -Fq 'Any non-null `lastEditedAt` makes that revision unresolvable.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must reject an edited plan comment"
-grep -Fq 'Do not use REST `updated_at` for this check.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not use updated_at to detect a body edit"
-grep -Fq 'A maintainer with write access posts both comments' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must say who posts a plan for an external owner"
-grep -Fq 'The same write-access human may author both' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must state whether self-acceptance is allowed"
-grep -Fq 'IssueComment.lastEditedAt' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must reject an edited plan comment"
-grep -Fq 'IssueComment.lastEditedAt' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must reject an edited plan comment"
-grep -Fq 'collaborator-permission API' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must check the acceptance comment author permission"
-grep -Fq 'collaborator-permission API' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must check the acceptance comment author permission"
-grep -Fq '→ accepted plan comment on the Issue' site/src/content/docs/developer/index.mdx || fail "Developer Guide must use the accepted-plan comment"
+if grep -Fq '<!-- seyal-plan-acceptance -->' docs/engineering/ISSUE-PROTOCOL.md \
+  || grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/implement-issue/SKILL.md \
+  || grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/development-readiness/SKILL.md; then
+  fail "a seyal-plan-acceptance comment must not be an implementation gate"
+fi
+grep -Fq '→ the Issue body is the plan' site/src/content/docs/developer/index.mdx || fail "Developer Guide must use the Issue body as the plan"
 if grep -Fq '→ confirmed plan' site/src/content/docs/developer/index.mdx; then
-  fail "Developer Guide still says the plan is confirmed without the acceptance comment"
+  fail "Developer Guide still says the plan is confirmed in chat"
 fi
 grep -Fq 'Exactly one human owns an implementation Issue at a time' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document single-human ownership"
 grep -Fq 'branch is only an audit/resume backstop for that human' site/src/content/docs/developer/index.mdx || fail "Developer Guide must not make the branch the ownership authority"

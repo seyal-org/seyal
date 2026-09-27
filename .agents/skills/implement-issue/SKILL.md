@@ -40,18 +40,22 @@ The work owner is always a human GitHub contributor.
 
 ## Accepted plan and candidate preflight
 
-Do not create or switch the implementation worktree/branch, generate files, or start production edits until the generic implementation preflight can resolve the exact current accepted plan and candidate state.
+Do not create or switch the implementation worktree/branch, generate files, or start production edits until the Issue is Ready and the candidate state is known.
 
-1. Resolve the Issue's exact accepted `plan_id + plan_revision` from the `<!-- seyal-plan-acceptance -->` comment in `docs/engineering/ISSUE-PROTOCOL.md`, including `plan_content_ref`, `accepted_by`, and `accepted_at`. Count that comment only when the collaborator-permission API reports that its GitHub author has write access or higher and that author is `accepted_by`. Read GraphQL `IssueComment.lastEditedAt` on the plan comment and the acceptance comment. Any non-null `lastEditedAt` makes that revision unresolvable. Do not use REST `updated_at` for that check. Ignore every other marker comment. A chat outline, related plan, latest plan, body-only `accepted_by` claim, or merely `PROPOSED` `<!-- seyal-plan -->` comment is not implementation authority.
-2. If the accepted plan is missing, stale, or no longer matches scope/architecture/dependencies, stop and route to `implementation-planning`, the human acceptance comment in `ISSUE-PROTOCOL.md`, then `development-readiness`. Do not repair the plan inside `implement-issue`.
-3. Re-state the accepted implementation slice and permanent production path before edits. Ask the user only when an unresolved product/architecture/authority decision remains; do not create a second ad-hoc plan in chat.
-4. Resolve the open implementation candidate defined in `docs/engineering/ISSUE-PROTOCOL.md` before creating a branch/worktree. `Refs` and `Part of` do not make a pull request the candidate. Read `candidate_lifecycle_stage` from that pull request's draft flag:
+1. The Issue body is the plan when it states the goal, scope, acceptance criteria, tests, and dependencies. A chat outline is not that plan. A separate plan comment is not required.
+2. If the Issue body lacks measurable acceptance or no longer matches scope, architecture, or dependencies, stop and route to `issue-refinement`, then `development-readiness`. Do not invent a second plan comment inside `implement-issue`.
+3. Re-state the implementation slice and permanent production path before edits. Ask the user only when an unresolved product/architecture/authority decision remains.
+4. Resolve the implementation candidate defined in `docs/engineering/ISSUE-PROTOCOL.md` before creating a branch/worktree. `Refs` and `Part of` do not make a pull request the candidate. Include a closed unmerged pull request on the Issue branch:
    - `NONE` → keep implementing on the branch. Do not open a pull request while accepted scope is incomplete. When it is complete, open one pull request ready for review;
    - same human owner + `IMPLEMENTATION_IN_PROGRESS` (an existing draft) → resume that exact candidate/branch; keep it a draft until accepted scope is complete, then mark that same PR ready for review;
    - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review`, then full `pr-review`; do not open a second PR;
+   - `CLOSED_UNMERGED` → reopen or rebase that same head. Review findings use `address-pr-review`. Do not re-implement it and do not open a second PR. A decision blocker names the other pull request and keeps this one;
+   - `REJECTED` → do not resume;
    - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.
    Only this skill may open the pull request or change it from draft to ready for review.
-5. New implementation begins only after the Issue is Ready, the accepted plan is current, the human owner claim is valid, and no conflicting candidate owns the same slice.
+5. New implementation begins only after the Issue is Ready, the human owner claim is valid, and no conflicting candidate owns the same slice.
+
+When the user asks what to do next, answer with one next action: the Issue or pull request, why it is next, and the concrete step.
 
 ## Failure remediation loop
 
@@ -93,7 +97,7 @@ Legacy implementation branches already created as `issue/<number>`, `issue/<numb
 
 Then apply only these Seyal-specific rules on top of the generic procedure:
 
-1. The GitHub Issue must already be **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`, with the exact current accepted `plan_id + plan_revision` and acceptance evidence resolvable. If scope, authority, dependencies, acceptance, or governing architecture changed materially, route through `implementation-planning` → project-defined plan acceptance → `development-readiness` before further production edits.
+1. The GitHub Issue must already be **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. The Issue body is the plan. If scope, authority, dependencies, acceptance, or governing architecture changed materially, route through `issue-refinement` and `development-readiness` before further production edits.
 2. Use one Issue → one sole **human GitHub owner** → one isolated worktree → deterministic `<human-login>/issue/<number>` → one scoped PR. Prefer sole assignment when assignable; otherwise use the acknowledged external-owner claim. Coding agents may act on behalf of that human and may be credited as co-authors/tooling provenance; they never become the ownership identity. When the work is a GitHub sub-issue slice, claim and branch that sub-issue only after the parent/slice overlap check above passes; do not duplicate ownership of the same implementation slice. If the user asked for a parent end-to-end outcome that still has multiple sub-issues, implement the claimed slice Issue only and keep other slices on their own Issues/PRs.
 3. Before implementation, classify the work as **production** or **exploratory**. Mergeable Issue branches are production only. A spike/prototype/POC must use an explicitly isolated non-mergeable branch/worktree and must never be promoted wholesale into `master`.
 4. MVP is valid only when it is a narrow slice of the permanent architecture. Never add fake UI/data, temporary VT/renderer/runtime, duplicate state, alternate implementation, compatibility shim, feature-flag POC, or parallel old/new production path merely to demonstrate progress or bridge an unready dependency.

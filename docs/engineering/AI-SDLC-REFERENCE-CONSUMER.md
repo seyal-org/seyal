@@ -11,10 +11,10 @@ This is **reference-consumer integration evidence**, not the model/evaluation be
 Seyal consumes AI-SDLC `main` at exact commit:
 
 ```text
-21459b36b3ee351e35af9bfb613a8660033b7590
+8d1cac09aef61bb3fb1431c35a114ef047aca12c
 ```
 
-This pin contains the merged deterministic review-routing work from AI-SDLC PR #13, the validator correction from #19, plan-acceptance authority/revision work from #18, and resumability/candidate validation from #20. It introduces `implementation-planning` and `address-pr-review`, makes `pr-review` the single generic review/re-review entrypoint, removes generic `code-review`, requires implementation to use the exact current accepted plan, and validates resume against plan/claim/candidate state.
+This pin contains AI-SDLC PR #22. The work item is the plan. A separate plan acceptance record is optional. A closed unmerged candidate that was not architecture-rejected stays the candidate. `pr-review` remains the single generic review entrypoint.
 
 The pin is developer tooling only and is materialized by `make bootstrap-agents` under ignored `.sdlc/framework/`. Product build/test/runtime paths do not depend on it.
 
@@ -24,8 +24,8 @@ The pin is developer tooling only and is materialized by `make bootstrap-agents`
 | --- | --- | --- |
 | `project-context` | AI-SDLC `project-context` | Seyal context/index + authority chain |
 | `issue-refinement` | AI-SDLC `work-item-design` | GitHub Issue fields, milestone frontier, terminal evidence classification, parent/sub-issue slice mapping |
-| `implementation-planning` | AI-SDLC `implementation-planning` | permanent terminal architecture path, Seyal evidence/domain gates; never claims the Issue or accepts the plan |
-| `development-readiness` | AI-SDLC `development-readiness` | exact accepted plan + `ISSUE-PROTOCOL.md` Ready checklist and architecture triggers |
+| `implementation-planning` | AI-SDLC `implementation-planning` | optional; only when the Issue body does not yet state the production path |
+| `development-readiness` | AI-SDLC `development-readiness` | Issue body plus `ISSUE-PROTOCOL.md` Ready checklist and architecture triggers |
 | `implement-issue` | AI-SDLC `implementation` | human GitHub owner, deterministic branch/worktree, same-candidate resume, repository/domain gates |
 | `verification` | AI-SDLC `verification` | Seyal Issue/candidate criterion evidence and repository/domain gates |
 | `pr-review` | AI-SDLC `pr-review` | full-candidate terminal architecture/hot-path/evidence merge gates |
@@ -40,40 +40,34 @@ Seyal intentionally does not add separate local `work-item-design` or `implement
 
 ```text
 issue-refinement
-  → AI-SDLC work-item-design
-implementation-planning
-  → PROPOSED plan_id + plan_revision
-human seyal-plan-acceptance comment (ISSUE-PROTOCOL.md)
+  → the Issue body is the plan
 development-readiness
-  → READY only with exact accepted plan + Seyal Ready gates
+  → READY from that body plus Seyal Ready gates
 implement-issue
-  → NEW or same authorized IMPLEMENTATION_IN_PROGRESS candidate
+  → NEW, or the same authorized candidate, including CLOSED_UNMERGED
 pr-review
   → full current-candidate review
   ├─ READY_TO_MERGE
-  └─ CHANGES_REQUIRED → address-pr-review → full pr-review
+  ├─ CHANGES_REQUIRED → address-pr-review → full pr-review
+  └─ BLOCKED_BY_DECISION → resolve the other decision, keep this candidate
 ```
 
-A proposed plan is not implementation authority. Plan acceptance is distinct from planning. Seyal must never substitute a chat outline, latest plan, or related plan for the exact accepted `plan_id + plan_revision`.
+A chat outline is not the plan. A separate plan comment is not required.
 
 ## Reference scenario 1 — work-item design, planning and readiness
 
-`issue-refinement` produces one planning-ready GitHub Issue with accepted outcome, scope, acceptance, dependencies, ownership boundary and required evidence. It then hands off to `implementation-planning`, not directly to implementation.
-
-`implementation-planning` inspects only the code/context needed to define the permanent production path, records tests/evidence/failure paths and returns a durable **PROPOSED** plan. It does not claim the Issue, create a branch, edit production code or accept the plan.
-
-Only a `<!-- seyal-plan-acceptance -->` comment whose GitHub author is `accepted_by` and has write access or higher may accept that exact plan revision. `development-readiness` then applies the generic readiness gate plus Seyal's Ready checklist, including that comment.
+`issue-refinement` produces one GitHub Issue whose body states outcome, scope, acceptance, dependencies, ownership boundary, and required evidence. That body is the plan. `development-readiness` applies the generic readiness gate plus Seyal's Ready checklist. `implementation-planning` runs only when the production path is still missing from the Issue. It does not claim the Issue or start production work.
 
 ## Reference scenario 2 — implementation and same-candidate continuation
 
 `implement-issue` maps the generic implementation preflight onto GitHub:
 
-- resolve the exact accepted plan from the `<!-- seyal-plan-acceptance -->` comment;
+- use the Issue body as the plan;
 - establish exactly one human GitHub owner;
-- resolve any open candidate for the same Issue before branch/worktree creation;
+- resolve the candidate for the same Issue, including a closed unmerged head, before branch/worktree creation;
 - do not open a pull request while accepted scope is incomplete;
 - treat an existing draft PR as `IMPLEMENTATION_IN_PROGRESS` and resume it rather than create another PR;
-- treat a ready-for-review PR as `IN_REVIEW` and route review/check remediation to `address-pr-review` on that same PR;
+- treat a ready-for-review PR as `IN_REVIEW` and a closed unmerged PR as `CLOSED_UNMERGED`; route review findings to `address-pr-review` on that same PR;
 - block on `UNKNOWN`, conflicting ownership or multiple active candidates.
 
 A correct implementation handoff is implemented-for-review on a concrete candidate, never a self-issued verification/merge verdict.

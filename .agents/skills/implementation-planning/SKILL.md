@@ -14,7 +14,7 @@ For Seyal, apply only these project-specific deltas:
 3. The plan must name the permanent production path and authoritative state owner. Reject temporary VT/renderer/runtime paths, duplicate state, compatibility bridges, fake-data paths, or architecture-by-precedent.
 4. Map acceptance to the concrete Seyal evidence that applies: unit/integration/fixture/conformance/fuzz/failure/performance/security/native UI/accessibility/docs gates. Do not require irrelevant specialist work.
 5. If the plan exposes an unresolved product/architecture/trust-boundary decision, route to the owning authority/`architecture-change`. If feasibility is unknown, route to an isolated non-mergeable spike.
-6. Post the durable `PROPOSED` plan as a new `<!-- seyal-plan -->` Issue comment under `docs/engineering/ISSUE-PROTOCOL.md`, with `plan_id: issue-<number>` and the next `plan_revision`, from a GitHub account that has write access or higher. Do not edit an older plan comment. Do not post `<!-- seyal-plan-acceptance -->` and do not mark the Issue Ready. A marker comment from any other author does not count.
-7. Handoff to the human acceptance comment in `ISSUE-PROTOCOL.md`. Only after that exact revision is accepted may `development-readiness` mark the Issue Ready.
+6. Use this skill only when the Issue body does not yet state the permanent production path. Put that path into the Issue through refinement. Do not post a separate plan comment. Do not mark the Issue Ready.
+7. Handoff to `development-readiness`. The Issue body is the plan.
 
 If generic planning behavior is insufficient, fix the reusable rule in `ai-sdlc`; do not duplicate the generic planner here.

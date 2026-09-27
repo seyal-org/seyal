@@ -68,7 +68,7 @@ Seyal uses an exclusive active-work claim:
 fresh Ready Issue
 → authenticated **human** GitHub owner
 → exactly one human owner (sole assignee when assignable; otherwise maintainer-acknowledged `Owner: @login` claim)
-→ accepted plan comment on the Issue
+→ Issue body is the plan
 → deterministic remote branch <human-login>/issue/<number>
 → coding agent may act only as delegated tool/co-author
 → isolated worktree
@@ -78,7 +78,7 @@ fresh Ready Issue
 
 If another human already owns the Issue, assignment/owner-claim records conflict, the human owner identity cannot be established, or `<human-login>/issue/<number>` already exists for an unrequested resume, **STOP before production work** and report the collision. Never clear or steal another contributor's assignment. Coding-agent/bot identities (Cursor, Codex, Claude Code, Copilot, or similar) are tools, not Seyal work owners. They may be credited as co-authors/tooling provenance, but must not replace the human owner record, branch owner, PR owner, durable handoff identity, or independent reviewer. Project status fields are lifecycle metadata, not an ownership lock.
 
-The accepted plan is the Issue comment defined in `docs/engineering/ISSUE-PROTOCOL.md`. A chat outline is not that record.
+The Issue body is the plan, as defined in `docs/engineering/ISSUE-PROTOCOL.md`. A chat outline is not that record. A separate plan comment is not required.
 
 New implementation branches are named `<human-login>/issue/<number>`; agent/vendor namespaces are forbidden. Agent assistance may be credited as tooling provenance or valid co-authorship, but required owner/reviewer records stay human. See `ISSUE-PROTOCOL.md` for external-contributor owner claims, handoff, legacy-branch disposition, and attribution details.
 
