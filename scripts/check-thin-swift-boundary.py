@@ -14,7 +14,6 @@ SOURCES = ROOT / "macos" / "Seyal" / "Sources"
 
 # KEEP_NATIVE_GLUE may still mention leftover types. New host files are always scanned.
 DEPRECATED_ALLOWLIST = {
-    "RuntimeLifecycleRecoveryCoordinator.swift",
     "RustDisplayBridge.swift",
     "MetalSurfaceView.swift",
     "MetalTerminalRenderer.swift",
@@ -33,10 +32,25 @@ PRODUCT_AUTHORITY = (
     "SeyalShellPreviewFactory",
     "SeyalShellProductionFactory",
     "PanePresentationSession",
-    "ComposerRequestCorrelation",
     "enum InspectorMode",
     "enum LeftPanelMode",
     "func appendCommand(",
+    # Dead remnant deleted in #1020/E7; keep scanning so a non-allowlisted host
+    # file cannot reintroduce the portable composer-correlation product type.
+    "ComposerRequestCorrelation",
+)
+
+# Runtime recovery policy is Rust-owned (#1065, ADR-015). Scanned in every host
+# file, including the deprecated allowlist, so no Swift episode owner returns.
+RECOVERY_POLICY = (
+    "RuntimeLifecycleRecoveryCoordinator",
+    "ReconnectReconstructionState",
+    "ReconnectReconstructionStage",
+    "RuntimeContinuityIdentity",
+    "retryDelays",
+    "episodeDeadline",
+    "maximumAttempts",
+    "launchClaimed",
 )
 
 
@@ -50,10 +64,16 @@ def main() -> int:
         if name not in present:
             errors.append(f"missing required thin-host source: {name}")
     for path in sorted(SOURCES.glob("*.swift")):
-        if path.name in DEPRECATED_ALLOWLIST:
-            continue
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(ROOT)
+        for token in RECOVERY_POLICY:
+            if token in text:
+                errors.append(
+                    f"{rel} owns Runtime recovery policy token {token!r}; "
+                    "the Rust RecoveryCoordinator is the sole owner"
+                )
+        if path.name in DEPRECATED_ALLOWLIST:
+            continue
         for token in PRODUCT_AUTHORITY:
             if token in text:
                 errors.append(f"{rel} introduces portable product authority token {token!r}")
