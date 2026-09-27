@@ -101,7 +101,7 @@ fn explicit_raw_replaces_flow_and_tui_exit_returns_to_it() {
 }
 
 #[test]
-fn unsupported_eligibility_selects_raw_until_a_trusted_prompt_returns() {
+fn unsupported_eligibility_keeps_the_flow_composer() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);
     let execution = root.snapshot().execution;
@@ -111,26 +111,21 @@ fn unsupported_eligibility_selects_raw_until_a_trusted_prompt_returns() {
         revision: 1,
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
-    assert!(root.snapshot().composer.unwrap().blocks.is_empty());
+    let flow = root.snapshot();
+    assert_eq!(flow.eligibility, PresentationEligibility::Flow);
+    assert!(flow.composer_eligible);
+    let composer = flow.composer.unwrap();
+    assert_eq!(composer.mode, ComposerMode::Available);
+    assert!(composer.blocks.is_empty());
 
     refresh(&mut root, true);
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Tui);
     assert_eq!(root.snapshot().execution, execution);
     refresh(&mut root, false);
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
-
-    root.apply(AppAction::ApplyRuntimeComposerStatus {
-        fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Available),
-        revision: 2,
-    })
-    .unwrap();
-    let flow = root.snapshot();
-    assert_eq!(flow.eligibility, PresentationEligibility::Flow);
-    assert!(flow.composer_eligible);
-    assert_eq!(flow.execution, execution);
-    assert_eq!(flow.composer.unwrap().mode, ComposerMode::Available);
+    let returned = root.snapshot();
+    assert_eq!(returned.eligibility, PresentationEligibility::Flow);
+    assert!(returned.composer_eligible);
+    assert_eq!(returned.execution, execution);
 }
 
 #[test]
@@ -193,30 +188,28 @@ fn reconnect_refresh_restores_one_presentation_and_rejects_a_second_bind() {
 }
 
 #[test]
-fn cleared_eligibility_does_not_leave_raw_and_stale_revision_is_ignored() {
+fn composer_eligibility_does_not_enter_or_leave_explicit_raw() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);
-    root.apply(AppAction::ApplyRuntimeComposerStatus {
+    root.apply(AppAction::SelectRestingPresentation {
         fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Unsupported),
-        revision: 3,
+        raw: true,
     })
     .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
-    root.apply(AppAction::ApplyRuntimeComposerStatus {
-        fence: root.fence(),
-        eligibility: Some(RuntimeComposerEligibility::Available),
-        revision: 1,
-    })
-    .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
-    root.apply(AppAction::ApplyRuntimeComposerStatus {
-        fence: root.fence(),
-        eligibility: None,
-        revision: 4,
-    })
-    .unwrap();
-    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    for (eligibility, revision) in [
+        (Some(RuntimeComposerEligibility::Unsupported), 1),
+        (Some(RuntimeComposerEligibility::Available), 2),
+        (None, 3),
+        (Some(RuntimeComposerEligibility::Busy), 4),
+    ] {
+        root.apply(AppAction::ApplyRuntimeComposerStatus {
+            fence: root.fence(),
+            eligibility,
+            revision,
+        })
+        .unwrap();
+        assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+    }
 }
 
 #[test]

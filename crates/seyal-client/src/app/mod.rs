@@ -373,9 +373,6 @@ pub struct ApplicationRoot {
     resting: PresentationMode,
     /// User asked for Raw until they ask to re-evaluate.
     explicit_raw: bool,
-    /// Latest accepted Runtime structured-eligibility publication.
-    structured_eligibility: Option<RuntimeComposerEligibility>,
-    structured_revision: Option<u64>,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -418,8 +415,6 @@ impl ApplicationRoot {
             alternate_screen: false,
             resting: PresentationMode::Flow,
             explicit_raw: false,
-            structured_eligibility: None,
-            structured_revision: None,
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
