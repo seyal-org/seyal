@@ -124,6 +124,16 @@ if grep -Fq 'Confirm the implementation plan in chat.' docs/engineering/DEVELOPM
   || grep -Fq 'Confirm the implementation plan in chat.' docs/engineering/ISSUE-PROTOCOL.md; then
   fail "chat plan confirmation must not outrank the accepted-plan comment"
 fi
+grep -Fq 'collaborator-permission API' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must verify plan-comment authors with the collaborator-permission API"
+grep -Fq 'acceptance comment'"'"'s GitHub author must be the login in `accepted_by`' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must require the acceptance author to be accepted_by"
+grep -Fq 'Ignore every other marker comment.' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must ignore marker comments from authors without write access"
+grep -Fq 'Minimizing or hiding the comment may bump `updated_at`' docs/engineering/ISSUE-PROTOCOL.md || fail "Issue protocol must not treat minimize or hide as a body edit"
+grep -Fq 'collaborator-permission API' .agents/skills/implement-issue/SKILL.md || fail "implement-issue must check the acceptance comment author permission"
+grep -Fq 'collaborator-permission API' .agents/skills/development-readiness/SKILL.md || fail "development-readiness must check the acceptance comment author permission"
+grep -Fq '→ accepted plan comment on the Issue' site/src/content/docs/developer/index.mdx || fail "Developer Guide must use the accepted-plan comment"
+if grep -Fq '→ confirmed plan' site/src/content/docs/developer/index.mdx; then
+  fail "Developer Guide still says the plan is confirmed without the acceptance comment"
+fi
 grep -Fq 'Exactly one human owns an implementation Issue at a time' site/src/content/docs/developer/index.mdx || fail "Developer Guide must document single-human ownership"
 grep -Fq 'branch is only an audit/resume backstop for that human' site/src/content/docs/developer/index.mdx || fail "Developer Guide must not make the branch the ownership authority"
 

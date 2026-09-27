@@ -134,7 +134,7 @@ Every implementation Issue must state:
 
 ## Accepted implementation plan
 
-A chat outline is not an implementation plan. The durable plan for an implementation Issue is two GitHub Issue comments. Each revision is a new comment. Do not edit a plan or acceptance comment after it is posted. If GitHub reports `updated_at` later than `created_at`, that comment is not a resolvable revision.
+A chat outline is not an implementation plan. The durable plan for an implementation Issue is two GitHub Issue comments. Each revision is a new comment. Do not edit a plan or acceptance comment after it is posted. A later `updated_at` invalidates the revision only when the comment body changed. Minimizing or hiding the comment may bump `updated_at` without changing the body, and that does not invalidate the revision.
 
 `plan_id` is `issue-<number>`. `plan_revision` is a positive integer. The first proposal is `1`. A refresh keeps `plan_id` and uses the next integer.
 
@@ -158,7 +158,11 @@ accepted_by: @<human-login>
 accepted_at: <UTC timestamp>
 ```
 
-Technical authority for that comment is a human GitHub account with write access to this repository. Coding-agent and bot accounts are not technical authority and must not be `accepted_by`. An agent may post the acceptance comment only when that human explicitly directs the exact acceptance; the agent must not accept a plan on its own. The newest acceptance comment whose `plan_content_ref` still matches an unedited `<!-- seyal-plan -->` comment with the same `plan_id` and `plan_revision` is the accepted-plan pointer. A `PROPOSED` comment without that pointer is not acceptance.
+A `<!-- seyal-plan -->` or `<!-- seyal-plan-acceptance -->` comment counts only when its GitHub author has write access or higher on this repository (`write`, `maintain`, or `admin`). Resolvers check that with the collaborator-permission API. They do not trust a permission claim written in the comment body. Ignore every other marker comment.
+
+The acceptance comment's GitHub author must be the login in `accepted_by`. An agent posts that comment only from that human's authenticated GitHub account, and only when that human directs the exact acceptance. The agent must not accept a plan on its own and must not post it from a bot or from a different account. Coding-agent and bot accounts are not technical authority and must not be `accepted_by`.
+
+The newest qualifying acceptance comment whose `plan_content_ref` still matches an unedited `<!-- seyal-plan -->` comment with the same `plan_id` and `plan_revision`, and whose author is `accepted_by`, is the accepted-plan pointer. A `PROPOSED` comment without that pointer is not acceptance.
 
 `implementation-planning` may post only the `<!-- seyal-plan -->` comment. It must not post `<!-- seyal-plan-acceptance -->` and must not mark the Issue Ready.
 
@@ -193,7 +197,7 @@ An Issue is Ready only when all are true:
 - [ ] documentation impact is classified
 - [ ] no unresolved architecture question remains
 - [ ] the mergeable implementation is a permanent production path, not a POC/spike/temporary parallel implementation
-- [ ] the exact plan revision is accepted by a `<!-- seyal-plan-acceptance -->` comment (`plan_content_ref`, `accepted_by`, and `accepted_at`). A chat outline or a `PROPOSED` plan comment alone is not acceptance
+- [ ] the exact plan revision is accepted by a `<!-- seyal-plan-acceptance -->` comment (`plan_content_ref`, `accepted_by`, and `accepted_at`) whose GitHub author is `accepted_by` and has write access or higher, checked with the collaborator-permission API. A chat outline, a body-only `accepted_by` claim, or a `PROPOSED` plan comment alone is not acceptance
 
 If any item is false, return the Issue to Refinement or Blocked. An agent must not silently fill the gap.
 

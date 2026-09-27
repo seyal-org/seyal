@@ -62,7 +62,7 @@ A proposed plan is not implementation authority. Plan acceptance is distinct fro
 
 `implementation-planning` inspects only the code/context needed to define the permanent production path, records tests/evidence/failure paths and returns a durable **PROPOSED** plan. It does not claim the Issue, create a branch, edit production code or accept the plan.
 
-Only the human `<!-- seyal-plan-acceptance -->` comment in `ISSUE-PROTOCOL.md` may accept that exact plan revision. `development-readiness` then applies the generic readiness gate plus Seyal's Ready checklist, including that comment.
+Only a `<!-- seyal-plan-acceptance -->` comment whose GitHub author is `accepted_by` and has write access or higher may accept that exact plan revision. `development-readiness` then applies the generic readiness gate plus Seyal's Ready checklist, including that comment.
 
 ## Reference scenario 2 — implementation and same-candidate continuation
 
