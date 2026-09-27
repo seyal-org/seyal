@@ -134,7 +134,7 @@ Every implementation Issue must state:
 
 ## Accepted implementation plan
 
-A chat outline is not an implementation plan. The durable plan for an implementation Issue is two GitHub Issue comments. Each revision is a new comment. Do not edit a plan or acceptance comment after it is posted. A later `updated_at` invalidates the revision only when the comment body changed. Minimizing or hiding the comment may bump `updated_at` without changing the body, and that does not invalidate the revision.
+A chat outline is not an implementation plan. The durable plan for an implementation Issue is two GitHub Issue comments. Each revision is a new comment. Do not edit a plan or acceptance comment after it is posted. Resolvers read the GraphQL field `IssueComment.lastEditedAt`. It is non-null only when the comment body was edited. Minimizing or hiding the comment does not set it. Any non-null `lastEditedAt` makes that revision unresolvable. Do not use REST `updated_at` for this check.
 
 `plan_id` is `issue-<number>`. `plan_revision` is a positive integer. The first proposal is `1`. A refresh keeps `plan_id` and uses the next integer.
 
@@ -162,7 +162,11 @@ A `<!-- seyal-plan -->` or `<!-- seyal-plan-acceptance -->` comment counts only 
 
 The acceptance comment's GitHub author must be the login in `accepted_by`. An agent posts that comment only from that human's authenticated GitHub account, and only when that human directs the exact acceptance. The agent must not accept a plan on its own and must not post it from a bot or from a different account. Coding-agent and bot accounts are not technical authority and must not be `accepted_by`.
 
-The newest qualifying acceptance comment whose `plan_content_ref` still matches an unedited `<!-- seyal-plan -->` comment with the same `plan_id` and `plan_revision`, and whose author is `accepted_by`, is the accepted-plan pointer. A `PROPOSED` comment without that pointer is not acceptance.
+The newest qualifying acceptance comment whose `plan_content_ref` still matches a `<!-- seyal-plan -->` comment with null `lastEditedAt` and the same `plan_id` and `plan_revision`, and whose author is `accepted_by`, is the accepted-plan pointer. A `PROPOSED` comment without that pointer is not acceptance.
+
+The same write-access human may author both the proposed plan and the acceptance comment. That records the exact revision before implementation. It is not independent pull-request review. Independent review remains the human review required before merge.
+
+An external contributor who cannot be assigned does not have write access, so that person cannot author either comment. A maintainer with write access posts both comments for that Issue. `accepted_by` is that maintainer. The external contributor remains the Issue owner through the acknowledged `Owner: @login` claim.
 
 `implementation-planning` may post only the `<!-- seyal-plan -->` comment. It must not post `<!-- seyal-plan-acceptance -->` and must not mark the Issue Ready.
 
