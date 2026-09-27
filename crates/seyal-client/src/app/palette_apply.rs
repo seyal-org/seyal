@@ -46,11 +46,12 @@ impl ApplicationRoot {
     pub(super) fn palette_snapshot(&self) -> PaletteSnapshot {
         let shell = self.shell.snapshot();
         let chrome = self.chrome.snapshot(&shell, &self.focused_blocks());
-        self.palette.snapshot(
+        self.palette.snapshot_with_resting(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
+            self.resting_palette_choice(),
         )
     }
 
@@ -58,11 +59,12 @@ impl ApplicationRoot {
         self.require_fence(fence)?;
         let shell = self.shell.snapshot();
         let chrome = self.chrome.snapshot(&shell, &self.focused_blocks());
-        let command = self.palette.resolve(
+        let command = self.palette.resolve_with_resting(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
+            self.resting_palette_choice(),
         );
         let Some(command) = command else {
             return Err(palette_error(PaletteError::NoSelection));
@@ -91,6 +93,7 @@ impl ApplicationRoot {
             PaletteCommand::SetInspectorMode(mode) => self.set_inspector_mode(mode),
             PaletteCommand::OpenAttention(id) => self.open_attention(fence, id),
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
+            PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
         }
     }
 }

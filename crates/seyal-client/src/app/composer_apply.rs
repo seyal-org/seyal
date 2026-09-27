@@ -138,7 +138,22 @@ impl ApplicationRoot {
                 eligibility,
                 revision,
             })
-            .map(|_| ())
-            .map_err(composer_error)
+            .map_err(composer_error)?;
+        if self
+            .structured_revision
+            .is_some_and(|current| revision < current)
+        {
+            return Ok(());
+        }
+        self.structured_revision = Some(revision);
+        // A cleared publication is not a new eligibility fact. Keep the
+        // resting mode until Runtime publishes one again.
+        if eligibility.is_none() {
+            self.structured_eligibility = None;
+            return Ok(());
+        }
+        self.structured_eligibility = eligibility;
+        self.recompute_resting();
+        self.derive_presentation(self.alternate_screen)
     }
 }

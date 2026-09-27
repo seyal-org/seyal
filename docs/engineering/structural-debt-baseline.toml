@@ -62,6 +62,12 @@ acknowledged_loc = 856
 issue = 1020
 reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production composer reducer stays under review_loc. Ceiling matches rustfmt-normalized LOC after the split."
 
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 799
+issue = 867
+reason = "Command enumeration stays one palette module. #867 adds the bound Pane's explicit Raw / Return to Flow choice beside the existing shell and chrome commands; splitting that list would let the host invent a second command set."
+
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
