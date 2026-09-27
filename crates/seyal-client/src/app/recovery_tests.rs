@@ -331,3 +331,41 @@ fn open_budget_survives_ack_of_perform_attempt() {
     );
     assert!(root.recovery.has_outstanding_attempt());
 }
+
+#[test]
+fn duplicate_complete_preserves_queued_schedule() {
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::AckRecoveryEffect).unwrap(); // host claims attempt
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::Retryable,
+        now: Duration::ZERO,
+        launch: None,
+    })
+    .unwrap();
+    assert!(matches!(
+        root.snapshot().recovery_effect,
+        Some(RecoveryEffect::Schedule { .. })
+    ));
+    // Duplicate completion for the same generation before the host drains Schedule.
+    let _ = root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::Retryable,
+        now: Duration::from_millis(1),
+        launch: None,
+    });
+    assert!(
+        matches!(
+            root.snapshot().recovery_effect,
+            Some(RecoveryEffect::Schedule { .. })
+        ),
+        "duplicate completion dropped the queued Schedule: effect={:?} stage={:?}",
+        root.snapshot().recovery_effect,
+        root.snapshot().recovery_stage
+    );
+}

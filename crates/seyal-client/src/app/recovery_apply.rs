@@ -19,16 +19,21 @@ impl ApplicationRoot {
         launch: Option<LaunchResult>,
     ) -> Result<(), AppError> {
         let stale = generation != self.recovery.state().generation;
+        let had_outstanding = self.recovery.has_outstanding_attempt();
         let effects = self
             .recovery
             .complete_attempt(generation, outcome, now, launch);
-        if stale {
-            // A late completion may only dispose its own handle; the current
-            // episode's queued effects stay behind that disposal.
+        if stale || !had_outstanding {
+            // Stale-generation or duplicate/late current-generation completion:
+            // dispose only. Never replace a queued Schedule/PerformAttempt the
+            // coordinator still expects the host to drain (ADR-015).
             let current = std::mem::take(&mut self.pending_recovery);
             self.pending_recovery = effects;
             self.pending_recovery.extend(current);
-            return Err(AppError::StaleRecoveryGeneration);
+            if stale {
+                return Err(AppError::StaleRecoveryGeneration);
+            }
+            return Ok(());
         }
         self.pending_recovery = effects;
         Ok(())
