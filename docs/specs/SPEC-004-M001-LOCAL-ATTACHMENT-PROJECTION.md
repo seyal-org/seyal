@@ -2,8 +2,8 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) accepted 2026-09-26 via PR #1060 (#865).
-- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #865 (§8.1 ViewportLineIds)
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) is **proposed** under Issue #1083 (PR #1060) and is normative only on that Issue's acceptance. #865 consumes the accepted text; it does not own the amendment.
+- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
 - **Proposed M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
@@ -147,7 +147,7 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
-| 35 | R→C | `ViewportLineIds` — §8.1 |
+| 35 | R→C | `ViewportLineIds` — §8.1, proposed under #1083 |
 | 36 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
 | 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
@@ -164,16 +164,19 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 6: grapheme display (`CAP_GRAPHEME_DISPLAY`);
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
-- bit 9: primary viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1;
+- bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, **proposed** under #1083, normative only on that Issue's acceptance;
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is `ViewportLineIds` (§8.1). §18 therefore assigns the next free types after that allocation, **36–39**, and the next free capability bit, **bit 10**.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is proposed for `ViewportLineIds` (§8.1, #1083). Until #1083 is accepted, type 35 and bit 9 stay unassigned for any other feature. §18 therefore assigns the next free types after that proposal, **36–39**, and the next free capability bit, **bit 10**. If #1083 is rejected, 35 and bit 9 return to the free pool and §18 must be renumbered before it becomes normative.
 
-### 8.1 Viewport LineIds (#865)
+### 8.1 Viewport LineIds (proposed, #1083)
 
-Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS`). It carries the primary viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only. This section is the normative wire contract.
+- **Status:** proposed. Normative only on acceptance of Issue #1083. PR #1060 is the text. #865 consumes the accepted contract and does not own this amendment.
+- **Nature:** additive and capability-gated. Framing version remains `1.0`. Nothing in §1–§7 changes.
 
-Payload, little-endian:
+Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS = 1 << 9`). It carries the visible viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only.
+
+Payload, little-endian. Maximum size is `12 + 8 × 256` = 2060 bytes.
 
 ```text
 generation   u64   non-zero display generation
@@ -191,11 +194,36 @@ Validation, failing closed as malformed:
 - any LineId is 0;
 - any LineId is repeated in the same viewport.
 
-LineIds are not required to be monotonic. Insert-line, reverse-index, and CSI T may reorder unique ids. The row order is the viewport order.
+LineIds are not required to be monotonic. Insert-line, reverse-index, and CSI T may reorder unique ids. The row order is the visible viewport order.
 
-Publish rule: after a display snapshot or delta for a viewer that advertised bit 9, Runtime may send one `ViewportLineIds` frame for that generation whose `row_count` equals the primary viewport row count. A viewer that did not advertise bit 9 never receives type 35. Missing or zero ids are not sent.
+**What the frame describes.** The ids are the active screen rows of the display generation just published (`Terminal::line_id` on `current()`), one id per visible row. While the alternate screen is active the frame is not suppressed and it does not carry the hidden primary buffer. The client pairs that vector with the committed display by generation and row count only. A Flow running-Block clip consumes a paired vector; it does not read a hidden primary buffer, and it draws no clip when the vector is absent or unpaired.
 
-Legacy hello: an older Runtime rejects unknown ClientHello bits as `MalformedPayload`. A newer client retries at most once without bit 9, then at most once without bit 9 and without `CAP_EXTENDED_TERMINAL_KEY`. It does not loop.
+**Publish rule.** Type 35 is bounded control output. It is not a presentation-batch member and it is not replaced when a pending presentation batch is superseded.
+
+- Runtime enqueues at most one type 35 frame after a snapshot batch is successfully enqueued, or after a delta enqueue returns `Queued`, for that same generation, and only for a viewer that advertised bit 9.
+- The frame is queued on the after-display control queue. It is written only between complete display frames, after the display batch that was pending at flush time, and after any mandatory control frames that are already allowed to preempt between complete frames. It is never inserted into a partial display frame.
+- A `Skipped` or `NeedSnapshot` delta result does not send type 35 for that attempt.
+- A viewer that did not advertise bit 9 never receives type 35.
+- If any visible-row LineId is missing or zero, Runtime skips the entire frame. It does not omit individual ids and it does not send a shorter vector.
+- One frame per successfully queued snapshot or queued delta is the rule, including when the id vector is unchanged. The payload bound above is the cost of that rule.
+
+A superseded presentation batch can therefore be followed on the wire by a type 35 frame for an older generation. The generation field, not queue membership, is what the client trusts.
+
+**Client pairing.** The safe presentation is no running-Block primary clip.
+
+- Commit the vector only when `generation` equals the committed display generation and `row_count` equals the committed viewport row count.
+- A strictly older generation than the last committed vector is ignored.
+- The same generation with a different id vector than the one already committed is a protocol failure.
+- Any other mismatch (newer than the committed display, row count differs, or the frame never arrives) clears any stored vector and draws no primary clip.
+- When the committed display generation advances and the stored vector's generation no longer matches, the client clears the vector before projection. Cells of the new generation are never painted with the previous vector.
+
+**Legacy hello.** SPEC-004 forbids probing an older Runtime by sending an unknown message type. It does not forbid a bounded ClientHello retry. An older Runtime rejects unknown ClientHello capability bits with `MalformedPayload` instead of ignoring them (`session.rs`). A newer client therefore uses this ordered fallback, each step at most once, and only after `MalformedPayload`:
+
+1. Advertise the full set, including bit 9 and `CAP_EXTENDED_TERMINAL_KEY`.
+2. Reconnect once without bit 9. A Runtime that accepts extended keys and rejects only bit 9 keeps extended-key handling.
+3. Reconnect once without bit 9 and without `CAP_EXTENDED_TERMINAL_KEY`. This second drop is the already-specified pre-V2 extended-key fallback, not a new reduction.
+
+Any other error does not retry. The client does not loop and does not send type 35 until bit 9 is accepted.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
@@ -519,6 +547,21 @@ Accepted SPEC-006 requires the Pass 7 production implementation to prove:
 - `ResizeResult` mandatory-control traffic remains bounded and never blocks terminal progress;
 - FIFO ordering with ordinary `Input`, `TerminalKey` and `ResizeRequest` barriers;
 - privacy tests proving semantic input and IME content are absent from logs.
+
+### 16.2 ViewportLineIds validation (#1083)
+
+Normative only on acceptance of #1083. The production proof lives on the #865 implementation candidate after this section is accepted:
+
+- malformed payloads: generation 0, non-zero reserved, `row_count` 0 or greater than 256, length not `12 + 8 × row_count`, a zero id, a duplicate id;
+- a non-monotonic vector of unique ids is accepted, in viewport order;
+- a viewer that did not advertise bit 9 never receives type 35;
+- a viewer that advertised bit 9 receives at most one type 35 frame after a successfully queued snapshot or a `Queued` delta, and none after `Skipped` or `NeedSnapshot`;
+- a missing or zero id skips the whole frame;
+- the client ignores a strictly older generation, treats a same-generation id conflict as a protocol failure, and clears the vector when the generation or row count does not match the committed display;
+- a display generation advance without a matching frame clears the vector and draws no running-Block primary clip;
+- while the alternate screen is active the frame carries the visible viewport ids of that generation and does not carry the hidden primary buffer;
+- hello fallback performs at most the two `MalformedPayload` retries in §8.1, drops bit 9 before `CAP_EXTENDED_TERMINAL_KEY`, and does not retry other errors;
+- the frame contains no command text.
 
 ## 17. Acceptance gate
 
