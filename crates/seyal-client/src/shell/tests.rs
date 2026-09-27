@@ -206,6 +206,44 @@ fn split_focus_and_close_panes() {
 }
 
 #[test]
+fn execution_bound_pane_cannot_be_closed() {
+    let mut shell = seed_two_workspaces();
+    let bound = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: bound,
+            execution: ExecutionId::from_bytes([7; 16]),
+        })
+        .expect("bind");
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+        })
+        .expect("split");
+    let created = shell.snapshot().focused_pane;
+    assert!(shell.snapshot().allows_pane_close);
+    shell
+        .apply(ShellAction::FocusPane { id: bound })
+        .expect("focus bound");
+    assert!(!shell.snapshot().allows_pane_close);
+    assert_eq!(
+        shell.apply(ShellAction::ClosePane { id: bound }),
+        Err(ShellError::CannotCloseBoundPane)
+    );
+    assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
+    shell
+        .apply(ShellAction::ClosePane { id: created })
+        .expect("close unbound");
+    let snap = shell.snapshot();
+    assert_eq!(snap.layout, LayoutDescription::Single);
+    assert_eq!(snap.focused_pane, bound);
+    assert_eq!(
+        snap.panes[0].execution,
+        Some(ExecutionId::from_bytes([7; 16]))
+    );
+}
+
+#[test]
 fn workspace_selection_switches_tab_inventory() {
     let mut shell = seed_two_workspaces();
     let first = shell.snapshot();

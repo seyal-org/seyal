@@ -53,7 +53,8 @@ enum SeyalAppActionKind {
      * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
-     * 32 = CannotCloseLastPane.
+     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
+     * bound to an execution; disposition is not yet available).
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -406,6 +407,31 @@ typedef struct SeyalAppShell {
     uint64_t focused_pane_hi;
 } SeyalAppShell;
 
+/*
+ * Pane regions (#923): one per leaf of the active Tab's PaneTree, index
+ * 0..<SeyalAppShell.pane_count in the same order as SEYAL_APP_ROW_PANE rows.
+ * x/y/width/height are unit fractions of the Tab's center area, origin
+ * top-left; hosts position regions and never derive geometry. LIVE marks the
+ * single region that hosts the live terminal/Metal/composer surface; no region
+ * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
+ * indices return size == 0.
+ */
+#define SEYAL_APP_PANE_REGION_FOCUSED 1u
+#define SEYAL_APP_PANE_REGION_LIVE 2u
+
+typedef struct SeyalAppPaneRegion {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    float x;
+    float y;
+    float width;
+    float height;
+} SeyalAppPaneRegion;
+
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
 #define SEYAL_APP_ROW_PANE 2u
@@ -455,6 +481,7 @@ SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
+SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);

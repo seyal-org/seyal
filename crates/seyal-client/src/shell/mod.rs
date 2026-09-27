@@ -30,6 +30,7 @@ pub enum ShellError {
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
+    CannotCloseBoundPane,
     ExecutionAlreadyBound,
     EmptyShell,
 }
@@ -48,6 +49,9 @@ impl ShellError {
             }
             Self::CannotCloseLastTab => "The last Tab cannot be closed.",
             Self::CannotCloseLastPane => "The last Pane cannot be closed.",
+            Self::CannotCloseBoundPane => {
+                "A Pane bound to an execution cannot be closed until execution disposition is available."
+            }
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
         }
@@ -110,7 +114,8 @@ pub struct ShellSnapshot {
     pub allows_tab_creation: bool,
     pub allows_pane_splitting: bool,
     /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close).
+    /// Pane would currently be accepted (the last Tab/Pane cannot close, and
+    /// neither can an execution-bound Pane).
     /// Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
@@ -278,7 +283,7 @@ impl ShellState {
             allows_tab_creation: self.allows_tab_creation,
             allows_pane_splitting: self.allows_pane_splitting,
             allows_tab_close: workspace.allows_tab_close(),
-            allows_pane_close: tab.allows_pane_close(),
+            allows_pane_close: tab.allows_focused_pane_close(),
         }
     }
 
@@ -398,8 +403,14 @@ impl ShellState {
         if !tab.allows_pane_close() {
             return Err(ShellError::CannotCloseLastPane);
         }
-        if !tab.panes.contains_key(&pane_id) {
+        let Some(pane) = tab.panes.get(&pane_id) else {
             return Err(ShellError::UnknownPane);
+        };
+        // Closing would orphan the bound execution's authority; what happens
+        // to that execution is the unaccepted provisioning/disposition
+        // contract (#994), so fail closed instead of inventing it here.
+        if pane.execution.is_some() {
+            return Err(ShellError::CannotCloseBoundPane);
         }
         let Some(root) = tab.root.removing(pane_id) else {
             return Err(ShellError::CannotCloseLastPane);

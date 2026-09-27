@@ -1,10 +1,11 @@
 //! Versioned one-Pane application-root C ABI.
 //!
-//! C entry points stay here; decode/encode/visual siblings keep each
+//! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
 mod decode;
 mod encode;
+mod pane_region;
 mod visual;
 
 #[cfg(test)]
@@ -28,6 +29,7 @@ use encode::{
     encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
+pub use pane_region::seyal_app_pane_region;
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
@@ -912,5 +914,6 @@ fn error_number(error: AppError) -> i32 {
         AppError::UnknownBlock => 30,
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
+        AppError::CannotCloseBoundPane => 33,
     }
 }

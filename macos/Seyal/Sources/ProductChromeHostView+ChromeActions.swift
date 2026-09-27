@@ -22,6 +22,19 @@ extension ProductChromeHostView {
         applyIdentity(UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue), button: sender)
     }
 
+    /// Pane-region click (#923): Rust validates the PaneId and owns focus.
+    func focusPaneRegion(lo: UInt64, hi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue)
+        action.target_execution_lo = lo
+        action.target_execution_hi = hi
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+        routeFocus()
+    }
+
     @objc func createTab() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
     }

@@ -201,6 +201,27 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
+    /// #923: the Tab's Rust PaneTree is projected into Pane regions. M001
+    /// policy keeps one Pane, so exactly one focused region hosts the live
+    /// composer/transcript surface, and no second region is invented.
+    func testSinglePaneTreeProjectsOneFocusedRegionHostingTheLiveSurface() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let region = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        XCTAssertTrue(region.waitForExistence(timeout: 5), "Pane region projection missing")
+        XCTAssertEqual(region.value as? String, "focused")
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-region-1"].exists,
+            "M001 policy projects exactly one Pane region"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertTrue(composer.isHittable, "live composer stays interactive inside the region")
+        XCTAssertTrue(region.frame.contains(composer.frame), "composer sits in the live region")
+        XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
+    }
+
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
