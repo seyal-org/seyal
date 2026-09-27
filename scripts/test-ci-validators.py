@@ -309,12 +309,27 @@ def main() -> None:
             "seyal-agent-core has forbidden dependencies: seyal-runtime",
         )
 
+        # Reverse firewall: terminal stack must not depend on seyal-agent-*.
+        terminal_agent = base / "layering-terminal-agent"
+        write(
+            terminal_agent / "crates/seyal-terminal/Cargo.toml",
+            '[package]\nname = "seyal-terminal"\nversion = "0.0.0"\n\n[dependencies]\nseyal-agent-core = { path = "../seyal-agent-core" }\n',
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-layering.py")],
+            terminal_agent,
+            "seyal-terminal has forbidden dependencies: seyal-agent-core",
+        )
+
         unknown_layering = base / "layering-unknown"
         write(unknown_layering / "crates/seyal-mystery/Cargo.toml", '[package]\nname = "seyal-mystery"\nversion = "0.0.0"\n')
         run_negative(["python3", str(ROOT / "scripts/check-layering.py")], unknown_layering, "seyal-mystery has no architecture layering rule")
 
         hot = base / "hot-path"
-        write(hot / "crates/seyal-terminal/src/terminal.rs", "impl TerminalState { pub fn feed(&mut self, bytes: &[u8]) { let _ = bytes.to_vec(); } pub fn finish_input(&mut self) {} }")
+        write(
+            hot / "crates/seyal-terminal/src/terminal/state.rs",
+            "impl TerminalState { pub fn feed(&mut self, bytes: &[u8]) { let _ = bytes.to_vec(); } pub fn finish_input(&mut self) {} }",
+        )
         write(
             hot / "crates/seyal-runtime/src/runtime/mod.rs",
             "impl Runtime { pub fn poll_once(&mut self) {} }",
@@ -325,8 +340,12 @@ def main() -> None:
         )
         write(hot / "crates/seyal-runtime/src/input.rs", "impl InputIngress { pub fn try_submit(&self) {} }")
         write(
-            hot / "crates/seyal-runtime/src/display.rs",
+            hot / "crates/seyal-runtime/src/display/encode_v1.rs",
             "pub fn encode_snapshot() {} pub fn encode_delta() {} fn encode_rows() {}",
+        )
+        write(
+            hot / "crates/seyal-runtime/src/display/encode_v2.rs",
+            "pub fn encode_snapshot_v2() {} pub fn encode_delta_v2() {} fn encode_cells_v2() {}",
         )
         write(
             hot / "crates/seyal-runtime/src/runtime/local/display_publish.rs",
@@ -343,17 +362,19 @@ def main() -> None:
             "impl Runtime { pub fn poll_once(&mut self) {} }",
             "impl Runtime { fn drain_control(&mut self) {} fn service_reads(&mut self) {} fn service_writes(&mut self) {} }",
             "impl InputIngress { pub fn try_submit(&self) {} }",
-            "pub fn encode_snapshot() {} pub fn encode_delta() {} fn encode_rows() {} pub fn encode_snapshot_v2() {} pub fn encode_delta_v2() {} fn encode_cells_v2() {}",
+            "pub fn encode_snapshot() {} pub fn encode_delta() {} fn encode_rows() {}",
+            "pub fn encode_snapshot_v2() {} pub fn encode_delta_v2() {} fn encode_cells_v2() {}",
             "impl Runtime { pub(super) fn publish_display_updates(&mut self) {} }",
         )
 
         def write_clean_rust_hot_paths(root: Path) -> None:
-            write(root / "crates/seyal-terminal/src/terminal.rs", clean_rust[0])
+            write(root / "crates/seyal-terminal/src/terminal/state.rs", clean_rust[0])
             write(root / "crates/seyal-runtime/src/runtime/mod.rs", clean_rust[1])
             write(root / "crates/seyal-runtime/src/runtime/reactor_io.rs", clean_rust[2])
             write(root / "crates/seyal-runtime/src/input.rs", clean_rust[3])
-            write(root / "crates/seyal-runtime/src/display.rs", clean_rust[4])
-            write(root / "crates/seyal-runtime/src/runtime/local/display_publish.rs", clean_rust[5])
+            write(root / "crates/seyal-runtime/src/display/encode_v1.rs", clean_rust[4])
+            write(root / "crates/seyal-runtime/src/display/encode_v2.rs", clean_rust[5])
+            write(root / "crates/seyal-runtime/src/runtime/local/display_publish.rs", clean_rust[6])
 
         absent_host = base / "hot-path-absent-host"
         write_clean_rust_hot_paths(absent_host)

@@ -97,7 +97,28 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /** Cancel the active recovery episode (generation bump → Disconnected). */
+    SEYAL_APP_ACTION_CANCEL_RECOVERY = 53,
+    /**
+     * Advance presentation stage after connect.
+     * reserved = SEYAL_APP_RECOVERY_RESTORING (5) or SEYAL_APP_RECOVERY_USABLE (6).
+     */
+    SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE = 54,
+    /** Begin a continuity-identity commit attempt. */
+    SEYAL_APP_ACTION_BEGIN_RECONSTRUCTION = 55,
+    /**
+     * Commit Runtime/execution continuity and a fresh attachment (Rust-owned).
+     * fence_execution_* = Runtime pin; target_execution_* = execution pin;
+     * target_attachment_* = attachment pin. `reserved` is ignored.
+     * Controller authority and authoritative-snapshot commitment are derived
+     * from the live CLIENTS entry whose identities match those pins. A missing,
+     * non-controller, or snapshot-less client fails closed. SeyalAppAction
+     * layout is unchanged.
+     */
+    SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
+    /** Mark reconstruction disconnected after the host drops the live client. */
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
