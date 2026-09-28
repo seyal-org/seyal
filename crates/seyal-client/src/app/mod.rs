@@ -35,20 +35,18 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::local::LocalDisplayClient;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
-use crate::provisioning::ProvisioningSession;
+use crate::provisioning::{ProvisioningEffect, ProvisioningSession};
 use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
-
-#[cfg(target_os = "macos")]
-use crate::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
 pub const APP_ABI_VERSION: u16 = 1;
@@ -357,6 +355,12 @@ pub struct ApplicationRoot {
     authority: Option<PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
+    /// Cold-path wire client for create/terminate (tests/harness). Production
+    /// macOS may instead use [`Self::client_handle`] via the FFI registry.
+    wire_client: Option<LocalDisplayClient>,
+    /// Effects waiting for a negotiated wire client (SendCreate/SendTerminate)
+    /// or for host attach (AttachController / bootstrap resize).
+    pending_wire_effects: Vec<ProvisioningEffect>,
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
@@ -397,6 +401,8 @@ impl ApplicationRoot {
             shell,
             authority: None,
             provisioning: ProvisioningSession::new(),
+            wire_client: None,
+            pending_wire_effects: Vec::new(),
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,

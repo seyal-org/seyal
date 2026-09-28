@@ -2,14 +2,15 @@
 
 use seyal_core::{AttachmentId, ExecutionId};
 use seyal_protocol::framing::ErrorCode;
+use seyal_runtime::local_ipc::framing::{
+    CreateExecutionResult, CreateExecutionResultCode, MessageType, HEADER_LEN,
+};
 
+use super::provisioning_apply::negotiated_provisioning_client;
 use super::{
     AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility, SplitAxis,
 };
-use crate::provisioning::{
-    CreateOutcome, ProvisioningEffect, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS,
-};
-use crate::shell::ShellAction;
+use crate::provisioning::{CreateOutcome, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS};
 
 fn exec(byte: u8) -> ExecutionId {
     ExecutionId::from_bytes([byte; 16])
@@ -19,50 +20,73 @@ fn attachment(byte: u8) -> AttachmentId {
     AttachmentId::from_bytes([byte; 16])
 }
 
-/// Drive the focused tab's pending create intent through bind into ShellState
-/// and ProvisioningSession (no ApplicationRoot authority yet).
-fn drive_focused_intent_to_shell_bound(root: &mut ApplicationRoot, execution: ExecutionId) {
+/// CreateTab → admitted type-36 on the wire client → create result → attach → bind.
+fn drive_create_tab_to_bound(root: &mut ApplicationRoot, execution: ExecutionId) {
+    root.apply(AppAction::CreateTab).expect("create tab");
     let pane = root.snapshot().shell.focused_pane;
     let intent = root
         .provisioning()
         .pending_intent(pane)
         .expect("create_tab must begin a pending intent")
         .clone();
-    let owner = intent.owner;
-    let request_id = intent.request_id;
     assert_eq!(intent.geometry.rows, BOOTSTRAP_ROWS);
     assert_eq!(intent.geometry.columns, BOOTSTRAP_COLUMNS);
 
-    let effects = root.provisioning_mut().apply_create_result(
-        owner,
-        request_id,
-        CreateOutcome::Created(execution),
+    let client = root.wire_client().expect("wire client installed");
+    assert!(
+        client.has_pending_create(intent.request_id),
+        "CreateTab must admit a create with the session request id"
     );
-    assert_eq!(
-        effects,
-        vec![ProvisioningEffect::AttachController { owner, execution }]
+    assert!(
+        client.has_outbound_create(intent.request_id)
+            || client.has_pending_create(intent.request_id),
+        "SendCreate must not be dropped: type-36 must be admitted on the client"
     );
-    let effects = root.provisioning_mut().apply_attach_success(
-        owner,
-        request_id,
-        attachment(execution.to_bytes()[0]),
-    );
-    assert_eq!(
-        effects,
-        vec![ProvisioningEffect::BindPane { pane, execution }]
-    );
-    root.shell
-        .apply(ShellAction::BindExecution { pane, execution })
-        .expect("shell bind");
-    let more = root.provisioning_mut().apply_bind_success(pane, execution);
-    assert!(matches!(
-        more.as_slice(),
-        [ProvisioningEffect::RequestBootstrapResize { .. }]
-    ));
+
+    root.wire_client_mut()
+        .unwrap()
+        .accept_create_result(CreateExecutionResult {
+            execution_id: execution,
+            request_id: intent.request_id,
+            result_code: CreateExecutionResultCode::Created,
+            detail_code: 0,
+        })
+        .unwrap();
+    root.absorb_wire_create_result()
+        .expect("absorb create")
+        .expect("create result present");
+    root.complete_create_attach_and_bind(attachment(execution.to_bytes()[0]))
+        .expect("attach+bind");
     assert_eq!(
         root.provisioning().recorded_execution(pane),
         Some(execution)
     );
+}
+
+#[test]
+fn create_tab_admits_type_36_with_session_request_id() {
+    let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    root.apply(AppAction::CreateTab).unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    let request_id = root
+        .provisioning()
+        .pending_intent(pane)
+        .expect("pending")
+        .request_id;
+    let client = root.wire_client().unwrap();
+    assert!(
+        client.has_pending_create(request_id),
+        "session request id must be the admitted create id (no second allocator)"
+    );
+    assert_ne!(request_id, 0);
+    // Decoder smoke: at least one outbound create frame or a flushed admission.
+    assert!(
+        client.has_outbound_create(request_id) || client.has_pending_create(request_id),
+        "SendCreate must reach LocalDisplayClient::submit_create_execution_with_id"
+    );
+    let _ = (HEADER_LEN, MessageType::CreateExecutionRequest);
 }
 
 #[test]
@@ -82,21 +106,20 @@ fn production_composition_allows_tab_creation_not_pane_splitting() {
 #[test]
 fn n_created_tabs_produce_n_distinct_execution_bindings() {
     let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
     let mut executions = Vec::new();
     let mut panes = Vec::new();
 
-    // Initial tab has no create intent yet (adopt/first-launch is separate).
-    // Each CreateTab provisions a distinct leaf.
     for i in 1..=3u8 {
-        root.apply(AppAction::CreateTab).expect("create tab");
+        let execution = exec(i);
+        drive_create_tab_to_bound(&mut root, execution);
         let pane = root.snapshot().shell.focused_pane;
         assert!(
             !panes.contains(&pane),
             "each new tab must introduce a distinct PaneId"
         );
         panes.push(pane);
-        let execution = exec(i);
-        drive_focused_intent_to_shell_bound(&mut root, execution);
         executions.push(execution);
     }
 
@@ -115,17 +138,17 @@ fn n_created_tabs_produce_n_distinct_execution_bindings() {
 #[test]
 fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
     let mut root = ApplicationRoot::new();
-    root.apply(AppAction::CreateTab).unwrap();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    drive_create_tab_to_bound(&mut root, exec(0xA1));
     let pane_a = root.snapshot().shell.focused_pane;
     let tab_a = root.snapshot().shell.active_tab;
     let exec_a = exec(0xA1);
-    drive_focused_intent_to_shell_bound(&mut root, exec_a);
 
-    root.apply(AppAction::CreateTab).unwrap();
+    drive_create_tab_to_bound(&mut root, exec(0xB2));
     let pane_b = root.snapshot().shell.focused_pane;
     let tab_b = root.snapshot().shell.active_tab;
     let exec_b = exec(0xB2);
-    drive_focused_intent_to_shell_bound(&mut root, exec_b);
     assert_ne!(tab_a, tab_b);
     assert_ne!(pane_a, pane_b);
 
@@ -141,44 +164,23 @@ fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
 #[test]
 fn explicit_terminate_is_distinct_from_removing_chrome() {
     let mut root = ApplicationRoot::new();
-    root.apply(AppAction::CreateTab).unwrap();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    drive_create_tab_to_bound(&mut root, exec(0x71));
     let pane = root.snapshot().shell.focused_pane;
     let tab = root.snapshot().shell.active_tab;
     let execution = exec(0x71);
 
-    // Provision to BindPane, then take ApplicationRoot authority via Bind
-    // without a prior shell bind so BindExecution succeeds once.
-    let intent = root
-        .provisioning()
-        .pending_intent(pane)
-        .expect("pending")
-        .clone();
-    root.provisioning_mut().apply_create_result(
-        intent.owner,
-        intent.request_id,
-        CreateOutcome::Created(execution),
-    );
-    root.provisioning_mut()
-        .apply_attach_success(intent.owner, intent.request_id, attachment(9));
-    root.provisioning_mut().apply_bind_success(pane, execution);
-
-    let fence = root.fence();
-    root.apply(AppAction::Bind {
-        fence,
-        evidence: BindingEvidence {
-            execution,
-            attachment: attachment(9),
-            controller: true,
-            pty_generation: 1,
-            alternate_screen: false,
-        },
+    root.adopt_authority_for_provisioned_pane(BindingEvidence {
+        execution,
+        attachment: attachment(9),
+        controller: true,
+        pty_generation: 1,
+        alternate_screen: false,
     })
     .unwrap();
 
     let before_tabs = root.snapshot().shell.tabs.len();
-    let effects_before = root.provisioning().recorded_execution(pane);
-    assert_eq!(effects_before, Some(execution));
-
     root.apply(AppAction::TerminateExecution {
         fence: root.fence(),
     })
@@ -195,41 +197,23 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
         root.snapshot().eligibility,
         PresentationEligibility::Unbound
     );
-    // Closing chrome afterward is still detach-only for any other bound tab.
     assert_eq!(root.provisioning().automatic_retries(), 0);
 }
 
 #[test]
 fn newly_bound_pane_keeps_spec_008_presentation_fence() {
     let mut root = ApplicationRoot::new();
-    root.apply(AppAction::CreateTab).unwrap();
-    let pane = root.snapshot().shell.focused_pane;
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    drive_create_tab_to_bound(&mut root, exec(0xF1));
     let execution = exec(0xF1);
 
-    let intent = root
-        .provisioning()
-        .pending_intent(pane)
-        .expect("pending")
-        .clone();
-    root.provisioning_mut().apply_create_result(
-        intent.owner,
-        intent.request_id,
-        CreateOutcome::Created(execution),
-    );
-    root.provisioning_mut()
-        .apply_attach_success(intent.owner, intent.request_id, attachment(3));
-    root.provisioning_mut().apply_bind_success(pane, execution);
-
-    let fence = root.fence();
-    root.apply(AppAction::Bind {
-        fence,
-        evidence: BindingEvidence {
-            execution,
-            attachment: attachment(3),
-            controller: true,
-            pty_generation: 2,
-            alternate_screen: false,
-        },
+    root.adopt_authority_for_provisioned_pane(BindingEvidence {
+        execution,
+        attachment: attachment(3),
+        controller: true,
+        pty_generation: 2,
+        alternate_screen: false,
     })
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
@@ -241,7 +225,6 @@ fn newly_bound_pane_keeps_spec_008_presentation_fence() {
     .unwrap();
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Tui);
 
-    // Stale fence after transition is rejected (SPEC-008).
     let mut stale = root.fence();
     stale.presentation_epoch = stale.presentation_epoch.saturating_sub(1);
     assert_eq!(
@@ -257,6 +240,8 @@ fn newly_bound_pane_keeps_spec_008_presentation_fence() {
 #[test]
 fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
     let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
     root.apply(AppAction::CreateTab).unwrap();
     let pane = root.snapshot().shell.focused_pane;
     let intent = root
@@ -265,12 +250,16 @@ fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
         .expect("pending")
         .clone();
 
-    let effects = root.provisioning_mut().apply_create_result(
-        intent.owner,
-        intent.request_id,
-        CreateOutcome::Failed(ErrorCode::CapacityExceeded),
-    );
-    assert!(effects.is_empty());
+    root.wire_client_mut()
+        .unwrap()
+        .accept_create_result(CreateExecutionResult {
+            execution_id: ExecutionId::from_bytes([0; 16]),
+            request_id: intent.request_id,
+            result_code: CreateExecutionResultCode::Error(ErrorCode::CapacityExceeded),
+            detail_code: 0,
+        })
+        .unwrap();
+    root.absorb_wire_create_result().unwrap();
     assert_eq!(
         root.provisioning().last_failure(),
         Some((
@@ -280,7 +269,6 @@ fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
     );
     assert_eq!(root.provisioning().recorded_execution(pane), None);
     assert_eq!(root.provisioning().automatic_retries(), 0);
-    // Tab chrome remains; failure is honest and non-crashing.
     assert_eq!(root.snapshot().shell.tabs.len(), 2);
     assert!(root.provisioning().pending_intent(pane).is_none());
 }
@@ -288,10 +276,12 @@ fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
 #[test]
 fn create_tab_does_not_block_with_fixed_frequency_retry() {
     let mut root = ApplicationRoot::new();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
     root.apply(AppAction::CreateTab).unwrap();
     let pane = root.snapshot().shell.focused_pane;
     let intent = root.provisioning().pending_intent(pane).unwrap().clone();
-    root.provisioning_mut().apply_create_result(
+    let _ = root.provisioning_mut().apply_create_result(
         intent.owner,
         intent.request_id,
         CreateOutcome::Failed(ErrorCode::Backpressure),

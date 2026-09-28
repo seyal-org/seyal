@@ -1,16 +1,39 @@
-//! ApplicationRoot create/close/terminate coordination with portable provisioning.
+//! ApplicationRoot create/close/terminate coordination with portable provisioning
+//! and the existing LocalDisplayClient create/terminate wire helpers.
 
-use seyal_core::{PaneId, TabId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
 use seyal_protocol::framing::ErrorCode;
+use seyal_runtime::local_ipc::framing::{CreateExecutionResult, CreateExecutionResultCode};
 
-use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
+use super::{
+    close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot, BindingEvidence,
+};
 use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
-use crate::provisioning::{ProvisioningEffect, ProvisioningFailure};
+use crate::local::{ClientError, LocalDisplayClient};
+use crate::provisioning::{
+    CreateOutcome, ProvisioningEffect, ProvisioningFailure, TerminateOutcome,
+};
 use crate::shell::ShellAction;
 
 impl ApplicationRoot {
-    /// Create a Tab whose terminal leaf begins one C1 provisioning intent.
+    /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
+    /// frames. Flushes any queued `SendCreate` / `SendTerminate` effects.
+    pub fn install_wire_client(&mut self, client: LocalDisplayClient) -> Result<(), AppError> {
+        self.wire_client = Some(client);
+        self.flush_pending_wire_effects()
+    }
+
+    pub fn wire_client(&self) -> Option<&LocalDisplayClient> {
+        self.wire_client.as_ref()
+    }
+
+    pub fn wire_client_mut(&mut self) -> Option<&mut LocalDisplayClient> {
+        self.wire_client.as_mut()
+    }
+
+    /// Create a Tab whose terminal leaf begins one C1 provisioning intent and
+    /// admits the resulting type-36 create on the wire client (same request id).
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::CreateTab)
@@ -18,12 +41,35 @@ impl ApplicationRoot {
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
         let tab = snap.active_tab;
+        let workspace = snap.active_workspace.to_bytes();
+        let workspace_id = u128::from_le_bytes(workspace);
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
-        if let Err(failure) = self.provisioning.begin_intent(pane, None) {
+        let effect = match self.provisioning.begin_intent(pane, None) {
+            Ok(effect) => effect,
+            Err(failure) => {
+                let _ = self.shell.apply(ShellAction::CloseTab { id: tab });
+                let _ = self.shell.take_removed_tab_panes();
+                self.provisioning.note_rejected_without_retry(pane, failure);
+                return Err(provisioning_app_error(failure));
+            }
+        };
+        if let Err(error) = self.dispatch_wire_effects(
+            vec![effect],
+            WireDispatchContext {
+                workspace_id,
+                launch_profile: 0,
+            },
+        ) {
             let _ = self.shell.apply(ShellAction::CloseTab { id: tab });
             let _ = self.shell.take_removed_tab_panes();
-            self.provisioning.note_rejected_without_retry(pane, failure);
-            return Err(provisioning_app_error(failure));
+            if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
+                let _ = self.provisioning.apply_create_result(
+                    intent.owner,
+                    intent.request_id,
+                    CreateOutcome::Failed(ErrorCode::InvalidState),
+                );
+            }
+            return Err(error);
         }
         let _ = self
             .chrome
@@ -38,16 +84,25 @@ impl ApplicationRoot {
             .apply(ShellAction::CloseTab { id })
             .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
+        let mut effects = Vec::new();
         for pane in removed {
-            let effects = self.provisioning.on_bound_pane_closed(pane);
+            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
-                !effects
+                !pane_effects
                     .iter()
                     .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
                 "removing a tab must not terminate a bound execution"
             );
+            effects.extend(pane_effects);
             self.clear_authority_for_pane(pane);
         }
+        let _ = self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        );
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -74,6 +129,13 @@ impl ApplicationRoot {
                 "closing a pane must not terminate a bound execution"
             );
             self.clear_authority_for_pane(pane);
+            let _ = self.dispatch_wire_effects(
+                effects,
+                WireDispatchContext {
+                    workspace_id: 0,
+                    launch_profile: 0,
+                },
+            );
         } else {
             // Outstanding create for this pane: keep the request until the
             // result arrives, then §6.3 disposition.
@@ -108,10 +170,133 @@ impl ApplicationRoot {
         );
         let _ = self.shell.release_execution(bound.pane);
         self.clear_authority_for_pane(bound.pane);
+        self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    /// Absorb a create result from the wire client and advance the session.
+    /// On `Created`, queues `AttachController` for the host (no automatic attach).
+    pub fn absorb_wire_create_result(&mut self) -> Result<Option<CreateExecutionResult>, AppError> {
+        let Some(client) = self.wire_client.as_mut() else {
+            return Err(AppError::NoLiveClient);
+        };
+        let Some(result) = client.take_create_result() else {
+            return Ok(None);
+        };
+        let Some(intent) = self
+            .provisioning
+            .pending_create_by_request_id(result.request_id)
+            .cloned()
+        else {
+            return Ok(Some(result));
+        };
+        let outcome = match result.result_code {
+            CreateExecutionResultCode::Created => CreateOutcome::Created(result.execution_id),
+            CreateExecutionResultCode::Error(code) => CreateOutcome::Failed(code),
+        };
+        let effects =
+            self.provisioning
+                .apply_create_result(intent.owner, result.request_id, outcome);
+        let _ = self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        );
+        Ok(Some(result))
+    }
+
+    /// After a successful create, record Controller attach and bind the Pane
+    /// through ShellState + [`ProvisioningSession::apply_bind_success`].
+    pub fn complete_create_attach_and_bind(
+        &mut self,
+        attachment: AttachmentId,
+    ) -> Result<ExecutionId, AppError> {
+        let pane = self.shell.snapshot().focused_pane;
+        let intent = self
+            .provisioning
+            .pending_intent(pane)
+            .cloned()
+            .ok_or(AppError::ProvisioningRejected)?;
+        let request_id = intent.request_id;
+        let owner = intent.owner;
+        let effects = self
+            .provisioning
+            .apply_attach_success(owner, request_id, attachment);
+        let mut bound = None;
+        for effect in effects {
+            match effect {
+                ProvisioningEffect::BindPane { pane, execution } => {
+                    self.shell
+                        .apply(ShellAction::BindExecution { pane, execution })
+                        .map_err(|_| AppError::AlreadyBound)?;
+                    let _ = self.provisioning.apply_bind_success(pane, execution);
+                    bound = Some(execution);
+                }
+                other => {
+                    self.dispatch_wire_effects(
+                        vec![other],
+                        WireDispatchContext {
+                            workspace_id: 0,
+                            launch_profile: 0,
+                        },
+                    )?;
+                }
+            }
+        }
+        bound.ok_or(AppError::ProvisioningRejected)
+    }
+
+    /// Apply a terminate result from the wire client (P4 correlation).
+    pub fn absorb_wire_terminate_result(
+        &mut self,
+        still_listed: bool,
+    ) -> Result<Option<()>, AppError> {
+        let Some(client) = self.wire_client.as_mut() else {
+            return Err(AppError::NoLiveClient);
+        };
+        let Some(result) = client.take_terminate_result() else {
+            return Ok(None);
+        };
+        // Find owner by scanning pending terminate via recorded owner map is
+        // not exposed; host supplies correlation through the client's pending set.
+        // Use focused pane's owner when present.
+        let pane = self.shell.snapshot().focused_pane;
+        let Some(owner) = self.provisioning.owner_for_pane(pane) else {
+            return Ok(Some(()));
+        };
+        let outcome = match result.result_code {
+            seyal_runtime::local_ipc::framing::TerminateExecutionResultCode::TerminationRequested => {
+                TerminateOutcome::TerminationRequested
+            }
+            seyal_runtime::local_ipc::framing::TerminateExecutionResultCode::Error(code) => {
+                TerminateOutcome::Failed(code)
+            }
+        };
+        let effects = self.provisioning.apply_terminate_result(
+            owner,
+            result.request_id,
+            outcome,
+            still_listed,
+        );
+        let _ = self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        );
+        Ok(Some(()))
     }
 
     fn clear_authority_for_pane(&mut self, pane: PaneId) {
@@ -127,6 +312,117 @@ impl ApplicationRoot {
             }
         }
     }
+
+    fn flush_pending_wire_effects(&mut self) -> Result<(), AppError> {
+        let pending = std::mem::take(&mut self.pending_wire_effects);
+        self.dispatch_wire_effects(
+            pending,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )
+    }
+
+    fn dispatch_wire_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+        ctx: WireDispatchContext,
+    ) -> Result<(), AppError> {
+        for effect in effects {
+            match effect {
+                ProvisioningEffect::SendCreate {
+                    request_id,
+                    rows,
+                    columns,
+                    ..
+                } => {
+                    if !self.has_wire_client() {
+                        self.pending_wire_effects.push(effect);
+                        continue;
+                    }
+                    self.with_wire_client_mut(|client| {
+                        client.submit_create_execution_with_id(
+                            request_id,
+                            ctx.workspace_id,
+                            ctx.launch_profile,
+                            rows,
+                            columns,
+                        )
+                    })?;
+                }
+                ProvisioningEffect::SendTerminate {
+                    request_id,
+                    execution,
+                    attachment,
+                    ..
+                } => {
+                    if !self.has_wire_client() {
+                        self.pending_wire_effects.push(effect);
+                        continue;
+                    }
+                    self.with_wire_client_mut(|client| {
+                        client.submit_terminate_execution_with_id(request_id, execution, attachment)
+                    })?;
+                }
+                ProvisioningEffect::Detach { .. } => {
+                    // Detach-only (ADR-017 §6.1): never terminate. Observed so
+                    // tab/pane close cannot drop SendTerminate; the shared
+                    // LocalDisplayClient stays for other panes' create/terminate.
+                }
+                ProvisioningEffect::BindPane { pane, execution } => {
+                    self.shell
+                        .apply(ShellAction::BindExecution { pane, execution })
+                        .map_err(|_| AppError::AlreadyBound)?;
+                    let _ = self.provisioning.apply_bind_success(pane, execution);
+                }
+                ProvisioningEffect::AttachController { .. }
+                | ProvisioningEffect::RequestBootstrapResize { .. } => {
+                    self.pending_wire_effects.push(effect);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn has_wire_client(&self) -> bool {
+        if self.wire_client.is_some() {
+            return true;
+        }
+        #[cfg(target_os = "macos")]
+        if self.client_handle.is_some() {
+            return true;
+        }
+        false
+    }
+
+    fn with_wire_client_mut<R>(
+        &mut self,
+        op: impl FnOnce(&mut LocalDisplayClient) -> Result<R, ClientError>,
+    ) -> Result<R, AppError> {
+        if let Some(client) = self.wire_client.as_mut() {
+            return op(client).map_err(client_error);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        {
+            return match crate::ffi::with_client_mut(handle, op) {
+                Some(Ok(value)) => Ok(value),
+                Some(Err(error)) => Err(client_error(error)),
+                None => Err(AppError::NoLiveClient),
+            };
+        }
+        Err(AppError::NoLiveClient)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct WireDispatchContext {
+    workspace_id: u128,
+    launch_profile: u16,
 }
 
 fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {
@@ -134,6 +430,72 @@ fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {
         ProvisioningFailure::CreateRejected(ErrorCode::CapacityExceeded) => {
             AppError::ProvisioningCapacityExceeded
         }
+        ProvisioningFailure::CapabilityMissing => AppError::ProvisioningRejected,
         _ => AppError::ProvisioningRejected,
     }
+}
+
+fn client_error(error: ClientError) -> AppError {
+    match error {
+        ClientError::UnsupportedInteractiveCapability => AppError::ProvisioningRejected,
+        ClientError::LostController => AppError::NotController,
+        _ => AppError::ProvisioningRejected,
+    }
+}
+
+impl ApplicationRoot {
+    /// After C1 wire create→bind has already bound the shell Pane, install
+    /// ApplicationRoot authority without a second `BindExecution`.
+    #[cfg(test)]
+    pub(super) fn adopt_authority_for_provisioned_pane(
+        &mut self,
+        evidence: BindingEvidence,
+    ) -> Result<(), AppError> {
+        let pane = self.shell.snapshot().focused_pane;
+        if self.authority.is_some() {
+            return Err(AppError::AlreadyBound);
+        }
+        if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
+            return Err(AppError::StaleExecution);
+        }
+        if evidence.pty_generation == 0 {
+            return Err(AppError::ZeroPtyGeneration);
+        }
+        let identity = crate::presentation::PresentationIdentity::new(
+            evidence.execution,
+            evidence.pty_generation,
+        )
+        .ok_or(AppError::ZeroPtyGeneration)?;
+        self.presentation
+            .apply(crate::presentation::PresentationAction::BindIdentity(
+                identity,
+            ))
+            .map_err(|_| AppError::AlreadyBound)?;
+        self.authority = Some(super::PaneAuthority {
+            pane,
+            execution: evidence.execution,
+            attachment: evidence.attachment,
+            controller: evidence.controller,
+            pty_generation: evidence.pty_generation,
+        });
+        self.derive_presentation(evidence.alternate_screen)?;
+        self.sync_composer_presentation();
+        Ok(())
+    }
+}
+
+/// Build a negotiated provisioning probe client for headed/portable tests.
+#[cfg(test)]
+pub(super) fn negotiated_provisioning_client() -> LocalDisplayClient {
+    use seyal_runtime::local_ipc::framing::Role;
+    let mut client = crate::local::reconstruction_probe_client(
+        Role::Controller,
+        24,
+        80,
+        1,
+        ExecutionId::from_bytes([0x11; 16]),
+        AttachmentId::from_bytes([0x22; 16]),
+    );
+    client.execution_provisioning_negotiated = true;
+    client
 }

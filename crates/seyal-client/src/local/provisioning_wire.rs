@@ -27,10 +27,31 @@ impl LocalDisplayClient {
         rows: u16,
         columns: u16,
     ) -> Result<u64, ClientError> {
+        let request_id = self.allocate_provisioning_request_id()?;
+        self.submit_create_execution_with_id(
+            request_id,
+            workspace_id,
+            launch_profile,
+            rows,
+            columns,
+        )?;
+        Ok(request_id)
+    }
+
+    /// Queue a type-36 create using a request id already allocated by
+    /// [`crate::provisioning::ProvisioningSession`]. Does not allocate a second id.
+    pub fn submit_create_execution_with_id(
+        &mut self,
+        request_id: u64,
+        workspace_id: u128,
+        launch_profile: u16,
+        rows: u16,
+        columns: u16,
+    ) -> Result<(), ClientError> {
         if !self.execution_provisioning_negotiated {
             return Err(ClientError::UnsupportedInteractiveCapability);
         }
-        let request_id = self.allocate_provisioning_request_id()?;
+        self.observe_provisioning_request_id(request_id)?;
         let payload = CreateExecutionRequest {
             workspace_id,
             request_id,
@@ -43,7 +64,7 @@ impl LocalDisplayClient {
         self.admit_frame(frame, OutboundKind::CreateExecution { request_id })?;
         self.pending_create_requests.insert(request_id);
         let _ = self.flush_control_write();
-        Ok(request_id)
+        Ok(())
     }
 
     /// Queue a type-38 terminate request. Requires Controller attachment.
@@ -56,8 +77,26 @@ impl LocalDisplayClient {
         }
         self.require_controller()?;
         let request_id = self.allocate_provisioning_request_id()?;
+        let attachment_id = self.attachment_id;
+        self.submit_terminate_execution_with_id(request_id, execution_id, attachment_id)?;
+        Ok(request_id)
+    }
+
+    /// Queue a type-38 terminate using a request id already allocated by
+    /// [`crate::provisioning::ProvisioningSession`]. Does not allocate a second id.
+    pub fn submit_terminate_execution_with_id(
+        &mut self,
+        request_id: u64,
+        execution_id: ExecutionId,
+        attachment_id: AttachmentId,
+    ) -> Result<(), ClientError> {
+        if !self.execution_provisioning_negotiated {
+            return Err(ClientError::UnsupportedInteractiveCapability);
+        }
+        self.require_controller()?;
+        self.observe_provisioning_request_id(request_id)?;
         let payload = TerminateExecutionRequest {
-            attachment_id: self.attachment_id,
+            attachment_id,
             execution_id,
             request_id,
         }
@@ -66,7 +105,39 @@ impl LocalDisplayClient {
         self.admit_frame(frame, OutboundKind::TerminateExecution { request_id })?;
         self.pending_terminate_requests.insert(request_id);
         let _ = self.flush_control_write();
-        Ok(request_id)
+        Ok(())
+    }
+
+    /// True when this connection has admitted a create with `request_id`
+    /// (correlation set used by [`Self::accept_create_result`]).
+    pub fn has_pending_create(&self, request_id: u64) -> bool {
+        self.pending_create_requests.contains(&request_id)
+    }
+
+    /// True when an admitted create frame is still sitting in the outbound FIFO
+    /// (false after a successful flush to the socket).
+    pub fn has_outbound_create(&self, request_id: u64) -> bool {
+        self.outbound.iter().any(|pending| {
+            matches!(
+                pending.kind,
+                OutboundKind::CreateExecution {
+                    request_id: id
+                } if id == request_id
+            )
+        })
+    }
+
+    /// Advance the connection-local allocator past `request_id` without
+    /// issuing a second id for the same create/terminate.
+    fn observe_provisioning_request_id(&mut self, request_id: u64) -> Result<(), ClientError> {
+        if request_id == 0 {
+            return Err(ClientError::Protocol);
+        }
+        if self.next_provisioning_request_id <= request_id {
+            self.next_provisioning_request_id =
+                request_id.checked_add(1).ok_or(ClientError::Protocol)?;
+        }
+        Ok(())
     }
 
     pub fn take_create_result(&mut self) -> Option<CreateExecutionResult> {
