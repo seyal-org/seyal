@@ -1336,6 +1336,14 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.shiftApplied, 0)
     }
 
+    func testShortcutRealizationReadsTheRustCommandPaletteEquivalent() {
+        let row = try XCTUnwrap(
+            KeybindingShortcutRealization.item(commandId: KeybindingShortcutRealization.commandPaletteOpen)
+        )
+        XCTAssertEqual(row.command_id, KeybindingShortcutRealization.commandPaletteOpen)
+        XCTAssertNotEqual(row.has_key_equivalent, 0)
+    }
+
 }
 
 @discardableResult
