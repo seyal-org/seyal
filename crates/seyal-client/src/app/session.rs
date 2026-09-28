@@ -151,6 +151,8 @@ impl ApplicationRoot {
                 execution: evidence.execution,
             })
             .map_err(|_| AppError::AlreadyBound)?;
+        self.provisioning
+            .record_adopted_binding(fence.pane, evidence.execution);
         let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
             .ok_or(AppError::ZeroPtyGeneration)?;
         self.presentation

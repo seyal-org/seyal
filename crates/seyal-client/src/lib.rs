@@ -15,6 +15,7 @@ pub mod input_policy;
 pub mod palette;
 pub mod pane_layout;
 pub mod presentation;
+pub mod provisioning;
 pub mod recovery;
 pub mod shell;
 pub mod theme;

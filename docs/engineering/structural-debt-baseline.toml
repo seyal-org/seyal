@@ -34,9 +34,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 747
-issue = 923
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs."
+acknowledged_loc = 762
+issue = 1136
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility/provisioning_apply extraction; #1136 adds the portable ProvisioningSession field and accessors only — create/bind/disposition reducers live in provisioning/, close coordination in provisioning_apply.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/provisioning/tests.rs"
+acknowledged_loc = 753
+issue = 1136
+reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"

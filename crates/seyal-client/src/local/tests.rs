@@ -57,6 +57,12 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        execution_provisioning_negotiated: false,
+        next_provisioning_request_id: 1,
+        pending_create_requests: std::collections::HashSet::new(),
+        pending_terminate_requests: std::collections::HashSet::new(),
+        last_create_result: None,
+        last_terminate_result: None,
     }
 }
 

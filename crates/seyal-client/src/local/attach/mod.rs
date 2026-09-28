@@ -16,6 +16,8 @@ use seyal_runtime::{
     ExecutionId,
 };
 
+use super::provisioning_wire::provisioning_negotiated;
+
 use crate::block_cache::{is_epoch_quarantined, BlockCache};
 
 use super::{
@@ -252,6 +254,7 @@ impl LocalDisplayClient {
             extended_terminal_key_supported(server_hello.server_capabilities),
             server_hello.runtime_id,
             block_metadata_negotiated,
+            provisioning_negotiated(server_hello.server_capabilities),
             deadline,
         )
     }
@@ -305,6 +308,7 @@ impl LocalDisplayClient {
             extended_terminal_key_supported(server_hello.server_capabilities),
             server_hello.runtime_id,
             block_metadata_negotiated,
+            provisioning_negotiated(server_hello.server_capabilities),
             deadline,
         )
     }
@@ -336,6 +340,7 @@ impl LocalDisplayClient {
             extended_terminal_key_supported(server_hello.server_capabilities),
             server_hello.runtime_id,
             false,
+            provisioning_negotiated(server_hello.server_capabilities),
             deadline,
         )
     }
@@ -358,6 +363,7 @@ impl LocalDisplayClient {
             extended_terminal_key_supported,
             runtime_id,
             block_metadata_negotiated,
+            false,
             Instant::now() + STARTUP_TIMEOUT,
         )
     }
@@ -371,6 +377,7 @@ impl LocalDisplayClient {
         extended_terminal_key_supported: bool,
         runtime_id: u128,
         block_metadata_negotiated: bool,
+        execution_provisioning_negotiated: bool,
         deadline: Instant,
     ) -> Result<Self, ClientError> {
         send_control_until(
@@ -535,6 +542,12 @@ impl LocalDisplayClient {
             last_sent_v2_action_id: 0,
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
+            execution_provisioning_negotiated,
+            next_provisioning_request_id: 1,
+            pending_create_requests: std::collections::HashSet::new(),
+            pending_terminate_requests: std::collections::HashSet::new(),
+            last_create_result: None,
+            last_terminate_result: None,
         })
     }
 }

@@ -206,13 +206,14 @@ fn split_focus_and_close_panes() {
 }
 
 #[test]
-fn execution_bound_pane_cannot_be_closed() {
+fn execution_bound_pane_close_releases_binding() {
     let mut shell = seed_two_workspaces();
     let bound = shell.snapshot().focused_pane;
+    let execution = ExecutionId::from_bytes([7; 16]);
     shell
         .apply(ShellAction::BindExecution {
             pane: bound,
-            execution: ExecutionId::from_bytes([7; 16]),
+            execution,
         })
         .expect("bind");
     shell
@@ -225,22 +226,15 @@ fn execution_bound_pane_cannot_be_closed() {
     shell
         .apply(ShellAction::FocusPane { id: bound })
         .expect("focus bound");
-    assert!(!shell.snapshot().allows_pane_close);
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: bound }),
-        Err(ShellError::CannotCloseBoundPane)
-    );
-    assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
+    assert!(shell.snapshot().allows_pane_close);
     shell
-        .apply(ShellAction::ClosePane { id: created })
-        .expect("close unbound");
+        .apply(ShellAction::ClosePane { id: bound })
+        .expect("close bound releases presentation");
+    assert_eq!(shell.take_released_execution(), Some((bound, execution)));
     let snap = shell.snapshot();
     assert_eq!(snap.layout, LayoutDescription::Single);
-    assert_eq!(snap.focused_pane, bound);
-    assert_eq!(
-        snap.panes[0].execution,
-        Some(ExecutionId::from_bytes([7; 16]))
-    );
+    assert_eq!(snap.focused_pane, created);
+    assert!(snap.panes[0].execution.is_none());
 }
 
 #[test]

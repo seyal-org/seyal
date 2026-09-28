@@ -127,6 +127,7 @@ fn startup_deadline_bounds_a_stalled_attach_read() {
         false,
         9,
         false,
+        false,
         std::time::Instant::now() + Duration::from_millis(25),
     );
     assert!(matches!(result, Err(ClientError::StartupDeadlineExceeded)));
@@ -237,6 +238,7 @@ fn malformed_initial_snapshot_requests_resync_then_converges_transactionally() {
         false,
         9,
         false,
+        false,
         std::time::Instant::now() + Duration::from_millis(250),
     )
     .expect("initial resync should converge");
@@ -275,6 +277,7 @@ fn repeated_malformed_initial_snapshots_terminate_within_existing_deadline() {
         false,
         false,
         9,
+        false,
         false,
         std::time::Instant::now() + Duration::from_millis(250),
     );
@@ -332,6 +335,7 @@ fn malformed_multichunk_attach_quarantines_stale_remainder_before_resync_snapsho
         false,
         9,
         false,
+        false,
         std::time::Instant::now() + Duration::from_millis(250),
     )
     .expect("stale remainder should not poison bounded resync");
@@ -388,6 +392,7 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
         true,
         false,
         9,
+        false,
         false,
         std::time::Instant::now() + Duration::from_millis(250),
     )

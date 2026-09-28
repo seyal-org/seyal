@@ -33,6 +33,12 @@ pub(crate) enum OutboundKind {
     Resync,
     ComposerCommand,
     HistoryRangeRequest,
+    CreateExecution {
+        request_id: u64,
+    },
+    TerminateExecution {
+        request_id: u64,
+    },
 }
 
 #[derive(Debug)]
