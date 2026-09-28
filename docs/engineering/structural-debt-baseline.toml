@@ -46,7 +46,7 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 898
+acknowledged_loc = 900
 issue = 1108
 reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/, ratcheting this façade down from the prior 919 LOC #923 ceiling."
 
