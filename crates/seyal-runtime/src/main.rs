@@ -11,13 +11,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config = config.isolated_to(runtime_dir);
     }
     let mut runtime = Runtime::new(config)?;
-    let mut args = parsed.command.into_iter();
-    let program = args
-        .next()
-        .or_else(|| std::env::var_os("SHELL"))
-        .unwrap_or_else(|| "/bin/sh".into());
-    let command = CommandSpec::new(program).args(args);
-    runtime.create_execution(command, WindowSize::new(80, 24, 0, 0)?)?;
+    let size = WindowSize::new(80, 24, 0, 0)?;
+
+    if parsed.command.is_empty() {
+        // Production default: EffectiveLaunchPolicy → CapabilityPolicy /
+        // ShellIntegrationPolicy (ADR-020 §3.6 / SPEC-023 §4). Never spawn an
+        // unvalidated bare `$SHELL`.
+        runtime.create_interactive_execution(size)?;
+    } else {
+        // Documented developer/test bypass (ADR-020 §3.11). Explicit argv is
+        // not the headed profile-0 route; create_execution still applies
+        // CapabilityPolicy and ShellIntegrationPolicy.
+        let mut args = parsed.command.into_iter();
+        let program = args.next().expect("non-empty command was checked above");
+        let command = CommandSpec::new(program).args(args);
+        runtime.create_execution(command, size)?;
+    }
 
     while runtime.execution_count() != 0 {
         runtime.poll_once(Some(Duration::from_secs(30)))?;

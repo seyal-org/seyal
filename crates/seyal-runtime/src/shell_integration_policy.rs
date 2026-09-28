@@ -3,7 +3,13 @@
 //! this module only decides which files and environment a zsh child starts
 //! with and how the per-execution secret reaches it.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+#[cfg(target_os = "macos")]
+use std::ffi::OsStr;
 
 #[cfg(target_os = "macos")]
 use std::{
@@ -13,7 +19,6 @@ use std::{
         fd::{FromRawFd, OwnedFd},
         unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     },
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use seyal_exec::CommandSpec;
@@ -31,6 +36,42 @@ pub const USER_ZDOTDIR_ENV: &str = "SEYAL_USER_ZDOTDIR";
 const BUNDLED_ZSHENV: &str = include_str!("../assets/shell-integration/zsh/.zshenv");
 #[cfg(target_os = "macos")]
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+/// ADR-020 §3.6 / SPEC-023 §6.1: max bytes for copied `SEYAL_USER_ZDOTDIR`.
+const USER_ZDOTDIR_MAX_BYTES: usize = 1024;
+
+/// Count-only structural events: Runtime-process `ZDOTDIR` failed §3.6 bounds
+/// and `SEYAL_USER_ZDOTDIR` was omitted. Never carries path/env bytes.
+static USER_ZDOTDIR_BOUNDS_OMITS: AtomicU64 = AtomicU64::new(0);
+
+/// Number of times `SEYAL_USER_ZDOTDIR` was omitted for bounds (tests / metrics).
+pub fn user_zdotdir_bounds_omit_count() -> u64 {
+    USER_ZDOTDIR_BOUNDS_OMITS.load(Ordering::Relaxed)
+}
+
+#[cfg(target_os = "macos")]
+fn user_zdotdir_value_ok(value: &OsStr) -> bool {
+    let bytes = value.as_encoded_bytes();
+    if bytes.is_empty() || bytes.len() > USER_ZDOTDIR_MAX_BYTES {
+        return false;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.chars().all(|c| !c.is_control()),
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn maybe_copy_user_zdotdir(command: CommandSpec) -> CommandSpec {
+    match std::env::var_os("ZDOTDIR") {
+        Some(value) if user_zdotdir_value_ok(&value) => command.env(USER_ZDOTDIR_ENV, value),
+        Some(_) => {
+            USER_ZDOTDIR_BOUNDS_OMITS.fetch_add(1, Ordering::Relaxed);
+            command
+        }
+        None => command,
+    }
+}
 
 /// Where the bundled `.zshenv` is materialized once and referenced by
 /// `ZDOTDIR` at every zsh spawn.
@@ -144,13 +185,11 @@ impl ShellIntegrationPolicy {
             read_end.as_raw_fd()
         };
 
-        let mut command = command
+        let command = command
             .env("ZDOTDIR", self.zdotdir.as_os_str())
             .env(NONCE_FD_ENV, read_raw.to_string())
             .inherit_fd(read_end);
-        if let Some(user_zdotdir) = std::env::var_os("ZDOTDIR") {
-            command = command.env(USER_ZDOTDIR_ENV, user_zdotdir);
-        }
+        let command = maybe_copy_user_zdotdir(command);
         Ok((command, nonce))
     }
 }
@@ -216,6 +255,7 @@ fn verify_private_file(path: &Path) -> Result<(), RuntimeError> {
 }
 
 #[cfg(all(test, target_os = "macos"))]
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
@@ -286,9 +326,97 @@ mod tests {
         let (command, nonce) = policy.apply(CommandSpec::new("/bin/zsh")).unwrap();
         let debug = format!("{command:?}");
         assert!(debug.contains("inherited_fd_count: 1"), "{debug}");
+        assert_eq!(command.inherited_fd_count(), 1);
         let mut hex = String::new();
         nonce.write_hex(&mut hex);
         assert_eq!(hex.len(), 32);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn user_zdotdir_bounds_omit_invalid_values_and_copy_valid() {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let dir = std::env::temp_dir().join(format!(
+            "seyal-shell-integration-zdotdir-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        create_private_dir(&dir).unwrap();
+        fs::write(dir.join(".zshenv"), BUNDLED_ZSHENV).unwrap();
+        fs::set_permissions(dir.join(".zshenv"), fs::Permissions::from_mode(0o600)).unwrap();
+        let policy = ShellIntegrationPolicy::from_zdotdir(&dir).unwrap();
+
+        let prior = user_zdotdir_bounds_omit_count();
+        let original = std::env::var_os("ZDOTDIR");
+
+        // SAFETY: test holds LOCK; no concurrent env readers in this process.
+        unsafe {
+            // Empty → omit + count.
+            std::env::set_var("ZDOTDIR", "");
+        }
+        let (command, _) = policy.apply(CommandSpec::new("/bin/zsh")).unwrap();
+        assert!(!env_has(&command, USER_ZDOTDIR_ENV));
+        assert_eq!(user_zdotdir_bounds_omit_count(), prior + 1);
+
+        unsafe {
+            std::env::set_var("ZDOTDIR", "/tmp/bad\nzdot");
+        }
+        let (command, _) = policy.apply(CommandSpec::new("/bin/zsh")).unwrap();
+        assert!(!env_has(&command, USER_ZDOTDIR_ENV));
+        assert_eq!(user_zdotdir_bounds_omit_count(), prior + 2);
+
+        unsafe {
+            std::env::set_var("ZDOTDIR", "x".repeat(USER_ZDOTDIR_MAX_BYTES + 1));
+        }
+        let (command, _) = policy.apply(CommandSpec::new("/bin/zsh")).unwrap();
+        assert!(!env_has(&command, USER_ZDOTDIR_ENV));
+        assert_eq!(user_zdotdir_bounds_omit_count(), prior + 3);
+
+        unsafe {
+            use std::os::unix::ffi::OsStringExt;
+            std::env::set_var("ZDOTDIR", std::ffi::OsString::from_vec(vec![0xff, 0xfe]));
+        }
+        let (command, _) = policy.apply(CommandSpec::new("/bin/zsh")).unwrap();
+        assert!(!env_has(&command, USER_ZDOTDIR_ENV));
+        assert_eq!(user_zdotdir_bounds_omit_count(), prior + 4);
+
+        // Valid → copied exactly; no additional omit.
+        let valid = dir.join("user-zdot");
+        fs::create_dir_all(&valid).unwrap();
+        unsafe {
+            std::env::set_var("ZDOTDIR", &valid);
+        }
+        let (command, _) = policy.apply(CommandSpec::new("/bin/zsh")).unwrap();
+        assert_eq!(
+            env_get(&command, USER_ZDOTDIR_ENV).as_deref(),
+            Some(valid.as_os_str())
+        );
+        assert_eq!(user_zdotdir_bounds_omit_count(), prior + 4);
+
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("ZDOTDIR", value),
+                None => std::env::remove_var("ZDOTDIR"),
+            }
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn env_has(command: &CommandSpec, key: &str) -> bool {
+        command
+            .environment_overrides()
+            .iter()
+            .any(|(k, _)| k == key)
+    }
+
+    fn env_get(command: &CommandSpec, key: &str) -> Option<std::ffi::OsString> {
+        command
+            .environment_overrides()
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
     }
 }

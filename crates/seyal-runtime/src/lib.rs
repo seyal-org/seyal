@@ -42,7 +42,9 @@ pub use error::RuntimeError;
 pub use ids::{AttachmentId, BlockId, ExecutionId, ProjectionId, RuntimeId, WorkspaceId};
 pub use input::InputIngress;
 pub use launch_policy::{
-    interactive_login_argv, lookup_effective_account_record, resolve as resolve_launch_policy,
+    account_record_usable, apply_post_policy, command_spec_from_policy, darwin_user_temp_dir,
+    interactive_login_argv, is_valid_cwd, is_valid_shell_program, lookup_effective_account_record,
+    path_has_forbidden_chars, resolve as resolve_launch_policy, resolve_default_interactive,
     AccountRecord, CapabilityProfileId, EffectiveLaunchPolicy, EmptyLocaleEnv, LaunchPolicyFailure,
     LaunchPolicyResolution, LaunchPolicyWarning, LaunchProfileIntent, LocaleEnv, PathProbe,
     ProcessLocaleEnv, RealPathProbe, ResolveInputs, ShellFamily, DEFAULT_PATH,
@@ -52,4 +54,6 @@ pub use launch_policy::{
 #[doc(hidden)]
 pub use runtime::BenchmarkRuntimeDiagnostics;
 pub use runtime::{ExecutionLifecycle, ExecutionSummary, LocalIpcMode, Runtime, RuntimeConfig};
-pub use shell_integration_policy::{ShellIntegrationPolicy, NONCE_FD_ENV, USER_ZDOTDIR_ENV};
+pub use shell_integration_policy::{
+    user_zdotdir_bounds_omit_count, ShellIntegrationPolicy, NONCE_FD_ENV, USER_ZDOTDIR_ENV,
+};

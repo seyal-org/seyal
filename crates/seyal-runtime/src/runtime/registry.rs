@@ -126,6 +126,28 @@ impl Runtime {
         self.entries.get(&id).map(|entry| &entry.execution)
     }
 
+    /// Profile-0 interactive create: resolve `EffectiveLaunchPolicy`, refuse when
+    /// CapabilityPolicy is unavailable, then publish through the SPEC-003 create
+    /// transaction (CapabilityPolicy + ShellIntegrationPolicy apply inside).
+    ///
+    /// A launch-policy failure returns before spawn: zero published executions
+    /// and no inherited descriptors.
+    pub fn create_interactive_execution(
+        &mut self,
+        size: WindowSize,
+    ) -> Result<ExecutionId, RuntimeError> {
+        let resolution = crate::launch_policy::resolve_default_interactive()?;
+        if !self.config.capability_policy.is_available() {
+            return Err(RuntimeError::LaunchPolicy(
+                crate::LaunchPolicyFailure::CapabilityUnavailable,
+            ));
+        }
+        // Warnings are count-only until L3; never carry rejected paths.
+        let _warning_count = resolution.warnings.len();
+        let command = crate::launch_policy::command_spec_from_policy(&resolution);
+        self.create_execution(command, size)
+    }
+
     pub fn create_execution(
         &mut self,
         command: CommandSpec,

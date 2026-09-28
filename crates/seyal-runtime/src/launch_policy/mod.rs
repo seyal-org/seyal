@@ -6,18 +6,25 @@
 #[allow(unsafe_code)]
 mod account;
 mod argv;
+mod compose;
 mod env;
 mod resolve;
+#[allow(unsafe_code)]
+mod tmpdir;
 mod types;
 mod validate;
 
+#[cfg(all(test, target_os = "macos"))]
+mod compose_tests;
 #[cfg(test)]
 mod tests;
 
 pub use account::lookup_effective_account_record;
 pub use argv::{interactive_login_argv, ShellFamily};
+pub use compose::{apply_post_policy, command_spec_from_policy, resolve_default_interactive};
 pub use env::{EmptyLocaleEnv, LocaleEnv, ProcessLocaleEnv, DEFAULT_PATH};
 pub use resolve::{resolve, ResolveInputs, PLATFORM_SAFE_FALLBACKS};
+pub use tmpdir::darwin_user_temp_dir;
 pub use types::{
     AccountRecord, CapabilityProfileId, EffectiveLaunchPolicy, LaunchPolicyFailure,
     LaunchPolicyResolution, LaunchPolicyWarning, LaunchProfileIntent,

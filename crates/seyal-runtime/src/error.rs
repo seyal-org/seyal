@@ -2,6 +2,8 @@ use std::{fmt, io};
 
 use seyal_exec::{ChildExit, ExecError};
 
+use crate::launch_policy::LaunchPolicyFailure;
+
 #[derive(Debug)]
 pub enum RuntimeError {
     UnsupportedPlatform(&'static str),
@@ -20,6 +22,8 @@ pub enum RuntimeError {
     Io(io::Error),
     Terminfo(String),
     ShellIntegration(&'static str),
+    /// Pre-spawn launch-policy failure (SPEC-023 §9). Carries no path/env bytes.
+    LaunchPolicy(LaunchPolicyFailure),
 }
 
 impl fmt::Display for RuntimeError {
@@ -48,11 +52,18 @@ impl fmt::Display for RuntimeError {
             Self::Io(error) => write!(f, "Runtime I/O error: {error}"),
             Self::Terminfo(message) => write!(f, "terminfo error: {message}"),
             Self::ShellIntegration(message) => write!(f, "shell integration error: {message}"),
+            Self::LaunchPolicy(failure) => f.write_str(failure.as_str()),
         }
     }
 }
 
 impl std::error::Error for RuntimeError {}
+
+impl From<LaunchPolicyFailure> for RuntimeError {
+    fn from(value: LaunchPolicyFailure) -> Self {
+        Self::LaunchPolicy(value)
+    }
+}
 
 impl From<ExecError> for RuntimeError {
     fn from(value: ExecError) -> Self {
