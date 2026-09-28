@@ -205,6 +205,10 @@ impl SeyalAppPalette {
 }
 
 const PALETTE_OPEN: u16 = 1;
+/// Overlay is projecting the navigation-only goto surface (N4).
+const PALETTE_GOTO: u16 = 2;
+/// Goto enumeration was truncated past GOTO_ENUMERATION_BOUND (SPEC-022 R7.6).
+const PALETTE_TRUNCATED: u16 = 4;
 
 /// One projected row. Optional `ResourceAddress` fields are set for palette
 /// navigation rows (SPEC-022 R7.2); `address_len == 0` means no address.
@@ -749,6 +753,12 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
         if snap.palette.open {
             flags |= PALETTE_OPEN;
         }
+        if snap.goto.open {
+            flags |= PALETTE_GOTO;
+            if snap.goto.truncated {
+                flags |= PALETTE_TRUNCATED;
+            }
+        }
         SeyalAppPalette {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppPalette>() as u16,
@@ -761,7 +771,12 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
                 state.palette_query.as_ptr()
             },
             query_utf8_len: state.palette_query.len() as u32,
-            reserved: 0,
+            // Low byte: GotoScope discriminant while goto is open; else 0.
+            reserved: if snap.goto.open {
+                snap.goto.scope as u8 as u32
+            } else {
+                0
+            },
         }
     })
 }
@@ -942,5 +957,8 @@ fn error_number(error: AppError) -> i32 {
         AppError::NavigationTargetTerminated => 41,
         AppError::NavigationTargetUnbound => 42,
         AppError::NavigationAmbiguousTarget => 43,
+        AppError::GotoNotOpen => 44,
+        AppError::GotoNoSelection => 45,
+        AppError::GotoUnsupportedScope => 46,
     }
 }
