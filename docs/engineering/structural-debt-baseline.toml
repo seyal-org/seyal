@@ -34,21 +34,39 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 747
-issue = 923
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs."
+acknowledged_loc = 858
+issue = 1144
+reason = "ApplicationRoot keeps W4a window dispatch and N4 goto dispatch. Goto reduction stays in goto_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 993
+issue = 1118
+reason = "N2 navigate/palette address tests already landed this suite in the cohesion band; #1118 does not grow the file (goto coverage lives in goto_tests.rs). Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 900
-issue = 1108
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/, ratcheting this façade down from the prior 919 LOC #923 ceiling."
+acknowledged_loc = 946
+issue = 1144
+reason = "Façade keeps the W3 window extraction and the N4 goto error numbers, shifted so UnknownWindow stays 34 and navigation/goto codes follow it."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 830
+issue = 1144
+reason = "N2 address-carrying palette rows already placed this module in the cohesion band. The N5 merge keeps that ceiling at the merged line count. Goto stays a sibling module."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 953
+issue = 1118
+reason = "N1/N2 resolver and Navigate commit tests already landed this suite in the cohesion band; #1118 does not grow it. Ceiling matches current rustfmt-normalized LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/mod.rs"
+acknowledged_loc = 771
+issue = 1144
+reason = "ShellState keeps W3 window containment and the N4 navigation helpers. Inventory enumeration lives in inventory.rs. Helpers walk Window tabs rather than a workspace.tabs field."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
