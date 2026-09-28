@@ -7,8 +7,7 @@ use super::payload::{
 };
 use super::{
     BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, HistoryRangeRequest,
-    HistoryRangeSnapshot, ResizeRequest, ResizeResult, TerminalKey, TerminalKeyV2,
-    ViewportLineIds,
+    HistoryRangeSnapshot, ResizeRequest, ResizeResult, TerminalKey, TerminalKeyV2, ViewportLineIds,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
