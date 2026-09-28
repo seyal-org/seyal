@@ -914,4 +914,13 @@ final class SeyalHostUITests: XCTestCase {
         let palette = app.descendants(matching: .any)["seyal-command-palette"]
         XCTAssertFalse(palette.waitForExistence(timeout: 1))
     }
+
+    func testViewMenuExposesGoToForTheShortcutSurface() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let view = app.menuBars.menuBarItems["View"]
+        XCTAssertTrue(view.waitForExistence(timeout: 5))
+        view.click()
+        XCTAssertTrue(view.menuItems["Go to…"].waitForExistence(timeout: 5))
+    }
 }
