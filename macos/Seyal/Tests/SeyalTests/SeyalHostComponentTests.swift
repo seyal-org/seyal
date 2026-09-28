@@ -34,7 +34,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 40)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
-        XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 64)
+        XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 112)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 56)
         let live = seyal_app_create()
         // Core Terminal chrome is visible by default (#922).

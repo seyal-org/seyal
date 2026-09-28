@@ -6,6 +6,8 @@
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
 mod actions;
+mod effects;
+mod snapshot;
 mod tree;
 mod workspace;
 
@@ -16,10 +18,21 @@ use std::fmt;
 
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
+pub use effects::ShellNativeEffect;
+pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
 use workspace::{Pane, Tab, Window, Workspace};
+
+/// ADR-018 §5 presentation tier for one Pane leaf (product-derived in W3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresentationTier {
+    Focused,
+    Visible,
+    Hidden,
+    Unpresented,
+}
 
 /// Why a [`ShellAction`] was rejected. The previous containment state is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,10 +167,13 @@ pub enum ShellAction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShellSnapshot {
     pub workspaces: Vec<WorkspaceSnapshot>,
+    /// Ordered Windows across Workspaces (`workspace order`, then window order).
+    pub windows: Vec<WindowSnapshot>,
     pub active_workspace: WorkspaceId,
     pub last_active_workspace: WorkspaceId,
     pub active_window: WindowId,
     pub containment_generation: u64,
+    /// Active-Window Tab projection (compatible with pre-W3 hosts).
     pub tabs: Vec<TabSnapshot>,
     pub active_tab: TabId,
     pub focused_pane: PaneId,
@@ -216,6 +232,8 @@ pub struct ShellState {
     allows_tab_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
+    /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
+    pending_effects: Vec<ShellNativeEffect>,
 }
 
 impl ShellState {
@@ -252,6 +270,7 @@ impl ShellState {
             allows_tab_creation: false,
             last_error: None,
             next_tab_ordinal: 2,
+            pending_effects: Vec::new(),
         }
     }
 
@@ -309,6 +328,7 @@ impl ShellState {
             allows_tab_creation,
             last_error: None,
             next_tab_ordinal: 2,
+            pending_effects: Vec::new(),
         })
     }
 
@@ -318,6 +338,15 @@ impl ShellState {
 
     pub fn containment_generation(&self) -> u64 {
         self.containment_generation
+    }
+
+    /// Drain §2.4 effects produced by the last successful commit(s).
+    pub fn take_effects(&mut self) -> Vec<ShellNativeEffect> {
+        std::mem::take(&mut self.pending_effects)
+    }
+
+    pub(super) fn push_effect(&mut self, effect: ShellNativeEffect) {
+        self.pending_effects.push(effect);
     }
 
     pub fn allows_pane_splitting(&self) -> bool {
@@ -345,68 +374,14 @@ impl ShellState {
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
-        let workspace = self
-            .workspace(self.active_workspace)
-            .expect("active Workspace must exist");
-        let window = workspace
-            .active_window()
-            .expect("product-active Window must exist for snapshot");
-        let tab = workspace
-            .tab(window.active_tab)
-            .expect("active Tab must exist");
-        ShellSnapshot {
-            workspaces: self
-                .workspaces
-                .iter()
-                .map(|item| WorkspaceSnapshot {
-                    id: item.id,
-                    name: item.name.clone(),
-                    detail: item.detail.clone(),
-                    attention: item.attention,
-                    tab_count: item.tab_count(),
-                })
-                .collect(),
-            active_workspace: self.active_workspace,
-            last_active_workspace: self.last_active_workspace,
-            active_window: window.id,
-            containment_generation: self.containment_generation,
-            tabs: workspace
-                .tabs()
-                .map(|item| TabSnapshot {
-                    id: item.id,
-                    title: item.title.clone(),
-                    attention: item.attention,
-                    pane_count: item.panes.len(),
-                })
-                .collect(),
-            active_tab: window.active_tab,
-            focused_pane: tab.focused,
-            panes: tab
-                .root
-                .pane_ids()
-                .into_iter()
-                .filter_map(|id| {
-                    tab.panes.get(&id).map(|pane| PaneSnapshot {
-                        id: pane.id,
-                        title: pane.title.clone(),
-                        execution: pane.execution,
-                        allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
-                    })
-                })
-                .collect(),
-            tree: tab.root.clone(),
-            layout: tab.root.layout_description(),
-            last_error: self.last_error,
-            allows_tab_creation: self.allows_tab_creation,
-            allows_pane_splitting: self.allows_pane_splitting,
-            allows_tab_close: workspace.allows_tab_close(),
-            allows_pane_close: tab.allows_focused_pane_close(),
-        }
+        self.build_snapshot()
     }
 
     pub fn apply(&mut self, action: ShellAction) -> Result<(), ShellError> {
         let mut next = self.clone();
         next.last_error = None;
+        // Effects belong to this commit only; do not replay prior drained ones.
+        next.pending_effects.clear();
         let result = next.apply_inner(action);
         match result {
             Ok(()) => {

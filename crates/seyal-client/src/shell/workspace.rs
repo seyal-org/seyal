@@ -30,6 +30,7 @@ pub(super) struct Tab {
 pub(super) struct Window {
     pub(super) id: WindowId,
     pub(super) workspace_id: WorkspaceId,
+    pub(super) attention: bool,
     pub(super) tabs: Vec<Tab>,
     pub(super) active_tab: TabId,
 }
@@ -95,6 +96,7 @@ impl Window {
         Ok(Self {
             id,
             workspace_id,
+            attention: false,
             tabs,
             active_tab,
         })

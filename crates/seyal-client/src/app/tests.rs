@@ -365,8 +365,8 @@ fn quit_freezes_and_emits_one_native_effect() {
     let snap = root.snapshot();
     assert!(snap.frozen);
     assert_eq!(
-        snap.pending_effect,
-        NativeEffect::BoundedDetachThenTerminate
+        snap.pending_effects.as_slice(),
+        &[NativeEffect::BoundedDetachThenTerminate]
     );
     assert_eq!(
         root.apply(AppAction::Focus {
@@ -375,7 +375,7 @@ fn quit_freezes_and_emits_one_native_effect() {
         Err(AppError::Frozen)
     );
     root.apply(AppAction::AckEffect).unwrap();
-    assert_eq!(root.snapshot().pending_effect, NativeEffect::None);
+    assert!(root.snapshot().pending_effects.is_empty());
 }
 
 #[test]

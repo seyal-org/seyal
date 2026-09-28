@@ -3,7 +3,7 @@
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::workspace::{Pane, Tab, Window};
-use super::{CycleDirection, ShellAction, ShellError, ShellState};
+use super::{CycleDirection, ShellAction, ShellError, ShellNativeEffect, ShellState};
 
 impl ShellState {
     pub(super) fn require_containment_generation(&self, carried: u64) -> Result<(), ShellError> {
@@ -32,6 +32,7 @@ impl ShellState {
         self.active_workspace = workspace_id;
         self.last_active_workspace = workspace_id;
         self.touch_mru(window);
+        self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
         Ok(())
     }
 
@@ -76,6 +77,7 @@ impl ShellState {
         let window = self.new_window_record(workspace)?;
         let window_id = window.id;
         self.workspace_mut(workspace)?.push_window(window);
+        self.push_effect(ShellNativeEffect::RealizeWindow { window: window_id });
         self.activate_window(window_id)?;
         self.bump_containment_generation();
         Ok(())
@@ -230,6 +232,9 @@ impl ShellState {
         let (removed, destroyed) = self.workspace_mut(source_workspace)?.take_tab(tab)?;
         if let Some(destroyed_id) = destroyed {
             self.remove_from_mru(destroyed_id);
+            self.push_effect(ShellNativeEffect::DestroyWindowRealization {
+                window: destroyed_id,
+            });
         }
         self.workspace_mut(source_workspace)?
             .insert_tab_before(window, removed, before)?;
@@ -271,6 +276,7 @@ impl ShellState {
         let window = Window::try_new(new_id, workspace_id, vec![removed], tab)
             .expect("moved tab forms a valid window");
         self.workspace_mut(workspace_id)?.push_window(window);
+        self.push_effect(ShellNativeEffect::RealizeWindow { window: new_id });
         self.activate_window(new_id)?;
         self.bump_containment_generation();
         Ok(())
