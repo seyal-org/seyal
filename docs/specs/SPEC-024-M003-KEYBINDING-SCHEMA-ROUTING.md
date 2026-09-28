@@ -715,15 +715,16 @@ After parsing all builtin + user entries:
    regardless of declaration order. To use T, a user first unbinds S in those
    contexts (§7.3). At runtime a stroke that completes a surviving binding
    therefore never also opens a chord prefix, and no dispatch ever waits on the
-   §8 timeout.
+   §8 timeout. Step 8 is applied to bindings in ascending sequence length; a
+   binding already dropped by step 8 is not a surviving binding and shadows nothing.
 
 Worked examples:
 
 | Earlier | Later | Result |
 |---|---|---|
 | builtin `cmd+k` → `command_palette.open` `[app]` | user `cmd+k` → `tab.create` `[app, raw]` | user owns `app` and `raw`; builtin loses its only bit and is dropped; one `DuplicateSequence` (`app`) |
-| user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `window.new` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
-| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `window.new` `[raw]` | disjoint; both remain; in Raw, `window.new` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
+| user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `pane.split_down` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
+| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `pane.split_down` `[raw]` | disjoint; both remain; in Raw, `pane.split_down` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
 
 ### 7.2 Diagnostics (non-secret)
 
@@ -946,7 +947,9 @@ Production Issues derived from this specification must include measurable cases:
 9. Chord: `ctrl+b>n` dispatches once; timeout clears prefix; no PTY echo of
    prefix. builtin `cmd+k` plus user `cmd+k>t` `[app]` → chord dropped with
    `ChordPrefixShadowed`; after `keys = "cmd+k"` `action = "none"` the chord
-   survives; user `ctrl+b` `[flow]` plus `ctrl+b>n` `[raw]` both survive.
+   survives; user `ctrl+b` `[flow]` plus `ctrl+b>n` `[raw]` both survive; the
+   three-sequence case S=`ctrl+b` `[flow]`, T=`ctrl+b>n` `[flow, raw]`,
+   U=`ctrl+b>n>x` `[raw]` leaves S and U and drops T.
 10. Cold-only: simulated theme reload leaves `KeybindingTable` pointer/identity
     unchanged.
 11. Stale/unavailable action invoke → `ActionUnavailable`; no PTY fallback.
