@@ -1316,7 +1316,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
 
-    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() {
+    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
         var empty = SeyalAppRow()
         XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
         var row = SeyalAppRow()
@@ -1328,7 +1328,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.count, 5)
     }
 
-    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() {
+    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() throws {
         let event = try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
