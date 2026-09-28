@@ -94,7 +94,11 @@ argument list (SPEC-009 §8.1.1) and must therefore create **no** execution from
 its own startup: provisioning intent has exactly one owner, and a startup-created
 execution would compete with it. A Runtime started explicitly with a command by a
 developer or a test harness may still create that execution as its own
-composition, which is not a second product authority.
+composition, which is not a second product authority. This no-startup-creation
+rule takes effect only in the same change that makes the headed client provision
+its initial Pane under SPEC-009 §8.2.1. Until then the client-launched Runtime
+keeps its single startup execution, and the zero-execution steady state above is
+the only lifetime change.
 
 ## 5. Execution registry
 

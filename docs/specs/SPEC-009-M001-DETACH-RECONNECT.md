@@ -354,6 +354,9 @@ rather than exceptional. Resolution therefore becomes:
 - within one live client session, a Pane reconnects by the exact `ExecutionId`
   recorded in portable Rust product state. "First/only running execution"
   resolution must not be the headed production path;
+- a fresh client process with zero eligible surviving executions provisions
+  exactly one new execution for its initial Pane through SPEC-004 §18;
+  continuity is not claimed (§8.2);
 - a fresh client process with exactly one eligible surviving execution still
   adopts it for its initial Pane, preserving the §8.2 proof above;
 - a fresh client process with more than one eligible surviving execution must not

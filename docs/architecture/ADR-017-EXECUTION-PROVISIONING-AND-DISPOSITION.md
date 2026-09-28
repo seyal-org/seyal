@@ -220,6 +220,10 @@ authority under ADR-015, keeps the wire free of paths and strings, and keeps the
 shell-integration nonce contract intact. Profile **contents** (env, CWD, shell,
 integration keys) are owned by #1003 / proposed ADR-020 (PR #1050); this ADR
 validates the selector fail-closed and never inlines policy payloads on the wire.
+Resolving profile `0` requires ADR-020 to be Accepted; this ADR defines no
+interim profile contents. Children that do not resolve a launch profile
+(M003-674 P1, P2) may become Ready on ADR-017 acceptance. P3 and every child
+that depends on it may become Ready only after ADR-020 is Accepted.
 It is not a privilege claim: a same-UID client can already execute programs itself,
 and SPEC-004 §4's same-UID threat boundary is unchanged.
 
@@ -423,8 +427,15 @@ ever became user-visible presentation:
 | State when the intent died | Required disposition |
 |---|---|
 | never bound, never attached, no input admitted | the client attaches as Controller solely to dispose and issues exactly one `TerminateExecutionRequest` |
+| attached as Controller, never bound, no input admitted (attach succeeded; bind failed or the intent died before bind) | issue exactly one `TerminateExecutionRequest` on that existing attachment, then detach; never open a second attach |
 | bound at any time (user could see or drive it) | detach only; it becomes an unreferenced live execution (§6.1) |
 | provisioning result never arrives (client died) | the Runtime completes or rolls back its own transaction; a surviving execution is unreferenced and discoverable by the next client |
+
+If the disposal attach fails (`ControllerBusy`, `InvalidExecution`,
+`CapacityExceeded`, or the child already exited), or the disposal
+`TerminateExecutionResult` is a failure code, the client records the execution
+as an unreferenced live execution (§6.1) if `ListExecutions` still reports it,
+and as disposed otherwise. It never retries automatically.
 
 The first row is not "detach kills a session": nothing was ever presented, no
 user work can exist, and the disposal is an explicit terminate request under
@@ -438,6 +449,9 @@ A fresh GUI process has no presentation persistence (ADR-007 class P4 remains
 deferred), so it cannot rebuild Pane→execution bindings. Resolution stays
 deterministic:
 
+- zero eligible surviving executions → provision exactly one new execution for
+  the initial Pane through §5; this is the first-launch path once the Runtime no
+  longer creates a startup execution (SPEC-003 §4.1);
 - exactly one eligible surviving execution → adopt it for the initial Pane, as
   SPEC-009 §8.2 already requires, preserving the Pass 9 continuity proof;
 - more than one eligible surviving execution → never guess by list order, never

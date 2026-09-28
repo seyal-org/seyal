@@ -41,8 +41,6 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 - `seyal-runtime` binary: zero live executions becomes a valid steady state; the
   process no longer exits when the live-execution count reaches zero.
-- On the production client-launched path (empty argument list per SPEC-009
-  §8.1.1) the Runtime creates no execution from its own startup.
 - An explicit developer/test invocation with a command keeps creating that
   execution as Runtime's own composition.
 - Exit only on explicit shutdown (SPEC-003 §16) or an OS signal.
@@ -159,7 +157,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
   treatment as a Runtime-composed execution;
 - logs contain no program/argv/environment/cwd/terminal content.
 
-**Dependencies:** P1, P2, SPEC-003 §5.2 and SPEC-004 §18 accepted.
+**Dependencies:** P1, P2, SPEC-003 §5.2 and SPEC-004 §18 accepted; ADR-020 Accepted.
 
 ---
 
@@ -223,6 +221,8 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 - Per-Pane client/connection ownership so the headed path no longer depends on
   single-running-execution resolution.
 - Bounded non-secret failure state; no automatic provisioning retry.
+- On the production client-launched path (empty argument list per SPEC-009
+  §8.1.1) the Runtime creates no execution from its own startup.
 
 **Out of scope**
 
