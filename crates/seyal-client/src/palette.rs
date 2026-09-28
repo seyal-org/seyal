@@ -458,29 +458,36 @@ fn filter<'a>(entries: &'a [PaletteEntry], query: &str) -> Vec<&'a PaletteEntry>
 mod tests {
     use super::*;
     use crate::chrome::{AgentActivity, AgentRecord, AttentionItem, ChromeAction, ChromeState};
-    use crate::shell::{ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWorkspaceSeed};
-    use seyal_core::{PaneId, TabId, WorkspaceId};
+    use crate::shell::{
+        ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+    };
+    use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
     fn seed_shell() -> ShellState {
         let workspace = WorkspaceId::from_bytes([1; 16]);
         let tab = TabId::from_bytes([1; 16]);
         let pane = PaneId::from_bytes([1; 16]);
+        let window = WindowId::new();
         ShellState::from_workspaces(
             vec![ShellWorkspaceSeed {
                 id: workspace,
                 name: "Seyal OSS".into(),
                 detail: None,
                 attention: false,
-                active_tab: tab,
-                tabs: vec![ShellTabSeed {
-                    id: tab,
-                    title: "Core Terminal".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: pane,
-                        title: "Pane 1".into(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                active_window: window,
+                windows: vec![ShellWindowSeed {
+                    id: window,
+                    active_tab: tab,
+                    tabs: vec![ShellTabSeed {
+                        id: tab,
+                        title: "Core Terminal".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: pane,
+                            title: "Pane 1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             }],
             workspace,
