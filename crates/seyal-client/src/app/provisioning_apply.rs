@@ -3,31 +3,38 @@
 
 use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
 use seyal_protocol::framing::ErrorCode;
-use seyal_runtime::local_ipc::framing::{CreateExecutionResult, CreateExecutionResultCode};
+#[cfg(target_os = "macos")]
+use seyal_protocol::local_ipc::framing::{
+    CreateExecutionResult, CreateExecutionResultCode, TerminateExecutionResultCode,
+};
 
-use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 use super::BindingEvidence;
+use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
 use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
+#[cfg(target_os = "macos")]
 use crate::local::{ClientError, LocalDisplayClient};
-use crate::provisioning::{
-    CreateOutcome, ProvisioningEffect, ProvisioningFailure, TerminateOutcome,
-};
+#[cfg(target_os = "macos")]
+use crate::provisioning::TerminateOutcome;
+use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
 use crate::shell::ShellAction;
 
 impl ApplicationRoot {
     /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
     /// frames. Flushes any queued `SendCreate` / `SendTerminate` effects.
+    #[cfg(target_os = "macos")]
     pub fn install_wire_client(&mut self, client: LocalDisplayClient) -> Result<(), AppError> {
         self.wire_client = Some(client);
         self.flush_pending_wire_effects()
     }
 
+    #[cfg(target_os = "macos")]
     pub fn wire_client(&self) -> Option<&LocalDisplayClient> {
         self.wire_client.as_ref()
     }
 
+    #[cfg(target_os = "macos")]
     pub fn wire_client_mut(&mut self) -> Option<&mut LocalDisplayClient> {
         self.wire_client.as_mut()
     }
@@ -185,6 +192,7 @@ impl ApplicationRoot {
 
     /// Absorb a create result from the wire client and advance the session.
     /// On `Created`, queues `AttachController` for the host (no automatic attach).
+    #[cfg(target_os = "macos")]
     pub fn absorb_wire_create_result(&mut self) -> Result<Option<CreateExecutionResult>, AppError> {
         let Some(client) = self.wire_client.as_mut() else {
             return Err(AppError::NoLiveClient);
@@ -258,6 +266,7 @@ impl ApplicationRoot {
     }
 
     /// Apply a terminate result from the wire client (P4 correlation).
+    #[cfg(target_os = "macos")]
     pub fn absorb_wire_terminate_result(
         &mut self,
         still_listed: bool,
@@ -276,12 +285,10 @@ impl ApplicationRoot {
             return Ok(Some(()));
         };
         let outcome = match result.result_code {
-            seyal_runtime::local_ipc::framing::TerminateExecutionResultCode::TerminationRequested => {
+            TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
             }
-            seyal_runtime::local_ipc::framing::TerminateExecutionResultCode::Error(code) => {
-                TerminateOutcome::Failed(code)
-            }
+            TerminateExecutionResultCode::Error(code) => TerminateOutcome::Failed(code),
         };
         let effects = self.provisioning.apply_terminate_result(
             owner,
@@ -313,6 +320,7 @@ impl ApplicationRoot {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn flush_pending_wire_effects(&mut self) -> Result<(), AppError> {
         let pending = std::mem::take(&mut self.pending_wire_effects);
         self.dispatch_wire_effects(
@@ -337,19 +345,7 @@ impl ApplicationRoot {
                     columns,
                     ..
                 } => {
-                    if !self.has_wire_client() {
-                        self.pending_wire_effects.push(effect);
-                        continue;
-                    }
-                    self.with_wire_client_mut(|client| {
-                        client.submit_create_execution_with_id(
-                            request_id,
-                            ctx.workspace_id,
-                            ctx.launch_profile,
-                            rows,
-                            columns,
-                        )
-                    })?;
+                    self.admit_create(effect, request_id, rows, columns, ctx)?;
                 }
                 ProvisioningEffect::SendTerminate {
                     request_id,
@@ -357,13 +353,7 @@ impl ApplicationRoot {
                     attachment,
                     ..
                 } => {
-                    if !self.has_wire_client() {
-                        self.pending_wire_effects.push(effect);
-                        continue;
-                    }
-                    self.with_wire_client_mut(|client| {
-                        client.submit_terminate_execution_with_id(request_id, execution, attachment)
-                    })?;
+                    self.admit_terminate(effect, request_id, execution, attachment)?;
                 }
                 ProvisioningEffect::Detach { .. } => {
                     // Detach-only (ADR-017 §6.1): never terminate. Observed so
@@ -385,17 +375,86 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     fn has_wire_client(&self) -> bool {
-        if self.wire_client.is_some() {
-            return true;
-        }
         #[cfg(target_os = "macos")]
-        if self.client_handle.is_some() {
-            return true;
+        {
+            if self.wire_client.is_some() || self.client_handle.is_some() {
+                return true;
+            }
         }
         false
     }
 
+    #[cfg(target_os = "macos")]
+    fn admit_create(
+        &mut self,
+        effect: ProvisioningEffect,
+        request_id: u64,
+        rows: u16,
+        columns: u16,
+        ctx: WireDispatchContext,
+    ) -> Result<(), AppError> {
+        if !self.has_wire_client() {
+            self.pending_wire_effects.push(effect);
+            return Ok(());
+        }
+        self.with_wire_client_mut(|client| {
+            client.submit_create_execution_with_id(
+                request_id,
+                ctx.workspace_id,
+                ctx.launch_profile,
+                rows,
+                columns,
+            )
+        })?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn admit_create(
+        &mut self,
+        effect: ProvisioningEffect,
+        _request_id: u64,
+        _rows: u16,
+        _columns: u16,
+        _ctx: WireDispatchContext,
+    ) -> Result<(), AppError> {
+        self.pending_wire_effects.push(effect);
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn admit_terminate(
+        &mut self,
+        effect: ProvisioningEffect,
+        request_id: u64,
+        execution: ExecutionId,
+        attachment: AttachmentId,
+    ) -> Result<(), AppError> {
+        if !self.has_wire_client() {
+            self.pending_wire_effects.push(effect);
+            return Ok(());
+        }
+        self.with_wire_client_mut(|client| {
+            client.submit_terminate_execution_with_id(request_id, execution, attachment)
+        })?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn admit_terminate(
+        &mut self,
+        effect: ProvisioningEffect,
+        _request_id: u64,
+        _execution: ExecutionId,
+        _attachment: AttachmentId,
+    ) -> Result<(), AppError> {
+        self.pending_wire_effects.push(effect);
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
     fn with_wire_client_mut<R>(
         &mut self,
         op: impl FnOnce(&mut LocalDisplayClient) -> Result<R, ClientError>,
@@ -420,6 +479,7 @@ impl ApplicationRoot {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct WireDispatchContext {
     workspace_id: u128,
     launch_profile: u16,
@@ -435,6 +495,7 @@ fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn client_error(error: ClientError) -> AppError {
     match error {
         ClientError::UnsupportedInteractiveCapability => AppError::ProvisioningRejected,
@@ -446,7 +507,7 @@ fn client_error(error: ClientError) -> AppError {
 impl ApplicationRoot {
     /// After C1 wire create→bind has already bound the shell Pane, install
     /// ApplicationRoot authority without a second `BindExecution`.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(super) fn adopt_authority_for_provisioned_pane(
         &mut self,
         evidence: BindingEvidence,
@@ -485,9 +546,9 @@ impl ApplicationRoot {
 }
 
 /// Build a negotiated provisioning probe client for headed/portable tests.
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(super) fn negotiated_provisioning_client() -> LocalDisplayClient {
-    use seyal_runtime::local_ipc::framing::Role;
+    use seyal_protocol::local_ipc::framing::Role;
     let mut client = crate::local::reconstruction_probe_client(
         Role::Controller,
         24,

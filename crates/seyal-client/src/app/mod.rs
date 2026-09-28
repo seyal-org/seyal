@@ -18,7 +18,7 @@ use accessibility::accessibility_nodes;
 
 #[cfg(test)]
 mod recovery_tests;
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
@@ -35,7 +35,6 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
-use crate::local::LocalDisplayClient;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
@@ -47,6 +46,9 @@ use crate::recovery::{
     RecoveryEffect, RecoveryStage,
 };
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
+
+#[cfg(target_os = "macos")]
+use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
 pub const APP_ABI_VERSION: u16 = 1;
@@ -357,6 +359,7 @@ pub struct ApplicationRoot {
     provisioning: ProvisioningSession,
     /// Cold-path wire client for create/terminate (tests/harness). Production
     /// macOS may instead use [`Self::client_handle`] via the FFI registry.
+    #[cfg(target_os = "macos")]
     wire_client: Option<LocalDisplayClient>,
     /// Effects waiting for a negotiated wire client (SendCreate/SendTerminate)
     /// or for host attach (AttachController / bootstrap resize).
@@ -401,6 +404,7 @@ impl ApplicationRoot {
             shell,
             authority: None,
             provisioning: ProvisioningSession::new(),
+            #[cfg(target_os = "macos")]
             wire_client: None,
             pending_wire_effects: Vec::new(),
             output_utf8: String::new(),
