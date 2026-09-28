@@ -109,19 +109,19 @@ pub(super) fn build(
                     focused: focused_here,
                     execution: pane.execution,
                 });
-                if let Some(execution) = pane.execution {
-                    if seen_executions.insert(execution) {
-                        sessions.push(SessionNavItem {
-                            execution,
-                            workspace: workspace.id,
-                            workspace_name: workspace.name.clone(),
-                            tab: tab.id,
-                            tab_title: tab.title.clone(),
-                            pane: pane.id,
-                            pane_title: pane.title.clone(),
-                            focused: focused_here,
-                        });
-                    }
+                if let Some(execution) = pane.execution
+                    && seen_executions.insert(execution)
+                {
+                    sessions.push(SessionNavItem {
+                        execution,
+                        workspace: workspace.id,
+                        workspace_name: workspace.name.clone(),
+                        tab: tab.id,
+                        tab_title: tab.title.clone(),
+                        pane: pane.id,
+                        pane_title: pane.title.clone(),
+                        focused: focused_here,
+                    });
                 }
             }
         }
