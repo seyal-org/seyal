@@ -1,6 +1,6 @@
 # ADR-021 — Intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-25
 - **Issue:** #1001 (refinement) — parent #674, epic #665
 - **Numbering:** Provisional allocation across concurrent M003 refinements is
