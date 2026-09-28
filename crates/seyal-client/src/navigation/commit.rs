@@ -37,10 +37,7 @@ pub fn navigate(
 ) -> Result<ResolvedTarget, NavigationRejection> {
     let target = resolve(address, shell, inventory, principal)?;
     let (workspace, tab, pane) = match target {
-        ResolvedTarget::Workspace { workspace } => {
-            let snap = focus_triple_for_workspace(shell, workspace)?;
-            snap
-        }
+        ResolvedTarget::Workspace { workspace } => focus_triple_for_workspace(shell, workspace)?,
         ResolvedTarget::Tab { workspace, tab } => {
             let pane = focused_pane_of_tab(shell, workspace, tab)?;
             (workspace, tab, pane)
