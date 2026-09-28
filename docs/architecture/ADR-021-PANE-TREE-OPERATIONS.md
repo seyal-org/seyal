@@ -187,7 +187,7 @@ candidates with overlapping projection on that axis. Ties break by pre-order
 tree walk order (stable, deterministic).
 
 - No wrap-around.
-- No neighbor → typed rejection; state unchanged.
+- No neighbor → typed rejection; state unchanged except `last_error`.
 - Success commits focus to that leaf (and interacts with zoom per §3).
 
 Mouse hit-testing remains: host maps a click to a `PaneId` and dispatches
@@ -202,7 +202,7 @@ committed focus change.
 
 | Operation | Focus after success |
 | --- | --- |
-| `SplitPane` / `SplitFocused` | the newly created leaf (matches current `shell.rs`) |
+| `SplitPane` / `SplitFocused` | the newly created leaf (matches current `shell/{mod.rs,tree.rs}`) |
 | `ClosePane` of a non-focused leaf | focus unchanged |
 | `ClosePane` of the focused leaf | the other child of the removed leaf's parent `Split`, preferring that sibling subtree's pre-order first leaf; if the parent was the root, that sibling is the new root's first leaf. Never an arbitrary Workspace-global pick. |
 | `SwapPanes` / `MovePaneBeside` | focused Pane unchanged if it still exists |
@@ -325,7 +325,7 @@ See SPEC-025. At minimum: deterministic before/after fixtures per operation;
 identity-preservation properties for move/swap; zoom topology-invariance;
 fail-closed stale ids; directional neighbor fixtures including ties; close
 successor sibling preference; property tests that every rejection is
-byte-identical and every successful transition keeps tree leaves ≡ pane map.
+byte-identical except `last_error` and every successful transition keeps tree leaves ≡ pane map.
 
 ## Not in this ADR
 

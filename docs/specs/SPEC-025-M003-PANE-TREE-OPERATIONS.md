@@ -3,8 +3,7 @@
 - **Status:** Proposed under #1001 / ADR-021 (not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Issue:** #1001 — parent #674, epic #665
-- **Authority:** normative only after ADR-021 is Accepted. Until then this
-  document is the Proposed observable contract for review.
+- **Authority:** ADR-021. This document is the observable contract for review.
 - **Consumes:** Proposed
   [`ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md);
   ADR-015; ADR-009 / SPEC-008; Proposed ADR-019 / SPEC-022 for focus-history
@@ -94,9 +93,8 @@ topology, zoom, equalize, or focus successors locally as authority.
 ## 4. Rejection taxonomy
 
 Every rejection leaves the Tab (and `ShellState`) byte-identical to the
-pre-action state except `last_error`, which equals the rejection code and
-sets a typed last-error (names may map onto today's `ShellError` variants
-plus new ones):
+pre-action state except `last_error`, which equals the rejection code
+(names may map onto today's `ShellError` variants plus new ones):
 
 | Code | When |
 | --- | --- |
@@ -280,7 +278,7 @@ P3. For every successful `Equalize*`: leaf set, axes, and child identities are
 P4. Every rejection leaves the full `ShellState` byte-identical to the
     pre-action state except `last_error`, which equals the rejection code.
 
-P5. After every successful transition: I2.1–I2.3 hold.
+P5. After every successful transition: I2.1–I2.3 and I2.6 hold.
 
 P6. `ClosePane` never yields zero leaves; last-pane close always rejects.
 
@@ -300,7 +298,7 @@ P9. Sequence generation: random valid action streams over small trees preserve
 3. Close focused leaf; sibling-first successor (fixture with nested splits
    proving not whole-tree `first_pane`)  
 4. Close last pane → `CannotCloseLastPane`  
-5. Stale `PaneId` on every action → typed reject, byte-identical state  
+5. Stale `PaneId` on every action → typed reject, byte-identical state except `last_error`  
 6. Swap preserves ids + bindings; topology slots exchanged  
 7. Move beside each side; removed old slot collapsed; ids preserved  
 8. Move `pane == neighbor` → `InvalidMoveTarget`  
