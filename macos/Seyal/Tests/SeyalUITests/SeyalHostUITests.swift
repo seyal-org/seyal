@@ -914,4 +914,12 @@ final class SeyalHostUITests: XCTestCase {
         let palette = app.descendants(matching: .any)["seyal-command-palette"]
         XCTAssertFalse(palette.waitForExistence(timeout: 1))
     }
+
+    func testCommandPalettePresentsAfterUnambiguousDispatch() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        app.typeKey("k", modifierFlags: [.command])
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        XCTAssertTrue(palette.waitForExistence(timeout: 5))
+    }
 }

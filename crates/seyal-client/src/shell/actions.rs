@@ -68,7 +68,6 @@ impl ShellState {
             .iter()
             .enumerate()
             .find(|(_, workspace)| workspace.window(window).is_some())
-            .map(|(index, workspace)| (index, workspace))
     }
 
     pub(super) fn find_tab_location(&self, tab: TabId) -> Option<(WorkspaceId, WindowId, usize)> {
