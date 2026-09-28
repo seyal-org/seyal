@@ -446,7 +446,29 @@ These numeric meanings are reused by `ResizeResult.result_code` values 1–14. `
 16 UnsupportedLaunchProfile
 ```
 
-Both are additive. A client must treat an unrecognized result code as a non-retryable failure and must not infer success from it.
+ADR-020 additionally defines (SPEC-004 L0 amendment). Message type 17 remains
+`TerminalKey` and is a different table; this registry is result/error codes only:
+
+```text
+17 LaunchPolicyRejected
+```
+
+On `LaunchPolicyRejected`, `detail_code` is one of:
+
+```text
+1 AccountRecordUnavailable
+2 ShellFallbackExhausted
+3 CwdInvalid
+4 CapabilityUnavailable
+```
+
+No other values are defined; clients treat any unknown `detail_code` as generic.
+The payload carries no path or environment bytes.
+
+Codes 15–17 are additive. A client must treat an unrecognized result code as a
+non-retryable failure and must not infer success from it. Older clients that do
+not recognize code 17 therefore treat it as a non-retryable unknown failure under
+that rule.
 
 Semantic errors do not mutate canonical state before validation succeeds. Fatal framing/version/ancillary failures close the connection after bounded cleanup. SPEC-006 classifies resize failures, forbids immediate automatic resend loops and treats result/projection generation inconsistency as protocol failure.
 
@@ -576,7 +598,7 @@ u16  reserved0 = 0
 u32  detail_code = 0
 ```
 
-- `result_code = 0` uniquely means `Created`; 1–16 reuse §15 numeric meanings.
+- `result_code = 0` uniquely means `Created`; 1–17 reuse §15 numeric meanings.
 - On `Created`, `execution_id` is a published live execution with exactly one
   owning Workspace association, observable through `ListExecutions`, and
   attachable by `Attach`.
@@ -589,8 +611,17 @@ u32  detail_code = 0
 - Results are mandatory bounded control output: never presentation-superseded,
   and terminal progress never waits for a client to read one.
 - No attachment is created and no display state is queued by creation.
-- `detail_code` is `0` unless a later accepted specification assigns a bounded
-  non-secret reason.
+- On `Created`, `detail_code` is a bitfield of bounded, non-secret launch-policy
+  warnings: bit 0 is `ConfiguredShellInvalid`, bit 1 is `CwdOverrideInvalid`,
+  and all other bits are reserved and must be 0. A client must treat `Created`
+  as success regardless of `detail_code`, must ignore unknown or reserved bits,
+  and must never infer failure from a nonzero `Created.detail_code`.
+- On `LaunchPolicyRejected` (`result_code = 17`), `detail_code` uses the §15
+  values 1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3
+  `CwdInvalid`, and 4 `CapabilityUnavailable`. Unknown values render generic.
+  The payload carries no path or environment bytes.
+- For other failure codes, `detail_code` is `0` unless a later accepted
+  specification assigns a bounded non-secret reason.
 
 ### 18.4 `TerminateExecutionRequest` — exactly 40 bytes
 
