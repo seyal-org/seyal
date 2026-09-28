@@ -1316,7 +1316,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
 
-    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() {
+    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() throws {
         let event = try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
@@ -1336,7 +1336,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.shiftApplied, 0)
     }
 
-    func testShortcutRealizationReadsTheRustCommandPaletteEquivalent() {
+    func testShortcutRealizationReadsTheRustCommandPaletteEquivalent() throws {
         let row = try XCTUnwrap(
             KeybindingShortcutRealization.item(commandId: KeybindingShortcutRealization.commandPaletteOpen)
         )

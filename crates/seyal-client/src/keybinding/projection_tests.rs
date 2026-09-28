@@ -108,13 +108,12 @@ fn item19_menu_half_projection_disables_non_palette_while_open() {
 #[test]
 fn accessibility_label_carries_no_terminal_text() {
     let terminal_fixture = "echo seyal-ax-terminal-fixture-9f3a";
-    let toml = format!(
-        r#"
+    let toml = r#"
 [[keybindings]]
 keys = "cmd+shift+p"
 action = "command_palette.open"
 "#
-    );
+    .to_string();
     let table = load_keybinding_table(Some(&toml));
     // Inject fixture into a notation only if mis-wired; projection must never
     // pull ApplicationRoot output / terminal buffers into labels.
