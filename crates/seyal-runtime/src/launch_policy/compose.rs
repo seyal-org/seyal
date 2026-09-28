@@ -62,11 +62,11 @@ pub fn apply_post_policy(
     let command = capability.apply(command);
     #[cfg(target_os = "macos")]
     {
-        if let Some(policy) = shell_integration {
-            if ShellIntegrationPolicy::supports(&command) {
-                let (command, _nonce) = policy.apply(command)?;
-                return Ok(command);
-            }
+        if let Some(policy) = shell_integration
+            && ShellIntegrationPolicy::supports(&command)
+        {
+            let (command, _nonce) = policy.apply(command)?;
+            return Ok(command);
         }
     }
     #[cfg(not(target_os = "macos"))]
