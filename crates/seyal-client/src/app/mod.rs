@@ -13,6 +13,7 @@ mod native_effect;
 mod palette_apply;
 mod recovery_apply;
 mod session;
+mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
 pub use native_effect::NativeEffect;
@@ -21,6 +22,8 @@ pub use native_effect::NativeEffect;
 mod recovery_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
 
 use std::time::Duration;
 
@@ -86,6 +89,8 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    CrossWorkspaceAdopt,
+    ExecutionNotUnpresented,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,6 +284,20 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+    SyncLiveUnpresented {
+        entries: Vec<(ExecutionId, WorkspaceId)>,
+    },
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    Adopt {
+        fence: AppFence,
+        evidence: BindingEvidence,
+    },
+    TerminateExecution {
+        execution: ExecutionId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -436,11 +455,13 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
+        let unpresented = self.shell.live_unpresented(shell.active_workspace);
+        let palette = self.palette.snapshot_with_unpresented(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
+            &unpresented,
         );
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
@@ -617,6 +638,13 @@ impl ApplicationRoot {
             }
             AppAction::RunPalette { fence } => self.run_palette(fence),
             AppAction::ClosePalette { fence } => self.close_palette(fence),
+            AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            AppAction::RecordUnpresented {
+                execution,
+                workspace,
+            } => self.record_unpresented(execution, workspace),
+            AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
         };
         match result {
             Ok(()) => {

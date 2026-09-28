@@ -11,10 +11,10 @@
 //! [`crate::shell::ShellState`] and [`crate::chrome::ChromeState`]. Hosts
 //! dispatch [`PaletteAction`] and render [`PaletteSnapshot`].
 
-use seyal_core::{PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
 
 use crate::chrome::{AgentId, AttentionId, ChromeSnapshot, InspectorMode, LeftPanelMode};
-use crate::shell::{ShellSnapshot, SplitAxis};
+use crate::shell::{unpresented_palette_label, ShellSnapshot, SplitAxis};
 
 /// Maximum rows projected to the host for one filter result.
 pub const PALETTE_VISIBLE_ROWS: usize = 12;
@@ -37,6 +37,8 @@ pub enum PaletteCommand {
     SetInspectorMode(InspectorMode),
     OpenAttention(AttentionId),
     FocusAgent(AgentId),
+    AdoptUnpresented(ExecutionId),
+    TerminateUnpresented(ExecutionId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -182,6 +184,24 @@ impl PaletteState {
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
     ) -> PaletteSnapshot {
+        self.snapshot_with_unpresented(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            &[],
+        )
+    }
+
+    /// Like [`Self::snapshot`], including ADR-018 §3.3 adopt/terminate rows.
+    pub fn snapshot_with_unpresented(
+        &self,
+        shell: &ShellSnapshot,
+        chrome: &ChromeSnapshot,
+        allows_tab_creation: bool,
+        allows_pane_splitting: bool,
+        unpresented: &[ExecutionId],
+    ) -> PaletteSnapshot {
         if !self.open {
             return PaletteSnapshot {
                 open: false,
@@ -191,7 +211,13 @@ impl PaletteState {
                 last_error: self.last_error,
             };
         }
-        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
+        let commands = build_commands(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            unpresented,
+        );
         let filtered = filter(&commands, &self.query);
         let selected = clamp(self.selected, filtered.len());
         let rows = filtered
@@ -219,10 +245,33 @@ impl PaletteState {
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
     ) -> Option<PaletteCommand> {
+        self.resolve_with_unpresented(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            &[],
+        )
+    }
+
+    pub fn resolve_with_unpresented(
+        &self,
+        shell: &ShellSnapshot,
+        chrome: &ChromeSnapshot,
+        allows_tab_creation: bool,
+        allows_pane_splitting: bool,
+        unpresented: &[ExecutionId],
+    ) -> Option<PaletteCommand> {
         if !self.open {
             return None;
         }
-        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
+        let commands = build_commands(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            unpresented,
+        );
         let filtered = filter(&commands, &self.query);
         filtered
             .get(clamp(self.selected, filtered.len()))
@@ -269,6 +318,7 @@ fn build_commands(
     chrome: &ChromeSnapshot,
     allows_tab_creation: bool,
     allows_pane_splitting: bool,
+    unpresented: &[ExecutionId],
 ) -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
 
@@ -409,6 +459,21 @@ fn build_commands(
             label: format!("Focus Agent: {}", agent.name),
             category: "Agent",
             command: PaletteCommand::FocusAgent(agent.id.clone()),
+        });
+    }
+
+    // Deterministic §3.3 rows: caller supplies already-sorted ids; never auto-pick.
+    for execution in unpresented {
+        let label = unpresented_palette_label(*execution);
+        entries.push(PaletteEntry {
+            label: format!("Adopt Unpresented: {label}"),
+            category: "Execution",
+            command: PaletteCommand::AdoptUnpresented(*execution),
+        });
+        entries.push(PaletteEntry {
+            label: format!("Terminate Unpresented: {label}"),
+            category: "Execution",
+            command: PaletteCommand::TerminateUnpresented(*execution),
         });
     }
 

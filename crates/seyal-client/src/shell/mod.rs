@@ -9,11 +9,15 @@ mod actions;
 mod effects;
 mod snapshot;
 mod tree;
+mod unpresented;
 mod workspace;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
@@ -21,6 +25,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 pub use effects::ShellNativeEffect;
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
+pub use unpresented::unpresented_palette_label;
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
 use workspace::{Pane, Tab, Window, Workspace};
@@ -53,6 +58,11 @@ pub enum ShellError {
     StaleContainment,
     MoveWouldNotChangeContainment,
     CrossWorkspaceMove,
+    /// Adopt naming an execution owned by a different Workspace (ADR-017).
+    CrossWorkspaceAdopt,
+    /// Adopt/terminate of an execution that is not live-unpresented here
+    /// (unknown, retired, or finalized).
+    ExecutionNotUnpresented,
 }
 
 impl ShellError {
@@ -82,6 +92,12 @@ impl ShellError {
                 "Moving this Tab would not change containment."
             }
             Self::CrossWorkspaceMove => "Tabs cannot move across Workspaces.",
+            Self::CrossWorkspaceAdopt => {
+                "An execution cannot be adopted across Workspaces."
+            }
+            Self::ExecutionNotUnpresented => {
+                "This execution is not a live-unpresented execution in this Workspace."
+            }
         }
     }
 }
@@ -161,6 +177,27 @@ pub enum ShellAction {
         pane: PaneId,
         execution: ExecutionId,
     },
+    /// Record a Runtime-owned live execution with no Pane binding (ADR-018 §3.3).
+    /// Reducer tests construct Unpresented state with this; W2b will emit it on unbind.
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    /// Drop a previously recorded live-unpresented entry after Runtime retirement.
+    ForgetUnpresented {
+        execution: ExecutionId,
+    },
+    /// Rebind a live-unpresented `ExecutionId` into a Pane leaf (same id; fresh
+    /// `AttachmentId` is allocated on the Runtime attach path).
+    AdoptExecution {
+        pane: PaneId,
+        execution: ExecutionId,
+    },
+    /// Explicit disposition. Queues [`ShellNativeEffect::TerminateExecution`];
+    /// never produced by presentation close (W2b/W4b).
+    TerminateExecution {
+        execution: ExecutionId,
+    },
 }
 
 /// Read-only projection for native hosts.
@@ -234,6 +271,9 @@ pub struct ShellState {
     next_tab_ordinal: u32,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
     pending_effects: Vec<ShellNativeEffect>,
+    /// Live executions with no Pane binding in this headed session (ADR-018 §3.3).
+    /// Keyed by `ExecutionId` so enumeration order is stable.
+    unpresented: BTreeMap<ExecutionId, WorkspaceId>,
 }
 
 impl ShellState {
@@ -271,6 +311,7 @@ impl ShellState {
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
+            unpresented: BTreeMap::new(),
         }
     }
 
@@ -329,6 +370,7 @@ impl ShellState {
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
+            unpresented: BTreeMap::new(),
         })
     }
 
@@ -416,6 +458,10 @@ impl ShellState {
             ShellAction::ClosePane { id } => self.close_pane(id),
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
+            ShellAction::RecordUnpresented { .. }
+            | ShellAction::ForgetUnpresented { .. }
+            | ShellAction::AdoptExecution { .. }
+            | ShellAction::TerminateExecution { .. } => self.dispatch_unpresented(action),
         }
     }
 
@@ -510,10 +556,11 @@ impl ShellState {
             return Err(ShellError::ExecutionAlreadyBound);
         }
         pane.execution = Some(execution);
+        self.unpresented.remove(&execution);
         Ok(())
     }
 
-    fn execution_is_bound(&self, execution: ExecutionId) -> bool {
+    pub(super) fn execution_is_bound(&self, execution: ExecutionId) -> bool {
         self.workspaces.iter().any(|workspace| {
             workspace.tabs().any(|tab| {
                 tab.panes

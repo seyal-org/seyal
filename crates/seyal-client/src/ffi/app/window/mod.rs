@@ -351,9 +351,15 @@ fn relocate_window_pointers(state: &mut AppHandle) {
 }
 
 fn encode_effect(effect: NativeEffect) -> SeyalAppNativeEffect {
-    let (window_lo, window_hi) = match effect.window() {
-        Some(window) => split_id(window.to_bytes()),
-        None => (0, 0),
+    // `window_lo`/`window_hi` carry `WindowId` for window effects, or the
+    // `ExecutionId` for `TerminateExecution` (same 128-bit split; kind selects).
+    let (window_lo, window_hi) = if let Some(execution) = effect.execution() {
+        split_id(execution.to_bytes())
+    } else {
+        match effect.window() {
+            Some(window) => split_id(window.to_bytes()),
+            None => (0, 0),
+        }
     };
     SeyalAppNativeEffect {
         version: APP_ABI_VERSION,
