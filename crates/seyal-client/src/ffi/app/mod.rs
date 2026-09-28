@@ -206,6 +206,8 @@ impl SeyalAppPalette {
 
 const PALETTE_OPEN: u16 = 1;
 
+/// One projected row. Optional `ResourceAddress` fields are set for palette
+/// navigation rows (SPEC-022 R7.2); `address_len == 0` means no address.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SeyalAppRow {
@@ -220,6 +222,11 @@ pub struct SeyalAppRow {
     pub detail: *const u8,
     pub detail_len: u32,
     pub reserved2: u32,
+    pub address_version: u16,
+    pub address_kind: u16,
+    pub address_len: u16,
+    pub address_pad: u16,
+    pub address_bytes: [u8; 48],
 }
 
 impl SeyalAppRow {
@@ -236,6 +243,11 @@ impl SeyalAppRow {
             detail: ptr::null(),
             detail_len: 0,
             reserved2: 0,
+            address_version: 0,
+            address_kind: 0,
+            address_len: 0,
+            address_pad: 0,
+            address_bytes: [0; 48],
         }
     }
 }
@@ -801,6 +813,11 @@ pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
         detail: ptr::null(),
         detail_len: 0,
         reserved2: 0,
+        address_version: 0,
+        address_kind: 0,
+        address_len: 0,
+        address_pad: 0,
+        address_bytes: [0; 48],
     }
 }
 
@@ -915,5 +932,15 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
+        AppError::NavigationUnsupportedKind => 34,
+        AppError::NavigationDenied => 35,
+        AppError::NavigationUnknownWorkspace => 36,
+        AppError::NavigationUnknownTab => 37,
+        AppError::NavigationUnknownPane => 38,
+        AppError::NavigationUnknownExecution => 39,
+        AppError::NavigationNotComposed => 40,
+        AppError::NavigationTargetTerminated => 41,
+        AppError::NavigationTargetUnbound => 42,
+        AppError::NavigationAmbiguousTarget => 43,
     }
 }

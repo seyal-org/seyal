@@ -32,6 +32,7 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
@@ -84,6 +85,16 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    NavigationUnsupportedKind,
+    NavigationDenied,
+    NavigationUnknownWorkspace,
+    NavigationUnknownTab,
+    NavigationUnknownPane,
+    NavigationUnknownExecution,
+    NavigationNotComposed,
+    NavigationTargetTerminated,
+    NavigationTargetUnbound,
+    NavigationAmbiguousTarget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -268,9 +279,17 @@ pub enum AppAction {
         fence: AppFence,
         delta: i32,
     },
-    /// Run the command bound to the current selection, then close.
+    /// Run the selected palette row. When `address` is `Some`, Navigate that
+    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
+    /// selected verb/chrome command. Never re-resolves by ordinal.
     RunPalette {
         fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    /// Atomic Navigate(address) commit (SPEC-022 §4).
+    Navigate {
+        fence: AppFence,
+        address: ResourceAddress,
     },
     ClosePalette {
         fence: AppFence,
@@ -439,12 +458,7 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
-            &shell,
-            &chrome,
-            self.shell.allows_tab_creation(),
-            self.shell.allows_pane_splitting(),
-        );
+        let palette = self.palette.snapshot();
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
         AppSnapshot {
@@ -618,7 +632,11 @@ impl ApplicationRoot {
             AppAction::MovePaletteSelection { fence, delta } => {
                 self.move_palette_selection(fence, delta)
             }
-            AppAction::RunPalette { fence } => self.run_palette(fence),
+            AppAction::RunPalette { fence, address } => self.run_palette(fence, address),
+            AppAction::Navigate { fence, address } => {
+                self.require_fence(fence)?;
+                self.navigate_address(address)
+            }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
         };
         match result {

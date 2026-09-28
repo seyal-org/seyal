@@ -10,10 +10,10 @@ use crate::shell::{
 };
 
 use super::{
-    decode_resource_address, resolve, ExecutionPresence, NavigationPrincipal, NavigationRejection,
-    ResolvedTarget, ResourceAddress, WorkspaceAccess, RESOURCE_ADDRESS_ABI_VERSION,
-    RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE, RESOURCE_ADDRESS_KIND_TAB,
-    RESOURCE_ADDRESS_KIND_WORKSPACE,
+    decode_resource_address, navigate, resolve, ExecutionPresence, NavigationPrincipal,
+    NavigationRejection, ResolvedTarget, ResourceAddress, WorkspaceAccess,
+    RESOURCE_ADDRESS_ABI_VERSION, RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE,
+    RESOURCE_ADDRESS_KIND_TAB, RESOURCE_ADDRESS_KIND_WORKSPACE,
 };
 
 struct MapInventory {
@@ -602,4 +602,352 @@ fn successful_decode_and_resolve_happy_paths() {
             pane: p1
         })
     );
+}
+
+// --- §12.8 successful Navigate across inactive Workspace --------------------
+
+#[test]
+fn navigate_pane_in_inactive_workspace_activates_all_in_one_transition() {
+    let (mut shell, w1, w2, _, _, p1, _) = seed_shell();
+    assert_eq!(shell.snapshot().active_workspace, w1);
+    assert_eq!(shell.snapshot().focused_pane, p1);
+
+    let w2_focus = shell.workspace_focus(w2).expect("w2");
+    let address = ResourceAddress::Pane {
+        workspace: w2,
+        tab: w2_focus.active_tab,
+        pane: w2_focus.focused_pane,
+    };
+    assert_eq!(
+        navigate(
+            address,
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Ok(ResolvedTarget::Pane {
+            workspace: w2,
+            tab: w2_focus.active_tab,
+            pane: w2_focus.focused_pane
+        })
+    );
+    let after = shell.snapshot();
+    assert_eq!(after.active_workspace, w2);
+    assert_eq!(after.active_tab, w2_focus.active_tab);
+    assert_eq!(after.focused_pane, w2_focus.focused_pane);
+}
+
+// --- §12.9 already-active Pane is success no-op -----------------------------
+
+#[test]
+fn navigate_already_active_pane_is_success_noop() {
+    let (mut shell, w1, _, t1, _, p1, _) = seed_shell();
+    let before = shell.focus_checkpoint();
+    assert_eq!(
+        navigate(
+            ResourceAddress::Pane {
+                workspace: w1,
+                tab: t1,
+                pane: p1
+            },
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Ok(ResolvedTarget::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p1
+        })
+    );
+    assert_eq!(shell.focus_checkpoint(), before);
+    // N2 does not own focus history; no-op success implies no history side effect.
+}
+
+// --- §12.10 Navigate never changes presentation/binding/PTY facts -----------
+
+#[test]
+fn navigate_does_not_change_bindings() {
+    let (mut shell, w1, w2, t1, _, p1, _) = seed_shell();
+    let execution = ExecutionId::from_bytes([0x21; 16]);
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: p1,
+            execution,
+        })
+        .expect("bind");
+    let before_bound = shell.panes_bound_to(execution);
+    assert_eq!(before_bound, vec![(w1, t1, p1)]);
+    let w2_focus = shell.workspace_focus(w2).expect("w2");
+    navigate(
+        ResourceAddress::Pane {
+            workspace: w2,
+            tab: w2_focus.active_tab,
+            pane: w2_focus.focused_pane,
+        },
+        &mut shell,
+        &MapInventory::new(),
+        NavigationPrincipal::local_user(),
+    )
+    .expect("navigate");
+    assert_eq!(
+        shell.panes_bound_to(execution),
+        before_bound,
+        "Navigate must not bind/unbind executions"
+    );
+}
+
+// --- §12.11 atomicity: destroyed Tab leaves Workspace selection unchanged ---
+
+#[test]
+fn navigate_rejects_destroyed_tab_without_workspace_change() {
+    let (mut shell, w1, w2, _, _, _, _) = seed_shell();
+    // Point at a Tab that never existed under w2.
+    let ghost = TabId::from_bytes([0xde; 16]);
+    let pane = PaneId::from_bytes([0xad; 16]);
+    let before = shell.focus_checkpoint();
+    assert_eq!(before.active_workspace, w1);
+    assert_eq!(
+        navigate(
+            ResourceAddress::Pane {
+                workspace: w2,
+                tab: ghost,
+                pane
+            },
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::UnknownTab)
+    );
+    assert_eq!(
+        shell.focus_checkpoint(),
+        before,
+        "rejected navigate must not change Workspace selection"
+    );
+}
+
+// --- §12.12 Execution with no bound Pane → TargetUnbound, no attach ---------
+
+#[test]
+fn navigate_unbound_execution_is_target_unbound_without_attach() {
+    let (mut shell, _, _, _, _, p1, _) = seed_shell();
+    let live = ExecutionId::from_bytes([0x22; 16]);
+    let before = shell.focus_checkpoint();
+    assert!(shell.panes_bound_to(live).is_empty());
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: live },
+            &mut shell,
+            &MapInventory::with(live, ExecutionPresence::Live),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::TargetUnbound)
+    );
+    assert_eq!(shell.focus_checkpoint(), before);
+    assert!(shell.panes_bound_to(live).is_empty());
+    assert_eq!(shell.pane_execution(p1).expect("p1"), None);
+}
+
+// --- §12.13 exited / ambiguous / destroyed pane matrix ----------------------
+
+#[test]
+fn navigate_execution_rejection_matrix_r8_3() {
+    let (mut shell, w1, _, t1, _, p1, _) = seed_shell();
+    let exited = ExecutionId::from_bytes([0x23; 16]);
+
+    // Exited, record held, no Pane bound → TargetTerminated.
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exited },
+            &mut shell,
+            &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::TargetTerminated)
+    );
+
+    // Exited record released → UnknownExecution.
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exited },
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::UnknownExecution)
+    );
+
+    // Exited still bound to exactly one Pane → resolves/navigates to that Pane.
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: p1,
+            execution: exited,
+        })
+        .expect("bind");
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exited },
+            &mut shell,
+            &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
+            NavigationPrincipal::local_user()
+        ),
+        Ok(ResolvedTarget::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p1
+        })
+    );
+
+    // Bound to two Panes → AmbiguousTarget, no navigation change after split.
+    shell
+        .apply(ShellAction::SplitPane {
+            id: p1,
+            axis: SplitAxis::Right,
+        })
+        .expect("split");
+    let second = shell
+        .snapshot()
+        .panes
+        .iter()
+        .map(|pane| pane.id)
+        .find(|id| *id != p1)
+        .expect("split pane");
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: second,
+            execution: exited,
+        })
+        .expect("bind second");
+    let before = shell.focus_checkpoint();
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exited },
+            &mut shell,
+            &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::AmbiguousTarget)
+    );
+    assert_eq!(shell.focus_checkpoint(), before);
+
+    // Destroyed Pane address → UnknownPane, never TargetTerminated.
+    let gone = PaneId::from_bytes([0x24; 16]);
+    assert_eq!(
+        navigate(
+            ResourceAddress::Pane {
+                workspace: w1,
+                tab: t1,
+                pane: gone
+            },
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::UnknownPane)
+    );
+}
+
+#[test]
+fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
+    let (mut shell, w1, _, _, _, _, _) = seed_shell();
+    let denied = NavigationPrincipal {
+        local_navigation: true,
+        workspaces: WorkspaceAccess::Only(&[]),
+    };
+    let before = shell.focus_checkpoint();
+    assert_eq!(
+        navigate(
+            ResourceAddress::Workspace { workspace: w1 },
+            &mut shell,
+            &MapInventory::new(),
+            denied
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+    assert_eq!(
+        navigate(
+            ResourceAddress::Workspace {
+                workspace: WorkspaceId::from_bytes([0xff; 16])
+            },
+            &mut shell,
+            &MapInventory::new(),
+            denied
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+    assert_eq!(shell.focus_checkpoint(), before);
+}
+
+// --- §12.14 ordinal-rebinding regression ------------------------------------
+
+#[test]
+fn address_run_reaches_original_target_after_ordinal_would_shift() {
+    let (mut shell, w1, _, t1, t2, p1, _) = seed_shell();
+    // Store the address of t2 while t1 is focused. A later CreateTab shifts
+    // the palette ordinals; running by address must still select t2.
+    let stored = ResourceAddress::Tab {
+        workspace: w1,
+        tab: t2,
+    };
+    assert_eq!(shell.snapshot().active_tab, t1);
+    assert_eq!(shell.snapshot().focused_pane, p1);
+    shell
+        .apply(ShellAction::CreateTab)
+        .expect("create shifts ordinals");
+    let after_create = shell.snapshot();
+    assert_ne!(
+        after_create.active_tab, t2,
+        "CreateTab must leave t2 inactive so ordinals of switch-tab rows shift"
+    );
+    assert_eq!(
+        navigate(
+            stored,
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Ok(ResolvedTarget::Tab {
+            workspace: w1,
+            tab: t2
+        })
+    );
+    assert_eq!(shell.snapshot().active_tab, t2);
+}
+
+#[test]
+fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
+    let (mut shell, w1, _, t1, _, p1, _) = seed_shell();
+    shell
+        .apply(ShellAction::SplitPane {
+            id: p1,
+            axis: SplitAxis::Right,
+        })
+        .expect("split");
+    let created = shell.snapshot().focused_pane;
+    assert_ne!(created, p1);
+    shell
+        .apply(ShellAction::FocusPane { id: p1 })
+        .expect("refocus");
+    let stored = ResourceAddress::Pane {
+        workspace: w1,
+        tab: t1,
+        pane: created,
+    };
+    shell
+        .apply(ShellAction::ClosePane { id: created })
+        .expect("destroy stored target");
+    let before = shell.focus_checkpoint();
+    // A fresh ordinal rebuild would now offer other rows at the old index.
+    // Address path must fail closed, not silently run a neighbour action.
+    assert_eq!(
+        navigate(
+            stored,
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Err(NavigationRejection::UnknownPane)
+    );
+    assert_eq!(shell.focus_checkpoint(), before);
 }
