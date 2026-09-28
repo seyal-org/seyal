@@ -17,8 +17,10 @@ final class MultiWindowHostTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        if NSApp.delegate == nil {
-            NSApp.delegate = Self.terminateGuard
+        MainActor.assumeIsolated {
+            if NSApp.delegate == nil {
+                NSApp.delegate = Self.terminateGuard
+            }
         }
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("seyal-test-missing-\(UUID().uuidString).toml")
