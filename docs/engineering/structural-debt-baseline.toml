@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 765
-issue = 1110
-reason = "ApplicationRoot façade retains types/snapshot/apply after chrome/composer/palette/recovery/session/accessibility/keybinding_apply extraction; #1110 adds ActionUnavailable and palette-modal CreateTab/OpenPalette gates only. Keybinding match and WorkspaceCommand dispatch live in keybinding_apply.rs."
+acknowledged_loc = 775
+issue = 1124
+reason = "ApplicationRoot façade retains types/snapshot/apply after chrome/composer/palette/recovery/session/accessibility/keybinding_apply extraction; #1124 adds ChordPrefixState product-UI field and R8.4 clear on presentation-route change only. Chord match/timeout/dispatch stay in keybinding and keybinding_apply."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -46,9 +46,9 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 975
-issue = 1110
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. #1110 adds seyal_app_route_keystroke and ActionUnavailable error mapping only; product match/dispatch stays in keybinding and app/keybinding_apply."
+acknowledged_loc = 977
+issue = 1124
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. #1124 maps RouteOutcome::PrefixWait to SEYAL_APP_ROUTE_CONSUMED only; chord state and match stay in keybinding and app/keybinding_apply."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

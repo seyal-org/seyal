@@ -1,10 +1,11 @@
-//! SPEC-024 K1/K2/K3: cold `[[keybindings]]` schema → immutable [`KeybindingTable`],
-//! plus the §6 routing gate (match order, Raw/TUI non-interception, invoke re-validation).
+//! SPEC-024 K1–K4: cold `[[keybindings]]` schema → immutable [`KeybindingTable`],
+//! §6 routing gate, and §8 chord prefix state machine.
 //!
 //! Distinct from [`crate::input_policy::InputPolicy`] and theme
-//! [`crate::theme::UserUiSettings`]. Chord prefix runtime state is K4.
+//! [`crate::theme::UserUiSettings`]. Prefix state is product UI state, not VT.
 
 mod builtins;
+mod chord;
 mod keys;
 mod load;
 mod reserved;
@@ -13,10 +14,13 @@ mod stroke;
 mod types;
 
 #[cfg(test)]
+mod chord_tests;
+#[cfg(test)]
 mod route_tests;
 #[cfg(test)]
 mod tests;
 
+pub use chord::{ChordPrefixActive, ChordPrefixState, CHORD_PREFIX_TIMEOUT};
 pub use load::{keybinding_config_path, load_keybinding_table, load_keybinding_table_from_path};
 pub use route::{
     fallthrough_is_flow, fallthrough_is_terminal, resolve_tab_ordinal, route_context_set,
