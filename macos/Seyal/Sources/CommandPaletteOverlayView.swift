@@ -166,19 +166,24 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         )
     }
 
+    static func addressPayload(for row: SeyalAppRow) -> Data? {
+        guard row.address_len > 0 else { return nil }
+        var payload = Data()
+        var version = row.address_version.littleEndian
+        var kind = row.address_kind.littleEndian
+        payload.append(Data(bytes: &version, count: 2))
+        payload.append(Data(bytes: &kind, count: 2))
+        withUnsafeBytes(of: row.address_bytes) { bytes in
+            payload.append(contentsOf: bytes.prefix(Int(row.address_len)))
+        }
+        return payload
+    }
+
     private func run() {
         // Echo the frozen row's ResourceAddress when present (SPEC-022 R7.2).
         // Verb/chrome rows have address_len == 0; Rust runs the stored command.
         let row = seyal_app_palette_row(appHandle, UInt32(selected))
-        if row.address_len > 0 {
-            var payload = Data()
-            var version = row.address_version.littleEndian
-            var kind = row.address_kind.littleEndian
-            payload.append(Data(bytes: &version, count: 2))
-            payload.append(Data(bytes: &kind, count: 2))
-            withUnsafeBytes(of: row.address_bytes) { bytes in
-                payload.append(contentsOf: bytes.prefix(Int(row.address_len)))
-            }
+        if let payload = Self.addressPayload(for: row) {
             dispatchAction(
                 kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue),
                 payloadBytes: payload
