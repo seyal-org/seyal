@@ -1,6 +1,6 @@
 # ADR-021 — Intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-25
 - **Issue:** #1001 (refinement) — parent #674, epic #665
 - **Numbering:** Provisional allocation across concurrent M003 refinements is
@@ -26,7 +26,7 @@
 
 ## Context
 
-`crates/seyal-client/src/shell.rs` already owns a binary `PaneTree`
+`crates/seyal-client/src/shell/{mod.rs,tree.rs}` already owns a binary `PaneTree`
 (`Leaf(PaneId)` / `Split { axis, first, second }`), per-Tab `focused: PaneId`,
 and the actions `SplitPane` / `ClosePane` / `FocusPane`. Split focuses the new
 leaf; close replaces a destroyed focused leaf with `first_pane()` of the
@@ -165,9 +165,7 @@ Rules:
 to the equal binary share (`1/2`) without changing axis, child identities, or
 leaf set.
 
-- Scope `Focused`: the smallest Split subtree that contains the focused leaf
-  and, when the focused leaf is the sole child of a larger tree, that leaf's
-  parent Split; if the Tab is a single leaf, equalize is a successful no-op.
+- Scope `Focused`: every `Split.ratio` in the subtree rooted at the focused leaf's parent `Split`. If the Tab root is a single leaf, this is a successful no-op.
 - Scope `Tab`: every Split node under the Tab root.
 - Without #928 ratio storage, equalize is specified but not implementable as a
   geometry-changing action; the production child that implements equalize
@@ -189,7 +187,7 @@ candidates with overlapping projection on that axis. Ties break by pre-order
 tree walk order (stable, deterministic).
 
 - No wrap-around.
-- No neighbor → typed rejection; state unchanged.
+- No neighbor → typed rejection; state unchanged except `last_error`.
 - Success commits focus to that leaf (and interacts with zoom per §3).
 
 Mouse hit-testing remains: host maps a click to a `PaneId` and dispatches
@@ -204,7 +202,7 @@ committed focus change.
 
 | Operation | Focus after success |
 | --- | --- |
-| `SplitPane` / `SplitFocused` | the newly created leaf (matches current `shell.rs`) |
+| `SplitPane` / `SplitFocused` | the newly created leaf (matches current `shell/{mod.rs,tree.rs}`) |
 | `ClosePane` of a non-focused leaf | focus unchanged |
 | `ClosePane` of the focused leaf | the other child of the removed leaf's parent `Split`, preferring that sibling subtree's pre-order first leaf; if the parent was the root, that sibling is the new root's first leaf. Never an arbitrary Workspace-global pick. |
 | `SwapPanes` / `MovePaneBeside` | focused Pane unchanged if it still exists |
@@ -221,14 +219,14 @@ nothing. Adjacent-dedup and capacity rules stay entirely in ADR-019 / SPEC-022.
 
 ### 7. Stale and invalid actions fail closed
 
-Every rejection is typed, atomic, and leaves state byte-identical:
+Every rejection is typed and atomic: all state other than `last_error` is byte-identical to the pre-action state, and `last_error` is set to the typed rejection.
 
 ```text
 UnknownPane | UnknownTab | UnknownWorkspace
-InvalidMoveTarget          (pane == neighbor; neighbor missing; side inconsistent)
+InvalidMoveTarget          (pane == neighbor; SwapPanes a == b; neighbor not a leaf of this Tab)
 CannotCloseLastPane
 NoDirectionalNeighbor
-NotZoomed | AlreadyZoomedSame
+NotZoomed
 PaneSplitUnavailable       (existing gate until provisioning allows split)
 ```
 
@@ -327,7 +325,7 @@ See SPEC-025. At minimum: deterministic before/after fixtures per operation;
 identity-preservation properties for move/swap; zoom topology-invariance;
 fail-closed stale ids; directional neighbor fixtures including ties; close
 successor sibling preference; property tests that every rejection is
-byte-identical and every successful transition keeps tree leaves ≡ pane map.
+byte-identical except `last_error` and every successful transition keeps tree leaves ≡ pane map.
 
 ## Not in this ADR
 
