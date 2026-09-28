@@ -211,12 +211,11 @@ impl ShellState {
     }
 
     fn repair_workspace_active_window(&mut self, workspace: WorkspaceId) {
-        if let Ok(workspace) = self.workspace_mut(workspace) {
-            if let Some(active) = workspace.active_window {
-                if workspace.window(active).is_none() {
-                    workspace.active_window = workspace.windows.first().map(|item| item.id);
-                }
-            }
+        if let Ok(workspace) = self.workspace_mut(workspace)
+            && let Some(active) = workspace.active_window
+            && workspace.window(active).is_none()
+        {
+            workspace.active_window = workspace.windows.first().map(|item| item.id);
         }
     }
 
