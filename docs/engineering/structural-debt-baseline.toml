@@ -40,9 +40,9 @@ reason = "ApplicationRoot façade keeps keybinding ActionUnavailable from #1110 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 993
-issue = 1118
-reason = "N2 navigate/palette address tests already landed this suite in the cohesion band; #1118 does not grow the file (goto coverage lives in goto_tests.rs). Ceiling matches current rustfmt-normalized LOC."
+acknowledged_loc = 995
+issue = 1127
+reason = "N2/N4 palette address coverage stays in this suite; #1127 only adjusts the CreateTab-while-palette-open fixture for R6.4.1. Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"

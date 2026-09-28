@@ -724,8 +724,10 @@ fn palette_run_by_address_not_rebinding_ordinal() {
             tab: t2
         }
     );
-    // Shift live ordinals; frozen row still holds t2.
-    root.apply(AppAction::CreateTab).unwrap();
+    // Shift live ordinals while the frozen palette row still holds t2.
+    // AppAction::CreateTab is ActionUnavailable under R6.4.1 while the palette
+    // owns the route; mutate the shell through the same reducer CreateTab uses.
+    root.create_tab().unwrap();
     assert_ne!(root.snapshot().shell.active_tab, t2);
     root.apply(AppAction::RunPalette {
         fence: root.fence(),

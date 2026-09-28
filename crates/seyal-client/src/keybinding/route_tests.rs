@@ -366,6 +366,51 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     ));
 }
 
+// --- §14 item 21: SPEC-022 navigation (goto.open only; Back/Forward wait on N3) ---
+
+#[test]
+fn item21_cmd_shift_o_dispatches_goto_open_focus_history_absent() {
+    let table = load_keybinding_table(None);
+    let matched = route(&table, "cmd+shift+o", raw_ctx(), false);
+    assert!(matches!(
+        matched,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::GotoOpen,
+                ordinal: None,
+            }
+        }
+    ));
+    assert!(!matched.writes_pty_bytes());
+
+    let flow = route(
+        &table,
+        "cmd+shift+o",
+        route_context_set(false, PresentationMode::Flow, false),
+        false,
+    );
+    assert_eq!(
+        flow.matched_command().map(|c| c.id),
+        Some(WorkspaceCommandId::GotoOpen)
+    );
+
+    // R5.5.3: Back/Forward stay out of the catalog until N3.
+    assert!(WorkspaceCommandId::parse("focus_history.back").is_none());
+    assert!(WorkspaceCommandId::parse("focus_history.forward").is_none());
+    assert_eq!(
+        route(&table, "cmd+[", raw_ctx(), false),
+        RouteOutcome::UnmatchedCommand
+    );
+    assert_eq!(
+        route(&table, "cmd+]", raw_ctx(), false),
+        RouteOutcome::UnmatchedCommand
+    );
+    assert!(table.bindings.iter().all(|b| {
+        b.action.id.as_str() != "focus_history.back"
+            && b.action.id.as_str() != "focus_history.forward"
+    }));
+}
+
 // --- §14 item 20: composer history-search ---
 
 #[test]

@@ -390,12 +390,16 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     .expect("ctrl+r composer history-search");
     assert_eq!(history.context, BindingContext::COMPOSER);
 
-    // Exclusions: ADR-021 pane focus/zoom, SPEC-022 navigation, ADR-018 window
+    // §5.5 / K8: goto.open lands with N4; Back/Forward wait on N3.
+    let goto = binding_for(&table, "cmd+shift+o", WorkspaceCommandId::GotoOpen)
+        .expect("cmd+shift+o goto.open");
+    assert_eq!(goto.context, BindingContext::APP);
+
+    // Exclusions: ADR-021 pane focus/zoom, SPEC-022 Back/Forward, ADR-018 window
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
-    assert!(contexts_for(&table, "cmd+shift+o").is_empty());
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
 }

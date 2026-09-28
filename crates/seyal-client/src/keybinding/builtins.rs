@@ -1,7 +1,8 @@
-//! SPEC-024 §4.1 builtin default rows for K2.
+//! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open`.
 //!
-//! Excludes ADR-021 pane rows (K7), SPEC-022 navigation rows (K8), and
-//! ADR-018 `window.new` (R5.0.1). Includes §5.4 `ctrl+r` composer history-search.
+//! Excludes ADR-021 pane rows (K7), SPEC-022 Back/Forward (K8 / N3), and
+//! ADR-018 `window.new` (R5.0.1). Includes §5.4 `ctrl+r` composer history-search
+//! and §5.5 `goto.open` (K8, with N4).
 
 use super::keys::parse_keys;
 use super::types::{
@@ -144,6 +145,12 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             id: WorkspaceCommandId::ComposerHistorySearchOpen,
             ordinal: None,
             context: COMPOSER,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+shift+o",
+            id: WorkspaceCommandId::GotoOpen,
+            ordinal: None,
+            context: APP,
         },
     ]
 }

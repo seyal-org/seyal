@@ -18,6 +18,8 @@ mod session;
 use accessibility::accessibility_nodes;
 
 #[cfg(test)]
+mod keybinding_apply_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod tests;
