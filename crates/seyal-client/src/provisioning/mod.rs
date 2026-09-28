@@ -497,6 +497,24 @@ impl ProvisioningSession {
             .collect()
     }
 
+    /// Explicit product terminate for a currently bound Controller attachment
+    /// (ADR-017 §6.2 / P4). Never used as a side effect of removing chrome.
+    pub fn begin_explicit_terminate(
+        &mut self,
+        pane: PaneId,
+        attachment: AttachmentId,
+    ) -> Result<Vec<ProvisioningEffect>, ProvisioningFailure> {
+        let Some(execution) = self.recorded_bindings.remove(&pane) else {
+            return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
+        };
+        let Some(owner) = self.bound_owners.remove(&pane) else {
+            self.unreferenced.insert(execution);
+            return Err(ProvisioningFailure::AttachFailed);
+        };
+        self.awaiting_bootstrap_resize.remove(&pane);
+        Ok(self.queue_terminate(pane, owner, execution, attachment))
+    }
+
     pub fn clear_bootstrap_resize(&mut self, pane: PaneId) {
         self.awaiting_bootstrap_resize.remove(&pane);
     }

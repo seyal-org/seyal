@@ -19,6 +19,8 @@ use accessibility::accessibility_nodes;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
+mod tab_provisioning_tests;
+#[cfg(test)]
 mod tests;
 
 use std::time::Duration;
@@ -86,6 +88,8 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    ProvisioningRejected,
+    ProvisioningCapacityExceeded,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,6 +228,9 @@ pub enum AppAction {
     CreateTab,
     CloseTab {
         id: TabId,
+    },
+    TerminateExecution {
+        fence: AppFence,
     },
     SplitFocused {
         axis: SplitAxis,
@@ -620,6 +627,7 @@ impl ApplicationRoot {
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => self.create_tab(),
             AppAction::CloseTab { id } => self.close_tab(id),
+            AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),

@@ -46,15 +46,15 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS_PANE = 21,
     SEYAL_APP_ACTION_SET_SHELL_CHROME = 22,
     /*
-     * Workspace/Tab/Pane composition mutations (#922). CREATE_TAB/CLOSE_TAB/
-     * SPLIT_FOCUSED/CLOSE_PANE route through the same Rust ShellState as
-     * SELECT_WORKSPACE/SELECT_TAB/FOCUS_PANE; they fail closed (do not
-     * mutate) rather than silently no-op. CLOSE_TAB/CLOSE_PANE:
+     * Workspace/Tab/Pane composition mutations (#922 / #1149). CREATE_TAB
+     * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
+     * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
+     * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
      * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
-     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
-     * bound to an execution; disposition is not yet available).
+     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
+     * 34 = ProvisioningRejected, 35 = ProvisioningCapacityExceeded.
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -118,7 +118,13 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
-    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /**
+     * Explicit Controller terminate (ADR-017 §6.2 / P4). Distinct from
+     * CLOSE_TAB / CLOSE_PANE chrome removal. Requires a matching fence with
+     * controller authority. Never terminates as a side effect of detach.
+     */
+    SEYAL_APP_ACTION_TERMINATE_EXECUTION = 58
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
