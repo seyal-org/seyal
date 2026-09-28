@@ -922,4 +922,10 @@ final class SeyalHostUITests: XCTestCase {
         let palette = app.descendants(matching: .any)["seyal-command-palette"]
         XCTAssertTrue(palette.waitForExistence(timeout: 5))
     }
+
+    func testHostLaunchesOneWindowThroughTheMultiWindowController() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+    }
 }
