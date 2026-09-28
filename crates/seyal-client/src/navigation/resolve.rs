@@ -6,7 +6,7 @@ use crate::shell::ShellState;
 
 use super::ResourceAddress;
 
-/// Typed rejection taxonomy from SPEC-022 R3.4. Exhaustive and ordered.
+/// Typed rejection taxonomy from SPEC-022 R3.4 / R6.8. Exhaustive and ordered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavigationRejection {
     UnsupportedKind,
@@ -19,6 +19,10 @@ pub enum NavigationRejection {
     TargetTerminated,
     TargetUnbound,
     AmbiguousTarget,
+    /// Back/Forward observed `FocusSeq` does not match the cursor (R6.8).
+    StaleHistoryCursor,
+    /// Back/Forward unavailable (empty history or no step in that direction).
+    HistoryUnavailable,
 }
 
 /// Successful resolution target. An [`ResourceAddress::Execution`] with exactly
