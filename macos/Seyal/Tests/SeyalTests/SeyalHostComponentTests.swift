@@ -1316,6 +1316,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
 
+    @MainActor
     func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
         var empty = SeyalAppRow()
         XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
@@ -1328,6 +1329,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.count, 5)
     }
 
+    @MainActor
     func testGotoOpenSelectorIsWiredOnTheChromeHost() {
         XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
     }
