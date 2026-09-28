@@ -5,12 +5,7 @@
 - **Issue:** #1000 (refinement); parent umbrella #674; epic #665
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 - **Coordinates with:** #994 (pane/tab → `TerminalExecution` provisioning contract), #922, #923, #928, #936, #929
-- **Numbering note:** Provisional allocation across concurrent M003 refinements
-  (checkable at this PR's head): #994 → **ADR-017** (PR #1056), #1000 → **ADR-018**
-  (this PR), #1004 → **ADR-019** (PR #1057), #1003 → **ADR-020** (PR #1050).
-  Numbers remain provisional until merge order is settled. Complementary scopes:
-  #994 owns how a leaf obtains an execution; this ADR owns how windows/tabs are
-  identified, ordered and destroyed.
+- **Numbering note:** Final. ADR-017 (#994), ADR-018 (#1000, this ADR), ADR-019 (#1004), ADR-020 (#1003) and ADR-021 (PaneTree operations) are allocated on `master`. Complementary scopes: #994/ADR-017 owns how a leaf obtains an execution; this ADR owns how windows/tabs are identified, ordered and destroyed.
 
 ## Context
 
@@ -129,6 +124,7 @@ The same `ShellState` reducer owns:
 - the order of Windows within a Workspace;
 - the order of Tabs within a Window;
 - which Window is the product-active Window;
+- the per-Workspace most-recently-active Window order, and `last_active_workspace` (§2.2);
 - which Tab is active per Window;
 - which Pane is focused per Tab, and the one product-focused Pane globally;
 - window and tab cycling/next/previous order and direct-selection ordinals.
@@ -158,7 +154,7 @@ snapshots out, unknown versions and mismatched sizes fail closed.
 
 The product snapshot carries, at minimum: the ordered Window list with each
 Window's `WorkspaceId`; per-Window ordered Tab list and active Tab; the
-product-active Window; per-Tab `PaneTree`, focused Pane and split ratios; per-leaf
+product-active Window; `last_active_workspace`; per-Tab `PaneTree`, focused Pane and split ratios; per-leaf
 presentation mode, execution binding and presentation tier (§5); Tab and Window
 titles and attention flags; capability flags such as tab-creation and
 pane-splitting admission; `last_error`; and the monotonic shell generation.
@@ -185,6 +181,8 @@ action creates one and is containment-generation-fenced like any structural
 action. A stale host that believes a raise is possible, while the Workspace's
 last Window was destroyed in between, therefore reaches the create path with a
 stale generation and is rejected rather than silently creating a Window.
+
+`CreateWindow { workspace: WorkspaceId }` and `ActivateWorkspace { workspace: WorkspaceId }` name their target Workspace explicitly; the reducer never infers it from AppKit state. The `ShellState` reducer owns `last_active_workspace: WorkspaceId`, updated whenever the product-active Window changes and left unchanged when the Window count reaches zero. While at least one Window exists it equals the product-active Window's `WorkspaceId`. With zero Windows the snapshot reports no product-active Window and carries `last_active_workspace` as the sole re-entry target: host-originated re-entry (Dock reopen, File → New Window with no key Window) forwards `ActivateWorkspace { workspace: last_active_workspace }` taken from the newest snapshot. The raise path selects by the Rust-owned per-Workspace most-recently-active Window order (§1.3), never by AppKit order.
 
 `RequestQuit` is an application-scope action, not a window action, and resolves
 through §4.
@@ -275,6 +273,7 @@ forbidden by this section.
 
 Because nothing is destroyed by a close, no close path requires a destructive
 confirmation prompt.
+Successor selection is Rust-owned and deterministic. Closing a Window's active Tab activates the Tab that immediately followed it in that Window's order, or the new last Tab if it was last. `CloseTab` naming a Window's only Tab is applied as `CloseWindow` for that Window in the same atomic reducer step; it is never rejected for being the last Tab and never leaves a zero-Tab Window. Closing a Window that is not product-active leaves the product-active Window unchanged. Closing the product-active Window makes the most recently active surviving Window of the same Workspace product-active; otherwise the most recently active surviving Window of any Workspace; otherwise the composition enters zero Windows (§3.3a) with `last_active_workspace` unchanged. Rust emits destroy-realization for the closed `WindowId` before order-front / make-key for the successor.
 
 ### 3.3 Live-unpresented executions must stay reachable
 
@@ -734,12 +733,7 @@ No other mockup conflict with ADR-015, ADR-007 or ADR-009 was found.
 
 A separate SPEC is deliberately not created in this refinement: the observable
 contract is carried by this ADR plus the already accepted SPEC-004, SPEC-006,
-SPEC-008 and SPEC-009. W3's multi-window snapshot/FFI ABI change is noted as a
-`docs/specs/README.md` "public API/ABI behavior" trigger; if reviewers require a
-SPEC before W3, promote §2–§6 into an unnumbered
-`SPEC-0xx-M003-WINDOW-TAB-LIFECYCLE` (number allocated at promotion; SPEC-022
-(#1004), SPEC-023 (#1003), SPEC-024 (#1002) and SPEC-025 (#1001) are already claimed) in a follow-up Architecture PR rather
-than inventing ABI in the child. A SPEC also
+SPEC-008 and SPEC-009. No separate SPEC is required before W3. W3 defines the multi-window snapshot and native-effect record layout under the ADR-015 versioned, size-tagged, fail-closed record rules and §2.1/§2.4 of this ADR; it may add fields and records but no action semantics, fencing or lifecycle behavior beyond §2–§6. Any W3 need for behavior not stated here reopens this ADR through a separate Architecture/R&D PR. A SPEC also
 becomes required if #994 introduces a new public protocol shape, and that SPEC
 belongs to #994.
 
