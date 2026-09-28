@@ -14,10 +14,47 @@ use super::{
 use crate::display::DisplayKind;
 #[cfg(feature = "test-fault-injection")]
 use crate::test_fault::{self, FaultPoint};
-use crate::{display::EncodedDisplayBatch, local_ipc::fd_transfer};
+use crate::{
+    display::EncodedDisplayBatch,
+    local_ipc::{
+        fd_transfer,
+        framing::{FrameHeader, MessageType},
+    },
+};
 #[cfg(feature = "benchmark-instrumentation")]
 use std::sync::atomic::Ordering;
-use std::{io, os::fd::AsRawFd, sync::Arc};
+use std::{collections::VecDeque, io, os::fd::AsRawFd, sync::Arc};
+
+/// True when `bytes` is a complete type-35 `ViewportLineIds` frame.
+fn is_viewport_line_ids_frame(bytes: &[u8]) -> bool {
+    FrameHeader::decode(bytes)
+        .ok()
+        .is_some_and(|header| header.message_type == MessageType::ViewportLineIds as u16)
+}
+
+/// Drop not-yet-started type-35 frames only. Partial in-flight type 35 and
+/// every other after-display control frame (BlockState, ComposerStatus,
+/// BlockTimeline, …) must survive latest-wins LineIds replacement.
+fn drop_unsent_viewport_line_ids(
+    after_display: &mut VecDeque<OutboundItem>,
+    queued_control_bytes: &mut usize,
+) {
+    let mut index = 0;
+    while index < after_display.len() {
+        let should_drop = {
+            let item = &after_display[index];
+            item.sent == 0 && is_viewport_line_ids_frame(&item.bytes)
+        };
+        if should_drop {
+            let item = after_display
+                .remove(index)
+                .expect("index was in after_display");
+            *queued_control_bytes = queued_control_bytes.saturating_sub(item.remaining_len());
+        } else {
+            index += 1;
+        }
+    }
+}
 
 impl Connection {
     pub(in crate::local_ipc::connection) fn queue_snapshot(
@@ -136,26 +173,14 @@ impl LocalIpcServer {
                 "connection is closed",
             ));
         };
-        if after_display {
-            // Type 35 keeps at most one not-yet-started frame. A partial
-            // frame stays until it finishes; any unsent successor is replaced.
-            let drop_from = if connection
-                .after_display
-                .front()
-                .is_some_and(|item| item.sent > 0)
-            {
-                1
-            } else {
-                0
-            };
-            while connection.after_display.len() > drop_from {
-                let Some(item) = connection.after_display.pop_back() else {
-                    break;
-                };
-                connection.queued_control_bytes = connection
-                    .queued_control_bytes
-                    .saturating_sub(item.remaining_len());
-            }
+        if after_display && is_viewport_line_ids_frame(&bytes) {
+            // Type 35 is latest-wins among not-yet-started copies only. A
+            // partial in-flight type 35 finishes; non-type-35 after-display
+            // work is never dropped for LineIds replacement (#865 / attach).
+            drop_unsent_viewport_line_ids(
+                &mut connection.after_display,
+                &mut connection.queued_control_bytes,
+            );
         }
         let new_total = connection
             .queued_control_bytes
