@@ -95,3 +95,17 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
+# #1167 PT6: stacked W2a surfaces already in the cohesion band vs master; this
+# Issue does not grow them (property suite lives in shell/pt6_tests.rs).
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 744
+issue = 1167
+reason = "Command palette reducer stayed one module after W2a WindowId/containment wiring on the PT1–PT3 stack; #1167 adds no palette edits. Ceiling matches current LOC so the stacked PR can pass the changed-file cohesion gate."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/tests.rs"
+acknowledged_loc = 846
+issue = 1167
+reason = "W2/W3 shell unit suite remains after PT1–PT3 extraction into pt*_tests siblings; #1167 adds pt6_tests.rs only and does not grow this file. Ceiling matches current LOC for the stacked cohesion gate."
