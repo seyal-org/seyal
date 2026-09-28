@@ -34,21 +34,21 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 765
-issue = 1110
-reason = "ApplicationRoot façade retains types/snapshot/apply after chrome/composer/palette/recovery/session/accessibility/keybinding_apply extraction; #1110 adds ActionUnavailable and palette-modal CreateTab/OpenPalette gates only. Keybinding match and WorkspaceCommand dispatch live in keybinding_apply.rs."
+acknowledged_loc = 812
+issue = 1132
+reason = "ApplicationRoot façade keeps #1110 ActionUnavailable and #1117 history errors. Keybinding match stays in keybinding_apply.rs. History apply stays in focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 993
+issue = 1117
+reason = "ApplicationRoot unit suite stays a sibling tests module; N2/N3 navigation commit and focus-history wiring add Navigate/history regression cases while production apply stays in concern modules. N3 focus-history app tests live in focus_history_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 975
-issue = 1110
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. #1110 adds seyal_app_route_keystroke and ActionUnavailable error mapping only; product match/dispatch stays in keybinding and app/keybinding_apply."
+acknowledged_loc = 956
+issue = 1132
+reason = "Published C ABI façade keeps #1110 keystroke routing. History and keybinding error numbers live in error_code.rs so this file stays under the hard line ceiling."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -95,3 +95,15 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 967
+issue = 1117
+reason = "SPEC-022 §12 N1/N2 resolver and Navigate commit suite stay one navigation tests module; N3 property/unit history tests live in history.rs and history_integration_tests.rs. Ceiling matches rustfmt-normalized LOC after N3 NavigateHistory call-site updates."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 817
+issue = 1117
+reason = "Global palette projection stays one reducer after N2 address-carrying navigation rows; N3 does not grow this module but the stack is changed versus master, so the cohesion-review band is acknowledged at the current rustfmt-normalized LOC."
