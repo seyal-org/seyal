@@ -906,4 +906,14 @@ final class SeyalHostUITests: XCTestCase {
         }
         return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
+
+    func testFileMenuExposesCloseForTheWindowHost() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let file = app.menuBars.menuBarItems["File"]
+        XCTAssertTrue(file.waitForExistence(timeout: 5))
+        file.click()
+        let close = file.menuItems["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+    }
 }
