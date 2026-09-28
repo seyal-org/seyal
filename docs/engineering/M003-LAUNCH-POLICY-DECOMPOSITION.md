@@ -36,7 +36,8 @@ Provisioning consume path (after ADR-017 accepted):
   ADR-017 P3 create admission
     → uses L2 policy resolution for profile 0
   L0 SPEC-004 additive `17 LaunchPolicyRejected` (docs-only amendment PR)
-    → consumed by L3 (switches the interim 14 mapping in the same PR)
+    → consumed by L3, or by the consumer child filed with L0 if L0 merges after L3
+      (switches failures and warnings and removes the interim 14 mapping in the same PR)
 ```
 
 L1 is independent of ADR-017. L2's developer/test argv path can land before
@@ -59,6 +60,7 @@ amendment PR; it does not edit ADR-017 files.
 
 - The registry lists the code; older clients treat it as a non-retryable
   unknown failure (SPEC-004 §15 rule).
+- SPEC-004 §18.3 states that a client must treat `Created` as success regardless of `detail_code`, must ignore unknown or reserved `Created.detail_code` bits, and must never infer failure from a nonzero `Created.detail_code`.
 
 **Dependencies:** ADR-017 accepted (it introduces the create result and codes
 15/16). Until L0 merges, ADR-020 §3.10's `14 InternalFailure` mapping is the
