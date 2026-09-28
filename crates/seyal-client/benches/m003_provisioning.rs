@@ -52,12 +52,9 @@ fn main() {
     let _contract_clock = Instant::now();
 
     #[cfg(not(target_os = "macos"))]
-    {
-        println!(
-            "m003_provisioning PLATFORM_LIMITED target_os!=macos evidence_class=PLATFORM_LIMITED {PERFORMANCE_CLAIM}"
-        );
-        return;
-    }
+    println!(
+        "m003_provisioning PLATFORM_LIMITED target_os!=macos evidence_class=PLATFORM_LIMITED {PERFORMANCE_CLAIM}"
+    );
 
     #[cfg(target_os = "macos")]
     run_macos();
