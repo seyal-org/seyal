@@ -97,6 +97,7 @@ Accepted
                       ├─ ResizeResult               Runtime → client
                       ├─ DisplaySnapshot             Runtime → client
                       ├─ DisplayDelta                Runtime → client
+                      ├─ ViewportLineIds             Runtime → client, after that display batch (§8.1)
                       ├─ Lifecycle                   Runtime → client
                       └─ Detach → Ready
   → Closing
@@ -172,7 +173,7 @@ Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` p
 ### 8.1 Viewport LineIds (proposed, #1083)
 
 - **Status:** proposed under Issue #1083 in PR #1060. Acceptance is on merge of that PR by a reviewer other than the author. This text is a wire contract only; no production implementation is accepted by it. #865 / #1058 consume it after acceptance and must prove §16.2 before #865 can be Done.
-- **Nature:** additive and capability-gated. Framing version remains `1.0`. Nothing in §1–§7 changes. §11 names this frame as its own one-slot output class.
+- **Nature:** additive and capability-gated. Framing version remains `1.0`. §6 records the Attached `ViewportLineIds` edge. §11 names this frame as its own one-slot output class.
 
 Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS = 1 << 9`). It carries the visible viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only.
 
@@ -214,7 +215,7 @@ LineIds are not required to be monotonic. Insert-line, reverse-index, and CSI T 
 - Each connection holds at most one not-yet-started type 35 frame. Enqueuing a newer one replaces the older not-yet-started frame; a partially written type 35 frame is completed first. Type 35 therefore retains no generation history. It is not mandatory control and cannot by itself exhaust that budget or cause slow-client disconnection. Under sustained backlog the clip may stay absent until a type 35 frame for the committed generation is fully written. Absence is the safe presentation, not a protocol error.
 - Runtime must not write a type 35 frame for generation G until the last frame of the display batch that carried G has been completely written, or that batch has been superseded by a newer-generation snapshot whose last frame has been completely written. A mandatory control frame that preempts between complete display frames does not release queued type 35 frames. Type 35 is never written inside a partially written frame.
 - A delta that is dropped, or replaced by a current-state snapshot, does not send type 35 for that dropped attempt.
-- A viewer that did not advertise bit 9 never receives type 35. A type 35 frame that arrives anyway is malformed: discard it and clear the stored vector.
+- A viewer that did not advertise bit 9 never receives type 35. If `ServerHello` does not advertise bit 9, the client does not wait for type 35. A type 35 frame that arrives without both sides having advertised bit 9 is malformed: discard it and clear the stored vector.
 - If any visible-row LineId is missing or zero, Runtime skips the entire frame. It does not omit individual ids and it does not send a shorter vector. A consecutive repeated id is not missing.
 - The payload bound above is the cost of publishing the full vector, including when the ids are unchanged from the previous frame.
 
@@ -569,7 +570,7 @@ Required once #1083 is accepted on merge of PR #1060. The production proof lives
 - malformed payloads: generation 0, non-zero reserved, `row_count` 0 or greater than 256, length not `12 + 8 × row_count`, a zero id, a non-consecutive repeated id. A malformed frame is discarded and clears the stored vector. It does not close the connection;
 - a consecutive run of the same id is accepted. A narrowing resize that soft-wraps one source line across two visible rows publishes both rows with that id and the client commits the frame;
 - a non-monotonic vector is accepted, in viewport order;
-- a viewer that did not advertise bit 9 never receives type 35;
+- a viewer that did not advertise bit 9 never receives type 35. If `ServerHello` does not advertise bit 9, the client does not wait for the frame. A type 35 frame that arrives without both advertisements is discarded and clears the stored vector;
 - a viewer that advertised bit 9 receives a type 35 frame only after a successfully queued snapshot or a delta admitted to the presentation queue, and none after a delta that was dropped or replaced by a snapshot;
 - a missing or zero id skips the whole frame;
 - `start_line` present maps to the first matching visible row through the last row; `start_line` absent maps to the entire paired viewport; an absent vector draws no clip;
