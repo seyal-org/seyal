@@ -232,6 +232,54 @@ impl ShellState {
         Ok(self.pane(pane)?.execution)
     }
 
+    /// Whether `id` is a current Workspace in this shell.
+    pub fn contains_workspace(&self, id: WorkspaceId) -> bool {
+        self.workspaces.iter().any(|workspace| workspace.id == id)
+    }
+
+    /// Owning Workspace of a current Tab, if any.
+    pub fn workspace_of_tab(&self, id: TabId) -> Option<WorkspaceId> {
+        self.workspaces
+            .iter()
+            .find_map(|workspace| workspace.tab(id).map(|_| workspace.id))
+    }
+
+    /// Owning Workspace and Tab of a current Pane, if any.
+    pub fn location_of_pane(&self, id: PaneId) -> Option<(WorkspaceId, TabId)> {
+        for workspace in &self.workspaces {
+            for tab in &workspace.tabs {
+                if tab.panes.contains_key(&id) {
+                    return Some((workspace.id, tab.id));
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether `pane` is currently a leaf of `tab` inside `workspace`.
+    pub fn tab_contains_leaf(&self, workspace: WorkspaceId, tab: TabId, pane: PaneId) -> bool {
+        self.workspaces
+            .iter()
+            .find(|item| item.id == workspace)
+            .and_then(|item| item.tab(tab))
+            .is_some_and(|item| item.root.contains_leaf(pane))
+    }
+
+    /// Every current Pane bound to `execution`, across all Workspaces and Tabs.
+    pub fn panes_bound_to(&self, execution: ExecutionId) -> Vec<(WorkspaceId, TabId, PaneId)> {
+        let mut bound = Vec::new();
+        for workspace in &self.workspaces {
+            for tab in &workspace.tabs {
+                for pane in tab.panes.values() {
+                    if pane.execution == Some(execution) {
+                        bound.push((workspace.id, tab.id, pane.id));
+                    }
+                }
+            }
+        }
+        bound
+    }
+
     pub fn snapshot(&self) -> ShellSnapshot {
         let workspace = self
             .workspace(self.active_workspace)
