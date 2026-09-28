@@ -9,6 +9,7 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod keybinding_apply;
 mod native_effect;
 mod palette_apply;
 mod recovery_apply;
@@ -86,6 +87,8 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
+    ActionUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -600,7 +603,15 @@ impl ApplicationRoot {
             }
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::SelectTab { id } => self.select_tab(id),
-            AppAction::CreateTab => self.create_tab(),
+            AppAction::CreateTab => {
+                // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.
+                if self.palette.is_open() {
+                    self.require_workspace_command_for_menu(
+                        crate::keybinding::WorkspaceCommandId::TabCreate,
+                    )?;
+                }
+                self.create_tab()
+            }
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
@@ -610,7 +621,14 @@ impl ApplicationRoot {
                 inspector,
                 tab_strip,
             } => self.set_shell_visibility(left, inspector, tab_strip),
-            AppAction::OpenPalette { fence } => self.open_palette(fence),
+            AppAction::OpenPalette { fence } => {
+                if self.palette.is_open() {
+                    self.require_workspace_command_for_menu(
+                        crate::keybinding::WorkspaceCommandId::CommandPaletteOpen,
+                    )?;
+                }
+                self.open_palette(fence)
+            }
             AppAction::SetPaletteQuery { fence, query } => self.set_palette_query(fence, query),
             AppAction::MovePaletteSelection { fence, delta } => {
                 self.move_palette_selection(fence, delta)
@@ -691,7 +709,7 @@ impl ApplicationRoot {
         }
     }
 
-    fn fail(&mut self, error: AppError) -> Result<(), AppError> {
+    pub(crate) fn fail(&mut self, error: AppError) -> Result<(), AppError> {
         self.last_error = Some(error);
         Err(error)
     }
