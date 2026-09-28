@@ -6,7 +6,7 @@
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
-- **Proposed M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
+- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
 
 ## 1. Purpose
 
@@ -503,7 +503,7 @@ Comparator/reference shared-projection code may remain only if isolated from pro
 
 ## 18. M003 execution provisioning and disposition extension
 
-- **Status:** proposed amendment; **normative only on ADR-017 acceptance**.
+- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance**.
 - **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
 - **Nature:** additive, capability-gated. Framing version remains `1.0`. Nothing in §1–§17 changes.
 

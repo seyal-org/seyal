@@ -1,6 +1,6 @@
 # ADR-017 — Pane/Tab TerminalExecution provisioning and disposition
 
-- **Status:** Proposed (refinement output of Issue #994; no production code in this decision)
+- **Status:** Accepted (Issue #994; profile 0 resolution normative on ADR-020 acceptance)
 - **Date:** 2026-09-24
 - **Issue:** #994 (parent #674, epic #665; consumed by #923 / #936; related #676, #686, #929)
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-015, SPEC-003, SPEC-004, SPEC-006, SPEC-008, SPEC-009
