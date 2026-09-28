@@ -2,7 +2,7 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) is **proposed** under Issue #1083 (PR #1060) and is normative only on that Issue's acceptance. #865 consumes the accepted text; it does not own the amendment.
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) **accepted** 2026-09-28 under Issue #1083 by independent review of PR #1060 at `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`. #865 consumes the accepted text; it does not own the amendment, and its implementation is not Done.
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
@@ -147,7 +147,7 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
-| 35 | R→C | `ViewportLineIds` — §8.1, proposed under #1083 |
+| 35 | R→C | `ViewportLineIds` — §8.1, accepted under #1083 |
 | 36 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
 | 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
@@ -164,14 +164,14 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 6: grapheme display (`CAP_GRAPHEME_DISPLAY`);
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
-- bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, **proposed** under #1083, normative only on that Issue's acceptance;
+- bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, accepted under #1083;
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is proposed for `ViewportLineIds` (§8.1, #1083). Until #1083 is accepted, type 35 and bit 9 stay unassigned for any other feature. §18 therefore assigns the next free types after that proposal, **36–39**, and the next free capability bit, **bit 10**. If #1083 is rejected, 35 and bit 9 return to the free pool and §18 must be renumbered before it becomes normative.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are allocated to `ViewportLineIds` (§8.1, accepted under #1083). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**.
 
-### 8.1 Viewport LineIds (proposed, #1083)
+### 8.1 Viewport LineIds (accepted, #1083)
 
-- **Status:** proposed. Normative only on acceptance of Issue #1083. PR #1060 is the text. #865 consumes the accepted contract and does not own this amendment.
+- **Status:** accepted 2026-09-28 under Issue #1083, decided by independent review of PR #1060 at `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`. This is a normative wire contract only; no production implementation is accepted by it. #865 / #1058 consume this contract and must prove §16.2 before #865 can be Done.
 - **Nature:** additive and capability-gated. Framing version remains `1.0`. Nothing in §1–§7 changes.
 
 Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS = 1 << 9`). It carries the visible viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only.
@@ -553,7 +553,7 @@ Accepted SPEC-006 requires the Pass 7 production implementation to prove:
 
 ### 16.2 ViewportLineIds validation (#1083)
 
-Normative only on acceptance of #1083. The production proof lives on the #865 implementation candidate after this section is accepted:
+Normative since #1083 acceptance (2026-09-28). The production proof lives on the #865 implementation candidate:
 
 - malformed payloads: generation 0, non-zero reserved, `row_count` 0 or greater than 256, length not `12 + 8 × row_count`, a zero id, a duplicate id;
 - a non-monotonic vector of unique ids is accepted, in viewport order;
