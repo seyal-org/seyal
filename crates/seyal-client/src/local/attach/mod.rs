@@ -9,8 +9,9 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{decode_chunk, empty_cache, DisplayKind},
     local_ipc::framing::{
-        Attach, Attached, BlockTimeline, ErrorMessage, ExecutionList, FrameHeader, MessageType,
-        Resync, Role, CAP_COMMAND_BLOCKS, HEADER_LEN,
+        Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
+        CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
+        Role, CAP_COMMAND_BLOCKS, HEADER_LEN,
     },
     pass8::BLOCK_STATE_MESSAGE_TYPE,
     ExecutionId,
@@ -174,6 +175,44 @@ pub(crate) fn resolve_single_running_execution(
     Ok(first)
 }
 
+/// SPEC-004 §18.2: CreateExecution is legal in Ready, before Attach.
+/// Profile 0, workspace 0, 80×24 matches the previous process-start shell.
+fn create_profile_zero_execution(
+    stream: &mut UnixStream,
+    deadline: Instant,
+) -> Result<ExecutionId, ClientError> {
+    let payload = CreateExecutionRequest {
+        workspace_id: 0,
+        request_id: 1,
+        launch_profile: 0,
+        rows: 24,
+        columns: 80,
+    }
+    .encode();
+    send_control_until(
+        stream,
+        MessageType::CreateExecutionRequest,
+        &payload,
+        deadline,
+    )?;
+    let (kind, payload) = read_blocking_frame_until(stream, deadline)?;
+    if kind == MessageType::Error {
+        let error = ErrorMessage::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        return Err(server_error(error.error_code));
+    }
+    if kind != MessageType::CreateExecutionResult {
+        return Err(ClientError::Protocol);
+    }
+    let result = CreateExecutionResult::decode(&payload).map_err(|_| ClientError::Protocol)?;
+    if result.request_id != 1 {
+        return Err(ClientError::Protocol);
+    }
+    match result.result_code {
+        CreateExecutionResultCode::Created => Ok(result.execution_id),
+        CreateExecutionResultCode::Error(_) => Err(server_error(result.result_code.wire_value())),
+    }
+}
+
 impl LocalDisplayClient {
     /// Attach to one explicitly selected execution. Native panes must use
     /// this entry point so two panes cannot accidentally share the first
@@ -230,7 +269,20 @@ impl LocalDisplayClient {
             return Err(ClientError::Protocol);
         }
         let list = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
-        let execution_id = resolve_single_running_execution(&list)?;
+        // P1 leaves the production Runtime resident with zero executions.
+        // A Controller opening the implicit bootstrap (headed recovery) creates
+        // profile 0 on this Ready connection, then attaches. Observer stays
+        // fail-closed so a read-only probe cannot spawn a shell.
+        let execution_id = match resolve_single_running_execution(&list) {
+            Ok(execution_id) => execution_id,
+            Err(ClientError::NoRunningExecution)
+                if role == Role::Controller
+                    && provisioning_negotiated(server_hello.server_capabilities) =>
+            {
+                create_profile_zero_execution(&mut stream, deadline)?
+            }
+            Err(error) => return Err(error),
+        };
 
         if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
             drop(stream);
