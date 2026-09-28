@@ -52,9 +52,9 @@ reason = "Published C ABI entry points and handle/row scratch stay one thin enco
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 773
-issue = 1065
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1065 imports encode-owned SNAP/block-row flag constants after those flags moved out of the façade, and the steady-state snapshot call-counter proof lives beside the counter in visual.rs."
+acknowledged_loc = 779
+issue = 1108
+reason = "ABI contract suite stays one module. #1108 adds the multi-window snapshot FFI proofs beside the existing handle tests; further extraction would split one contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
