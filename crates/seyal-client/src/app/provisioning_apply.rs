@@ -5,9 +5,9 @@ use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{CreateExecutionResult, CreateExecutionResultCode};
 
-use super::{
-    close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot, BindingEvidence,
-};
+use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
+#[cfg(test)]
+use super::BindingEvidence;
 use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
