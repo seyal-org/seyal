@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 874
-issue = 1144
-reason = "ApplicationRoot keeps W4a window dispatch, N4 goto dispatch, and N5 activation-episode fields. Activation retry lives in activation.rs; goto reduction stays in goto_apply.rs."
+acknowledged_loc = 903
+issue = 1156
+reason = "ApplicationRoot keeps W4a window dispatch, N4 goto, N5 activation-episode fields, and N3 FocusHistory ownership on the N6 merge. History apply stays in focus_history_apply.rs; activation retry stays in activation.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -46,9 +46,9 @@ reason = "N5 extracted navigate/palette-by-address coverage into navigate_tests.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 946
-issue = 1144
-reason = "Façade keeps the W3 window extraction and the N4 goto error numbers, shifted so UnknownWindow stays 34 and navigation/goto codes follow it."
+acknowledged_loc = 948
+issue = 1156
+reason = "Façade keeps W3 window extraction, N4 goto error numbers, and N3 history error numbers shifted to 48 and 49 so UnknownWindow stays 34. History action decode stays in decode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -58,15 +58,21 @@ reason = "N2 address-carrying palette rows already placed this module in the coh
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 964
-issue = 1144
-reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after multi-window seed migration. N5 cross-window coverage lives in activation_tests.rs."
+acknowledged_loc = 978
+issue = 1156
+reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after the N6 merge of multi-window seeds and N3 history call sites. Cross-window coverage lives in activation_tests.rs; history integration lives in history_integration_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
 acknowledged_loc = 798
 issue = 1144
 reason = "ShellState keeps W3 window containment, N4 navigation helpers, and N5 Tab→Window placement accessors. Inventory enumeration lives in inventory.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/decode.rs"
+acknowledged_loc = 713
+issue = 1156
+reason = "Action decode stays one FFI sibling. The N6 merge adds HistoryBack and HistoryForward at codes 65 and 66 after window actions 58–61 and Navigate/goto 62–64, which places this module in the cohesion-review band."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

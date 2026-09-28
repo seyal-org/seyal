@@ -10,6 +10,7 @@ mod accessibility;
 mod activation;
 mod chrome_apply;
 mod composer_apply;
+mod focus_history_apply;
 mod goto_apply;
 mod native_effect;
 mod palette_apply;
@@ -21,6 +22,8 @@ use activation::PendingWindowActivation;
 pub use activation::{ActivationHostFailure, WINDOW_ACTIVATION_ATTEMPT_BUDGET};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
+#[cfg(test)]
+mod focus_history_tests;
 #[cfg(test)]
 mod navigate_tests;
 #[cfg(test)]
@@ -41,7 +44,7 @@ use crate::composer::{
     RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
-use crate::navigation::ResourceAddress;
+use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
@@ -108,6 +111,8 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
+    NavigationStaleHistoryCursor,
+    NavigationHistoryUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,6 +303,16 @@ pub enum AppAction {
         fence: AppFence,
         address: ResourceAddress,
     },
+    /// Focus-history Back (SPEC-022 R6.5 / R6.8).
+    HistoryBack {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    /// Focus-history Forward (SPEC-022 R6.5 / R6.8).
+    HistoryForward {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
     ClosePalette {
         fence: AppFence,
     },
@@ -418,6 +433,9 @@ pub struct AppSnapshot {
     pub composer: Option<ComposerSnapshot>,
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
+    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
+    /// when history is empty.
+    pub focus_history_seq: Option<FocusSeq>,
     pub goto: GotoSnapshot,
 }
 
@@ -452,6 +470,7 @@ pub struct ApplicationRoot {
     pending_activation: Option<PendingWindowActivation>,
     /// Typed host-failure record for the latest activation episode (SPEC-022 R5.4).
     last_activation_failure: Option<ActivationHostFailure>,
+    focus_history: FocusHistory,
     goto: GotoState,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
@@ -506,6 +525,7 @@ impl ApplicationRoot {
             last_window_event: None,
             pending_activation: None,
             last_activation_failure: None,
+            focus_history: FocusHistory::new(),
             goto: GotoState::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
@@ -586,6 +606,7 @@ impl ApplicationRoot {
             composer,
             chrome,
             palette,
+            focus_history_seq: self.focus_history.cursor_seq(),
             goto,
         }
     }
@@ -733,6 +754,14 @@ impl ApplicationRoot {
             AppAction::Navigate { fence, address } => {
                 self.require_fence(fence)?;
                 self.navigate_address(address)
+            }
+            AppAction::HistoryBack { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_back(observed)
+            }
+            AppAction::HistoryForward { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_forward(observed)
             }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::SelectWindow { id } => self.select_window(id),

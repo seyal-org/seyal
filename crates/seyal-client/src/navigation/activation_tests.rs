@@ -5,7 +5,9 @@ use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 use crate::app::{
     AppAction, ApplicationRoot, NativeEffect, WindowNativeEvent, WINDOW_ACTIVATION_ATTEMPT_BUDGET,
 };
-use crate::navigation::{navigate, EmptyExecutionInventory, NavigationPrincipal, ResourceAddress};
+use crate::navigation::{
+    navigate, EmptyExecutionInventory, NavigateHistory, NavigationPrincipal, ResourceAddress,
+};
 use crate::shell::{
     ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
 };
@@ -102,6 +104,7 @@ fn cross_window_navigate_emits_one_window_activation() {
         &mut shell,
         &EmptyExecutionInventory,
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
 
@@ -171,6 +174,7 @@ fn same_window_navigate_emits_no_activation() {
         &mut shell,
         &EmptyExecutionInventory,
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
     assert_eq!(shell.snapshot().active_tab, t2);
@@ -198,6 +202,7 @@ fn navigate_does_not_reparent_tab() {
         &mut shell,
         &EmptyExecutionInventory,
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
 
