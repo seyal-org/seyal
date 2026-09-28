@@ -13,6 +13,7 @@ mod native_effect;
 mod palette_apply;
 mod recovery_apply;
 mod session;
+mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
@@ -21,6 +22,8 @@ pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 mod recovery_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
 
 use std::time::Duration;
 
@@ -87,6 +90,8 @@ pub enum AppError {
     UnknownBlock,
     CannotCloseBoundPane,
     UnknownWindow,
+    CrossWorkspaceAdopt,
+    ExecutionNotUnpresented,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,6 +222,9 @@ pub enum AppAction {
         id: TabId,
     },
     CreateTab,
+    CloseWindow {
+        id: WindowId,
+    },
     CloseTab {
         id: TabId,
     },
@@ -294,6 +302,20 @@ pub enum AppAction {
     ReportWindowEvent {
         window: WindowId,
         event: WindowNativeEvent,
+    },
+    SyncLiveUnpresented {
+        entries: Vec<(ExecutionId, WorkspaceId)>,
+    },
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    Adopt {
+        fence: AppFence,
+        evidence: BindingEvidence,
+    },
+    TerminateExecution {
+        execution: ExecutionId,
     },
 }
 
@@ -418,10 +440,8 @@ impl ApplicationRoot {
         for window in &snap.windows {
             pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
         }
-        if !snap.windows.is_empty() {
-            pending_effects.push(NativeEffect::OrderFrontMakeKey {
-                window: snap.active_window,
-            });
+        if let Some(window) = snap.active_window {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey { window });
         }
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
@@ -482,11 +502,13 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
+        let unpresented = self.shell.live_unpresented(shell.active_workspace);
+        let palette = self.palette.snapshot_with_unpresented(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
+            &unpresented,
         );
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
@@ -648,6 +670,7 @@ impl ApplicationRoot {
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => self.create_tab(),
+            AppAction::CloseWindow { id } => self.close_window(id),
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
@@ -670,6 +693,13 @@ impl ApplicationRoot {
             AppAction::ReportWindowEvent { window, event } => {
                 self.report_window_event(window, event)
             }
+            AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            AppAction::RecordUnpresented {
+                execution,
+                workspace,
+            } => self.record_unpresented(execution, workspace),
+            AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
         };
         match result {
             Ok(()) => {
@@ -763,6 +793,7 @@ pub(super) fn chrome_error(error: ChromeError) -> AppError {
 pub(super) fn close_tab_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
+        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownChromeTab,
     }
 }
@@ -771,6 +802,7 @@ pub(super) fn close_pane_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
         ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
+        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownPane,
     }
 }

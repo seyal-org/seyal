@@ -228,7 +228,7 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
         let (active_tab_lo, active_tab_hi) = split_id(window.active_tab.to_bytes());
         let title = push_text(&mut state.window_scratch.text, &window.title);
         let mut flags = 0u16;
-        if window.id == shell.active_window {
+        if Some(window.id) == shell.active_window {
             flags |= WINDOW_FLAG_PRODUCT_ACTIVE;
         }
         if window.attention {
@@ -351,9 +351,11 @@ fn relocate_window_pointers(state: &mut AppHandle) {
 }
 
 fn encode_effect(effect: NativeEffect) -> SeyalAppNativeEffect {
-    // kind 1 BoundedDetachThenTerminate: window_lo carries relative deadline_ms.
+    // kind 1: window_lo is the relative deadline. kind 6: window_lo/hi are the
+    // ExecutionId. Other kinds carry WindowId, or zeros when they have none.
     let (window_lo, window_hi) = match effect {
         NativeEffect::BoundedDetachThenTerminate { deadline_ms } => (deadline_ms, 0),
+        NativeEffect::TerminateExecution { execution } => split_id(execution.to_bytes()),
         other => match other.window() {
             Some(window) => split_id(window.to_bytes()),
             None => (0, 0),
@@ -452,7 +454,10 @@ pub(super) fn fill_shell_header(state: &AppHandle) -> SeyalAppShell {
     let last_workspace = split_id(shell.last_active_workspace.to_bytes());
     let tab = split_id(shell.active_tab.to_bytes());
     let pane = split_id(shell.focused_pane.to_bytes());
-    let window = split_id(shell.active_window.to_bytes());
+    let window = match shell.active_window {
+        Some(id) => split_id(id.to_bytes()),
+        None => (0, 0),
+    };
     let mut flags = 0u16;
     if shell.allows_tab_creation {
         flags |= SHELL_FLAG_ALLOWS_TAB_CREATION;

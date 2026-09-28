@@ -1,6 +1,6 @@
-//! ADR-018 §2.4 native effects queued for the thin host (W3/W4a).
+//! ADR-018 §2.4 native effects queued for the thin host (W3/W4a/W6).
 
-use seyal_core::WindowId;
+use seyal_core::{ExecutionId, WindowId};
 
 use crate::shell::ShellNativeEffect;
 
@@ -30,6 +30,10 @@ pub enum NativeEffect {
     },
     /// Rust finished quit bookkeeping after the host acked BoundedDetachThenTerminate.
     QuitCleanupComplete,
+    /// Explicit ADR-005 terminate for one live-unpresented execution (§3.3).
+    TerminateExecution {
+        execution: ExecutionId,
+    },
 }
 
 impl From<ShellNativeEffect> for NativeEffect {
@@ -40,6 +44,9 @@ impl From<ShellNativeEffect> for NativeEffect {
                 Self::DestroyWindowRealization { window }
             }
             ShellNativeEffect::OrderFrontMakeKey { window } => Self::OrderFrontMakeKey { window },
+            ShellNativeEffect::TerminateExecution { execution } => {
+                Self::TerminateExecution { execution }
+            }
         }
     }
 }
@@ -53,12 +60,15 @@ impl NativeEffect {
             Self::DestroyWindowRealization { .. } => 3,
             Self::OrderFrontMakeKey { .. } => 4,
             Self::QuitCleanupComplete => 5,
+            Self::TerminateExecution { .. } => 6,
         }
     }
 
     pub fn window(self) -> Option<WindowId> {
         match self {
-            Self::BoundedDetachThenTerminate { .. } | Self::QuitCleanupComplete => None,
+            Self::BoundedDetachThenTerminate { .. }
+            | Self::QuitCleanupComplete
+            | Self::TerminateExecution { .. } => None,
             Self::RealizeWindow { window }
             | Self::DestroyWindowRealization { window }
             | Self::OrderFrontMakeKey { window } => Some(window),
@@ -70,6 +80,13 @@ impl NativeEffect {
         match self {
             Self::BoundedDetachThenTerminate { deadline_ms } => deadline_ms,
             _ => 0,
+        }
+    }
+
+    pub fn execution(self) -> Option<ExecutionId> {
+        match self {
+            Self::TerminateExecution { execution } => Some(execution),
+            _ => None,
         }
     }
 }
