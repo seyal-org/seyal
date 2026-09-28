@@ -1315,6 +1315,19 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
+
+    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() {
+        var empty = SeyalAppRow()
+        XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
+        var row = SeyalAppRow()
+        row.address_version = 1
+        row.address_kind = 2
+        row.address_len = 1
+        let payload = try XCTUnwrap(CommandPaletteOverlayView.addressPayload(for: row))
+        XCTAssertEqual(Array(payload.prefix(4)), [1, 0, 2, 0])
+        XCTAssertEqual(payload.count, 5)
+    }
+
 }
 
 @discardableResult
@@ -1341,4 +1354,5 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
+
 }
