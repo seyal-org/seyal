@@ -1316,7 +1316,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
 
-    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() {
+    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() throws {
         let event = try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
