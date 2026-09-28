@@ -24,6 +24,12 @@ use seyal_runtime::{
 
 static FD_SERIAL: Mutex<()> = Mutex::new(());
 
+fn hold_fd_serial() -> std::sync::MutexGuard<'static, ()> {
+    FD_SERIAL
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
 fn config() -> RuntimeConfig {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let suffix = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -390,6 +396,7 @@ impl Harness {
 
 #[test]
 fn controller_terminate_requests_then_finalizes_via_lifecycle_only() {
+    let _guard = hold_fd_serial();
     let (mut h, streamer) = Harness::with_streamer();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
     let gen_before = h
@@ -444,6 +451,7 @@ fn controller_terminate_requests_then_finalizes_via_lifecycle_only() {
 
 #[test]
 fn capability_absent_is_unknown_message() {
+    let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.send(
         0,
@@ -482,6 +490,7 @@ fn capability_absent_is_unknown_message() {
 
 #[test]
 fn observer_zero_stale_and_mismatched_identity_fail_closed() {
+    let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
     let created = h.create(0, 1, 24, 80);
@@ -558,6 +567,7 @@ fn observer_zero_stale_and_mismatched_identity_fail_closed() {
 
 #[test]
 fn section_18_5_outcome_table_duplicate_draining_and_post_release() {
+    let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
 
@@ -708,6 +718,7 @@ fn section_18_5_outcome_table_duplicate_draining_and_post_release() {
 
 #[test]
 fn terminate_after_explicit_detach_is_invalid_state() {
+    let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
     let created = h.create(0, 1, 24, 80);
@@ -737,9 +748,7 @@ fn terminate_after_explicit_detach_is_invalid_state() {
 
 #[test]
 fn repeated_create_terminate_cycles_return_counters_to_baseline() {
-    let _guard = FD_SERIAL
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
     // Warm the connection path before measuring baseline.
@@ -804,6 +813,7 @@ fn repeated_create_terminate_cycles_return_counters_to_baseline() {
 
 #[test]
 fn termination_after_primary_reap_finalizes_exactly_once() {
+    let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
     let id = h
