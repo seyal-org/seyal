@@ -95,3 +95,15 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 744
+issue = 1092
+reason = "Command palette query, rows, and run dispatch stay one reducer. #1092 adds the window and tab actions that the palette runs; splitting the file would separate the row model from those actions."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/tests.rs"
+acknowledged_loc = 846
+issue = 1092
+reason = "Shell inventory tests stay one module beside ShellState. #1092 adds the window and tab action proofs; a numbered split would hide which action the assertion covers."
