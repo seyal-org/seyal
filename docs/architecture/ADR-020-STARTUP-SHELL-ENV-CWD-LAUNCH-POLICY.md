@@ -4,7 +4,7 @@
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent umbrella #676, epic #665; consumed by #994 provisioning children; related #686)
 - **Depends on:** ADR-005, ADR-008, ADR-009, ADR-015, SPEC-002, SPEC-003, SPEC-009
-- **Neighbor (Proposed, not on `master`):** ADR-017 (TerminalExecution provisioning and disposition) is on `master` as Proposed. This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
+- **Neighbor (Proposed, on `master`):** ADR-017 (TerminalExecution provisioning and disposition) is on `master` as Proposed. This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
 - **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). #1001 landed on `master` as ADR-021 / SPEC-025 (PR #1053). Numbers remain provisional until merge order is settled; siblings must not claim ADR-020.
 - **Scope:** deterministic cold-path policy for program/argv (including login bit), startup CWD, bounded environment construction, and `TERM`/`COLORTERM`/capability ownership when composing a new local interactive `TerminalExecution`
 - **Classification:** new architecture decision plus tightly scoped SPEC-023 (Proposed) and light SPEC-003/SPEC-009 cross-references
@@ -278,7 +278,7 @@ Mapping rules:
   2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4 `CapabilityUnavailable`. No other
   values are defined; clients treat any unknown value as generic.
   `LaunchPolicyWarning` values are **not** surfaced on the create-result wire
-  (`Created` has no warning field). Until L0 merges, warnings are recorded in
+  (before L0, `Created.detail_code` is 0). Until L0 merges, warnings are recorded in
   count-only structured logs and are not user-visible. L0 assigns
   `Created.detail_code` bit 0 = `ConfiguredShellInvalid` and bit 1 =
   `CwdOverrideInvalid`. All other bits are reserved and must be 0. No other

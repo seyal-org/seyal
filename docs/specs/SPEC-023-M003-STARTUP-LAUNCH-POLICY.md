@@ -246,9 +246,7 @@ unknown/reserved → UnsupportedLaunchProfile (ADR-017) before policy resolution
 
 This specification does not define wire layouts.
 
-§3.9 and the create-path mapping in §3.10 are normative only once ADR-017 is
-Accepted. §§3.1–3.8, §3.10's failure/warning types, and §3.11 are normative on
-ADR-020 acceptance.
+ADR-020 §3.9, the ADR-020 §3.10 create-path mapping, this specification's §9 wire-mapping bullets and this §10 are normative only once ADR-017 is Accepted. The rest of this specification is normative on ADR-020 acceptance.
 
 ## 11. Performance / resource constraints
 
@@ -292,6 +290,7 @@ Implementation children must provide at least:
     `result_code` 14 with `detail_code` 0 and no path/env bytes in the payload;
     a fallback-with-warning create returns `Created` with no warning on the
     wire.
+17. Post-L0 wire mapping: each `LaunchPolicyFailure` variant → `result_code` 17 with its §9 `detail_code` (1–4); a fallback-with-warning create returns `Created` with only the §9 warning bits set and all reserved bits 0; no path/env bytes.
 
 ## 13. Acceptance criteria
 

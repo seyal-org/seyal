@@ -53,10 +53,7 @@ amendment PR; it does not edit ADR-017 files.
 
 **In scope**
 
-- Add `17 LaunchPolicyRejected` to the SPEC-004 §15 / §18 result-code
-  registry as an additive `CreateExecutionResult` code, with `detail_code` 0
-  and no path/env bytes. If 17 has been claimed by then, take the next free
-  code and update ADR-020 §3.10 in the same PR.
+- Add `17 LaunchPolicyRejected` to the SPEC-004 §15/§18 registry with `detail_code` 1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4 `CapabilityUnavailable` (unknown values render generic), and amend §18.3 so `Created` `detail_code` bit 0 = `ConfiguredShellInvalid` and bit 1 = `CwdOverrideInvalid`, with all other bits reserved and 0; no path/env bytes. If 17 has been claimed by then, take the next free code and update ADR-020 §3.10 in the same PR.
 
 **Acceptance**
 
@@ -147,8 +144,7 @@ provisioning consume path also needs ADR-017 P1/P3.
 - Thin native rendering of that bounded state only (ADR-015).
 - Protocol mapping: until L0 merges, every `LaunchPolicyFailure` maps to
   create `14 InternalFailure` with `detail_code` 0 and warnings stay off the
-  wire (ADR-020 §3.10). When L0 has merged, L3 uses `17 LaunchPolicyRejected`
-  instead, in the same PR; the two mappings never coexist.
+  wire (ADR-020 §3.10). When L0 has merged, L3 uses `17 LaunchPolicyRejected` with the ADR-020 §3.10 detail codes and sets the ADR-020 §3.10 `Created.detail_code` warning bits instead, in the same PR; the two mappings never coexist.
 - `pw_shell` empty/invalid with safe-default spawn → `ConfiguredShellInvalid`.
 
 **Out of scope**
@@ -167,7 +163,7 @@ provisioning consume path also needs ADR-017 P1/P3.
   headed smoke that invalid home / exhausted shell fallback shows the bounded
   state.
 
-**Dependencies:** L2.
+**Dependencies:** L2. If L0 merges after L3, the switch of both failures and warnings to the L0 encoding is a separate consumer child filed together with L0, and it removes the code-14 mapping in that PR.
 
 ---
 
