@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_client::LocalDisplayClient;
+use seyal_client::{ClientError, LocalDisplayClient};
 use seyal_exec::{CommandSpec, WindowSize};
 use seyal_runtime::{local_ipc::framing::Role, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig};
 
@@ -62,6 +62,19 @@ fn start_runtime(command: &str) -> (PathBuf, ExecutionId, thread::JoinHandle<()>
     (socket_path, execution_id, join)
 }
 
+fn connect_observer(socket_path: &Path, execution_id: ExecutionId) -> LocalDisplayClient {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match LocalDisplayClient::connect_execution(socket_path, execution_id, Role::Observer) {
+            Ok(client) => return client,
+            Err(ClientError::Io) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("attach production client: {error:?}"),
+        }
+    }
+}
+
 fn prepared_text(client: &LocalDisplayClient) -> String {
     client
         .prepared_surface()
@@ -92,9 +105,7 @@ fn wait_until(client: &mut LocalDisplayClient, predicate: impl Fn(&LocalDisplayC
 #[test]
 fn real_shell_candidate_d_commit_reaches_prepared_surface_without_gui_vt() {
     let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-LIVE'; sleep 1");
-    let mut client =
-        LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
-            .expect("attach production client");
+    let mut client = connect_observer(&socket_path, execution_id);
 
     wait_until(&mut client, |client| {
         prepared_text(client).contains("SEYAL-LIVE")
@@ -114,9 +125,7 @@ fn real_shell_candidate_d_commit_reaches_prepared_surface_without_gui_vt() {
 fn live_alternate_screen_uses_same_candidate_d_and_preparation_path() {
     let (socket_path, execution_id, runtime) =
         start_runtime(r"printf '\033[?1049hALT-LIVE'; sleep 1");
-    let mut client =
-        LocalDisplayClient::connect_execution(&socket_path, execution_id, Role::Observer)
-            .expect("attach production client");
+    let mut client = connect_observer(&socket_path, execution_id);
 
     wait_until(&mut client, |client| {
         client.cache().alternate_screen && prepared_text(client).contains("ALT-LIVE")
