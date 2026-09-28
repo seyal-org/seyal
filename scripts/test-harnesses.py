@@ -174,6 +174,7 @@ def validate_fuzz_registry() -> None:
         "display-state-machine",
         "pass7-protocol-decode",
         "block-state-decode",
+        "execution-provisioning-decode",
     }
     names = {target.get("name") for target in targets}
     require(names == expected, f"fuzz registry mismatch: expected {sorted(expected)}, got {sorted(names)}")
