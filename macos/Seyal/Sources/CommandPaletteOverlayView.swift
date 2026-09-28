@@ -160,7 +160,10 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
     // MARK: Actions
 
     private func move(by delta: Int32) {
-        dispatch(kind: UInt16(SEYAL_APP_ACTION_MOVE_PALETTE_SELECTION.rawValue), reserved: UInt32(bitPattern: delta))
+        dispatchAction(
+            kind: UInt16(SEYAL_APP_ACTION_MOVE_PALETTE_SELECTION.rawValue),
+            reserved: UInt32(bitPattern: delta)
+        )
     }
 
     private func run() {
@@ -176,14 +179,17 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
             withUnsafeBytes(of: row.address_bytes) { bytes in
                 payload.append(contentsOf: bytes.prefix(Int(row.address_len)))
             }
-            dispatch(kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue), payloadBytes: payload)
+            dispatchAction(
+                kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue),
+                payloadBytes: payload
+            )
         } else {
-            dispatch(kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue))
+            dispatchAction(kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue))
         }
     }
 
     private func close() {
-        dispatch(kind: UInt16(SEYAL_APP_ACTION_CLOSE_PALETTE.rawValue))
+        dispatchAction(kind: UInt16(SEYAL_APP_ACTION_CLOSE_PALETTE.rawValue))
     }
 
     /// AppKit hit-tests to the deepest view under the cursor; a click that
@@ -206,10 +212,16 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
 
     private func dispatch(kind: UInt16, payload: String? = nil, reserved: UInt32 = 0) {
         let bytes = payload.map { Data($0.utf8) }
-        dispatch(kind: kind, payloadBytes: bytes, reserved: reserved)
+        dispatchAction(kind: kind, payloadBytes: bytes, reserved: reserved)
     }
 
-    private func dispatch(kind: UInt16, payloadBytes: Data? = nil, reserved: UInt32 = 0) {
+    /// Byte-payload apply path. Named distinctly from `dispatch(payload:)` so
+    /// defaulted call sites are not ambiguous under current Swift overload rules.
+    private func dispatchAction(
+        kind: UInt16,
+        payloadBytes: Data? = nil,
+        reserved: UInt32 = 0
+    ) {
         let snapshot = seyal_app_snapshot(appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -263,7 +275,7 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         let palette = seyal_app_palette(appHandle)
         guard palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0 else { return }
         let next = (Int(palette.reserved & 0xff) + 1) % 4
-        dispatch(
+        dispatchAction(
             kind: UInt16(SEYAL_APP_ACTION_SET_GOTO_SCOPE.rawValue),
             reserved: UInt32(next)
         )
