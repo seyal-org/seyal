@@ -38,6 +38,10 @@ pub enum ErrorCode {
     DisplayUnavailable = 12,
     MalformedPayload = 13,
     InternalFailure = 14,
+    /// SPEC-004 §18: workspace_id is not accepted by this Runtime.
+    InvalidWorkspace = 15,
+    /// SPEC-004 §18: launch_profile is reserved/unimplemented.
+    UnsupportedLaunchProfile = 16,
 }
 
 impl ErrorCode {
@@ -57,6 +61,8 @@ impl ErrorCode {
             12 => Self::DisplayUnavailable,
             13 => Self::MalformedPayload,
             14 => Self::InternalFailure,
+            15 => Self::InvalidWorkspace,
+            16 => Self::UnsupportedLaunchProfile,
             _ => return None,
         })
     }
