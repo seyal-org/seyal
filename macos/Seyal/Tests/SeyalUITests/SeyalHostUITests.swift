@@ -906,4 +906,12 @@ final class SeyalHostUITests: XCTestCase {
         }
         return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
+
+    func testPlainCharacterDoesNotOpenCommandPalette() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        app.typeKey("a", modifierFlags: [])
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        XCTAssertFalse(palette.waitForExistence(timeout: 1))
+    }
 }
