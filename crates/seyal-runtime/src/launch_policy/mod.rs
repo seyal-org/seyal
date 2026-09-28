@@ -29,8 +29,7 @@ pub use types::{
     AccountRecord, CapabilityProfileId, EffectiveLaunchPolicy, LaunchPolicyFailure,
     LaunchPolicyResolution, LaunchPolicyWarning, LaunchProfileIntent,
 };
-#[cfg(test)]
 pub use validate::{
     account_record_usable, is_valid_cwd, is_valid_shell_program, path_has_forbidden_chars,
+    PathProbe, RealPathProbe,
 };
-pub use validate::{PathProbe, RealPathProbe};
