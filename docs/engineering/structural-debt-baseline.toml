@@ -34,27 +34,27 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 747
-issue = 923
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs."
+acknowledged_loc = 797
+issue = 1123
+reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions beside the existing apply path; window identity and the action that targets it stay in this façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 828
+issue = 1123
+reason = "ApplicationRoot tests stay one module. #1123 adds the multi-window action proofs beside the existing apply tests."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 900
-issue = 1108
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/, ratcheting this façade down from the prior 919 LOC #923 ceiling."
+acknowledged_loc = 901
+issue = 1123
+reason = "The C ABI façade stays one encode/decode surface after the window extraction. #1123 adds the close-action export beside the existing window exports."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 773
-issue = 1065
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1065 imports encode-owned SNAP/block-row flag constants after those flags moved out of the façade, and the steady-state snapshot call-counter proof lives beside the counter in visual.rs."
+acknowledged_loc = 779
+issue = 1123
+reason = "ABI contract tests stay one module. #1123 adds the multi-window snapshot proofs beside the existing handle tests."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
