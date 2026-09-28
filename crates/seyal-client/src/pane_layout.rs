@@ -10,6 +10,15 @@ use seyal_core::PaneId;
 
 use crate::shell::{PaneTree, SplitAxis};
 
+/// Geometric direction for focus-relative neighbor selection (SPEC-025 §5.7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 /// Unit-space rectangle, origin top-left, all fields in `0.0..=1.0`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneRect {
@@ -77,6 +86,78 @@ pub fn project(tree: &PaneTree, focused: PaneId, live_pane: PaneId) -> Vec<PaneR
         region.live = region.focused && region.pane == live_pane;
     }
     regions
+}
+
+/// SPEC-025 §5.7 geometric neighbor of `from` in `direction`, or `None`.
+///
+/// Candidates share the facing edge with positive orthogonal overlap; the
+/// winner minimizes center distance on the orthogonal axis, then pre-order
+/// leaf index. Ratio defaults to `1/2` until #928 lands.
+pub fn directional_neighbor(tree: &PaneTree, from: PaneId, direction: Direction) -> Option<PaneId> {
+    let mut regions = Vec::new();
+    collect(tree, PaneRect::FULL, &mut regions);
+    let from_index = regions.iter().position(|region| region.pane == from)?;
+    let focus = regions[from_index].rect;
+    let mut best: Option<(f32, usize, PaneId)> = None;
+    for (index, region) in regions.iter().enumerate() {
+        if index == from_index {
+            continue;
+        }
+        if !shares_edge(focus, region.rect, direction) {
+            continue;
+        }
+        let distance = orthogonal_center_distance(focus, region.rect, direction);
+        let candidate = (distance, index, region.pane);
+        best = Some(match best {
+            Some(current) if candidate >= current => current,
+            _ => candidate,
+        });
+    }
+    best.map(|(_, _, pane)| pane)
+}
+
+const EDGE_EPS: f32 = 1e-5;
+
+fn shares_edge(focus: PaneRect, other: PaneRect, direction: Direction) -> bool {
+    match direction {
+        Direction::Left => {
+            (other.x + other.width - focus.x).abs() <= EDGE_EPS
+                && overlap_1d(focus.y, focus.height, other.y, other.height)
+        }
+        Direction::Right => {
+            (other.x - (focus.x + focus.width)).abs() <= EDGE_EPS
+                && overlap_1d(focus.y, focus.height, other.y, other.height)
+        }
+        Direction::Up => {
+            (other.y + other.height - focus.y).abs() <= EDGE_EPS
+                && overlap_1d(focus.x, focus.width, other.x, other.width)
+        }
+        Direction::Down => {
+            (other.y - (focus.y + focus.height)).abs() <= EDGE_EPS
+                && overlap_1d(focus.x, focus.width, other.x, other.width)
+        }
+    }
+}
+
+fn overlap_1d(a0: f32, a_len: f32, b0: f32, b_len: f32) -> bool {
+    let a1 = a0 + a_len;
+    let b1 = b0 + b_len;
+    (a0.max(b0) + EDGE_EPS) < a1.min(b1)
+}
+
+fn orthogonal_center_distance(focus: PaneRect, other: PaneRect, direction: Direction) -> f32 {
+    match direction {
+        Direction::Left | Direction::Right => {
+            let focus_c = focus.y + focus.height / 2.0;
+            let other_c = other.y + other.height / 2.0;
+            (focus_c - other_c).abs()
+        }
+        Direction::Up | Direction::Down => {
+            let focus_c = focus.x + focus.width / 2.0;
+            let other_c = other.x + other.width / 2.0;
+            (focus_c - other_c).abs()
+        }
+    }
 }
 
 fn collect(tree: &PaneTree, rect: PaneRect, out: &mut Vec<PaneRegion>) {
@@ -175,6 +256,29 @@ mod tests {
             .map(|region| region.rect.width * region.rect.height)
             .sum();
         assert_eq!(area, 1.0);
+    }
+
+    #[test]
+    fn directional_neighbor_selects_shared_edge_leaf() {
+        let (a, b, c) = (PaneId::new(), PaneId::new(), PaneId::new());
+        let tree = PaneTree::Split {
+            axis: SplitAxis::Right,
+            first: leaf(a),
+            second: Box::new(PaneTree::Split {
+                axis: SplitAxis::Down,
+                first: leaf(b),
+                second: leaf(c),
+            }),
+        };
+        assert_eq!(
+            directional_neighbor(&tree, a, Direction::Right),
+            Some(b),
+            "tie on right edge prefers pre-order (b before c)"
+        );
+        assert_eq!(directional_neighbor(&tree, b, Direction::Left), Some(a));
+        assert_eq!(directional_neighbor(&tree, b, Direction::Down), Some(c));
+        assert_eq!(directional_neighbor(&tree, a, Direction::Left), None);
+        assert_eq!(directional_neighbor(&tree, a, Direction::Up), None);
     }
 
     #[test]

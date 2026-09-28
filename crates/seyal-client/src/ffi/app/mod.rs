@@ -952,5 +952,6 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
         AppError::ActionUnavailable => 34,
+        AppError::NoDirectionalNeighbor => 35,
     }
 }

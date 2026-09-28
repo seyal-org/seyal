@@ -19,6 +19,8 @@ use accessibility::accessibility_nodes;
 pub use native_effect::NativeEffect;
 
 #[cfg(test)]
+mod keybinding_verb_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod tests;
@@ -89,6 +91,8 @@ pub enum AppError {
     CannotCloseBoundPane,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     ActionUnavailable,
+    /// SPEC-024 §10.2 / ADR-021: no geometric neighbor for a focus-relative verb.
+    NoDirectionalNeighbor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

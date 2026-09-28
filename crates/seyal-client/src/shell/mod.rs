@@ -61,6 +61,7 @@ pub enum ShellError {
     CrossWorkspaceMove,
     NotZoomed,
     InvalidMoveTarget,
+    NoDirectionalNeighbor,
 }
 
 impl ShellError {
@@ -92,6 +93,7 @@ impl ShellError {
             Self::CrossWorkspaceMove => "Tabs cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
+            Self::NoDirectionalNeighbor => "No pane neighbor in that direction.",
         }
     }
 }

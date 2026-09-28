@@ -1,4 +1,4 @@
-//! SPEC-024 K3: dispatch matched WorkspaceCommands from the routing gate.
+//! SPEC-024 K3/K7: dispatch matched WorkspaceCommands from the routing gate.
 
 use std::sync::OnceLock;
 
@@ -8,8 +8,9 @@ use crate::keybinding::{
     validate_workspace_command, BindingContext, InvokeError, KeybindingTable, NormalizedStroke,
     RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
 };
+use crate::pane_layout::{self, Direction};
 use crate::presentation::{PresentationAction, PresentationMode};
-use crate::shell::SplitAxis;
+use crate::shell::{MoveSide, ShellAction, ShellError, SplitAxis};
 
 use super::{AppError, ApplicationRoot};
 
@@ -70,6 +71,15 @@ impl ApplicationRoot {
     ) -> Result<(), AppError> {
         let table = process_keybinding_table();
         validate_workspace_command(table, command, route).map_err(invoke_error)?;
+        self.dispatch_workspace_command(command)
+    }
+
+    /// Apply a catalog command after route/binding validation (or from tests that
+    /// exercise catalog-only ids such as `pane.swap_*` / `pane.move_*`).
+    pub(super) fn dispatch_workspace_command(
+        &mut self,
+        command: WorkspaceCommand,
+    ) -> Result<(), AppError> {
         let fence = self.fence();
         match command.id {
             WorkspaceCommandId::CommandPaletteOpen => self.open_palette(fence),
@@ -99,6 +109,23 @@ impl ApplicationRoot {
             }
             WorkspaceCommandId::PaneFocusNext | WorkspaceCommandId::PaneFocusPrevious => {
                 Err(AppError::ActionUnavailable)
+            }
+            WorkspaceCommandId::PaneZoomToggle => self.zoom_toggle_focused(),
+            WorkspaceCommandId::PaneSwapLeft => self.swap_focused_neighbor(Direction::Left),
+            WorkspaceCommandId::PaneSwapRight => self.swap_focused_neighbor(Direction::Right),
+            WorkspaceCommandId::PaneSwapUp => self.swap_focused_neighbor(Direction::Up),
+            WorkspaceCommandId::PaneSwapDown => self.swap_focused_neighbor(Direction::Down),
+            WorkspaceCommandId::PaneMoveLeft => {
+                self.move_focused_beside(Direction::Left, MoveSide::Left)
+            }
+            WorkspaceCommandId::PaneMoveRight => {
+                self.move_focused_beside(Direction::Right, MoveSide::Right)
+            }
+            WorkspaceCommandId::PaneMoveUp => {
+                self.move_focused_beside(Direction::Up, MoveSide::Above)
+            }
+            WorkspaceCommandId::PaneMoveDown => {
+                self.move_focused_beside(Direction::Down, MoveSide::Below)
             }
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
@@ -167,6 +194,46 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// SPEC-024 §5.1: Unzoom when zoomed, else ZoomPane of the focused leaf.
+    fn zoom_toggle_focused(&mut self) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
+        let action = if snap.zoomed.is_some() {
+            ShellAction::Unzoom
+        } else {
+            ShellAction::ZoomPane {
+                id: snap.focused_pane,
+            }
+        };
+        self.apply_shell(action).map_err(pane_verb_error)
+    }
+
+    fn swap_focused_neighbor(&mut self, direction: Direction) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
+        let neighbor = pane_layout::directional_neighbor(&snap.tree, snap.focused_pane, direction)
+            .ok_or(AppError::NoDirectionalNeighbor)?;
+        self.apply_shell(ShellAction::SwapPanes {
+            a: snap.focused_pane,
+            b: neighbor,
+        })
+        .map_err(pane_verb_error)
+    }
+
+    fn move_focused_beside(
+        &mut self,
+        direction: Direction,
+        side: MoveSide,
+    ) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
+        let neighbor = pane_layout::directional_neighbor(&snap.tree, snap.focused_pane, direction)
+            .ok_or(AppError::NoDirectionalNeighbor)?;
+        self.apply_shell(ShellAction::MovePaneBeside {
+            pane: snap.focused_pane,
+            neighbor,
+            side,
+        })
+        .map_err(pane_verb_error)
+    }
+
     /// Gate menu-originated CreateTab when the palette owns focus (R6.4.1).
     pub(super) fn require_workspace_command_for_menu(
         &self,
@@ -179,5 +246,14 @@ impl ApplicationRoot {
 fn invoke_error(error: InvokeError) -> AppError {
     match error {
         InvokeError::ActionUnavailable => AppError::ActionUnavailable,
+    }
+}
+
+fn pane_verb_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::NoDirectionalNeighbor => AppError::NoDirectionalNeighbor,
+        ShellError::UnknownPane => AppError::UnknownPane,
+        ShellError::NotZoomed | ShellError::InvalidMoveTarget => AppError::ActionUnavailable,
+        _ => AppError::ActionUnavailable,
     }
 }

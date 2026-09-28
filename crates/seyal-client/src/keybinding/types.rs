@@ -168,8 +168,8 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (window.*, ADR-021 pane verbs, SPEC-022 navigation) stay out until
-/// their typed actions land (R5.0.1 / R5.1.3 / R5.5.3).
+/// Gated ids (`window.*`, `pane.focus_*`, `pane.equalize_*`, SPEC-022 navigation)
+/// stay out until their typed actions land (R5.0.1 / R5.1.3 / R5.5.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -184,6 +184,15 @@ pub enum WorkspaceCommandId {
     PaneCloseFocused,
     PaneFocusNext,
     PaneFocusPrevious,
+    PaneZoomToggle,
+    PaneSwapLeft,
+    PaneSwapRight,
+    PaneSwapUp,
+    PaneSwapDown,
+    PaneMoveLeft,
+    PaneMoveRight,
+    PaneMoveUp,
+    PaneMoveDown,
     PresentationSetFlow,
     PresentationSetRaw,
     PresentationSetTui,
@@ -208,6 +217,15 @@ impl WorkspaceCommandId {
             Self::PaneCloseFocused => "pane.close_focused",
             Self::PaneFocusNext => "pane.focus_next",
             Self::PaneFocusPrevious => "pane.focus_previous",
+            Self::PaneZoomToggle => "pane.zoom_toggle",
+            Self::PaneSwapLeft => "pane.swap_left",
+            Self::PaneSwapRight => "pane.swap_right",
+            Self::PaneSwapUp => "pane.swap_up",
+            Self::PaneSwapDown => "pane.swap_down",
+            Self::PaneMoveLeft => "pane.move_left",
+            Self::PaneMoveRight => "pane.move_right",
+            Self::PaneMoveUp => "pane.move_up",
+            Self::PaneMoveDown => "pane.move_down",
             Self::PresentationSetFlow => "presentation.set_flow",
             Self::PresentationSetRaw => "presentation.set_raw",
             Self::PresentationSetTui => "presentation.set_tui",
@@ -232,6 +250,15 @@ impl WorkspaceCommandId {
             "pane.close_focused" => Self::PaneCloseFocused,
             "pane.focus_next" => Self::PaneFocusNext,
             "pane.focus_previous" => Self::PaneFocusPrevious,
+            "pane.zoom_toggle" => Self::PaneZoomToggle,
+            "pane.swap_left" => Self::PaneSwapLeft,
+            "pane.swap_right" => Self::PaneSwapRight,
+            "pane.swap_up" => Self::PaneSwapUp,
+            "pane.swap_down" => Self::PaneSwapDown,
+            "pane.move_left" => Self::PaneMoveLeft,
+            "pane.move_right" => Self::PaneMoveRight,
+            "pane.move_up" => Self::PaneMoveUp,
+            "pane.move_down" => Self::PaneMoveDown,
             "presentation.set_flow" => Self::PresentationSetFlow,
             "presentation.set_raw" => Self::PresentationSetRaw,
             "presentation.set_tui" => Self::PresentationSetTui,

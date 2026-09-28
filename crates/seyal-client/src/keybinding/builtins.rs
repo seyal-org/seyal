@@ -1,7 +1,9 @@
-//! SPEC-024 §4.1 builtin default rows for K2.
+//! SPEC-024 §4.1 builtin default rows for K2 / K7.
 //!
-//! Excludes ADR-021 pane rows (K7), SPEC-022 navigation rows (K8), and
-//! ADR-018 `window.new` (R5.0.1). Includes §5.4 `ctrl+r` composer history-search.
+//! Includes K7 `pane.zoom_toggle` (`cmd+shift+enter`). Excludes `pane.focus_*`
+//! builtins, `pane.equalize_*`, SPEC-022 navigation rows (K8), and ADR-018
+//! `window.new` (R5.0.1). Includes §5.4 `ctrl+r` composer history-search.
+//! `pane.swap_*` / `pane.move_*` are catalog ids without M003 builtins.
 
 use super::keys::parse_keys;
 use super::types::{
@@ -130,6 +132,13 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         BuiltinRow {
             keys_notation: "cmd+opt+enter",
             id: WorkspaceCommandId::PresentationToggleTui,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            // SPEC-024 §4.1 zoom toggle chord (not a secret).
+            keys_notation: "cmd+shift+enter", // gitleaks:allow
+            id: WorkspaceCommandId::PaneZoomToggle,
             ordinal: None,
             context: APP,
         },
