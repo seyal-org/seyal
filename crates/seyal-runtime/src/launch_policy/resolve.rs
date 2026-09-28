@@ -62,13 +62,14 @@ pub fn resolve(inputs: ResolveInputs<'_>) -> Result<LaunchPolicyResolution, Laun
         shell_source_invalid = true;
     }
 
-    if let Some(shell) = inputs.process_shell {
-        if shell.is_absolute() && inputs.probe.is_valid_shell_program(shell) {
-            if shell_source_invalid {
-                warnings.push(LaunchPolicyWarning::ConfiguredShellInvalid);
-            }
-            return finish(shell.to_path_buf(), account, inputs, warnings);
+    if let Some(shell) = inputs.process_shell
+        && shell.is_absolute()
+        && inputs.probe.is_valid_shell_program(shell)
+    {
+        if shell_source_invalid {
+            warnings.push(LaunchPolicyWarning::ConfiguredShellInvalid);
         }
+        return finish(shell.to_path_buf(), account, inputs, warnings);
     }
 
     for candidate in PLATFORM_SAFE_FALLBACKS {
