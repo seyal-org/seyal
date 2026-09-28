@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration amendment proposed by #686; superseded predecessor PR #991; accepted on merge of PR #1022
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration amendment proposed 2026-09-19; accepted on merge of PR #1022
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration amendment proposed by #686; superseded predecessor PR #991; accepted on merge of PR #1022; prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration amendment proposed 2026-09-19; accepted on merge of PR #1022; prompt-anchor amendment proposed 2026-09-24
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -942,3 +942,192 @@ After this amendment is accepted, update SPEC-008 and refine the separate
 implementation Issue before adding duration to Runtime, the wire protocol, or
 the client. Reopen #686 if a concrete M003 requirement appears for live CWD,
 Bash/fish integration, or trusted remote-shell Blocks.
+
+## 2026-09-24 amendment — Block prompt anchor and terminal-truth context line (#1041)
+
+**Status:** Proposed by #1041. This section is **not normative**, before or
+after the PR that adds it merges. Merging that PR records the proposal only.
+The section becomes accepted and normative only when a separate acceptance PR
+for #1041 records the evidence listed under "Acceptance gates", applies the
+accepted-text changes listed under "Accepted-text changes on acceptance", and
+changes this status line. Until then, the Decision, the Normative invariants
+(including invariant 9) and the Required seam above remain the only authority.
+Product code, wire changes and SPEC-008 edits stay out of scope until
+acceptance.
+
+### Problem
+
+The Seyal Block Component design (`ui/M003-BLOCK-COMPONENT-DESIGN.md`, proposed
+for #1010 by docs-only PR #1059, which must merge before this amendment is
+accepted) shows each Block as the shell's own prompt row(s) (the "context
+line", `C-BLOCK-CONTEXT`), then the command line (`C-BLOCK-COMMAND`), then
+output. All three are labelled terminal truth and drawn by Metal. This ADR
+defines a Block as the command's **output range** delimited by trusted
+`C`/`D`, and #1015 stamps that range at marker recognition so it excludes both
+the prompt/echo row(s) and the next prompt's row. The 2026-09-19 amendment
+forbids synthesizing CWD/Git metadata, so Seyal chrome cannot recreate the
+context line. The only honest source is the prompt and echo rows already in
+canonical history.
+
+### Decision
+
+Keep the Block output range exactly as defined (`[start_line, end_line]` from
+`C`/`D`). Add an optional, separately published **prompt anchor**:
+
+1. When the parser recognizes a nonce-trusted `A` marker, it stamps the
+   cursor's logical line at recognition time, as #1015 does for `C`/`D`. That
+   stamp is Runtime's `pending_prompt_line`. Each trusted `A` overwrites the
+   pending stamp (last writer wins); each trusted `C` or `D` consumes and
+   clears it.
+2. When a composer-correlated Block starts on the next trusted `C`, Runtime
+   stores `prompt_line = pending_prompt_line` only if a stamp is pending and
+   `pending_prompt_line < start_line`. Otherwise `prompt_line` is `None`.
+3. `prompt_line` is immutable once recorded, survives detach/reattach, and
+   becomes `None` if bounded history evicts that line.
+4. The rows `[prompt_line, start_line)` are the Block's **context region**.
+   They contain the shell's prompt row(s) and the shell's own echo of the
+   submitted command line (including any continuation-prompt rows of a
+   multi-line command). Flow may present them as the same canonical rows,
+   drawn by the same Pane Metal compositor into a second registered clip for
+   that Block. They are never copied text, never a second grid, and never
+   part of "copy output".
+5. **The echo row is the Block's command line.** Under terminal truth, the
+   visible command line is what the shell echoed, not a Seyal-drawn copy.
+   When `prompt_line` is `Some`, Flow draws no separate Seyal header text for
+   the command: the context region supplies both `C-BLOCK-CONTEXT` and
+   `C-BLOCK-COMMAND`. With a one-line prompt the prompt and the echoed
+   command share one canonical row; that row is both the context line and the
+   command line, and Seyal does not split it by column. With a multi-line
+   prompt the earlier rows are the context line and the row(s) from the last
+   prompt row onward carry the command. Runtime's submitted composer text
+   stays the Block's command **identity** (Copy command, Rerun, accessibility
+   label, Raw/inspector projections); only its visible Flow header is
+   suppressed.
+6. `None` means no context region. Flow then keeps the Rust-projected command
+   text as the visible header, so no Block loses its command. Clients never
+   guess prompt rows by scanning upward, and never render prompt text as
+   AppKit.
+7. **Input and live tail for the context clip.** Invariant 10 applies
+   unchanged: the context clip is noninteractive Block space. A click selects
+   the Block like other Block chrome, and no keyboard, IME or mouse input is
+   routed to the terminal through it. Invariant 12 applies unchanged: the
+   running Block's live tail starts at `start_line`. The context rows are
+   fixed once `C` is recognized and are fetched through the same bounded range
+   projection as completed Block history, not through the live tail.
+8. **Empty output.** A command that prints nothing (`cd`, `export`, `true`)
+   finishes on the row it started on, which is where the next prompt is drawn.
+   Today Runtime clamps `end_line` to `start_line` so the Block completes
+   (#1015), and that single row later shows the next prompt. The extended
+   record therefore also carries `output_empty: bool`. It is set when, at
+   trusted `D` recognition, both hold:
+   - the cursor is at column 0 on the `start_line` row; and
+   - every cell of the `start_line` row is blank (a space or empty cell with
+     default attributes).
+
+   The cursor test alone is not enough: output that ends in a bare carriage
+   return (`printf 'abc\r'`) also leaves the cursor at column 0 on
+   `start_line`, but that row holds the output. The blank-row test rejects
+   that case. Together the two conditions cover both the case where the
+   parser's completion line backs up before `start_line` and the
+   top-screen-row case (`cursor.row == 0`) where the completion line cannot
+   back up and would otherwise equal `start_line`. `output_empty` describes
+   what the output region shows at `D`, not how many bytes were written.
+   Output that is later erased (`printf 'abc\r\033[K'`) leaves nothing to
+   present or copy, so it is also empty. The check is one bounded scan of one
+   row at `D` recognition, not per-byte tracking. Clients then present a Block
+   with no output region, and never request or draw its range.
+
+### Record and wire shape
+
+`BlockTimeline` gains `prompt_line: Option<LineId>` with explicit presence
+encoding, and `output_empty: bool` for completed records (always `false` while
+running). It is negotiated exactly like the duration amendment: a
+ClientHello/ServerHello capability bit selects the extended record. Without the
+bit, Runtime sends the existing shape. A capability without command Blocks is a
+protocol error. Mixed-version fallback composes after the duration and
+extended-key fallbacks in that fixed order, adding at most one attempt.
+Per-record growth is bounded to one optional `LineId` and one flag byte.
+
+### Invariants
+
+- One `TerminalExecution`, PTY and VT authority per Pane. The context region is
+  a view over canonical history.
+- Block output-range semantics are unchanged: line counts, copy output, and
+  running live tail.
+- There is no new trust source: only the authenticated `A` stamp can set
+  `prompt_line`. Forged or unauthenticated `A`, direct-input Blocks and
+  unsupported shells yield `None`.
+- There is no synchronous work on the PTY → VT → render hot path beyond storing
+  one already-computed line id at `A` recognition and one bounded scan of the
+  `start_line` row at `D` recognition (decision 8).
+
+### Accepted-text changes on acceptance
+
+The acceptance PR, not the PR that adds this section, makes these edits so
+that ADR-009 never states both rules at once:
+
+- Flow rule ("terminal output is visible only inside the appropriate Block
+  output regions"), Normative invariant 9, the Required-seam compositor item
+  and the migration test item: "Block output regions" becomes "Block output
+  regions and, when that Block's `prompt_line` is `Some`, its context region".
+- Shell-integration marker rule 3 ("uses it as the Block header"): Runtime
+  uses the submitted text as the Block's command identity, and Flow shows it
+  as a visible header only when `prompt_line` is `None`.
+- `docs/architecture/README.md` ADR-009 summary: "Flow draws terminal pixels
+  only in Block output regions" gains "and, with a trusted prompt anchor, the
+  Block's context region".
+
+### Edge cases that must be specified by tests
+
+- Multi-line prompts (for example a two-line starship prompt: both rows
+  included).
+- Single-line prompt: the prompt and the echoed command share one row, which
+  is drawn once as both context line and command line, with no Seyal header.
+- Multi-line command submission (continuation-prompt rows inside the context
+  region).
+- `PROMPT_SP` and partial-line output; output ending in a bare carriage
+  return (`printf 'abc\r'` must give `output_empty == false`; `printf
+  'abc\r\033[K'` gives `true`).
+- Transient and right prompts.
+- `clear` or `reset` between `A` and `C`.
+- `A`, `C` and `D` parsed in one PTY read.
+- Zero-output commands (`output_empty`, never a stuck Running Block),
+  including one that starts on the top screen row.
+- Prompt row evicted from bounded history.
+- Reattach after completion.
+- Interrupted multiline submission (no `C`).
+- Nested shell or `exec` replacement.
+
+### Acceptance gates
+
+#1041 stays open, and this section stays Proposed, until:
+
+- the edge-case experiments above have run;
+- the security review of forged or unauthenticated `A` is done;
+- the Block record and wire size delta (`prompt_line`, `output_empty`) is
+  measured;
+- PR #1059 (Block Component design) has merged;
+- a human accepts the amendment in the acceptance PR.
+
+### Alternatives considered
+
+- **Widen the Block range to start at `A`.** Rejected: it breaks the
+  output-range contract, copy-output semantics and #1015.
+- **Recreate the context line from shell metadata or OSC 7.** Rejected by the
+  2026-09-19 metadata boundary.
+- **Client scans upward from `start_line` for the prompt.** Rejected: it is
+  prompt scraping, is not trusted, and fails for multi-line prompts and cleared
+  screens.
+- **Keep the Seyal header as the command line and hide the echo row.**
+  Rejected: it needs column-level clipping of a shared prompt/command row,
+  and it draws a Seyal copy of text the terminal already shows.
+- **Show both the Seyal header and the echo row.** Rejected: the command
+  appears twice.
+- **No context line.** Rejected by the owner: it diverges from the Block
+  Component design.
+
+### Follow-up after acceptance
+
+Update SPEC-008 §5 (context region), `M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §7
+(Block model gains a terminal-truth context line), and mark #1042 Ready. #1010
+removes its staged command label only after #1042 lands.

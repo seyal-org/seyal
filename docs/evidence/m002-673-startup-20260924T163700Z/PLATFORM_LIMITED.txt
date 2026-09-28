@@ -1,0 +1,8 @@
+gate=startup
+environment=PLATFORM_LIMITED
+physical_arm64_valid=false
+gate_status=accepted
+reason=uncontrolled-developer-host; diagnostic collection is not a release PASS
+production_sha=e43131125f759721d3ad2bb38745dc130af7436c
+power_thermal_state=ac-power-developer-host
+population=1

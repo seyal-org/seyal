@@ -1,6 +1,7 @@
 #ifndef SEYAL_APP_H
 #define SEYAL_APP_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -45,6 +46,21 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS_PANE = 21,
     SEYAL_APP_ACTION_SET_SHELL_CHROME = 22,
     /*
+     * Workspace/Tab/Pane composition mutations (#922). CREATE_TAB/CLOSE_TAB/
+     * SPLIT_FOCUSED/CLOSE_PANE route through the same Rust ShellState as
+     * SELECT_WORKSPACE/SELECT_TAB/FOCUS_PANE; they fail closed (do not
+     * mutate) rather than silently no-op. CLOSE_TAB/CLOSE_PANE:
+     * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
+     * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
+     * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
+     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
+     * bound to an execution; disposition is not yet available).
+     */
+    SEYAL_APP_ACTION_CREATE_TAB = 23,
+    SEYAL_APP_ACTION_CLOSE_TAB = 24,
+    SEYAL_APP_ACTION_SPLIT_FOCUSED = 25,
+    SEYAL_APP_ACTION_CLOSE_PANE = 26,
+    /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
      * MOVE_COMPOSER_HISTORY_SELECTION: reserved = signed row delta (int32).
@@ -81,7 +97,28 @@ enum SeyalAppActionKind {
      * revision older than the one it holds. reserved = NONE clears the fact
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
-    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52
+    SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /** Cancel the active recovery episode (generation bump → Disconnected). */
+    SEYAL_APP_ACTION_CANCEL_RECOVERY = 53,
+    /**
+     * Advance presentation stage after connect.
+     * reserved = SEYAL_APP_RECOVERY_RESTORING (5) or SEYAL_APP_RECOVERY_USABLE (6).
+     */
+    SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE = 54,
+    /** Begin a continuity-identity commit attempt. */
+    SEYAL_APP_ACTION_BEGIN_RECONSTRUCTION = 55,
+    /**
+     * Commit Runtime/execution continuity and a fresh attachment (Rust-owned).
+     * fence_execution_* = Runtime pin; target_execution_* = execution pin;
+     * target_attachment_* = attachment pin. `reserved` is ignored.
+     * Controller authority and authoritative-snapshot commitment are derived
+     * from the live CLIENTS entry whose identities match those pins. A missing,
+     * non-controller, or snapshot-less client fails closed. SeyalAppAction
+     * layout is unchanged.
+     */
+    SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
+    /** Mark reconstruction disconnected after the host drops the live client. */
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -310,7 +347,11 @@ typedef struct SeyalAppChrome {
     uint32_t agent_count;
     uint32_t attention_count;
     uint32_t inspector_row_count;
-    /* SEYAL_APP_CHROME_* visibility bits. Zero is M001 first-UI receded chrome. */
+    /*
+     * SEYAL_APP_CHROME_* visibility bits. All three bits set (left, inspector,
+     * tab strip visible) is the Core Terminal default; SET_SHELL_CHROME may
+     * still recede any of them.
+     */
     uint32_t reserved;
 } SeyalAppChrome;
 
@@ -334,6 +375,22 @@ typedef struct SeyalAppTheme {
     uint16_t reserved;
 } SeyalAppTheme;
 
+/*
+ * SeyalAppShell.flags: whether CREATE_TAB/SPLIT_FOCUSED would currently be
+ * accepted. Hosts must omit the "+"/split control when the bit is unset
+ * rather than show one that always fails closed (mirrors the command
+ * palette's own omission of "New Tab"/"Split"; see build_commands).
+ */
+#define SEYAL_APP_SHELL_ALLOWS_TAB_CREATION 1u
+#define SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING 2u
+/*
+ * Whether CLOSE_TAB of the active Tab / CLOSE_PANE of the focused Pane would
+ * currently be accepted (Rust rejects closing the last Tab/Pane). Hosts omit
+ * the close control when the bit is unset instead of re-deriving the rule.
+ */
+#define SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE 4u
+#define SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE 8u
+
 typedef struct SeyalAppShell {
     uint16_t version;
     uint16_t size;
@@ -349,6 +406,31 @@ typedef struct SeyalAppShell {
     uint64_t focused_pane_lo;
     uint64_t focused_pane_hi;
 } SeyalAppShell;
+
+/*
+ * Pane regions (#923): one per leaf of the active Tab's PaneTree, index
+ * 0..<SeyalAppShell.pane_count in the same order as SEYAL_APP_ROW_PANE rows.
+ * x/y/width/height are unit fractions of the Tab's center area, origin
+ * top-left; hosts position regions and never derive geometry. LIVE marks the
+ * single region that hosts the live terminal/Metal/composer surface; no region
+ * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
+ * indices return size == 0.
+ */
+#define SEYAL_APP_PANE_REGION_FOCUSED 1u
+#define SEYAL_APP_PANE_REGION_LIVE 2u
+
+typedef struct SeyalAppPaneRegion {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    float x;
+    float y;
+    float width;
+    float height;
+} SeyalAppPaneRegion;
 
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
@@ -399,6 +481,7 @@ SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
+SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);
@@ -433,6 +516,51 @@ SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t ind
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
+
+/*
+ * Resolved visual snapshot from Rust cold TOML/theme authority (#993 / ADR-015).
+ * `platform_appearance`: 0 = dark, 1 = light (host system appearance input).
+ * Returned `appearance` is the Rust-resolved value after applying preference.
+ * Font family pointers and warnings are borrowed until the next seyal_app_visual*.
+ * flags: bit0 reduced material/transparency, bit1 full-default fallback,
+ *        bit2 warnings present.
+ * utility_material: 0 opaque, 1 tonal, 2 frosted.
+ * preference: 0 system, 1 light, 2 dark.
+ */
+typedef struct SeyalAppVisual {
+    uint16_t version;
+    uint16_t size;
+    uint16_t appearance;
+    uint16_t preference;
+    uint32_t canvas;
+    uint32_t text;
+    uint32_t accent;
+    uint32_t container;
+    double ui_font_size;
+    double terminal_font_size;
+    double window_padding;
+    double terminal_padding;
+    double utility_opacity;
+    uint32_t flags;
+    uint16_t utility_material;
+    uint16_t warning_count;
+    const uint8_t *ui_font_family;
+    uint32_t ui_font_family_len;
+    const uint8_t *terminal_font_family;
+    uint32_t terminal_font_family_len;
+} SeyalAppVisual;
+
+typedef struct SeyalAppVisualWarning {
+    const uint8_t *text;
+    uint32_t text_len;
+    uint32_t reserved;
+} SeyalAppVisualWarning;
+
+SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
+SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
+/* Test/native harness only: reload cold UI config from path (len 0 = default). */
+int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+
 int32_t seyal_app_last_error(uint64_t handle);
 
 #ifdef __cplusplus

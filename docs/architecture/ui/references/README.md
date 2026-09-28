@@ -147,3 +147,7 @@ Primary split/layout controls live with the active Tab/layout chrome and target 
 - configuration parsing, semantic enrichment, agents, persistence, and UI metadata must never synchronously block PTY → VT → damage → render/input paths.
 
 If an old screenshot conflicts with the current frozen specification, **the current specification wins**. Do not create a parallel implementation path to preserve the old mockup.
+
+## Block component board
+
+`block-component/seyal-block-component.webp` is the approved visual for the Seyal Block Component (#1010). Its design authority is `../M003-BLOCK-COMPONENT-DESIGN.md`, which normalizes the board into tokens and records intentional deviations.

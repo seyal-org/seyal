@@ -272,6 +272,13 @@ pub(crate) fn hello_until(
     let (kind, payload) = super::attach::read_blocking_frame_until(stream, deadline)?;
     if kind == MessageType::Error {
         let error = ErrorMessage::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        // Retry the hello fallback only for a ClientHello the client encoded.
+        // Any other MalformedPayload is a protocol failure, not a probe.
+        if ErrorCode::from_u16(error.error_code) == Some(ErrorCode::MalformedPayload)
+            && error.offending_message_type != MessageType::ClientHello as u16
+        {
+            return Err(ClientError::Protocol);
+        }
         return Err(server_error(error.error_code));
     }
     if kind != MessageType::ServerHello {

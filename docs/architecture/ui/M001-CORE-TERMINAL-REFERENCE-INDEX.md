@@ -47,6 +47,7 @@ Until that asset exists in the repository, the UI container must be checked agai
 | Live tail | `M001-LIVE-TAIL-BEHAVIOR.md` | Long-running output with growing Block + Pane-level follow/scroll-away/return-to-live |
 | Pre-Pass-6 shell scaffold | `M001-UI-SHELL-SCAFFOLD.md` | Native UI-container decomposition boundary that preserves M001 pass ordering and terminal ownership |
 | Left context implementation spec (C03+C05) | `M001-LEFT-CONTEXT-IMAGE-TO-CODE.md` | Implementation-oriented component inventory + runtime/state mapping for the left pane and shared Tab selection |
+| Core Terminal visual fidelity (#934) | `M001-CORE-TERMINAL-VISUAL-FIDELITY.md` | image-to-code Gates 1–4 for `references/01-core terminal.png`: measured component inventory, runtime/state mapping, deviations and the VF-1…VF-8 Issue plan (Block chrome defers to `M003-BLOCK-COMPONENT-DESIGN.md`) |
 
 ## Cross-screen invariants
 

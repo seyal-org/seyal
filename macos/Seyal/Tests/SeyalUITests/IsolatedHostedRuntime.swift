@@ -27,10 +27,13 @@ enum IsolatedHostedRuntime {
 
 extension XCUIApplication {
   @discardableResult
-  func launchIsolatedHost() -> XCUIApplication {
+  func launchIsolatedHost(environment: [String: String] = [:]) -> XCUIApplication {
     terminate()
     if !launchArguments.contains(IsolatedHostedRuntime.flag) {
       launchArguments += IsolatedHostedRuntime.makeLaunchArguments()
+    }
+    for (key, value) in environment {
+      launchEnvironment[key] = value
     }
     launch()
     return self

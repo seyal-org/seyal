@@ -31,9 +31,16 @@ make bench
 
 Some commands may intentionally report that a later milestone has not created a production component yet. That is preferable to documentation pretending an unfinished surface is available.
 
-## Appearance configuration (under development)
+## Appearance configuration
 
-Seyal may read `~/.config/seyal/config.toml` or the path in `SEYAL_CONFIG` at launch. Only a small user-facing subset is accepted:
+At cold startup the production app loads local UI configuration once through the Rust config authority (no Swift TOML parser):
+
+1. If `SEYAL_CONFIG` is set to a non-empty path, that file is used.
+2. Otherwise Seyal reads `~/.config/seyal/config.toml` when present.
+
+Missing or unreadable files keep built-in defaults and the app still starts. Invalid TOML keeps the same full-default fallback and surfaces bounded, non-secret diagnostics (for example via system log). There is no live reload in this slice: restart the app to pick up changes.
+
+Accepted user-facing keys that this cold-start slice realizes in the production app:
 
 ```toml
 [ui]
@@ -43,24 +50,24 @@ utility-opacity = 1.0
 window-padding = 0
 
 [ui.font]
-family = ""
 size = 12
-fallbacks = ["SF Pro Text"]
 
 [terminal]
 padding = 8
 
 [terminal.font]
-family = "Menlo"
 size = 14
-fallbacks = ["SF Mono", "Menlo"]
+
+[input]
+option_as_alt = false
 ```
 
-Invalid keys or values are ignored or clamped; Seyal always starts from a complete snapshot. This is not a shipped settings product yet.
+Invalid keys or values are ignored or clamped; Seyal always starts from a complete resolved snapshot. Appearance preference (system/light/dark) and material intent (`reduced-material` / `utility-opacity`) are resolved in Rust; AppKit maps the typed appearance, font **sizes**, padding, and utility material preference onto native presentation. Font **family** / fallback lists may be present in the file for forward compatibility but are not applied by the host in this slice (system / monospaced system fonts are used). There is still no settings UI, cloud sync, or Lua overlay.
 
 For a one-off override without editing a file, launch with `open --env` (shell `VAR=value open …` does not pass environment into the app):
 
 ```sh
+open --env SEYAL_CONFIG=/tmp/seyal-config.toml target/macos-derived-data/Build/Products/Debug/Seyal.app
 open --env SEYAL_UI_APPEARANCE=light target/macos-derived-data/Build/Products/Debug/Seyal.app
 ```
 

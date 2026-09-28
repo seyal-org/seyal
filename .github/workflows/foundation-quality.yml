@@ -54,6 +54,10 @@ jobs:
         run: python3 scripts/check-host-product-fixtures.py
       - name: Thin-Swift product-authority boundary
         run: python3 scripts/check-thin-swift-boundary.py
+      - name: Structural-debt ratchet
+        run: |
+          python3 scripts/check-structural-debt.py
+          python3 scripts/check-structural-debt.py --self-test
       - name: Harness contracts
         run: python3 scripts/test-harnesses.py
       - name: Fuzz registry smoke

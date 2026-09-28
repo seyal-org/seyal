@@ -1,0 +1,16 @@
+   Compiling seyal-exec v0.0.0 (<repo>/crates/seyal-exec)
+    Finished `bench` profile [optimized] target(s) in 0.52s
+     Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
+[seyal scalability] m002_contract gate=startup cohort=1 warmups=20 samples=100 population=1 process_rss_kib=2816 child_rss_kib=0 out=<repo>/docs/evidence/m002-673-startup-20260924T163700Z/cohorts/1.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.00s
+     Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
+[seyal scalability] m002_contract gate=startup cohort=2 warmups=20 samples=100 population=1 process_rss_kib=2688 child_rss_kib=0 out=<repo>/docs/evidence/m002-673-startup-20260924T163700Z/cohorts/2.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.00s
+     Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
+[seyal scalability] m002_contract gate=startup cohort=3 warmups=20 samples=100 population=1 process_rss_kib=2688 child_rss_kib=0 out=<repo>/docs/evidence/m002-673-startup-20260924T163700Z/cohorts/3.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.00s
+     Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
+[seyal scalability] m002_contract gate=startup cohort=4 warmups=20 samples=100 population=1 process_rss_kib=2704 child_rss_kib=0 out=<repo>/docs/evidence/m002-673-startup-20260924T163700Z/cohorts/4.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.00s
+     Running benches/execution_scalability.rs (target/release/deps/execution_scalability-2429b645ec1c1809)
+[seyal scalability] m002_contract gate=startup cohort=5 warmups=20 samples=100 population=1 process_rss_kib=2912 child_rss_kib=0 out=<repo>/docs/evidence/m002-673-startup-20260924T163700Z/cohorts/5.toml performance_claim=false

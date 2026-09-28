@@ -1,0 +1,24 @@
+   Compiling unicode-segmentation v1.13.3
+   Compiling unicode-width v0.2.2
+   Compiling seyal-runtime v0.0.0 (<repo>/crates/seyal-runtime)
+   Compiling seyal-core v0.0.0 (<repo>/crates/seyal-core)
+   Compiling stats_alloc v0.1.10
+   Compiling libc v0.2.189
+   Compiling seyal-terminal v0.0.0 (<repo>/crates/seyal-terminal)
+   Compiling seyal-protocol v0.0.0 (<repo>/crates/seyal-protocol)
+   Compiling seyal-exec v0.0.0 (<repo>/crates/seyal-exec)
+    Finished `bench` profile [optimized] target(s) in 2.87s
+     Running benches/pass5_production_transport.rs (target/release/deps/pass5_production_transport-597100075b5017e7)
+[seyal pass5] m002_contract gate=damage_to_client_cache cohort=1 warmups=20 samples=100 out=<repo>/docs/evidence/m002-673-damage_to_client_cache-20260924T164812Z/cohorts/1.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass5_production_transport.rs (target/release/deps/pass5_production_transport-597100075b5017e7)
+[seyal pass5] m002_contract gate=damage_to_client_cache cohort=2 warmups=20 samples=100 out=<repo>/docs/evidence/m002-673-damage_to_client_cache-20260924T164812Z/cohorts/2.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass5_production_transport.rs (target/release/deps/pass5_production_transport-597100075b5017e7)
+[seyal pass5] m002_contract gate=damage_to_client_cache cohort=3 warmups=20 samples=100 out=<repo>/docs/evidence/m002-673-damage_to_client_cache-20260924T164812Z/cohorts/3.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass5_production_transport.rs (target/release/deps/pass5_production_transport-597100075b5017e7)
+[seyal pass5] m002_contract gate=damage_to_client_cache cohort=4 warmups=20 samples=100 out=<repo>/docs/evidence/m002-673-damage_to_client_cache-20260924T164812Z/cohorts/4.toml performance_claim=false
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/pass5_production_transport.rs (target/release/deps/pass5_production_transport-597100075b5017e7)
+[seyal pass5] m002_contract gate=damage_to_client_cache cohort=5 warmups=20 samples=100 out=<repo>/docs/evidence/m002-673-damage_to_client_cache-20260924T164812Z/cohorts/5.toml performance_claim=false

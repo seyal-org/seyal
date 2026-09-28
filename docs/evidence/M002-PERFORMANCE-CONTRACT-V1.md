@@ -1,7 +1,8 @@
 # M002 performance evidence contract v1
 
-Status: proposed contract for Issue #673. This document defines evidence shape
-and boundaries; it does not declare any product gate as passing.
+Status: accepted thresholds for Issue #673. This document defines evidence
+shape, boundaries, and frozen numeric ceilings; it does not declare any product gate as passing.
+Qualification remains a separate controlled-host measurement.
 
 ## Required identity
 
@@ -30,6 +31,12 @@ passes nor silently discarded samples. A `PHYSICAL_ARM64` `VALID` result
 requires a controlled power/thermal state; `uncontrolled-developer-host`
 records are `PLATFORM_LIMITED` and cannot establish that class.
 
+Controlled `--qualify` writes a validator-checked `record.toml` from
+candidate cohorts plus a distinct baseline SHA. History `--full-matrix`
+must enumerate all 336 accepted configurations or fail closed. Same-SHA
+A/A, Debug binaries, and invalid power/thermal states cannot emit
+`VALID`.
+
 `--require-exact-head` is required when recording a new measurement against
 the current checkout. Historical `--record` validation keeps the recorded
 production SHA and does not require it to equal `HEAD`.
@@ -40,15 +47,20 @@ The contract covers these independently reported boundaries:
 
 - HistoryStore active reflow and sealed-segment lazy reflow, using the frozen
   #818 ceilings: p50/p95/p99 active `2/4/8 ms` and sealed `1/2/4 ms`.
-- PTY-read to canonical `TerminalState` mutation.
-- Damage/projection and client-cache readiness.
-- Metal preparation/submission and the explicitly named visible-frame proxy.
-- Input admission through the named presentation boundary; this is not called
-  key-to-photon unless scanout is actually measured.
-- Sustained high-output responsiveness while input, resize, and scrolling are
-  active.
-- Startup, idle CPU, RSS, file descriptors, threads, and teardown recovery for
+- PTY-read to canonical `TerminalState` mutation (`1/2/4 ms`).
+- Damage extraction to client-cache readiness (`4/8/16 ms`).
+- Metal preparation/submission (`8/16/33 ms`) and the named visible-frame
+  proxy (`8/16/33 ms`). The proxy is not key-to-photon unless scanout is
+  actually measured.
+- Sustained high-output input responsiveness (`8/16/33 ms`) while input,
+  resize, and scrolling are active for at least two seconds.
+- Startup (`50/100/200 ms`), idle CPU (`1/3/5 percent`), RSS
+  (`64/96/128 MiB` at population=1), file descriptors (`64/96/128`),
+  threads (`16/24/32`), and teardown recovery (`50/150/500 ms`) for
   1/10/50/100 execution populations where the host permits them.
+
+Accepted numeric decisions and baseline/host rules live in
+`docs/evidence/M002-673-THRESHOLD-DECISIONS.md`.
 
 History-specific required matrix dimensions remain 10k/100k/1M retained
 content, 1/10/50/100 executions, widths 40/48/64/80/96/132/160, and

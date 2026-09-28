@@ -71,15 +71,15 @@ def main() -> None:
         build_script = base / "fake-build-macos.sh"
 
         module = load_module()
-        real_require_clean_source_tree = module.require_clean_source_tree
+        real_require_clean_worktree = module.require_clean_worktree
         module.SEYAL_APP = app_path
         module.BUILD_MACOS = build_script
         module.git_sha = lambda: "1111111111111111111111111111111111111111"
         # This fixture never has (or needs) a real git checkout matching
-        # SEYAL_APP/BUILD_MACOS; require_clean_source_tree()'s own behavior
-        # is exercised separately below (test_require_clean_source_tree)
+        # SEYAL_APP/BUILD_MACOS; require_clean_worktree()'s own behavior
+        # is exercised separately below (test_require_clean_worktree)
         # against a real git repo, using the captured real function above.
-        module.require_clean_source_tree = lambda: None
+        module.require_clean_worktree = lambda: None
 
         build_calls = {"count": 0}
         real_run = module.run
@@ -145,7 +145,7 @@ def main() -> None:
         require(build_calls["count"] == 5, "ensure_seyal_app reused a binary with no manifest at all")
         require(sixth == app_path, "ensure_seyal_app did not return the expected app path")
 
-        # Case 7 (blocking-review fix): require_clean_source_tree() itself,
+        # Case 7 (blocking-review fix): require_clean_worktree() itself,
         # against a real git repo, must refuse a dirty working tree (staged,
         # unstaged, or untracked) and allow a clean one. The build consumes
         # the working tree's contents, not just `git rev-parse HEAD`; a
@@ -163,48 +163,48 @@ def main() -> None:
         module.ROOT = git_repo
 
         # Clean tree -> must not raise.
-        real_require_clean_source_tree()
+        real_require_clean_worktree()
 
         # Untracked file -> must raise.
         (git_repo / "untracked.txt").write_text("new\n", encoding="utf-8")
         untracked_raised = False
         try:
-            real_require_clean_source_tree()
+            real_require_clean_worktree()
         except SystemExit as error:
             untracked_raised = True
             require("dirty working tree" in str(error), f"expected a dirty-tree message, got: {error}")
-        require(untracked_raised, "require_clean_source_tree accepted an untracked file")
+        require(untracked_raised, "require_clean_worktree accepted an untracked file")
         (git_repo / "untracked.txt").unlink()
 
         # Modified tracked file (unstaged) -> must raise.
         (git_repo / "tracked.txt").write_text("v2\n", encoding="utf-8")
         modified_raised = False
         try:
-            real_require_clean_source_tree()
+            real_require_clean_worktree()
         except SystemExit:
             modified_raised = True
-        require(modified_raised, "require_clean_source_tree accepted a modified tracked file")
+        require(modified_raised, "require_clean_worktree accepted a modified tracked file")
 
         # Staged-but-uncommitted change -> must also raise.
         subprocess.run(["git", "add", "-A"], cwd=git_repo, check=True, stdout=subprocess.DEVNULL)
         staged_raised = False
         try:
-            real_require_clean_source_tree()
+            real_require_clean_worktree()
         except SystemExit:
             staged_raised = True
-        require(staged_raised, "require_clean_source_tree accepted a staged-but-uncommitted change")
+        require(staged_raised, "require_clean_worktree accepted a staged-but-uncommitted change")
 
         # Committing the change restores a clean tree -> must not raise again.
         subprocess.run(
             ["git", "-c", "user.name=seyal", "-c", "user.email=seyal@test", "commit", "-m", "v2"],
             cwd=git_repo, check=True, stdout=subprocess.DEVNULL,
         )
-        real_require_clean_source_tree()
+        real_require_clean_worktree()
 
     print(
         "[seyal m002 app identity test] stale/mismatched manifest and binary "
         "correctly forced a rebuild in every case; a fresh matching manifest was reused; "
-        "require_clean_source_tree() correctly refused every dirty-tree case and allowed clean ones."
+        "require_clean_worktree() correctly refused every dirty-tree case and allowed clean ones."
     )
 
 

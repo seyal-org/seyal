@@ -35,6 +35,11 @@ impl Runtime {
             self.send_error(token, ErrorCode::UnknownMessage, message_type);
             return;
         };
+        if kind == MessageType::ViewportLineIds {
+            // Type 35 is Runtime→client only.
+            self.send_error(token, ErrorCode::UnknownMessage, message_type);
+            return;
+        };
         let pass7_attached = current_state == LocalIpcConnState::Attached
             && matches!(
                 kind,

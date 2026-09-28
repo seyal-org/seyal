@@ -309,12 +309,27 @@ def main() -> None:
             "seyal-agent-core has forbidden dependencies: seyal-runtime",
         )
 
+        # Reverse firewall: terminal stack must not depend on seyal-agent-*.
+        terminal_agent = base / "layering-terminal-agent"
+        write(
+            terminal_agent / "crates/seyal-terminal/Cargo.toml",
+            '[package]\nname = "seyal-terminal"\nversion = "0.0.0"\n\n[dependencies]\nseyal-agent-core = { path = "../seyal-agent-core" }\n',
+        )
+        run_negative(
+            ["python3", str(ROOT / "scripts/check-layering.py")],
+            terminal_agent,
+            "seyal-terminal has forbidden dependencies: seyal-agent-core",
+        )
+
         unknown_layering = base / "layering-unknown"
         write(unknown_layering / "crates/seyal-mystery/Cargo.toml", '[package]\nname = "seyal-mystery"\nversion = "0.0.0"\n')
         run_negative(["python3", str(ROOT / "scripts/check-layering.py")], unknown_layering, "seyal-mystery has no architecture layering rule")
 
         hot = base / "hot-path"
-        write(hot / "crates/seyal-terminal/src/terminal.rs", "impl TerminalState { pub fn feed(&mut self, bytes: &[u8]) { let _ = bytes.to_vec(); } pub fn finish_input(&mut self) {} }")
+        write(
+            hot / "crates/seyal-terminal/src/terminal/state.rs",
+            "impl TerminalState { pub fn feed(&mut self, bytes: &[u8]) { let _ = bytes.to_vec(); } pub fn finish_input(&mut self) {} }",
+        )
         write(
             hot / "crates/seyal-runtime/src/runtime/mod.rs",
             "impl Runtime { pub fn poll_once(&mut self) {} }",
@@ -325,8 +340,12 @@ def main() -> None:
         )
         write(hot / "crates/seyal-runtime/src/input.rs", "impl InputIngress { pub fn try_submit(&self) {} }")
         write(
-            hot / "crates/seyal-runtime/src/display.rs",
+            hot / "crates/seyal-runtime/src/display/encode_v1.rs",
             "pub fn encode_snapshot() {} pub fn encode_delta() {} fn encode_rows() {}",
+        )
+        write(
+            hot / "crates/seyal-runtime/src/display/encode_v2.rs",
+            "pub fn encode_snapshot_v2() {} pub fn encode_delta_v2() {} fn encode_cells_v2() {}",
         )
         write(
             hot / "crates/seyal-runtime/src/runtime/local/display_publish.rs",
@@ -343,17 +362,19 @@ def main() -> None:
             "impl Runtime { pub fn poll_once(&mut self) {} }",
             "impl Runtime { fn drain_control(&mut self) {} fn service_reads(&mut self) {} fn service_writes(&mut self) {} }",
             "impl InputIngress { pub fn try_submit(&self) {} }",
-            "pub fn encode_snapshot() {} pub fn encode_delta() {} fn encode_rows() {} pub fn encode_snapshot_v2() {} pub fn encode_delta_v2() {} fn encode_cells_v2() {}",
+            "pub fn encode_snapshot() {} pub fn encode_delta() {} fn encode_rows() {}",
+            "pub fn encode_snapshot_v2() {} pub fn encode_delta_v2() {} fn encode_cells_v2() {}",
             "impl Runtime { pub(super) fn publish_display_updates(&mut self) {} }",
         )
 
         def write_clean_rust_hot_paths(root: Path) -> None:
-            write(root / "crates/seyal-terminal/src/terminal.rs", clean_rust[0])
+            write(root / "crates/seyal-terminal/src/terminal/state.rs", clean_rust[0])
             write(root / "crates/seyal-runtime/src/runtime/mod.rs", clean_rust[1])
             write(root / "crates/seyal-runtime/src/runtime/reactor_io.rs", clean_rust[2])
             write(root / "crates/seyal-runtime/src/input.rs", clean_rust[3])
-            write(root / "crates/seyal-runtime/src/display.rs", clean_rust[4])
-            write(root / "crates/seyal-runtime/src/runtime/local/display_publish.rs", clean_rust[5])
+            write(root / "crates/seyal-runtime/src/display/encode_v1.rs", clean_rust[4])
+            write(root / "crates/seyal-runtime/src/display/encode_v2.rs", clean_rust[5])
+            write(root / "crates/seyal-runtime/src/runtime/local/display_publish.rs", clean_rust[6])
 
         absent_host = base / "hot-path-absent-host"
         write_clean_rust_hot_paths(absent_host)
@@ -387,7 +408,7 @@ def main() -> None:
         malformed_performance = base / "m002-performance-malformed"
         write(
             malformed_performance / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         write(malformed_performance / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml", "schema = 'wrong'\nversion = 1\n")
         run_negative(
@@ -399,7 +420,7 @@ def main() -> None:
         invalid_result = base / "m002-performance-invalid-result"
         write(
             invalid_result / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         shutil.copy(ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml", invalid_result / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml")
         write(
@@ -415,7 +436,7 @@ def main() -> None:
         invalid_percentiles = base / "m002-performance-invalid-percentiles"
         write(
             invalid_percentiles / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         shutil.copy(ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml", invalid_percentiles / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml")
         write(
@@ -570,6 +591,17 @@ def main() -> None:
 
         proposed_gate = base / "m002-performance-proposed-gate"
         shutil.copytree(invalid_percentiles, proposed_gate)
+        schema_path = proposed_gate / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml"
+        schema_text = schema_path.read_text(encoding="utf-8")
+        schema_text = schema_text.replace(
+            'status = "accepted-thresholds"',
+            'status = "proposed"',
+        )
+        schema_text = schema_text.replace(
+            '[gates.input_visible_proxy]\nevidence_class = "PHYSICAL_ARM64"\nstatus = "accepted"',
+            '[gates.input_visible_proxy]\nevidence_class = "PHYSICAL_ARM64"\nstatus = "proposed"',
+        )
+        schema_path.write_text(schema_text, encoding="utf-8")
         record = (proposed_gate / "record.toml").read_text(encoding="utf-8")
         record = record.replace("p50 = 3\np95 = 2\np99 = 4", "p50 = 2\np95 = 4\np99 = 8")
         record = record.replace(
@@ -741,7 +773,7 @@ def main() -> None:
         incomplete_matrix = base / "m002-performance-incomplete-matrix"
         write(
             incomplete_matrix / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         toml = (ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml").read_text(encoding="utf-8")
         toml = toml.replace("columns = [40, 48, 64, 80, 96, 132, 160]\n", "")
@@ -768,7 +800,7 @@ def main() -> None:
         weakened_ceiling = base / "m002-performance-weakened-ceiling"
         write(
             weakened_ceiling / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.md",
-            "Status: proposed contract for Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\n",
+            "Issue #673\nexact production SHA\nbaseline SHA\nnearest-rank\ndoes not declare any product gate as passing\n",
         )
         toml = (ROOT / "docs/evidence/M002-PERFORMANCE-CONTRACT-V1.toml").read_text(encoding="utf-8")
         toml = toml.replace(
@@ -1024,6 +1056,35 @@ def main() -> None:
             boundary,
             "introduces portable product authority token 'enum InspectorMode'",
         )
+
+        structural_self = run_command(
+            ["python3", str(ROOT / "scripts/check-structural-debt.py"), "--self-test"],
+            base,
+        )
+        require(
+            structural_self.returncode == 0,
+            f"structural-debt self-test failed:\n{structural_self.stdout}",
+        )
+
+        structural = base / "structural-debt-new-huge"
+        write(structural / "crates/seyal-core/src/lib.rs", "x\n" * 1200)
+        write(
+            structural / "docs/engineering/structural-debt-baseline.toml",
+            'schema = "seyal.structural-debt-baseline"\nversion = 1\n',
+        )
+        env_changed = os.environ.get("SEYAL_STRUCTURAL_DEBT_CHANGED_FILES")
+        os.environ["SEYAL_STRUCTURAL_DEBT_CHANGED_FILES"] = "crates/seyal-core/src/lib.rs"
+        try:
+            run_negative(
+                ["python3", str(ROOT / "scripts/check-structural-debt.py")],
+                structural,
+                "exceeds 1000 LOC",
+            )
+        finally:
+            if env_changed is None:
+                os.environ.pop("SEYAL_STRUCTURAL_DEBT_CHANGED_FILES", None)
+            else:
+                os.environ["SEYAL_STRUCTURAL_DEBT_CHANGED_FILES"] = env_changed
 
         workspace = base / "workspace"
         workspace.mkdir()
