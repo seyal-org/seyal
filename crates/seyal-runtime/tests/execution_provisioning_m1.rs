@@ -402,15 +402,13 @@ fn provisioning_burst_preserves_streamer_fairness() {
     );
 
     let mut spawn_us = Vec::new();
-    let mut next_request = 1u64;
     let burst_started = Instant::now();
     let mut longest_stall = Duration::ZERO;
     let mut last_progress = Instant::now();
     let mut gen_cursor = gen_before;
 
-    for _ in 0..8 {
+    for next_request in 1u64..=8 {
         let (created, elapsed) = h.create_timed(0, next_request);
-        next_request += 1;
         assert_eq!(created.result_code, CreateExecutionResultCode::Created);
         spawn_us.push(elapsed.as_micros().min(u128::from(u64::MAX)) as u64);
 
