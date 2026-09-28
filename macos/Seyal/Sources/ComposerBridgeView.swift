@@ -242,7 +242,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         case .nativeCommand:
             // Reserved / unmatched Command — never insert; never PTY.
             return true
-        case .fallthrough:
+        case .`fallthrough`:
             return false
         }
     }
