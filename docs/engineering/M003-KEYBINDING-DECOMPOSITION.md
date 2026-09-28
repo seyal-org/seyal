@@ -62,7 +62,8 @@ privacy on fixtures).
 ## K2 — Defaults, reserved Command, conflict resolution
 
 **Outcome:** builtin default rows from SPEC-024 §4.1 (excluding ADR-021 pane
-rows, see K7, and SPEC-022 navigation rows, see K8; including the §5.4
+rows, see K7, SPEC-022 navigation rows, see K8, and ADR-018 window rows per
+R5.0.1; including the §5.4
 `ctrl+r` composer history-search row); the enumerated reserved set from §4.2; per-context-bit last-wins
 resolution with `DuplicateSequence` diagnostics; `action = "none"` unbind.
 
