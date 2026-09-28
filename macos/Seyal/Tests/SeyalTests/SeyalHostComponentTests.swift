@@ -1316,6 +1316,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
 
+    @MainActor
     func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
         var empty = SeyalAppRow()
         XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
