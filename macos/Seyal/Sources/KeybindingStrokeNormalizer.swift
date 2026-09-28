@@ -90,7 +90,7 @@ enum KeybindingStrokeNormalizer {
         composerFocused: Bool,
         compositionActive: Bool
     ) -> RouteResult {
-        guard let payload = normalize(event) else { return .fallthrough }
+        guard let payload = normalize(event) else { return .`fallthrough` }
         let code = seyal_app_route_keystroke(
             appHandle,
             payload.modifierBits,
@@ -103,12 +103,12 @@ enum KeybindingStrokeNormalizer {
         switch code {
         case 1: return .consumed
         case 2: return .nativeCommand
-        default: return .fallthrough
+        default: return .`fallthrough`
         }
     }
 
     enum RouteResult {
-        case fallthrough
+        case `fallthrough`
         case consumed
         case nativeCommand
     }
