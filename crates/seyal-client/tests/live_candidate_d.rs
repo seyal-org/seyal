@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -62,7 +62,7 @@ fn start_runtime(command: &str) -> (PathBuf, ExecutionId, thread::JoinHandle<()>
     (socket_path, execution_id, join)
 }
 
-fn connect_observer(socket_path: &PathBuf, execution_id: ExecutionId) -> LocalDisplayClient {
+fn connect_observer(socket_path: &Path, execution_id: ExecutionId) -> LocalDisplayClient {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match LocalDisplayClient::connect_execution(socket_path, execution_id, Role::Observer) {
