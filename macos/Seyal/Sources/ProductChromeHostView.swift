@@ -463,6 +463,17 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpen()
     }
 
+    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
+    /// WorkspaceCommand. Rust re-validates against the current route context.
+    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
+        guard let commandId = sender.representedObject as? UInt16 else { return }
+        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, 0, 0)
+        if code == 0 {
+            reconcileChrome()
+            routeFocus()
+        }
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
@@ -656,6 +667,20 @@ final class ProductChromeHostView: NSView {
         )
         coldVisualProbe.setAccessibilityLabel(
             "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
+        )
+    }
+}
+
+extension ProductChromeHostView: NSMenuItemValidation {
+    /// R6.4.2: enabled state comes only from the Rust shortcut projection.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let commandId = menuItem.representedObject as? UInt16 else {
+            return true
+        }
+        return KeybindingShortcutRealization.isEnabled(
+            appHandle: pane.appHandle,
+            commandId: commandId,
+            composerFocused: false
         )
     }
 }

@@ -43,6 +43,7 @@
 		A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000050 /* TerminalCompositionDocument.swift */; };
 		A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */; };
 		A1000000000000000000006A /* KeybindingStrokeNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006A /* KeybindingStrokeNormalizer.swift */; };
+		A1000000000000000000006B /* KeybindingShortcutRealization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006B /* KeybindingShortcutRealization.swift */; };
 		A10000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift */; };
 		A10000000000000000000053 /* MetalSurfaceRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000053 /* MetalSurfaceRecoveryState.swift */; };
 		A10000000000000000000054 /* MetalSurfaceView+DisplayLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000054 /* MetalSurfaceView+DisplayLink.swift */; };
@@ -128,6 +129,7 @@
 		A20000000000000000000050 /* TerminalCompositionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCompositionDocument.swift; sourceTree = "<group>"; };
 		A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalNativeKeyClassifier.swift; sourceTree = "<group>"; };
 		A2000000000000000000006A /* KeybindingStrokeNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingStrokeNormalizer.swift; sourceTree = "<group>"; };
+		A2000000000000000000006B /* KeybindingShortcutRealization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingShortcutRealization.swift; sourceTree = "<group>"; };
 		A20000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "InteractiveMetalSurfaceView+InputSelfTests.swift"; sourceTree = "<group>"; };
 		A20000000000000000000053 /* MetalSurfaceRecoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalSurfaceRecoveryState.swift; sourceTree = "<group>"; };
 		A20000000000000000000054 /* MetalSurfaceView+DisplayLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+DisplayLink.swift"; sourceTree = "<group>"; };
@@ -225,6 +227,7 @@
 				A20000000000000000000050 /* TerminalCompositionDocument.swift */,
 				A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */,
 				A2000000000000000000006A /* KeybindingStrokeNormalizer.swift */,
+				A2000000000000000000006B /* KeybindingShortcutRealization.swift */,
 				A20000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift */,
 				A20000000000000000000053 /* MetalSurfaceRecoveryState.swift */,
 				A20000000000000000000054 /* MetalSurfaceView+DisplayLink.swift */,
@@ -435,6 +438,7 @@
 				A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */,
 				A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */,
 				A1000000000000000000006A /* KeybindingStrokeNormalizer.swift in Sources */,
+				A1000000000000000000006B /* KeybindingShortcutRealization.swift in Sources */,
 				A10000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift in Sources */,
 				A10000000000000000000053 /* MetalSurfaceRecoveryState.swift in Sources */,
 				A10000000000000000000054 /* MetalSurfaceView+DisplayLink.swift in Sources */,

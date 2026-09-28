@@ -1,0 +1,143 @@
+//! SPEC-024 §14 items 12 and 19 (menu half); AX label privacy.
+
+use super::load::load_keybinding_table;
+use super::projection::{project_shortcuts, projected_item_for, ProjectedShortcut};
+use super::route::route_context_set;
+use super::types::{BindingContext, KeySym, Modifiers, WorkspaceCommand, WorkspaceCommandId};
+use crate::presentation::PresentationMode;
+
+fn item_for(
+    id: WorkspaceCommandId,
+    projection: &super::projection::KeybindingShortcutProjection,
+) -> &ProjectedShortcut {
+    projected_item_for(projection, WorkspaceCommand { id, ordinal: None })
+        .unwrap_or_else(|| panic!("missing projected {}", id.as_str()))
+}
+
+/// SPEC-024 §14 item 12 (R11.1).
+#[test]
+fn item12_menu_ax_projection_key_equivalent_and_chord_hints() {
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+shift+p"
+action = "command_palette.open"
+"#;
+    let table = load_keybinding_table(Some(toml));
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+
+    let palette = item_for(WorkspaceCommandId::CommandPaletteOpen, &projection);
+    assert_eq!(
+        palette.key_equivalent_notation.as_deref(),
+        Some("cmd+shift+p"),
+        "highest-declaration-index single-stroke app binding wins"
+    );
+    let equiv = palette.key_equivalent.expect("key equivalent");
+    assert_eq!(equiv.modifiers, Modifiers::CMD.union(Modifiers::SHIFT));
+    assert_eq!(equiv.key, KeySym::Char('p'));
+    let notations: Vec<&str> = palette
+        .hints
+        .iter()
+        .map(|h| h.keys_notation.as_str())
+        .collect();
+    assert!(
+        notations.contains(&"cmd+k") && notations.contains(&"cmd+shift+p"),
+        "both bindings appear as hints: {notations:?}"
+    );
+    assert!(!palette.hints.iter().any(|h| h.is_chord));
+
+    // Chord-only command: unbind builtin cmd+t, bind a Command chord (app-safe).
+    let chord_only = r#"
+[[keybindings]]
+keys = "cmd+t"
+action = "none"
+
+[[keybindings]]
+keys = "cmd+shift+t>n"
+action = "tab.create"
+"#;
+    let table = load_keybinding_table(Some(chord_only));
+    let projection = project_shortcuts(&table, route);
+    let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
+    assert!(
+        new_tab.key_equivalent.is_none(),
+        "chords never become key equivalents"
+    );
+    assert_eq!(new_tab.hints.len(), 1);
+    assert!(new_tab.hints[0].is_chord);
+    assert_eq!(new_tab.hints[0].keys_notation, "cmd+shift+t>n");
+}
+
+/// SPEC-024 §14 item 19 (menu half): projection enabled bits for palette modal.
+#[test]
+fn item19_menu_half_projection_disables_non_palette_while_open() {
+    let table = load_keybinding_table(None);
+    let closed = route_context_set(false, PresentationMode::Flow, false);
+    let open = route_context_set(true, PresentationMode::Flow, false);
+
+    let when_closed = project_shortcuts(&table, closed);
+    let when_open = project_shortcuts(&table, open);
+
+    let new_tab_closed = item_for(WorkspaceCommandId::TabCreate, &when_closed);
+    let new_tab_open = item_for(WorkspaceCommandId::TabCreate, &when_open);
+    assert!(
+        new_tab_closed.enabled,
+        "New Tab enabled when palette closed"
+    );
+    assert!(
+        !new_tab_open.enabled,
+        "New Tab disabled while palette open (R6.4.2)"
+    );
+
+    let palette_closed = item_for(WorkspaceCommandId::CommandPaletteOpen, &when_closed);
+    let palette_open = item_for(WorkspaceCommandId::CommandPaletteOpen, &when_open);
+    assert!(palette_closed.enabled);
+    // command_palette.open is app-context only; not permitted under {palette}.
+    assert!(
+        !palette_open.enabled,
+        "non-palette-context open command disabled while palette owns the route"
+    );
+
+    // No palette-context menu-visible item in M003 K5; Close remains Escape-only.
+    assert!(
+        when_open.items.iter().all(|item| !item.enabled),
+        "every projected menu item is non-palette-context and disabled while open"
+    );
+}
+
+#[test]
+fn accessibility_label_carries_no_terminal_text() {
+    let terminal_fixture = "echo seyal-ax-terminal-fixture-9f3a";
+    let toml = format!(
+        r#"
+[[keybindings]]
+keys = "cmd+shift+p"
+action = "command_palette.open"
+"#
+    );
+    let table = load_keybinding_table(Some(&toml));
+    // Inject fixture into a notation only if mis-wired; projection must never
+    // pull ApplicationRoot output / terminal buffers into labels.
+    let route = BindingContext::APP.union(BindingContext::FLOW);
+    let projection = project_shortcuts(&table, route);
+    for item in &projection.items {
+        assert!(
+            !item.accessibility_label.contains(terminal_fixture),
+            "AX label leaked terminal fixture: {}",
+            item.accessibility_label
+        );
+        assert!(
+            !item.accessibility_label.contains('\n'),
+            "AX label must stay a short product string"
+        );
+        for hint in &item.hints {
+            assert!(!hint.keys_notation.contains(terminal_fixture));
+        }
+    }
+    let palette = item_for(WorkspaceCommandId::CommandPaletteOpen, &projection);
+    assert!(
+        palette.accessibility_label.starts_with("Command Palette"),
+        "{}",
+        palette.accessibility_label
+    );
+}

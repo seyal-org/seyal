@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         self.window = window
 
-        installMenus()
+        installMenus(host: host)
         host.activateAfterWindowPresentation()
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -43,7 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
-    private func installMenus() {
+    /// Reserved §4.2 Edit/AppKit items keep hardcoded equivalents; product items
+    /// realize Rust `KeybindingShortcutProjection` once at startup (R11.2–R11.3).
+    private func installMenus(host: ProductChromeHostView) {
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
@@ -63,22 +65,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editItem.submenu = editMenu
 
+        let fileItem = NSMenuItem()
+        mainMenu.addItem(fileItem)
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabCreate,
+            host: host
+        ))
+        fileMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabCloseFocused,
+            host: host
+        ))
+        fileItem.submenu = fileMenu
+
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
-        let paletteItem = NSMenuItem(
-            title: "Command Palette",
-            action: #selector(ProductChromeHostView.openCommandPalette),
-            keyEquivalent: "k"
-        )
-        // Global command palette (#932). Target-less: AppKit walks the
-        // responder chain, but `host` is the content view and not always
-        // first responder (e.g. the terminal surface is), so target it
-        // explicitly at the chrome host that owns the Rust-backed overlay.
-        paletteItem.target = host
-        viewMenu.addItem(paletteItem)
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.commandPaletteOpen,
+            host: host
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.paneSplitRight,
+            host: host
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.paneSplitDown,
+            host: host
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.presentationToggleRaw,
+            host: host
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.presentationToggleTui,
+            host: host
+        ))
         viewItem.submenu = viewMenu
 
+        let windowItem = NSMenuItem()
+        mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabSelectPrevious,
+            host: host
+        ))
+        windowMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabSelectNext,
+            host: host
+        ))
+        windowItem.submenu = windowMenu
+
         NSApp.mainMenu = mainMenu
+    }
+
+    private func projectedItem(commandId: UInt16, host: ProductChromeHostView) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        item.target = host
+        KeybindingShortcutRealization.realize(item, commandId: commandId)
+        return item
     }
 }

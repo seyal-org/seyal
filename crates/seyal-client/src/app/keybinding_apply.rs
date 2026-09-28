@@ -1,24 +1,15 @@
 //! SPEC-024 K3: dispatch matched WorkspaceCommands from the routing gate.
 
-use std::sync::OnceLock;
-
 use crate::composer::ComposerAction;
 use crate::keybinding::{
-    load_keybinding_table_from_path, resolve_tab_ordinal, route_context_set, route_keystroke,
-    validate_workspace_command, BindingContext, InvokeError, KeybindingTable, NormalizedStroke,
-    RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
+    process_keybinding_table, resolve_tab_ordinal, route_context_set, route_keystroke,
+    validate_workspace_command, BindingContext, InvokeError, NormalizedStroke, RouteOutcome,
+    WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
 use crate::shell::SplitAxis;
 
 use super::{AppError, ApplicationRoot};
-
-fn process_keybinding_table() -> &'static KeybindingTable {
-    static TABLE: OnceLock<KeybindingTable> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        load_keybinding_table_from_path(crate::keybinding::keybinding_config_path().as_deref())
-    })
-}
 
 impl ApplicationRoot {
     /// Current §6.1 route context set from palette / presentation / composer focus.
@@ -61,6 +52,18 @@ impl ApplicationRoot {
         let table = process_keybinding_table();
         let route = self.keybinding_route_context(composer_first_responder);
         validate_workspace_command(table, command, route).map_err(invoke_error)
+    }
+
+    /// Menu / key-equivalent path: validate against `route`, then dispatch.
+    pub fn invoke_workspace_command_for_menu(
+        &mut self,
+        command: WorkspaceCommand,
+        route: BindingContext,
+    ) -> Result<(), AppError> {
+        self.invoke_workspace_command(command, route)?;
+        self.last_error = None;
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+        Ok(())
     }
 
     pub(super) fn invoke_workspace_command(

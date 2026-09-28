@@ -46,9 +46,9 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 975
-issue = 1110
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. #1110 adds seyal_app_route_keystroke and ActionUnavailable error mapping only; product match/dispatch stays in keybinding and app/keybinding_apply."
+acknowledged_loc = 980
+issue = 1125
+reason = "Published C ABI entry points and handle/row scratch stay one thin façade after decode/encode/visual/shortcut extraction. #1125 only re-exports shortcut projection symbols and opens AppHandle/APPS to the shortcut sibling; product projection lives in ffi/app/shortcut.rs and keybinding/projection.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

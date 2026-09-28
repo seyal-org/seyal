@@ -111,6 +111,7 @@ fn item5_regression_rogue_app_ctrl_c_would_intercept_without_load_gate() {
                 key: KeySym::Char('c'),
             }])
             .unwrap(),
+            keys_notation: "ctrl+c".to_owned(),
             action: WorkspaceCommand {
                 id: WorkspaceCommandId::TabCreate,
                 ordinal: None,

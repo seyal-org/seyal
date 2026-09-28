@@ -277,6 +277,8 @@ pub enum BindingSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledBinding {
     pub sequence: BindingSequence,
+    /// Config / builtin notation retained for §11 hints (never live input).
+    pub keys_notation: String,
     pub action: WorkspaceCommand,
     pub context: BindingContext,
     pub source: BindingSource,

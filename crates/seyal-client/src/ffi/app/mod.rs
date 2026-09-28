@@ -6,6 +6,7 @@
 mod decode;
 mod encode;
 mod pane_region;
+mod shortcut;
 mod visual;
 
 #[cfg(test)]
@@ -30,6 +31,10 @@ use encode::{
 };
 
 pub use pane_region::seyal_app_pane_region;
+pub use shortcut::{
+    seyal_app_invoke_workspace_command, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
+    seyal_app_shortcut_item,
+};
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
@@ -240,8 +245,8 @@ impl SeyalAppRow {
     }
 }
 
-struct AppHandle {
-    root: ApplicationRoot,
+pub(super) struct AppHandle {
+    pub(super) root: ApplicationRoot,
     output: Vec<u8>,
     composer_draft: Vec<u8>,
     ax_nodes: Vec<SeyalAppAxNode>,
@@ -261,7 +266,7 @@ struct AppHandle {
 }
 
 thread_local! {
-    static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
+    pub(super) static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
 impl SeyalAppSnapshot {

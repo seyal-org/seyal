@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::theme::{parse_toml, ui_config_path, TomlError, TomlValue};
 
@@ -19,6 +20,12 @@ const KNOWN_FIELDS: &[&str] = &["keys", "action", "context", "ordinal"];
 /// Same file selection as SPEC-006 §21.3 / `input_policy_config_path`.
 pub fn keybinding_config_path() -> Option<std::path::PathBuf> {
     ui_config_path()
+}
+
+/// Process-global cold table (SPEC-024 R2.3). Shared by routing and §11 projection.
+pub fn process_keybinding_table() -> &'static KeybindingTable {
+    static TABLE: OnceLock<KeybindingTable> = OnceLock::new();
+    TABLE.get_or_init(|| load_keybinding_table_from_path(keybinding_config_path().as_deref()))
 }
 
 pub fn load_keybinding_table_from_path(path: Option<&Path>) -> KeybindingTable {
@@ -132,6 +139,7 @@ fn resolve_conflicts(
         .flatten()
         .map(|entry| CompiledBinding {
             sequence: entry.sequence,
+            keys_notation: entry.keys_notation,
             action: entry.action.expect("bind entries retain WorkspaceCommand"),
             context: entry.context,
             source: entry.source,
