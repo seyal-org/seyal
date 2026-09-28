@@ -507,10 +507,10 @@ fn outstanding_budget_backpressure_before_spawn() {
     let deadline = Instant::now() + Duration::from_secs(5);
     while results.len() < 6 && Instant::now() < deadline {
         h.pump();
-        if let Ok((kind, payload)) = try_frame(&mut h) {
-            if kind == MessageType::CreateExecutionResult as u16 {
-                results.push(CreateExecutionResult::decode(&payload).unwrap());
-            }
+        if let Ok((kind, payload)) = try_frame(&mut h)
+            && kind == MessageType::CreateExecutionResult as u16
+        {
+            results.push(CreateExecutionResult::decode(&payload).unwrap());
         }
     }
     assert_eq!(results.len(), 6, "expected six correlated results");

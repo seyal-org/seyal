@@ -39,7 +39,7 @@ pub(super) fn resolve_reconnect(
     let Some(recorded) = recorded else {
         return ReconnectPlan::NoRecord;
     };
-    if listed.iter().any(|id| *id == recorded) {
+    if listed.contains(&recorded) {
         ReconnectPlan::BindRecorded(recorded)
     } else {
         ReconnectPlan::RecordedMissing

@@ -381,18 +381,18 @@ impl ProvisioningSession {
             PendingKind::Create => {
                 self.last_failure = Some((intent.pane, ProvisioningFailure::AttachFailed));
                 // Spawn succeeded, attach failed → try dispose attach (§6.3).
-                if let Some(execution) = execution {
-                    if still_listed {
-                        let mut intent = intent;
-                        intent.phase = IntentPhase::Disposing {
-                            execution,
-                            attached: false,
-                        };
-                        intent.intent_alive = false;
-                        let dispose_id = intent.request_id;
-                        self.insert_pending(owner, dispose_id, PendingKind::DisposeAttach, intent);
-                        return vec![ProvisioningEffect::AttachController { owner, execution }];
-                    }
+                if let Some(execution) = execution
+                    && still_listed
+                {
+                    let mut intent = intent;
+                    intent.phase = IntentPhase::Disposing {
+                        execution,
+                        attached: false,
+                    };
+                    intent.intent_alive = false;
+                    let dispose_id = intent.request_id;
+                    self.insert_pending(owner, dispose_id, PendingKind::DisposeAttach, intent);
+                    return vec![ProvisioningEffect::AttachController { owner, execution }];
                 }
             }
             PendingKind::Terminate => {}
