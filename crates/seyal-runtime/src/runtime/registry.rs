@@ -131,21 +131,33 @@ impl Runtime {
     /// transaction (CapabilityPolicy + ShellIntegrationPolicy apply inside).
     ///
     /// A launch-policy failure returns before spawn: zero published executions
-    /// and no inherited descriptors.
+    /// and no inherited descriptors. Failures encode as SPEC-004
+    /// `17 LaunchPolicyRejected` (see [`crate::encode_launch_policy_failure`]);
+    /// success-after-fallback sets `Created.detail_code` warning bits only.
     pub fn create_interactive_execution(
         &mut self,
         size: WindowSize,
-    ) -> Result<ExecutionId, RuntimeError> {
-        let resolution = crate::launch_policy::resolve_default_interactive()?;
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        let resolution = match crate::launch_policy::resolve_default_interactive() {
+            Ok(resolution) => resolution,
+            Err(failure) => {
+                // Sole create-path failure encoding: code 17 (never 14).
+                let _wire = crate::encode_launch_policy_failure(failure);
+                return Err(RuntimeError::LaunchPolicy(failure));
+            }
+        };
         if !self.config.capability_policy.is_available() {
-            return Err(RuntimeError::LaunchPolicy(
-                crate::LaunchPolicyFailure::CapabilityUnavailable,
-            ));
+            let failure = crate::LaunchPolicyFailure::CapabilityUnavailable;
+            let _wire = crate::encode_launch_policy_failure(failure);
+            return Err(RuntimeError::LaunchPolicy(failure));
         }
-        // Warnings are count-only until L3; never carry rejected paths.
-        let _warning_count = resolution.warnings.len();
+        let wire = crate::encode_created_warnings(&resolution.warnings);
         let command = crate::launch_policy::command_spec_from_policy(&resolution);
-        self.create_execution(command, size)
+        let execution_id = self.create_execution(command, size)?;
+        Ok(crate::InteractiveCreateOutcome {
+            execution_id,
+            detail_code: wire.detail_code,
+        })
     }
 
     pub fn create_execution(

@@ -21,6 +21,7 @@ mod app;
 mod display;
 mod errors;
 mod input;
+mod launch_policy;
 mod session;
 mod types;
 
@@ -102,6 +103,10 @@ pub use input::{
     seyal_bridge_propose_geometry, seyal_bridge_retry_resize, seyal_bridge_submit_composer,
     seyal_bridge_submit_host_search, seyal_bridge_submit_host_selection, seyal_bridge_submit_key,
     seyal_bridge_submit_mouse, seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
+};
+#[allow(unused_imports)]
+pub use launch_policy::{
+    seyal_launch_policy_failure_copy, seyal_launch_policy_warning_copy, SeyalLaunchPolicyCopy,
 };
 #[allow(unused_imports)]
 pub use session::{

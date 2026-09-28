@@ -12,6 +12,7 @@ pub mod app;
 pub mod chrome;
 pub mod composer;
 pub mod input_policy;
+pub mod launch_policy_ux;
 pub mod palette;
 pub mod pane_layout;
 pub mod presentation;
@@ -62,6 +63,7 @@ pub use ffi::{
     seyal_app_theme, seyal_app_visual, seyal_app_visual_warning, seyal_bridge_adopt_handle,
     seyal_bridge_disconnect_handle, seyal_bridge_ensure_prepared, seyal_bridge_frame,
     seyal_bridge_poll, seyal_bridge_select, seyal_bridge_set_runtime_dir,
+    seyal_launch_policy_failure_copy, seyal_launch_policy_warning_copy,
     test_register_pending_client,
 };
 

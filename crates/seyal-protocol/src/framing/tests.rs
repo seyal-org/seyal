@@ -140,6 +140,22 @@ fn host_selection_round_trip() {
 }
 
 #[test]
+fn launch_policy_rejected_is_code_17_and_15_16_stay_unknown() {
+    assert_eq!(ErrorCode::LaunchPolicyRejected as u16, 17);
+    assert_eq!(
+        ErrorCode::from_u16(17),
+        Some(ErrorCode::LaunchPolicyRejected)
+    );
+    assert_eq!(ErrorCode::from_u16(14), Some(ErrorCode::InternalFailure));
+    assert_eq!(
+        ErrorCode::from_u16(15),
+        None,
+        "codes 15/16 belong to the ADR-017 stack and stay unknown here"
+    );
+    assert_eq!(ErrorCode::from_u16(16), None);
+}
+
+#[test]
 fn input_borrows_payload_and_enforces_bound() {
     let payload = InputRef {
         attachment_id: attach_id(),

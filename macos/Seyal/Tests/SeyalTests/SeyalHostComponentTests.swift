@@ -1262,6 +1262,25 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertGreaterThan(fallback.warning_count, 0)
     }
 
+    /// #1119: Swift only renders Rust-owned launch-policy copy (ADR-015).
+    func testLaunchPolicyProductCopyRendersRustOwnedStrings() {
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 2),
+            "Shell unavailable"
+        )
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 3),
+            "Working directory unavailable"
+        )
+        XCTAssertFalse(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 1).contains("/")
+        )
+        let warnings = LaunchPolicyProductCopy.warningMessages(detailCode: 0b11)
+        XCTAssertEqual(warnings.count, 2)
+        XCTAssertTrue(warnings[0].contains("default shell"))
+        XCTAssertTrue(warnings[1].contains("home directory"))
+    }
+
     @MainActor
     func testColdConfigMaterialPreferenceRealizesOnVisualEffectView() throws {
         let dir = FileManager.default.temporaryDirectory
