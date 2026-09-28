@@ -203,13 +203,6 @@ impl Workspace {
             .active_tab)
     }
 
-    /// The active Window's last Tab cannot be closed. Closing it would leave a
-    /// zero-Tab Window, which is not a W1 close-window path.
-    pub(super) fn allows_tab_close(&self) -> bool {
-        self.active_window()
-            .is_some_and(|window| window.tabs.len() > 1)
-    }
-
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
         let window_id = self
             .windows
@@ -232,37 +225,6 @@ impl Workspace {
             .ok_or(ShellError::UnknownWindow)?;
         window.active_tab = tab.id;
         window.tabs.push(tab);
-        Ok(())
-    }
-
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        // One Tab in the Workspace fails closed before the id is resolved, so a
-        // stale id and the real last Tab report the same cause.
-        if self.tab_count() <= 1 {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(window_index) = self
-            .windows
-            .iter()
-            .position(|window| window.tabs.iter().any(|tab| tab.id == id))
-        else {
-            return Err(ShellError::UnknownTab);
-        };
-        if self.windows[window_index].tabs.len() <= 1 {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(tab_index) = self.windows[window_index]
-            .tabs
-            .iter()
-            .position(|tab| tab.id == id)
-        else {
-            return Err(ShellError::UnknownTab);
-        };
-        self.windows[window_index].tabs.remove(tab_index);
-        if self.windows[window_index].active_tab == id {
-            let replacement = tab_index.min(self.windows[window_index].tabs.len() - 1);
-            self.windows[window_index].active_tab = self.windows[window_index].tabs[replacement].id;
-        }
         Ok(())
     }
 
@@ -347,21 +309,6 @@ impl Tab {
             root: PaneTree::Leaf(pane_id),
             focused: pane_id,
         }
-    }
-
-    /// The last Pane of a Tab cannot be closed.
-    pub(super) fn allows_pane_close(&self) -> bool {
-        self.panes.len() > 1
-    }
-
-    /// `ClosePane` of the focused Pane would be accepted: not the last Pane
-    /// and not bound to an execution.
-    pub(super) fn allows_focused_pane_close(&self) -> bool {
-        self.allows_pane_close()
-            && self
-                .panes
-                .get(&self.focused)
-                .is_some_and(|pane| pane.execution.is_none())
     }
 
     #[cfg(test)]

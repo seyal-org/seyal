@@ -27,7 +27,7 @@ mod unpresented_tests;
 
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::chrome::{
     AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
@@ -221,6 +221,9 @@ pub enum AppAction {
         id: TabId,
     },
     CreateTab,
+    CloseWindow {
+        id: WindowId,
+    },
     CloseTab {
         id: TabId,
     },
@@ -622,6 +625,7 @@ impl ApplicationRoot {
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => self.create_tab(),
+            AppAction::CloseWindow { id } => self.close_window(id),
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
@@ -738,6 +742,7 @@ pub(super) fn chrome_error(error: ChromeError) -> AppError {
 pub(super) fn close_tab_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
+        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownChromeTab,
     }
 }
@@ -746,6 +751,7 @@ pub(super) fn close_pane_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
         ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
+        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownPane,
     }
 }
