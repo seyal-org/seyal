@@ -34,21 +34,33 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 765
-issue = 1110
-reason = "ApplicationRoot façade retains types/snapshot/apply after chrome/composer/palette/recovery/session/accessibility/keybinding_apply extraction; #1110 adds ActionUnavailable and palette-modal CreateTab/OpenPalette gates only. Keybinding match and WorkspaceCommand dispatch live in keybinding_apply.rs."
+acknowledged_loc = 830
+issue = 1127
+reason = "ApplicationRoot façade keeps keybinding ActionUnavailable from #1110 and goto/navigation errors from #1118. Match and goto reducers stay in keybinding_apply.rs and goto_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 993
+issue = 1118
+reason = "N2 navigate/palette address tests already landed this suite in the cohesion band; #1118 does not grow the file (goto coverage lives in goto_tests.rs). Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 975
-issue = 1110
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. #1110 adds seyal_app_route_keystroke and ActionUnavailable error mapping only; product match/dispatch stays in keybinding and app/keybinding_apply."
+acknowledged_loc = 972
+issue = 1127
+reason = "Published C ABI façade keeps #1110 keystroke routing. Error-number mapping, including #1118 goto codes, lives in error_code.rs so this file stays under the hard line ceiling."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 817
+issue = 1118
+reason = "N2 address-carrying palette rows already placed this module in the cohesion band; #1118 does not grow it (goto is a sibling module). Ceiling matches current rustfmt-normalized LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 953
+issue = 1118
+reason = "N1/N2 resolver and Navigate commit tests already landed this suite in the cohesion band; #1118 does not grow it. Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

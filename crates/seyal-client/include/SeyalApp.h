@@ -81,8 +81,11 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_BLOCK = 45,
     SEYAL_APP_ACTION_CLEAR_BLOCK_SELECTION = 46,
     /*
-     * Global keyboard-first command palette (#932). The command list is never
-     * sent by the host. Error codes 26-29.
+     * Global keyboard-first command palette (#932 / SPEC-022 N2).
+     * RUN_PALETTE: when the selected row carries a ResourceAddress, payload =
+     *   address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
+     *   Verb/chrome rows send payload_len = 0; Rust runs the frozen command.
+     * Navigation never re-resolves by ordinal. Error codes 26-27, 34-43.
      */
     SEYAL_APP_ACTION_OPEN_PALETTE = 47,
     SEYAL_APP_ACTION_SET_PALETTE_QUERY = 48,
@@ -118,7 +121,29 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
-    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /**
+     * Atomic Navigate(address) (SPEC-022 §4). Payload is required:
+     * address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
+     * Rejected navigate leaves focus unchanged. Error codes 34-43.
+     */
+    SEYAL_APP_ACTION_NAVIGATE = 58,
+    /*
+     * Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+     * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
+     * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
+     * while open. Error codes 44-46.
+     */
+    SEYAL_APP_ACTION_OPEN_GOTO = 59,
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 60
+};
+
+/* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
+enum SeyalAppGotoScope {
+    SEYAL_APP_GOTO_WORKSPACES = 0,
+    SEYAL_APP_GOTO_TABS = 1,
+    SEYAL_APP_GOTO_PANES = 2,
+    SEYAL_APP_GOTO_SESSIONS = 3
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -452,6 +477,16 @@ typedef struct SeyalAppRow {
     const uint8_t *detail;
     uint32_t detail_len;
     uint32_t reserved2;
+    /*
+     * Optional ResourceAddress (SPEC-022 / N2). address_len == 0 means none.
+     * Palette navigation rows set these; other row kinds leave them zero.
+     * address_bytes holds up to 48 payload bytes (Pane = three UUIDs).
+     */
+    uint16_t address_version;
+    uint16_t address_kind;
+    uint16_t address_len;
+    uint16_t address_pad;
+    uint8_t address_bytes[48];
 } SeyalAppRow;
 
 /*
@@ -471,6 +506,10 @@ typedef struct SeyalAppPalette {
 } SeyalAppPalette;
 
 #define SEYAL_APP_PALETTE_OPEN 1u
+/** Overlay is projecting the navigation-only goto surface (N4). */
+#define SEYAL_APP_PALETTE_GOTO 2u
+/** Goto enumeration exceeded the bound; results are truncated (SPEC-022 R7.6). */
+#define SEYAL_APP_PALETTE_TRUNCATED 4u
 
 uint64_t seyal_app_create(void);
 int32_t seyal_app_destroy(uint64_t handle);

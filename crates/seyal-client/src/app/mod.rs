@@ -9,6 +9,7 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod goto_apply;
 mod keybinding_apply;
 mod palette_apply;
 mod recovery_apply;
@@ -33,6 +34,8 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::goto::{GotoScope, GotoSnapshot, GotoState};
+use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
@@ -79,6 +82,9 @@ pub enum AppError {
     UnknownChromeTab,
     PaletteNotOpen,
     PaletteNoSelection,
+    GotoNotOpen,
+    GotoNoSelection,
+    GotoUnsupportedScope,
     TabCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
@@ -87,6 +93,16 @@ pub enum AppError {
     CannotCloseBoundPane,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     ActionUnavailable,
+    NavigationUnsupportedKind,
+    NavigationDenied,
+    NavigationUnknownWorkspace,
+    NavigationUnknownTab,
+    NavigationUnknownPane,
+    NavigationUnknownExecution,
+    NavigationNotComposed,
+    NavigationTargetTerminated,
+    NavigationTargetUnbound,
+    NavigationAmbiguousTarget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,11 +287,44 @@ pub enum AppAction {
         fence: AppFence,
         delta: i32,
     },
-    /// Run the command bound to the current selection, then close.
+    /// Run the selected palette row. When `address` is `Some`, Navigate that
+    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
+    /// selected verb/chrome command. Never re-resolves by ordinal.
     RunPalette {
         fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    /// Atomic Navigate(address) commit (SPEC-022 §4).
+    Navigate {
+        fence: AppFence,
+        address: ResourceAddress,
     },
     ClosePalette {
+        fence: AppFence,
+    },
+    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+    OpenGoto {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoScope {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MoveGotoSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected goto row by stored/host-echoed address.
+    RunGoto {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    CloseGoto {
         fence: AppFence,
     },
     /// Bind the inspector to one Block of the focused Pane (#935).
@@ -333,6 +382,7 @@ pub struct AppSnapshot {
     pub composer: Option<ComposerSnapshot>,
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
+    pub goto: GotoSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -360,6 +410,7 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    goto: GotoState,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -399,6 +450,7 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            goto: GotoState::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
@@ -442,12 +494,10 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
-            &shell,
-            &chrome,
-            self.shell.allows_tab_creation(),
-            self.shell.allows_pane_splitting(),
-        );
+        // When goto is open, the existing overlay ABI carries goto rows
+        // (one overlay component; ADR-019 §8).
+        let palette = self.overlay_palette_snapshot();
+        let goto = self.goto.snapshot();
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
         AppSnapshot {
@@ -480,6 +530,7 @@ impl ApplicationRoot {
             composer,
             chrome,
             palette,
+            goto,
         }
     }
 
@@ -636,8 +687,18 @@ impl ApplicationRoot {
             AppAction::MovePaletteSelection { fence, delta } => {
                 self.move_palette_selection(fence, delta)
             }
-            AppAction::RunPalette { fence } => self.run_palette(fence),
+            AppAction::RunPalette { fence, address } => self.run_palette(fence, address),
+            AppAction::Navigate { fence, address } => {
+                self.require_fence(fence)?;
+                self.navigate_address(address)
+            }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
+            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
+            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
+            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
+            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
+            AppAction::CloseGoto { fence } => self.close_goto(fence),
         };
         match result {
             Ok(()) => {
