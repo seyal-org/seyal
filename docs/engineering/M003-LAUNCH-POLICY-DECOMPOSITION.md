@@ -8,9 +8,9 @@
   (Proposed), [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md)
   (Proposed), ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1,
   [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
-- **Neighbor:** Proposed ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)) owns the create/dispose seam and
+- **Neighbor:** ADR-017 (Proposed, on `master`) owns the create/dispose seam and
   profile selector. These children supply the policy object that seam resolves.
-  Do not edit ADR-017 files on that PR from this workstream.
+  Do not edit ADR-017 or its SPEC amendments from this workstream.
 
 **Hard gate:** no child below may be marked **Ready** before ADR-020 and
 SPEC-023 are accepted on `master`. Children that call the provisioning create
@@ -159,7 +159,7 @@ provisioning consume path also needs ADR-017 P1/P3.
 
 **Tests**
 
-- SPEC-023 §12 items 15–16; snapshot/unit tests for each failure class;
+- SPEC-023 §12 items 15–16, and item 17 when L0 has merged before L3 (otherwise item 17 belongs to the L0 consumer child); snapshot/unit tests for each failure class;
   headed smoke that invalid home / exhausted shell fallback shows the bounded
   state.
 
@@ -223,7 +223,7 @@ fields.
 
 ## Non-goals for all children
 
-- Production edits to proposed ADR-017 files on PR #1056;
+- Edits to ADR-017 or its SPEC amendments;
 - Trusted OSC CWD (#686);
 - Remote shell integration;
 - Persistence of dead process state;

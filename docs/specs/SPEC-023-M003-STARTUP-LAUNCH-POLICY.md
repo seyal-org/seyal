@@ -228,9 +228,7 @@ LaunchPolicyWarning =
   `CwdOverrideInvalid`. All other bits are reserved and must be 0. No other
   transport for launch-policy warnings is authorized. Implementations must
   not invent interim wire encodings of paths or secrets in `detail_code`. The
-  interim ban covers everything before L0. L0 (ADR-020 §3.10) owns adding
-  code 17; L3 switches to it in the same PR, so the two mappings never
-  coexist.
+  interim ban covers everything before L0. L0 (ADR-020 §3.10) owns adding code 17 and the `Created` warning bits; the PR that consumes L0 (L3, or the consumer child filed together with L0 if L0 merges after L3) switches both failures and warnings to the L0 encoding and removes the code-14 mapping in that same PR, so the two mappings never coexist.
 - User-visible strings are bounded and non-secret.
 - Protocol payloads carry no paths or env data.
 

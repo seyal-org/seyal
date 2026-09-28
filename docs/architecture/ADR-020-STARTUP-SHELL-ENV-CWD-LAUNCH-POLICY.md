@@ -286,9 +286,7 @@ Mapping rules:
   invent interim wire encodings of paths or secrets in `detail_code`. The
   interim ban covers everything before L0.
 - **Removal boundary.** The `14 InternalFailure` mapping is authoritative only
-  until L0 merges. L3 then switches every `LaunchPolicyFailure` to
-  `17 LaunchPolicyRejected` in the same PR that consumes it; the two mappings
-  never coexist. If another specification claims 17 first, L0 takes the next
+  until L0 merges. The PR that consumes L0 (L3 if L0 has merged before L3, otherwise the consumer child filed together with L0) switches every `LaunchPolicyFailure` to `17 LaunchPolicyRejected` with the §3.10 detail codes and sets the §3.10 `Created.detail_code` warning bits, and removes the code-14 mapping in that same PR; the two mappings never coexist. If another specification claims 17 first, L0 takes the next
   free code and updates this section.
 - Portable Rust product authority owns user-visible copy: short, non-secret strings such as "Shell unavailable", "Working directory unavailable", or "Using the default shell because the configured shell is invalid".
 - Native AppKit renders that bounded state only; it does not reinterpret OS error strings.
@@ -351,7 +349,7 @@ Costs / honest limits:
 
 - **New:** [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (Proposed) — observable resolution, validation, failure and test contract.
 - **Cross-reference only:** SPEC-003 create transaction consumes `EffectiveLaunchPolicy`→`CommandSpec`; SPEC-009 helper env remains the Runtime-process contract, not the child-shell contract.
-- **Do not edit in this PR:** proposed ADR-017 files that exist only on PR #1056.
+- **Do not edit in this PR:** ADR-017 (Proposed, on `master`) or its SPEC amendments.
 - **Decomposition:** [`../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md`](../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md).
 
 ## 7. Security and privacy
