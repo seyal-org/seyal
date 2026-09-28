@@ -196,34 +196,37 @@ Validation, failing closed as malformed:
 
 LineIds are not required to be monotonic. Insert-line, reverse-index, and CSI T may reorder unique ids. The row order is the visible viewport order.
 
-**What the frame describes.** The ids are the active screen rows of the display generation just published (`Terminal::line_id` on `current()`), one id per visible row. While the alternate screen is active the frame is not suppressed and it does not carry the hidden primary buffer. The client pairs that vector with the committed display by generation and row count only. A Flow running-Block clip consumes a paired vector; it does not read a hidden primary buffer, and it draws no clip when the vector is absent or unpaired.
+**What the frame describes.** The ids are the active screen rows of the display generation just published (`Terminal::line_id` on `current()`), one id per visible row. While the alternate screen is active the frame is not suppressed and it does not carry the hidden primary buffer. ADR-004 / SPEC-001 give both screens one allocator that never reuses a `LineId`, so a primary `start_line` cannot match an alternate-screen row. The client pairs that vector with the committed display by generation and row count only. A Flow running-Block clip consumes a paired vector; it does not read a hidden primary buffer, and it draws no clip when the vector is absent or unpaired.
 
-**Publish rule.** Type 35 is bounded control output. It is not a presentation-batch member and it is not replaced when a pending presentation batch is superseded.
+**Publish rule.** Type 35 is bounded control output. It is not a presentation-batch member. Superseding a pending presentation batch does not delete a type 35 frame that has already started writing. A not-yet-started type 35 frame is replaced by a newer one, as bounded below.
 
-- Runtime enqueues at most one type 35 frame after a snapshot batch is successfully enqueued, or after a delta enqueue returns `Queued`, for that same generation, and only for a viewer that advertised bit 9.
-- The frame is queued on the after-display control queue. It is written only between complete display frames, after the display batch that was pending at flush time, and after any mandatory control frames that are already allowed to preempt between complete frames. It is never inserted into a partial display frame.
+- Runtime prepares at most one type 35 frame after a snapshot batch is successfully enqueued, or after a delta enqueue returns `Queued`, for that same generation, and only for a viewer that advertised bit 9. Runtime sets bit 9 in `ServerHello.server_capabilities` when it implements this message.
+- Each connection holds at most one not-yet-started type 35 frame. Enqueuing a newer one replaces the older not-yet-started frame; a partially written type 35 frame is completed first. Type 35 therefore retains no generation history and cannot by itself exhaust the mandatory control budget or cause slow-client disconnection.
+- Runtime must not write a type 35 frame for generation G until the last frame of the display batch that carried G has been completely written, or that batch has been superseded by a newer-generation snapshot whose last frame has been completely written. A mandatory control frame that preempts between complete display frames does not release queued type 35 frames. Type 35 is never written inside a partially written frame.
 - A `Skipped` or `NeedSnapshot` delta result does not send type 35 for that attempt.
 - A viewer that did not advertise bit 9 never receives type 35.
 - If any visible-row LineId is missing or zero, Runtime skips the entire frame. It does not omit individual ids and it does not send a shorter vector.
-- One frame per successfully queued snapshot or queued delta is the rule, including when the id vector is unchanged. The payload bound above is the cost of that rule.
+- The payload bound above is the cost of publishing the full vector, including when the ids are unchanged from the previous frame.
 
-A superseded presentation batch can therefore be followed on the wire by a type 35 frame for an older generation. The generation field, not queue membership, is what the client trusts.
+If an older type 35 frame is already on the wire when a newer snapshot supersedes its display batch, the client trusts the generation field, not queue membership.
 
-**Client pairing.** The safe presentation is no running-Block primary clip.
+**Client pairing.** The safe presentation is no running-Block primary clip. Pairing and clearing are owned by the Rust local client. The native host receives only a paired vector or none and must not pair, store, or infer LineIds.
 
+- The stored vector is scoped to one attachment. `Detach`, `Detached`, a new `Attached`, reconnect, and disconnect clear it before any display of the new attachment is projected.
 - Commit the vector only when `generation` equals the committed display generation and `row_count` equals the committed viewport row count.
 - A strictly older generation than the last committed vector is ignored.
-- The same generation with a different id vector than the one already committed is a protocol failure.
-- Any other mismatch (newer than the committed display, row count differs, or the frame never arrives) clears any stored vector and draws no primary clip.
+- A type 35 frame whose `generation` is newer than the committed display generation is discarded, not buffered.
+- The same generation with a different id vector than the one already committed is a protocol failure. Protocol failure means the client's existing fatal protocol error, which closes the connection.
+- Any other mismatch (row count differs, or the frame never arrives) clears any stored vector and draws no primary clip.
 - When the committed display generation advances and the stored vector's generation no longer matches, the client clears the vector before projection. Cells of the new generation are never painted with the previous vector.
 
-**Legacy hello.** SPEC-004 forbids probing an older Runtime by sending an unknown message type. It does not forbid a bounded ClientHello retry. An older Runtime rejects unknown ClientHello capability bits with `MalformedPayload` instead of ignoring them (`session.rs`). A newer client therefore uses this ordered fallback, each step at most once, and only after `MalformedPayload`:
+**Legacy hello.** SPEC-004 forbids probing an older Runtime by sending an unknown message type. It does not forbid a bounded ClientHello retry. An older Runtime rejects unknown ClientHello capability bits with `MalformedPayload` instead of ignoring them (`session.rs`). A newer client therefore uses this ordered fallback, each step at most once, and only after a decoded `Error` with `error_code = MalformedPayload` and `offending_message_type = ClientHello` for a ClientHello the client itself encoded, each retry on a fresh connection:
 
-1. Advertise the full set, including bit 9 and `CAP_EXTENDED_TERMINAL_KEY`.
+1. Advertise bit 9 and `CAP_EXTENDED_TERMINAL_KEY`.
 2. Reconnect once without bit 9. A Runtime that accepts extended keys and rejects only bit 9 keeps extended-key handling.
-3. Reconnect once without bit 9 and without `CAP_EXTENDED_TERMINAL_KEY`. This second drop is the already-specified pre-V2 extended-key fallback, not a new reduction.
+3. Reconnect once without bit 9 and without `CAP_EXTENDED_TERMINAL_KEY`. This second drop is the existing extended-key compatibility fallback referenced by ADR-009, not a new reduction.
 
-Any other error does not retry. The client does not loop and does not send type 35 until bit 9 is accepted.
+This chain does not compose with ADR-009's `CAP_COMMAND_BLOCK_DURATION` retry: until that ADR's fallback order is amended in a separate ADR PR, a client must not request bit 8 and bit 9 in the same ClientHello. Any other error, or exhaustion of these retries, returns the final error without further retry. A client never sends type 35. Runtime rejects a client-sent type 35 with `UnknownMessage`.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
@@ -555,12 +558,15 @@ Normative only on acceptance of #1083. The production proof lives on the #865 im
 - malformed payloads: generation 0, non-zero reserved, `row_count` 0 or greater than 256, length not `12 + 8 × row_count`, a zero id, a duplicate id;
 - a non-monotonic vector of unique ids is accepted, in viewport order;
 - a viewer that did not advertise bit 9 never receives type 35;
-- a viewer that advertised bit 9 receives at most one type 35 frame after a successfully queued snapshot or a `Queued` delta, and none after `Skipped` or `NeedSnapshot`;
+- a viewer that advertised bit 9 receives a type 35 frame only after a successfully queued snapshot or a `Queued` delta, and none after `Skipped` or `NeedSnapshot`;
 - a missing or zero id skips the whole frame;
-- the client ignores a strictly older generation, treats a same-generation id conflict as a protocol failure, and clears the vector when the generation or row count does not match the committed display;
+- under sustained output to a non-reading client, queued type 35 bytes never exceed one frame plus one partially written frame, and mandatory control admission is unaffected;
+- Runtime does not write a type 35 frame for generation G before the last frame of G's display batch, or of the newer snapshot that superseded it, has been completely written; a preempting mandatory control frame does not release it early;
+- the client ignores a strictly older generation, discards a newer generation without buffering it, treats a same-generation id conflict as a fatal protocol error that closes the connection, and clears the vector when the row count does not match the committed display;
+- `Detach`, `Detached`, a new `Attached`, reconnect, and disconnect clear the stored vector before the next attachment is projected;
 - a display generation advance without a matching frame clears the vector and draws no running-Block primary clip;
 - while the alternate screen is active the frame carries the visible viewport ids of that generation and does not carry the hidden primary buffer;
-- hello fallback performs at most the two `MalformedPayload` retries in §8.1, drops bit 9 before `CAP_EXTENDED_TERMINAL_KEY`, and does not retry other errors;
+- hello fallback retries only on `MalformedPayload` for a ClientHello the client encoded, on a fresh connection, drops bit 9 before `CAP_EXTENDED_TERMINAL_KEY`, does not request bit 8 and bit 9 together, and does not retry other errors;
 - the frame contains no command text.
 
 ## 17. Acceptance gate
