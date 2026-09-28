@@ -361,7 +361,9 @@ pub extern "C" fn seyal_app_route_keystroke(
             composer_focused != 0,
             composition_active != 0,
         ) {
-            Ok(RouteOutcome::Matched { .. }) => SEYAL_APP_ROUTE_CONSUMED,
+            Ok(RouteOutcome::Matched { .. }) | Ok(RouteOutcome::PrefixWait) => {
+                SEYAL_APP_ROUTE_CONSUMED
+            }
             Ok(RouteOutcome::ReservedCommand) | Ok(RouteOutcome::UnmatchedCommand) => {
                 SEYAL_APP_ROUTE_NATIVE_COMMAND
             }
