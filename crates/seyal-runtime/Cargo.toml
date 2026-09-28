@@ -25,6 +25,9 @@ seyal-protocol = { path = "../seyal-protocol" }
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.189"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "=0.2.189"
+
 [dev-dependencies]
 stats_alloc = "=0.1.10"
 

@@ -64,16 +64,16 @@ pub fn build_base_env(
     env.push((OsString::from("LOGNAME"), account_name.to_os_string()));
     env.push((OsString::from("SHELL"), program.as_os_str().to_os_string()));
     env.push((OsString::from("PATH"), OsString::from(DEFAULT_PATH)));
-    if let Some(dir) = tmpdir {
-        if dir.is_absolute() {
-            env.push((OsString::from("TMPDIR"), dir.as_os_str().to_os_string()));
-        }
+    if let Some(dir) = tmpdir
+        && dir.is_absolute()
+    {
+        env.push((OsString::from("TMPDIR"), dir.as_os_str().to_os_string()));
     }
     for key in ["LANG", "LC_CTYPE"] {
-        if let Some(value) = locale.get(key) {
-            if locale_value_ok(&value) {
-                env.push((OsString::from(key), value));
-            }
+        if let Some(value) = locale.get(key)
+            && locale_value_ok(&value)
+        {
+            env.push((OsString::from(key), value));
         }
     }
     env
