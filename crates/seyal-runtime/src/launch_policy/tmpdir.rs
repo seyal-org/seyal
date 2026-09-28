@@ -1,6 +1,8 @@
 //! Darwin per-user temporary directory for child `TMPDIR` (SPEC-023 §6).
 
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
 use std::os::unix::ffi::OsStringExt;
