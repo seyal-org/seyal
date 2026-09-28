@@ -118,8 +118,29 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
-    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /*
+     * W4a window actions (ADR-018 §2.2). SELECT_WINDOW / CREATE_WINDOW:
+     * target_execution_lo/hi = WindowId / WorkspaceId. CYCLE_WINDOW: reserved
+     * = 0 next, 1 previous. REPORT_WINDOW_EVENT: target_execution = WindowId,
+     * reserved = event kind (0 became-key … 9 screen/scale). Error 34 = UnknownWindow.
+     */
+    SEYAL_APP_ACTION_SELECT_WINDOW = 58,
+    SEYAL_APP_ACTION_CYCLE_WINDOW = 59,
+    SEYAL_APP_ACTION_CREATE_WINDOW = 60,
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 61
 };
+
+#define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_KEY 1u
+#define SEYAL_APP_WINDOW_EVENT_BECAME_MAIN 2u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_MAIN 3u
+#define SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED 4u
+#define SEYAL_APP_WINDOW_EVENT_MINIATURIZED 5u
+#define SEYAL_APP_WINDOW_EVENT_DEMINIATURIZED 6u
+#define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
+#define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
+#define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
 enum SeyalAppComposerEligibility {
@@ -500,8 +521,9 @@ typedef struct SeyalAppPaneTreeNode {
 
 /*
  * ADR-018 §2.4 native effects in commit order.
- * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
- *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
+ * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
+ *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
+ *       5 QuitCleanupComplete.
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -516,6 +538,7 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
+#define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 5u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u

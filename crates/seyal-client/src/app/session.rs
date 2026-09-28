@@ -240,7 +240,9 @@ impl ApplicationRoot {
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
         self.pending_effects
-            .push(NativeEffect::BoundedDetachThenTerminate);
+            .push(NativeEffect::BoundedDetachThenTerminate {
+                deadline_ms: QUIT_CLEANUP_DEADLINE_MS,
+            });
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
         self.sync_composer_presentation();
@@ -248,8 +250,14 @@ impl ApplicationRoot {
     }
 
     pub(super) fn ack_effect(&mut self) -> Result<(), AppError> {
-        if !self.pending_effects.is_empty() {
-            self.pending_effects.remove(0);
+        if self.pending_effects.is_empty() {
+            return Ok(());
+        }
+        let removed = self.pending_effects.remove(0);
+        // ADR-018 §4: after the host acks BoundedDetachThenTerminate, Rust
+        // signals cleanup-complete so native can reply(toApplicationShouldTerminate).
+        if matches!(removed, NativeEffect::BoundedDetachThenTerminate { .. }) {
+            self.pending_effects.push(NativeEffect::QuitCleanupComplete);
         }
         Ok(())
     }

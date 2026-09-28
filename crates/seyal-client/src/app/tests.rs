@@ -361,18 +361,29 @@ fn tui_controller_without_client_is_authorized_but_has_no_second_pty() {
 #[test]
 fn quit_freezes_and_emits_one_native_effect() {
     let mut root = ApplicationRoot::new();
+    // Drain bootstrap realize/order-front so Quit is the sole pending effect under test.
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
     root.apply(AppAction::Quit).unwrap();
     let snap = root.snapshot();
     assert!(snap.frozen);
     assert_eq!(
         snap.pending_effects.as_slice(),
-        &[NativeEffect::BoundedDetachThenTerminate]
+        &[NativeEffect::BoundedDetachThenTerminate {
+            deadline_ms: QUIT_CLEANUP_DEADLINE_MS
+        }]
     );
     assert_eq!(
         root.apply(AppAction::Focus {
             fence: root.fence()
         }),
         Err(AppError::Frozen)
+    );
+    root.apply(AppAction::AckEffect).unwrap();
+    assert_eq!(
+        root.snapshot().pending_effects.as_slice(),
+        &[NativeEffect::QuitCleanupComplete]
     );
     root.apply(AppAction::AckEffect).unwrap();
     assert!(root.snapshot().pending_effects.is_empty());

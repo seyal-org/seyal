@@ -1,10 +1,10 @@
 //! Shell tab/pane and chrome inspector apply paths.
 
-use seyal_core::{PaneId, TabId, WorkspaceId};
+use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
-use crate::shell::{ShellAction, SplitAxis};
+use crate::shell::{CycleDirection, ShellAction, SplitAxis};
 
 impl ApplicationRoot {
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
@@ -152,6 +152,61 @@ impl ApplicationRoot {
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    pub(super) fn select_window(&mut self, id: WindowId) -> Result<(), AppError> {
+        self.apply_shell(ShellAction::SelectWindow { id })
+            .map_err(|_| AppError::UnknownWindow)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn cycle_window(&mut self, direction: CycleDirection) -> Result<(), AppError> {
+        self.apply_shell(ShellAction::CycleWindow { direction })
+            .map_err(|_| AppError::UnknownWindow)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn create_window(&mut self, workspace: WorkspaceId) -> Result<(), AppError> {
+        let generation = self.shell.containment_generation();
+        self.apply_shell(ShellAction::CreateWindow {
+            workspace,
+            containment_generation: generation,
+        })
+        .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn report_window_event(
+        &mut self,
+        window: WindowId,
+        event: WindowNativeEvent,
+    ) -> Result<(), AppError> {
+        if !self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .any(|entry| entry.id == window)
+        {
+            return Err(AppError::UnknownWindow);
+        }
+        // Disposable presentation input only — never mutates window/tab/pane product state.
+        self.last_window_event = Some((window, event));
+        Ok(())
+    }
+
+    /// Last forwarded window event (W4a tests / host observability).
+    pub fn last_window_event(&self) -> Option<(WindowId, WindowNativeEvent)> {
+        self.last_window_event
     }
 
     pub(super) fn focus_pane(&mut self, id: PaneId) -> Result<(), AppError> {

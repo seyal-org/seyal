@@ -285,6 +285,14 @@ fn effects_emit_in_commit_order() {
         ]
     );
     install_shell(handle, seed_n_windows(1));
+    // Drain bootstrap RealizeWindow + OrderFrontMakeKey from with_shell.
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        while !state.root.snapshot().pending_effects.is_empty() {
+            state.root.apply(crate::app::AppAction::AckEffect).unwrap();
+        }
+    });
     let generation = seyal_app_shell(handle).containment_generation;
     apply_on_handle(
         handle,
