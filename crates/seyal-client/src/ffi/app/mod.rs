@@ -316,6 +316,61 @@ pub extern "C" fn seyal_app_option_as_alt(handle: u64) -> u8 {
     })
 }
 
+/// SPEC-024 §6.2 route result codes for `seyal_app_route_keystroke`.
+pub const SEYAL_APP_ROUTE_FALLTHROUGH: i32 = 0;
+pub const SEYAL_APP_ROUTE_CONSUMED: i32 = 1;
+pub const SEYAL_APP_ROUTE_NATIVE_COMMAND: i32 = 2;
+
+/// Route one already-normalized keystroke (ADR-015). Rust owns the match and
+/// dispatches matched WorkspaceCommands; ApplicationCommand paths write zero
+/// PTY bytes. Swift must not reinterpret product shortcuts.
+///
+/// `modifier_bits`: CMD=1, CTRL=2, SHIFT=4, OPT=8.
+/// `named_key` non-zero means `base` is a NamedKey discriminant (Enter=0…).
+/// `shift_applied` is 0 when absent.
+/// `composer_focused` / `composition_active`: 0 or 1.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_route_keystroke(
+    handle: u64,
+    modifier_bits: u8,
+    named_key: u8,
+    base: u32,
+    shift_applied: u32,
+    composer_focused: u8,
+    composition_active: u8,
+) -> i32 {
+    use crate::keybinding::{NormalizedStroke, RouteOutcome};
+
+    let Some(stroke) =
+        NormalizedStroke::from_ffi(modifier_bits, named_key != 0, base, shift_applied)
+    else {
+        return -4;
+    };
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        match state.root.route_normalized_keystroke(
+            &stroke,
+            composer_focused != 0,
+            composition_active != 0,
+        ) {
+            Ok(RouteOutcome::Matched { .. }) => SEYAL_APP_ROUTE_CONSUMED,
+            Ok(RouteOutcome::ReservedCommand) | Ok(RouteOutcome::UnmatchedCommand) => {
+                SEYAL_APP_ROUTE_NATIVE_COMMAND
+            }
+            Ok(RouteOutcome::CompositionConsumes) | Ok(RouteOutcome::Fallthrough) => {
+                SEYAL_APP_ROUTE_FALLTHROUGH
+            }
+            Err(error) => {
+                let _ = state.root.fail(error);
+                -error_number(error)
+            }
+        }
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_create() -> u64 {
     let handle = allocate_handle();
@@ -915,5 +970,6 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
+        AppError::ActionUnavailable => 34,
     }
 }

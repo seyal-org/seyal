@@ -163,6 +163,14 @@ pub(crate) fn compile_builtin_entries() -> Vec<PendingEntry> {
         .map(|row| {
             let sequence = parse_keys(row.keys_notation)
                 .unwrap_or_else(|_| panic!("builtin keys must parse: {}", row.keys_notation));
+            assert!(
+                !super::load::violates_terminal_passthrough(
+                    sequence.strokes().first(),
+                    row.context
+                ),
+                "builtin {} violates TerminalPassthroughProtected",
+                row.keys_notation
+            );
             let ordinal = row
                 .ordinal
                 .map(|n| Ordinal1To9::new(n).expect("builtin ordinal 1..=9"));
