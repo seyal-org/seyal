@@ -2,11 +2,12 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703
-- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension)
-- **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703; M003 delivery-suspend and capacity amendment under Issue #1162 (2026-09-28)
+- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1162 (M003 per-attachment delivery suspend and capacity)
+- **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`; ADR-018 §5.1 for the §19 delivery-suspend / capacity amendment
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
 - **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
+- **Accepted M003 extension:** §19 per-attachment delivery suspend/resume and revised §5 maxima (types 40–41, capability bit 11) under Issue #1162; satisfies ADR-018 §5.1; Runtime/client implementation is W5 and is **not** part of this amendment.
 
 ## 1. Purpose
 
@@ -63,15 +64,17 @@ Same-UID authentication does not grant attachment or mutation authority. Attachm
 
 ## 5. Authority and hard limits
 
-Roles are `Observer` and `Controller`. An observer may receive display state, request resync and detach. A controller additionally owns input, semantic terminal-key and resize authority. At most one controller lease exists per `ExecutionId`; controller requests never preempt an existing controller.
+Roles are `Observer` and `Controller`. An observer may receive display state, request resync, suspend/resume delivery under §19 and detach. A controller additionally owns input, semantic terminal-key and resize authority. At most one controller lease exists per `ExecutionId`; controller requests never preempt an existing controller.
 
-M001 hard maxima:
+Hard maxima (M001 baselines revised by the §19 / Issue #1162 capacity derivation so
+`MILESTONE-003.md` §8.2 presentation scaling 1/10/50/100 is reachable under
+ADR-018 §5 attachment retention):
 
 | Resource | Maximum |
 |---|---:|
 | local control connections | 16 |
-| live local attachments | 16 |
-| attachments per connection | 1 |
+| live local attachments | 100 |
+| attachments per connection | 100 |
 | controllers per execution | 1 |
 | execution-list entries | 512 |
 | frame payload | 262,144 bytes |
@@ -81,28 +84,78 @@ M001 hard maxima:
 | visible columns | 512 |
 | visible cells | 131,072 |
 
+### 5.1 Capacity derivation (Issue #1162 / ADR-018 §5.1)
+
+The pre-#1162 table allowed one attachment per connection and 16 connections, so
+at most 16 retained leaves. That ceiling is a correctness limit under ADR-018 §5
+Hidden retention, not a tunable budget: it cannot meet the milestone
+1/10/50/100 presentation-scaling row.
+
+Counted quantities and the revised maxima:
+
+1. **Connections (unchanged at 16).** The defect ADR-018 §5.1 names is treating
+   the 16-connection ceiling as a presentation/leaf counter. Prefer one headed
+   client connection carrying many attachments over one connection per Hidden
+   leaf. Sixteen connections remain for the headed GUI plus bounded
+   observer/tool peers; they are not resized by this amendment.
+2. **Live local attachments = 100.** Set to the milestone presentation-scaling
+   maximum so 100 retained Pane leaves are simultaneously attachable. Canonical
+   `TerminalState` remains one per `ExecutionId` (SPEC-003); attachment count is
+   not a second VT or grid authority. Unpresented live executions continue to
+   need no attachment.
+3. **Attachments per connection = 100.** Equal to the live-attachment maximum so
+   one connection can retain every presented leaf without consuming the
+   connection budget as a leaf counter.
+4. **Encoded display bytes.** Frame payload and per-client mandatory outbound
+   control budgets are unchanged (262,144 bytes each). Presentation output is
+   still replaceable and bounded by §11. Under §19, a **suspended** attachment
+   MUST NOT be included in `DisplayDelta` / presentation encode or write fanout
+   for that attachment: Runtime encodes once per execution update where at least
+   one non-suspended attachment needs delivery (§10.4), then delivers only to
+   non-suspended attachments. Suspended attachments therefore contribute **zero**
+   required DisplayDelta encode/write cost. A full visible-grid snapshot at the
+   §5 cell maximum remains chunked within the existing frame payload; this
+   amendment does not raise encode size.
+5. **Client RenderState.** This specification MUST NOT require the client to keep
+   a second grid, a canonical grid, or a disposable RenderState for a suspended
+   attachment. Releasing renderer/GPU resources for an ADR-018 `Hidden` leaf is a
+   **client** fact (ADR-018 §5 / §5.2). On resume, the client reconstructs
+   disposable RenderState only from the bounded snapshot path in §12 / §19.3.
+
+Clients that do not negotiate `CAP_ATTACHMENT_DELIVERY_CONTROL` (§19) keep the
+pre-#1162 behavioral envelope for delivery (no suspend) and must still obey the
+revised capacity table when attaching. Fail closed: without the capability there
+is no suspend, and existing non-suspend §5 / §6 / §11 / §12 behavior applies.
+
 SPEC-003 accepted-but-unwritten input budgets remain authoritative in addition to these limits. SPEC-006 separately bounds Pass 7 client-side accepted-but-not-fully-written wire bytes, unresolved `ResizeRequest` bookkeeping and the single applied-awaiting-projection fence.
 
 ## 6. Connection state machine
+
+A connection may hold zero or more live attachments, up to the §5 per-connection
+and Runtime-wide maxima. `Attached` means the connection currently holds at
+least one live attachment; message routing is by `AttachmentId`.
 
 ```text
 Accepted
   → same-UID verified
   → AwaitHello
-  → Ready
+  → Ready   (zero live attachments)
        ├─ ListExecutions → Ready
-       └─ Attach → Attached
+       └─ Attach → Attached (n ≥ 1)
+                      ├─ Attach → Attached (n+1) when under §5 maxima
                       ├─ Input/TerminalKey/Resize/ResizeRequest   controller only
                       ├─ Resync
+                      ├─ SuspendDelivery / ResumeDelivery   (§19; capability-gated)
                       ├─ ResizeResult               Runtime → client
                       ├─ DisplaySnapshot             Runtime → client
                       ├─ DisplayDelta                Runtime → client
+                      │     (only for attachments whose delivery is not suspended)
                       ├─ Lifecycle                   Runtime → client
-                      └─ Detach → Ready
+                      └─ Detach → Attached (n-1) or Ready (n = 0)
   → Closing
 ```
 
-Invalid state transitions return `InvalidState`. Protocol-fatal framing/version/ancillary-data failures close the connection after bounded cleanup. Disconnect revokes a connection's controller lease and attachment state before resource cleanup; the execution continues independently.
+Invalid state transitions return `InvalidState`. Protocol-fatal framing/version/ancillary-data failures close the connection after bounded cleanup. Disconnect revokes a connection's controller leases and every attachment on that connection before resource cleanup; executions continue independently.
 
 ## 7. Binary framing
 
@@ -151,6 +204,8 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
 | 39 | R→C | `TerminateExecutionResult` — M003 disposition (§18) |
+| 40 | C→R | `SuspendDelivery` — M003 per-attachment delivery suspend (§19) |
+| 41 | C→R | `ResumeDelivery` — M003 per-attachment delivery resume (§19) |
 
 M001 / live capability bits (master + open claims), for allocation hygiene:
 
@@ -164,9 +219,10 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
 - bit 9: claimed by open PR #1058 (#865, `CAP_VIEWPORT_LINE_IDS`);
-- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance;
+- bit 11: per-attachment delivery suspend/resume (`CAP_ATTACHMENT_DELIVERY_CONTROL`) — §19 / Issue #1162.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is claimed by open PR #1058 (`ViewportLineIds`). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is claimed by open PR #1058 (`ViewportLineIds`). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. §19 deliberately skips type 35 and bits 8–10 (already claimed) and assigns the next free types **40–41** and capability bit **11**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18 or §19; later allocations must re-check live `MessageType` and open PRs before claiming a number.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
@@ -366,9 +422,11 @@ Viewer identity is connection state and is deliberately absent from display fram
 
 Mandatory control/lifecycle output and replaceable presentation output have separate bounded queue semantics. Mandatory output is serviced before presentation output.
 
-Each client may have at most one presentation batch in flight and one not-yet-started pending batch. Presentation batches are immutable/shareable encoded bytes. Runtime must not retain unbounded generation history.
+Each **attachment** may have at most one presentation batch in flight and one not-yet-started pending batch. Presentation batches are immutable/shareable encoded bytes. Runtime must not retain unbounded generation history. A connection that holds several attachments applies these caps independently per `AttachmentId`; there is no shared single in-flight presentation slot for the whole connection.
 
-If a new delta is contiguous with the last presentation generation targeted for that client and a pending slot is available, it may be queued as a delta. If continuity cannot be guaranteed, or a pending presentation batch must be superseded, Runtime replaces the not-yet-started pending work with a current-state snapshot. Subsequent supersession replaces that pending snapshot with a newer snapshot rather than adding history.
+If a new delta is contiguous with the last presentation generation targeted for that attachment and a pending slot is available, it may be queued as a delta. If continuity cannot be guaranteed, or a pending presentation batch must be superseded, Runtime replaces the not-yet-started pending work with a current-state snapshot. Subsequent supersession replaces that pending snapshot with a newer snapshot rather than adding history.
+
+An attachment whose delivery is suspended under §19 MUST NOT receive new presentation enqueue (snapshot or delta). Pending not-yet-started presentation work for that attachment is dropped on suspend; an in-flight partially written frame is completed or the connection is closed under the ordinary frame rule below. Suspend never drops or delays mandatory control/lifecycle output.
 
 A partially written frame is completed or the connection is closed; bytes from two frames are never interleaved. A slow client may be disconnected under bounded resource policy. No case blocks PTY/VT progress.
 
@@ -378,7 +436,7 @@ Pass 7 client→Runtime input/control backpressure, `ResizeRequest` coalescing, 
 
 ## 12. Attach, reconnect and resync transactions
 
-First attach validates peer/state/role/`ExecutionId`/capacity, allocates `AttachmentId` privately, reads current canonical visible state without consuming shared canonical damage, encodes a bounded snapshot, admits both `Attached` and the snapshot into nonblocking bounded output, then publishes attachment/controller authority and transitions the connection to `Attached`.
+First attach validates peer/state/role/`ExecutionId`/capacity, allocates `AttachmentId` privately, reads current canonical visible state without consuming shared canonical damage, encodes a bounded snapshot, admits both `Attached` and the snapshot into nonblocking bounded output, then publishes attachment/controller authority and transitions the connection to `Attached` (or keeps it `Attached` when this is an additional attachment on the same connection). The new attachment starts in delivery substate `Delivering` (§19.3).
 
 Failure before authority publication leaves no attachment/controller record. Client disappearance after publication is owned by disconnect cleanup and is idempotent.
 
@@ -607,10 +665,11 @@ Rules, validated in this order:
 3. exact payload length, otherwise `MalformedPayload`;
 4. `request_id` obeys the same nonzero/strictly-increasing rules as §18.2 in the
    same connection-local request-ID space;
-5. `attachment_id` is this connection's current live attachment. An all-zero
-   `attachment_id` (never a valid identity) is `InvalidAttachment`; any other
-   value that is not the current live attachment (previously released,
-   issued to another connection, or never issued) is `StaleIdentity`;
+5. `attachment_id` is a live attachment on this connection for the target
+   execution. An all-zero `attachment_id` (never a valid identity) is
+   `InvalidAttachment`; any other value that is not a live attachment on this
+   connection (previously released, issued to another connection, or never
+   issued) is `StaleIdentity`;
 6. `execution_id` matches that attachment's execution, otherwise
    `StaleIdentity`;
 7. the attachment holds the Controller lease, otherwise `PermissionDenied`.
@@ -657,9 +716,11 @@ sent after primary reap. `detail_code` is `0` in all rows.
   spawn work starts.
 - At most **one** execution is created per Runtime reactor dispatch turn, so a
   burst of requests cannot monopolize the event loop.
-- The §5 maxima are unchanged. With one connection and one attachment per Pane,
-  at most 16 Panes may be simultaneously attached even though SPEC-003 permits
-  up to 512 live executions.
+- The §5 maxima, including multiple attachments per connection after §19 /
+  Issue #1162, apply. A single headed connection may retain up to the §5
+  per-connection attachment maximum of presented Panes even though SPEC-003
+  permits up to 512 live executions; Unpresented executions still need no
+  attachment.
 - Provisioning and disposition never synchronously gate another execution's
   PTY → VT → canonical state → damage progress.
 
@@ -700,3 +761,170 @@ The owning production child Issues must prove:
   automatic retry loop, and no resource growth;
 - privacy tests proving no program/argv/environment/cwd/terminal content appears
   in logs or error payloads.
+
+## 19. M003 per-attachment delivery suspend and resume
+
+- **Status:** accepted amendment (Issue #1162). Satisfies ADR-018 §5.1. Does
+  **not** amend ADR-018. Runtime and client implementation are owned by
+  decomposition item W5 and are outside this amendment.
+- **Authority:** [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md) §5.1 / §5.2; Issue #1162; `docs/engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md` item S1.
+- **Nature:** additive, capability-gated. Framing version remains `1.0`. §5
+  maxima and the §6 / §11 multi-attachment wording above are revised by this
+  section; nothing in §1–§4 or §7–§17 changes their M001 meanings except where
+  those sections already defer to §5 / §6 / §11.
+
+This section defines the only permitted way for a client to suspend and resume
+replaceable display delivery for one live attachment while retaining that
+attachment (ADR-018 `Hidden` retention). It does not move PTY, child, VT or
+`TerminalState` ownership. Suspension is a delivery decision only.
+
+### 19.1 Capability and allocation
+
+`CAP_ATTACHMENT_DELIVERY_CONTROL = 1 << 11`.
+
+Allocation hygiene (do not reuse claimed numbers):
+
+- message type **35** and capability bit **9** remain claimed by open PR #1058
+  (`ViewportLineIds` / `CAP_VIEWPORT_LINE_IDS`);
+- types **36–39** and bit **10** remain §18 (`CAP_EXECUTION_PROVISIONING`);
+- bit **8** remains ADR-009 `CAP_COMMAND_BLOCK_DURATION`;
+- therefore §19 assigns the next free types **40** and **41**, and the next free
+  capability bit **11**.
+
+Runtime must reject types 40/41 from a peer that did not advertise the
+capability with `UnknownMessage`. A client must not probe an older Runtime by
+sending an unknown message type. Without the capability there is **no**
+suspend: existing non-suspend attach/delivery/resync behavior applies, and the
+revised §5 capacity table still bounds attach.
+
+Types 40 and 41 are legal only in connection state `Attached`, and only for an
+`AttachmentId` that is live on that connection.
+
+### 19.2 Wire payloads
+
+`SuspendDelivery` (type 40, C→R) is exactly 24 bytes:
+
+```text
+u128 AttachmentId
+u8   reserved0 = 0
+u8[7] reserved1 = 0
+```
+
+`ResumeDelivery` (type 41, C→R) is exactly 24 bytes with the same layout.
+
+Who may send: the client that owns the live attachment — both `Observer` and
+`Controller` roles. Suspension does not grant, revoke, transfer or extend a
+Controller lease; existing Controller-lease rules (§5, attach, disconnect)
+remain authoritative and are not bypassed by types 40/41.
+
+Validation order before any delivery-state mutation:
+
+1. capability negotiated, otherwise `UnknownMessage`;
+2. connection state `Attached`, otherwise `InvalidState`;
+3. exact payload length and all reserved bytes zero, otherwise
+   `MalformedPayload`;
+4. `AttachmentId` is a live attachment on this connection, otherwise
+   `InvalidAttachment` (all-zero) or `StaleIdentity` (any other non-live value).
+
+There is no Runtime→client acknowledgement message. Success is observed by
+delivery behavior (no further presentation for suspend; a bounded snapshot for
+resume). Failures use the existing type-15 `Error` path with
+`offending_message_type` set to 40 or 41.
+
+### 19.3 Per-attachment delivery state machine
+
+Each live attachment has a delivery substate independent of other attachments
+on the same connection:
+
+```text
+Delivering   (default immediately after successful Attach)
+  ├─ SuspendDelivery → Suspended   (idempotent if already Suspended)
+  ├─ ResumeDelivery  → Delivering  (idempotent no-op if already Delivering;
+  │                                 does not force an extra snapshot)
+  ├─ Resync          → Delivering  (existing §12 bounded snapshot; legal while
+  │                                 Delivering)
+  └─ Detach / disconnect → attachment released
+
+Suspended
+  ├─ SuspendDelivery → Suspended   (idempotent)
+  ├─ ResumeDelivery  → Delivering via the existing §12 bounded current-state
+  │                    snapshot resync path (same mechanism as explicit Resync /
+  │                    reconnect / generation-gap recovery)
+  ├─ Resync          → Delivering via the same §12 bounded snapshot path
+  │                    (Resync while Suspended is defined as resume+resync so a
+  │                    client cannot strand presentation permanently)
+  └─ Detach / disconnect → attachment released
+```
+
+**Resume rules (normative):**
+
+- `ResumeDelivery` always performs the existing bounded SPEC-004 snapshot
+  resync (§12): read current canonical visible state without consuming shared
+  canonical damage, encode a bounded `DisplaySnapshot`, and admit it into the
+  attachment's presentation queue.
+- Resume **never** replays historical PTY bytes into a client VT engine.
+- Resume **never** allocates a new `AttachmentId`. The same attachment and any
+  Controller lease it already holds continue.
+- Resume does not require Alternative E (release-on-hide) handshake, peer
+  re-auth, or a fresh attach.
+
+**While delivery is `Suspended` (normative):**
+
+- PTY reads, VT progress, canonical `TerminalState` mutation, damage
+  consumption for the execution, and child-exit observation **continue**
+  without throttling (ADR-018 §5.1 item 3 / §5.2).
+- Runtime MUST NOT encode or write `DisplayDelta` (or enqueue other replaceable
+  presentation) for that attachment. If an execution update has at least one
+  non-suspended attachment that needs delivery, encode remains execution-scoped
+  once (§10.4) and fanout skips suspended attachments.
+- `Lifecycle`, `Error`, `ResizeResult`, and other mandatory control output for
+  the connection/attachment **continue**. Suspend MUST NOT suppress `Lifecycle`
+  and MUST NOT be usable to hide primary-child exit from a client that still
+  holds the attachment.
+- Controller input, semantic key, resize and disposition authority are unchanged
+  by suspend; role checks still apply. Suspend is not a Controller-lease hold
+  without the existing lease rules.
+- The client is not required to retain disposable RenderState, a second grid, or
+  GPU/renderer resources for the suspended attachment (§5.1). Rebuilding
+  RenderState happens only from the resume/resync snapshot.
+
+Attach always enters `Delivering` after the attach-transaction snapshot. A
+client that wants Hidden-tier behavior sends `SuspendDelivery` after attach (or
+after a prior resume) when its presentation tier becomes Hidden.
+
+### 19.4 Threat note
+
+Suspension is delivery-only control on an already-authenticated, same-UID,
+connection-bound attachment. It must not become a mechanism to:
+
+- suppress or delay `Lifecycle` / child-exit observation;
+- stall PTY reads, VT progress, or canonical state mutation;
+- drop or fork canonical terminal state into a second authority;
+- retain or extend a Controller lease without the ordinary attach / disconnect /
+  preemption rules;
+- force Runtime to keep encoding presentation bytes the client intends to
+  discard.
+
+A malicious or buggy peer that suspends every attachment still cannot
+backpressure terminal progress (§2 invariant 10). Capacity limits (§5) and
+fail-closed capability negotiation limit fanout and prevent older peers from
+exercising types 40/41.
+
+### 19.5 Required validation (W5 / production children)
+
+Owning production Issues (W5 and dependents) must prove:
+
+- capability negotiation: peers lacking bit 11 never successfully suspend;
+  types 40/41 fail closed with `UnknownMessage`;
+- exact 24-byte fixtures for types 40/41 plus malformed/truncated/oversized/
+  nonzero-reserved and fuzz coverage;
+- suspended attachments receive zero `DisplayDelta` encode/write while an
+  unrelated delivering attachment on the same or another execution continues;
+- resume uses the §12 snapshot path, preserves `AttachmentId`, and never
+  replays PTY bytes;
+- `Lifecycle` is still delivered while suspended, including primary-child exit;
+- Controller-lease rules are unchanged by suspend/resume;
+- §5 maxima admit 1/10/50/100 retained attachments on one connection without
+  requiring one connection per Hidden leaf;
+- client-side Hidden release of renderer/GPU resources does not require a
+  second VT or canonical grid in the client.
