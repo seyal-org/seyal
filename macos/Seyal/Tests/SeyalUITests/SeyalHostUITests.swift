@@ -906,4 +906,20 @@ final class SeyalHostUITests: XCTestCase {
         }
         return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
+
+    func testPlainCharacterDoesNotOpenCommandPalette() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        app.typeKey("a", modifierFlags: [])
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        XCTAssertFalse(palette.waitForExistence(timeout: 1))
+    }
+
+    func testProjectedMenusExposeFileViewAndWindow() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(app.menuBars.menuBarItems["File"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
+    }
 }

@@ -1315,6 +1315,35 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
+
+    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() throws {
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        let payload = try XCTUnwrap(KeybindingStrokeNormalizer.normalize(event))
+        XCTAssertEqual(payload.modifierBits, 1)
+        XCTAssertEqual(payload.namedKey, 0)
+        XCTAssertEqual(payload.base, UInt32(UnicodeScalar("k").value))
+        XCTAssertEqual(payload.shiftApplied, 0)
+    }
+
+    func testShortcutRealizationReadsTheRustCommandPaletteEquivalent() throws {
+        let row = try XCTUnwrap(
+            KeybindingShortcutRealization.item(commandId: KeybindingShortcutRealization.commandPaletteOpen)
+        )
+        XCTAssertEqual(row.command_id, KeybindingShortcutRealization.commandPaletteOpen)
+        XCTAssertNotEqual(row.has_key_equivalent, 0)
+    }
+
 }
 
 @discardableResult
@@ -1341,4 +1370,5 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
+
 }
