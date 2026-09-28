@@ -1,8 +1,9 @@
-//! ApplicationRoot focus-history wiring (SPEC-022 §6 / N3).
+//! ApplicationRoot focus-history wiring (SPEC-022 §6 / N3) and K8 bindings.
 
 use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use super::*;
+use crate::keybinding::{BindingContext, WorkspaceCommand, WorkspaceCommandId};
 use crate::navigation::ResourceAddress;
 use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
 
@@ -120,6 +121,90 @@ fn stale_history_back_rejects_without_focus_move() {
         Err(AppError::NavigationStaleHistoryCursor)
     );
     assert_eq!(root.snapshot().shell.focused_pane, focused);
+}
+
+#[test]
+fn builtin_focus_history_back_and_forward_dispatch_committed_seq() {
+    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p1,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p2,
+        },
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    let seq_at_p2 = root
+        .snapshot()
+        .focus_history_seq
+        .expect("cursor after navigate");
+
+    // Dispatch reads FocusSeq from the committed snapshot (not a stale caller value).
+    root.invoke_workspace_command(
+        WorkspaceCommand {
+            id: WorkspaceCommandId::FocusHistoryBack,
+            ordinal: None,
+        },
+        BindingContext::APP,
+    )
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_ne!(
+        root.snapshot()
+            .focus_history_seq
+            .expect("cursor after back"),
+        seq_at_p2
+    );
+
+    root.invoke_workspace_command(
+        WorkspaceCommand {
+            id: WorkspaceCommandId::FocusHistoryForward,
+            ordinal: None,
+        },
+        BindingContext::APP,
+    )
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+
+    // At the forward end → HistoryUnavailable (SPEC-022 rejection surfaces).
+    assert_eq!(
+        root.invoke_workspace_command(
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ordinal: None,
+            },
+            BindingContext::APP,
+        ),
+        Err(AppError::NavigationHistoryUnavailable)
+    );
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+}
+
+#[test]
+fn focus_history_binding_empty_history_is_action_unavailable() {
+    let mut root = ApplicationRoot::new();
+    assert!(root.snapshot().focus_history_seq.is_none());
+    assert_eq!(
+        root.invoke_workspace_command(
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ordinal: None,
+            },
+            BindingContext::APP,
+        ),
+        Err(AppError::ActionUnavailable)
+    );
 }
 
 #[test]

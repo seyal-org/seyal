@@ -40,9 +40,9 @@ reason = "ApplicationRoot façade keeps #1110 ActionUnavailable and #1117 histor
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 993
-issue = 1117
-reason = "ApplicationRoot unit suite stays a sibling tests module; N2/N3 navigation commit and focus-history wiring add Navigate/history regression cases while production apply stays in concern modules. N3 focus-history app tests live in focus_history_tests.rs."
+acknowledged_loc = 995
+issue = 1132
+reason = "ApplicationRoot unit suite stays a sibling tests module; K3+N3 merge fix keeps palette address-stability proof without growing production apply. N3 focus-history app tests live in focus_history_tests.rs; K8 history binding tests stay there too."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
