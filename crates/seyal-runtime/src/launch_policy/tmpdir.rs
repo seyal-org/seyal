@@ -1,10 +1,12 @@
 //! Darwin per-user temporary directory for child `TMPDIR` (SPEC-023 §6).
 
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::path::PathBuf;
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 use std::os::unix::ffi::OsStringExt;
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 use std::os::unix::fs::MetadataExt;
 
 /// Resolve `confstr(_CS_DARWIN_USER_TEMP_DIR)` when it is an absolute existing
@@ -24,6 +26,7 @@ pub fn darwin_user_temp_dir() -> Option<PathBuf> {
     None
 }
 
+#[cfg(target_os = "macos")]
 pub fn is_valid_tmpdir(path: &Path) -> bool {
     if !path.is_absolute() {
         return false;
@@ -34,16 +37,9 @@ pub fn is_valid_tmpdir(path: &Path) -> bool {
     if !metadata.is_dir() {
         return false;
     }
-    #[cfg(unix)]
-    {
-        // SAFETY: geteuid reads process credentials only.
-        let uid = unsafe { libc::geteuid() };
-        metadata.uid() == uid
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    // SAFETY: geteuid reads process credentials only.
+    let uid = unsafe { libc::geteuid() };
+    metadata.uid() == uid
 }
 
 #[cfg(target_os = "macos")]

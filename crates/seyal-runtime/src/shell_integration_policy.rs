@@ -38,6 +38,7 @@ const BUNDLED_ZSHENV: &str = include_str!("../assets/shell-integration/zsh/.zshe
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// ADR-020 §3.6 / SPEC-023 §6.1: max bytes for copied `SEYAL_USER_ZDOTDIR`.
+#[cfg(target_os = "macos")]
 const USER_ZDOTDIR_MAX_BYTES: usize = 1024;
 
 /// Count-only structural events: Runtime-process `ZDOTDIR` failed §3.6 bounds
