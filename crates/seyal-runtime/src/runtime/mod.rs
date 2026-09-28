@@ -164,46 +164,61 @@ impl Runtime {
         }
         let timeout = self.bound_wait_by_deadline(max_wait);
         let count = self.reactor.wait(&mut self.events, timeout)?;
+        // Within one wait batch, service local control/IPC before PTY/lifecycle
+        // events. SPEC-004 §18.5 disposition must still observe DrainingAfterPrimaryExit
+        // when a terminate races the same turn's primary-exit finalization path;
+        // fairness across dispatches is unchanged.
         let mut processed = 0usize;
-        for index in 0..count {
-            let event = self.events[index];
-            match event.kind {
-                ReactorEventKind::Control => {
-                    processed += self.drain_control()?;
+        for pass in 0..2 {
+            for index in 0..count {
+                let event = self.events[index];
+                let control_plane = matches!(
+                    event.kind,
+                    ReactorEventKind::Control
+                        | ReactorEventKind::AuxiliaryReadable
+                        | ReactorEventKind::AuxiliaryWritable
+                );
+                if control_plane != (pass == 0) {
+                    continue;
                 }
-                ReactorEventKind::Readable => {
-                    if let Some(id) = event
-                        .token
-                        .and_then(|token| self.by_token.get(&token).copied())
-                    {
-                        self.service_reads(id)?;
-                        processed += 1;
+                match event.kind {
+                    ReactorEventKind::Control => {
+                        processed += self.drain_control()?;
                     }
-                }
-                ReactorEventKind::Writable => {
-                    if let Some(id) = event
-                        .token
-                        .and_then(|token| self.by_token.get(&token).copied())
-                    {
-                        self.service_writes(id)?;
-                        processed += 1;
+                    ReactorEventKind::Readable => {
+                        if let Some(id) = event
+                            .token
+                            .and_then(|token| self.by_token.get(&token).copied())
+                        {
+                            self.service_reads(id)?;
+                            processed += 1;
+                        }
                     }
-                }
-                ReactorEventKind::PrimaryExited => {
-                    if let Some(id) = event
-                        .token
-                        .and_then(|token| self.by_token.get(&token).copied())
-                    {
-                        self.observe_primary_exit(id)?;
-                        processed += 1;
+                    ReactorEventKind::Writable => {
+                        if let Some(id) = event
+                            .token
+                            .and_then(|token| self.by_token.get(&token).copied())
+                        {
+                            self.service_writes(id)?;
+                            processed += 1;
+                        }
                     }
-                }
-                ReactorEventKind::AuxiliaryReadable | ReactorEventKind::AuxiliaryWritable =>
-                {
-                    #[cfg(target_os = "macos")]
-                    if let Some(token) = event.token {
-                        self.service_local_reactor_event(token, event.kind, event.hangup)?;
-                        processed += 1;
+                    ReactorEventKind::PrimaryExited => {
+                        if let Some(id) = event
+                            .token
+                            .and_then(|token| self.by_token.get(&token).copied())
+                        {
+                            self.observe_primary_exit(id)?;
+                            processed += 1;
+                        }
+                    }
+                    ReactorEventKind::AuxiliaryReadable | ReactorEventKind::AuxiliaryWritable =>
+                    {
+                        #[cfg(target_os = "macos")]
+                        if let Some(token) = event.token {
+                            self.service_local_reactor_event(token, event.kind, event.hangup)?;
+                            processed += 1;
+                        }
                     }
                 }
             }

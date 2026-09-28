@@ -24,6 +24,7 @@ pub(super) const ACCEPT_BACKOFF_MAX: Duration = Duration::from_millis(250);
 mod composer_status;
 mod connection;
 mod display_publish;
+mod disposition;
 mod history_blocks;
 mod ingress;
 mod listener;

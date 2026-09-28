@@ -36,9 +36,14 @@ impl Runtime {
             self.send_error(token, ErrorCode::UnknownMessage, message_type);
             return;
         };
-        // SPEC-004 §18.2 validates capability before connection-state for type 36.
+        // SPEC-004 §18.2 / §18.4 validate capability before connection-state for
+        // types 36 and 38 (provisioning / disposition).
         if kind == MessageType::CreateExecutionRequest {
             self.handle_create_execution_request(token, payload);
+            return;
+        }
+        if kind == MessageType::TerminateExecutionRequest {
+            self.handle_terminate_execution_request(token, payload);
             return;
         }
         let pass7_attached = current_state == LocalIpcConnState::Attached
