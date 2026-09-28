@@ -1328,6 +1328,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.count, 5)
     }
 
+    func testGotoOpenSelectorIsWiredOnTheChromeHost() {
+        XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
+    }
+
 }
 
 @discardableResult
