@@ -356,15 +356,14 @@ impl Harness {
                     return;
                 }
             }
-            if self.runtime.lookup(execution_id).is_none() {
-                if let Some((kind, payload)) = self.try_frame(client, Duration::from_millis(200)) {
-                    if kind == MessageType::Lifecycle as u16 {
-                        let message = LifecycleMessage::decode(&payload).expect("Lifecycle");
-                        assert_eq!(message.execution_id, execution_id);
-                        assert_eq!(message.lifecycle, Lifecycle::Finalized);
-                        return;
-                    }
-                }
+            if self.runtime.lookup(execution_id).is_none()
+                && let Some((kind, payload)) = self.try_frame(client, Duration::from_millis(200))
+                && kind == MessageType::Lifecycle as u16
+            {
+                let message = LifecycleMessage::decode(&payload).expect("Lifecycle");
+                assert_eq!(message.execution_id, execution_id);
+                assert_eq!(message.lifecycle, Lifecycle::Finalized);
+                return;
             }
         }
         panic!("execution never finalized via Lifecycle path");
