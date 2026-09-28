@@ -36,6 +36,21 @@ impl ShellState {
         Ok(())
     }
 
+    /// SPEC-022 WindowActivation after focus is already committed on `window`.
+    ///
+    /// Emits exactly one `OrderFrontMakeKey` (ADR-018 §2.4 realization of
+    /// WindowActivation). Does not move Tabs or change the focus triple.
+    pub(crate) fn emit_window_activation(&mut self, window: WindowId) -> Result<(), ShellError> {
+        let workspace_id = self
+            .find_window(window)
+            .map(|(_, workspace)| workspace.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        self.last_active_workspace = workspace_id;
+        self.touch_mru(window);
+        self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        Ok(())
+    }
+
     pub(super) fn touch_mru(&mut self, window: WindowId) {
         self.window_mru.retain(|id| *id != window);
         self.window_mru.insert(0, window);

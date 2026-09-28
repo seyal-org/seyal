@@ -397,6 +397,16 @@ impl ShellState {
             .find_map(|workspace| workspace.tab(id).map(|_| workspace.id))
     }
 
+    /// Owning Window of a current Tab (Tab → Window placement map; SPEC-022 §5).
+    pub fn window_of_tab(&self, id: TabId) -> Option<WindowId> {
+        self.find_tab_location(id).map(|(_, window, _)| window)
+    }
+
+    /// Product-active WindowId (never a host-chosen substitute).
+    pub fn active_window_id(&self) -> WindowId {
+        self.product_active_window()
+    }
+
     /// Owning Workspace and Tab of a current Pane, if any.
     pub fn location_of_pane(&self, id: PaneId) -> Option<(WorkspaceId, TabId)> {
         for workspace in &self.workspaces {
@@ -692,6 +702,23 @@ impl ShellState {
         if self.execution_is_bound(execution) {
             return Err(ShellError::ExecutionAlreadyBound);
         }
+        let pane = self.pane_mut(pane_id)?;
+        if pane.execution.is_some() {
+            return Err(ShellError::ExecutionAlreadyBound);
+        }
+        pane.execution = Some(execution);
+        Ok(())
+    }
+
+    /// Test-only: bind without Execution→Pane uniqueness so AmbiguousTarget
+    /// fixtures remain constructible (ADR-019 / SPEC-022). Production
+    /// [`ShellAction::BindExecution`] stays fail-closed.
+    #[cfg(test)]
+    pub fn force_bind_execution_for_ambiguity_fixture(
+        &mut self,
+        pane_id: PaneId,
+        execution: ExecutionId,
+    ) -> Result<(), ShellError> {
         let pane = self.pane_mut(pane_id)?;
         if pane.execution.is_some() {
             return Err(ShellError::ExecutionAlreadyBound);

@@ -345,6 +345,7 @@ fn window_native_event(code: u32) -> Result<crate::app::WindowNativeEvent, i32> 
         7 => WindowNativeEvent::EnteredFullscreen,
         8 => WindowNativeEvent::ExitedFullscreen,
         9 => WindowNativeEvent::ScreenOrScaleChanged,
+        10 => WindowNativeEvent::ActivationFailed,
         _ => return Err(-6),
     })
 }

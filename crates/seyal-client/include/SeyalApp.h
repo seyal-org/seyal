@@ -126,7 +126,8 @@ enum SeyalAppActionKind {
      * W4a window actions (ADR-018 §2.2). SELECT_WINDOW / CREATE_WINDOW:
      * target_execution_lo/hi = WindowId / WorkspaceId. CYCLE_WINDOW: reserved
      * = 0 next, 1 previous. REPORT_WINDOW_EVENT: target_execution = WindowId,
-     * reserved = event kind (0 became-key … 9 screen/scale). Error 34 = UnknownWindow.
+     * reserved = event kind (0 became-key … 9 screen/scale, 10 activation-failed).
+     * Error 34 = UnknownWindow.
      */
     SEYAL_APP_ACTION_SELECT_WINDOW = 58,
     SEYAL_APP_ACTION_CYCLE_WINDOW = 59,
@@ -166,6 +167,8 @@ enum SeyalAppGotoScope {
 #define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
 #define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
 #define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
+/** Host could not realize WindowActivation (SPEC-022 §5 / N5). */
+#define SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED 10u
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
 enum SeyalAppComposerEligibility {

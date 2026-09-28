@@ -793,7 +793,13 @@ mod tests {
     #[test]
     fn frozen_projection_ignores_live_shell_changes_until_rebuild() {
         let mut shell = seed_shell();
-        shell.apply(ShellAction::CreateTab).unwrap();
+        let snap = shell.snapshot();
+        shell
+            .apply(ShellAction::CreateTab {
+                window: snap.active_window,
+                containment_generation: snap.containment_generation,
+            })
+            .unwrap();
         let snap = shell.snapshot();
         let chrome = ChromeState::new().snapshot(&snap, &[]);
         let mut palette = PaletteState::new();

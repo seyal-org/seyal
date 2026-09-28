@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::shell::{
-    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWorkspaceSeed, SplitAxis,
+    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+    SplitAxis,
 };
 
 use super::{
@@ -61,6 +62,8 @@ fn seed_shell() -> (
     let p2 = PaneId::new();
     let t_other = TabId::new();
     let p_other = PaneId::new();
+    let win1 = WindowId::new();
+    let win2 = WindowId::new();
     let shell = ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -68,45 +71,53 @@ fn seed_shell() -> (
                 name: "Alpha".to_owned(),
                 detail: Some("shared-label".to_owned()),
                 attention: false,
-                active_tab: t1,
-                tabs: vec![
-                    ShellTabSeed {
-                        id: t1,
-                        title: "Tab One".to_owned(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: p1,
-                            title: "Pane A".to_owned(),
-                            allows_implicit_execution_bootstrap: true,
+                active_window: win1,
+                windows: vec![ShellWindowSeed {
+                    id: win1,
+                    active_tab: t1,
+                    tabs: vec![
+                        ShellTabSeed {
+                            id: t1,
+                            title: "Tab One".to_owned(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: p1,
+                                title: "Pane A".to_owned(),
+                                allows_implicit_execution_bootstrap: true,
+                            },
                         },
-                    },
-                    ShellTabSeed {
-                        id: t2,
-                        title: "Tab Two".to_owned(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: p2,
-                            title: "Pane B".to_owned(),
-                            allows_implicit_execution_bootstrap: false,
+                        ShellTabSeed {
+                            id: t2,
+                            title: "Tab Two".to_owned(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: p2,
+                                title: "Pane B".to_owned(),
+                                allows_implicit_execution_bootstrap: false,
+                            },
                         },
-                    },
-                ],
+                    ],
+                }],
             },
             ShellWorkspaceSeed {
                 id: w2,
                 name: "Alpha".to_owned(),
                 detail: Some("shared-label".to_owned()),
                 attention: false,
-                active_tab: t_other,
-                tabs: vec![ShellTabSeed {
-                    id: t_other,
-                    title: "Other".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p_other,
-                        title: "Other Pane".to_owned(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: win2,
+                windows: vec![ShellWindowSeed {
+                    id: win2,
+                    active_tab: t_other,
+                    tabs: vec![ShellTabSeed {
+                        id: t_other,
+                        title: "Other".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p_other,
+                            title: "Other Pane".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],
@@ -433,11 +444,10 @@ fn rejection_ambiguous_target() {
         .map(|pane| pane.id)
         .find(|id| *id != p1)
         .expect("split pane");
+    // Production BindExecution refuses a second Pane for one Execution.
+    // Force the multi-bind fixture so AmbiguousTarget stays covered.
     shell
-        .apply(ShellAction::BindExecution {
-            pane: second,
-            execution,
-        })
+        .force_bind_execution_for_ambiguity_fixture(second, execution)
         .expect("bind second");
     assert_eq!(
         resolve(
@@ -814,10 +824,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
         .find(|id| *id != p1)
         .expect("split pane");
     shell
-        .apply(ShellAction::BindExecution {
-            pane: second,
-            execution: exited,
-        })
+        .force_bind_execution_for_ambiguity_fixture(second, exited)
         .expect("bind second");
     let before = shell.focus_checkpoint();
     assert_eq!(
@@ -892,8 +899,12 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
     };
     assert_eq!(shell.snapshot().active_tab, t1);
     assert_eq!(shell.snapshot().focused_pane, p1);
+    let snap = shell.snapshot();
     shell
-        .apply(ShellAction::CreateTab)
+        .apply(ShellAction::CreateTab {
+            window: snap.active_window,
+            containment_generation: snap.containment_generation,
+        })
         .expect("create shifts ordinals");
     let after_create = shell.snapshot();
     assert_ne!(

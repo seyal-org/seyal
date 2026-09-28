@@ -105,6 +105,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn navigate_address(&mut self, address: ResourceAddress) -> Result<(), AppError> {
+        let prior_window = self.shell.active_window_id();
         navigate(
             address,
             &mut self.shell,
@@ -112,6 +113,14 @@ impl ApplicationRoot {
             NavigationPrincipal::local_user(),
         )
         .map_err(navigation_error)?;
+        let after_window = self.shell.active_window_id();
+        self.drain_shell_effects();
+        if after_window != prior_window {
+            // Navigate emitted exactly one WindowActivation for Rust's placement.
+            self.begin_window_activation_episode(after_window);
+        } else {
+            self.clear_window_activation_episode();
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

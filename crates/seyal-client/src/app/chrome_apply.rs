@@ -201,6 +201,9 @@ impl ApplicationRoot {
         }
         // Disposable presentation input only — never mutates window/tab/pane product state.
         self.last_window_event = Some((window, event));
+        // SPEC-022 §5: ActivationFailed may re-emit WindowActivation under budget;
+        // BecameKey clears the episode. Focus is never rolled back.
+        self.handle_activation_window_event(window, event);
         Ok(())
     }
 

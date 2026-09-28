@@ -1,8 +1,10 @@
-//! Atomic `Navigate(address)` commit (SPEC-022 §4).
+//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5).
 //!
 //! Resolve with the N1 resolver, then apply workspace/tab/pane focus in one
-//! transition. Rejection leaves shell focus unchanged. No focus history,
-//! window activation, presentation, binding, or PTY mutation (N2 scope).
+//! transition. When the target Tab lives in a non-active Window, emit exactly
+//! one WindowActivation (`OrderFrontMakeKey`) naming that WindowId. Rejection
+//! leaves shell focus unchanged. No focus history, presentation, binding, or
+//! PTY mutation.
 
 use crate::shell::ShellState;
 
@@ -14,9 +16,10 @@ use super::{
 /// Atomically navigate to `address`.
 ///
 /// On success: activate owning Workspace, select owning Tab, set focused Pane
-/// (SPEC-022 R4.1). On any failure: no focus fields change (R4.2). Already-active
-/// targets succeed as a no-op (R4.4). Never mutates presentation, bindings, or
-/// PTY state (R4.3).
+/// (SPEC-022 R4.1). When the Tab's Window is not product-active, emit one
+/// WindowActivation effect (R5.2). On any failure: no focus fields change
+/// (R4.2). Already-active targets succeed as a no-op (R4.4). Never mutates
+/// presentation, bindings, or PTY state (R4.3). Never reparents a Tab (R5.3).
 pub fn navigate(
     address: ResourceAddress,
     shell: &mut ShellState,
@@ -45,7 +48,7 @@ pub fn navigate(
         && before.active_tab == tab
         && before.focused_pane == pane
     {
-        // Already active: success no-op (R4.4).
+        // Already active: success no-op (R4.4). No activation effect.
         return Ok(target);
     }
 
@@ -68,9 +71,21 @@ pub fn navigate(
         return Err(NavigationRejection::NotComposed);
     }
 
+    let prior_window = shell.active_window_id();
+    let target_window = shell
+        .window_of_tab(tab)
+        .ok_or(NavigationRejection::UnknownTab)?;
+
     shell
         .commit_focus(workspace, tab, pane)
         .expect("composition re-validated immediately above");
+
+    if target_window != prior_window {
+        // SPEC-022 R5.2: exactly one WindowActivation naming Rust's placement.
+        shell
+            .emit_window_activation(target_window)
+            .expect("target window re-validated via window_of_tab");
+    }
     Ok(target)
 }
 

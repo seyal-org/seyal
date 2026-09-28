@@ -34,15 +34,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 858
+acknowledged_loc = 874
 issue = 1144
-reason = "ApplicationRoot keeps W4a window dispatch and N4 goto dispatch. Goto reduction stays in goto_apply.rs."
+reason = "ApplicationRoot keeps W4a window dispatch, N4 goto dispatch, and N5 activation-episode fields. Activation retry lives in activation.rs; goto reduction stays in goto_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 993
-issue = 1118
-reason = "N2 navigate/palette address tests already landed this suite in the cohesion band; #1118 does not grow the file (goto coverage lives in goto_tests.rs). Ceiling matches current rustfmt-normalized LOC."
+acknowledged_loc = 830
+issue = 1144
+reason = "N5 extracted navigate/palette-by-address coverage into navigate_tests.rs so this suite ratchets below the prior N4 ceiling. Goto coverage remains in goto_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -52,27 +52,33 @@ reason = "Façade keeps the W3 window extraction and the N4 goto error numbers, 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 830
+acknowledged_loc = 836
 issue = 1144
-reason = "N2 address-carrying palette rows already placed this module in the cohesion band. The N5 merge keeps that ceiling at the merged line count. Goto stays a sibling module."
+reason = "N2 address-carrying palette rows already placed this module in the cohesion band. N5 only updates CreateTab struct construction in tests; goto stays a sibling module."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 953
-issue = 1118
-reason = "N1/N2 resolver and Navigate commit tests already landed this suite in the cohesion band; #1118 does not grow it. Ceiling matches current rustfmt-normalized LOC."
+acknowledged_loc = 964
+issue = 1144
+reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after multi-window seed migration. N5 cross-window coverage lives in activation_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 771
+acknowledged_loc = 798
 issue = 1144
-reason = "ShellState keeps W3 window containment and the N4 navigation helpers. Inventory enumeration lives in inventory.rs. Helpers walk Window tabs rather than a workspace.tabs field."
+reason = "ShellState keeps W3 window containment, N4 navigation helpers, and N5 Tab→Window placement accessors. Inventory enumeration lives in inventory.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 773
-issue = 1065
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1065 imports encode-owned SNAP/block-row flag constants after those flags moved out of the façade, and the steady-state snapshot call-counter proof lives beside the counter in visual.rs."
+acknowledged_loc = 781
+issue = 1144
+reason = "W3/W4a FFI window-effect ABI coverage plus N4 error-number shifts land this suite in the cohesion band on the N5 merge base. N5 does not grow the file; ceiling matches current rustfmt-normalized LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/tests.rs"
+acknowledged_loc = 846
+issue = 1144
+reason = "W2a/W4a multi-window shell action coverage is changed relative to master on the N5 start branch. N5 does not grow this suite; ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

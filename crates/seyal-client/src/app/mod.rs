@@ -7,6 +7,7 @@
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
 mod accessibility;
+mod activation;
 mod chrome_apply;
 mod composer_apply;
 mod goto_apply;
@@ -16,8 +17,12 @@ mod recovery_apply;
 mod session;
 
 use accessibility::accessibility_nodes;
+use activation::PendingWindowActivation;
+pub use activation::{ActivationHostFailure, WINDOW_ACTIVATION_ATTEMPT_BUDGET};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
+#[cfg(test)]
+mod navigate_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
@@ -347,6 +352,9 @@ pub enum AppAction {
 }
 
 /// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
+///
+/// `ActivationFailed` is the SPEC-022 §5 host-failure report for a WindowActivation
+/// the host could not realize. It does not alter portable focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub enum WindowNativeEvent {
@@ -360,6 +368,8 @@ pub enum WindowNativeEvent {
     EnteredFullscreen = 7,
     ExitedFullscreen = 8,
     ScreenOrScaleChanged = 9,
+    /// Host could not realize the WindowActivation effect for this WindowId.
+    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -438,6 +448,10 @@ pub struct ApplicationRoot {
     palette: PaletteState,
     /// Last forwarded window presentation event (test/host observability; not product state).
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
+    /// In-flight WindowActivation episode after cross-window Navigate (N5).
+    pending_activation: Option<PendingWindowActivation>,
+    /// Typed host-failure record for the latest activation episode (SPEC-022 R5.4).
+    last_activation_failure: Option<ActivationHostFailure>,
     goto: GotoState,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
@@ -490,6 +504,8 @@ impl ApplicationRoot {
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
             last_window_event: None,
+            pending_activation: None,
+            last_activation_failure: None,
             goto: GotoState::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
