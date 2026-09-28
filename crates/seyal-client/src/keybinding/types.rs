@@ -168,8 +168,8 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (window.*, ADR-021 pane verbs, SPEC-022 navigation) stay out until
-/// their typed actions land (R5.0.1 / R5.1.3 / R5.5.3).
+/// Gated ids (window.*, remaining ADR-021 pane verbs, SPEC-022 navigation) stay
+/// out until their typed actions land (R5.0.1 / R5.1.3 / R5.5.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -184,6 +184,10 @@ pub enum WorkspaceCommandId {
     PaneCloseFocused,
     PaneFocusNext,
     PaneFocusPrevious,
+    PaneFocusLeft,
+    PaneFocusRight,
+    PaneFocusUp,
+    PaneFocusDown,
     PresentationSetFlow,
     PresentationSetRaw,
     PresentationSetTui,
@@ -208,6 +212,10 @@ impl WorkspaceCommandId {
             Self::PaneCloseFocused => "pane.close_focused",
             Self::PaneFocusNext => "pane.focus_next",
             Self::PaneFocusPrevious => "pane.focus_previous",
+            Self::PaneFocusLeft => "pane.focus_left",
+            Self::PaneFocusRight => "pane.focus_right",
+            Self::PaneFocusUp => "pane.focus_up",
+            Self::PaneFocusDown => "pane.focus_down",
             Self::PresentationSetFlow => "presentation.set_flow",
             Self::PresentationSetRaw => "presentation.set_raw",
             Self::PresentationSetTui => "presentation.set_tui",
@@ -232,6 +240,10 @@ impl WorkspaceCommandId {
             "pane.close_focused" => Self::PaneCloseFocused,
             "pane.focus_next" => Self::PaneFocusNext,
             "pane.focus_previous" => Self::PaneFocusPrevious,
+            "pane.focus_left" => Self::PaneFocusLeft,
+            "pane.focus_right" => Self::PaneFocusRight,
+            "pane.focus_up" => Self::PaneFocusUp,
+            "pane.focus_down" => Self::PaneFocusDown,
             "presentation.set_flow" => Self::PresentationSetFlow,
             "presentation.set_raw" => Self::PresentationSetRaw,
             "presentation.set_tui" => Self::PresentationSetTui,

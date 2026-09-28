@@ -1,4 +1,4 @@
-//! SPEC-024 K3: dispatch matched WorkspaceCommands from the routing gate.
+//! SPEC-024 K3/K7: dispatch matched WorkspaceCommands from the routing gate.
 
 use std::sync::OnceLock;
 
@@ -9,7 +9,7 @@ use crate::keybinding::{
     RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
-use crate::shell::SplitAxis;
+use crate::shell::{FocusDirection, ShellAction, ShellError, SplitAxis};
 
 use super::{AppError, ApplicationRoot};
 
@@ -100,6 +100,10 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneFocusNext | WorkspaceCommandId::PaneFocusPrevious => {
                 Err(AppError::ActionUnavailable)
             }
+            WorkspaceCommandId::PaneFocusLeft => self.focus_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneFocusRight => self.focus_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneFocusUp => self.focus_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneFocusDown => self.focus_direction(FocusDirection::Down),
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
             }
@@ -167,6 +171,12 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// SPEC-024 §5.1 / §10.2: focus-relative directional neighbor via FocusDirection.
+    fn focus_direction(&mut self, direction: FocusDirection) -> Result<(), AppError> {
+        self.apply_shell(ShellAction::FocusDirection { direction })
+            .map_err(focus_direction_error)
+    }
+
     /// Gate menu-originated CreateTab when the palette owns focus (R6.4.1).
     pub(super) fn require_workspace_command_for_menu(
         &self,
@@ -179,5 +189,13 @@ impl ApplicationRoot {
 fn invoke_error(error: InvokeError) -> AppError {
     match error {
         InvokeError::ActionUnavailable => AppError::ActionUnavailable,
+    }
+}
+
+fn focus_direction_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::NoDirectionalNeighbor => AppError::NoDirectionalNeighbor,
+        ShellError::UnknownPane => AppError::UnknownPane,
+        _ => AppError::ActionUnavailable,
     }
 }

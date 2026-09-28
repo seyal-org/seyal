@@ -22,6 +22,8 @@ pub use route::{
     fallthrough_is_flow, fallthrough_is_terminal, resolve_tab_ordinal, route_context_set,
     route_keystroke, validate_workspace_command, InvokeError, RouteOutcome,
 };
+#[cfg(test)]
+pub use stroke::normalized_from_notation;
 pub use stroke::NormalizedStroke;
 pub use types::{
     BindingContext, BindingSequence, BindingSource, CompiledBinding, DiagnosticCategory, KeyStroke,
