@@ -51,18 +51,6 @@ issue = 1118
 reason = "Published C ABI entry points stay one thin façade; #1118 adds goto overlay flags (GOTO/TRUNCATED), scope in reserved, and error numbers 44–46. Product decode for OpenGoto/SetGotoScope lives in decode.rs."
 
 [[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 817
-issue = 1118
-reason = "N2 address-carrying palette rows already placed this module in the cohesion band; #1118 does not grow it (goto is a sibling module). Ceiling matches current rustfmt-normalized LOC."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 953
-issue = 1118
-reason = "N1/N2 resolver and Navigate commit tests already landed this suite in the cohesion band; #1118 does not grow it. Ceiling matches current rustfmt-normalized LOC."
-
-[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
 acknowledged_loc = 773
 issue = 1065
