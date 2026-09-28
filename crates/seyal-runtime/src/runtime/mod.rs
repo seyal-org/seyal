@@ -86,6 +86,9 @@ pub struct Runtime {
     read_buffer: [u8; READ_BUFFER_SIZE],
     shutting_down: bool,
     rollback_reap: Vec<TerminalExecution>,
+    /// SPEC-004 §18.6: at most one provisioning create per reactor dispatch turn.
+    #[cfg(target_os = "macos")]
+    provisioning_created_this_turn: bool,
     #[cfg(target_os = "macos")]
     local_ipc: Option<LocalIpcState>,
     #[cfg(feature = "benchmark-instrumentation")]
@@ -144,6 +147,8 @@ impl Runtime {
             shutting_down: false,
             rollback_reap: Vec::new(),
             #[cfg(target_os = "macos")]
+            provisioning_created_this_turn: false,
+            #[cfg(target_os = "macos")]
             local_ipc,
             #[cfg(feature = "benchmark-instrumentation")]
             benchmark: BenchmarkRuntimeState::default(),
@@ -152,6 +157,11 @@ impl Runtime {
 
     pub fn poll_once(&mut self, max_wait: Option<Duration>) -> Result<usize, RuntimeError> {
         self.reap_failed_creations()?;
+        #[cfg(target_os = "macos")]
+        {
+            self.provisioning_created_this_turn = false;
+            self.drain_one_pending_create();
+        }
         let timeout = self.bound_wait_by_deadline(max_wait);
         let count = self.reactor.wait(&mut self.events, timeout)?;
         let mut processed = 0usize;

@@ -119,7 +119,10 @@ impl ConnectionState {
         let allowed = matches!(
             (self, message_type),
             (Self::AwaitHello, ClientHello)
-                | (Self::Ready, ListExecutions | Attach | Goodbye)
+                | (
+                    Self::Ready,
+                    ListExecutions | Attach | CreateExecutionRequest | Goodbye
+                )
                 | (
                     Self::Attached,
                     Input
@@ -130,6 +133,7 @@ impl ConnectionState {
                         | Resize
                         | Resync
                         | Detach
+                        | CreateExecutionRequest
                         | Goodbye
                 )
         );

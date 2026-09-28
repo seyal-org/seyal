@@ -8,6 +8,7 @@ use crate::{
         framing::{
             self, Attach as WireAttach, Attached as WireAttached, ErrorCode, ExecutionList,
             ExecutionListEntry, Lifecycle as WireLifecycle, MessageType, Role, CAP_COMMAND_BLOCKS,
+            CAP_EXECUTION_PROVISIONING,
         },
     },
     AttachmentId,
@@ -35,6 +36,11 @@ impl Runtime {
             self.send_error(token, ErrorCode::UnknownMessage, message_type);
             return;
         };
+        // SPEC-004 §18.2 validates capability before connection-state for type 36.
+        if kind == MessageType::CreateExecutionRequest {
+            self.handle_create_execution_request(token, payload);
+            return;
+        }
         let pass7_attached = current_state == LocalIpcConnState::Attached
             && matches!(
                 kind,
@@ -95,7 +101,8 @@ impl Runtime {
             & !(CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
-                | framing::CAP_EXTENDED_TERMINAL_KEY)
+                | framing::CAP_EXTENDED_TERMINAL_KEY
+                | CAP_EXECUTION_PROVISIONING)
             != 0
         {
             self.send_error(
@@ -114,7 +121,8 @@ impl Runtime {
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
-                | framing::CAP_GRAPHEME_DISPLAY,
+                | framing::CAP_GRAPHEME_DISPLAY
+                | CAP_EXECUTION_PROVISIONING,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };

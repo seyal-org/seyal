@@ -15,6 +15,7 @@ use crate::{
 
 use connection::ConnectionMeta;
 use display_publish::PublishedDisplay;
+use provisioning::PendingCreate;
 
 pub(super) const RESYNC_SNAPSHOT_BUDGET_PER_POLL: usize = 2;
 pub(super) const ACCEPT_BACKOFF_INITIAL: Duration = Duration::from_millis(10);
@@ -26,6 +27,7 @@ mod display_publish;
 mod history_blocks;
 mod ingress;
 mod listener;
+mod provisioning;
 mod resize_resync;
 mod send;
 mod session;
@@ -42,6 +44,8 @@ pub(super) struct LocalIpcState {
     pub(super) published: HashMap<ExecutionId, PublishedDisplay>,
     pub(super) pending_resync: VecDeque<u64>,
     pub(super) pending_resync_set: HashSet<u64>,
+    pub(super) pending_creates: VecDeque<PendingCreate>,
+    pub(super) outstanding_creates: usize,
 }
 
 impl LocalIpcState {
@@ -98,6 +102,8 @@ impl LocalIpcState {
             published: HashMap::new(),
             pending_resync: VecDeque::new(),
             pending_resync_set: HashSet::new(),
+            pending_creates: VecDeque::new(),
+            outstanding_creates: 0,
         })
     }
 }

@@ -150,10 +150,23 @@ impl Runtime {
                 _ => (command, ShellIntegrationMode::Unsupported, None),
             }
         };
+        #[cfg(all(target_os = "macos", feature = "test-fault-injection"))]
+        if crate::test_fault::take(crate::test_fault::FaultPoint::ProvisioningSpawn) {
+            return Err(RuntimeError::Io(std::io::Error::other(
+                "injected provisioning spawn failure",
+            )));
+        }
         let mut execution = TerminalExecution::spawn(&command, size)?;
         // The child owns its copy of the nonce descriptor now; drop ours.
         drop(command);
         let initial_primary_line_id = execution.initial_primary_line_id().map(|line| line.0);
+        #[cfg(all(target_os = "macos", feature = "test-fault-injection"))]
+        if crate::test_fault::take(crate::test_fault::FaultPoint::ProvisioningRegistration) {
+            self.kill_unpublished(execution);
+            return Err(RuntimeError::Io(std::io::Error::other(
+                "injected provisioning registration failure",
+            )));
+        }
         let token = match self.reactor.register(&execution) {
             Ok(token) => token,
             Err(error) => {
@@ -173,6 +186,15 @@ impl Runtime {
                 self.kill_unpublished(execution);
                 return Err(error.into());
             }
+        }
+
+        #[cfg(all(target_os = "macos", feature = "test-fault-injection"))]
+        if crate::test_fault::take(crate::test_fault::FaultPoint::ProvisioningPublication) {
+            let _ = self.reactor.deregister(token);
+            self.kill_unpublished(execution);
+            return Err(RuntimeError::Io(std::io::Error::other(
+                "injected provisioning publication failure",
+            )));
         }
 
         let id = ExecutionId::new();
