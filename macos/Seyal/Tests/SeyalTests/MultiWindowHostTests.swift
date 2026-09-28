@@ -188,8 +188,115 @@ final class MultiWindowHostTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("keyEquivalent: \"n\""))
         XCTAssertTrue(source.contains("keyEquivalent: \"t\""))
+        XCTAssertTrue(source.contains("keyEquivalent: \"w\""))
+        XCTAssertTrue(source.contains("hierarchicalClose"))
         XCTAssertTrue(source.contains("[.command, .option]"))
         XCTAssertFalse(source.contains("keyDown"))
+        let hostSource = try! String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/MultiWindowHostController.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(hostSource.contains("func keyDown"), "⌘W must not use keyDown")
+    }
+
+    func testWindowShouldCloseForwardsCloseWindowAndDestroysViaEffect() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        guard let key = host.orderedKeys.first,
+              let window = host.realizedWindow(for: key)
+        else {
+            return XCTFail("expected bootstrap window")
+        }
+        // Refuse local destroy; Rust DestroyWindowRealization removes it.
+        XCTAssertFalse(host.windowShouldClose(window))
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        XCTAssertNil(host.realizedWindow(for: key))
+        let effect = seyal_app_native_effect(host.appHandle, 0)
+        XCTAssertNotEqual(
+            effect.kind,
+            UInt16(SEYAL_APP_EFFECT_BOUNDED_DETACH_THEN_TERMINATE)
+        )
+        XCTAssertNotEqual(effect.kind, UInt16(SEYAL_APP_EFFECT_TERMINATE_EXECUTION))
+    }
+
+    func testLastWindowCloseLeavesZeroWindowsWithoutQuit() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        guard let key = host.orderedKeys.first else {
+            return XCTFail("expected bootstrap window")
+        }
+        host.forwardCloseWindow(key)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        let delegate = AppDelegate()
+        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+        XCTAssertEqual(host.quitReplyCount, 0)
+    }
+
+    func testZeroWindowReentryViaNewWindowAndDockReopen() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first else {
+            return XCTFail("expected bootstrap window")
+        }
+        host.forwardCloseWindow(key)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+
+        // File → New Window from zero windows → ActivateWorkspace create path.
+        host.createWindow(nil)
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+
+        guard let again = host.orderedKeys.first else {
+            return XCTFail("expected re-entered window")
+        }
+        host.forwardCloseWindow(again)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+
+        // Dock reopen path: same typed re-entry as AppDelegate when
+        // hasVisibleWindows == false.
+        host.reenterOrCreateWindow()
+        XCTAssertEqual(host.orderedKeys.count, 1)
+
+        let delegateSource = try! String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/AppDelegate.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(delegateSource.contains("applicationShouldHandleReopen"))
+        XCTAssertTrue(delegateSource.contains("reenterOrCreateWindow"))
+        XCTAssertTrue(delegateSource.contains("hasVisibleWindows"))
+    }
+
+    func testTabCreationAdmittedPaneSplittingOff() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        let shell = seyal_app_shell(host.appHandle)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
+        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
+        host.createTab(nil)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).tab_count, 2)
+    }
+
+    func testHierarchicalCloseMenuForwardsClosePane() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        createExtraWindows(on: host, count: 1)
+        XCTAssertEqual(host.orderedKeys.count, 2)
+        // Sole pane in the active window → ClosePane peels to CloseWindow.
+        host.hierarchicalClose(nil)
+        XCTAssertEqual(host.orderedKeys.count, 1)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
     }
 
     func testQuitWithThreeWindowsFollowsReplyRule() {

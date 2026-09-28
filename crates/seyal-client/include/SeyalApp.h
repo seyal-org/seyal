@@ -124,11 +124,14 @@ enum SeyalAppActionKind {
      * target_execution_lo/hi = WindowId / WorkspaceId. CYCLE_WINDOW: reserved
      * = 0 next, 1 previous. REPORT_WINDOW_EVENT: target_execution = WindowId,
      * reserved = event kind (0 became-key … 9 screen/scale). Error 34 = UnknownWindow.
+     * W4b: CLOSE_WINDOW target_execution_lo/hi = WindowId. Host never destroys
+     * locally; Rust emits DestroyWindowRealization.
      */
     SEYAL_APP_ACTION_SELECT_WINDOW = 58,
     SEYAL_APP_ACTION_CYCLE_WINDOW = 59,
     SEYAL_APP_ACTION_CREATE_WINDOW = 60,
-    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 61
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 61,
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 62
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u

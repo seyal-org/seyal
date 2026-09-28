@@ -46,9 +46,9 @@ reason = "Global command-palette reducer stays one cohesive open/filter/resolve 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 820
+acknowledged_loc = 824
 issue = 1158
-reason = "The ApplicationRoot suite keeps W4a quit-effect coverage and the W2b sole-tab removal rewrite. Ceiling matches rustfmt-normalized LOC after the W4b merge."
+reason = "W4b admits CreateTab on the production shell and keeps pane-split fail-closed coverage in the ApplicationRoot suite. Ceiling matches rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -58,9 +58,9 @@ reason = "Published C ABI entry points and handle/row scratch stay one thin enco
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 782
-issue = 1153
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1153 updates sole-pane close and shell flag expectations for hierarchical presentation removal."
+acknowledged_loc = 873
+issue = 1158
+reason = "W4b adds CLOSE_WINDOW ABI coverage plus zero-window ActivateWorkspace re-entry and updates production shell flag expectations for tab-creation admission."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

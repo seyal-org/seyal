@@ -100,17 +100,15 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert_eq!(snap.panes.len(), 1);
     assert_eq!(snap.panes[0].title, "Pane 1");
     assert!(snap.panes[0].allows_implicit_bootstrap);
-    assert!(!shell.allows_tab_creation());
+    // W4b: production admits tab creation; pane splitting stays fail-closed.
+    assert!(shell.allows_tab_creation());
     assert!(!shell.allows_pane_splitting());
     // Hierarchical close is always admitted while a Window exists (W2b).
     assert!(snap.allows_tab_close);
     assert!(snap.allows_pane_close);
-    assert_eq!(
-        create_tab(&mut shell),
-        Err(ShellError::TabCreationUnavailable)
-    );
-    assert_eq!(shell.last_error(), Some(ShellError::TabCreationUnavailable));
-    let focused = snap.focused_pane;
+    create_tab(&mut shell).expect("W4b admits CreateTab");
+    assert_eq!(shell.snapshot().tabs.len(), 2);
+    let focused = shell.snapshot().focused_pane;
     assert_eq!(
         shell.apply(ShellAction::SplitPane {
             id: focused,
@@ -118,7 +116,8 @@ fn production_shell_is_single_pane_and_fail_closed() {
         }),
         Err(ShellError::PaneSplitUnavailable)
     );
-    assert_eq!(shell.snapshot().tabs.len(), 1);
+    // Rejected split leaves tab inventory and single-pane layout unchanged.
+    assert_eq!(shell.snapshot().tabs.len(), 2);
     assert_eq!(shell.snapshot().layout, LayoutDescription::Single);
 }
 

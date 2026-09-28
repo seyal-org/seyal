@@ -64,6 +64,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         orderedKeys.compactMap { realizations[$0]?.tabbingMode }
     }
 
+    /// Test/host inspection of the derived realization map (not a product model).
+    func realizedWindow(for key: WindowKey) -> NSWindow? {
+        realizations[key]
+    }
+
     func applyPendingEffects() {
         // Drain window effects only. Quit effects stay queued for §4.
         while true {
@@ -272,20 +277,59 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     // MARK: - Typed actions (menus)
 
+    /// File → New Window / Dock reopen. Zero windows use ActivateWorkspace
+    /// (ADR-018 §3.3a); otherwise CreateWindow. Host never builds an NSWindow
+    /// without a Rust effect.
     @objc func createWindow(_: Any?) {
+        reenterOrCreateWindow()
+    }
+
+    func reenterOrCreateWindow() {
         let shell = seyal_app_shell(appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
         action.target_execution_lo = shell.last_active_workspace_lo
         action.target_execution_hi = shell.last_active_workspace_hi
+        if shell.window_count == 0 {
+            // SELECT_WORKSPACE decodes to ActivateWorkspace (create path).
+            action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
+        } else {
+            action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
+        }
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
     }
 
     @objc func createTab(_: Any?) {
         liveHost.createTab()
+        applyPendingEffectsAndReconcile()
+    }
+
+    /// ⌘W hierarchical close: always ClosePane on the focused Pane. Rust peels
+    /// Pane → Tab → Window (ADR-018 §6 / M001 scaffold). No keyDown path.
+    @objc func hierarchicalClose(_: Any?) {
+        let shell = seyal_app_shell(appHandle)
+        guard shell.window_count > 0 else { return }
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        action.target_execution_lo = shell.focused_pane_lo
+        action.target_execution_hi = shell.focused_pane_hi
+        _ = seyal_app_apply(appHandle, &action)
+        applyPendingEffectsAndReconcile()
+    }
+
+    /// Title-bar / system close: forward CloseWindow; never destroy locally.
+    func forwardCloseWindow(_ key: WindowKey) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_WINDOW.rawValue)
+        action.target_execution_lo = key.lo
+        action.target_execution_hi = key.hi
+        _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
     }
 
@@ -342,8 +386,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate (forward only; no product decisions)
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // W4b owns CloseWindow. Refuse local destroy.
-        false
+        // ADR-018 §2.5: refuse local destroy; Rust emits DestroyWindowRealization.
+        if let key = key(for: sender) {
+            forwardCloseWindow(key)
+        }
+        return false
     }
 
     func windowDidBecomeKey(_ notification: Notification) {

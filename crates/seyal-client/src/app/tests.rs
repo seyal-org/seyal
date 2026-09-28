@@ -94,17 +94,13 @@ fn new_root_is_one_unbound_pane() {
 }
 
 #[test]
-fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
-    // AppAction::CreateTab/SplitFocused (#922) route straight to the same
-    // ShellState that already disallows composition growth until a
-    // distinct execution route exists; the direct action must fail the
-    // same way the palette-mediated path already does, not silently
-    // no-op.
+fn create_tab_admitted_and_split_focused_fail_closed_under_m001_policy() {
+    // W4b admits CreateTab on the production shell; pane splitting stays
+    // fail-closed. Split must not silently no-op.
     let mut root = ApplicationRoot::new();
-    assert_eq!(
-        root.apply(AppAction::CreateTab),
-        Err(AppError::TabCreationUnavailable)
-    );
+    root.apply(AppAction::CreateTab)
+        .expect("W4b admits CreateTab");
+    assert_eq!(root.snapshot().shell.tabs.len(), 2);
     assert_eq!(
         root.apply(AppAction::SplitFocused {
             axis: SplitAxis::Right,
@@ -501,8 +497,16 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     let opened = root.snapshot();
     assert!(opened.palette.open);
     assert!(
-        !opened.palette.rows.iter().any(|row| row.label == "New Tab"),
-        "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+        opened.palette.rows.iter().any(|row| row.label == "New Tab"),
+        "W4b admits tab creation; New Tab is listed"
+    );
+    assert!(
+        !opened
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label == "Split Pane Right"),
+        "pane splitting stays omitted while policy disallows it"
     );
     assert!(!opened.palette.rows.is_empty());
 

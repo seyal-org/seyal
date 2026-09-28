@@ -291,8 +291,7 @@ pub struct ShellState {
 
 impl ShellState {
     /// M001 production composition: one Runtime default workspace, one Tab,
-    /// one Pane. Extra tabs/splits stay fail-closed until a distinct execution
-    /// route exists.
+    /// one Pane. W4b admits tab creation; pane splitting stays fail-closed.
     pub fn m001_local(detail: impl Into<String>) -> Self {
         let pane = Pane {
             id: PaneId::new(),
@@ -320,7 +319,8 @@ impl ShellState {
             containment_generation: 0,
             workspaces: vec![workspace],
             allows_pane_splitting: false,
-            allows_tab_creation: false,
+            // W4b: headed tab creation admitted; pane splitting stays off.
+            allows_tab_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),

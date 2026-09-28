@@ -16,6 +16,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        // ADR-018 §3.3a: Dock reopen with no visible windows forwards re-entry.
+        if !flag {
+            host?.reenterOrCreateWindow()
+            return true
+        }
+        return false
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let host else {
             return .terminateNow
@@ -53,6 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         newTab.target = host
         fileMenu.addItem(newTab)
+        let closeItem = NSMenuItem(
+            title: "Close",
+            action: #selector(MultiWindowHostController.hierarchicalClose(_:)),
+            keyEquivalent: "w"
+        )
+        closeItem.target = host
+        fileMenu.addItem(closeItem)
         fileItem.submenu = fileMenu
 
         let editItem = NSMenuItem()

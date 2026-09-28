@@ -187,3 +187,39 @@ fn close_actions_do_not_emit_terminate_execution() {
     assert_eq!(root.live_unpresented(), vec![execution]);
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
+
+#[test]
+fn close_window_keeps_bound_execution_live_and_enumerable() {
+    let mut root = ApplicationRoot::new();
+    let execution = ExecutionId::new();
+    let workspace = WorkspaceId::m001_default();
+    root.apply(AppAction::RecordUnpresented {
+        execution,
+        workspace,
+    })
+    .unwrap();
+    root.apply(AppAction::Adopt {
+        fence: root.fence(),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x88; 16])),
+    })
+    .unwrap();
+    let window = root
+        .snapshot()
+        .shell
+        .active_window
+        .expect("product-active window");
+    root.apply(AppAction::CloseWindow { id: window })
+        .expect("CloseWindow removes presentation only");
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::DestroyWindowRealization { .. })));
+    assert_eq!(root.live_unpresented(), vec![execution]);
+    assert!(root.snapshot().shell.active_window.is_none());
+}
