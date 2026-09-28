@@ -137,3 +137,133 @@ fn invalid_command_still_rolls_back_with_zero_publications() {
     assert_eq!(runtime.execution_count(), 0);
     assert!(runtime.list().is_empty());
 }
+
+/// L5 / SPEC-023 §11: N-times launch-policy failure injection cannot hot-loop
+/// the reactor, and an unrelated live streaming execution keeps advancing.
+///
+/// Orthogonal facts kept separate: streamer child alive, interactive create
+/// rejected pre-spawn, reactor still drains PTY readiness, shutdown retains a
+/// signal/reap path. Progress is asserted via `damage_generation` only (no
+/// terminal contents in assertions).
+#[test]
+fn launch_policy_failure_n_times_does_not_hot_loop_or_starve_streaming_pty() {
+    const FAILURES: usize = 8;
+    const CREATE_BUDGET: Duration = Duration::from_millis(50);
+    const MAX_POLL_TURNS: usize = 500;
+
+    let missing = std::env::temp_dir().join(format!(
+        "seyal-cap-nfail-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&missing).unwrap();
+    let mut cfg = config("n-times-fail");
+    cfg.capability_policy = CapabilityPolicy::from_terminfo_dir(&missing).unwrap();
+    assert!(!cfg.capability_policy.is_available());
+
+    let mut runtime = Runtime::new(cfg).unwrap();
+    // Explicit argv bypasses profile-0 policy; CapabilityUnavailable gates only
+    // interactive create. Streamer stays live across the injected failures.
+    let stream_id = runtime
+        .create_execution(
+            CommandSpec::new("/bin/sh").args(["-c", "while :; do printf .; sleep 0.05; done"]),
+            size(),
+        )
+        .expect("streaming execution");
+    assert_eq!(runtime.execution_count(), 1);
+
+    // Prime at least one VT mutation before injection so later advances are
+    // unambiguous relative to a known baseline.
+    let primed = Instant::now() + Duration::from_secs(2);
+    let mut baseline = 0u64;
+    while Instant::now() < primed {
+        runtime
+            .poll_once(Some(Duration::from_millis(25)))
+            .expect("prime poll");
+        baseline = runtime
+            .execution(stream_id)
+            .expect("streamer still registered")
+            .terminal()
+            .damage_generation();
+        if baseline > 0 {
+            break;
+        }
+    }
+    assert!(baseline > 0, "streaming execution never produced VT damage");
+
+    let mut poll_turns = 0usize;
+    let mut last_generation = baseline;
+    for _ in 0..FAILURES {
+        let generation_before = runtime
+            .execution(stream_id)
+            .expect("streamer live before failure")
+            .terminal()
+            .damage_generation();
+
+        let create_started = Instant::now();
+        let err = runtime
+            .create_interactive_execution(size())
+            .expect_err("interactive create must fail while capability is unavailable");
+        assert!(
+            create_started.elapsed() < CREATE_BUDGET,
+            "create_interactive_execution exceeded one-attempt budget (possible retry hot loop)"
+        );
+        assert!(matches!(
+            err,
+            RuntimeError::LaunchPolicy(LaunchPolicyFailure::CapabilityUnavailable)
+        ));
+        let wire = err.create_result_wire().expect("launch-policy wire");
+        assert_eq!(wire.result_code, ErrorCode::LaunchPolicyRejected as u16);
+        assert_eq!(wire.detail_code, 4);
+        // Failures stay pre-spawn: only the unrelated streamer is published.
+        assert_eq!(runtime.execution_count(), 1);
+        assert_eq!(runtime.list().len(), 1);
+        assert_eq!(runtime.list()[0].id, stream_id);
+
+        let progress_deadline = Instant::now() + Duration::from_secs(2);
+        let mut advanced = false;
+        while Instant::now() < progress_deadline {
+            poll_turns += 1;
+            assert!(
+                poll_turns < MAX_POLL_TURNS,
+                "reactor poll turns unbounded under launch-policy failure injection"
+            );
+            runtime
+                .poll_once(Some(Duration::from_millis(25)))
+                .expect("policy failure must not poison reactor polling");
+            let generation = runtime
+                .execution(stream_id)
+                .expect("streamer remains registered during failures")
+                .terminal()
+                .damage_generation();
+            if generation > generation_before {
+                assert!(
+                    generation > last_generation,
+                    "streaming damage_generation must keep advancing across failures"
+                );
+                last_generation = generation;
+                advanced = true;
+                break;
+            }
+        }
+        assert!(
+            advanced,
+            "unrelated streaming PTY stopped advancing during launch-policy failure injection"
+        );
+    }
+
+    assert!(
+        last_generation > baseline,
+        "streaming execution made no net progress across N policy failures"
+    );
+    assert_eq!(runtime.execution_count(), 1);
+
+    // Termination invariant: while the primary child is still live, shutdown
+    // retains a signalling/reap path regardless of the failed creates.
+    shutdown(&mut runtime);
+    assert_eq!(runtime.execution_count(), 0);
+    std::fs::remove_dir_all(&missing).unwrap();
+}
