@@ -8,8 +8,12 @@ use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
         self.shell
-            .apply(ShellAction::CreateTab)
+            .apply(ShellAction::CreateTab {
+                window: snap.active_window,
+                containment_generation: snap.containment_generation,
+            })
             .map_err(|_| AppError::TabCreationUnavailable)?;
         let _ = self
             .chrome
@@ -104,8 +108,12 @@ impl ApplicationRoot {
             .apply(ChromeAction::OpenAttention { id }, &shell)
             .map_err(chrome_error)?;
         if let Some(workspace) = effect.select_workspace {
+            let generation = self.shell.containment_generation();
             self.shell
-                .apply(ShellAction::SelectWorkspace { id: workspace })
+                .apply(ShellAction::ActivateWorkspace {
+                    workspace,
+                    containment_generation: generation,
+                })
                 .map_err(|_| AppError::UnknownChromeWorkspace)?;
         }
         if let Some(tab) = effect.select_tab {
@@ -120,8 +128,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
+        let generation = self.shell.containment_generation();
         self.shell
-            .apply(ShellAction::SelectWorkspace { id })
+            .apply(ShellAction::ActivateWorkspace {
+                workspace: id,
+                containment_generation: generation,
+            })
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         let _ = self
             .chrome

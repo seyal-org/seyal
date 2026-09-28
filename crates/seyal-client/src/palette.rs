@@ -577,7 +577,13 @@ mod tests {
     #[test]
     fn build_commands_excludes_no_ops_and_includes_split_and_new_tab() {
         let mut shell = seed_shell();
-        shell.apply(ShellAction::CreateTab).unwrap();
+        let snap = shell.snapshot();
+        shell
+            .apply(ShellAction::CreateTab {
+                window: snap.active_window,
+                containment_generation: snap.containment_generation,
+            })
+            .unwrap();
         let snap = shell.snapshot();
         let chrome = ChromeState::new().snapshot(&snap, &[]);
         let mut palette = PaletteState::new();

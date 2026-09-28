@@ -7,7 +7,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use super::tree::PaneTree;
 use super::ShellError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Pane {
     pub(super) id: PaneId,
     pub(super) title: String,
@@ -15,7 +15,7 @@ pub(super) struct Pane {
     pub(super) allows_implicit_execution_bootstrap: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Tab {
     pub(super) id: TabId,
     pub(super) title: String,
@@ -26,7 +26,7 @@ pub(super) struct Tab {
 }
 
 /// One Window inside a Workspace. `workspace_id` is fixed at construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Window {
     pub(super) id: WindowId,
     pub(super) workspace_id: WorkspaceId,
@@ -34,14 +34,15 @@ pub(super) struct Window {
     pub(super) active_tab: TabId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
     pub(super) name: String,
     pub(super) detail: Option<String>,
     pub(super) attention: bool,
     pub(super) windows: Vec<Window>,
-    pub(super) active_window: WindowId,
+    /// None only when this Workspace has zero Windows (ADR-018 §3.3a / ActivateWorkspace create).
+    pub(super) active_window: Option<WindowId>,
 }
 
 /// Constructor input for tests and future hosts. Not a persistence schema.
@@ -51,6 +52,7 @@ pub struct ShellWorkspaceSeed {
     pub detail: Option<String>,
     pub attention: bool,
     pub windows: Vec<ShellWindowSeed>,
+    /// Ignored when `windows` is empty; otherwise must name a seeded Window.
     pub active_window: WindowId,
 }
 
@@ -97,12 +99,23 @@ impl Window {
             active_tab,
         })
     }
+
+    pub(super) fn tab_index(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
 }
 
 impl Workspace {
     pub(super) fn from_seed(seed: ShellWorkspaceSeed) -> Result<Self, ShellError> {
         if seed.windows.is_empty() {
-            return Err(ShellError::EmptyWindow);
+            return Ok(Self {
+                id: seed.id,
+                name: seed.name,
+                detail: seed.detail,
+                attention: seed.attention,
+                windows: Vec::new(),
+                active_window: None,
+            });
         }
         let mut windows = Vec::with_capacity(seed.windows.len());
         for window in seed.windows {
@@ -138,7 +151,7 @@ impl Workspace {
             name: seed.name,
             detail: seed.detail,
             attention: seed.attention,
-            active_window: seed.active_window,
+            active_window: Some(seed.active_window),
             windows,
         })
     }
@@ -156,29 +169,43 @@ impl Workspace {
         self.tabs().find(|tab| tab.id == id)
     }
 
-    pub(super) fn active_window(&self) -> &Window {
-        self.windows
-            .iter()
-            .find(|window| window.id == self.active_window)
-            .expect("active Window must exist")
+    pub(super) fn window(&self, id: WindowId) -> Option<&Window> {
+        self.windows.iter().find(|window| window.id == id)
+    }
+
+    pub(super) fn window_mut(&mut self, id: WindowId) -> Option<&mut Window> {
+        self.windows.iter_mut().find(|window| window.id == id)
+    }
+
+    pub(super) fn window_index(&self, id: WindowId) -> Option<usize> {
+        self.windows.iter().position(|window| window.id == id)
+    }
+
+    pub(super) fn active_window(&self) -> Option<&Window> {
+        let id = self.active_window?;
+        self.windows.iter().find(|window| window.id == id)
     }
 
     pub(super) fn active_window_mut(&mut self) -> Result<&mut Window, ShellError> {
-        let id = self.active_window;
+        let id = self.active_window.ok_or(ShellError::UnknownWindow)?;
         self.windows
             .iter_mut()
             .find(|window| window.id == id)
             .ok_or(ShellError::UnknownWindow)
     }
 
-    pub(super) fn active_tab_id(&self) -> TabId {
-        self.active_window().active_tab
+    pub(super) fn active_tab_id(&self) -> Result<TabId, ShellError> {
+        Ok(self
+            .active_window()
+            .ok_or(ShellError::UnknownWindow)?
+            .active_tab)
     }
 
     /// The active Window's last Tab cannot be closed. Closing it would leave a
     /// zero-Tab Window, which is not a W1 close-window path.
     pub(super) fn allows_tab_close(&self) -> bool {
-        self.active_window().tabs.len() > 1
+        self.active_window()
+            .is_some_and(|window| window.tabs.len() > 1)
     }
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
@@ -188,13 +215,19 @@ impl Workspace {
             .find(|window| window.tabs.iter().any(|tab| tab.id == id))
             .map(|window| window.id)
             .ok_or(ShellError::UnknownTab)?;
-        self.active_window = window_id;
+        self.active_window = Some(window_id);
         self.active_window_mut()?.active_tab = id;
         Ok(())
     }
 
-    pub(super) fn push_tab_on_active_window(&mut self, tab: Tab) -> Result<(), ShellError> {
-        let window = self.active_window_mut()?;
+    pub(super) fn push_tab_on_window(
+        &mut self,
+        window_id: WindowId,
+        tab: Tab,
+    ) -> Result<(), ShellError> {
+        let window = self
+            .window_mut(window_id)
+            .ok_or(ShellError::UnknownWindow)?;
         window.active_tab = tab.id;
         window.tabs.push(tab);
         Ok(())
@@ -232,12 +265,62 @@ impl Workspace {
     }
 
     pub(super) fn active_tab_mut(&mut self) -> Result<&mut Tab, ShellError> {
-        let tab_id = self.active_tab_id();
+        let tab_id = self.active_tab_id()?;
         self.active_window_mut()?
             .tabs
             .iter_mut()
             .find(|tab| tab.id == tab_id)
             .ok_or(ShellError::UnknownTab)
+    }
+
+    /// Remove `tab` from its Window. Destroys the Window when it was the only Tab.
+    /// Returns `(removed_tab, destroyed_source_window)`.
+    pub(super) fn take_tab(&mut self, tab: TabId) -> Result<(Tab, Option<WindowId>), ShellError> {
+        let window_index = self
+            .windows
+            .iter()
+            .position(|window| window.tabs.iter().any(|item| item.id == tab))
+            .ok_or(ShellError::UnknownTab)?;
+        let tab_index = self.windows[window_index]
+            .tab_index(tab)
+            .expect("tab located above");
+        let removed = self.windows[window_index].tabs.remove(tab_index);
+        if self.windows[window_index].tabs.is_empty() {
+            let destroyed = self.windows.remove(window_index).id;
+            if self.active_window == Some(destroyed) {
+                self.active_window = self.windows.first().map(|window| window.id);
+            }
+            return Ok((removed, Some(destroyed)));
+        }
+        if self.windows[window_index].active_tab == tab {
+            let replacement = tab_index.min(self.windows[window_index].tabs.len() - 1);
+            self.windows[window_index].active_tab = self.windows[window_index].tabs[replacement].id;
+        }
+        Ok((removed, None))
+    }
+
+    /// Insert `tab` before `before` in `window` (`None` appends). Makes it active.
+    pub(super) fn insert_tab_before(
+        &mut self,
+        window_id: WindowId,
+        tab: Tab,
+        before: Option<TabId>,
+    ) -> Result<(), ShellError> {
+        let window = self
+            .window_mut(window_id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let insert_at = match before {
+            None => window.tabs.len(),
+            Some(before_id) => window.tab_index(before_id).ok_or(ShellError::UnknownTab)?,
+        };
+        window.active_tab = tab.id;
+        window.tabs.insert(insert_at, tab);
+        Ok(())
+    }
+
+    pub(super) fn push_window(&mut self, window: Window) {
+        self.active_window = Some(window.id);
+        self.windows.push(window);
     }
 
     #[cfg(test)]
@@ -408,5 +491,20 @@ mod tests {
             ),
             Err(ShellError::EmptyTab)
         ));
+    }
+
+    #[test]
+    fn empty_workspace_seed_is_allowed_for_activate_create() {
+        let workspace = Workspace::from_seed(ShellWorkspaceSeed {
+            id: WorkspaceId::m001_default(),
+            name: "Empty".to_owned(),
+            detail: None,
+            attention: false,
+            active_window: WindowId::new(),
+            windows: Vec::new(),
+        })
+        .expect("empty workspace");
+        assert!(workspace.windows.is_empty());
+        assert_eq!(workspace.active_window, None);
     }
 }

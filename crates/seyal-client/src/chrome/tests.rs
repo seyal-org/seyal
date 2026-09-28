@@ -257,7 +257,13 @@ fn attention_item_navigates_then_dismisses() {
     assert_eq!(effect.select_workspace, Some(workspace(1)));
     assert_eq!(effect.select_tab, Some(tab(2)));
     if let Some(id) = effect.select_workspace {
-        shell.apply(ShellAction::SelectWorkspace { id }).unwrap();
+        let generation = shell.containment_generation();
+        shell
+            .apply(ShellAction::ActivateWorkspace {
+                workspace: id,
+                containment_generation: generation,
+            })
+            .unwrap();
     }
     if let Some(id) = effect.select_tab {
         shell.apply(ShellAction::SelectTab { id }).unwrap();
