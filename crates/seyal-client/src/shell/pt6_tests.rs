@@ -146,25 +146,22 @@ fn assert_rejection_byte_identical(before: &ShellState, after: &ShellState, expe
 /// `ShellNativeEffect` has no Terminate/Provision variants (type surface);
 /// these reducers must also emit an empty effect list (no window lifecycle).
 fn assert_no_terminate_or_provision_effects(effects: &[ShellNativeEffect]) {
-    assert!(
-        effects.is_empty(),
-        "P8: move/swap/zoom/focus must not emit effects; got {effects:?}"
-    );
     // Exhaustive match documents the effect surface: no terminate/provision.
-    for effect in effects {
-        match effect {
-            ShellNativeEffect::RealizeWindow { .. }
-            | ShellNativeEffect::DestroyWindowRealization { .. }
-            | ShellNativeEffect::OrderFrontMakeKey { .. } => {
-                panic!("P8: pane ops must not emit window lifecycle effects either")
-            }
+    let Some(effect) = effects.first() else {
+        return;
+    };
+    match effect {
+        ShellNativeEffect::RealizeWindow { .. }
+        | ShellNativeEffect::DestroyWindowRealization { .. }
+        | ShellNativeEffect::OrderFrontMakeKey { .. } => {
+            panic!("P8: pane ops must not emit window lifecycle effects; got {effects:?}")
         }
     }
 }
 
 fn grow_small_tree(shell: &mut ShellState, rng: &mut Lcg, target_leaves: usize) {
     while shell.snapshot().panes.len() < target_leaves {
-        let axis = if rng.next_u64() % 2 == 0 {
+        let axis = if rng.next_u64().is_multiple_of(2) {
             SplitAxis::Right
         } else {
             SplitAxis::Down
@@ -504,7 +501,7 @@ fn spec025_p1_generated_swap_and_move_preserve_ids_and_bindings() {
                 break;
             };
             let _ = shell.take_effects();
-            if rng.next_u64() % 2 == 0 {
+            if rng.next_u64().is_multiple_of(2) {
                 shell
                     .apply(ShellAction::SwapPanes { a, b })
                     .expect("swap on distinct leaves");
