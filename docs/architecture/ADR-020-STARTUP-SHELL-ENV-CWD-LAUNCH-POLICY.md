@@ -1,13 +1,13 @@
 # ADR-020 — Startup shell, environment and CWD launch policy
 
-- **Status:** Proposed (refinement output of Issue #1003; no production code in this decision)
+- **Status:** Accepted (Issue #1003; §3.9 and the §3.10 create-path mapping normative on ADR-017 acceptance)
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent umbrella #676, epic #665; consumed by #994 provisioning children; related #686)
 - **Depends on:** ADR-005, ADR-008, ADR-009, ADR-015, SPEC-002, SPEC-003, SPEC-009
 - **Neighbor (Proposed, on `master`):** ADR-017 (TerminalExecution provisioning and disposition) is on `master` as Proposed. This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
 - **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). #1001 landed on `master` as ADR-021 / SPEC-025 (PR #1053). Numbers remain provisional until merge order is settled; siblings must not claim ADR-020.
 - **Scope:** deterministic cold-path policy for program/argv (including login bit), startup CWD, bounded environment construction, and `TERM`/`COLORTERM`/capability ownership when composing a new local interactive `TerminalExecution`
-- **Classification:** new architecture decision plus tightly scoped SPEC-023 (Proposed) and light SPEC-003/SPEC-009 cross-references
+- **Classification:** new architecture decision plus tightly scoped SPEC-023 (Accepted; not an implemented-behavior claim) and light SPEC-003/SPEC-009 cross-references
 
 ## 1. Context
 
@@ -347,7 +347,7 @@ Costs / honest limits:
 
 ## 6. Spec / milestone impact
 
-- **New:** [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (Proposed) — observable resolution, validation, failure and test contract.
+- **New:** [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (Accepted; not an implemented-behavior claim) — observable resolution, validation, failure and test contract.
 - **Cross-reference only:** SPEC-003 create transaction consumes `EffectiveLaunchPolicy`→`CommandSpec`; SPEC-009 helper env remains the Runtime-process contract, not the child-shell contract.
 - **Do not edit in this PR:** ADR-017 (Proposed, on `master`) or its SPEC amendments.
 - **Decomposition:** [`../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md`](../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md).

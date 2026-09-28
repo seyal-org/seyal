@@ -5,8 +5,8 @@
   [#676](https://github.com/seyal-org/seyal/issues/676) (do not assign the
   umbrella). Coordination with provisioning children under [#674](https://github.com/seyal-org/seyal/issues/674) / #994 is explicit below.
 - **Authority:** [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md)
-  (Proposed), [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md)
-  (Proposed), ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1,
+  (Accepted; not an implemented-behavior claim), [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md)
+  (Accepted; not an implemented-behavior claim), ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1,
   [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
 - **Neighbor:** ADR-017 (Proposed, on `master`) owns the create/dispose seam and
   profile selector. These children supply the policy object that seam resolves.

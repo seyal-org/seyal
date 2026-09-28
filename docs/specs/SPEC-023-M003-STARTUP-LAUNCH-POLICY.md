@@ -1,6 +1,6 @@
 # SPEC-023 — M003 startup shell, environment and CWD launch policy
 
-- **Status:** Proposed (normative only on ADR-020 acceptance)
+- **Status:** Accepted (normative with ADR-020; §10 provisioning relationship normative on ADR-017 acceptance)
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent #676, epic #665)
 - **Architecture:** [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md) (Proposed)
