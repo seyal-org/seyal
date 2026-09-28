@@ -148,7 +148,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         case .nativeCommand:
             super.keyDown(with: event)
             return
-        case .fallthrough:
+        case .fallsThrough:
             break
         }
         if flags.contains(.command) {

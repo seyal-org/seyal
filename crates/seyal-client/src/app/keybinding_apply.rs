@@ -1,6 +1,5 @@
 //! SPEC-024 K3–K5: dispatch matched commands, own chord prefix wait, and read the projected table.
 
-use std::time::Instant;
 use crate::composer::ComposerAction;
 use crate::keybinding::{
     process_keybinding_table, resolve_tab_ordinal, route_context_set, route_keystroke,
@@ -9,6 +8,7 @@ use crate::keybinding::{
 };
 use crate::presentation::{PresentationAction, PresentationMode};
 use crate::shell::SplitAxis;
+use std::time::Instant;
 
 use super::{AppError, ApplicationRoot};
 
