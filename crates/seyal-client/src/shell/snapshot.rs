@@ -225,6 +225,7 @@ impl ShellError {
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
             Self::NotZoomed => 17,
+            Self::InvalidMoveTarget => 18,
         }
     }
 }
