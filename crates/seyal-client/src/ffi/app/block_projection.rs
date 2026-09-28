@@ -2,7 +2,8 @@
 //!
 //! Rust owns the clip mapping from Runtime `ViewportLineIds` onto prepared
 //! rows; the host only draws the row range it receives and never pairs,
-//! stores, or infers LineIds.
+//! stores, or infers LineIds. `seyal_app_block_span` remains the raw Runtime
+//! anchor export; hosts must not invent `start + 511` from a zero end.
 
 use seyal_core::{AttachmentId, ExecutionId};
 
@@ -122,8 +123,9 @@ fn with_fence_matched_client<R>(
     crate::ffi::CLIENTS.with(|clients| {
         let clients = clients.borrow();
         let active = crate::ffi::active_handle();
-        let owns =
-            |client: &LocalDisplayClient| client.execution_id() == execution && client.attachment_id() == attachment;
+        let owns = |client: &LocalDisplayClient| {
+            client.execution_id() == execution && client.attachment_id() == attachment
+        };
         if let Some(client) = clients.get(&active).filter(|client| owns(client)) {
             return Some(operation(client));
         }

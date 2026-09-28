@@ -537,8 +537,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         // Flow must be allowed to submit a clear-only frame so a prior live
         // grid cannot remain on the drawable after the mode fence.
         needsPresent = instanceBuffer != nil
-            || !historyRegionOrder.isEmpty
-            || !liveTail.order.isEmpty
+            || !historyRegionOrder.isEmpty || !liveTail.order.isEmpty
             || !plan.drawsLiveGrid
     }
 
@@ -560,7 +559,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                 to: TerminalInstance.self,
                 capacity: region.instanceCount
             )
-            // Zero-size slots are live-tail dense-layout placeholders outside the clip.
             for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
                 historyInstanceCount += 1
                 let origin = pointer[index].origin
@@ -606,11 +604,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         historyRegions = historyRegions.filter { ids.contains($0.key) }
         historyRegionOrder.removeAll { !ids.contains($0) }
         needsPresent = instanceBuffer != nil
-    }
-
-    /// Completed-history regions followed by running live-tail clips.
-    private var orderedBlockRegions: [HistoryRenderRegion] {
-        historyRegionOrder.compactMap { historyRegions[$0] } + orderedLiveTailRegions
     }
 
     /// Submit a frame to a drawable supplied by the platform frame scheduler.

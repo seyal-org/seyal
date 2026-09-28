@@ -2,6 +2,7 @@ mod attach;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod viewport_line_ids;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -16,7 +17,7 @@ use seyal_runtime::{
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus, ErrorCode,
         FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle, MessageType,
-        ResizeResult, Role, ViewportLineIds, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
@@ -215,36 +216,6 @@ impl LocalDisplayClient {
         request_id: u64,
     ) -> Option<&HistoryRangeSnapshot> {
         self.history_ranges.get(&(block_id, request_id))
-    }
-
-    /// Latest Runtime-published primary viewport LineIds for Flow live-tail
-    /// mapping. Empty until a `ViewportLineIds` frame is accepted for this
-    /// attachment, and cleared on disconnect/resync.
-    pub fn viewport_line_ids(&self) -> &[u64] {
-        &self.viewport_line_ids
-    }
-
-    pub fn viewport_line_ids_generation(&self) -> u64 {
-        self.viewport_line_ids_generation
-    }
-
-    pub(crate) fn clear_viewport_line_ids(&mut self) {
-        self.viewport_line_ids.clear();
-        self.viewport_line_ids_generation = 0;
-    }
-
-    /// Test-only: pair LineIds with a committed display generation for FFI
-    /// projection checks (production path uses Runtime ViewportLineIds frames).
-    #[cfg(test)]
-    pub(crate) fn set_paired_viewport_line_ids_for_test(
-        &mut self,
-        generation: u64,
-        line_ids: Vec<u64>,
-    ) {
-        self.cache.generation = generation;
-        self.cache.rows = line_ids.len() as u16;
-        self.viewport_line_ids_generation = generation;
-        self.viewport_line_ids = line_ids;
     }
 
     /// Drops one copied history response after the native consumer has
@@ -494,37 +465,9 @@ impl LocalDisplayClient {
                         self.copied_text = copied.bytes.to_vec();
                     }
                     MessageType::ViewportLineIds => {
-                        let message = ViewportLineIds::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        // LineIds are sent after the matching display frame. Reject
-                        // unpaired / conflicting vectors; ignore strictly older gens.
-                        if message.generation > self.cache.generation {
-                            // Newer than the committed display: discard. Do not
-                            // buffer it and do not drop a vector still paired
-                            // to the current generation.
-                        } else if message.generation < self.viewport_line_ids_generation {
-                            // stale
-                        } else if message.generation == self.viewport_line_ids_generation
-                            && message.line_ids != self.viewport_line_ids
-                        {
-                            return Err(ClientError::Protocol);
-                        } else if message.generation != self.cache.generation
-                            || message.line_ids.len() != usize::from(self.cache.rows)
-                        {
-                            // Unpaired with committed display: clear and continue.
-                            if !self.viewport_line_ids.is_empty() {
-                                self.clear_viewport_line_ids();
-                                metadata_changed = true;
-                            }
-                        } else {
-                            if self.viewport_line_ids_generation != message.generation
-                                || self.viewport_line_ids != message.line_ids
-                            {
-                                metadata_changed = true;
-                            }
-                            self.viewport_line_ids = message.line_ids;
-                            self.viewport_line_ids_generation = message.generation;
-                        }
+                        // Copy off the read buffer before mutating attachment state.
+                        let payload = frame[HEADER_LEN..].to_vec();
+                        metadata_changed |= self.apply_viewport_line_ids(&payload)?;
                     }
                     _ => return Err(ClientError::Protocol),
                 }
@@ -567,15 +510,7 @@ impl LocalDisplayClient {
         }
 
         self.compact_buffer();
-        // Display may have advanced without a matching ViewportLineIds frame
-        // (capability off, collect skipped). Drop unpaired LineIds so projection
-        // cannot pair a new generation's cells with a previous vector.
-        if self.viewport_line_ids_generation != 0
-            && self.viewport_line_ids_generation != self.cache.generation
-        {
-            self.clear_viewport_line_ids();
-            metadata_changed = true;
-        }
+        metadata_changed |= self.drop_unpaired_viewport_line_ids();
         if !committed_any && !metadata_changed {
             return Ok(None);
         }

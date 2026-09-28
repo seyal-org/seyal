@@ -24,6 +24,11 @@ struct LiveTailRenderState {
 }
 
 extension MetalTerminalRenderer {
+    /// Completed-history regions followed by running live-tail clips.
+    var orderedBlockRegions: [HistoryRenderRegion] {
+        historyRegionOrder.compactMap { historyRegions[$0] } + orderedLiveTailRegions
+    }
+
     var orderedLiveTailRegions: [HistoryRenderRegion] {
         liveTail.order.compactMap { liveTail.regions[$0] }
     }

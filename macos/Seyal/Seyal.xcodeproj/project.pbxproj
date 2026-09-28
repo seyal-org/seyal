@@ -48,6 +48,7 @@
 		A10000000000000000000056 /* MetalTerminalRendererTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000056 /* MetalTerminalRendererTypes.swift */; };
 		A10000000000000000000057 /* MetalTerminalRenderer+Encode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000057 /* MetalTerminalRenderer+Encode.swift */; };
 		A1000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift */; };
+		A1000000000000000000006B /* MetalSurfaceView+LiveTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006B /* MetalSurfaceView+LiveTail.swift */; };
 		A10000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */; };
 		A10000000000000000000059 /* ProductChromeBlockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000059 /* ProductChromeBlockViews.swift */; };
 		A1000000000000000000005A /* ProductChromeHostView+Blocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */; };
@@ -133,6 +134,7 @@
 		A20000000000000000000056 /* MetalTerminalRendererTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalTerminalRendererTypes.swift; sourceTree = "<group>"; };
 		A20000000000000000000057 /* MetalTerminalRenderer+Encode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+Encode.swift"; sourceTree = "<group>"; };
 		A2000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+LiveTail.swift"; sourceTree = "<group>"; };
+		A2000000000000000000006B /* MetalSurfaceView+LiveTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+LiveTail.swift"; sourceTree = "<group>"; };
 		A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+GPUCompletionSelfTest.swift"; sourceTree = "<group>"; };
 		A20000000000000000000059 /* ProductChromeBlockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeBlockViews.swift; sourceTree = "<group>"; };
 		A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Blocks.swift"; sourceTree = "<group>"; };
@@ -227,6 +229,7 @@
 				A20000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift */,
 				A20000000000000000000053 /* MetalSurfaceRecoveryState.swift */,
 				A20000000000000000000054 /* MetalSurfaceView+DisplayLink.swift */,
+				A2000000000000000000006B /* MetalSurfaceView+LiveTail.swift */,
 				A20000000000000000000056 /* MetalTerminalRendererTypes.swift */,
 				A20000000000000000000057 /* MetalTerminalRenderer+Encode.swift */,
 				A2000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift */,
@@ -437,6 +440,7 @@
 				A10000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift in Sources */,
 				A10000000000000000000053 /* MetalSurfaceRecoveryState.swift in Sources */,
 				A10000000000000000000054 /* MetalSurfaceView+DisplayLink.swift in Sources */,
+				A1000000000000000000006B /* MetalSurfaceView+LiveTail.swift in Sources */,
 				A10000000000000000000056 /* MetalTerminalRendererTypes.swift in Sources */,
 				A10000000000000000000057 /* MetalTerminalRenderer+Encode.swift in Sources */,
 				A1000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift in Sources */,

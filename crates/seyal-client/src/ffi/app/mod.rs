@@ -815,8 +815,6 @@ pub struct SeyalAppBlockSpan {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_block_span(handle: u64, index: u32) -> SeyalAppBlockSpan {
-    // Raw Runtime anchors only. Hosts must use `seyal_app_block_projection`
-    // for Flow drawing; do not invent `start + 511` from a zero end.
     APPS.with(|apps| {
         let apps = apps.borrow();
         let Some(composer) = apps

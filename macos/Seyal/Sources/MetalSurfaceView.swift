@@ -217,47 +217,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     return renderer.inspectFlowPaint(from: texture)
   }
 
-  func setTranscriptFrame(_ frame: NativeTranscriptFrame) {
-    guard frame.isValid,
-      frame.surfaceIdentity == nil || frame.surfaceIdentity == ObjectIdentifier(self)
-    else {
-      return
-    }
-    let regionIDs = Set(frame.regionIDs)
-    historyRanges = historyRanges.filter { regionIDs.contains($0.key.blockID) }
-    renderer.removeHistoryRegions(except: regionIDs)
-    renderer.setHistoryRegionOrder(frame.regionIDs)
-    // AppKit bottom-left → terminal top-left pixel clips for live-tail.
-    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
-    let pixelRegions: [NativeTranscriptRegion] = frame.regions.map { region in
-      let pixelClip = NSRect(
-        x: region.clip.minX * scale,
-        y: (bounds.height - region.clip.maxY) * scale,
-        width: region.clip.width * scale,
-        height: region.clip.height * scale
-      )
-      // Match history prepare: origin is the top-left of the clipped body.
-      return NativeTranscriptRegion(id: region.id, origin: pixelClip.origin, clip: pixelClip)
-    }
-    renderer.setTranscriptRegions(pixelRegions)
-    // Body intrinsic growth moves every following Block. Re-encode all
-    // retained canonical ranges against this complete frame so no region
-    // retains its previous clip or origin.
-    for region in frame.regions {
-      guard let range = historyRanges[PaneBlockKey(paneID: paneID, blockID: region.id)] else {
-        continue
-      }
-      renderHistoryRange(range, region: region)
-    }
-  }
-
   func removeTranscriptRegions(except ids: Set<UInt64>) {
     historyRanges = historyRanges.filter { ids.contains($0.key.blockID) }
     renderer.removeHistoryRegions(except: ids)
-    if ids.isEmpty {
-      renderer.setLiveTailBlocks([:])
-      renderer.setTranscriptRegions([])
-    }
+    clearLiveTailWhenTranscriptEmpty(ids)
   }
 
   var terminalExecutionIdentity: String? {
@@ -549,9 +512,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       if result == .updated {
         forceNextFrame = false
         hasPreparedState = true
-        // Notify product chrome only after Candidate-D prepare so live-tail
-        // clip publication cannot force a Metal rewrite before damage-driven
-        // update (and cannot race a still-in-flight GPU sample).
+        // Chrome learns the frame only after Candidate-D prepare succeeds.
         onFrameChanged?(frame)
         // Candidate-D can continue advancing while an exhausted GPU
         // display failure is latched. A successful CPU preparation must
@@ -727,15 +688,6 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   func discardHistoryRequests(except blockIDs: Set<UInt64>) {
     bridge?.discardHistoryRequests(except: blockIDs)
-  }
-
-  /// Running Flow Blocks: clip the prepared primary frame into Block regions.
-  func setLiveTailBlocks(_ clipsByBlock: [UInt64: LiveTailClip]) {
-    renderer.setLiveTailBlocks(clipsByBlock)
-  }
-
-  var lastPreparedRowCount: Int {
-    renderer.lastPreparedRowCount
   }
 
   @discardableResult
