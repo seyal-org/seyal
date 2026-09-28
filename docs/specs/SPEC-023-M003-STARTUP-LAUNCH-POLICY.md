@@ -139,7 +139,10 @@ Required:
 - `SHELL` = validated program path;
 - `PATH` = `/usr/bin:/bin:/usr/sbin:/sbin` unless a later accepted profile
   replaces it under the same validation discipline;
-- `TMPDIR` when a validated absolute per-user temp directory exists;
+- `TMPDIR`: the Darwin per-user temporary directory from
+  `confstr(_CS_DARWIN_USER_TEMP_DIR)`, validated as an absolute existing
+  directory owned by the effective UID. It is never copied from the Runtime
+  process environment; if it is unavailable or invalid it is omitted;
 - `TERM` / `TERMINFO` from CapabilityPolicy (ADR-008).
 
 Optional locale copy from the Runtime process env, each key independently, only
@@ -212,9 +215,22 @@ LaunchPolicyWarning =
 - Exactly one failure result to the create caller.
 - Until SPEC-004 adds additive `17 LaunchPolicyRejected`, every
   `LaunchPolicyFailure` maps to create result code `14 InternalFailure` with
-  `detail_code` 0. Warnings are not carried on the create-result wire. L0
-  (ADR-020 §3.10) owns adding code 17; L3 switches to it in the same PR, so
-  the two mappings never coexist.
+  `detail_code` 0. Runtime records the failure class in structured logs. Until
+  L0 merges, the client-side portable Rust product UI receives only
+  `14 InternalFailure` with `detail_code` 0 and renders the single generic
+  copy "New terminal could not start". L0 assigns `17 LaunchPolicyRejected`
+  with the bounded, non-secret `detail_code` values 1
+  `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4
+  `CapabilityUnavailable`. No other values are defined; clients treat any
+  unknown value as generic. Until L0 merges, warnings are recorded in
+  count-only structured logs and are not user-visible. L0 assigns
+  `Created.detail_code` bit 0 = `ConfiguredShellInvalid` and bit 1 =
+  `CwdOverrideInvalid`. All other bits are reserved and must be 0. No other
+  transport for launch-policy warnings is authorized. Implementations must
+  not invent interim wire encodings of paths or secrets in `detail_code`. The
+  interim ban covers everything before L0. L0 (ADR-020 §3.10) owns adding
+  code 17; L3 switches to it in the same PR, so the two mappings never
+  coexist.
 - User-visible strings are bounded and non-secret.
 - Protocol payloads carry no paths or env data.
 
@@ -229,6 +245,10 @@ unknown/reserved → UnsupportedLaunchProfile (ADR-017) before policy resolution
 ```
 
 This specification does not define wire layouts.
+
+§3.9 and the create-path mapping in §3.10 are normative only once ADR-017 is
+Accepted. §§3.1–3.8, §3.10's failure/warning types, and §3.11 are normative on
+ADR-020 acceptance.
 
 ## 11. Performance / resource constraints
 

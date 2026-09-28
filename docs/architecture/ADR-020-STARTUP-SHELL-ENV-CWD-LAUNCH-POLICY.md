@@ -4,7 +4,7 @@
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent umbrella #676, epic #665; consumed by #994 provisioning children; related #686)
 - **Depends on:** ADR-005, ADR-008, ADR-009, ADR-015, SPEC-002, SPEC-003, SPEC-009
-- **Neighbor (Proposed, not on `master`):** [PR #1056](https://github.com/seyal-org/seyal/pull/1056) / Issue #994 proposes **ADR-017** (TerminalExecution provisioning and disposition). This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
+- **Neighbor (Proposed, not on `master`):** ADR-017 (TerminalExecution provisioning and disposition) is on `master` as Proposed. This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
 - **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). #1001 landed on `master` as ADR-021 / SPEC-025 (PR #1053). Numbers remain provisional until merge order is settled; siblings must not claim ADR-020.
 - **Scope:** deterministic cold-path policy for program/argv (including login bit), startup CWD, bounded environment construction, and `TERM`/`COLORTERM`/capability ownership when composing a new local interactive `TerminalExecution`
 - **Classification:** new architecture decision plus tightly scoped SPEC-023 (Proposed) and light SPEC-003/SPEC-009 cross-references
@@ -176,7 +176,7 @@ Production interactive launches **always** set `clear_environment = true` on `Co
 | `USER`, `LOGNAME` | account-record name |
 | `SHELL` | the validated `program` path actually being executed |
 | `PATH` | exactly `/usr/bin:/bin:/usr/sbin:/sbin` unless a later accepted profile extends it under #676 with the same validation discipline |
-| `TMPDIR` | already-validated absolute per-user temporary directory when available; otherwise omit |
+| `TMPDIR` | the Darwin per-user temporary directory from `confstr(_CS_DARWIN_USER_TEMP_DIR)`, validated as an absolute existing directory owned by the effective UID. It is never copied from the Runtime process environment; if it is unavailable or invalid it is omitted. |
 | `TERM`, `TERMINFO` | CapabilityPolicy (ADR-008) — applied as overrides after base env |
 
 **Policy-owned keys (named carve-out).** After the base allowlist, exactly two later policies may add keys, and only these:
@@ -240,6 +240,8 @@ Profile `0` is the only interactive profile authorized before #676 named profile
 
 Named profiles, when #676 defines them, only extend the selector→intent map inside Runtime (or a Runtime-readable config authority). They must not turn the provisioning request into a command-line or environment channel.
 
+§3.9 and the create-path mapping in §3.10 are normative only once ADR-017 is Accepted. §§3.1–3.8, §3.10's failure/warning types, and §3.11 are normative on ADR-020 acceptance.
+
 ### 3.10 Error UX when shell or CWD is invalid
 
 Resolution has two disjoint outcome types. A **failure** means nothing spawns; a **warning** accompanies a successful spawn. No condition appears in both.
@@ -268,13 +270,21 @@ Mapping rules:
   `17 LaunchPolicyRejected` result code (decomposition slice L0, owned by this
   #1003 workstream as a separate SPEC-004 amendment PR after ADR-017
   acceptance; 17 is the next free code after ADR-017's 15/16), **all** `LaunchPolicyFailure` variants map to create result code
-  `14 InternalFailure` with `detail_code` 0. The bounded failure class is kept
-  only in portable Rust product UI state and structured logs — never in the
-  create-result wire payload. `LaunchPolicyWarning` values are **not** surfaced
-  on the create-result wire (`Created` has no warning field); they reach the
-  Rust UI only through a separate product-state channel owned by the
-  implementation Issue. Implementations must not invent interim wire encodings
-  of paths, secrets, or warning bitmasks in `detail_code`.
+  `14 InternalFailure` with `detail_code` 0. Runtime records the failure class in
+  structured logs. Until L0 merges, the client-side portable Rust product UI
+  receives only `14 InternalFailure` with `detail_code` 0 and renders the single
+  generic copy "New terminal could not start". L0 assigns `17 LaunchPolicyRejected`
+  with the bounded, non-secret `detail_code` values 1 `AccountRecordUnavailable`,
+  2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4 `CapabilityUnavailable`. No other
+  values are defined; clients treat any unknown value as generic.
+  `LaunchPolicyWarning` values are **not** surfaced on the create-result wire
+  (`Created` has no warning field). Until L0 merges, warnings are recorded in
+  count-only structured logs and are not user-visible. L0 assigns
+  `Created.detail_code` bit 0 = `ConfiguredShellInvalid` and bit 1 =
+  `CwdOverrideInvalid`. All other bits are reserved and must be 0. No other
+  transport for launch-policy warnings is authorized. Implementations must not
+  invent interim wire encodings of paths or secrets in `detail_code`. The
+  interim ban covers everything before L0.
 - **Removal boundary.** The `14 InternalFailure` mapping is authoritative only
   until L0 merges. L3 then switches every `LaunchPolicyFailure` to
   `17 LaunchPolicyRejected` in the same PR that consumes it; the two mappings
