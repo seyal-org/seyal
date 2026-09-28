@@ -124,7 +124,7 @@ The same `ShellState` reducer owns:
 - the order of Windows within a Workspace;
 - the order of Tabs within a Window;
 - which Window is the product-active Window;
-- the per-Workspace most-recently-active Window order, and `last_active_workspace` (§2.2);
+- the single most-recently-active order over all Windows, whose restriction to one Workspace is that Workspace's most-recently-active Window order, and `last_active_workspace` (§2.2);
 - which Tab is active per Window;
 - which Pane is focused per Tab, and the one product-focused Pane globally;
 - window and tab cycling/next/previous order and direct-selection ordinals.
@@ -273,7 +273,7 @@ forbidden by this section.
 
 Because nothing is destroyed by a close, no close path requires a destructive
 confirmation prompt.
-Successor selection is Rust-owned and deterministic. Closing a Window's active Tab activates the Tab that immediately followed it in that Window's order, or the new last Tab if it was last. `CloseTab` naming a Window's only Tab is applied as `CloseWindow` for that Window in the same atomic reducer step; it is never rejected for being the last Tab and never leaves a zero-Tab Window. Closing a Window that is not product-active leaves the product-active Window unchanged. Closing the product-active Window makes the most recently active surviving Window of the same Workspace product-active; otherwise the most recently active surviving Window of any Workspace; otherwise the composition enters zero Windows (§3.3a) with `last_active_workspace` unchanged. Rust emits destroy-realization for the closed `WindowId` before order-front / make-key for the successor.
+Successor selection is Rust-owned and deterministic. Closing a Window's active Tab activates the Tab that immediately followed it in that Window's order, or the new last Tab if it was last. Closing a Tab that is not its Window's active Tab leaves that Window's active Tab, and the product-focused Pane, unchanged. `CloseTab` naming a Window's only Tab is applied as `CloseWindow` for that Window in the same atomic reducer step; it is never rejected for being the last Tab and never leaves a zero-Tab Window. Closing a Window that is not product-active leaves the product-active Window unchanged. Closing the product-active Window makes the most recently active surviving Window of the same Workspace product-active; otherwise the most recently active surviving Window of any Workspace; otherwise the composition enters zero Windows (§3.3a) with `last_active_workspace` unchanged. Rust emits destroy-realization for the closed `WindowId` before order-front / make-key for the successor.
 
 ### 3.3 Live-unpresented executions must stay reachable
 
