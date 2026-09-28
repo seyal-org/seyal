@@ -13,6 +13,7 @@ mod error;
 mod ids;
 mod input;
 mod key_v2_encode;
+mod launch_policy;
 pub mod local_ipc;
 #[cfg(all(target_os = "macos", feature = "benchmark-instrumentation"))]
 #[doc(hidden)]
@@ -40,6 +41,13 @@ pub use capability::{m001_term_name, CapabilityPolicy};
 pub use error::RuntimeError;
 pub use ids::{AttachmentId, BlockId, ExecutionId, ProjectionId, RuntimeId, WorkspaceId};
 pub use input::InputIngress;
+pub use launch_policy::{
+    interactive_login_argv, lookup_effective_account_record, resolve as resolve_launch_policy,
+    AccountRecord, CapabilityProfileId, EffectiveLaunchPolicy, EmptyLocaleEnv, LaunchPolicyFailure,
+    LaunchPolicyResolution, LaunchPolicyWarning, LaunchProfileIntent, LocaleEnv, PathProbe,
+    ProcessLocaleEnv, RealPathProbe, ResolveInputs, ShellFamily, DEFAULT_PATH,
+    PLATFORM_SAFE_FALLBACKS,
+};
 #[cfg(feature = "benchmark-instrumentation")]
 #[doc(hidden)]
 pub use runtime::BenchmarkRuntimeDiagnostics;
