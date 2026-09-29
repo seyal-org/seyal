@@ -466,10 +466,14 @@ final class SeyalHostComponentTests: XCTestCase {
         var connectedOnce = false
         var didRetryExhaustedRecovery = false
         let checkConnected = {
+            let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
+            // A zsh account is Flow. A bash account is full-pane Raw (SPEC-008)
+            // and is still a connected projection.
+            let projected = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             if !connectedOnce, view.terminalBridgeIsConnected,
                 view.terminalCurrentFrame() != nil,
-                seyal_app_snapshot(pane.appHandle).eligibility
-                    == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                projected
             {
                 connectedOnce = true
                 connected.fulfill()
