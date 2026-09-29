@@ -238,6 +238,8 @@ If an older type 35 frame is already on the wire when a newer snapshot supersede
 2. Reconnect once without bit 9. A Runtime that accepts extended keys and rejects only bit 9 keeps extended-key handling.
 3. Reconnect once without bit 9 and without `CAP_EXTENDED_TERMINAL_KEY`. This second drop is the existing extended-key compatibility fallback referenced by ADR-009, not a new reduction.
 
+"At most once per connect attempt" bounds one chain; an epoch-quarantined attach starts a second chain on a new connection, so that path's worst case is six ClientHellos.
+
 This chain does not compose with ADR-009's `CAP_COMMAND_BLOCK_DURATION` retry: until that ADR's fallback order is amended in a separate ADR PR, a client must not request bit 8 and bit 9 in the same ClientHello. Any other error, or exhaustion of these retries, returns the final error without further retry. A client never sends type 35. Runtime rejects a client-sent type 35 with `UnknownMessage`.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
@@ -580,7 +582,7 @@ Required once #1083 is accepted on merge of PR #1060. The production proof lives
 - `Detach`, `Detached`, a new `Attached`, reconnect, and disconnect clear the stored vector before the next attachment is projected;
 - a display generation advance without a matching frame clears the vector and draws no running-Block primary clip;
 - while the alternate screen is active the frame carries the visible viewport ids of that generation and does not carry the hidden primary buffer;
-- hello fallback retries only on `MalformedPayload` for a ClientHello the client encoded, on a fresh connection, drops bit 9 before `CAP_EXTENDED_TERMINAL_KEY`, does not request bit 8 and bit 9 together, and does not retry other errors;
+- hello fallback retries only on `MalformedPayload` for a ClientHello the client encoded, on a fresh connection, drops bit 9 before `CAP_EXTENDED_TERMINAL_KEY`, does not request bit 8 and bit 9 together, and does not retry other errors; an epoch-quarantined attach may start a second chain on a new connection;
 - the frame contains no command text.
 
 ## 17. Acceptance gate
