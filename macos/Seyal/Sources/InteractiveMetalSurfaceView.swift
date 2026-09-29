@@ -135,6 +135,22 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
 
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let compositionActive = hasMarkedText()
+        switch KeybindingStrokeNormalizer.route(
+            appHandle: appHandle,
+            event: event,
+            composerFocused: false,
+            compositionActive: compositionActive
+        ) {
+        case .consumed:
+            // ApplicationCommand matched in Rust — zero PTY bytes.
+            return
+        case .nativeCommand:
+            super.keyDown(with: event)
+            return
+        case .`fallthrough`:
+            break
+        }
         if flags.contains(.command) {
             super.keyDown(with: event)
             return

@@ -2,7 +2,7 @@
 
 - **Status:** Proposed decomposition output of refinement Issue #1002
 - **Parent umbrella:** #676 (epic #665) — do **not** assign #676
-- **Authority:** [`../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md`](../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md) (Proposed), ADR-015, SPEC-006 (incl. §21.3 `input.option_as_alt`), SPEC-008 / ADR-009, Foundation cold keybinding rule, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
+- **Authority:** [`../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md`](../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md) (Accepted; not an implemented-behavior claim), ADR-015, SPEC-006 (incl. §21.3 `input.option_as_alt`), SPEC-008 / ADR-009, Foundation cold keybinding rule, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 
 This file is a planning artifact. It creates no implementation authority: each
 slice below becomes real work only as a GitHub child Issue of #676 that passes
@@ -62,7 +62,8 @@ privacy on fixtures).
 ## K2 — Defaults, reserved Command, conflict resolution
 
 **Outcome:** builtin default rows from SPEC-024 §4.1 (excluding ADR-021 pane
-rows, see K7, and SPEC-022 navigation rows, see K8; including the §5.4
+rows, see K7, SPEC-022 navigation rows, see K8, and ADR-018 window rows per
+R5.0.1; including the §5.4
 `ctrl+r` composer history-search row); the enumerated reserved set from §4.2; per-context-bit last-wins
 resolution with `DuplicateSequence` diagnostics; `action = "none"` unbind.
 
