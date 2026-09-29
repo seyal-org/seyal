@@ -22,7 +22,10 @@ enum IsolatedHostedRuntime {
     return url.path
   }
 
-  static func makeLaunchArguments() -> [String] { [flag, makeDirectory()] }
+  /// `/bin/zsh` is the helper command so Flow tests run with trusted
+  /// integration. The account `pw_shell` on hosted runners is bash, which
+  /// SPEC-008 presents as full-pane Raw.
+  static func makeLaunchArguments() -> [String] { [flag, makeDirectory(), "/bin/zsh"] }
 }
 
 extension XCUIApplication {
