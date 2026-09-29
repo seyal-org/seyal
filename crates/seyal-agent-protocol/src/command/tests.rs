@@ -44,6 +44,23 @@ fn commands_round_trip_and_trailing_bytes_fail() {
 }
 
 #[test]
+fn truncated_bodies_unknown_aggregates_and_empty_scopes_fail_closed() {
+    assert_eq!(decode_command(&[]), Err(FrameError::Malformed));
+    assert_eq!(decode_command(&[1]), Err(FrameError::Malformed));
+    assert_eq!(decode_command(&[1, 0, 0]), Err(FrameError::Malformed));
+    let mut snapshot = vec![7, 0];
+    snapshot.extend_from_slice(&[0; 16]);
+    snapshot.push(9);
+    assert_eq!(decode_command(&snapshot), Err(FrameError::Malformed));
+    let frame = encode_result(&CommandResult::Resumed, 4096).unwrap();
+    let decoded = decode_frame(&frame, 4096).unwrap();
+    let mut trailing = decoded.body.clone();
+    trailing.push(0);
+    assert_eq!(decode_result(&trailing), Err(FrameError::Malformed));
+    assert_eq!(decode_result(&[2]), Err(FrameError::Malformed));
+}
+
+#[test]
 fn unknown_command_code_and_zero_generation_fail_closed() {
     assert_eq!(
         decode_command(&99_u16.to_le_bytes()),

@@ -14,9 +14,9 @@ use std::{
 use seyal_agent_backend::{AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep};
 use seyal_agent_core::WorkScopeKind;
 use seyal_agent_protocol::{
-    decode_frame, decode_result, encode_command, encode_hello, AgentRunId, AggregateRef, AttemptId,
-    ClientSessionId, Command, CommandError, CommandResult, FrameKind, Hello, ProtocolVersion,
-    WorkItemId, WorkScopeId, ABSOLUTE_MAX_FRAME_SIZE,
+    decode_frame, decode_result, encode_command, encode_frame, encode_hello, AgentRunId,
+    AggregateRef, AttemptId, ClientSessionId, Command, CommandError, CommandResult, FrameKind,
+    Hello, ProtocolVersion, WorkItemId, WorkScopeId, ABSOLUTE_MAX_FRAME_SIZE,
 };
 
 #[test]
@@ -146,6 +146,129 @@ fn standalone_path_survives_disconnect_and_restart() {
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
+    let dir = std::env::temp_dir().join(format!(
+        "seyal-ag-m-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config.clone()).unwrap();
+    let socket = daemon.socket_path();
+    let socket_for_client = socket.clone();
+    let opened = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket_for_client);
+        let unknown = client.write_frame(
+            &encode_frame(
+                FrameKind::Command,
+                &99_u16.to_le_bytes(),
+                ABSOLUTE_MAX_FRAME_SIZE,
+            )
+            .unwrap(),
+        );
+        let bad_scope = client.command(&Command::OpenSession { scopes: vec![9] });
+        let widened = client.command(&Command::OpenSession { scopes: vec![3] });
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let foreign = AggregateRef::AgentRun(AgentRunId::new());
+        let snapshot = client.command(&Command::GetSnapshot {
+            session_id: client.session_id,
+            aggregate: foreign,
+        });
+        let replay = client.command(&Command::Subscribe {
+            session_id: client.session_id,
+            aggregate: foreign,
+            after: None,
+        });
+        (
+            client.session_id,
+            unknown,
+            bad_scope,
+            widened,
+            scope,
+            snapshot,
+            replay,
+        )
+    });
+    daemon.serve_one().unwrap();
+    let (session_id, unknown, bad_scope, widened, scope, snapshot, replay) = opened.join().unwrap();
+    assert_eq!(unknown, CommandResult::Error(CommandError::Malformed));
+    assert_eq!(bad_scope, CommandResult::Error(CommandError::Malformed));
+    assert_eq!(widened, CommandResult::Error(CommandError::Denied));
+    assert_eq!(snapshot, CommandResult::Error(CommandError::Denied));
+    assert_eq!(replay, CommandResult::Error(CommandError::Denied));
+
+    let socket = daemon.socket_path();
+    let rejected = thread::spawn(move || TestClient::resume(&socket, ClientSessionId::new()));
+    daemon.serve_one().unwrap();
+    assert_eq!(
+        rejected.join().unwrap().err(),
+        Some(CommandError::RejectedSession)
+    );
+
+    let socket = daemon.socket_path();
+    let narrowed = thread::spawn(move || {
+        let mut client = TestClient::connect_with(&socket, vec![2]);
+        let create = client.command(&Command::CreateWorkScope {
+            session_id: client.session_id,
+            kind: WorkScopeKind::Repository,
+        });
+        let control = client.check_generation(AgentRunId::new(), 1, 1);
+        (create, control)
+    });
+    daemon.serve_one().unwrap();
+    let (create, control) = narrowed.join().unwrap();
+    assert_eq!(create, CommandResult::Error(CommandError::Denied));
+    assert_eq!(control, Err(CommandError::Denied));
+
+    let socket = daemon.socket_path();
+    let broken = thread::spawn(move || {
+        let mut stream = handshake(&socket);
+        let mut header = [0_u8; 10];
+        header[..4].copy_from_slice(b"BAD!");
+        stream.write_all(&header).unwrap();
+    });
+    assert_eq!(
+        daemon.serve_one(),
+        Err(seyal_agent_backend::DaemonError::Malformed)
+    );
+    broken.join().unwrap();
+
+    let socket = daemon.socket_path();
+    let resume_session = session_id;
+    let resume_scope = scope;
+    let still_there = thread::spawn(move || {
+        let mut client = TestClient::resume(&socket, resume_session).unwrap();
+        client.replay(AggregateRef::WorkScope(resume_scope)).len()
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(still_there.join().unwrap(), 1);
+
+    daemon.abandon_as_crash();
+    let mut restarted = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = restarted.socket_path();
+    let rejected = thread::spawn(move || TestClient::resume(&socket, session_id));
+    restarted.serve_one().unwrap();
+    assert_eq!(
+        rejected.join().unwrap().err(),
+        Some(CommandError::RejectedSession)
+    );
+    let socket = restarted.socket_path();
+    let recovered = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        client.replay(AggregateRef::WorkScope(scope)).len()
+    });
+    restarted.serve_one().unwrap();
+    assert_eq!(recovered.join().unwrap(), 1);
+    let _ = fs::remove_dir_all(dir);
+}
+
 struct TestClient {
     stream: UnixStream,
     session_id: ClientSessionId,
@@ -164,17 +287,27 @@ struct Snap {
 
 impl TestClient {
     fn connect(path: &Path) -> Self {
+        Self::connect_with(path, vec![1, 2, 4])
+    }
+
+    fn connect_with(path: &Path, scopes: Vec<u8>) -> Self {
         let mut stream = handshake(path);
-        let session_id = match round_trip(
-            &mut stream,
-            &Command::OpenSession {
-                scopes: vec![1, 2, 4],
-            },
-        ) {
+        let session_id = match round_trip(&mut stream, &Command::OpenSession { scopes }) {
             CommandResult::Opened { session_id } => session_id,
             other => panic!("open session: {other:?}"),
         };
         Self { stream, session_id }
+    }
+
+    fn command(&mut self, command: &Command) -> CommandResult {
+        round_trip(&mut self.stream, command)
+    }
+
+    fn write_frame(&mut self, frame: &[u8]) -> CommandResult {
+        self.stream.write_all(frame).unwrap();
+        let response = read_frame(&mut self.stream);
+        assert_eq!(response.kind, FrameKind::Result);
+        decode_result(&response.body).unwrap()
     }
 
     fn resume(path: &Path, session_id: ClientSessionId) -> Result<Self, CommandError> {

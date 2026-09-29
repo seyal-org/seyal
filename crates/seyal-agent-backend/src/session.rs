@@ -413,11 +413,8 @@ impl IntegrationService {
         session_id: seyal_agent_core::ClientSessionId,
         aggregate: AggregateRef,
     ) -> CommandResult {
-        if let Err(error) =
-            self.auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsObserve)
-        {
-            return CommandResult::Error(map_auth(error));
+        if let Err(error) = self.authorize_observe(session_id, aggregate) {
+            return CommandResult::Error(error);
         }
         match self.store.get_snapshot(to_aggregate(aggregate)) {
             Ok(None) => CommandResult::Snapshot { view: None },
@@ -438,11 +435,8 @@ impl IntegrationService {
         after: Option<u64>,
         event_window: u32,
     ) -> CommandResult {
-        if let Err(error) =
-            self.auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsObserve)
-        {
-            return CommandResult::Error(map_auth(error));
+        if let Err(error) = self.authorize_observe(session_id, aggregate) {
+            return CommandResult::Error(error);
         }
         let after = match after {
             Some(sequence) => match AggregateSequence::from_raw(sequence) {
@@ -535,6 +529,27 @@ impl IntegrationService {
             control_generation: run.control_generation().get(),
             liveness: liveness_code(self.authority.liveness(run_id)),
         }
+    }
+
+    /// Run snapshots and replays use the same target gate as `ReadRun`.
+    fn authorize_observe(
+        &self,
+        session_id: seyal_agent_core::ClientSessionId,
+        aggregate: AggregateRef,
+    ) -> Result<(), CommandError> {
+        let decision = if let AggregateRef::AgentRun(run_id) = aggregate {
+            self.auth.authorize_run(
+                session_id,
+                self.instance_id,
+                ClientScope::RunsObserve,
+                run_id,
+            )
+        } else {
+            self.auth
+                .authorize_session(session_id, self.instance_id, ClientScope::RunsObserve)
+                .map(|_| ())
+        };
+        decision.map_err(map_auth)
     }
 }
 

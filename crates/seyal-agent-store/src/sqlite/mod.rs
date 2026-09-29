@@ -578,8 +578,12 @@ fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
     if from >= SCHEMA_VERSION {
         return Ok(());
     }
+    // One transaction so a failed migration cannot publish the new version.
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|_| StoreError::WriteFailed)?;
     if from < 2 {
-        conn.execute_batch(
+        tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS aggregate_sequence_hwm (
                 aggregate_kind INTEGER NOT NULL,
                 aggregate_id BLOB NOT NULL,
@@ -589,7 +593,7 @@ fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
         )
         .map_err(|_| StoreError::WriteFailed)?;
         // Backfill from the max of retained events and snapshot frontiers.
-        conn.execute_batch(
+        tx.execute_batch(
             "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
              SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
                SELECT aggregate_kind, aggregate_id, sequence AS seq FROM aggregate_event
@@ -600,11 +604,12 @@ fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
         .map_err(|_| StoreError::WriteFailed)?;
     }
     if from < 3 {
-        conn.execute_batch(IDENTITY_TABLES)
+        tx.execute_batch(IDENTITY_TABLES)
             .map_err(|_| StoreError::WriteFailed)?;
     }
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
+    tx.commit().map_err(|_| StoreError::WriteFailed)?;
     Ok(())
 }
 

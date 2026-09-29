@@ -179,7 +179,7 @@ fn id_from_bytes(bytes: Vec<u8>) -> Result<crate::WorkScopeId, StoreError> {
 mod tests {
     use super::*;
     use crate::AgentStore;
-    use rusqlite::Connection;
+    use rusqlite::{params, Connection};
     use std::{
         fs,
         sync::atomic::{AtomicU64, Ordering},
@@ -239,10 +239,64 @@ mod tests {
             );",
         )
         .unwrap();
+        let prior_run = [9u8; 16];
+        let prior_attempt = [8u8; 16];
+        conn.execute(
+            "INSERT INTO agent_run (id, attempt_id, binding_generation, control_generation, liveness)
+             VALUES (?1, ?2, 4, 5, 'unknown')",
+            params![prior_run.to_vec(), prior_attempt.to_vec()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO aggregate_event
+                (aggregate_kind, aggregate_id, sequence, event_id, kind, payload)
+             VALUES (4, ?1, 1, 1, 9, ?2)",
+            params![prior_run.to_vec(), b"kept".to_vec()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
+             VALUES (4, ?1, 1)",
+            params![prior_run.to_vec()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO aggregate_snapshot
+                (aggregate_kind, aggregate_id, incorporated_through, payload)
+             VALUES (4, ?1, 1, ?2)",
+            params![prior_run.to_vec(), b"snap".to_vec()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO output_segment (agent_run_id, segment_index, payload)
+             VALUES (?1, 0, ?2)",
+            params![prior_run.to_vec(), b"seg".to_vec()],
+        )
+        .unwrap();
         conn.pragma_update(None, "user_version", 2).unwrap();
         drop(conn);
 
         let store = AgentStore::open(&legacy).unwrap();
+        let prior_run = crate::AgentRunId::from_bytes([9u8; 16]);
+        let prior = store.agent_run(prior_run).unwrap();
+        assert_eq!(prior.attempt_id, crate::AttemptId::from_bytes([8u8; 16]));
+        assert_eq!(prior.binding_generation, 4);
+        assert_eq!(prior.control_generation, 5);
+        assert_eq!(prior.liveness, PersistedLiveness::Unknown);
+        let prior_events = store
+            .replay_after(AggregateId::AgentRun(prior_run), None)
+            .unwrap();
+        assert_eq!(prior_events.len(), 1);
+        assert_eq!(prior_events[0].sequence.get(), 1);
+        assert_eq!(prior_events[0].payload, b"kept");
+        let (position, payload) = store
+            .get_snapshot(AggregateId::AgentRun(prior_run))
+            .unwrap()
+            .unwrap();
+        assert_eq!(position.incorporated_through.get(), 1);
+        assert_eq!(payload, b"snap");
+        assert_eq!(store.output_segment_count(prior_run).unwrap(), 1);
+        assert!(store.work_scopes().unwrap().is_empty());
         let scope = crate::WorkScopeId::new();
         let item = crate::WorkItemId::new();
         let attempt = crate::AttemptId::new();
@@ -261,5 +315,12 @@ mod tests {
         assert_eq!(scope_events.len(), 1);
         assert_eq!(scope_events[0].sequence.get(), 1);
         assert_eq!(scope_events[0].payload, vec![2]);
+        assert_eq!(reopened.agent_run(prior_run).unwrap().binding_generation, 4);
+        drop(reopened);
+        let conn = Connection::open(&legacy).unwrap();
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
     }
 }
