@@ -4,6 +4,7 @@ use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
+use crate::navigation::{matches_destroyed_pane, matches_destroyed_tab, ResourceAddress};
 use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
@@ -28,9 +29,25 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
+        let focus_before = self.shell.focus_checkpoint();
+        let was_active = focus_before.active_tab == id;
         self.shell
             .apply(ShellAction::CloseTab { id })
             .map_err(close_tab_error)?;
+        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
+        // product close path — surfaces do not scan history themselves.
+        let focus_after = self.shell.focus_checkpoint();
+        let successor = if was_active {
+            Some(ResourceAddress::Pane {
+                workspace: focus_after.active_workspace,
+                tab: focus_after.active_tab,
+                pane: focus_after.focused_pane,
+            })
+        } else {
+            None
+        };
+        self.focus_history
+            .on_destroy(|addr| matches_destroyed_tab(addr, id), successor);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -38,9 +55,24 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
+        let focus_before = self.shell.focus_checkpoint();
+        let was_focused = focus_before.focused_pane == id;
         self.shell
             .apply(ShellAction::ClosePane { id })
             .map_err(close_pane_error)?;
+        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
+        let focus_after = self.shell.focus_checkpoint();
+        let successor = if was_focused {
+            Some(ResourceAddress::Pane {
+                workspace: focus_after.active_workspace,
+                tab: focus_after.active_tab,
+                pane: focus_after.focused_pane,
+            })
+        } else {
+            None
+        };
+        self.focus_history
+            .on_destroy(|addr| matches_destroyed_pane(addr, id), successor);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
