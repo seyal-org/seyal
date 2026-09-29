@@ -11,8 +11,8 @@ use crate::shell::{
 };
 
 use super::{
-    decode_resource_address, navigate, resolve, ExecutionPresence, NavigationPrincipal,
-    NavigationRejection, ResolvedTarget, ResourceAddress, WorkspaceAccess,
+    decode_resource_address, navigate, resolve, ExecutionPresence, NavigateHistory,
+    NavigationPrincipal, NavigationRejection, ResolvedTarget, ResourceAddress, WorkspaceAccess,
     RESOURCE_ADDRESS_ABI_VERSION, RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE,
     RESOURCE_ADDRESS_KIND_TAB, RESOURCE_ADDRESS_KIND_WORKSPACE,
 };
@@ -633,7 +633,8 @@ fn navigate_pane_in_inactive_workspace_activates_all_in_one_transition() {
             address,
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w2,
@@ -662,7 +663,8 @@ fn navigate_already_active_pane_is_success_noop() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
@@ -671,7 +673,7 @@ fn navigate_already_active_pane_is_success_noop() {
         })
     );
     assert_eq!(shell.focus_checkpoint(), before);
-    // N2 does not own focus history; no-op success implies no history side effect.
+    // Focus unchanged; history recording is ApplyOnly in this N2 regression.
 }
 
 // --- §12.10 Navigate never changes presentation/binding/PTY facts -----------
@@ -698,6 +700,7 @@ fn navigate_does_not_change_bindings() {
         &mut shell,
         &MapInventory::new(),
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
     assert_eq!(
@@ -726,7 +729,8 @@ fn navigate_rejects_destroyed_tab_without_workspace_change() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::UnknownTab)
     );
@@ -750,7 +754,8 @@ fn navigate_unbound_execution_is_target_unbound_without_attach() {
             ResourceAddress::Execution { execution: live },
             &mut shell,
             &MapInventory::with(live, ExecutionPresence::Live),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::TargetUnbound)
     );
@@ -772,7 +777,8 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::TargetTerminated)
     );
@@ -783,7 +789,8 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::UnknownExecution)
     );
@@ -800,7 +807,8 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
@@ -832,7 +840,8 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::AmbiguousTarget)
     );
@@ -849,7 +858,8 @@ fn navigate_execution_rejection_matrix_r8_3() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::UnknownPane)
     );
@@ -868,7 +878,8 @@ fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
             ResourceAddress::Workspace { workspace: w1 },
             &mut shell,
             &MapInventory::new(),
-            denied
+            denied,
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::NavigationDenied)
     );
@@ -879,7 +890,8 @@ fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
             },
             &mut shell,
             &MapInventory::new(),
-            denied
+            denied,
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::NavigationDenied)
     );
@@ -916,7 +928,8 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
             stored,
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Ok(ResolvedTarget::Tab {
             workspace: w1,
@@ -956,7 +969,8 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
             stored,
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Err(NavigationRejection::UnknownPane)
     );

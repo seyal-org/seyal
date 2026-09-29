@@ -5,7 +5,9 @@ use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 use crate::app::{
     AppAction, ApplicationRoot, NativeEffect, WindowNativeEvent, WINDOW_ACTIVATION_ATTEMPT_BUDGET,
 };
-use crate::navigation::{navigate, EmptyExecutionInventory, NavigationPrincipal, ResourceAddress};
+use crate::navigation::{
+    navigate, EmptyExecutionInventory, NavigateHistory, NavigationPrincipal, ResourceAddress,
+};
 use crate::shell::{
     ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
 };
@@ -102,6 +104,7 @@ fn cross_window_navigate_emits_one_window_activation() {
         &mut shell,
         &EmptyExecutionInventory,
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
 
@@ -171,6 +174,7 @@ fn same_window_navigate_emits_no_activation() {
         &mut shell,
         &EmptyExecutionInventory,
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
     assert_eq!(shell.snapshot().active_tab, t2);
@@ -198,6 +202,7 @@ fn navigate_does_not_reparent_tab() {
         &mut shell,
         &EmptyExecutionInventory,
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
 
@@ -291,13 +296,10 @@ fn activation_failure_retries_bounded_then_stops_focus_intact() {
     assert_eq!(root.snapshot().shell.focused_pane, focused);
 }
 
-/// Focus-history is absent on this branch; activation state carries WindowId
-/// only in the placement/effect path, never as a history entry shape.
+/// ActivationHostFailure carries WindowId only; it is never a focus-history
+/// entry shape (no FocusSeq / Pane address). History stays WindowId-free (R6.2).
 #[test]
 fn activation_path_does_not_introduce_windowed_focus_history() {
-    // Compile-time / structural guard: ActivationHostFailure is the typed
-    // host-failure record and is not a focus-history entry (no FocusSeq / Pane
-    // address). Focus history lands in N3 and must stay WindowId-free (R6.2).
     let failure = crate::app::ActivationHostFailure {
         window: WindowId::from_bytes([0; 16]),
         attempts_emitted: 1,

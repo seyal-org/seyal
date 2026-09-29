@@ -942,5 +942,7 @@ fn error_number(error: AppError) -> i32 {
         AppError::GotoNotOpen => 45,
         AppError::GotoNoSelection => 46,
         AppError::GotoUnsupportedScope => 47,
+        AppError::NavigationStaleHistoryCursor => 48,
+        AppError::NavigationHistoryUnavailable => 49,
     }
 }
