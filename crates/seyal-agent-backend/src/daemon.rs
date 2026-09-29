@@ -48,6 +48,7 @@ pub enum DaemonError {
     Endpoint(EndpointFault),
     StartupContended,
     Handshake(HandshakeError),
+    Unavailable,
     Malformed,
     Oversized,
     TimedOut,
@@ -62,6 +63,7 @@ pub struct AgentDaemon {
     config: DaemonConfig,
     cleanup: bool,
     our_uid: u32,
+    integration: Option<crate::session::IntegrationService>,
 }
 
 pub struct DaemonSample {
@@ -138,7 +140,19 @@ impl AgentDaemon {
             config,
             cleanup: true,
             our_uid,
+            integration: None,
         })
+    }
+
+    pub fn bind_integration(
+        directory: impl Into<PathBuf>,
+        integration: crate::session::IntegrationConfig,
+    ) -> Result<Self, DaemonError> {
+        let mut daemon = Self::bind(directory)?;
+        let service = crate::session::IntegrationService::open(daemon.instance_id, &integration)
+            .map_err(|_| DaemonError::Unavailable)?;
+        daemon.integration = Some(service);
+        Ok(daemon)
     }
 
     pub fn instance_id(&self) -> BackendInstanceId {
@@ -150,6 +164,40 @@ impl AgentDaemon {
     }
 
     pub fn accept_hello(&self) -> Result<HelloAck, DaemonError> {
+        let (stream, ack) = self.accept_stream()?;
+        drop(stream);
+        Ok(ack)
+    }
+
+    /// Serve one authenticated client until it disconnects.
+    ///
+    /// Disconnect does not drop backend authority. The domain, store, and
+    /// open `ClientSession` remain for a later connection to this process.
+    pub fn serve_one(&mut self) -> Result<(), DaemonError> {
+        if self.integration.is_none() {
+            return Err(DaemonError::Unavailable);
+        }
+        let (mut stream, ack) = self.accept_stream()?;
+        let max_frame_size = ack.max_frame_size;
+        let event_window = ack.event_window;
+        let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
+        loop {
+            let frame = match crate::session::read_session_frame(&mut stream, max_frame_size) {
+                crate::session::SessionRead::Frame(frame) => frame,
+                crate::session::SessionRead::Disconnected => return Ok(()),
+                crate::session::SessionRead::Oversized => return Err(DaemonError::Oversized),
+                crate::session::SessionRead::Malformed => return Err(DaemonError::Malformed),
+                crate::session::SessionRead::TimedOut => return Err(DaemonError::TimedOut),
+                crate::session::SessionRead::Io => return Err(DaemonError::Io),
+            };
+            let response = service
+                .handle(frame, max_frame_size, event_window)
+                .map_err(|_| DaemonError::Unavailable)?;
+            stream.write_all(&response).map_err(map_io)?;
+        }
+    }
+
+    fn accept_stream(&self) -> Result<(UnixStream, HelloAck), DaemonError> {
         let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
         let (mut stream, _) = listener.accept().map_err(map_io)?;
         stream
@@ -179,7 +227,7 @@ impl AgentDaemon {
                 let bytes = encode_ack(&ack, self.config.max_frame_size)
                     .map_err(|_| DaemonError::Malformed)?;
                 stream.write_all(&bytes).map_err(map_io)?;
-                Ok(ack)
+                Ok((stream, ack))
             }
             Err(error) => {
                 let bytes = encode_handshake_error(error, self.config.max_frame_size)
@@ -258,7 +306,7 @@ fn complete_client_handshake(
             let error = decode_handshake_error(&frame.body).map_err(|_| DaemonError::Malformed)?;
             Err(DaemonError::Handshake(error))
         }
-        FrameKind::Hello => Err(DaemonError::Malformed),
+        FrameKind::Hello | FrameKind::Command | FrameKind::Result => Err(DaemonError::Malformed),
     }
 }
 

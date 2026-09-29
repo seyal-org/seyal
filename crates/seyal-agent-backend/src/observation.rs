@@ -47,6 +47,45 @@ impl ObservationAuthority {
         &self.domain
     }
 
+    pub fn restore_work_scope(
+        &mut self,
+        id: seyal_agent_core::WorkScopeId,
+        kind: seyal_agent_core::WorkScopeKind,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_work_scope(id, kind)
+    }
+
+    pub fn restore_work_item(
+        &mut self,
+        id: seyal_agent_core::WorkItemId,
+        work_scope_id: seyal_agent_core::WorkScopeId,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_work_item(id, work_scope_id)
+    }
+
+    pub fn restore_attempt(
+        &mut self,
+        id: seyal_agent_core::AttemptId,
+        work_item_id: seyal_agent_core::WorkItemId,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_attempt(id, work_item_id)
+    }
+
+    pub fn restore_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+    ) -> Result<(), DomainError> {
+        self.domain
+            .restore_agent_run(id, attempt_id, binding_generation, control_generation)
+    }
+
+    pub fn mark_recovered(&mut self, run_id: AgentRunId) {
+        self.set_liveness(run_id, RunLiveness::UnknownAfterCrash);
+    }
+
     pub fn liveness(&self, run_id: AgentRunId) -> RunLiveness {
         self.liveness
             .get(&run_id)

@@ -178,6 +178,50 @@ impl AuthorizationRepository {
         Ok(id)
     }
 
+    pub fn authorize_session(
+        &self,
+        session_id: ClientSessionId,
+        backend_instance_id: BackendInstanceId,
+        required_scope: ClientScope,
+    ) -> Result<ClientPrincipalId, AuthorizationError> {
+        let session = self.session(session_id, backend_instance_id)?;
+        if !session.scopes.contains(&required_scope) {
+            return Err(AuthorizationError::ScopeDenied);
+        }
+        Ok(session.principal_id)
+    }
+
+    pub fn resume_session(
+        &self,
+        session_id: ClientSessionId,
+        backend_instance_id: BackendInstanceId,
+    ) -> Result<(), AuthorizationError> {
+        let _session = self.session(session_id, backend_instance_id)?;
+        Ok(())
+    }
+
+    fn session(
+        &self,
+        session_id: ClientSessionId,
+        backend_instance_id: BackendInstanceId,
+    ) -> Result<&Session, AuthorizationError> {
+        let session = self
+            .sessions
+            .get(&session_id)
+            .ok_or(AuthorizationError::UnknownSession)?;
+        if session.backend_instance_id != backend_instance_id {
+            return Err(AuthorizationError::StaleBackendInstance);
+        }
+        let principal = self
+            .principals
+            .get(&session.principal_id)
+            .ok_or(AuthorizationError::UnknownPrincipal)?;
+        if principal.status != PrincipalStatus::Active {
+            return Err(AuthorizationError::PrincipalInactive);
+        }
+        Ok(session)
+    }
+
     pub fn authorize_local_uid(
         &self,
         _uid: u32,

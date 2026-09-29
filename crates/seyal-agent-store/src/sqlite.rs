@@ -7,7 +7,20 @@ use crate::{
     SnapshotPosition,
 };
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
+const IDENTITY_TABLES: &str = "
+CREATE TABLE IF NOT EXISTS work_scope (
+    id BLOB PRIMARY KEY,
+    kind INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS work_item (
+    id BLOB PRIMARY KEY,
+    work_scope_id BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attempt (
+    id BLOB PRIMARY KEY,
+    work_item_id BLOB NOT NULL
+);";
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
 
@@ -34,7 +47,7 @@ pub enum StoreError {
 }
 
 pub struct AgentStore {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
 }
 
 impl AgentStore {
@@ -525,7 +538,7 @@ impl AgentStore {
     }
 }
 
-fn insert_event(
+pub(crate) fn insert_event(
     tx: &rusqlite::Transaction<'_>,
     aggregate_id: AggregateId,
     event_kind: u16,
@@ -565,25 +578,31 @@ fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
     if from >= SCHEMA_VERSION {
         return Ok(());
     }
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS aggregate_sequence_hwm (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            high_water INTEGER NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id)
-        );",
-    )
-    .map_err(|_| StoreError::WriteFailed)?;
-    // Backfill from the max of retained events and snapshot frontiers.
-    conn.execute_batch(
-        "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
-         SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
-           SELECT aggregate_kind, aggregate_id, sequence AS seq FROM aggregate_event
-           UNION ALL
-           SELECT aggregate_kind, aggregate_id, incorporated_through AS seq FROM aggregate_snapshot
-         ) GROUP BY aggregate_kind, aggregate_id;",
-    )
-    .map_err(|_| StoreError::WriteFailed)?;
+    if from < 2 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS aggregate_sequence_hwm (
+                aggregate_kind INTEGER NOT NULL,
+                aggregate_id BLOB NOT NULL,
+                high_water INTEGER NOT NULL,
+                PRIMARY KEY (aggregate_kind, aggregate_id)
+            );",
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+        // Backfill from the max of retained events and snapshot frontiers.
+        conn.execute_batch(
+            "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
+             SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
+               SELECT aggregate_kind, aggregate_id, sequence AS seq FROM aggregate_event
+               UNION ALL
+               SELECT aggregate_kind, aggregate_id, incorporated_through AS seq FROM aggregate_snapshot
+             ) GROUP BY aggregate_kind, aggregate_id;",
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 3 {
+        conn.execute_batch(IDENTITY_TABLES)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     Ok(())
@@ -625,6 +644,18 @@ fn initialize(conn: &Connection) -> Result<(), StoreError> {
             binding_generation INTEGER NOT NULL,
             control_generation INTEGER NOT NULL,
             liveness TEXT NOT NULL CHECK (liveness = 'unknown')
+        );
+        CREATE TABLE work_scope (
+            id BLOB PRIMARY KEY,
+            kind INTEGER NOT NULL
+        );
+        CREATE TABLE work_item (
+            id BLOB PRIMARY KEY,
+            work_scope_id BLOB NOT NULL
+        );
+        CREATE TABLE attempt (
+            id BLOB PRIMARY KEY,
+            work_item_id BLOB NOT NULL
         );",
     )
     .map_err(|_| StoreError::WriteFailed)?;
@@ -643,7 +674,7 @@ fn aggregate_key(id: AggregateId) -> (i64, Vec<u8>) {
 }
 
 impl AggregateSequence {
-    fn from_raw(value: u64) -> Option<Self> {
+    pub fn from_raw(value: u64) -> Option<Self> {
         NonZeroU64::new(value).map(Self)
     }
 }

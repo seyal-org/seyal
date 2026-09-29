@@ -6,6 +6,7 @@
 
 use std::num::NonZeroU64;
 
+mod identity;
 mod sqlite;
 
 pub use seyal_agent_core::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};

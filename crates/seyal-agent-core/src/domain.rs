@@ -10,6 +10,27 @@ pub enum WorkScopeKind {
     HostBound,
 }
 
+impl WorkScopeKind {
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Project => 1,
+            Self::Repository => 2,
+            Self::AdHoc => 3,
+            Self::HostBound => 4,
+        }
+    }
+
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::Project),
+            2 => Some(Self::Repository),
+            3 => Some(Self::AdHoc),
+            4 => Some(Self::HostBound),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorkScope {
     id: WorkScopeId,
@@ -99,6 +120,7 @@ pub enum DomainError {
         presented: ControlGeneration,
     },
     GenerationExhausted,
+    Conflict,
 }
 
 /// Pure in-memory aggregate used to prove one agent-domain transition authority.
@@ -245,6 +267,92 @@ impl AgentDomain {
         let next = current.next().ok_or(DomainError::GenerationExhausted)?;
         run.control_generation = next;
         Ok(next)
+    }
+
+    pub fn restore_work_scope(
+        &mut self,
+        id: WorkScopeId,
+        kind: WorkScopeKind,
+    ) -> Result<(), DomainError> {
+        if let Some(existing) = self.work_scopes.get(&id) {
+            return if existing.kind == kind {
+                Ok(())
+            } else {
+                Err(DomainError::Conflict)
+            };
+        }
+        self.work_scopes.insert(id, WorkScope { id, kind });
+        Ok(())
+    }
+
+    pub fn restore_work_item(
+        &mut self,
+        id: WorkItemId,
+        work_scope_id: WorkScopeId,
+    ) -> Result<(), DomainError> {
+        if !self.work_scopes.contains_key(&work_scope_id) {
+            return Err(DomainError::UnknownWorkScope(work_scope_id));
+        }
+        if let Some(existing) = self.work_items.get(&id) {
+            return if existing.work_scope_id == work_scope_id {
+                Ok(())
+            } else {
+                Err(DomainError::Conflict)
+            };
+        }
+        self.work_items.insert(id, WorkItem { id, work_scope_id });
+        Ok(())
+    }
+
+    pub fn restore_attempt(
+        &mut self,
+        id: AttemptId,
+        work_item_id: WorkItemId,
+    ) -> Result<(), DomainError> {
+        if !self.work_items.contains_key(&work_item_id) {
+            return Err(DomainError::UnknownWorkItem(work_item_id));
+        }
+        if let Some(existing) = self.attempts.get(&id) {
+            return if existing.work_item_id == work_item_id {
+                Ok(())
+            } else {
+                Err(DomainError::Conflict)
+            };
+        }
+        self.attempts.insert(id, Attempt { id, work_item_id });
+        Ok(())
+    }
+
+    pub fn restore_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: AttemptId,
+        binding_generation: BindingGeneration,
+        control_generation: ControlGeneration,
+    ) -> Result<(), DomainError> {
+        if !self.attempts.contains_key(&attempt_id) {
+            return Err(DomainError::UnknownAttempt(attempt_id));
+        }
+        if let Some(existing) = self.agent_runs.get(&id) {
+            return if existing.attempt_id == attempt_id
+                && existing.binding_generation == binding_generation
+                && existing.control_generation == control_generation
+            {
+                Ok(())
+            } else {
+                Err(DomainError::Conflict)
+            };
+        }
+        self.agent_runs.insert(
+            id,
+            AgentRun {
+                id,
+                attempt_id,
+                binding_generation,
+                control_generation,
+            },
+        );
+        Ok(())
     }
 }
 
