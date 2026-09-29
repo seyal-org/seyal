@@ -1,10 +1,9 @@
 //! Resting Flow/Raw selection and canonical TUI takeover (#867).
 //!
-//! Alternate-screen evidence selects TUI. Otherwise the Pane uses an explicit
-//! Raw choice, or Flow. Runtime composer eligibility does not select Raw:
-//! an unsupported shell keeps the Flow composer. The same ExecutionId and
-//! PTY generation are kept across transitions. Leaving TUI restores that
-//! resting mode.
+//! Alternate-screen evidence selects TUI. Otherwise the Pane uses explicit
+//! Raw, full-Pane Raw when Runtime reports unsupported shell integration
+//! (SPEC-008), or Flow. The same ExecutionId and PTY generation are kept
+//! across transitions. Leaving TUI restores that resting mode.
 
 use super::*;
 
@@ -40,7 +39,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn recompute_resting(&mut self) {
-        self.resting = if self.explicit_raw {
+        self.resting = if self.explicit_raw || self.integration_unsupported {
             PresentationMode::Raw
         } else {
             PresentationMode::Flow

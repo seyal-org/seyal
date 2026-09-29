@@ -101,7 +101,7 @@ fn explicit_raw_replaces_flow_and_tui_exit_returns_to_it() {
 }
 
 #[test]
-fn unsupported_eligibility_keeps_the_flow_composer() {
+fn unsupported_eligibility_selects_full_pane_raw() {
     let mut root = ApplicationRoot::new();
     bind(&mut root, false);
     let execution = root.snapshot().execution;
@@ -111,20 +111,18 @@ fn unsupported_eligibility_keeps_the_flow_composer() {
         revision: 1,
     })
     .unwrap();
-    let flow = root.snapshot();
-    assert_eq!(flow.eligibility, PresentationEligibility::Flow);
-    assert!(flow.composer_eligible);
-    let composer = flow.composer.unwrap();
-    assert_eq!(composer.mode, ComposerMode::Available);
-    assert!(composer.blocks.is_empty());
+    let raw = root.snapshot();
+    assert_eq!(raw.eligibility, PresentationEligibility::Raw);
+    assert!(!raw.composer_eligible);
+    assert_eq!(raw.execution, execution);
 
     refresh(&mut root, true);
     assert_eq!(root.snapshot().eligibility, PresentationEligibility::Tui);
     assert_eq!(root.snapshot().execution, execution);
     refresh(&mut root, false);
     let returned = root.snapshot();
-    assert_eq!(returned.eligibility, PresentationEligibility::Flow);
-    assert!(returned.composer_eligible);
+    assert_eq!(returned.eligibility, PresentationEligibility::Raw);
+    assert!(!returned.composer_eligible);
     assert_eq!(returned.execution, execution);
 }
 

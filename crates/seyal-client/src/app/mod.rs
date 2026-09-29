@@ -373,6 +373,9 @@ pub struct ApplicationRoot {
     resting: PresentationMode,
     /// User asked for Raw until they ask to re-evaluate.
     explicit_raw: bool,
+    /// Runtime reported unsupported shell integration. SPEC-008 requires
+    /// full-Pane Raw until a later status says otherwise.
+    integration_unsupported: bool,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -415,6 +418,7 @@ impl ApplicationRoot {
             alternate_screen: false,
             resting: PresentationMode::Flow,
             explicit_raw: false,
+            integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
         }

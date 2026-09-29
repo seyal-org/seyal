@@ -151,8 +151,10 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
     // Transport lost: cleared, still busy; the next attachment restarts.
     assert_eq!(relay_composer_status(handle, 0, 0), 0);
     assert_eq!(seyal_app_composer(handle).mode, 2);
+    // Unsupported shell integration is full-Pane Raw (SPEC-008), so the
+    // composer is hidden rather than available.
     assert_eq!(relay_composer_status(handle, 3, 1), 0);
-    assert_eq!(seyal_app_composer(handle).mode, 1);
+    assert_eq!(seyal_app_composer(handle).mode, 0);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 

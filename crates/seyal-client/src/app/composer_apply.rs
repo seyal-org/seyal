@@ -139,6 +139,12 @@ impl ApplicationRoot {
                 revision,
             })
             .map(|_| ())
-            .map_err(composer_error)
+            .map_err(composer_error)?;
+        if let Some(eligibility) = eligibility {
+            self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
+            self.recompute_resting();
+            self.derive_presentation(self.alternate_screen)?;
+        }
+        Ok(())
     }
 }
