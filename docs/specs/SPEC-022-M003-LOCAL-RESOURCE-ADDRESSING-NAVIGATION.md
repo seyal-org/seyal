@@ -1,6 +1,9 @@
 # SPEC-022 — M003 local Resource Addressing, goto and focus history
 
-- **Status:** Accepted (behavior contract for #1004 children; not an implemented-behavior claim)
+- **Status:** Accepted on merge of PR #1084 under #1004 (behavior contract for
+  #1004 children; not an implemented-behavior claim). An author or agent
+  comment is not that acceptance. Acceptance is the non-author review of
+  PR #1084.
 - **Date:** 2026-09-24
 - **Architecture:** ADR-019; consumes ADR-007, ADR-015, ADR-009/SPEC-008, SPEC-009, and the focus-successor rules of ADR-021 / SPEC-025 (#1001)
 - **Issue:** #1004 — parent #674, epic #665
@@ -60,6 +63,11 @@ titles, labels, or any previously projected snapshot.
 R3.2 Composite addresses are validated as a whole:
 
 ```text
+Workspace { w }    resolves iff w is a current Workspace and has at least
+                   one Window. A Workspace with zero Windows does not
+                   resolve (`NotComposed`); Navigate must not spawn a
+                   Window and must not call ADR-018 `ActivateWorkspace`
+                   (R4.3).
 Tab  { w, t }      resolves iff t is currently a Tab of w
 Pane { w, t, p }   resolves iff t is currently a Tab of w
                    and p is currently a leaf of t's PaneTree
@@ -92,17 +100,24 @@ The three binding-count variants are mutually exclusive by their conditions:
 selects between them; an Execution with exactly one bound Pane matches none of
 them and resolves (R3.3), including when that Execution has exited.
 
-Authorization is evaluated immediately after kind/version/size validation and
-before any existence or binding check. It tests the requesting principal's
-Workspace access set (ADR-007 §11): for `Workspace`/`Tab`/`Pane` addresses the
-addressed `WorkspaceId` must be in that set; for `Execution` addresses the
-principal must hold local navigation authority. A `WorkspaceId` outside the
-set yields `NavigationDenied` whether or not it exists, so an unauthorized
-principal cannot distinguish unknown from existing-but-denied resources or
-learn how they are bound. If the target resolves into a Workspace outside the
-principal's set (for example an `Execution` bound in such a Workspace), the
-result is also `NavigationDenied`. In M003 the only principal is the local
-user, authorized for every local Workspace.
+Authorization runs in two steps that both yield `NavigationDenied` and never
+disclose existence to an unauthorized principal.
+
+1. Immediately after kind/version/size validation and before any existence or
+   binding check, the access-set test runs (ADR-007 §11). For
+   `Workspace`/`Tab`/`Pane` addresses the `WorkspaceId` in the address must be
+   in the principal's Workspace access set; a `WorkspaceId` outside the set
+   yields `NavigationDenied` whether or not it exists. An `Execution` address
+   carries no `WorkspaceId`, so that first test is only that the principal
+   holds local navigation authority.
+2. After resolution, a target whose Workspace is outside the principal's set
+   (for example an `Execution` bound in such a Workspace) is
+   `NavigationDenied`, not `Unknown*` / `TargetUnbound` / `AmbiguousTarget`.
+   That second result does not tell an unauthorized principal whether the
+   target exists.
+
+In M003 the only principal is the local user, authorized for every local
+Workspace.
 
 | Rejection | Condition |
 |---|---|
@@ -112,7 +127,7 @@ user, authorized for every local Workspace.
 | `UnknownTab` | `TabId` is not a current Tab anywhere |
 | `UnknownPane` | `PaneId` is not a current Pane anywhere, including a Pane that has been destroyed |
 | `UnknownExecution` | `ExecutionId` is not in the Runtime inventory (never existed, or exited record released) |
-| `NotComposed` | components exist but do not currently compose (R3.2) |
+| `NotComposed` | components exist but do not currently compose (R3.2), including a current Workspace with zero Windows |
 | `TargetTerminated` | `Execution` address only: zero Panes bound to `e`, `e` has exited, and the Runtime inventory still holds its exited record |
 | `TargetUnbound` | `Execution` address only: zero Panes bound to `e`, `e` is live |
 | `AmbiguousTarget` | `Execution` address only: two or more Panes bound to `e` (live or exited) |
@@ -143,6 +158,18 @@ activate owning Workspace
 → emit WindowActivation effect when the target window is not active
 → record focus history per §6 (user-initiated commits only; see R6.5)
 ```
+
+Kind-specific success focus:
+
+- `Workspace { w }`: focus that Workspace's product-active Window if it has
+  one, otherwise its most recently active existing Window (ADR-018), then
+  that Window's active Tab and focused Pane. A Workspace with zero Windows
+  does not resolve (R3.2); Navigate must not spawn a Window and must not
+  call ADR-018 `ActivateWorkspace`.
+- `Tab { w, t }`: select that Tab and its focused Pane and activate that
+  Tab's Window.
+- `Pane { w, t, p }` and a resolved `Execution { e }`: apply the transition
+  above to the resolved Pane.
 
 A Navigate issued as the apply step of Back/Forward traversal (§6.5) performs
 the focus/activation steps above but does **not** append a history entry.
@@ -285,9 +312,11 @@ its observed `FocusSeq` is the cursor of the same authoritative snapshot it is
 dispatched against.
 
 R6.9 Traversal reuses §3 resolution and the apply-only Navigate path in §4
-(R4.1 traversal clause). If a traversal target fails resolution despite R6.7
-(for example a race with destruction), the request is rejected, the dead
-entry is removed, and no fallback navigation occurs.
+(R4.1 traversal clause). If a traversal target fails resolution (for example a
+race with destruction that R6.7 has not yet purged), the request is rejected
+and focus, bindings, presentation, and history are left unchanged — including
+the dead history entry. Eager removal of dead entries stays on the R6.7
+maintenance path, not on this rejection path. No fallback navigation occurs.
 
 R6.10 History is not persisted across restart in M003.
 
@@ -410,6 +439,14 @@ Rust, platform-independent unless stated:
 
 8. Successful `Navigate` to a Pane in an inactive Workspace activates
    workspace, tab and pane in one transition.
+8a. Successful `Navigate(Workspace { w })` focuses w's product-active Window
+    if present, otherwise its most recently active existing Window, then that
+    Window's active Tab and focused Pane.
+8b. `Navigate(Workspace { w })` when w has zero Windows is rejected
+    (`NotComposed`); no Window is spawned and `ActivateWorkspace` is not
+    invoked; focus and history are unchanged.
+8c. Successful `Navigate(Tab { w, t })` selects that Tab and its focused Pane
+    and activates that Tab's Window.
 9. Navigate to the already-active Pane is a success no-op with no new history
    entry.
 10. Navigate never changes presentation mode, binding, or PTY state (assert
@@ -424,8 +461,14 @@ Rust, platform-independent unless stated:
     execution bound to two Panes yields `AmbiguousTarget`; a destroyed Pane
     yields `UnknownPane`, never `TargetTerminated` (each R8.3 row asserted
     exactly).
-13a. An unauthorized principal receives `NavigationDenied` for both an existing
-     and a nonexistent `WorkspaceId`, with no existence/binding checks run.
+13a. Authorization is two-step (R3.4). (a) For `Workspace`/`Tab`/`Pane`, an
+     unauthorized principal receives `NavigationDenied` for both an existing
+     and a nonexistent `WorkspaceId` from the first access-set test, with no
+     existence or binding checks run. (b) For `Execution`, the first test is
+     only local navigation authority; after resolution, an Execution whose
+     Workspace is outside the set yields `NavigationDenied` rather than
+     `Unknown*` / `TargetUnbound` / `AmbiguousTarget`, and does not disclose
+     whether the target exists.
 13b. Execution bound to two Panes yields `AmbiguousTarget` and performs no
      navigation (R3.3).
 
@@ -462,6 +505,9 @@ Rust, platform-independent unless stated:
 21. Destroying every referenced resource empties history and makes
     Back/Forward unavailable rather than focusing arbitrarily.
 22. Stale `FocusSeq` in a traversal request is rejected with no navigation.
+22a. A traversal whose target fails resolution is rejected with focus,
+     bindings, presentation, and history unchanged (R6.9); dead-entry removal
+     happens only on the R6.7 maintenance path.
 23. Overflow eviction: with history full and cursor at head, a commit to a new
     target evicts exactly the oldest entry, keeps length at capacity, and sets
     the cursor to the new head; Back then reaches the previous head. With
@@ -501,7 +547,9 @@ Rust, platform-independent unless stated:
 - no display string participates in identity or resolution anywhere on the
   path, enforced by type shape plus tests 1, 14, 28 and 29;
 - every stale/missing/destroyed target produces a typed refusal with unchanged
-  state (tests 4–7, 11–13, 13a, 13b, 14, 22);
+  state (tests 4–7, 8b, 11–13, 13a, 13b, 14, 22, 22a);
+- Workspace and Tab Navigate outcomes follow ADR-018 focus order without
+  spawning Windows (tests 8, 8a–8c);
 - focus history is bounded, totally ordered, deterministic, and eagerly
   invalidated (tests 15–20, 20a, 21–23, 23b);
 - cross-window navigation activates exactly one window, never reparents, and
@@ -518,11 +566,9 @@ Rust, platform-independent unless stated:
 - persistence or restart restoration of history and layout;
 - Block, Agent, Attention, Artifact, WorkItem address kinds;
 - fuzzy-ranking algorithm design;
-- keybinding assignment: Proposed SPEC-024 §5.5 (#1002) owns the keys for
+- keybinding assignment: SPEC-024 §5.5 (#1002, PR #1087) owns the keys for
   Back/Forward (`focus_history.back` / `focus_history.forward`) and goto open
-  (`goto.open`). Those catalog ids enter production only with the N3/N4 action
-  they invoke and after this specification is Accepted. This specification
-  owns their semantics;
+  (`goto.open`). This specification owns their semantics;
 - `PaneTree` mutation semantics (#1001, ADR-021 / SPEC-025) and execution
   provisioning (#994);
 - multi-live Metal surface policy (#936).
