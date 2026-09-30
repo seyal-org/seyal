@@ -347,24 +347,31 @@ fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
     assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
     assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
 
-    // CloseTab (24) / ClosePane (26) on the sole Tab/Pane reach
-    // ShellState's last-of-one guard, whether the id is real or not.
-    let mut close_tab = identity_fence(24, &snap);
-    close_tab.target_execution_lo = tab_row.id_lo;
-    close_tab.target_execution_hi = tab_row.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 31, "CannotCloseLastTab");
+    // ClosePane (26) / CloseTab (24) stay gated under m001 until W4b re-entry.
+    let mut close_unknown = identity_fence(24, &snap);
+    close_unknown.target_execution_lo = 0x1111;
+    close_unknown.target_execution_hi = 0x2222;
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_unknown) }, -4);
+    assert_eq!(
+        seyal_app_last_error(handle),
+        36,
+        "PresentationCloseUnavailable"
+    );
 
     let mut close_pane = identity_fence(26, &snap);
     close_pane.target_execution_lo = pane_row.id_lo;
     close_pane.target_execution_hi = pane_row.id_hi;
     assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 32, "CannotCloseLastPane");
-
-    // Shell composition is unchanged by every rejected action above.
+    assert_eq!(
+        seyal_app_last_error(handle),
+        36,
+        "PresentationCloseUnavailable"
+    );
     let shell = seyal_app_shell(handle);
+    assert_eq!(shell.window_count, 1);
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
+    let _ = tab_row;
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -376,9 +383,14 @@ fn shell_projection_is_one_local_workspace() {
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
     assert_eq!(
-        shell.flags, 0,
-        "M001 default shell policy disallows tab creation/pane splitting, \
-         and the sole Tab/Pane cannot be closed"
+        shell.flags & 3,
+        0,
+        "M001 default shell policy disallows tab creation/pane splitting"
+    );
+    assert_eq!(
+        shell.flags & 12,
+        0,
+        "presentation close stays gated until W4b zero-window re-entry"
     );
     let workspace = seyal_app_shell_row(handle, 0, 0);
     assert_eq!(workspace.flags & 1, 1);

@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 772
-issue = 1143
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility/unpresented extraction; #1143 adds only SyncLiveUnpresented/RecordUnpresented/Adopt/TerminateExecution action and error variants on the façade — adopt/terminate apply logic lives in unpresented_apply.rs."
+acknowledged_loc = 781
+issue = 1153
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1153 adds CloseWindow, PresentationCloseUnavailable mapping, and gated close error paths without moving close apply logic out of chrome_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -46,15 +46,15 @@ reason = "Global command-palette reducer stays one cohesive open/filter/resolve 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 848
-issue = 1108
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1108 adds multi-window OrderFrontMakeKey emission and bounded-queue proofs beside the existing ApplicationRoot suite. Ceiling matches post-W3 LOC."
+acknowledged_loc = 845
+issue = 1153
+reason = "Former app.rs #[cfg(test)] suite; #1153 keeps gated presentation-close proofs beside #1108 multi-window coverage. Ceiling matches post-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 872
-issue = 1108
-reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot and native-effect projection proofs beside existing workspace/tab/pane coverage; further extraction would split one containment contract table."
+acknowledged_loc = 717
+issue = 1153
+reason = "Shell reducer suite stays one module after #1153 presentation-close gate proofs and #1108 multi-window coverage; further extraction would split one containment contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -64,9 +64,9 @@ reason = "Published C ABI entry points and handle/row scratch stay one thin enco
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 779
-issue = 1143
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; W3 multi-window ABI proofs on the #1108 base grew the suite to 779 LOC. #1143 ratchets acknowledged_loc to the measured size without further growth on this Issue."
+acknowledged_loc = 791
+issue = 1153
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1153 updates close flag/error expectations for gated presentation removal."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

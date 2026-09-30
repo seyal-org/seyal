@@ -157,9 +157,6 @@ fn sync_drops_retired_and_bound() {
 
 #[test]
 fn close_actions_do_not_emit_terminate_execution() {
-    // Production shell is single-pane; close fails as last-pane before bound
-    // checks. Either way no TerminateExecution effect is queued — destruction
-    // paths that could unbind are W2b/W4b and do not exist on this branch.
     let mut root = ApplicationRoot::new();
     let execution = ExecutionId::new();
     let workspace = WorkspaceId::m001_default();
@@ -174,11 +171,18 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    assert!(matches!(
+    // m001 gates presentation close until W4b; rejection must still avoid
+    // TerminateExecution and leave the bound execution presented.
+    assert_eq!(
         root.apply(AppAction::ClosePane { id: pane }),
-        Err(AppError::CannotCloseLastPane) | Err(AppError::CannotCloseBoundPane)
-    ));
-    assert!(root.snapshot().pending_effects.is_empty());
+        Err(AppError::PresentationCloseUnavailable)
+    );
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert!(root.live_unpresented().is_empty());
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
 

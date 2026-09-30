@@ -48,6 +48,7 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseBoundPane => 33,
         AppError::CrossWorkspaceAdopt => 34,
         AppError::ExecutionNotUnpresented => 35,
+        AppError::PresentationCloseUnavailable => 36,
     }
 }
 

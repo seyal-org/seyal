@@ -6,12 +6,15 @@
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
 mod actions;
+mod close;
 mod effects;
 mod snapshot;
 mod tree;
 mod unpresented;
 mod workspace;
 
+#[cfg(test)]
+mod close_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -47,6 +50,8 @@ pub enum ShellError {
     UnknownPane,
     TabCreationUnavailable,
     PaneSplitUnavailable,
+    /// Presentation close is gated off until W4b zero-window re-entry ships.
+    PresentationCloseUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
     CannotCloseBoundPane,
@@ -76,6 +81,9 @@ impl ShellError {
             }
             Self::PaneSplitUnavailable => {
                 "Splitting panes is unavailable until a distinct execution route is available."
+            }
+            Self::PresentationCloseUnavailable => {
+                "Closing tabs or panes is unavailable until zero-window re-entry is available."
             }
             Self::CannotCloseLastTab => "The last Tab cannot be closed.",
             Self::CannotCloseLastPane => "The last Pane cannot be closed.",
@@ -157,8 +165,13 @@ pub enum ShellAction {
         tab: TabId,
         containment_generation: u64,
     },
+    CloseWindow {
+        id: WindowId,
+        containment_generation: u64,
+    },
     CloseTab {
         id: TabId,
+        containment_generation: u64,
     },
     SplitFocused {
         axis: SplitAxis,
@@ -169,6 +182,7 @@ pub enum ShellAction {
     },
     ClosePane {
         id: PaneId,
+        containment_generation: u64,
     },
     FocusPane {
         id: PaneId,
@@ -208,11 +222,15 @@ pub struct ShellSnapshot {
     pub windows: Vec<WindowSnapshot>,
     pub active_workspace: WorkspaceId,
     pub last_active_workspace: WorkspaceId,
-    pub active_window: WindowId,
+    /// `None` in the zero-Window state (ADR-018 §3.3a).
+    pub active_window: Option<WindowId>,
     pub containment_generation: u64,
     /// Active-Window Tab projection (compatible with pre-W3 hosts).
+    /// Empty when there is no product-active Window.
     pub tabs: Vec<TabSnapshot>,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub active_tab: TabId,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub focused_pane: PaneId,
     pub panes: Vec<PaneSnapshot>,
     pub tree: PaneTree,
@@ -223,10 +241,8 @@ pub struct ShellSnapshot {
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
     pub allows_pane_splitting: bool,
-    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close, and
-    /// neither can an execution-bound Pane).
-    /// Hosts read these instead of re-deriving the rule from counts.
+    /// Whether `CloseTab` / `ClosePane` would currently be accepted. Gated by
+    /// `allows_presentation_close` (off in m001 until W4b) and a live Window.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
 }
@@ -267,6 +283,8 @@ pub struct ShellState {
     containment_generation: u64,
     allows_pane_splitting: bool,
     allows_tab_creation: bool,
+    /// When false, CloseTab/ClosePane/CloseWindow reject and snapshot omits close controls.
+    allows_presentation_close: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
@@ -308,6 +326,7 @@ impl ShellState {
             workspaces: vec![workspace],
             allows_pane_splitting: false,
             allows_tab_creation: false,
+            allows_presentation_close: false,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -367,6 +386,8 @@ impl ShellState {
             containment_generation: 0,
             allows_pane_splitting,
             allows_tab_creation,
+            // Test fixtures that enable tab creation also exercise close; m001 keeps both off.
+            allows_presentation_close: allows_tab_creation,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -397,6 +418,10 @@ impl ShellState {
 
     pub fn allows_tab_creation(&self) -> bool {
         self.allows_tab_creation
+    }
+
+    pub fn allows_presentation_close(&self) -> bool {
+        self.allows_presentation_close
     }
 
     pub fn focused_pane_allows_implicit_bootstrap(&self) -> bool {
@@ -449,13 +474,14 @@ impl ShellState {
             | ShellAction::MoveTabBefore { .. }
             | ShellAction::MoveTabToWindow { .. }
             | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
-            ShellAction::CloseTab { id } => self.close_tab(id),
+            ShellAction::CloseWindow { .. }
+            | ShellAction::CloseTab { .. }
+            | ShellAction::ClosePane { .. } => self.dispatch_close(action),
             ShellAction::SplitFocused { axis } => {
                 let focused = self.focused_pane_id()?;
                 self.split_pane(focused, axis).map(|_| ())
             }
             ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
-            ShellAction::ClosePane { id } => self.close_pane(id),
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
             ShellAction::RecordUnpresented { .. }
@@ -463,13 +489,6 @@ impl ShellState {
             | ShellAction::AdoptExecution { .. }
             | ShellAction::TerminateExecution { .. } => self.dispatch_unpresented(action),
         }
-    }
-
-    fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        workspace.close_tab(id)?;
-        self.bump_containment_generation();
-        Ok(())
     }
 
     fn split_pane(&mut self, pane_id: PaneId, axis: SplitAxis) -> Result<PaneId, ShellError> {
@@ -501,36 +520,6 @@ impl ShellState {
         tab.focused = id;
         self.bump_containment_generation();
         Ok(id)
-    }
-
-    fn close_pane(&mut self, pane_id: PaneId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.allows_pane_close() {
-            return Err(ShellError::CannotCloseLastPane);
-        }
-        let Some(pane) = tab.panes.get(&pane_id) else {
-            return Err(ShellError::UnknownPane);
-        };
-        // Closing would orphan the bound execution's authority; what happens
-        // to that execution is the unaccepted provisioning/disposition
-        // contract (#994), so fail closed instead of inventing it here.
-        if pane.execution.is_some() {
-            return Err(ShellError::CannotCloseBoundPane);
-        }
-        let Some(root) = tab.root.removing(pane_id) else {
-            return Err(ShellError::CannotCloseLastPane);
-        };
-        tab.root = root;
-        tab.panes.remove(&pane_id);
-        if tab.focused == pane_id || !tab.panes.contains_key(&tab.focused) {
-            tab.focused = tab
-                .root
-                .first_pane()
-                .expect("remaining Pane tree must contain a Pane");
-        }
-        self.bump_containment_generation();
-        Ok(())
     }
 
     fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {

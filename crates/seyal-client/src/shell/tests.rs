@@ -69,7 +69,7 @@ fn seed_two_workspaces() -> ShellState {
 fn create_tab(shell: &mut ShellState) -> Result<(), ShellError> {
     let snap = shell.snapshot();
     shell.apply(ShellAction::CreateTab {
-        window: snap.active_window,
+        window: snap.active_window.expect("active window"),
         containment_generation: snap.containment_generation,
     })
 }
@@ -102,6 +102,7 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert!(snap.panes[0].allows_implicit_bootstrap);
     assert!(!shell.allows_tab_creation());
     assert!(!shell.allows_pane_splitting());
+    // Presentation close stays gated off in m001 until W4b re-entry lands.
     assert!(!snap.allows_tab_close);
     assert!(!snap.allows_pane_close);
     assert_eq!(
@@ -119,162 +120,6 @@ fn production_shell_is_single_pane_and_fail_closed() {
     );
     assert_eq!(shell.snapshot().tabs.len(), 1);
     assert_eq!(shell.snapshot().layout, LayoutDescription::Single);
-}
-
-#[test]
-fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
-    let mut shell = seed_two_workspaces();
-    let single = shell.snapshot();
-    assert!(!single.allows_tab_close);
-    assert!(!single.allows_pane_close);
-
-    create_tab(&mut shell).expect("tabs allowed");
-    let two_tabs = shell.snapshot();
-    assert!(two_tabs.allows_tab_close);
-    assert!(!two_tabs.allows_pane_close);
-
-    shell
-        .apply(ShellAction::SplitFocused {
-            axis: SplitAxis::Right,
-        })
-        .expect("splits allowed");
-    let two_panes = shell.snapshot();
-    assert!(two_panes.allows_pane_close);
-
-    shell
-        .apply(ShellAction::ClosePane {
-            id: two_panes.focused_pane,
-        })
-        .expect("close split pane");
-    assert!(!shell.snapshot().allows_pane_close);
-    shell
-        .apply(ShellAction::CloseTab {
-            id: two_tabs.active_tab,
-        })
-        .expect("close created tab");
-    let closed = shell.snapshot();
-    assert!(!closed.allows_tab_close);
-    assert_eq!(
-        shell.apply(ShellAction::CloseTab {
-            id: closed.active_tab
-        }),
-        Err(ShellError::CannotCloseLastTab)
-    );
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane {
-            id: closed.focused_pane
-        }),
-        Err(ShellError::CannotCloseLastPane)
-    );
-}
-
-#[test]
-fn select_create_close_tabs_are_authoritative() {
-    let mut shell = seed_two_workspaces();
-    let before = shell.snapshot();
-    create_tab(&mut shell).expect("tabs allowed");
-    let after_create = shell.snapshot();
-    assert_eq!(after_create.tabs.len(), 2);
-    assert_ne!(after_create.active_tab, before.active_tab);
-    let created = after_create.active_tab;
-    shell
-        .apply(ShellAction::SelectTab {
-            id: before.active_tab,
-        })
-        .expect("select original");
-    assert_eq!(shell.snapshot().active_tab, before.active_tab);
-    shell
-        .apply(ShellAction::CloseTab { id: created })
-        .expect("close created");
-    assert_eq!(shell.snapshot().tabs.len(), 1);
-    assert_eq!(shell.snapshot().active_tab, before.active_tab);
-    assert_eq!(
-        shell.apply(ShellAction::CloseTab {
-            id: before.active_tab
-        }),
-        Err(ShellError::CannotCloseLastTab)
-    );
-}
-
-#[test]
-fn split_focus_and_close_panes() {
-    let mut shell = seed_two_workspaces();
-    let original = shell.snapshot().focused_pane;
-    shell
-        .apply(ShellAction::SplitFocused {
-            axis: SplitAxis::Right,
-        })
-        .expect("split");
-    let snap = shell.snapshot();
-    assert_eq!(snap.layout, LayoutDescription::SplitRight);
-    assert_eq!(snap.tabs[0].pane_count, 2);
-    assert_ne!(snap.focused_pane, original);
-    let created = snap.focused_pane;
-    shell
-        .apply(ShellAction::FocusPane { id: original })
-        .expect("focus original");
-    assert_eq!(shell.snapshot().focused_pane, original);
-    shell
-        .apply(ShellAction::SplitPane {
-            id: original,
-            axis: SplitAxis::Down,
-        })
-        .expect("nested split");
-    assert_eq!(shell.snapshot().tabs[0].pane_count, 3);
-    assert_eq!(shell.snapshot().layout, LayoutDescription::SplitRight);
-    shell
-        .apply(ShellAction::ClosePane { id: created })
-        .expect("close first split");
-    assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
-    let remaining_new = shell.snapshot().focused_pane;
-    shell
-        .apply(ShellAction::ClosePane { id: remaining_new })
-        .expect("close nested");
-    let snap = shell.snapshot();
-    assert_eq!(snap.layout, LayoutDescription::Single);
-    assert_eq!(snap.focused_pane, original);
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: original }),
-        Err(ShellError::CannotCloseLastPane)
-    );
-}
-
-#[test]
-fn execution_bound_pane_cannot_be_closed() {
-    let mut shell = seed_two_workspaces();
-    let bound = shell.snapshot().focused_pane;
-    shell
-        .apply(ShellAction::BindExecution {
-            pane: bound,
-            execution: ExecutionId::from_bytes([7; 16]),
-        })
-        .expect("bind");
-    shell
-        .apply(ShellAction::SplitFocused {
-            axis: SplitAxis::Right,
-        })
-        .expect("split");
-    let created = shell.snapshot().focused_pane;
-    assert!(shell.snapshot().allows_pane_close);
-    shell
-        .apply(ShellAction::FocusPane { id: bound })
-        .expect("focus bound");
-    assert!(!shell.snapshot().allows_pane_close);
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: bound }),
-        Err(ShellError::CannotCloseBoundPane)
-    );
-    assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
-    shell
-        .apply(ShellAction::ClosePane { id: created })
-        .expect("close unbound");
-    let snap = shell.snapshot();
-    assert_eq!(snap.layout, LayoutDescription::Single);
-    assert_eq!(snap.focused_pane, bound);
-    assert_eq!(
-        snap.panes[0].execution,
-        Some(ExecutionId::from_bytes([7; 16]))
-    );
 }
 
 #[test]
@@ -550,7 +395,7 @@ fn selection_actions_accept_live_identities_across_generations() {
     shell
         .apply(ShellAction::SelectWindow { id: w2 })
         .expect("select window");
-    assert_eq!(shell.snapshot().active_window, w2);
+    assert_eq!(shell.snapshot().active_window, Some(w2));
     shell
         .apply(ShellAction::SelectTab { id: t1 })
         .expect("select tab");
@@ -674,7 +519,7 @@ fn move_only_tab_to_other_window_destroys_source() {
         })
         .expect("move only tab");
     let snap = shell.snapshot();
-    assert_eq!(snap.active_window, w1);
+    assert_eq!(snap.active_window, Some(w1));
     assert_eq!(snap.active_tab, t3);
     assert_eq!(snap.focused_pane, focused_before);
     assert_eq!(snap.containment_generation, generation + 1);
@@ -715,7 +560,7 @@ fn move_tab_to_new_window_splits_off_tab() {
         .expect("move to new");
     let snap = shell.snapshot();
     assert_eq!(snap.active_tab, t2);
-    assert_ne!(snap.active_window, w1);
+    assert_ne!(snap.active_window, Some(w1));
     assert_eq!(snap.containment_generation, generation + 1);
     // Original window still has t1 as its only remaining seeded tab from {t1,t2}.
     shell.apply(ShellAction::SelectWindow { id: w1 }).unwrap();
@@ -772,7 +617,7 @@ fn move_rejects_cross_workspace() {
     let snap = shell.snapshot();
     let tab = snap.active_tab;
     activate_workspace(&mut shell, other_workspace()).unwrap();
-    let other_window = shell.snapshot().active_window;
+    let other_window = shell.snapshot().active_window.expect("active window");
     let generation = shell.containment_generation();
     let before = shell.containment_fingerprint();
     assert_eq!(

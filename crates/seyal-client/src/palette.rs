@@ -645,7 +645,7 @@ mod tests {
         let snap = shell.snapshot();
         shell
             .apply(ShellAction::CreateTab {
-                window: snap.active_window,
+                window: snap.active_window.expect("active window"),
                 containment_generation: snap.containment_generation,
             })
             .unwrap();
