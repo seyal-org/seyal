@@ -6,15 +6,22 @@
 
 use std::{ffi::OsString, path::Path};
 
-/// Shell family used only to select the argv table. Unknown basenames that still
-/// validate as executables use the generic login+interactive flag pair.
+/// Shell family used only to select the argv table.
+///
+/// Unknown basenames that still validate as executables use non-login `-i`
+/// (same conservative treatment as `sh`) unless the family is known to accept
+/// a documented login flag pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellFamily {
     Zsh,
     Bash,
     Fish,
-    /// POSIX `sh`, including `/bin/sh` last-resort fallback.
+    /// POSIX `sh`, including `/bin/sh` last-resort fallback and account shells
+    /// whose basename is `sh` (non-login interactive).
     Sh,
+    /// macOS-shipped `tcsh` / `csh`: login flag must be sole argv (`-l` alone).
+    Tcsh,
+    /// Unknown basename: non-login interactive only.
     Other,
 }
 
@@ -28,6 +35,7 @@ impl ShellFamily {
             "bash" => Self::Bash,
             "fish" => Self::Fish,
             "sh" => Self::Sh,
+            "tcsh" | "csh" => Self::Tcsh,
             _ => Self::Other,
         }
     }
@@ -40,15 +48,17 @@ impl ShellFamily {
 /// | zsh    | `-l -i` | login interactive |
 /// | bash   | `-l -i` | login interactive |
 /// | fish   | `-l -i` | login interactive (documented `-l` / `-i`) |
-/// | sh     | `-i`    | last-resort non-login interactive |
-/// | other  | `-l -i` | families with a documented login flag |
+/// | tcsh/csh | `-l` | login interactive on a tty (`-l -i` is rejected) |
+/// | sh     | `-i`    | non-login interactive (fallback and `/bin/sh` accounts) |
+/// | other  | `-i`    | unknown family: non-login interactive |
 ///
 /// Never includes user-supplied `-c` / `--command` payloads.
 pub fn interactive_login_argv(program: &Path) -> Vec<OsString> {
     match ShellFamily::from_program(program) {
-        ShellFamily::Sh => vec![OsString::from("-i")],
-        ShellFamily::Zsh | ShellFamily::Bash | ShellFamily::Fish | ShellFamily::Other => {
+        ShellFamily::Zsh | ShellFamily::Bash | ShellFamily::Fish => {
             vec![OsString::from("-l"), OsString::from("-i")]
         }
+        ShellFamily::Tcsh => vec![OsString::from("-l")],
+        ShellFamily::Sh | ShellFamily::Other => vec![OsString::from("-i")],
     }
 }
