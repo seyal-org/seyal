@@ -40,7 +40,9 @@ final class SeyalKeybindingUITests: XCTestCase {
         let palette = app.descendants(matching: .any)["seyal-command-palette"]
         app.typeKey("k", modifierFlags: .command)
         XCTAssertTrue(palette.waitForExistence(timeout: 5), "⌘K must open the palette")
-        assertFlowBlocksOrFail(in: app)
+        // Palette modal covers Flow chrome (HostUITests hideInspectorThroughPalette):
+        // Flow/Blocks must still exist; composer is not hittable under the overlay.
+        assertFlowChromeExists(in: app)
         app.typeKey(.escape, modifierFlags: [])
         let closed = expectation(
             for: NSPredicate(format: "exists == false"),
@@ -48,6 +50,7 @@ final class SeyalKeybindingUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+        assertFlowBlocksOrFail(in: app)
     }
 
     /// §14.5: under TUI (alt-screen), Control-C and ArrowUp reach the terminal path.
@@ -196,7 +199,7 @@ final class SeyalKeybindingUITests: XCTestCase {
         )
     }
 
-    private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+    private func assertFlowChromeExists(in app: XCUIApplication, timeout: TimeInterval = 8) {
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let blocks = app.descendants(matching: .any)["seyal-blocks"]
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
@@ -204,9 +207,14 @@ final class SeyalKeybindingUITests: XCTestCase {
             composer.waitForExistence(timeout: timeout),
             "keybinding XCUI must stay on Flow/Blocks"
         )
-        XCTAssertTrue(composer.firstMatch.isHittable, "composer must stay hittable on Flow")
         XCTAssertTrue(blocks.waitForExistence(timeout: timeout))
         XCTAssertTrue(transcript.waitForExistence(timeout: timeout))
+    }
+
+    private func assertFlowBlocksOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        assertFlowChromeExists(in: app, timeout: timeout)
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        XCTAssertTrue(composer.firstMatch.isHittable, "composer must stay hittable on Flow")
     }
 
     private func waitBriefly(_ seconds: TimeInterval) {
