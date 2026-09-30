@@ -7,6 +7,7 @@
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
 - **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
+- **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
 
 ## 1. Purpose
 
@@ -164,9 +165,11 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
 - bit 9: claimed by open PR #1058 (#865, `CAP_VIEWPORT_LINE_IDS`);
-- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance;
+- bit 11: claimed by open PR #1163 (#1162, `CAP_ATTACHMENT_DELIVERY_CONTROL`);
+- bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is claimed by open PR #1058 (`ViewportLineIds`). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** is claimed by open PR #1058 (`ViewportLineIds`). §18 therefore assigns the next free types after live allocations, **36–39**, and the next free capability bit, **bit 10**. Open PR #1163 claims bit 11 for §19 delivery control; L0 therefore takes the next free bit, **bit 12**, for `CAP_LAUNCH_POLICY_DETAIL` (ADR-020 §3.10). If #1058 does not merge, 35 and bit 9 stay unassigned rather than being reused by §18; later allocations must re-check live `MessageType` and open PRs before claiming a number.
 
 Existing Pass 5/6 clients must continue tolerating unknown server capability bits and requiring only the capabilities they understand.
 
@@ -613,13 +616,19 @@ u32  detail_code = 0
 - No attachment is created and no display state is queued by creation.
 - On `Created`, `detail_code` is a bitfield of bounded, non-secret launch-policy
   warnings: bit 0 is `ConfiguredShellInvalid`, bit 1 is `CwdOverrideInvalid`,
-  and all other bits are reserved and must be 0. A client must treat `Created`
-  as success regardless of `detail_code`, must ignore unknown or reserved bits,
-  and must never infer failure from a nonzero `Created.detail_code`.
+  and all other bits are reserved and must be 0. Runtime sets nonzero
+  `Created.detail_code` bits only when the peer negotiated
+  `CAP_LAUNCH_POLICY_DETAIL` (`1 << 12`); otherwise `detail_code` remains `0`.
+  A client must treat `Created` as success regardless of `detail_code`, must
+  ignore unknown or reserved bits, and must never infer failure from a nonzero
+  `Created.detail_code`.
 - On `LaunchPolicyRejected` (`result_code = 17`), `detail_code` uses the §15
   values 1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3
   `CwdInvalid`, and 4 `CapabilityUnavailable`. Unknown values render generic.
-  The payload carries no path or environment bytes.
+  The payload carries no path or environment bytes. Code 17 itself is not
+  capability-gated: ADR-020 gates only the `Created` warning bits, and a
+  non-negotiating client already treats unrecognized result codes as
+  non-retryable failure under §15.
 - For other failure codes, `detail_code` is `0` unless a later accepted
   specification assigns a bounded non-secret reason.
 

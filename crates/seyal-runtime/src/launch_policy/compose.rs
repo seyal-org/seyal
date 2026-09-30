@@ -1,12 +1,13 @@
 //! Runtime interactive create composition (ADR-020 §3.6 / SPEC-023 §4).
 //!
 //! Builds `CommandSpec` only through `EffectiveLaunchPolicy`. CapabilityPolicy
-//! and ShellIntegrationPolicy apply afterward inside `Runtime::create_execution`
-//! (or via [`apply_post_policy`] for tests that inspect the full child env).
+//! and ShellIntegrationPolicy apply afterward through [`compose_child_command`],
+//! which is the sole composition authority used by `Runtime::create_execution`
+//! and by tests that inspect the full child env.
 
 use std::path::PathBuf;
 
-use seyal_exec::CommandSpec;
+use seyal_exec::{CommandSpec, ShellIntegrationToken};
 
 use crate::{CapabilityPolicy, RuntimeError, ShellIntegrationPolicy};
 
@@ -45,15 +46,26 @@ pub fn command_spec_from_policy(resolution: &LaunchPolicyResolution) -> CommandS
     resolution.policy.to_command_spec()
 }
 
+/// Result of CapabilityPolicy + ShellIntegrationPolicy composition.
+///
+/// This is the sole post-policy composition authority (ADR-020 §3.1).
+#[derive(Debug)]
+pub struct ComposedChildCommand {
+    pub command: CommandSpec,
+    /// True when zsh shell-integration hooks were applied (macOS only).
+    pub shell_integration_applied: bool,
+    /// Nonce token when shell integration applied; `None` otherwise.
+    pub shell_nonce: Option<ShellIntegrationToken>,
+}
+
 /// Apply CapabilityPolicy then ShellIntegrationPolicy when eligible.
 ///
-/// Used by tests that assert the child key set. Production create applies the
-/// same owners inside `Runtime::create_execution` after policy conversion.
-pub fn apply_post_policy(
+/// Production `Runtime::create_execution` and compose tests both call this.
+pub fn compose_child_command(
     command: CommandSpec,
     capability: &CapabilityPolicy,
     shell_integration: Option<&ShellIntegrationPolicy>,
-) -> Result<CommandSpec, RuntimeError> {
+) -> Result<ComposedChildCommand, RuntimeError> {
     if !capability.is_available() {
         return Err(RuntimeError::LaunchPolicy(
             LaunchPolicyFailure::CapabilityUnavailable,
@@ -65,13 +77,31 @@ pub fn apply_post_policy(
         if let Some(policy) = shell_integration
             && ShellIntegrationPolicy::supports(&command)
         {
-            let (command, _nonce) = policy.apply(command)?;
-            return Ok(command);
+            let (command, nonce) = policy.apply(command)?;
+            return Ok(ComposedChildCommand {
+                command,
+                shell_integration_applied: true,
+                shell_nonce: Some(nonce),
+            });
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = shell_integration;
     }
-    Ok(command)
+    Ok(ComposedChildCommand {
+        command,
+        shell_integration_applied: false,
+        shell_nonce: None,
+    })
+}
+
+/// Test helper: composition returning only the `CommandSpec`.
+#[cfg(test)]
+pub fn apply_post_policy(
+    command: CommandSpec,
+    capability: &CapabilityPolicy,
+    shell_integration: Option<&ShellIntegrationPolicy>,
+) -> Result<CommandSpec, RuntimeError> {
+    Ok(compose_child_command(command, capability, shell_integration)?.command)
 }

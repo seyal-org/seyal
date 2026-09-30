@@ -336,9 +336,7 @@ mod tests {
 
     #[test]
     fn user_zdotdir_bounds_omit_invalid_values_and_copy_valid() {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::launch_policy::process_env_test_lock();
 
         let dir = std::env::temp_dir().join(format!(
             "seyal-shell-integration-zdotdir-{}-{}",
