@@ -21,7 +21,23 @@ mod tests;
 
 pub use account::lookup_effective_account_record;
 pub use argv::{interactive_login_argv, ShellFamily};
-pub use compose::{apply_post_policy, command_spec_from_policy, resolve_default_interactive};
+pub use compose::{
+    command_spec_from_policy, compose_child_command, resolve_default_interactive,
+    ComposedChildCommand,
+};
+#[cfg(test)]
+pub use compose::apply_post_policy;
+
+/// Serialize process-env reads/writes across launch-policy and shell-integration
+/// tests. Parallel `--lib` harnesses must not race on `setenv`/`getenv`.
+#[cfg(test)]
+pub(crate) fn process_env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
 pub use env::{EmptyLocaleEnv, LocaleEnv, ProcessLocaleEnv, DEFAULT_PATH};
 pub use resolve::{resolve, ResolveInputs, PLATFORM_SAFE_FALLBACKS};
 pub use tmpdir::darwin_user_temp_dir;
