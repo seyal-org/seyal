@@ -168,9 +168,8 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (window.*, ADR-021 pane verbs, SPEC-022 Back/Forward) stay out until
-/// their typed actions land (R5.0.1 / R5.1.3 / R5.5.3). `goto.open` is admitted
-/// with the N4 surface (R5.5.3).
+/// Gated ids (window.*, ADR-021 pane verbs) stay out until their typed actions
+/// land (R5.0.1 / R5.1.3). `goto.open` and focus-history Back/Forward are admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -192,6 +191,8 @@ pub enum WorkspaceCommandId {
     PresentationToggleTui,
     ComposerHistorySearchOpen,
     GotoOpen,
+    FocusHistoryBack,
+    FocusHistoryForward,
     AppQuit,
 }
 
@@ -217,6 +218,8 @@ impl WorkspaceCommandId {
             Self::PresentationToggleTui => "presentation.toggle_tui",
             Self::ComposerHistorySearchOpen => "composer.history_search.open",
             Self::GotoOpen => "goto.open",
+            Self::FocusHistoryBack => "focus_history.back",
+            Self::FocusHistoryForward => "focus_history.forward",
             Self::AppQuit => "app.quit",
         }
     }
@@ -242,6 +245,8 @@ impl WorkspaceCommandId {
             "presentation.toggle_tui" => Self::PresentationToggleTui,
             "composer.history_search.open" => Self::ComposerHistorySearchOpen,
             "goto.open" => Self::GotoOpen,
+            "focus_history.back" => Self::FocusHistoryBack,
+            "focus_history.forward" => Self::FocusHistoryForward,
             "app.quit" => Self::AppQuit,
             _ => return None,
         })

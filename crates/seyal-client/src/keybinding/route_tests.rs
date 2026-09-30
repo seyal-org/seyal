@@ -366,10 +366,10 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     ));
 }
 
-// --- §14 item 21: SPEC-022 navigation (goto.open only; Back/Forward wait on N3) ---
+// --- §14 item 21: SPEC-022 navigation (goto.open + focus-history Back/Forward) ---
 
 #[test]
-fn item21_cmd_shift_o_dispatches_goto_open_focus_history_absent() {
+fn item21_cmd_shift_o_dispatches_goto_open() {
     let table = load_keybinding_table(None);
     let matched = route(&table, "cmd+shift+o", raw_ctx(), false);
     assert!(matches!(
@@ -393,22 +393,59 @@ fn item21_cmd_shift_o_dispatches_goto_open_focus_history_absent() {
         flow.matched_command().map(|c| c.id),
         Some(WorkspaceCommandId::GotoOpen)
     );
+}
 
-    // R5.5.3: Back/Forward stay out of the catalog until N3.
-    assert!(WorkspaceCommandId::parse("focus_history.back").is_none());
-    assert!(WorkspaceCommandId::parse("focus_history.forward").is_none());
+#[test]
+fn item21_unbind_cmd_shift_o_stops_goto_open() {
+    // R11.2: after unbind, the table must not match ⌘⇧O to goto.open. The
+    // native menu must not hardcode the equivalent (AppDelegate), so AppKit
+    // cannot reopen goto when the table says none.
+    let unbind = r#"
+[[keybindings]]
+keys = "cmd+shift+o"
+action = "none"
+context = ["app"]
+"#;
+    let table = load_keybinding_table(Some(unbind));
     assert_eq!(
-        route(&table, "cmd+[", raw_ctx(), false),
+        route(&table, "cmd+shift+o", raw_ctx(), false),
         RouteOutcome::UnmatchedCommand
     );
     assert_eq!(
-        route(&table, "cmd+]", raw_ctx(), false),
+        route(
+            &table,
+            "cmd+shift+o",
+            route_context_set(false, PresentationMode::Flow, false),
+            false,
+        ),
         RouteOutcome::UnmatchedCommand
     );
-    assert!(table.bindings.iter().all(|b| {
-        b.action.id.as_str() != "focus_history.back"
-            && b.action.id.as_str() != "focus_history.forward"
-    }));
+}
+
+#[test]
+fn item21_cmd_bracket_dispatches_focus_history() {
+    let table = load_keybinding_table(None);
+    let back = route(&table, "cmd+[", raw_ctx(), false);
+    assert!(matches!(
+        back,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ordinal: None,
+            }
+        }
+    ));
+    assert!(!back.writes_pty_bytes());
+    let forward = route(&table, "cmd+]", raw_ctx(), false);
+    assert!(matches!(
+        forward,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ordinal: None,
+            }
+        }
+    ));
 }
 
 // --- §14 item 20: composer history-search ---

@@ -9,7 +9,7 @@ use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
-use crate::navigation::{decode_resource_address, ResourceAddress};
+use crate::navigation::{decode_resource_address, FocusSeq, ResourceAddress};
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
@@ -286,13 +286,23 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             fence,
             address: decode_required_address(action.payload, action.payload_len)?,
         }),
+        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
+        // as little-endian u64; empty payload is invalid.
+        59 => Ok(AppAction::HistoryBack {
+            fence,
+            observed: decode_focus_seq(action.payload, action.payload_len)?,
+        }),
+        60 => Ok(AppAction::HistoryForward {
+            fence,
+            observed: decode_focus_seq(action.payload, action.payload_len)?,
+        }),
         // Goto / quick-switcher (SPEC-022 §7 / N4). reserved = GotoScope
         // discriminant (0 Workspaces, 1 Tabs, 2 Panes, 3 Sessions).
-        59 => Ok(AppAction::OpenGoto {
+        61 => Ok(AppAction::OpenGoto {
             fence,
             scope: decode_goto_scope(action.reserved)?,
         }),
-        60 => Ok(AppAction::SetGotoScope {
+        62 => Ok(AppAction::SetGotoScope {
             fence,
             scope: decode_goto_scope(action.reserved)?,
         }),
@@ -325,6 +335,17 @@ fn decode_required_address(payload: *const u8, payload_len: u32) -> Result<Resou
     let version = u16::from_le_bytes([bytes[0], bytes[1]]);
     let kind = u16::from_le_bytes([bytes[2], bytes[3]]);
     decode_resource_address(version, kind, &bytes[4..]).map_err(|_| -6)
+}
+
+fn decode_focus_seq(payload: *const u8, payload_len: u32) -> Result<FocusSeq, i32> {
+    if payload_len != 8 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — payload_len bytes are readable.
+    let bytes = unsafe { slice::from_raw_parts(payload, 8) };
+    let mut raw = [0_u8; 8];
+    raw.copy_from_slice(bytes);
+    Ok(FocusSeq::from_raw(u64::from_le_bytes(raw)))
 }
 
 fn continuity_of_bytes(bytes: [u8; 16]) -> ContinuityIdentity {

@@ -129,13 +129,19 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_NAVIGATE = 58,
     /*
+     * Focus-history Back/Forward (SPEC-022 §6 / N3).
+     * Payload is FocusSeq as little-endian u64.
+     */
+    SEYAL_APP_ACTION_HISTORY_BACK = 59,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 60,
+    /*
      * Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
      * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
      * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
-     * while open. Error codes 44-46.
+     * while open.
      */
-    SEYAL_APP_ACTION_OPEN_GOTO = 59,
-    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 60
+    SEYAL_APP_ACTION_OPEN_GOTO = 61,
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
 };
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */

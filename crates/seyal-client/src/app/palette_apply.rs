@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::navigation::{
-    navigate, EmptyExecutionInventory, NavigationPrincipal, NavigationRejection, ResourceAddress,
+    navigate, EmptyExecutionInventory, NavigateHistory, NavigationPrincipal, NavigationRejection,
+    ResourceAddress,
 };
 use crate::palette::{PaletteAction, PaletteCommand, PaletteRunTarget};
 
@@ -82,6 +83,7 @@ impl ApplicationRoot {
         if self.goto.is_open() {
             return self.run_goto(fence, address);
         }
+
         self.require_fence(fence)?;
         let target = match address {
             Some(address) => PaletteRunTarget::Navigate(address),
@@ -110,6 +112,7 @@ impl ApplicationRoot {
             &mut self.shell,
             &EmptyExecutionInventory,
             NavigationPrincipal::local_user(),
+            NavigateHistory::Record(&mut self.focus_history),
         )
         .map_err(navigation_error)?;
         let _ = self
@@ -151,5 +154,7 @@ pub(super) fn navigation_error(error: NavigationRejection) -> AppError {
         NavigationRejection::TargetTerminated => AppError::NavigationTargetTerminated,
         NavigationRejection::TargetUnbound => AppError::NavigationTargetUnbound,
         NavigationRejection::AmbiguousTarget => AppError::NavigationAmbiguousTarget,
+        NavigationRejection::StaleHistoryCursor => AppError::NavigationStaleHistoryCursor,
+        NavigationRejection::HistoryUnavailable => AppError::NavigationHistoryUnavailable,
     }
 }

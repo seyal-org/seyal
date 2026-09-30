@@ -34,33 +34,33 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 830
+acknowledged_loc = 856
 issue = 1127
-reason = "ApplicationRoot façade keeps keybinding ActionUnavailable from #1110 and goto/navigation errors from #1118. Match and goto reducers stay in keybinding_apply.rs and goto_apply.rs."
+reason = "ApplicationRoot façade keeps #1110 ActionUnavailable, #1117 history errors, and #1118/#1127 goto surface. Match stays in keybinding_apply.rs; history in focus_history_apply.rs; goto in goto_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
 acknowledged_loc = 995
 issue = 1127
-reason = "N2/N4 palette address coverage stays in this suite; #1127 only adjusts the CreateTab-while-palette-open fixture for R6.4.1. Ceiling matches current rustfmt-normalized LOC."
+reason = "ApplicationRoot unit suite keeps N2/N4 palette address coverage and R6.4.1 CreateTab-while-palette fixture. N3 focus-history app tests live in focus_history_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 972
+acknowledged_loc = 971
 issue = 1127
-reason = "Published C ABI façade keeps #1110 keystroke routing. Error-number mapping, including #1118 goto codes, lives in error_code.rs so this file stays under the hard line ceiling."
+reason = "Published C ABI façade keeps #1110 keystroke routing. History, goto, and keybinding error numbers live in error_code.rs so this file stays under the hard line ceiling."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
 acknowledged_loc = 817
-issue = 1118
-reason = "N2 address-carrying palette rows already placed this module in the cohesion band; #1118 does not grow it (goto is a sibling module). Ceiling matches current rustfmt-normalized LOC."
+issue = 1127
+reason = "N2 address-carrying palette rows place this module in the cohesion band; goto remains a sibling module. Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 953
-issue = 1118
-reason = "N1/N2 resolver and Navigate commit tests already landed this suite in the cohesion band; #1118 does not grow it. Ceiling matches current rustfmt-normalized LOC."
+acknowledged_loc = 967
+issue = 1127
+reason = "N1/N2 resolver, Navigate commit, and N3 history tests land this suite in the cohesion band. Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -107,3 +107,15 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 967
+issue = 1117
+reason = "SPEC-022 §12 N1/N2 resolver and Navigate commit suite stay one navigation tests module; N3 property/unit history tests live in history.rs and history_integration_tests.rs. Ceiling matches rustfmt-normalized LOC after N3 NavigateHistory call-site updates."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 817
+issue = 1117
+reason = "Global palette projection stays one reducer after N2 address-carrying navigation rows; N3 does not grow this module but the stack is changed versus master, so the cohesion-review band is acknowledged at the current rustfmt-normalized LOC."

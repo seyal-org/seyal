@@ -77,13 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // explicitly at the chrome host that owns the Rust-backed overlay.
         paletteItem.target = host
         viewMenu.addItem(paletteItem)
+        // R11.2 / R6.2.1: do not hardcode ⌘⇧O here. The Rust keybinding table
+        // owns `goto.open`; a hardcoded equivalent would fire before routing
+        // and ignore unbind/rebind. Menu click still opens goto; shortcut
+        // display/projection is #1135.
         let gotoItem = NSMenuItem(
             title: "Go to…",
             action: #selector(ProductChromeHostView.openGoto),
-            keyEquivalent: "o"
+            keyEquivalent: ""
         )
-        // SPEC-024 §5.5 `goto.open` default: ⌘⇧O. Same overlay as the palette.
-        gotoItem.keyEquivalentModifierMask = [.command, .shift]
         gotoItem.target = host
         viewMenu.addItem(gotoItem)
         viewItem.submenu = viewMenu
