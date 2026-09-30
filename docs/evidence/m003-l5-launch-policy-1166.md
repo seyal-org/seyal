@@ -22,8 +22,8 @@ ADR-020.
 | 3 | `crates/seyal-runtime/src/launch_policy/tests.rs` → `exhausted_fallbacks_fail_closed` |
 | 4 | `crates/seyal-runtime/src/launch_policy/tests.rs` → `login_argv_shapes_match_spec_tables` |
 | 5 | `crates/seyal-runtime/src/launch_policy/tests.rs` → `default_cwd_is_home_invalid_override_warns_invalid_home_fails` |
-| 6 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `helper_like_empty_locale_still_resolves` |
-| 7 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration` |
+| 6 | **resolver/CommandSpec-level only; live helper-allowlist process-env launch pending #1111** — cited `helper_like_empty_locale_still_resolves` injects `EmptyLocaleEnv` into the pure resolver and never sets a helper-only process env or launches |
+| 7 | **resolver/CommandSpec-level only; live poisoned-parent proof pending #1111** — cited `poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration` never poisons process env (absence assertions are tautological), checks `contains` rather than exact key-set equality, and runs against the test-only `apply_post_policy` mirror rather than `Runtime::create_execution` |
 | 8 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `term_terminfo_present_colorterm_and_terminfo_dirs_absent` |
 | 9 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `osc7_and_pane_title_cannot_steer_cwd_or_program` |
 | 10 | `crates/seyal-runtime/src/launch_policy/tests.rs` → `policy_debug_redacts_program_path_and_env` |
@@ -52,4 +52,4 @@ cargo test -p seyal-runtime --lib launch_policy
 cargo test -p seyal-runtime --test launch_policy_create
 ```
 
-Milestone status: not Done.
+Milestone status: not Done. Rows 6 and 7 remain unresolved until #1111 ships production-path helper-env / poisoned-env harnesses; this note must not be read as closing SPEC-023 §12 items 6–7.
