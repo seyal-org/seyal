@@ -96,11 +96,13 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
-[[cohesion_acknowledgement]]
+# #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc as one cohesive navigation
+# test module (resolver rejections beside the Navigate commits they feed).
+[[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 953
+ceiling_loc = 1132
 issue = 1101
-reason = "Navigation resolver tests stay one module. #1101 adds address-resolution cases beside the existing resolver proofs; splitting them would separate a rejection from the address that produced it."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it; further N3 history coverage lands in sibling history test modules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
