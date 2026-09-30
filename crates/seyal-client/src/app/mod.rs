@@ -287,9 +287,8 @@ pub enum AppAction {
     CycleWindow {
         direction: crate::shell::CycleDirection,
     },
-    CreateWindow {
-        workspace: WorkspaceId,
-    },
+    /// Target-free New Window (ADR-018 §2.2 / §3.3a): Rust resolves Workspace.
+    CreateWindow,
     /// Forwarded native window presentation input; host derives no product state.
     ReportWindowEvent {
         window: WindowId,
@@ -666,7 +665,7 @@ impl ApplicationRoot {
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::SelectWindow { id } => self.select_window(id),
             AppAction::CycleWindow { direction } => self.cycle_window(direction),
-            AppAction::CreateWindow { workspace } => self.create_window(workspace),
+            AppAction::CreateWindow => self.create_window(),
             AppAction::ReportWindowEvent { window, event } => {
                 self.report_window_event(window, event)
             }

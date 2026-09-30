@@ -225,13 +225,10 @@ final class MultiWindowHostTests: XCTestCase {
 
     private func createExtraWindows(on host: MultiWindowHostController, count: Int) {
         for _ in 0..<count {
-            let shell = seyal_app_shell(host.appHandle)
             var action = SeyalAppAction()
             action.version = UInt16(SEYAL_APP_ABI_VERSION)
             action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
             action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
-            action.target_execution_lo = shell.last_active_workspace_lo
-            action.target_execution_hi = shell.last_active_workspace_hi
             XCTAssertEqual(seyal_app_apply(host.appHandle, &action), 0)
             host.applyPendingEffectsAndReconcile()
         }

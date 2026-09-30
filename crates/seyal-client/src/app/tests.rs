@@ -826,3 +826,19 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
         Err(AppError::UnknownAttention)
     );
 }
+
+#[test]
+fn create_window_is_target_free_and_uses_active_workspace() {
+    let mut root = ApplicationRoot::new();
+    let before = root.snapshot().shell.clone();
+    let workspace = before.active_workspace;
+    let window_count = before.windows.len();
+    root.apply(AppAction::CreateWindow)
+        .expect("target-free create");
+    let after = root.snapshot().shell;
+    assert_eq!(after.windows.len(), window_count + 1);
+    assert_eq!(
+        after.active_workspace, workspace,
+        "with a product-active Window, New Window targets that Workspace"
+    );
+}

@@ -278,7 +278,8 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         57 => Ok(AppAction::DisconnectReconstruction),
         /*
          * W4a window actions / native presentation events (ADR-018 §2.2 / §2.3).
-         * SELECT_WINDOW / CREATE_WINDOW: target_execution_lo/hi = WindowId / WorkspaceId.
+         * SELECT_WINDOW: target_execution_lo/hi = WindowId.
+         * CREATE_WINDOW: target-free (Workspace resolved in Rust).
          * CYCLE_WINDOW: reserved = 0 next, 1 previous.
          * REPORT_WINDOW_EVENT: target_execution = WindowId; reserved = event kind.
          */
@@ -295,12 +296,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 crate::shell::CycleDirection::Next
             },
         }),
-        60 => Ok(AppAction::CreateWindow {
-            workspace: WorkspaceId::from_bytes(id16(
-                action.target_execution_lo,
-                action.target_execution_hi,
-            )?),
-        }),
+        60 => Ok(AppAction::CreateWindow),
         61 => Ok(AppAction::ReportWindowEvent {
             window: WindowId::from_bytes(id16(
                 action.target_execution_lo,
