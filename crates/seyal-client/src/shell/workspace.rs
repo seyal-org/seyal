@@ -31,6 +31,8 @@ pub(super) struct Tab {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Window {
     pub(super) id: WindowId,
+    /// Stored with the window. Shell tests read it; the library build does not.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) workspace_id: WorkspaceId,
     pub(super) attention: bool,
     pub(super) tabs: Vec<Tab>,
