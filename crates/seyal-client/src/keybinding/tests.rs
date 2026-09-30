@@ -518,11 +518,9 @@ action = "tab.select_next"
     let table = load_keybinding_table(Some(toml));
     for keys in ["cmd+q>x", "cmd+h>x", "ctrl+b>cmd+q"] {
         assert!(
-            table
-                .diagnostics
-                .iter()
-                .any(|d| d.category == DiagnosticCategory::ReservedCommandCollision
-                    && d.keys_notation == keys),
+            table.diagnostics.iter().any(|d| d.category
+                == DiagnosticCategory::ReservedCommandCollision
+                && d.keys_notation == keys),
             "expected ReservedCommandCollision for chord {keys}: {:?}",
             table.diagnostics
         );
