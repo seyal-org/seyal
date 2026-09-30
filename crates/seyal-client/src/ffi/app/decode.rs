@@ -278,7 +278,8 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         57 => Ok(AppAction::DisconnectReconstruction),
         /*
          * W4a/W4b window actions / native presentation events (ADR-018 §2.2 / §2.3 / §2.5).
-         * SELECT_WINDOW / CREATE_WINDOW: target_execution_lo/hi = WindowId / WorkspaceId.
+         * SELECT_WINDOW: target_execution_lo/hi = WindowId.
+         * CREATE_WINDOW: target-free (Workspace resolved in Rust).
          * CYCLE_WINDOW: reserved = 0 next, 1 previous.
          * REPORT_WINDOW_EVENT: target_execution = WindowId; reserved = event kind.
          * CLOSE_WINDOW: target_execution_lo/hi = WindowId.

@@ -46,9 +46,15 @@ reason = "Global command-palette reducer stays one cohesive open/filter/resolve 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 824
+acknowledged_loc = 871
 issue = 1158
-reason = "W4b admits CreateTab on the production shell and keeps pane-split fail-closed coverage in the ApplicationRoot suite. Ceiling matches rustfmt-normalized LOC."
+reason = "W4b admits CreateTab on the production shell and absorbs #1123/#1108 multi-window ApplicationRoot proofs. Ceiling matches post-merge LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/tests.rs"
+acknowledged_loc = 872
+issue = 1108
+reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot and native-effect projection proofs beside existing workspace/tab/pane coverage; further extraction would split one containment contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"

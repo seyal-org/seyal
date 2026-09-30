@@ -378,6 +378,37 @@ fn quit_freezes_and_emits_one_native_effect() {
 }
 
 #[test]
+fn repeated_same_window_selection_keeps_effect_queue_bounded() {
+    let mut root = ApplicationRoot::new();
+    let tab = root.snapshot().shell.active_tab;
+    for _ in 0..32 {
+        root.apply(AppAction::SelectTab { id: tab }).unwrap();
+    }
+    let effects = root.snapshot().pending_effects;
+    assert!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. }))
+            .count()
+            <= 1,
+        "OrderFrontMakeKey must stay coalesced, got {effects:?}"
+    );
+    // Quit after selections still emits exactly one terminate effect and remains acodable.
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert!(
+        snap.pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
+        "quit effect must remain present after prior selections"
+    );
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+}
+
+#[test]
 fn unknown_pane_does_not_route_across_identities() {
     let mut root = ApplicationRoot::new();
     let mut fence = root.fence();
@@ -820,5 +851,21 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
             id: AttentionId::new("missing"),
         }),
         Err(AppError::UnknownAttention)
+    );
+}
+
+#[test]
+fn create_window_is_target_free_and_uses_active_workspace() {
+    let mut root = ApplicationRoot::new();
+    let before = root.snapshot().shell.clone();
+    let workspace = before.active_workspace;
+    let window_count = before.windows.len();
+    root.apply(AppAction::CreateWindow)
+        .expect("target-free create");
+    let after = root.snapshot().shell;
+    assert_eq!(after.windows.len(), window_count + 1);
+    assert_eq!(
+        after.active_workspace, workspace,
+        "with a product-active Window, New Window targets that Workspace"
     );
 }

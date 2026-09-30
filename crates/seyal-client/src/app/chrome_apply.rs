@@ -222,7 +222,7 @@ impl ApplicationRoot {
     pub(super) fn create_window(&mut self) -> Result<(), AppError> {
         // ADR-018 §2.2 / §3.3a: host sends target-free New Window; Rust picks
         // the product-active Window's Workspace when any Window exists,
-        // otherwise `last_active_workspace`.
+        // otherwise `last_active_workspace` (zero-window re-entry / W4b).
         let snap = self.shell.snapshot();
         let workspace = if snap.windows.is_empty() {
             snap.last_active_workspace
