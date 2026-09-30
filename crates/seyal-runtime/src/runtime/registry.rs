@@ -315,6 +315,10 @@ impl Runtime {
             Lifecycle::Running | Lifecycle::TerminationFailed { .. } => {}
             _ => return Ok(()),
         }
+        #[cfg(all(target_os = "macos", feature = "test-fault-injection"))]
+        if crate::test_fault::take(crate::test_fault::FaultPoint::RequestTermination) {
+            return Err(RuntimeError::ExecutionNotRunning);
+        }
         entry.pty_eof_reap_probe = None;
         entry.ingress_active.store(false, Ordering::Release);
         entry.pending_input.clear();

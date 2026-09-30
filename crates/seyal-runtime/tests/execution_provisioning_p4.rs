@@ -22,6 +22,9 @@ use seyal_runtime::{
     AttachmentId, ExecutionId, ExecutionLifecycle, LocalIpcMode, Runtime, RuntimeConfig,
 };
 
+#[cfg(feature = "test-fault-injection")]
+use seyal_runtime::test_fault::{self, FaultPoint};
+
 static FD_SERIAL: Mutex<()> = Mutex::new(());
 
 fn hold_fd_serial() -> std::sync::MutexGuard<'static, ()> {
@@ -877,4 +880,83 @@ fn self_try_lifecycle(h: &mut Harness, client: usize) -> Option<Lifecycle> {
         }
     }
     None
+}
+
+#[cfg(feature = "test-fault-injection")]
+#[test]
+fn terminate_reports_invalid_state_when_request_termination_fails() {
+    let _guard = hold_fd_serial();
+    let mut h = Harness::empty();
+    h.hello(0, CAP_EXECUTION_PROVISIONING);
+    let created = h.create(0, 1, 24, 80);
+    assert_eq!(created.result_code, CreateExecutionResultCode::Created);
+    let attached = h.attach(0, created.execution_id, Role::Controller);
+
+    test_fault::fail_next(FaultPoint::RequestTermination);
+    let result = h.terminate(0, attached.attachment_id, created.execution_id, 2);
+    assert_eq!(
+        result.result_code,
+        TerminateExecutionResultCode::Error(ErrorCode::InvalidState)
+    );
+    assert_eq!(
+        h.runtime.lookup(created.execution_id).unwrap().lifecycle,
+        ExecutionLifecycle::Running,
+        "§11 must not be claimed when arming failed"
+    );
+}
+
+#[test]
+fn controller_connection_loss_after_termination_requested_still_finalizes() {
+    let _guard = hold_fd_serial();
+    let mut h = Harness::empty();
+    h.hello(0, CAP_EXECUTION_PROVISIONING);
+    let created = h.create(0, 1, 24, 80);
+    assert_eq!(created.result_code, CreateExecutionResultCode::Created);
+    let attached = h.attach(0, created.execution_id, Role::Controller);
+
+    let result = h.terminate(0, attached.attachment_id, created.execution_id, 2);
+    assert_eq!(
+        result.result_code,
+        TerminateExecutionResultCode::TerminationRequested
+    );
+    assert_eq!(
+        h.runtime.lookup(created.execution_id).unwrap().lifecycle,
+        ExecutionLifecycle::TerminatingGraceful
+    );
+
+    // Inverse regression: peer disappears mid-termination. §11 must continue
+    // through graceful → forced → finalize exactly once without a Controller.
+    let dropped = h.clients.remove(0);
+    drop(dropped.stream);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut saw_forced_or_drain = false;
+    while Instant::now() < deadline {
+        h.pump_for_deadlines();
+        match h.runtime.lookup(created.execution_id).map(|s| s.lifecycle) {
+            None => {
+                // Finalized.
+                break;
+            }
+            Some(ExecutionLifecycle::TerminatingGraceful) => {}
+            Some(ExecutionLifecycle::TerminatingForced)
+            | Some(ExecutionLifecycle::DrainingAfterPrimaryExit)
+            | Some(ExecutionLifecycle::PrimaryExitPending) => {
+                saw_forced_or_drain = true;
+            }
+            Some(other) => panic!("unexpected lifecycle {other:?}"),
+        }
+    }
+    assert!(
+        h.runtime.lookup(created.execution_id).is_none(),
+        "execution must finalize after controller loss mid-termination"
+    );
+    let _ = saw_forced_or_drain;
+    for _ in 0..20 {
+        h.pump_for_deadlines();
+        assert!(
+            h.runtime.lookup(created.execution_id).is_none(),
+            "must finalize exactly once"
+        );
+    }
 }

@@ -28,6 +28,8 @@ pub enum FaultPoint {
     ProvisioningSpawn,
     ProvisioningRegistration,
     ProvisioningPublication,
+    // SPEC-004 §18.5 terminate path: fail before §11 is armed.
+    RequestTermination,
     // Legacy Candidate-B comparator/reference resource lifecycle.
     ShmOpenWriter,
     Truncate,
