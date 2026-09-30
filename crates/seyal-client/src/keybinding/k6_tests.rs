@@ -269,6 +269,44 @@ fn presentation_switch_mid_chord_clears_prefix_and_writes_no_consumed_prefix_to_
     assert!(after.matched_command().is_none());
 }
 
+#[test]
+fn menu_invoked_command_clears_active_chord_prefix() {
+    // R8.4: menu entry (not only palette validate) must clear an active prefix.
+    // Scenario: ⌃B prefix active, then menu Split Right / TabCreate, then `n`
+    // within 1 s must not complete the chord.
+    use crate::app::ApplicationRoot;
+
+    let table = load_keybinding_table(None);
+    let t0 = Instant::now();
+    let mut root = ApplicationRoot::new();
+    root.chord_prefix.force_active_for_test(
+        vec![KeyStroke {
+            modifiers: Modifiers::CTRL,
+            key: KeySym::Char('b'),
+        }],
+        t0,
+    );
+    assert!(root.chord_prefix.is_active());
+
+    let open = WorkspaceCommand {
+        id: WorkspaceCommandId::CommandPaletteOpen,
+        ordinal: None,
+    };
+    let route = root.keybinding_route_context(false);
+    root.invoke_workspace_command_for_menu(open, route)
+        .expect("menu open palette");
+    assert!(
+        !root.chord_prefix.is_active(),
+        "menu-invoked command must clear chord prefix (R8.4)"
+    );
+
+    let mut chord = ChordPrefixState::new();
+    // Re-seed an independent prefix state to show `n` alone is fallthrough,
+    // not a chord completion after the menu clear.
+    let after = route_at(&table, "n", BindingContext::APP, false, &mut chord, t0);
+    assert_eq!(after, RouteOutcome::Fallthrough);
+}
+
 // --- Adversarial: passthrough protection still gates load ---
 
 #[test]

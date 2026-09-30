@@ -307,6 +307,7 @@
 				C20000000000000000000005 /* SeyalHostHistoryUITests.swift */,
 				C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */,
 				C20000000000000000000007 /* IsolatedHostedRuntime.swift */,
+				C20000000000000000000009 /* SeyalKeybindingUITests.swift */,
 			);
 			path = SeyalUITests;
 			sourceTree = "<group>";
@@ -510,6 +511,7 @@
 				C10000000000000000000005 /* SeyalHostHistoryUITests.swift in Sources */,
 				C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */,
 				C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */,
+				C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

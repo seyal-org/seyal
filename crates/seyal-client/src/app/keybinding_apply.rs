@@ -67,11 +67,13 @@ impl ApplicationRoot {
     }
 
     /// Menu / key-equivalent path: validate against `route`, then dispatch.
+    /// R8.4: menu entry clears any active chord prefix before dispatch.
     pub fn invoke_workspace_command_for_menu(
         &mut self,
         command: WorkspaceCommand,
         route: BindingContext,
     ) -> Result<(), AppError> {
+        self.clear_chord_prefix();
         self.invoke_workspace_command(command, route)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);

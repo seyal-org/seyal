@@ -35,7 +35,8 @@
 | IME/composition skip + Command still matches | Component | **PASS** |
 | TUI Control-C + arrows Fallthrough | Component (route FFI under TUI eligibility) | **PASS** |
 | Unmatched/reserved Command non-leak | Component | **PASS** |
-| Menu titles / ⌘K / TUI PTY bytes / Quit | XCUI `SeyalKeybindingUITests` | **ENVIRONMENT_UNSUPPORTED** — `Timed out while enabling automation mode` |
+| Menu titles / ⌘K / TUI PTY bytes / Quit | XCUI `SeyalKeybindingUITests` | Wired into `SeyalUITests` Sources + group; run with `xcodebuild … -only-testing:SeyalUITests/SeyalKeybindingUITests`. Prior session: **ENVIRONMENT_UNSUPPORTED** (`Timed out while enabling automation mode`) — not a product FAIL when XCUIAutomation is unavailable |
+| Menu entry clears chord prefix (R8.4) | Rust `k6_tests::menu_invoked_command_clears_active_chord_prefix` | **PASS** — `invoke_workspace_command_for_menu` clears before dispatch |
 | Composition×chord race | Rust `k6_tests` | **PASS** (no headed chord+IME injector) |
 | Cold OnceLock identity | Rust `k6_tests` | **PASS** |
 | Reserved override load diagnostics | Rust `k6_tests` | **PASS** |
