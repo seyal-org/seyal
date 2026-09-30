@@ -128,8 +128,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         if liveKey == key {
             liveHost.removeFromSuperview()
             liveKey = nil
-            // Park the live host on another realized window when present.
-            if let next = orderedKeys.first, let hostWindow = realizations[next] {
+            // Park only on Rust's product-active window (ADR-015). Otherwise wait
+            // for OrderFrontMakeKey — never pick an arbitrary orderedKeys entry.
+            if let next = orderedKeys.first(where: { isProductActive($0) }),
+               let hostWindow = realizations[next] {
                 installLiveHost(in: hostWindow, key: next)
             }
         }
@@ -285,13 +287,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     // MARK: - Typed actions (menus)
 
     @objc func createWindow(_: Any?) {
-        let shell = seyal_app_shell(appHandle)
+        // ADR-018 §2.2 / §3.3a: target-free New Window — Rust resolves Workspace.
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
         action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
-        action.target_execution_lo = shell.last_active_workspace_lo
-        action.target_execution_hi = shell.last_active_workspace_hi
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
     }
