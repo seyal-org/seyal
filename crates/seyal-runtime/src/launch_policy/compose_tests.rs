@@ -5,7 +5,6 @@ use std::{
     collections::HashSet,
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 
 use seyal_exec::CommandSpec;
@@ -196,10 +195,9 @@ fn poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration() {
     );
 
     // Eligible zsh — carve-outs present; SEYAL_USER_ZDOTDIR absent without process ZDOTDIR.
-    static LOCK: Mutex<()> = Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = super::process_env_test_lock();
     let original = std::env::var_os("ZDOTDIR");
-    // SAFETY: test holds LOCK; no concurrent env readers in this process.
+    // SAFETY: test holds process_env_test_lock; no concurrent env readers in this process.
     unsafe { std::env::remove_var("ZDOTDIR") };
     let (si_dir, si) = materialize_shell_policy();
     let zsh_spec = apply_post_policy(zsh_base, &capability, Some(&si)).expect("zsh apply");
@@ -250,10 +248,9 @@ fn term_terminfo_present_colorterm_and_terminfo_dirs_absent() {
     .expect("resolve");
     let capability = CapabilityPolicy::bundled().expect("capability");
     // Poison process TERMINFO_DIRS — must not appear on the child.
-    static LOCK: Mutex<()> = Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = super::process_env_test_lock();
     let original = std::env::var_os("TERMINFO_DIRS");
-    // SAFETY: test holds LOCK; no concurrent env readers in this process.
+    // SAFETY: test holds process_env_test_lock; no concurrent env readers in this process.
     unsafe { std::env::set_var("TERMINFO_DIRS", "/evil/terminfo") };
     let spec = apply_post_policy(command_spec_from_policy(&out), &capability, None).unwrap();
     assert_eq!(env_get(&spec, "TERM"), Some(OsStr::new(m001_term_name())));
