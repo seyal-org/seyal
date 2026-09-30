@@ -64,7 +64,10 @@ impl ApplicationRoot {
             id,
             containment_generation: generation,
         })
-        .map_err(|_| AppError::UnknownChromeTab)?;
+        .map_err(|error| match error {
+            ShellError::PresentationCloseUnavailable => AppError::PresentationCloseUnavailable,
+            _ => AppError::UnknownChromeTab,
+        })?;
         self.release_authority_if_unbound();
         let _ = self
             .chrome

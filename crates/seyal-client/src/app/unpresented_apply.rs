@@ -64,15 +64,23 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Palette adopt: rebind `ExecutionId` into the focused Pane leaf.
-    /// Fresh `AttachmentId` is completed via [`AppAction::Adopt`] after Runtime attach.
+    /// Palette adopt: validate and emit an attach intent only.
+    ///
+    /// ADR-018 §6: do not bind the leaf here. Shell binding commits only through
+    /// [`AppAction::Adopt`] after Runtime attachment evidence exists.
     pub(super) fn adopt_unpresented_command(
         &mut self,
         execution: ExecutionId,
     ) -> Result<(), AppError> {
-        let pane = self.shell.snapshot().focused_pane;
-        self.apply_shell(ShellAction::AdoptExecution { pane, execution })
-            .map_err(unpresented_shell_error)
+        let snap = self.shell.snapshot();
+        let pane = snap.focused_pane;
+        // Fail closed on the same predicates AdoptExecution would, without mutating.
+        self.shell
+            .validate_adopt_execution(pane, execution)
+            .map_err(unpresented_shell_error)?;
+        self.pending_effects
+            .push(NativeEffect::RequestAdoptAttach { pane, execution });
+        Ok(())
     }
 
     pub(super) fn terminate_execution(&mut self, execution: ExecutionId) -> Result<(), AppError> {

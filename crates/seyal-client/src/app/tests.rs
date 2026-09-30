@@ -114,32 +114,37 @@ fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
 }
 
 #[test]
-fn close_unknown_ids_reject_and_sole_tab_removes_window() {
-    // Unknown identities reject without retarget. The sole Tab of the
-    // production Window removes that Window (ADR-018 §3.2), replacing the
-    // older last-tab refusal.
+fn close_unknown_ids_and_sole_tab_reject_while_presentation_close_gated() {
+    // m001 keeps presentation close gated until W4b zero-window re-entry.
+    // Unknown identities and the sole Tab share PresentationCloseUnavailable.
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
     let only_tab = snap.shell.tabs[0].id;
     let only_pane = snap.shell.panes[0].id;
 
+    assert!(!snap.shell.allows_tab_close);
+    assert!(!snap.shell.allows_pane_close);
     assert_eq!(
         root.apply(AppAction::CloseTab { id: TabId::new() }),
-        Err(AppError::UnknownChromeTab)
+        Err(AppError::PresentationCloseUnavailable)
     );
     assert_eq!(
         root.apply(AppAction::ClosePane { id: PaneId::new() }),
-        Err(AppError::UnknownPane)
+        Err(AppError::PresentationCloseUnavailable)
+    );
+    assert_eq!(
+        root.apply(AppAction::CloseTab { id: only_tab }),
+        Err(AppError::PresentationCloseUnavailable)
+    );
+    assert_eq!(
+        root.apply(AppAction::ClosePane { id: only_pane }),
+        Err(AppError::PresentationCloseUnavailable)
     );
     assert_eq!(root.snapshot().shell.tabs.len(), 1);
     assert_eq!(root.snapshot().shell.panes.len(), 1);
     assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
     assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
-
-    root.apply(AppAction::CloseTab { id: only_tab })
-        .expect("sole tab removes window");
-    assert!(root.snapshot().shell.windows.is_empty());
-    assert_eq!(root.snapshot().shell.active_window, None);
+    assert_eq!(root.snapshot().shell.windows.len(), 1);
 }
 
 #[test]
@@ -368,6 +373,37 @@ fn quit_freezes_and_emits_one_native_effect() {
     );
     root.apply(AppAction::AckEffect).unwrap();
     assert!(root.snapshot().pending_effects.is_empty());
+}
+
+#[test]
+fn repeated_same_window_selection_keeps_effect_queue_bounded() {
+    let mut root = ApplicationRoot::new();
+    let tab = root.snapshot().shell.active_tab;
+    for _ in 0..32 {
+        root.apply(AppAction::SelectTab { id: tab }).unwrap();
+    }
+    let effects = root.snapshot().pending_effects;
+    assert!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. }))
+            .count()
+            <= 1,
+        "OrderFrontMakeKey must stay coalesced, got {effects:?}"
+    );
+    // Quit after selections still emits exactly one terminate effect and remains acodable.
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert!(
+        snap.pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
+        "quit effect must remain present after prior selections"
+    );
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
 }
 
 #[test]

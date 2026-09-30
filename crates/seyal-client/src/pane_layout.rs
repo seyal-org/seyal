@@ -248,7 +248,7 @@ mod root_tests {
             }],
             WorkspaceId::m001_default(),
             true,
-            false,
+            true,
         )
         .expect("fixture");
         ApplicationRoot::with_shell(shell)
