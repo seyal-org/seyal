@@ -844,3 +844,29 @@ fn selection_does_not_bump_containment_generation() {
     assert_eq!(shell.containment_generation(), generation);
     let _ = w1;
 }
+
+#[test]
+fn same_window_selection_does_not_emit_order_front() {
+    let (mut shell, w1, w2, t1, t2, _) = seed_two_windows_one_workspace();
+    let _ = shell.take_effects();
+    // Cross-window selection emits exactly one raise.
+    shell.apply(ShellAction::SelectWindow { id: w2 }).unwrap();
+    assert_eq!(
+        shell.take_effects(),
+        [ShellNativeEffect::OrderFrontMakeKey { window: w2 }]
+    );
+    // Return to w1 (one raise), then same-window tab selection must not emit.
+    shell.apply(ShellAction::SelectWindow { id: w1 }).unwrap();
+    assert_eq!(
+        shell.take_effects(),
+        [ShellNativeEffect::OrderFrontMakeKey { window: w1 }]
+    );
+    for _ in 0..8 {
+        shell.apply(ShellAction::SelectTab { id: t2 }).unwrap();
+        shell.apply(ShellAction::SelectTab { id: t1 }).unwrap();
+        assert!(
+            shell.take_effects().is_empty(),
+            "same-window SelectTab must not emit OrderFrontMakeKey"
+        );
+    }
+}
