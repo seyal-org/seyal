@@ -412,7 +412,7 @@ fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     assert!(
         snap.pending_effects
             .iter()
-            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
         "quit effect must remain present after prior selections"
     );
     while !root.snapshot().pending_effects.is_empty() {
