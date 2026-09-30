@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::shell::{
-    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWorkspaceSeed, SplitAxis,
+    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+    SplitAxis,
 };
 
 use super::{
@@ -61,6 +62,8 @@ fn seed_shell() -> (
     let p2 = PaneId::new();
     let t_other = TabId::new();
     let p_other = PaneId::new();
+    let win1 = WindowId::new();
+    let win2 = WindowId::new();
     let shell = ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -68,45 +71,53 @@ fn seed_shell() -> (
                 name: "Alpha".to_owned(),
                 detail: Some("shared-label".to_owned()),
                 attention: false,
-                active_tab: t1,
-                tabs: vec![
-                    ShellTabSeed {
-                        id: t1,
-                        title: "Tab One".to_owned(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: p1,
-                            title: "Pane A".to_owned(),
-                            allows_implicit_execution_bootstrap: true,
+                active_window: win1,
+                windows: vec![ShellWindowSeed {
+                    id: win1,
+                    active_tab: t1,
+                    tabs: vec![
+                        ShellTabSeed {
+                            id: t1,
+                            title: "Tab One".to_owned(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: p1,
+                                title: "Pane A".to_owned(),
+                                allows_implicit_execution_bootstrap: true,
+                            },
                         },
-                    },
-                    ShellTabSeed {
-                        id: t2,
-                        title: "Tab Two".to_owned(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: p2,
-                            title: "Pane B".to_owned(),
-                            allows_implicit_execution_bootstrap: false,
+                        ShellTabSeed {
+                            id: t2,
+                            title: "Tab Two".to_owned(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: p2,
+                                title: "Pane B".to_owned(),
+                                allows_implicit_execution_bootstrap: false,
+                            },
                         },
-                    },
-                ],
+                    ],
+                }],
             },
             ShellWorkspaceSeed {
                 id: w2,
                 name: "Alpha".to_owned(),
                 detail: Some("shared-label".to_owned()),
                 attention: false,
-                active_tab: t_other,
-                tabs: vec![ShellTabSeed {
-                    id: t_other,
-                    title: "Other".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p_other,
-                        title: "Other Pane".to_owned(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: win2,
+                windows: vec![ShellWindowSeed {
+                    id: win2,
+                    active_tab: t_other,
+                    tabs: vec![ShellTabSeed {
+                        id: t_other,
+                        title: "Other".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p_other,
+                            title: "Other Pane".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],

@@ -38,11 +38,11 @@ acknowledged_loc = 812
 issue = 1118
 reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1118 adds Goto Open/Scope/Query/Move/Run/Close/CycleScope action variants and the goto snapshot field while goto_apply.rs owns the reducer. N2 Navigate/RunPalette growth is included in this ceiling."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 993
-issue = 1118
-reason = "N2 navigate/palette address tests already landed this suite in the cohesion band; #1118 does not grow the file (goto coverage lives in goto_tests.rs). Ceiling matches current rustfmt-normalized LOC."
+ceiling_loc = 1010
+issue = 1003
+responsibility = "N2 navigate and palette address proofs stay in the app tests module. W1 moved tabs onto windows, so those fixtures wrap each workspace seed in one ShellWindowSeed; splitting them out would separate the address assertions from the app actions they drive."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -100,9 +100,9 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1132
+ceiling_loc = 1143
 issue = 1101
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it; further N3 history coverage lands in sibling history test modules."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"

@@ -565,10 +565,13 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
 #[test]
 fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
     use crate::navigation::ResourceAddress;
-    use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
+    use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+    use seyal_core::WindowId;
 
     let w1 = WorkspaceId::m001_default();
     let w2 = WorkspaceId::from_bytes([0x22; 16]);
+    let win1 = WindowId::from_bytes([0x31; 16]);
+    let win2 = WindowId::from_bytes([0x32; 16]);
     let t1 = TabId::from_bytes([0x01; 16]);
     let t2 = TabId::from_bytes([0x02; 16]);
     let p1 = PaneId::from_bytes([0x03; 16]);
@@ -580,16 +583,20 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
                 name: "A".into(),
                 detail: None,
                 attention: false,
-                active_tab: t1,
-                tabs: vec![ShellTabSeed {
-                    id: t1,
-                    title: "T1".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p1,
-                        title: "P1".into(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                active_window: win1,
+                windows: vec![ShellWindowSeed {
+                    id: win1,
+                    active_tab: t1,
+                    tabs: vec![ShellTabSeed {
+                        id: t1,
+                        title: "T1".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "P1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             },
             ShellWorkspaceSeed {
@@ -597,16 +604,20 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
                 name: "B".into(),
                 detail: None,
                 attention: false,
-                active_tab: t2,
-                tabs: vec![ShellTabSeed {
-                    id: t2,
-                    title: "T2".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p2,
-                        title: "P2".into(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: win2,
+                windows: vec![ShellWindowSeed {
+                    id: win2,
+                    active_tab: t2,
+                    tabs: vec![ShellTabSeed {
+                        id: t2,
+                        title: "T2".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "P2".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],
@@ -662,9 +673,11 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
 #[test]
 fn palette_run_by_address_not_rebinding_ordinal() {
     use crate::navigation::ResourceAddress;
-    use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
+    use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+    use seyal_core::WindowId;
 
     let w1 = WorkspaceId::m001_default();
+    let win1 = WindowId::from_bytes([0x21; 16]);
     let t1 = TabId::from_bytes([0x11; 16]);
     let t2 = TabId::from_bytes([0x12; 16]);
     let p1 = PaneId::from_bytes([0x13; 16]);
@@ -675,29 +688,33 @@ fn palette_run_by_address_not_rebinding_ordinal() {
             name: "A".into(),
             detail: None,
             attention: false,
-            active_tab: t1,
-            tabs: vec![
-                ShellTabSeed {
-                    id: t1,
-                    title: "One".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p1,
-                        title: "P1".into(),
-                        allows_implicit_execution_bootstrap: true,
+            active_window: win1,
+            windows: vec![ShellWindowSeed {
+                id: win1,
+                active_tab: t1,
+                tabs: vec![
+                    ShellTabSeed {
+                        id: t1,
+                        title: "One".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "P1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
                     },
-                },
-                ShellTabSeed {
-                    id: t2,
-                    title: "Two".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p2,
-                        title: "P2".into(),
-                        allows_implicit_execution_bootstrap: false,
+                    ShellTabSeed {
+                        id: t2,
+                        title: "Two".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "P2".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
                     },
-                },
-            ],
+                ],
+            }],
         }],
         w1,
         true,

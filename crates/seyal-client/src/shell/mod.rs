@@ -272,7 +272,7 @@ impl ShellState {
     /// Owning Workspace and Tab of a current Pane, if any.
     pub fn location_of_pane(&self, id: PaneId) -> Option<(WorkspaceId, TabId)> {
         for workspace in &self.workspaces {
-            for tab in &workspace.tabs {
+            for tab in workspace.tabs() {
                 if tab.panes.contains_key(&id) {
                     return Some((workspace.id, tab.id));
                 }
@@ -294,7 +294,7 @@ impl ShellState {
     pub fn panes_bound_to(&self, execution: ExecutionId) -> Vec<(WorkspaceId, TabId, PaneId)> {
         let mut bound = Vec::new();
         for workspace in &self.workspaces {
-            for tab in &workspace.tabs {
+            for tab in workspace.tabs() {
                 for pane in tab.panes.values() {
                     if pane.execution == Some(execution) {
                         bound.push((workspace.id, tab.id, pane.id));
@@ -331,11 +331,7 @@ impl ShellState {
     ) -> Result<(), ShellError> {
         let workspace_id = self.workspace_of_tab(id).ok_or(ShellError::UnknownTab)?;
         let workspace = self.workspace_mut(workspace_id)?;
-        let tab = workspace
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.id == id)
-            .ok_or(ShellError::UnknownTab)?;
+        let tab = workspace.tab_mut(id).ok_or(ShellError::UnknownTab)?;
         tab.title = title.into();
         Ok(())
     }
@@ -349,11 +345,7 @@ impl ShellState {
     ) -> Result<(), ShellError> {
         let (workspace_id, tab_id) = self.location_of_pane(id).ok_or(ShellError::UnknownPane)?;
         let workspace = self.workspace_mut(workspace_id)?;
-        let tab = workspace
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.id == tab_id)
-            .ok_or(ShellError::UnknownTab)?;
+        let tab = workspace.tab_mut(tab_id).ok_or(ShellError::UnknownTab)?;
         let pane = tab.panes.get_mut(&id).ok_or(ShellError::UnknownPane)?;
         pane.title = title.into();
         Ok(())
@@ -372,7 +364,7 @@ impl ShellState {
     /// Active Tab and focused Pane currently recorded for `workspace`.
     pub fn workspace_focus(&self, workspace: WorkspaceId) -> Option<FocusCheckpoint> {
         let workspace = self.workspace(workspace).ok()?;
-        let tab = workspace.tab(workspace.active_tab)?;
+        let tab = workspace.tab(workspace.active_tab_id())?;
         Some(FocusCheckpoint {
             active_workspace: workspace.id,
             active_tab: tab.id,
@@ -416,13 +408,8 @@ impl ShellState {
         }
         self.active_workspace = workspace;
         let workspace_mut = self.workspace_mut(workspace)?;
-        workspace_mut.active_tab = tab;
-        let tab_mut = workspace_mut
-            .tabs
-            .iter_mut()
-            .find(|item| item.id == tab)
-            .ok_or(ShellError::UnknownTab)?;
-        tab_mut.focused = pane;
+        workspace_mut.select_tab(tab)?;
+        workspace_mut.active_tab_mut()?.focused = pane;
         self.last_error = None;
         Ok(())
     }

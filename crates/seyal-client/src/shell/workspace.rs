@@ -158,6 +158,12 @@ impl Workspace {
         self.tabs().find(|tab| tab.id == id)
     }
 
+    pub(super) fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.windows
+            .iter_mut()
+            .find_map(|window| window.tabs.iter_mut().find(|tab| tab.id == id))
+    }
+
     pub(super) fn active_window(&self) -> &Window {
         self.windows
             .iter()
