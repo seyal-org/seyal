@@ -127,7 +127,15 @@ enum SeyalAppActionKind {
      * address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
      * Rejected navigate leaves focus unchanged. Error codes 34-43.
      */
-    SEYAL_APP_ACTION_NAVIGATE = 58
+    SEYAL_APP_ACTION_NAVIGATE = 58,
+    /**
+     * Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq as
+     * little-endian u64. reserved = 0. Observed cursor must match the current
+     * history seq or the action rejects with StaleHistoryCursor (47).
+     * Numbers 61/62 leave 59/60 for N4 OpenGoto/SetGotoScope.
+     */
+    SEYAL_APP_ACTION_HISTORY_BACK = 61,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 62
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */

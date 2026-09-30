@@ -46,9 +46,9 @@ reason = "ApplicationRoot unit suite stays a sibling tests module; N2/N3 navigat
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 948
+acknowledged_loc = 949
 issue = 1117
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. #1117 adds NavigationStaleHistoryCursor and NavigationHistoryUnavailable error numbers only; HistoryBack/Forward decode lives in decode.rs."
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. #1117 maps NavigationStaleHistoryCursor/HistoryUnavailable to error numbers 47/48 (after N4 goto 44–46); HistoryBack/Forward decode lives in decode.rs at actions 61/62."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -96,11 +96,13 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
-[[cohesion_acknowledgement]]
+# #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc; #1117 NavigateHistory
+# call-site updates raise the ceiling while history unit coverage stays sibling.
+[[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 967
+ceiling_loc = 1151
 issue = 1117
-reason = "SPEC-022 §12 N1/N2 resolver and Navigate commit suite stay one navigation tests module; N3 property/unit history tests live in history.rs and history_integration_tests.rs. Ceiling matches rustfmt-normalized LOC after N3 NavigateHistory call-site updates."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it; N3 property/unit history tests live in history.rs and history_integration_tests.rs, while NavigateHistory call-site updates remain co-located here."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"

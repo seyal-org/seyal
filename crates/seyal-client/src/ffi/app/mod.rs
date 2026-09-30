@@ -942,7 +942,8 @@ fn error_number(error: AppError) -> i32 {
         AppError::NavigationTargetTerminated => 41,
         AppError::NavigationTargetUnbound => 42,
         AppError::NavigationAmbiguousTarget => 43,
-        AppError::NavigationStaleHistoryCursor => 44,
-        AppError::NavigationHistoryUnavailable => 45,
+        // 44–46 reserved for N4 goto (GotoNotOpen/NoSelection/UnsupportedScope).
+        AppError::NavigationStaleHistoryCursor => 47,
+        AppError::NavigationHistoryUnavailable => 48,
     }
 }

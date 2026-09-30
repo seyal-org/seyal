@@ -288,11 +288,13 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
         // as little-endian u64; empty payload is invalid.
-        59 => Ok(AppAction::HistoryBack {
+        // Action numbers 61/62 (not 59/60): N4 goto owns OpenGoto/SetGotoScope
+        // at 59/60; error codes 47/48 follow goto's 44–46.
+        61 => Ok(AppAction::HistoryBack {
             fence,
             observed: decode_focus_seq(action.payload, action.payload_len)?,
         }),
-        60 => Ok(AppAction::HistoryForward {
+        62 => Ok(AppAction::HistoryForward {
             fence,
             observed: decode_focus_seq(action.payload, action.payload_len)?,
         }),
