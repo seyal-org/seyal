@@ -153,7 +153,11 @@ fn spec025_6_swap_preserves_ids_bindings_and_exchanges_slots() {
         }
     );
     shell
-        .apply(ShellAction::SwapPanes { a, b: c })
+        .apply(ShellAction::SwapPanes {
+            a,
+            b: c,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("swap A↔C");
     let after = shell.snapshot();
     assert_identity_preserved(&before, &after);
@@ -220,6 +224,7 @@ fn spec025_7_move_beside_each_side_collapses_old_slot_and_preserves_ids() {
                 pane: c,
                 neighbor: a,
                 side,
+                containment_generation: shell.containment_generation(),
             })
             .expect("move C beside A");
         let after = shell.snapshot();
@@ -260,6 +265,7 @@ fn spec025_8_move_pane_equals_neighbor_rejects_atomically() {
             pane: a,
             neighbor: a,
             side: MoveSide::Right,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::InvalidMoveTarget)
     );
@@ -272,7 +278,11 @@ fn swap_a_equals_b_and_unknown_ids_reject_atomically() {
     let (mut shell, a, _, _) = seed_nested_abc();
     let before = shell.clone();
     assert_eq!(
-        shell.apply(ShellAction::SwapPanes { a, b: a }),
+        shell.apply(ShellAction::SwapPanes {
+            a,
+            b: a,
+            containment_generation: shell.containment_generation(),
+        }),
         Err(ShellError::InvalidMoveTarget)
     );
     assert_rejection_atomic(&shell, &before);
@@ -280,17 +290,27 @@ fn swap_a_equals_b_and_unknown_ids_reject_atomically() {
 
     let stale = PaneId::new();
     for action in [
-        ShellAction::SwapPanes { a, b: stale },
-        ShellAction::SwapPanes { a: stale, b: a },
+        ShellAction::SwapPanes {
+            a,
+            b: stale,
+            containment_generation: shell.containment_generation(),
+        },
+        ShellAction::SwapPanes {
+            a: stale,
+            b: a,
+            containment_generation: shell.containment_generation(),
+        },
         ShellAction::MovePaneBeside {
             pane: stale,
             neighbor: a,
             side: MoveSide::Left,
+            containment_generation: shell.containment_generation(),
         },
         ShellAction::MovePaneBeside {
             pane: a,
             neighbor: stale,
             side: MoveSide::Left,
+            containment_generation: shell.containment_generation(),
         },
     ] {
         let before = shell.clone();
@@ -321,7 +341,11 @@ fn spec025_p1_swap_and_move_preserve_pane_ids_and_execution_bindings() {
 
     let before_swap = shell.snapshot();
     shell
-        .apply(ShellAction::SwapPanes { a: b, b: c })
+        .apply(ShellAction::SwapPanes {
+            a: b,
+            b: c,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("swap");
     assert_identity_preserved(&before_swap, &shell.snapshot());
 
@@ -331,8 +355,53 @@ fn spec025_p1_swap_and_move_preserve_pane_ids_and_execution_bindings() {
             pane: a,
             neighbor: c,
             side: MoveSide::Below,
+            containment_generation: shell.containment_generation(),
         })
         .expect("move");
     assert_identity_preserved(&before_move, &shell.snapshot());
     assert_eq!(shell.snapshot().focused_pane, before_move.focused_pane);
+}
+
+#[test]
+fn spec025_stale_containment_generation_rejects_swap_and_move_beside() {
+    let (mut shell, a, b, c) = seed_nested_abc();
+    let generation = shell.containment_generation();
+    shell
+        .apply(ShellAction::SwapPanes {
+            a,
+            b,
+            containment_generation: generation,
+        })
+        .expect("swap");
+    assert!(shell.containment_generation() > generation);
+    let stale = generation;
+    let fingerprint = shell.containment_fingerprint();
+    for action in [
+        ShellAction::SwapPanes {
+            a: b,
+            b: c,
+            containment_generation: stale,
+        },
+        ShellAction::MovePaneBeside {
+            pane: c,
+            neighbor: a,
+            side: MoveSide::Right,
+            containment_generation: stale,
+        },
+    ] {
+        let prior = shell.clone();
+        assert_eq!(shell.apply(action), Err(ShellError::StaleContainment));
+        assert_rejection_atomic(&shell, &prior);
+        assert_eq!(shell.last_error(), Some(ShellError::StaleContainment));
+        assert_eq!(shell.containment_fingerprint(), fingerprint);
+    }
+    let now = shell.containment_generation();
+    shell
+        .apply(ShellAction::SwapPanes {
+            a: b,
+            b: c,
+            containment_generation: now,
+        })
+        .expect("fresh swap");
+    assert!(shell.containment_generation() > now);
 }

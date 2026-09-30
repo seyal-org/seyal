@@ -180,11 +180,13 @@ pub enum ShellAction {
     SwapPanes {
         a: PaneId,
         b: PaneId,
+        containment_generation: u64,
     },
     MovePaneBeside {
         pane: PaneId,
         neighbor: PaneId,
         side: MoveSide,
+        containment_generation: u64,
     },
     FocusDirection {
         direction: FocusDirection,
@@ -451,12 +453,23 @@ impl ShellState {
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::ZoomPane { id } => self.zoom_pane(id),
             ShellAction::Unzoom => self.unzoom(),
-            ShellAction::SwapPanes { a, b } => self.swap_panes(a, b),
+            ShellAction::SwapPanes {
+                a,
+                b,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.swap_panes(a, b)
+            }
             ShellAction::MovePaneBeside {
                 pane,
                 neighbor,
                 side,
-            } => self.move_pane_beside(pane, neighbor, side),
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.move_pane_beside(pane, neighbor, side)
+            }
             ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }
