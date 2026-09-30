@@ -9,6 +9,7 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod goto_apply;
 mod palette_apply;
 mod recovery_apply;
 mod session;
@@ -32,6 +33,7 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
@@ -79,6 +81,9 @@ pub enum AppError {
     UnknownChromeTab,
     PaletteNotOpen,
     PaletteNoSelection,
+    GotoNotOpen,
+    GotoNoSelection,
+    GotoUnsupportedScope,
     TabCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
@@ -294,6 +299,34 @@ pub enum AppAction {
     ClosePalette {
         fence: AppFence,
     },
+    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+    OpenGoto {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoScope {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    CycleGotoScope {
+        fence: AppFence,
+    },
+    SetGotoQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MoveGotoSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected goto row by stored/host-echoed address.
+    RunGoto {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    CloseGoto {
+        fence: AppFence,
+    },
     /// Bind the inspector to one Block of the focused Pane (#935).
     SelectBlock {
         fence: AppFence,
@@ -349,6 +382,7 @@ pub struct AppSnapshot {
     pub composer: Option<ComposerSnapshot>,
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
+    pub goto: GotoSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +410,7 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    goto: GotoState,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -415,6 +450,7 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            goto: GotoState::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
@@ -458,7 +494,10 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot();
+        // When goto is open, the existing overlay ABI carries goto rows
+        // (one overlay component; ADR-019 §8).
+        let palette = self.overlay_palette_snapshot();
+        let goto = self.goto.snapshot();
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
         AppSnapshot {
@@ -491,6 +530,7 @@ impl ApplicationRoot {
             composer,
             chrome,
             palette,
+            goto,
         }
     }
 
@@ -638,6 +678,13 @@ impl ApplicationRoot {
                 self.navigate_address(address)
             }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
+            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
+            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::CycleGotoScope { fence } => self.cycle_goto_scope(fence),
+            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
+            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
+            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
+            AppAction::CloseGoto { fence } => self.close_goto(fence),
         };
         match result {
             Ok(()) => {
