@@ -8,6 +8,10 @@ import XCTest
 /// the relaunch-reconnect case stays on one fixture Runtime.
 enum IsolatedHostedRuntime {
   static let flag = "--runtime-dir"
+  /// Must match `BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey`.
+  /// Xcode leaves `XCTestConfigurationFilePath` on the test runner, so the
+  /// app under test only sees a variable this launch sets.
+  static let forwardCommandEnvironmentKey = "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
 
   static func makeDirectory() -> String {
     let url = URL(fileURLWithPath: "/tmp").appendingPathComponent(
@@ -38,6 +42,7 @@ extension XCUIApplication {
     for (key, value) in environment {
       launchEnvironment[key] = value
     }
+    launchEnvironment[IsolatedHostedRuntime.forwardCommandEnvironmentKey] = "1"
     launch()
     return self
   }

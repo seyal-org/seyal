@@ -38,6 +38,16 @@ final class BundledRuntimeLauncher {
   static let helperIdentifier = "dev.seyal.Seyal.runtime"
   static let helperRelativePath = "Contents/Helpers/seyal-runtime"
   static let systemPath = "/usr/bin:/bin:/usr/sbin:/sbin"
+  /// Set by `IsolatedHostedRuntime` on `XCUIApplication.launchEnvironment`.
+  /// Xcode does not copy the test runner's `XCTestConfigurationFilePath` into
+  /// Seyal.app, and production argv must not select the helper command.
+  static let uiTestForwardRuntimeCommandEnvironmentKey = "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+
+  static func uiTestRequestsHelperCommand(
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> Bool {
+    environment[uiTestForwardRuntimeCommandEnvironmentKey] == "1"
+  }
 
   /// The launch is synchronous and currently invoked by the recovery
   /// coordinator on one executor. Retain its typed outcome only until that
@@ -302,12 +312,11 @@ final class BundledRuntimeLauncher {
     else { throw BundledRuntimeLaunchError.launchDenied }
 
     let executable = helperURL.path
-    // XCUI's Seyal.app does not link XCTest. The configuration-file variable
-    // is how that launch is distinguished from a production argv.
-    let launchedByUITest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    // XCUI's Seyal.app does not link XCTest, and Xcode does not copy the test
+    // runner environment into it. The UI test sets this variable itself.
     var arguments: [UnsafeMutablePointer<CChar>?] = helperArgv(
       executable: executable,
-      forwardHelperCommand: launchedByUITest
+      forwardHelperCommand: uiTestRequestsHelperCommand()
     )
       .map { strdup($0) as UnsafeMutablePointer<CChar>? }
     arguments.append(nil)

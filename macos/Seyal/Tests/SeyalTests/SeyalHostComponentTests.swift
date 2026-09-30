@@ -318,6 +318,26 @@ final class SeyalHostComponentTests: XCTestCase {
             ),
             ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
         )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey,
+            "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+        )
+        XCTAssertFalse(BundledRuntimeLauncher.uiTestRequestsHelperCommand(environment: [:]))
+        XCTAssertFalse(
+            BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                environment: ["XCTestConfigurationFilePath": "/tmp/config"]
+            )
+        )
+        XCTAssertFalse(
+            BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "0"]
+            )
+        )
+        XCTAssertTrue(
+            BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"]
+            )
+        )
     }
 
     @MainActor
