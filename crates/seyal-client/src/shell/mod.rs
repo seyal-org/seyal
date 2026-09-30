@@ -346,7 +346,6 @@ impl ShellState {
         Ok(())
     }
 
-
     /// Current focus triple for equality / no-op checks (SPEC-022 R4.4).
     pub fn focus_checkpoint(&self) -> FocusCheckpoint {
         let snap = self.snapshot();
