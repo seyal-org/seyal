@@ -27,8 +27,8 @@ use std::fmt;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 pub use effects::ShellNativeEffect;
-pub use focus_direction::FocusDirection;
 pub(crate) use focus_direction::directional_neighbor;
+pub use focus_direction::FocusDirection;
 pub use pane_ops::MoveSide;
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};

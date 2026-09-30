@@ -9,7 +9,9 @@ use crate::keybinding::{
     RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
-use crate::shell::{directional_neighbor, FocusDirection, MoveSide, ShellAction, ShellError, SplitAxis};
+use crate::shell::{
+    directional_neighbor, FocusDirection, MoveSide, ShellAction, ShellError, SplitAxis,
+};
 
 use super::{AppError, ApplicationRoot};
 
@@ -203,7 +205,6 @@ impl ApplicationRoot {
             .map_err(focus_direction_error)
     }
 
-
     /// SPEC-024 §5.1: Unzoom when zoomed, else ZoomPane of the focused leaf.
     fn zoom_toggle_focused(&mut self) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
@@ -219,11 +220,13 @@ impl ApplicationRoot {
 
     fn swap_focused_neighbor(&mut self, direction: FocusDirection) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
+        let generation = self.shell.containment_generation();
         let neighbor = directional_neighbor(&snap.tree, snap.focused_pane, direction)
             .ok_or(AppError::NoDirectionalNeighbor)?;
         self.apply_shell(ShellAction::SwapPanes {
             a: snap.focused_pane,
             b: neighbor,
+            containment_generation: generation,
         })
         .map_err(pane_verb_error)
     }
@@ -234,12 +237,14 @@ impl ApplicationRoot {
         side: MoveSide,
     ) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
+        let generation = self.shell.containment_generation();
         let neighbor = directional_neighbor(&snap.tree, snap.focused_pane, direction)
             .ok_or(AppError::NoDirectionalNeighbor)?;
         self.apply_shell(ShellAction::MovePaneBeside {
             pane: snap.focused_pane,
             neighbor,
             side,
+            containment_generation: generation,
         })
         .map_err(pane_verb_error)
     }
@@ -271,7 +276,9 @@ fn pane_verb_error(error: ShellError) -> AppError {
     match error {
         ShellError::NoDirectionalNeighbor => AppError::NoDirectionalNeighbor,
         ShellError::UnknownPane => AppError::UnknownPane,
-        ShellError::NotZoomed | ShellError::InvalidMoveTarget => AppError::ActionUnavailable,
+        ShellError::NotZoomed | ShellError::InvalidMoveTarget | ShellError::StaleContainment => {
+            AppError::ActionUnavailable
+        }
         _ => AppError::ActionUnavailable,
     }
 }

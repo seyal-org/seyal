@@ -225,6 +225,53 @@ fn item18_no_neighbor_rejects_atomically() {
 }
 
 #[test]
+fn item18_stale_containment_generation_rejects_swap_and_move_atomically() {
+    use crate::shell::{MoveSide, ShellAction, ShellError};
+
+    let mut root = split_enabled_root();
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("split");
+    let right = root.snapshot().shell.focused_pane;
+    let left = root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .map(|pane| pane.id)
+        .find(|id| *id != right)
+        .expect("left");
+    root.apply(AppAction::FocusPane { id: left })
+        .expect("focus left");
+
+    let stale = root.snapshot().shell.containment_generation;
+    dispatch(&mut root, WorkspaceCommandId::PaneSwapRight).expect("live swap bumps generation");
+    assert!(root.snapshot().shell.containment_generation > stale);
+    let before = shell_identity(&root.snapshot().shell);
+    let fingerprint = root.shell.containment_fingerprint();
+
+    for action in [
+        ShellAction::SwapPanes {
+            a: left,
+            b: right,
+            containment_generation: stale,
+        },
+        ShellAction::MovePaneBeside {
+            pane: left,
+            neighbor: right,
+            side: MoveSide::Right,
+            containment_generation: stale,
+        },
+    ] {
+        assert_eq!(root.apply_shell(action), Err(ShellError::StaleContainment));
+        assert_eq!(shell_identity(&root.snapshot().shell), before);
+        assert_eq!(root.shell.containment_fingerprint(), fingerprint);
+        assert_eq!(root.shell.last_error(), Some(ShellError::StaleContainment));
+    }
+}
+
+#[test]
 fn item18_unmatched_stroke_still_falls_through_as_k3() {
     let table = load_keybinding_table(None);
     let stroke = normalized_from_notation("ctrl+b").expect("ctrl+b");
