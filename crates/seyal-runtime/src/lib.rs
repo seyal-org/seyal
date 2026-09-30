@@ -45,10 +45,10 @@ pub use launch_policy::{
     account_record_usable, command_spec_from_policy, compose_child_command, darwin_user_temp_dir,
     interactive_login_argv, is_valid_cwd, is_valid_shell_program, lookup_effective_account_record,
     path_has_forbidden_chars, resolve as resolve_launch_policy, resolve_default_interactive,
-    AccountRecord, CapabilityProfileId, ComposedChildCommand, EffectiveLaunchPolicy, EmptyLocaleEnv,
-    LaunchPolicyFailure, LaunchPolicyResolution, LaunchPolicyWarning, LaunchProfileIntent,
-    LocaleEnv, PathProbe, ProcessLocaleEnv, RealPathProbe, ResolveInputs, ShellFamily, DEFAULT_PATH,
-    PLATFORM_SAFE_FALLBACKS,
+    AccountRecord, CapabilityProfileId, ComposedChildCommand, EffectiveLaunchPolicy,
+    EmptyLocaleEnv, LaunchPolicyFailure, LaunchPolicyResolution, LaunchPolicyWarning,
+    LaunchProfileIntent, LocaleEnv, PathProbe, ProcessLocaleEnv, RealPathProbe, ResolveInputs,
+    ShellFamily, DEFAULT_PATH, PLATFORM_SAFE_FALLBACKS,
 };
 #[cfg(feature = "benchmark-instrumentation")]
 #[doc(hidden)]
