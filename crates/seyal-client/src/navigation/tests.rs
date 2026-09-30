@@ -268,7 +268,7 @@ fn unknown_kind_version_or_size_is_unsupported_without_reading_state() {
 
 #[test]
 fn rejection_navigation_denied() {
-    let (shell, w1, _, _, _, _, _) = seed_shell();
+    let (mut shell, w1, w2, _, _, p1, _) = seed_shell();
     let denied = NavigationPrincipal {
         local_navigation: true,
         workspaces: WorkspaceAccess::Only(&[]),
@@ -290,6 +290,70 @@ fn rejection_navigation_denied() {
             &shell,
             &MapInventory::new(),
             denied
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+
+    // SPEC-022 test 13a(b): one binding outside the principal's Workspace set.
+    let single = ExecutionId::from_bytes([0x21; 16]);
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: p1,
+            execution: single,
+        })
+        .expect("bind single");
+    let only_w2 = NavigationPrincipal {
+        local_navigation: true,
+        workspaces: WorkspaceAccess::Only(std::slice::from_ref(&w2)),
+    };
+    assert_eq!(
+        resolve(
+            ResourceAddress::Execution { execution: single },
+            &shell,
+            &MapInventory::with(single, ExecutionPresence::Live),
+            only_w2
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+
+    // Same rule for n >= 2: AmbiguousTarget must not leak unauthorized shape.
+    let (mut shell_multi, _, w2b, _, _, p_multi, _) = seed_shell();
+    let multi = ExecutionId::from_bytes([0x22; 16]);
+    shell_multi
+        .apply(ShellAction::BindExecution {
+            pane: p_multi,
+            execution: multi,
+        })
+        .expect("bind first for multi");
+    shell_multi
+        .apply(ShellAction::SplitPane {
+            id: p_multi,
+            axis: SplitAxis::Right,
+        })
+        .expect("split");
+    let second = shell_multi
+        .snapshot()
+        .panes
+        .iter()
+        .map(|pane| pane.id)
+        .find(|id| *id != p_multi)
+        .expect("split pane");
+    shell_multi
+        .apply(ShellAction::BindExecution {
+            pane: second,
+            execution: multi,
+        })
+        .expect("bind second");
+    let only_w2_multi = NavigationPrincipal {
+        local_navigation: true,
+        workspaces: WorkspaceAccess::Only(std::slice::from_ref(&w2b)),
+    };
+    assert_eq!(
+        resolve(
+            ResourceAddress::Execution { execution: multi },
+            &shell_multi,
+            &MapInventory::with(multi, ExecutionPresence::Live),
+            only_w2_multi
         ),
         Err(NavigationRejection::NavigationDenied)
     );
