@@ -240,8 +240,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             }
             return true
         case .nativeCommand:
-            // Reserved / unmatched Command — never insert; never PTY.
-            return true
+            // Unmatched / reserved Command — ordinary native text commands
+            // (⌘←/⌘⌫/…); never PTY (this is the composer NSTextView).
+            return false
         case .fallsThrough:
             return false
         }

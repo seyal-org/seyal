@@ -373,42 +373,86 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     ));
 }
 
-// --- §14 item 21: SPEC-022 focus-history bindings (history half) ---
+// --- §14 item 21: SPEC-022 navigation (goto.open + focus-history Back/Forward) ---
 
 #[test]
-fn item21_cmd_brackets_match_focus_history_goto_still_unknown() {
+fn item21_cmd_shift_o_dispatches_goto_open() {
     let table = load_keybinding_table(None);
+    let matched = route(&table, "cmd+shift+o", raw_ctx(), false);
     assert!(matches!(
-        route(&table, "cmd+[", BindingContext::APP, false),
+        matched,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::GotoOpen,
+                ordinal: None,
+            }
+        }
+    ));
+    assert!(!matched.writes_pty_bytes());
+
+    let flow = route(
+        &table,
+        "cmd+shift+o",
+        route_context_set(false, PresentationMode::Flow, false),
+        false,
+    );
+    assert_eq!(
+        flow.matched_command().map(|c| c.id),
+        Some(WorkspaceCommandId::GotoOpen)
+    );
+}
+
+#[test]
+fn item21_unbind_cmd_shift_o_stops_goto_open() {
+    // R11.2: after unbind, the table must not match ⌘⇧O to goto.open. The
+    // native menu must not hardcode the equivalent (AppDelegate), so AppKit
+    // cannot reopen goto when the table says none.
+    let unbind = r#"
+[[keybindings]]
+keys = "cmd+shift+o"
+action = "none"
+context = ["app"]
+"#;
+    let table = load_keybinding_table(Some(unbind));
+    assert_eq!(
+        route(&table, "cmd+shift+o", raw_ctx(), false),
+        RouteOutcome::UnmatchedCommand
+    );
+    assert_eq!(
+        route(
+            &table,
+            "cmd+shift+o",
+            route_context_set(false, PresentationMode::Flow, false),
+            false,
+        ),
+        RouteOutcome::UnmatchedCommand
+    );
+}
+
+#[test]
+fn item21_cmd_bracket_dispatches_focus_history() {
+    let table = load_keybinding_table(None);
+    let back = route(&table, "cmd+[", raw_ctx(), false);
+    assert!(matches!(
+        back,
         RouteOutcome::Matched {
             command: WorkspaceCommand {
                 id: WorkspaceCommandId::FocusHistoryBack,
-                ..
+                ordinal: None,
             }
         }
     ));
+    assert!(!back.writes_pty_bytes());
+    let forward = route(&table, "cmd+]", raw_ctx(), false);
     assert!(matches!(
-        route(&table, "cmd+]", BindingContext::APP, false),
+        forward,
         RouteOutcome::Matched {
             command: WorkspaceCommand {
                 id: WorkspaceCommandId::FocusHistoryForward,
-                ..
+                ordinal: None,
             }
         }
     ));
-    // goto.open stays gated (N4 / #1127).
-    assert!(WorkspaceCommandId::parse("goto.open").is_none());
-    assert!(contexts_for_keys(&table, "cmd+shift+o").is_empty());
-}
-
-fn contexts_for_keys(table: &KeybindingTable, keys: &str) -> Vec<BindingContext> {
-    let sequence = super::keys::parse_keys(keys).expect(keys);
-    table
-        .bindings
-        .iter()
-        .filter(|b| b.sequence == sequence)
-        .map(|b| b.context)
-        .collect()
 }
 
 // --- §14 item 20: composer history-search ---

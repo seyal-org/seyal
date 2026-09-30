@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use crate::composer::ComposerAction;
+use crate::goto::GotoScope;
 use crate::keybinding::{
     load_keybinding_table_from_path, resolve_tab_ordinal, route_context_set, route_keystroke,
     validate_workspace_command, BindingContext, InvokeError, KeybindingTable, NormalizedStroke,
@@ -109,9 +110,8 @@ impl ApplicationRoot {
                 let id = self.shell.snapshot().focused_pane;
                 self.close_pane(id)
             }
-            WorkspaceCommandId::PaneFocusNext | WorkspaceCommandId::PaneFocusPrevious => {
-                Err(AppError::ActionUnavailable)
-            }
+            WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
+            WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
             }
@@ -142,6 +142,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::ComposerHistorySearchOpen => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
+            // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
+            WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
             WorkspaceCommandId::FocusHistoryBack => {
                 // R5.5 / R6.8: FocusSeq from the same snapshot history committed.
                 let observed = self
@@ -161,7 +163,7 @@ impl ApplicationRoot {
         }
     }
 
-    fn select_tab_relative(&mut self, delta: isize) -> Result<(), AppError> {
+    pub(super) fn select_tab_relative(&mut self, delta: isize) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
         let tabs = snap.tabs;
         if tabs.is_empty() {
@@ -171,11 +173,25 @@ impl ApplicationRoot {
             .iter()
             .position(|tab| tab.id == snap.active_tab)
             .ok_or(AppError::ActionUnavailable)?;
-        let next = current as isize + delta;
-        if next < 0 || next as usize >= tabs.len() {
+        let len = tabs.len() as isize;
+        let next = (current as isize + delta).rem_euclid(len) as usize;
+        self.select_tab(tabs[next].id)
+    }
+
+    /// Depth-first leaf-order pane focus with wrap (SPEC-024 R5.0.2).
+    pub(super) fn focus_pane_relative(&mut self, delta: isize) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
+        let panes = &snap.panes;
+        if panes.is_empty() {
             return Err(AppError::ActionUnavailable);
         }
-        self.select_tab(tabs[next as usize].id)
+        let current = panes
+            .iter()
+            .position(|pane| pane.id == snap.focused_pane)
+            .ok_or(AppError::ActionUnavailable)?;
+        let len = panes.len() as isize;
+        let next = (current as isize + delta).rem_euclid(len) as usize;
+        self.focus_pane(panes[next].id)
     }
 
     fn transition_presentation(&mut self, mode: PresentationMode) -> Result<(), AppError> {

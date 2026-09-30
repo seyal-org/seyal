@@ -10,15 +10,17 @@ mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod focus_history_apply;
+mod goto_apply;
 mod keybinding_apply;
 mod palette_apply;
 mod recovery_apply;
 mod session;
 
 use accessibility::accessibility_nodes;
-
 #[cfg(test)]
 mod focus_history_tests;
+#[cfg(test)]
+mod keybinding_apply_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
@@ -36,6 +38,7 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
 use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
@@ -84,6 +87,9 @@ pub enum AppError {
     UnknownChromeTab,
     PaletteNotOpen,
     PaletteNoSelection,
+    GotoNotOpen,
+    GotoNoSelection,
+    GotoUnsupportedScope,
     TabCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
@@ -313,6 +319,31 @@ pub enum AppAction {
     ClosePalette {
         fence: AppFence,
     },
+    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+    OpenGoto {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoScope {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MoveGotoSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected goto row by stored/host-echoed address.
+    RunGoto {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    CloseGoto {
+        fence: AppFence,
+    },
     /// Bind the inspector to one Block of the focused Pane (#935).
     SelectBlock {
         fence: AppFence,
@@ -368,6 +399,7 @@ pub struct AppSnapshot {
     pub composer: Option<ComposerSnapshot>,
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
+    pub goto: GotoSnapshot,
     /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
     /// when history is empty.
     pub focus_history_seq: Option<FocusSeq>,
@@ -400,6 +432,7 @@ pub struct ApplicationRoot {
     palette: PaletteState,
     /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
+    goto: GotoState,
     focus_history: FocusHistory,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
@@ -441,6 +474,7 @@ impl ApplicationRoot {
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
             chord_prefix: ChordPrefixState::new(),
+            goto: GotoState::new(),
             focus_history: FocusHistory::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
@@ -490,7 +524,10 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot();
+        // When goto is open, the existing overlay ABI carries goto rows
+        // (one overlay component; ADR-019 §8).
+        let palette = self.overlay_palette_snapshot();
+        let goto = self.goto.snapshot();
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
         AppSnapshot {
@@ -523,6 +560,7 @@ impl ApplicationRoot {
             composer,
             chrome,
             palette,
+            goto,
             focus_history_seq: self.focus_history.cursor_seq(),
         }
     }
@@ -694,6 +732,12 @@ impl ApplicationRoot {
                 self.history_forward(observed)
             }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
+            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
+            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
+            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
+            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
+            AppAction::CloseGoto { fence } => self.close_goto(fence),
         };
         match result {
             Ok(()) => {
