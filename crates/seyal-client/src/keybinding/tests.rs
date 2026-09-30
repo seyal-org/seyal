@@ -414,7 +414,7 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     // Exclusions: equalize, SPEC-022 navigation, ADR-018 window; swap/move catalog-only
     assert!(WorkspaceCommandId::parse("pane.swap_left").is_some());
     assert!(WorkspaceCommandId::parse("pane.move_down").is_some());
-    assert!(contexts_for(&table, "ctrl+alt+left").is_empty()); // no swap builtin
+    assert!(contexts_for(&table, "cmd+shift+h").is_empty()); // no swap builtin chord
     assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
