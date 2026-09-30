@@ -192,7 +192,17 @@ pub fn resolve(
                         pane,
                     })
                 }
-                _ => Err(NavigationRejection::AmbiguousTarget),
+                _ => {
+                    // Authorize before disclosing ambiguity (SPEC-022 / N1): when
+                    // every binding sits in a denied Workspace, reject as denied.
+                    if !bound
+                        .iter()
+                        .any(|(workspace, _, _)| principal.allows_workspace(*workspace))
+                    {
+                        return Err(NavigationRejection::NavigationDenied);
+                    }
+                    Err(NavigationRejection::AmbiguousTarget)
+                }
             }
         }
     }
