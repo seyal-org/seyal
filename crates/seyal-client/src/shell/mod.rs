@@ -150,13 +150,16 @@ pub enum ShellAction {
     },
     SplitFocused {
         axis: SplitAxis,
+        containment_generation: u64,
     },
     SplitPane {
         id: PaneId,
         axis: SplitAxis,
+        containment_generation: u64,
     },
     ClosePane {
         id: PaneId,
+        containment_generation: u64,
     },
     FocusPane {
         id: PaneId,
@@ -418,12 +421,29 @@ impl ShellState {
             | ShellAction::MoveTabToWindow { .. }
             | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
             ShellAction::CloseTab { id } => self.close_tab(id),
-            ShellAction::SplitFocused { axis } => {
+            ShellAction::SplitFocused {
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
                 let focused = self.focused_pane_id()?;
                 self.split_pane(focused, axis).map(|_| ())
             }
-            ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
-            ShellAction::ClosePane { id } => self.close_pane(id),
+            ShellAction::SplitPane {
+                id,
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.split_pane(id, axis).map(|_| ())
+            }
+            ShellAction::ClosePane {
+                id,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.close_pane(id)
+            }
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::ZoomPane { id } => self.zoom_pane(id),
             ShellAction::Unzoom => self.unzoom(),
