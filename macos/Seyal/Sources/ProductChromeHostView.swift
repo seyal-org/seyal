@@ -474,6 +474,12 @@ final class ProductChromeHostView: NSView {
         }
     }
 
+    /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the
+    /// command-palette overlay; default scope is Panes.
+    @objc func openGoto() {
+        commandPalette.requestOpenGoto()
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).

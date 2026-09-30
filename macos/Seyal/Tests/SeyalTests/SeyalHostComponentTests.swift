@@ -1329,6 +1329,21 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.count, 5)
     }
 
+    /// SPEC-022 N4 / #1127: host `openGoto` opens the existing overlay in goto
+    /// mode with the default Panes scope (no second surface).
+    @MainActor
+    func testOpenGotoReusesPaletteOverlayWithDefaultPanesScope() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.openGoto()
+        let palette = seyal_app_palette(view.pane.appHandle)
+        XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_OPEN), 0)
+        XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
+        XCTAssertEqual(
+            UInt8(palette.reserved & 0xff),
+            UInt8(SEYAL_APP_GOTO_PANES.rawValue)
+        )
+    }
+
     func testCommandKNormalizesToTheCommandModifierAndLowercaseK() throws {
         let event = try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown,

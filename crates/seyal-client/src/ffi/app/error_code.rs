@@ -52,5 +52,8 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::NavigationAmbiguousTarget => 44,
         AppError::NavigationStaleHistoryCursor => 45,
         AppError::NavigationHistoryUnavailable => 46,
+        AppError::GotoNotOpen => 47,
+        AppError::GotoNoSelection => 48,
+        AppError::GotoUnsupportedScope => 49,
     }
 }

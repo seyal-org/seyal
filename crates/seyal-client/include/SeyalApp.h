@@ -127,7 +127,29 @@ enum SeyalAppActionKind {
      * address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
      * Rejected navigate leaves focus unchanged. Error codes 34-43.
      */
-    SEYAL_APP_ACTION_NAVIGATE = 58
+    SEYAL_APP_ACTION_NAVIGATE = 58,
+    /*
+     * Focus-history Back/Forward (SPEC-022 §6 / N3).
+     * Payload is FocusSeq as little-endian u64.
+     */
+    SEYAL_APP_ACTION_HISTORY_BACK = 59,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 60,
+    /*
+     * Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+     * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
+     * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
+     * while open.
+     */
+    SEYAL_APP_ACTION_OPEN_GOTO = 61,
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
+};
+
+/* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
+enum SeyalAppGotoScope {
+    SEYAL_APP_GOTO_WORKSPACES = 0,
+    SEYAL_APP_GOTO_TABS = 1,
+    SEYAL_APP_GOTO_PANES = 2,
+    SEYAL_APP_GOTO_SESSIONS = 3
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -490,6 +512,10 @@ typedef struct SeyalAppPalette {
 } SeyalAppPalette;
 
 #define SEYAL_APP_PALETTE_OPEN 1u
+/** Overlay is projecting the navigation-only goto surface (N4). */
+#define SEYAL_APP_PALETTE_GOTO 2u
+/** Goto enumeration exceeded the bound; results are truncated (SPEC-022 R7.6). */
+#define SEYAL_APP_PALETTE_TRUNCATED 4u
 
 uint64_t seyal_app_create(void);
 int32_t seyal_app_destroy(uint64_t handle);
