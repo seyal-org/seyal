@@ -22,12 +22,12 @@ mod tests;
 
 pub use account::lookup_effective_account_record;
 pub use argv::{interactive_login_argv, ShellFamily};
+#[cfg(test)]
+pub use compose::apply_post_policy;
 pub use compose::{
     command_spec_from_policy, compose_child_command, resolve_default_interactive,
     ComposedChildCommand,
 };
-#[cfg(test)]
-pub use compose::apply_post_policy;
 
 /// Serialize process-env reads/writes across launch-policy and shell-integration
 /// tests. Parallel `--lib` harnesses must not race on `setenv`/`getenv`.
