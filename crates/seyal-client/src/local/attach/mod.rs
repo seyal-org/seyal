@@ -273,12 +273,15 @@ impl LocalDisplayClient {
         // A Controller opening the implicit bootstrap (headed recovery) creates
         // profile 0 on this Ready connection, then attaches. Observer stays
         // fail-closed so a read-only probe cannot spawn a shell.
+        // SPEC-009 §8.2.1: >1 survivors also provision new (leave survivors).
+        let mut created_bootstrap = false;
         let execution_id = match resolve_single_running_execution(&list) {
             Ok(execution_id) => execution_id,
-            Err(ClientError::NoRunningExecution)
+            Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
                 if role == Role::Controller
                     && provisioning_negotiated(server_hello.server_capabilities) =>
             {
+                created_bootstrap = true;
                 create_profile_zero_execution(&mut stream, deadline)?
             }
             Err(error) => return Err(error),
@@ -298,7 +301,7 @@ impl LocalDisplayClient {
         let block_metadata_negotiated =
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
-        Self::finish_attach_with_deadline(
+        let mut client = Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
@@ -308,7 +311,13 @@ impl LocalDisplayClient {
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
             deadline,
-        )
+        )?;
+        // Bootstrap CreateExecution used request_id 1 on this stream; the
+        // client's allocator must not reuse it (Runtime rejects <= last).
+        if created_bootstrap {
+            client.next_provisioning_request_id = 2;
+        }
+        Ok(client)
     }
 
     pub fn connect_execution(
