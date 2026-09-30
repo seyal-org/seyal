@@ -269,6 +269,7 @@ struct AppHandle {
     history_text: Vec<u8>,
     palette_query: Vec<u8>,
     palette_text: Vec<u8>,
+    palette_placeholder: Vec<u8>,
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
@@ -351,6 +352,7 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 history_text: Vec::new(),
                 palette_query: Vec::new(),
                 palette_text: Vec::new(),
+                palette_placeholder: Vec::new(),
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
@@ -799,41 +801,57 @@ pub extern "C" fn seyal_app_palette_row(handle: u64, index: u32) -> SeyalAppRow 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
-    let mode = APPS.with(|apps| {
-        apps.borrow()
-            .get(&handle)
-            .and_then(|state| state.root.snapshot().composer)
-            .map(|composer| composer.mode)
-    });
-    let text = match kind {
-        0 => match &mode {
-            Some(mode) => mode.editor_placeholder(),
-            None => ComposerMode::Available.editor_placeholder(),
-        },
-        1 => COMPOSER_EXECUTE_LABEL,
-        2 => BLOCK_PROMPT,
-        3 => COMPOSER_HISTORY_LABEL,
-        4 => COMPOSER_HISTORY_PLACEHOLDER,
-        _ => "",
-    };
-    SeyalAppRow {
-        kind,
-        flags: 0,
-        reserved: 0,
-        id_lo: 0,
-        id_hi: 0,
-        title: text.as_ptr(),
-        title_len: text.len() as u32,
-        reserved1: 0,
-        detail: ptr::null(),
-        detail_len: 0,
-        reserved2: 0,
-        address_version: 0,
-        address_kind: 0,
-        address_len: 0,
-        address_pad: 0,
-        address_bytes: [0; 48],
-    }
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return SeyalAppRow::empty();
+        };
+        let snap = state.root.snapshot();
+        let mode = snap.composer.map(|composer| composer.mode);
+        let text: &[u8] = match kind {
+            0 => {
+                let s = match &mode {
+                    Some(mode) => mode.editor_placeholder(),
+                    None => ComposerMode::Available.editor_placeholder(),
+                };
+                s.as_bytes()
+            }
+            1 => COMPOSER_EXECUTE_LABEL.as_bytes(),
+            2 => BLOCK_PROMPT.as_bytes(),
+            3 => COMPOSER_HISTORY_LABEL.as_bytes(),
+            4 => COMPOSER_HISTORY_PLACEHOLDER.as_bytes(),
+            5 => {
+                // Palette / goto placeholder is Rust-owned (ADR-015).
+                state.palette_placeholder = if snap.goto.open {
+                    snap.goto.scope.placeholder(snap.goto.truncated).into_bytes()
+                } else if snap.palette.open {
+                    b"Type a command...".to_vec()
+                } else {
+                    Vec::new()
+                };
+                state.palette_placeholder.as_slice()
+            }
+            _ => b"",
+        };
+        SeyalAppRow {
+            kind,
+            flags: 0,
+            reserved: 0,
+            id_lo: 0,
+            id_hi: 0,
+            title: text.as_ptr(),
+            title_len: text.len() as u32,
+            reserved1: 0,
+            detail: ptr::null(),
+            detail_len: 0,
+            reserved2: 0,
+            address_version: 0,
+            address_kind: 0,
+            address_len: 0,
+            address_pad: 0,
+            address_bytes: [0; 48],
+        }
+    })
 }
 
 #[repr(C)]

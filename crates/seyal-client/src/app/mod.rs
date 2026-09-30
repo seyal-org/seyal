@@ -308,6 +308,9 @@ pub enum AppAction {
         fence: AppFence,
         scope: GotoScope,
     },
+    CycleGotoScope {
+        fence: AppFence,
+    },
     SetGotoQuery {
         fence: AppFence,
         query: String,
@@ -677,6 +680,7 @@ impl ApplicationRoot {
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
             AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::CycleGotoScope { fence } => self.cycle_goto_scope(fence),
             AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
             AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
             AppAction::RunGoto { fence, address } => self.run_goto(fence, address),

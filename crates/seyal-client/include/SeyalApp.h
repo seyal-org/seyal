@@ -143,7 +143,9 @@ enum SeyalAppGotoScope {
     SEYAL_APP_GOTO_WORKSPACES = 0,
     SEYAL_APP_GOTO_TABS = 1,
     SEYAL_APP_GOTO_PANES = 2,
-    SEYAL_APP_GOTO_SESSIONS = 3
+    SEYAL_APP_GOTO_SESSIONS = 3,
+    /* SET_GOTO_SCOPE only: advance to next scope in Rust (ADR-015). */
+    SEYAL_APP_GOTO_CYCLE_NEXT = 255
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -316,6 +318,7 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_COPY_BLOCK_PROMPT 2u
 #define SEYAL_APP_COPY_COMPOSER_HISTORY 3u
 #define SEYAL_APP_COPY_COMPOSER_HISTORY_PLACEHOLDER 4u
+#define SEYAL_APP_COPY_PALETTE_PLACEHOLDER 5u
 
 /*
  * seyal_app_block_row flags: state in the low three bits, plus

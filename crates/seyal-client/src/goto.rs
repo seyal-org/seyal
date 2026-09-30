@@ -41,6 +41,15 @@ impl GotoScope {
         }
     }
 
+    /// Host-facing placeholder text for the goto overlay (ADR-015: Rust-owned).
+    pub fn placeholder(self, truncated: bool) -> String {
+        if truncated {
+            format!("Go to {} (truncated)…", self.as_str())
+        } else {
+            format!("Go to {}…", self.as_str())
+        }
+    }
+
     pub fn next(self) -> Self {
         match self {
             Self::Workspaces => Self::Tabs,
@@ -78,6 +87,8 @@ impl std::fmt::Display for GotoError {
 pub enum GotoAction {
     Open { scope: GotoScope },
     SetScope(GotoScope),
+    /// Advance to the next target-kind scope (Workspaces→Tabs→Panes→Sessions).
+    CycleScope,
     SetQuery(String),
     MoveSelection(i32),
     Close,
@@ -171,6 +182,16 @@ impl GotoState {
                     self.projected.clear();
                     self.truncated = false;
                 }
+                Ok(())
+            }
+            GotoAction::CycleScope => {
+                if !self.open {
+                    return self.fail(GotoError::NotOpen);
+                }
+                self.scope = self.scope.next();
+                self.selected = 0;
+                self.projected.clear();
+                self.truncated = false;
                 Ok(())
             }
             GotoAction::SetQuery(query) => {
@@ -376,7 +397,8 @@ fn pane_label(item: &crate::shell::PaneNavItem) -> String {
 
 fn session_label(item: &crate::shell::SessionNavItem) -> String {
     let mut label = format!("{} · {}", item.pane_title, item.workspace_name);
-    push_badge(&mut label, true, "live");
+    // No fabricated "live" badge — SessionNavItem has no Runtime liveness
+    // authority (SPEC-022 R7.1). Focused is projected from shell focus.
     push_badge(&mut label, item.focused, "focused");
     label
 }

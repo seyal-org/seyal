@@ -287,15 +287,21 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             address: decode_required_address(action.payload, action.payload_len)?,
         }),
         // Goto / quick-switcher (SPEC-022 §7 / N4). reserved = GotoScope
-        // discriminant (0 Workspaces, 1 Tabs, 2 Panes, 3 Sessions).
+        // discriminant (0–3), or 0xFF to cycle to the next scope in Rust.
         59 => Ok(AppAction::OpenGoto {
             fence,
             scope: decode_goto_scope(action.reserved)?,
         }),
-        60 => Ok(AppAction::SetGotoScope {
-            fence,
-            scope: decode_goto_scope(action.reserved)?,
-        }),
+        60 => {
+            if action.reserved == 0xff {
+                Ok(AppAction::CycleGotoScope { fence })
+            } else {
+                Ok(AppAction::SetGotoScope {
+                    fence,
+                    scope: decode_goto_scope(action.reserved)?,
+                })
+            }
+        },
         _ => Err(-6),
     }
 }

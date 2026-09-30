@@ -329,10 +329,15 @@ fn filter_sessions_scope_lists_only_executions() {
         .expect("bind");
     let mut goto = GotoState::new();
     open_scope(&mut goto, &shell, GotoScope::Sessions);
-    goto.apply(GotoAction::SetQuery("live".into()), 0).unwrap();
+    goto.apply(GotoAction::SetQuery("Shared".into()), 0).unwrap();
     goto.rebuild(&shell.navigation_inventory());
     let snap = goto.snapshot();
     assert_eq!(snap.rows.len(), 1);
+    assert!(
+        !snap.rows[0].label.contains("live"),
+        "session labels must not fabricate a live badge: {}",
+        snap.rows[0].label
+    );
     assert_scope_only_kind(GotoScope::Sessions, &snap.rows);
     assert_eq!(
         snap.rows[0].address,
@@ -364,4 +369,29 @@ fn filter_sessions_scope_lists_only_executions() {
     assert_eq!(root.snapshot().shell.active_tab, t1);
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     assert!(!root.snapshot().goto.open);
+}
+
+#[test]
+fn cycle_scope_advances_in_rust_owned_order() {
+    let (shell, _, _, _, _, _, _) = twin_shell();
+    let mut goto = GotoState::new();
+    open_scope(&mut goto, &shell, GotoScope::Workspaces);
+    assert_eq!(goto.snapshot().scope, GotoScope::Workspaces);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    goto.rebuild(&shell.navigation_inventory());
+    assert_eq!(goto.snapshot().scope, GotoScope::Tabs);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    assert_eq!(goto.snapshot().scope, GotoScope::Panes);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    assert_eq!(goto.snapshot().scope, GotoScope::Sessions);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    assert_eq!(goto.snapshot().scope, GotoScope::Workspaces);
+    assert_eq!(
+        GotoScope::Panes.placeholder(false),
+        "Go to Panes…"
+    );
+    assert_eq!(
+        GotoScope::Sessions.placeholder(true),
+        "Go to Sessions (truncated)…"
+    );
 }
