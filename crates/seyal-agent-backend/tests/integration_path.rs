@@ -9,6 +9,7 @@ use std::{
     os::unix::net::UnixStream,
     path::Path,
     thread,
+    time::{Duration, Instant},
 };
 
 use seyal_agent_backend::{AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep};
@@ -521,6 +522,158 @@ fn persistence_fault_before_commit_does_not_publish_success() {
     let _ = fs::remove_dir_all(refused);
 }
 
+#[test]
+fn records_session_startup_throughput_reconnect_and_storage_growth() {
+    const OUTPUT_BYTES: usize = 32 * 1024;
+    let dir = temp_dir("measure");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Output(vec![7; OUTPUT_BYTES])),
+        ],
+    };
+    let started_bind = Instant::now();
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let startup = started_bind.elapsed();
+    let bytes_before = AgentStore::open(dir.join("agent.db"))
+        .unwrap()
+        .database_bytes()
+        .unwrap();
+    let idle_rss_kib = resident_kib();
+    let idle_cpu = cpu_percent();
+
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect_limits(&socket, ABSOLUTE_MAX_FRAME_SIZE, 64);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let append_started = Instant::now();
+        let started = client.start_agent_run(attempt);
+        let append = append_started.elapsed();
+        let snapshot_started = Instant::now();
+        let snapshot = client.snapshot(AggregateRef::AgentRun(started.run_id));
+        let snapshot_latency = snapshot_started.elapsed();
+        let replay_started = Instant::now();
+        let replay = client.replay(AggregateRef::AgentRun(started.run_id));
+        let replay_latency = replay_started.elapsed();
+        (
+            client.session_id,
+            started,
+            snapshot.incorporated_through,
+            replay,
+            append,
+            snapshot_latency,
+            replay_latency,
+        )
+    });
+    daemon.serve_one().unwrap();
+    let (session_id, started, through, replay, append, snapshot_latency, replay_latency) =
+        client.join().unwrap();
+    assert_eq!(started.event_count, 34);
+    assert_eq!(replay.len(), 34);
+    assert_eq!(through, 34);
+
+    let socket = daemon.socket_path();
+    let run_id = started.run_id;
+    let event_count = started.event_count;
+    let reconnect_started = Instant::now();
+    let resumed = thread::spawn(move || {
+        let mut client =
+            TestClient::resume_limits(&socket, session_id, ABSOLUTE_MAX_FRAME_SIZE, 64).unwrap();
+        let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
+        let replay = client.replay(AggregateRef::AgentRun(run_id));
+        (snapshot.incorporated_through, replay.len())
+    });
+    daemon.serve_one().unwrap();
+    let reconnect = reconnect_started.elapsed();
+    let (again, replay_len) = resumed.join().unwrap();
+    assert_eq!(again, through);
+    assert_eq!(replay_len, 34);
+
+    let bytes_after = AgentStore::open(dir.join("agent.db"))
+        .unwrap()
+        .database_bytes()
+        .unwrap();
+    assert!(bytes_after > bytes_before);
+    for (name, sample) in [
+        ("startup", startup),
+        ("append", append),
+        ("snapshot", snapshot_latency),
+        ("replay", replay_latency),
+        ("reconnect", reconnect),
+    ] {
+        assert!(
+            sample < Duration::from_secs(5),
+            "{name} exceeded the hang ceiling: {sample:?}"
+        );
+    }
+    if let Some(rss) = idle_rss_kib {
+        assert!(rss < 512 * 1024, "process RSS ceiling exceeded: {rss} KiB");
+    }
+    let events_per_s = events_per_second(event_count, append);
+    eprintln!(
+        "ab-0.6 measurement performance_claim=false host_class={} os={} arch={} build_mode={} workload=output_32kib_plus_started run_count=1 percentile_method=single_sample startup_us={} idle_rss_kib={} idle_cpu={} append_us={} events={} events_per_s={} snapshot_us={} replay_us={} reconnect_us={} db_bytes_before={} db_bytes_after={}",
+        host_class(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        build_mode(),
+        startup.as_micros(),
+        idle_rss_kib.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+        idle_cpu.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+        append.as_micros(),
+        event_count,
+        events_per_s,
+        snapshot_latency.as_micros(),
+        replay_latency.as_micros(),
+        reconnect.as_micros(),
+        bytes_before,
+        bytes_after
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn host_class() -> &'static str {
+    if std::env::var_os("GITHUB_ACTIONS").is_some() {
+        "ci"
+    } else {
+        "developer"
+    }
+}
+
+fn build_mode() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    }
+}
+
+fn events_per_second(events: u64, elapsed: Duration) -> u64 {
+    let micros = elapsed.as_micros().max(1);
+    u128::from(events)
+        .saturating_mul(1_000_000)
+        .checked_div(micros)
+        .unwrap_or(0) as u64
+}
+
+fn resident_kib() -> Option<u64> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+}
+
+fn cpu_percent() -> Option<f64> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "pcpu=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+}
+
 fn temp_dir(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "seyal-q-{label}-{}-{}",
@@ -571,8 +724,8 @@ impl TestClient {
         Self::connect_with(path, vec![1, 2, 4])
     }
 
-    fn connect_window(path: &Path, event_window: u32) -> Self {
-        let mut stream = handshake_with(path, event_window);
+    fn connect_limits(path: &Path, max_frame_size: u32, event_window: u32) -> Self {
+        let mut stream = handshake_with(path, max_frame_size, event_window);
         let session_id = match round_trip(
             &mut stream,
             &Command::OpenSession {
@@ -583,6 +736,10 @@ impl TestClient {
             other => panic!("open session: {other:?}"),
         };
         Self { stream, session_id }
+    }
+
+    fn connect_window(path: &Path, event_window: u32) -> Self {
+        Self::connect_limits(path, 4096, event_window)
     }
 
     fn connect_with(path: &Path, scopes: Vec<u8>) -> Self {
@@ -606,7 +763,16 @@ impl TestClient {
     }
 
     fn resume(path: &Path, session_id: ClientSessionId) -> Result<Self, CommandError> {
-        let mut stream = handshake(path);
+        Self::resume_limits(path, session_id, 4096, 32)
+    }
+
+    fn resume_limits(
+        path: &Path,
+        session_id: ClientSessionId,
+        max_frame_size: u32,
+        event_window: u32,
+    ) -> Result<Self, CommandError> {
+        let mut stream = handshake_with(path, max_frame_size, event_window);
         match round_trip(&mut stream, &Command::ResumeSession { session_id }) {
             CommandResult::Resumed => Ok(Self { stream, session_id }),
             CommandResult::Error(error) => Err(error),
@@ -746,10 +912,10 @@ impl TestClient {
 }
 
 fn handshake(path: &Path) -> UnixStream {
-    handshake_with(path, 32)
+    handshake_with(path, 4096, 32)
 }
 
-fn handshake_with(path: &Path, event_window: u32) -> UnixStream {
+fn handshake_with(path: &Path, max_frame_size: u32, event_window: u32) -> UnixStream {
     let mut stream = UnixStream::connect(path).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(2)))
@@ -759,7 +925,7 @@ fn handshake_with(path: &Path, event_window: u32) -> UnixStream {
         .unwrap();
     let hello = Hello {
         supported_versions: vec![ProtocolVersion::V1],
-        max_frame_size: 4096,
+        max_frame_size,
         event_window,
         client_principal_evidence: Vec::new(),
     };
