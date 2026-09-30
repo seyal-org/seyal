@@ -175,18 +175,46 @@ impl FocusHistory {
         }
     }
 
-    /// Validate `observed`, move the cursor one step back, return the target (R6.5 / R6.8).
-    pub fn prepare_back(
-        &mut self,
+    /// Validate `observed` and return the back target index without mutating (R6.9).
+    pub fn peek_back(
+        &self,
         observed: FocusSeq,
-    ) -> Result<ResourceAddress, NavigationRejection> {
+    ) -> Result<(usize, ResourceAddress), NavigationRejection> {
         self.require_cursor_seq(observed)?;
         let idx = self.cursor.expect("cursor present after seq check");
         if idx == 0 {
             return Err(NavigationRejection::HistoryUnavailable);
         }
-        self.cursor = Some(idx - 1);
-        Ok(self.entries[idx - 1].target)
+        Ok((idx - 1, self.entries[idx - 1].target))
+    }
+
+    /// Validate `observed` and return the forward target index without mutating (R6.9).
+    pub fn peek_forward(
+        &self,
+        observed: FocusSeq,
+    ) -> Result<(usize, ResourceAddress), NavigationRejection> {
+        self.require_cursor_seq(observed)?;
+        let idx = self.cursor.expect("cursor present after seq check");
+        if idx + 1 >= self.entries.len() {
+            return Err(NavigationRejection::HistoryUnavailable);
+        }
+        Ok((idx + 1, self.entries[idx + 1].target))
+    }
+
+    /// Commit the history cursor after a successful ApplyOnly navigate (R6.9).
+    pub fn set_cursor(&mut self, idx: usize) {
+        debug_assert!(idx < self.entries.len());
+        self.cursor = Some(idx);
+    }
+
+    /// Validate `observed`, move the cursor one step back, return the target (R6.5 / R6.8).
+    pub fn prepare_back(
+        &mut self,
+        observed: FocusSeq,
+    ) -> Result<ResourceAddress, NavigationRejection> {
+        let (idx, target) = self.peek_back(observed)?;
+        self.set_cursor(idx);
+        Ok(target)
     }
 
     /// Validate `observed`, move the cursor one step forward, return the target.
@@ -194,32 +222,9 @@ impl FocusHistory {
         &mut self,
         observed: FocusSeq,
     ) -> Result<ResourceAddress, NavigationRejection> {
-        self.require_cursor_seq(observed)?;
-        let idx = self.cursor.expect("cursor present after seq check");
-        if idx + 1 >= self.entries.len() {
-            return Err(NavigationRejection::HistoryUnavailable);
-        }
-        self.cursor = Some(idx + 1);
-        Ok(self.entries[idx + 1].target)
-    }
-
-    /// Remove the cursor entry after a failed traversal apply (R6.9).
-    pub fn remove_cursor_entry(&mut self) {
-        let Some(idx) = self.cursor else {
-            return;
-        };
-        if idx >= self.entries.len() {
-            self.cursor = None;
-            return;
-        }
-        self.entries.remove(idx);
-        self.cursor = if self.entries.is_empty() {
-            None
-        } else if idx == 0 {
-            Some(0)
-        } else {
-            Some(idx - 1)
-        };
+        let (idx, target) = self.peek_forward(observed)?;
+        self.set_cursor(idx);
+        Ok(target)
     }
 
     fn require_cursor_seq(&self, observed: FocusSeq) -> Result<(), NavigationRejection> {

@@ -100,7 +100,7 @@ pub fn history_back(
     inventory: &impl ExecutionInventory,
     principal: NavigationPrincipal<'_>,
 ) -> Result<ResolvedTarget, NavigationRejection> {
-    let target = history.prepare_back(observed)?;
+    let (idx, target) = history.peek_back(observed)?;
     match navigate(
         target,
         shell,
@@ -108,11 +108,11 @@ pub fn history_back(
         principal,
         NavigateHistory::ApplyOnly,
     ) {
-        Ok(resolved) => Ok(resolved),
-        Err(error) => {
-            history.remove_cursor_entry();
-            Err(error)
+        Ok(resolved) => {
+            history.set_cursor(idx);
+            Ok(resolved)
         }
+        Err(error) => Err(error),
     }
 }
 
@@ -124,7 +124,7 @@ pub fn history_forward(
     inventory: &impl ExecutionInventory,
     principal: NavigationPrincipal<'_>,
 ) -> Result<ResolvedTarget, NavigationRejection> {
-    let target = history.prepare_forward(observed)?;
+    let (idx, target) = history.peek_forward(observed)?;
     match navigate(
         target,
         shell,
@@ -132,11 +132,11 @@ pub fn history_forward(
         principal,
         NavigateHistory::ApplyOnly,
     ) {
-        Ok(resolved) => Ok(resolved),
-        Err(error) => {
-            history.remove_cursor_entry();
-            Err(error)
+        Ok(resolved) => {
+            history.set_cursor(idx);
+            Ok(resolved)
         }
+        Err(error) => Err(error),
     }
 }
 

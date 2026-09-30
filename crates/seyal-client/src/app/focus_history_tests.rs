@@ -91,6 +91,30 @@ fn navigate_records_and_back_moves_focus() {
 }
 
 #[test]
+fn select_tab_and_focus_pane_record_focus_history() {
+    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    // two_pane_root already FocusPane'd p1 (recorded). Navigate/focus to p2.
+    root.apply(AppAction::FocusPane { id: p2 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    let seq = root.snapshot().focus_history_seq.expect("p2 recorded");
+    root.apply(AppAction::HistoryBack {
+        fence: root.fence(),
+        observed: seq,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+
+    root.apply(AppAction::CreateTab).unwrap();
+    let t_new = root.snapshot().shell.active_tab;
+    assert_ne!(t_new, t1);
+    root.apply(AppAction::SelectTab { id: t1 }).unwrap();
+    assert_eq!(root.snapshot().shell.active_tab, t1);
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert!(root.snapshot().focus_history_seq.is_some());
+    let _ = w1;
+}
+
+#[test]
 fn stale_history_back_rejects_without_focus_move() {
     let (mut root, w1, t1, p1, p2) = two_pane_root();
     root.apply(AppAction::Navigate {
