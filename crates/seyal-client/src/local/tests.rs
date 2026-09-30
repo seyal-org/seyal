@@ -486,7 +486,6 @@ fn v2_sent_bound_advances_only_after_wire_complete() {
     );
 }
 
-
 #[test]
 fn malformed_type_35_discards_and_clears_without_protocol_error() {
     let (stream, _peer) = UnixStream::pair().expect("pair");
