@@ -25,7 +25,6 @@ fn binding_for<'a>(
         .iter()
         .find(|b| b.sequence == sequence && b.action.id == id)
 }
-
 fn contexts_for(table: &KeybindingTable, keys: &str) -> Vec<(WorkspaceCommandId, BindingContext)> {
     let sequence = parse_keys(keys).expect("test keys");
     table
@@ -35,7 +34,6 @@ fn contexts_for(table: &KeybindingTable, keys: &str) -> Vec<(WorkspaceCommandId,
         .map(|b| (b.action.id, b.context))
         .collect()
 }
-
 fn diag_categories(table: &KeybindingTable) -> Vec<DiagnosticCategory> {
     table.diagnostics.iter().map(|d| d.category).collect()
 }
@@ -402,7 +400,6 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
         .expect("cmd+] focus_history.forward");
     assert_eq!(forward.context, BindingContext::APP);
     assert_eq!(forward.source, BindingSource::Builtin);
-
     // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());

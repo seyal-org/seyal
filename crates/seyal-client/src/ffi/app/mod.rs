@@ -339,11 +339,9 @@ pub extern "C" fn seyal_app_option_as_alt(handle: u64) -> u8 {
 pub const SEYAL_APP_ROUTE_FALLTHROUGH: i32 = 0;
 pub const SEYAL_APP_ROUTE_CONSUMED: i32 = 1;
 pub const SEYAL_APP_ROUTE_NATIVE_COMMAND: i32 = 2;
-
 /// Route one already-normalized keystroke (ADR-015). Rust owns the match and
 /// dispatches matched WorkspaceCommands; ApplicationCommand paths write zero
 /// PTY bytes. Swift must not reinterpret product shortcuts.
-///
 /// `modifier_bits`: CMD=1, CTRL=2, SHIFT=4, OPT=8.
 /// `named_key` non-zero means `base` is a NamedKey discriminant (Enter=0…).
 /// `shift_applied` is 0 when absent.
@@ -383,8 +381,10 @@ pub extern "C" fn seyal_app_route_keystroke(
                 SEYAL_APP_ROUTE_FALLTHROUGH
             }
             Err(error) => {
+                // Matched binding whose invoke failed: still consumed — never
+                // fall through to the PTY (SPEC-024 R10.2 / R10.3 / §14 item 11).
                 let _ = state.root.fail(error);
-                -error_number(error)
+                SEYAL_APP_ROUTE_CONSUMED
             }
         }
     })
