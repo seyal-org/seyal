@@ -1,5 +1,3 @@
-//! SPEC-024 §14 items 1, 2–3, 8, 14, 15, and 22 (K1 + K2).
-
 use std::path::Path;
 
 use crate::input_policy::load_input_policy;
@@ -406,7 +404,6 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
 
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
-    // Until K9, cmd+w has no builtin (accepted §4.1 / §5.0; not tab.close_focused).
     assert!(contexts_for(&table, "cmd+w").is_empty());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
 }
