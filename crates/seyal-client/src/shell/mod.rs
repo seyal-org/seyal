@@ -5,6 +5,7 @@
 //! VT/grid, Runtime registry, or renderer. Hosts dispatch [`ShellAction`] values
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
+mod inventory;
 mod tree;
 mod workspace;
 
@@ -15,6 +16,9 @@ use std::fmt;
 
 use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
 
+pub use inventory::{
+    NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
+};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
 
@@ -62,6 +66,14 @@ impl fmt::Display for ShellError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.message())
     }
+}
+
+/// Portable focus triple used by atomic navigation commit checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusCheckpoint {
+    pub active_workspace: WorkspaceId,
+    pub active_tab: TabId,
+    pub focused_pane: PaneId,
 }
 
 /// Typed host → Rust command. One action is one coarse transition.
@@ -278,6 +290,128 @@ impl ShellState {
             }
         }
         bound
+    }
+
+    /// Stable-order inventory for goto enumeration (SPEC-022 §7.6 / N4).
+    pub fn navigation_inventory(&self) -> NavigationInventory {
+        inventory::build(&self.workspaces, self.active_workspace)
+    }
+
+    /// Test helper: rename a Workspace's display name without changing identity.
+    #[cfg(test)]
+    pub fn rename_workspace_for_test(
+        &mut self,
+        id: WorkspaceId,
+        name: impl Into<String>,
+    ) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(id)?;
+        workspace.name = name.into();
+        Ok(())
+    }
+
+    /// Test helper: rename a Tab's display title without changing identity.
+    #[cfg(test)]
+    pub fn rename_tab_for_test(
+        &mut self,
+        id: TabId,
+        title: impl Into<String>,
+    ) -> Result<(), ShellError> {
+        let workspace_id = self.workspace_of_tab(id).ok_or(ShellError::UnknownTab)?;
+        let workspace = self.workspace_mut(workspace_id)?;
+        let tab = workspace
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == id)
+            .ok_or(ShellError::UnknownTab)?;
+        tab.title = title.into();
+        Ok(())
+    }
+
+    /// Test helper: rename a Pane's display title without changing identity.
+    #[cfg(test)]
+    pub fn rename_pane_for_test(
+        &mut self,
+        id: PaneId,
+        title: impl Into<String>,
+    ) -> Result<(), ShellError> {
+        let (workspace_id, tab_id) = self.location_of_pane(id).ok_or(ShellError::UnknownPane)?;
+        let workspace = self.workspace_mut(workspace_id)?;
+        let tab = workspace
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == tab_id)
+            .ok_or(ShellError::UnknownTab)?;
+        let pane = tab.panes.get_mut(&id).ok_or(ShellError::UnknownPane)?;
+        pane.title = title.into();
+        Ok(())
+    }
+
+    /// Current focus triple for equality / no-op checks (SPEC-022 R4.4).
+    pub fn focus_checkpoint(&self) -> FocusCheckpoint {
+        let snap = self.snapshot();
+        FocusCheckpoint {
+            active_workspace: snap.active_workspace,
+            active_tab: snap.active_tab,
+            focused_pane: snap.focused_pane,
+        }
+    }
+
+    /// Active Tab and focused Pane currently recorded for `workspace`.
+    pub fn workspace_focus(&self, workspace: WorkspaceId) -> Option<FocusCheckpoint> {
+        let workspace = self.workspace(workspace).ok()?;
+        let tab = workspace.tab(workspace.active_tab)?;
+        Some(FocusCheckpoint {
+            active_workspace: workspace.id,
+            active_tab: tab.id,
+            focused_pane: tab.focused,
+        })
+    }
+
+    /// Focused Pane of `tab` inside `workspace`, if that composition exists.
+    pub fn tab_focused_pane(&self, workspace: WorkspaceId, tab: TabId) -> Option<PaneId> {
+        self.workspace(workspace)
+            .ok()
+            .and_then(|item| item.tab(tab))
+            .map(|item| item.focused)
+    }
+
+    /// Atomically set Workspace + Tab + Pane focus. Validates composition
+    /// before any write so a failure leaves prior focus unchanged.
+    pub fn commit_focus(
+        &mut self,
+        workspace: WorkspaceId,
+        tab: TabId,
+        pane: PaneId,
+    ) -> Result<(), ShellError> {
+        if !self.contains_workspace(workspace) {
+            return Err(ShellError::UnknownWorkspace);
+        }
+        let Some(owner) = self.workspace_of_tab(tab) else {
+            return Err(ShellError::UnknownTab);
+        };
+        if owner != workspace {
+            return Err(ShellError::UnknownTab);
+        }
+        let Some((pane_workspace, pane_tab)) = self.location_of_pane(pane) else {
+            return Err(ShellError::UnknownPane);
+        };
+        if pane_workspace != workspace
+            || pane_tab != tab
+            || !self.tab_contains_leaf(workspace, tab, pane)
+        {
+            return Err(ShellError::UnknownPane);
+        }
+        self.active_workspace = workspace;
+        let workspace_mut = self.workspace_mut(workspace)?;
+        workspace_mut.active_tab = tab;
+        let tab_mut = workspace_mut
+            .tabs
+            .iter_mut()
+            .find(|item| item.id == tab)
+            .ok_or(ShellError::UnknownTab)?;
+        tab_mut.focused = pane;
+        self.last_error = None;
+        Ok(())
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
