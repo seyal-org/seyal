@@ -26,7 +26,7 @@ dependency added.
 | P6 close never yields zero leaves | Represented | Drain to last pane + reject |
 | P7 directional neighbor or `NoDirectionalNeighbor` | Represented | Geometric-neighbor check |
 | P8 no terminate/provision on move/swap/zoom/focus | Represented | Effect-surface assertion (portable stand-in) |
-| P9 random sequences incl. stale / self-move / zoom+close | Represented | 48 seeds × 20 steps; equalize omitted |
+| P9 random sequences incl. stale / self-move / zoom+close | **Partially represented** | 48 seeds × 20 steps cover stale PaneId / self-move / zoom+close; stale `containment_generation` is not generable on this stack (see matrix) |
 
 ## Adversarial matrix (zoom × close × move × stale id × directional miss)
 
@@ -34,9 +34,10 @@ dependency added.
 | --- | --- | --- |
 | Zoom then successful close of zoomed leaf | Yes | `ZoomThenClose` stream kind |
 | Zoom then close of non-zoomed unbound leaf | Yes | Same kind with distinct zoom/close ids |
-| Zoom then close of bound leaf → reject | Yes | Bound panes via `bind_some_panes`; close rejects |
+| Zoom then close of bound leaf → reject | Yes | Bound panes via `bind_some_panes`; close rejects (`CannotCloseBoundPane` — current behavior pending SPEC-025 item 18 release-without-terminate) |
 | Move / swap while zoomed (clears zoom) | Yes | Stream `Move`/`Swap` after zoom steps |
 | Stale PaneId on swap/move/zoom/focus/close | Yes | `StaleId` stream kind + P4 table |
+| Stale `containment_generation` on pane structural actions (`StaleContainment`) | **Unrepresented** | Blocked on the generation fence gap (#1130 / #1137): `SplitPane` / `ClosePane` / `SwapPanes` / `MovePaneBeside` still carry no generation on this parent stack, so a generated stale-generation action cannot be produced yet |
 | Self-move (`pane == neighbor`) | Yes | `SelfMove` stream kind |
 | Directional miss (`NoDirectionalNeighbor`) | Yes | P4 / P7 / stream `FocusDir` |
 | Last-pane close reject | Yes | P6 |

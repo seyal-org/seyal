@@ -146,17 +146,10 @@ fn assert_rejection_byte_identical(before: &ShellState, after: &ShellState, expe
 /// `ShellNativeEffect` has no Terminate/Provision variants (type surface);
 /// these reducers must also emit an empty effect list (no window lifecycle).
 fn assert_no_terminate_or_provision_effects(effects: &[ShellNativeEffect]) {
-    // Exhaustive match documents the effect surface: no terminate/provision.
-    let Some(effect) = effects.first() else {
-        return;
-    };
-    match effect {
-        ShellNativeEffect::RealizeWindow { .. }
-        | ShellNativeEffect::DestroyWindowRealization { .. }
-        | ShellNativeEffect::OrderFrontMakeKey { .. } => {
-            panic!("P8: pane ops must not emit window lifecycle effects; got {effects:?}")
-        }
-    }
+    assert!(
+        effects.is_empty(),
+        "P8: pane ops must emit no effects (no terminate/provision/window lifecycle); got {effects:?}"
+    );
 }
 
 fn grow_small_tree(shell: &mut ShellState, rng: &mut Lcg, target_leaves: usize) {
