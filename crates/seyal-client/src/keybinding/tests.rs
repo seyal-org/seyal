@@ -217,7 +217,7 @@ action = "pane.focus_left"
 
 [[keybindings]]
 keys = "cmd+["
-action = "goto.open"
+action = "goto.fly"
 "#;
     let table = load_keybinding_table(Some(toml));
     assert!(
@@ -388,7 +388,10 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     .expect("ctrl+r composer history-search");
     assert_eq!(history.context, BindingContext::COMPOSER);
 
-    // §5.5 focus-history rows (K8 history half)
+    // §5.5 / K8: goto.open and focus-history Back/Forward
+    let goto = binding_for(&table, "cmd+shift+o", WorkspaceCommandId::GotoOpen)
+        .expect("cmd+shift+o goto.open");
+    assert_eq!(goto.context, BindingContext::APP);
     let back = binding_for(&table, "cmd+[", WorkspaceCommandId::FocusHistoryBack)
         .expect("cmd+[ focus_history.back");
     assert_eq!(back.context, BindingContext::APP);
@@ -397,10 +400,10 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
         .expect("cmd+] focus_history.forward");
     assert_eq!(forward.context, BindingContext::APP);
     assert_eq!(forward.source, BindingSource::Builtin);
-    // Exclusions: ADR-021 pane focus/zoom, goto.open (N4), ADR-018 window
+    // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
-    assert!(contexts_for(&table, "cmd+shift+o").is_empty());
+
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
 }

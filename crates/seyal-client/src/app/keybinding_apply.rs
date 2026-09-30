@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 
 use crate::composer::ComposerAction;
+use crate::goto::GotoScope;
 use crate::keybinding::{
     load_keybinding_table_from_path, resolve_tab_ordinal, route_context_set, route_keystroke,
     validate_workspace_command, BindingContext, InvokeError, KeybindingTable, NormalizedStroke,
@@ -129,6 +130,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::ComposerHistorySearchOpen => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
+            // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
+            WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
             WorkspaceCommandId::FocusHistoryBack => {
                 // R5.5 / R6.8: FocusSeq from the same snapshot history committed.
                 let observed = self

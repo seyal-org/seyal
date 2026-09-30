@@ -111,10 +111,19 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         if query.stringValue != text {
             query.stringValue = text
         }
-        query.placeholderString = "Type a command..."
+        let isGoto = palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0
+        let truncated = palette.flags & UInt16(SEYAL_APP_PALETTE_TRUNCATED) != 0
+        if isGoto {
+            let scope = gotoScopeName(UInt8(palette.reserved & 0xff))
+            query.placeholderString = truncated
+                ? "Go to \(scope) (truncated)…"
+                : "Go to \(scope)…"
+        } else {
+            query.placeholderString = "Type a command..."
+        }
         selected = Int(palette.selected)
         rebuildRows(count: Int(palette.row_count))
-        setAccessibilityValue("\(palette.row_count)")
+        setAccessibilityValue(truncated ? "\(palette.row_count) truncated" : "\(palette.row_count)")
         if !wasOpen {
             wasOpen = true
             focusQuery()
@@ -139,6 +148,9 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         case #selector(NSResponder.cancelOperation(_:)), #selector(NSStandardKeyBindingResponding.complete(_:)):
             // NSTextField's field editor reports Escape as either selector.
             close()
+        case #selector(NSResponder.insertTab(_:)):
+            // Scope modes stay separated: Tab cycles Workspaces→Tabs→Panes→Sessions.
+            cycleGotoScope()
         default:
             return false
         }
@@ -239,6 +251,40 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         action.applySnapshotFence(snapshot)
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
         onChanged?()
+    }
+
+    /// Navigation-only goto surface (SPEC-022 N4). Reuses this overlay;
+    /// default scope is Panes.
+    func requestOpenGoto(scope: SeyalAppGotoScope = SEYAL_APP_GOTO_PANES) {
+        let snapshot = seyal_app_snapshot(appHandle)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_OPEN_GOTO.rawValue)
+        action.reserved = UInt32(scope.rawValue)
+        action.applySnapshotFence(snapshot)
+        guard seyal_app_apply(appHandle, &action) == 0 else { return }
+        onChanged?()
+    }
+
+    private func cycleGotoScope() {
+        let palette = seyal_app_palette(appHandle)
+        guard palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0 else { return }
+        let next = (Int(palette.reserved & 0xff) + 1) % 4
+        dispatch(
+            kind: UInt16(SEYAL_APP_ACTION_SET_GOTO_SCOPE.rawValue),
+            reserved: UInt32(next)
+        )
+    }
+
+    private func gotoScopeName(_ value: UInt8) -> String {
+        switch value {
+        case UInt8(SEYAL_APP_GOTO_WORKSPACES.rawValue): return "Workspaces"
+        case UInt8(SEYAL_APP_GOTO_TABS.rawValue): return "Tabs"
+        case UInt8(SEYAL_APP_GOTO_PANES.rawValue): return "Panes"
+        case UInt8(SEYAL_APP_GOTO_SESSIONS.rawValue): return "Sessions"
+        default: return "…"
+        }
     }
 
     // MARK: Projection

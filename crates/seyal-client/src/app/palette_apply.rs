@@ -10,6 +10,8 @@ use crate::palette::{PaletteAction, PaletteCommand, PaletteRunTarget};
 impl ApplicationRoot {
     pub(super) fn open_palette(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
+        // Mutually exclusive with goto; one overlay surface.
+        self.goto.close();
         self.palette
             .apply(PaletteAction::Open, 0)
             .map_err(palette_error)?;
@@ -22,6 +24,10 @@ impl ApplicationRoot {
         fence: AppFence,
         query: String,
     ) -> Result<(), AppError> {
+        // Overlay reuse: query keystrokes hit the open surface.
+        if self.goto.is_open() {
+            return self.set_goto_query(fence, query);
+        }
         self.require_fence(fence)?;
         self.palette
             .apply(PaletteAction::SetQuery(query), 0)
@@ -35,6 +41,9 @@ impl ApplicationRoot {
         fence: AppFence,
         delta: i32,
     ) -> Result<(), AppError> {
+        if self.goto.is_open() {
+            return self.move_goto_selection(fence, delta);
+        }
         self.require_fence(fence)?;
         let row_count = self.palette.snapshot().rows.len();
         self.palette
@@ -43,6 +52,9 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_palette(&mut self, fence: AppFence) -> Result<(), AppError> {
+        if self.goto.is_open() {
+            return self.close_goto(fence);
+        }
         self.require_fence(fence)?;
         self.palette
             .apply(PaletteAction::Close, 0)
@@ -68,6 +80,10 @@ impl ApplicationRoot {
         fence: AppFence,
         address: Option<ResourceAddress>,
     ) -> Result<(), AppError> {
+        if self.goto.is_open() {
+            return self.run_goto(fence, address);
+        }
+
         self.require_fence(fence)?;
         let target = match address {
             Some(address) => PaletteRunTarget::Navigate(address),
