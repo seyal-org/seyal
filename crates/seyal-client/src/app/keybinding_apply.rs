@@ -8,9 +8,8 @@ use crate::keybinding::{
     validate_workspace_command, BindingContext, InvokeError, KeybindingTable, NormalizedStroke,
     RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
 };
-use crate::pane_layout::{self, Direction};
 use crate::presentation::{PresentationAction, PresentationMode};
-use crate::shell::{MoveSide, ShellAction, ShellError, SplitAxis};
+use crate::shell::{directional_neighbor, FocusDirection, MoveSide, ShellAction, ShellError, SplitAxis};
 
 use super::{AppError, ApplicationRoot};
 
@@ -110,22 +109,26 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneFocusNext | WorkspaceCommandId::PaneFocusPrevious => {
                 Err(AppError::ActionUnavailable)
             }
+            WorkspaceCommandId::PaneFocusLeft => self.focus_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneFocusRight => self.focus_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneFocusUp => self.focus_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneFocusDown => self.focus_direction(FocusDirection::Down),
             WorkspaceCommandId::PaneZoomToggle => self.zoom_toggle_focused(),
-            WorkspaceCommandId::PaneSwapLeft => self.swap_focused_neighbor(Direction::Left),
-            WorkspaceCommandId::PaneSwapRight => self.swap_focused_neighbor(Direction::Right),
-            WorkspaceCommandId::PaneSwapUp => self.swap_focused_neighbor(Direction::Up),
-            WorkspaceCommandId::PaneSwapDown => self.swap_focused_neighbor(Direction::Down),
+            WorkspaceCommandId::PaneSwapLeft => self.swap_focused_neighbor(FocusDirection::Left),
+            WorkspaceCommandId::PaneSwapRight => self.swap_focused_neighbor(FocusDirection::Right),
+            WorkspaceCommandId::PaneSwapUp => self.swap_focused_neighbor(FocusDirection::Up),
+            WorkspaceCommandId::PaneSwapDown => self.swap_focused_neighbor(FocusDirection::Down),
             WorkspaceCommandId::PaneMoveLeft => {
-                self.move_focused_beside(Direction::Left, MoveSide::Left)
+                self.move_focused_beside(FocusDirection::Left, MoveSide::Left)
             }
             WorkspaceCommandId::PaneMoveRight => {
-                self.move_focused_beside(Direction::Right, MoveSide::Right)
+                self.move_focused_beside(FocusDirection::Right, MoveSide::Right)
             }
             WorkspaceCommandId::PaneMoveUp => {
-                self.move_focused_beside(Direction::Up, MoveSide::Above)
+                self.move_focused_beside(FocusDirection::Up, MoveSide::Above)
             }
             WorkspaceCommandId::PaneMoveDown => {
-                self.move_focused_beside(Direction::Down, MoveSide::Below)
+                self.move_focused_beside(FocusDirection::Down, MoveSide::Below)
             }
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
@@ -194,6 +197,13 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// SPEC-024 §5.1 / §10.2: focus-relative directional neighbor via FocusDirection.
+    fn focus_direction(&mut self, direction: FocusDirection) -> Result<(), AppError> {
+        self.apply_shell(ShellAction::FocusDirection { direction })
+            .map_err(focus_direction_error)
+    }
+
+
     /// SPEC-024 §5.1: Unzoom when zoomed, else ZoomPane of the focused leaf.
     fn zoom_toggle_focused(&mut self) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
@@ -207,9 +217,9 @@ impl ApplicationRoot {
         self.apply_shell(action).map_err(pane_verb_error)
     }
 
-    fn swap_focused_neighbor(&mut self, direction: Direction) -> Result<(), AppError> {
+    fn swap_focused_neighbor(&mut self, direction: FocusDirection) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
-        let neighbor = pane_layout::directional_neighbor(&snap.tree, snap.focused_pane, direction)
+        let neighbor = directional_neighbor(&snap.tree, snap.focused_pane, direction)
             .ok_or(AppError::NoDirectionalNeighbor)?;
         self.apply_shell(ShellAction::SwapPanes {
             a: snap.focused_pane,
@@ -220,11 +230,11 @@ impl ApplicationRoot {
 
     fn move_focused_beside(
         &mut self,
-        direction: Direction,
+        direction: FocusDirection,
         side: MoveSide,
     ) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
-        let neighbor = pane_layout::directional_neighbor(&snap.tree, snap.focused_pane, direction)
+        let neighbor = directional_neighbor(&snap.tree, snap.focused_pane, direction)
             .ok_or(AppError::NoDirectionalNeighbor)?;
         self.apply_shell(ShellAction::MovePaneBeside {
             pane: snap.focused_pane,
@@ -246,6 +256,14 @@ impl ApplicationRoot {
 fn invoke_error(error: InvokeError) -> AppError {
     match error {
         InvokeError::ActionUnavailable => AppError::ActionUnavailable,
+    }
+}
+
+fn focus_direction_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::NoDirectionalNeighbor => AppError::NoDirectionalNeighbor,
+        ShellError::UnknownPane => AppError::UnknownPane,
+        _ => AppError::ActionUnavailable,
     }
 }
 

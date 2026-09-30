@@ -1,9 +1,10 @@
 //! SPEC-024 §4.1 builtin default rows for K2 / K7.
 //!
-//! Includes K7 `pane.zoom_toggle` (`cmd+shift+enter`). Excludes `pane.focus_*`
-//! builtins, `pane.equalize_*`, SPEC-022 navigation rows (K8), and ADR-018
-//! `window.new` (R5.0.1). Includes §5.4 `ctrl+r` composer history-search.
+//! Includes directional `pane.focus_*` (`cmd+opt+arrow`) and K7
+//! `pane.zoom_toggle` (`cmd+shift+enter`). Excludes `pane.equalize_*`,
+//! SPEC-022 navigation rows (K8), and ADR-018 `window.new` (R5.0.1).
 //! `pane.swap_*` / `pane.move_*` are catalog ids without M003 builtins.
+//! Includes §5.4 `ctrl+r` composer history-search.
 
 use super::keys::parse_keys;
 use super::types::{
@@ -132,6 +133,30 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         BuiltinRow {
             keys_notation: "cmd+opt+enter",
             id: WorkspaceCommandId::PresentationToggleTui,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+left",
+            id: WorkspaceCommandId::PaneFocusLeft,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+right",
+            id: WorkspaceCommandId::PaneFocusRight,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+up",
+            id: WorkspaceCommandId::PaneFocusUp,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+down",
+            id: WorkspaceCommandId::PaneFocusDown,
             ordinal: None,
             context: APP,
         },

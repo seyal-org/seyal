@@ -215,7 +215,7 @@ action = "window.new"
 
 [[keybindings]]
 keys = "cmd+opt+left"
-action = "pane.focus_left"
+action = "pane.equalize_focused"
 
 [[keybindings]]
 keys = "cmd+["
@@ -390,6 +390,18 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     .expect("ctrl+r composer history-search");
     assert_eq!(history.context, BindingContext::COMPOSER);
 
+    // K7 directional focus builtins (SPEC-024 §5.1)
+    for (keys, id) in [
+        ("cmd+opt+left", WorkspaceCommandId::PaneFocusLeft),
+        ("cmd+opt+right", WorkspaceCommandId::PaneFocusRight),
+        ("cmd+opt+up", WorkspaceCommandId::PaneFocusUp),
+        ("cmd+opt+down", WorkspaceCommandId::PaneFocusDown),
+    ] {
+        let binding = binding_for(&table, keys, id).unwrap_or_else(|| panic!("missing {keys}"));
+        assert_eq!(binding.context, BindingContext::APP);
+        assert_eq!(binding.source, BindingSource::Builtin);
+    }
+
     // K7 zoom builtin; swap/move are catalog-only (no M003 builtin keys).
     let zoom = binding_for(
         &table,
@@ -398,12 +410,11 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     )
     .expect("cmd+shift+enter zoom toggle");
     assert_eq!(zoom.context, BindingContext::APP);
+
+    // Exclusions: equalize, SPEC-022 navigation, ADR-018 window; swap/move catalog-only
     assert!(WorkspaceCommandId::parse("pane.swap_left").is_some());
     assert!(WorkspaceCommandId::parse("pane.move_down").is_some());
-
-    // Exclusions: pane.focus_*, pane.equalize_*, SPEC-022 navigation, ADR-018 window
-    assert!(contexts_for(&table, "cmd+opt+left").is_empty());
-    assert!(WorkspaceCommandId::parse("pane.focus_left").is_none());
+    assert!(contexts_for(&table, "ctrl+alt+left").is_empty()); // no swap builtin
     assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());

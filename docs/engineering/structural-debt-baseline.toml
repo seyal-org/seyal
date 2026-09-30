@@ -35,8 +35,8 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
 acknowledged_loc = 766
-issue = 1145
-reason = "ApplicationRoot façade retains types/snapshot/apply after chrome/composer/palette/recovery/session/accessibility/keybinding_apply extraction; #1145 adds NoDirectionalNeighbor only. Keybinding match and WorkspaceCommand dispatch live in keybinding_apply.rs."
+issue = 1150
+reason = "ApplicationRoot façade retains types/snapshot/apply after concern extraction; #1150 adds NoDirectionalNeighbor for directional pane-focus dispatch. Match and FocusDirection invoke stay in keybinding_apply.rs / keybinding_verb_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -47,8 +47,8 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
 acknowledged_loc = 957
-issue = 1145
-reason = "Façade keeps the W3 window extraction and the K3 seyal_app_route_keystroke export; #1145 adds NoDirectionalNeighbor FFI code only. Match and dispatch stay in keybinding and app/keybinding_apply."
+issue = 1150
+reason = "Façade keeps the W3 window extraction and the K3 seyal_app_route_keystroke export; #1150 publishes NoDirectionalNeighbor as error 35. Match and dispatch stay in keybinding and app/keybinding_apply."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
