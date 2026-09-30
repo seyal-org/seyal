@@ -113,7 +113,8 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert_eq!(
         shell.apply(ShellAction::SplitPane {
             id: focused,
-            axis: SplitAxis::Right
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::PaneSplitUnavailable)
     );
@@ -136,6 +137,7 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("splits allowed");
     let two_panes = shell.snapshot();
@@ -144,6 +146,7 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
     shell
         .apply(ShellAction::ClosePane {
             id: two_panes.focused_pane,
+            containment_generation: shell.containment_generation(),
         })
         .expect("close split pane");
     assert!(!shell.snapshot().allows_pane_close);
@@ -162,7 +165,8 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
     );
     assert_eq!(
         shell.apply(ShellAction::ClosePane {
-            id: closed.focused_pane
+            id: closed.focused_pane,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::CannotCloseLastPane)
     );
@@ -203,6 +207,7 @@ fn split_focus_and_close_panes() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let snap = shell.snapshot();
@@ -218,23 +223,33 @@ fn split_focus_and_close_panes() {
         .apply(ShellAction::SplitPane {
             id: original,
             axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
         })
         .expect("nested split");
     assert_eq!(shell.snapshot().tabs[0].pane_count, 3);
     assert_eq!(shell.snapshot().layout, LayoutDescription::SplitRight);
     shell
-        .apply(ShellAction::ClosePane { id: created })
+        .apply(ShellAction::ClosePane {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close first split");
     assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
     let remaining_new = shell.snapshot().focused_pane;
     shell
-        .apply(ShellAction::ClosePane { id: remaining_new })
+        .apply(ShellAction::ClosePane {
+            id: remaining_new,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close nested");
     let snap = shell.snapshot();
     assert_eq!(snap.layout, LayoutDescription::Single);
     assert_eq!(snap.focused_pane, original);
     assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: original }),
+        shell.apply(ShellAction::ClosePane {
+            id: original,
+            containment_generation: shell.containment_generation(),
+        }),
         Err(ShellError::CannotCloseLastPane)
     );
 }
@@ -252,6 +267,7 @@ fn execution_bound_pane_cannot_be_closed() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let created = shell.snapshot().focused_pane;
@@ -261,12 +277,18 @@ fn execution_bound_pane_cannot_be_closed() {
         .expect("focus bound");
     assert!(!shell.snapshot().allows_pane_close);
     assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: bound }),
+        shell.apply(ShellAction::ClosePane {
+            id: bound,
+            containment_generation: shell.containment_generation(),
+        }),
         Err(ShellError::CannotCloseBoundPane)
     );
     assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
     shell
-        .apply(ShellAction::ClosePane { id: created })
+        .apply(ShellAction::ClosePane {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close unbound");
     let snap = shell.snapshot();
     assert_eq!(snap.layout, LayoutDescription::Single);
@@ -843,4 +865,30 @@ fn selection_does_not_bump_containment_generation() {
         .unwrap();
     assert_eq!(shell.containment_generation(), generation);
     let _ = w1;
+}
+
+#[test]
+fn same_window_selection_does_not_emit_order_front() {
+    let (mut shell, w1, w2, t1, t2, _) = seed_two_windows_one_workspace();
+    let _ = shell.take_effects();
+    // Cross-window selection emits exactly one raise.
+    shell.apply(ShellAction::SelectWindow { id: w2 }).unwrap();
+    assert_eq!(
+        shell.take_effects(),
+        [ShellNativeEffect::OrderFrontMakeKey { window: w2 }]
+    );
+    // Return to w1 (one raise), then same-window tab selection must not emit.
+    shell.apply(ShellAction::SelectWindow { id: w1 }).unwrap();
+    assert_eq!(
+        shell.take_effects(),
+        [ShellNativeEffect::OrderFrontMakeKey { window: w1 }]
+    );
+    for _ in 0..8 {
+        shell.apply(ShellAction::SelectTab { id: t2 }).unwrap();
+        shell.apply(ShellAction::SelectTab { id: t1 }).unwrap();
+        assert!(
+            shell.take_effects().is_empty(),
+            "same-window SelectTab must not emit OrderFrontMakeKey"
+        );
+    }
 }

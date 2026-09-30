@@ -86,12 +86,14 @@ fn seed_nested_abc() -> (ShellState, PaneId, PaneId, PaneId) {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split A|B");
     let b = shell.snapshot().focused_pane;
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split B|C under right");
     let c = shell.snapshot().focused_pane;
@@ -109,6 +111,7 @@ fn spec025_1_split_focuses_new_leaf_and_clears_zoom() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split right");
     let right = shell.snapshot();
@@ -124,6 +127,7 @@ fn spec025_1_split_focuses_new_leaf_and_clears_zoom() {
         .apply(ShellAction::SplitPane {
             id: right.focused_pane,
             axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split down");
     let down = shell.snapshot();
@@ -144,7 +148,10 @@ fn spec025_2_close_non_focused_leaf_preserves_focus() {
         .apply(ShellAction::FocusPane { id: a })
         .expect("focus A");
     shell
-        .apply(ShellAction::ClosePane { id: b })
+        .apply(ShellAction::ClosePane {
+            id: b,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close B");
     let snap = shell.snapshot();
     assert_eq!(snap.focused_pane, a);
@@ -161,7 +168,10 @@ fn spec025_3_close_focused_uses_sibling_first_successor() {
         .apply(ShellAction::FocusPane { id: b })
         .expect("focus B");
     shell
-        .apply(ShellAction::ClosePane { id: b })
+        .apply(ShellAction::ClosePane {
+            id: b,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close B");
     let snap = shell.snapshot();
     assert_eq!(
@@ -177,7 +187,10 @@ fn spec025_4_close_last_pane_rejects() {
     let mut shell = seed_two_workspaces();
     let only = shell.snapshot().focused_pane;
     assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: only }),
+        shell.apply(ShellAction::ClosePane {
+            id: only,
+            containment_generation: shell.containment_generation(),
+        }),
         Err(ShellError::CannotCloseLastPane)
     );
 }
@@ -188,15 +201,20 @@ fn spec025_5_stale_pane_id_fails_closed_on_pt1_actions() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let stale = PaneId::new();
     let actions = [
-        ShellAction::ClosePane { id: stale },
+        ShellAction::ClosePane {
+            id: stale,
+            containment_generation: shell.containment_generation(),
+        },
         ShellAction::FocusPane { id: stale },
         ShellAction::SplitPane {
             id: stale,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         },
         ShellAction::ZoomPane { id: stale },
     ];
@@ -209,11 +227,60 @@ fn spec025_5_stale_pane_id_fails_closed_on_pt1_actions() {
 }
 
 #[test]
+fn spec025_5_stale_containment_generation_rejects_structural_pt1_actions() {
+    let mut shell = seed_two_workspaces();
+    let generation = shell.containment_generation();
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: generation,
+        })
+        .expect("split");
+    assert!(shell.containment_generation() > generation);
+    let focused = shell.snapshot().focused_pane;
+    let stale = generation; // pre-split generation
+    let before = shell.clone();
+    let fingerprint = before.containment_fingerprint();
+    for action in [
+        ShellAction::SplitFocused {
+            axis: SplitAxis::Down,
+            containment_generation: stale,
+        },
+        ShellAction::SplitPane {
+            id: focused,
+            axis: SplitAxis::Down,
+            containment_generation: stale,
+        },
+        ShellAction::ClosePane {
+            id: focused,
+            containment_generation: stale,
+        },
+    ] {
+        let prior = shell.clone();
+        assert_eq!(shell.apply(action), Err(ShellError::StaleContainment));
+        assert_rejection_atomic(&shell, &prior);
+        assert_eq!(shell.last_error(), Some(ShellError::StaleContainment));
+        assert_eq!(shell.containment_fingerprint(), fingerprint);
+    }
+    // Focus/Zoom/Unzoom are not generation-fenced and must not bump.
+    let gen_now = shell.containment_generation();
+    shell
+        .apply(ShellAction::FocusPane { id: focused })
+        .expect("focus");
+    shell
+        .apply(ShellAction::ZoomPane { id: focused })
+        .expect("zoom");
+    shell.apply(ShellAction::Unzoom).expect("unzoom");
+    assert_eq!(shell.containment_generation(), gen_now);
+}
+
+#[test]
 fn spec025_9_zoom_overlay_preserves_topology_and_snapshot_field() {
     let mut shell = seed_two_workspaces();
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let before = shell.snapshot();
@@ -279,7 +346,10 @@ fn spec025_12_close_zoomed_leaf_clears_zoom_and_applies_successor() {
         .apply(ShellAction::ZoomPane { id: b })
         .expect("zoom B");
     shell
-        .apply(ShellAction::ClosePane { id: b })
+        .apply(ShellAction::ClosePane {
+            id: b,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close B");
     let snap = shell.snapshot();
     assert_eq!(snap.zoomed, None);
@@ -297,7 +367,10 @@ fn spec025_17_close_successor_differs_from_whole_tree_first_pane() {
         .apply(ShellAction::FocusPane { id: b })
         .expect("focus B");
     shell
-        .apply(ShellAction::ClosePane { id: b })
+        .apply(ShellAction::ClosePane {
+            id: b,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close B");
     let snap = shell.snapshot();
     assert_eq!(snap.focused_pane, c);
