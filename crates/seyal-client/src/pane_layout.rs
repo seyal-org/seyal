@@ -219,25 +219,31 @@ mod root_tests {
     /// Split-enabled root over the same production reducers; M001 policy
     /// keeps splitting disabled, so only tests reach multi-leaf trees (#923).
     fn split_enabled_root() -> ApplicationRoot {
-        use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
+        use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+        use seyal_core::WindowId;
 
         let tab = TabId::new();
+        let window = WindowId::new();
         let shell = ShellState::from_workspaces(
             vec![ShellWorkspaceSeed {
                 id: WorkspaceId::m001_default(),
                 name: "Local".to_owned(),
                 detail: None,
                 attention: false,
-                active_tab: tab,
-                tabs: vec![ShellTabSeed {
-                    id: tab,
-                    title: "Terminal".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: PaneId::new(),
-                        title: "Pane 1".to_owned(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                active_window: window,
+                windows: vec![ShellWindowSeed {
+                    id: window,
+                    active_tab: tab,
+                    tabs: vec![ShellTabSeed {
+                        id: tab,
+                        title: "Terminal".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: PaneId::new(),
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             }],
             WorkspaceId::m001_default(),

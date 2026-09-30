@@ -106,6 +106,6 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 817
-issue = 1101
-reason = "Palette query, rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows; the row model and the command it runs remain one type."
+acknowledged_loc = 824
+issue = 1090
+reason = "Command palette query, rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows and #1090 threads window identity through the same reducer; splitting the file would separate the row model from the command it runs."

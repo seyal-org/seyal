@@ -14,15 +14,15 @@ mod tests;
 
 use std::fmt;
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
-pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
+pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
-use workspace::{Pane, Tab, Workspace};
+use workspace::{Pane, Tab, Window, Workspace};
 
 /// Why a [`ShellAction`] was rejected. The previous state is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +37,9 @@ pub enum ShellError {
     CannotCloseBoundPane,
     ExecutionAlreadyBound,
     EmptyShell,
+    EmptyWindow,
+    EmptyTab,
+    UnknownWindow,
 }
 
 impl ShellError {
@@ -58,6 +61,9 @@ impl ShellError {
             }
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
+            Self::EmptyWindow => "A Window requires at least one Tab.",
+            Self::EmptyTab => "A Tab requires at least one Pane.",
+            Self::UnknownWindow => "Unknown Window.",
         }
     }
 }
@@ -181,13 +187,17 @@ impl ShellState {
             allows_implicit_execution_bootstrap: true,
         };
         let tab = Tab::with_pane(TabId::new(), "Terminal".to_owned(), pane);
+        let tab_id = tab.id;
+        let window_id = WindowId::new();
+        let window = Window::try_new(window_id, WorkspaceId::m001_default(), vec![tab], tab_id)
+            .expect("the production window has one tab");
         let workspace = Workspace {
             id: WorkspaceId::m001_default(),
             name: "Local".to_owned(),
             detail: Some(detail.into()),
             attention: false,
-            active_tab: tab.id,
-            tabs: vec![tab],
+            windows: vec![window],
+            active_window: window_id,
         };
         Self {
             active_workspace: workspace.id,
@@ -212,7 +222,10 @@ impl ShellState {
         if !workspaces.iter().any(|seed| seed.id == active_workspace) {
             return Err(ShellError::UnknownWorkspace);
         }
-        let workspaces = workspaces.into_iter().map(Workspace::from_seed).collect();
+        let workspaces = workspaces
+            .into_iter()
+            .map(Workspace::from_seed)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             workspaces,
             active_workspace,
@@ -419,7 +432,7 @@ impl ShellState {
             .workspace(self.active_workspace)
             .expect("active Workspace must exist");
         let tab = workspace
-            .tab(workspace.active_tab)
+            .tab(workspace.active_tab_id())
             .expect("active Tab must exist");
         ShellSnapshot {
             workspaces: self
@@ -430,13 +443,12 @@ impl ShellState {
                     name: item.name.clone(),
                     detail: item.detail.clone(),
                     attention: item.attention,
-                    tab_count: item.tabs.len(),
+                    tab_count: item.tab_count(),
                 })
                 .collect(),
             active_workspace: self.active_workspace,
             tabs: workspace
-                .tabs
-                .iter()
+                .tabs()
                 .map(|item| TabSnapshot {
                     id: item.id,
                     title: item.title.clone(),
@@ -444,7 +456,7 @@ impl ShellState {
                     pane_count: item.panes.len(),
                 })
                 .collect(),
-            active_tab: workspace.active_tab,
+            active_tab: workspace.active_tab_id(),
             focused_pane: tab.focused,
             panes: tab
                 .root
@@ -506,11 +518,7 @@ impl ShellState {
 
     fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;
-        if workspace.tab(id).is_none() {
-            return Err(ShellError::UnknownTab);
-        }
-        workspace.active_tab = id;
-        Ok(())
+        workspace.select_tab(id)
     }
 
     fn create_tab(&mut self) -> Result<TabId, ShellError> {
@@ -528,25 +536,13 @@ impl ShellState {
         let tab = Tab::with_pane(TabId::new(), format!("Terminal {ordinal}"), pane);
         let id = tab.id;
         let workspace = self.workspace_mut(self.active_workspace)?;
-        workspace.active_tab = id;
-        workspace.tabs.push(tab);
+        workspace.push_tab_on_active_window(tab)?;
         Ok(id)
     }
 
     fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;
-        if !workspace.allows_tab_close() {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(index) = workspace.tabs.iter().position(|tab| tab.id == id) else {
-            return Err(ShellError::UnknownTab);
-        };
-        workspace.tabs.remove(index);
-        if workspace.active_tab == id {
-            let replacement = index.min(workspace.tabs.len() - 1);
-            workspace.active_tab = workspace.tabs[replacement].id;
-        }
-        Ok(())
+        workspace.close_tab(id)
     }
 
     fn split_pane(&mut self, pane_id: PaneId, axis: SplitAxis) -> Result<PaneId, ShellError> {
@@ -638,7 +634,7 @@ impl ShellState {
     fn focused_pane(&self) -> Result<&Pane, ShellError> {
         let workspace = self.workspace(self.active_workspace)?;
         let tab = workspace
-            .tab(workspace.active_tab)
+            .tab(workspace.active_tab_id())
             .ok_or(ShellError::UnknownTab)?;
         tab.panes.get(&tab.focused).ok_or(ShellError::UnknownPane)
     }
@@ -646,7 +642,7 @@ impl ShellState {
     fn pane(&self, id: PaneId) -> Result<&Pane, ShellError> {
         let workspace = self.workspace(self.active_workspace)?;
         let tab = workspace
-            .tab(workspace.active_tab)
+            .tab(workspace.active_tab_id())
             .ok_or(ShellError::UnknownTab)?;
         tab.panes.get(&id).ok_or(ShellError::UnknownPane)
     }
