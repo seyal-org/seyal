@@ -52,9 +52,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 824
+acknowledged_loc = 851
 issue = 1149
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1149 updates CreateTab/palette expectations for production tab-creation enablement. New C2 acceptance cases live in tab_provisioning_tests.rs."
+reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1149 covers the production-off tab-creation gate (CreateTab/palette stay off by default, opt-in only via enable_tab_creation_for_test). New C2 acceptance cases live in tab_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
