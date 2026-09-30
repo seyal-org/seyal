@@ -202,8 +202,10 @@ impl ShellState {
             .window_index(window)
             .ok_or(ShellError::UnknownWindow)?;
         workspace.windows.remove(index);
+        // Leave product-active unset so `activate_window(successor)` observes a
+        // real change and emits OrderFrontMakeKey (ADR-018 §3.2).
         if workspace.active_window == Some(window) {
-            workspace.active_window = workspace.windows.first().map(|item| item.id);
+            workspace.active_window = None;
         }
         Ok(())
     }
