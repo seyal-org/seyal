@@ -37,12 +37,8 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             ordinal: None,
             context: APP,
         },
-        BuiltinRow {
-            keys_notation: "cmd+w",
-            id: WorkspaceCommandId::TabCloseFocused,
-            ordinal: None,
-            context: APP,
-        },
+        // cmd+w stays unbound until K9 (`app.close_focused`); SPEC-024 §4.1 /
+        // §5.0 give `tab.close_focused` no cmd+w builtin (R5.0.1).
         BuiltinRow {
             keys_notation: "cmd+shift+[",
             id: WorkspaceCommandId::TabSelectPrevious,
