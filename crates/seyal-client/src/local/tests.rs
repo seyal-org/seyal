@@ -2,6 +2,7 @@ use super::*;
 use seyal_runtime::local_ipc::framing::{ErrorCode, ErrorMessage, MessageType};
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 
 fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
@@ -482,5 +483,76 @@ fn v2_sent_bound_advances_only_after_wire_complete() {
             .classify_incoming_error(type29(ErrorCode::Backpressure, 7))
             .unwrap(),
         Some(InputAdmissionFailure::ClientBackpressure)
+    );
+}
+
+
+#[test]
+fn malformed_type_35_discards_and_clears_without_protocol_error() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 3;
+    client.cache.rows = 2;
+    client.viewport_line_ids = vec![10, 11];
+    client.viewport_line_ids_generation = 3;
+    let mut payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 1,
+        line_ids: vec![10, 11],
+    }
+    .encode();
+    payload[0..8].copy_from_slice(&0u64.to_le_bytes());
+    assert_eq!(client.apply_viewport_line_ids(&payload), Ok(true));
+    assert!(client.viewport_line_ids.is_empty());
+    assert_eq!(client.viewport_line_ids_generation, 0);
+}
+
+#[test]
+fn consecutive_soft_wrap_line_ids_commit() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 5;
+    client.cache.rows = 3;
+    let payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 5,
+        line_ids: vec![1, 1, 2],
+    }
+    .encode();
+    assert_eq!(client.apply_viewport_line_ids(&payload), Ok(true));
+    assert_eq!(client.viewport_line_ids, vec![1, 1, 2]);
+}
+
+#[test]
+fn same_generation_different_row_count_clears_without_fatal() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 5;
+    client.cache.rows = 3;
+    client.viewport_line_ids = vec![1, 2, 3];
+    client.viewport_line_ids_generation = 5;
+    let payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 5,
+        line_ids: vec![1, 2],
+    }
+    .encode();
+    assert_eq!(client.apply_viewport_line_ids(&payload), Ok(true));
+    assert!(client.viewport_line_ids.is_empty());
+}
+
+#[test]
+fn same_generation_and_row_count_conflicting_ids_are_fatal() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 5;
+    client.cache.rows = 2;
+    client.viewport_line_ids = vec![1, 2];
+    client.viewport_line_ids_generation = 5;
+    let payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 5,
+        line_ids: vec![3, 4],
+    }
+    .encode();
+    assert_eq!(
+        client.apply_viewport_line_ids(&payload),
+        Err(ClientError::Protocol)
     );
 }

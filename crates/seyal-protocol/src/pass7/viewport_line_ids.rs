@@ -81,13 +81,22 @@ impl ViewportLineIds {
             return Err(FramingError::MalformedPayload);
         }
         // Viewport rows may be reordered by insert-line / reverse-index / CSI T
-        // without renumbering LineIds, so ids need not be monotonic. They must
-        // remain unique within one viewport so start_line mapping is unambiguous.
-        let mut seen = std::collections::BTreeSet::new();
-        for id in &self.line_ids {
-            if !seen.insert(*id) {
+        // without renumbering LineIds, so ids need not be monotonic. A consecutive
+        // run of the same LineId is valid (soft-wrapped source line). A
+        // non-consecutive repeat is malformed (SPEC-004 §8.1).
+        let mut seen_closed = std::collections::BTreeSet::new();
+        let mut run_id: Option<u64> = None;
+        for &id in &self.line_ids {
+            if run_id == Some(id) {
+                continue;
+            }
+            if let Some(ended) = run_id {
+                seen_closed.insert(ended);
+            }
+            if seen_closed.contains(&id) {
                 return Err(FramingError::MalformedPayload);
             }
+            run_id = Some(id);
         }
         Ok(())
     }
@@ -198,13 +207,24 @@ mod tests {
     }
 
     #[test]
-    fn viewport_line_ids_reject_duplicate_ids() {
-        let mut encoded = ViewportLineIds {
+    fn viewport_line_ids_accept_consecutive_repeated_ids() {
+        let message = ViewportLineIds {
             generation: 1,
-            line_ids: vec![1, 2, 3],
+            line_ids: vec![1, 1, 2],
+        };
+        assert_eq!(ViewportLineIds::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn viewport_line_ids_reject_non_consecutive_repeated_ids() {
+        // Build manually: encode() debug-asserts validate().
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(&1u64.to_le_bytes());
+        encoded.extend_from_slice(&3u16.to_le_bytes());
+        encoded.extend_from_slice(&0u16.to_le_bytes());
+        for id in [1u64, 2, 1] {
+            encoded.extend_from_slice(&id.to_le_bytes());
         }
-        .encode();
-        encoded[12 + 16..12 + 24].copy_from_slice(&1u64.to_le_bytes());
         assert_eq!(
             ViewportLineIds::decode(&encoded),
             Err(FramingError::MalformedPayload)

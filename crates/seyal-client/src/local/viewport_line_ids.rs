@@ -2,8 +2,9 @@
 //!
 //! The vector is accepted only when its generation equals the committed
 //! display generation and its length equals the viewport row count. A newer
-//! generation is discarded. A conflicting vector for the same generation is
-//! a protocol error.
+//! generation is discarded. A malformed frame is discarded and clears any
+//! stored vector without closing the connection. The same generation and
+//! row count with a different id vector is a protocol failure.
 
 use seyal_runtime::local_ipc::framing::ViewportLineIds;
 
@@ -40,21 +41,43 @@ impl LocalDisplayClient {
         self.viewport_line_ids = line_ids;
     }
 
-    /// Apply one decoded type-35 payload. `Ok(true)` means attachment metadata
-    /// changed. Newer-than-display generations are discarded without clearing
+    /// Apply one type-35 payload. `Ok(true)` means attachment metadata changed.
+    /// Malformed frames discard+clear (SPEC-004 §8.1); they do not close the
+    /// connection. Newer-than-display generations are discarded without clearing
     /// a vector still paired to the committed display.
     pub(crate) fn apply_viewport_line_ids(&mut self, payload: &[u8]) -> Result<bool, ClientError> {
-        let message = ViewportLineIds::decode(payload).map_err(|_| ClientError::Protocol)?;
+        let message = match ViewportLineIds::decode(payload) {
+            Ok(message) => message,
+            Err(_) => {
+                if self.viewport_line_ids.is_empty() {
+                    return Ok(false);
+                }
+                self.clear_viewport_line_ids();
+                return Ok(true);
+            }
+        };
         if message.generation > self.cache.generation {
             return Ok(false);
         }
         if message.generation < self.viewport_line_ids_generation {
             return Ok(false);
         }
+        // Same generation as the stored vector, but a different row_count than
+        // the committed viewport: clear (not fatal). Same generation + same
+        // row_count with a different id vector: protocol failure.
         if message.generation == self.viewport_line_ids_generation
             && message.line_ids != self.viewport_line_ids
         {
-            return Err(ClientError::Protocol);
+            if message.line_ids.len() == self.viewport_line_ids.len()
+                && message.line_ids.len() == usize::from(self.cache.rows)
+            {
+                return Err(ClientError::Protocol);
+            }
+            if self.viewport_line_ids.is_empty() {
+                return Ok(false);
+            }
+            self.clear_viewport_line_ids();
+            return Ok(true);
         }
         if message.generation != self.cache.generation
             || message.line_ids.len() != usize::from(self.cache.rows)
@@ -84,3 +107,4 @@ impl LocalDisplayClient {
         }
     }
 }
+
