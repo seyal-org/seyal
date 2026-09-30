@@ -260,6 +260,13 @@ final class SeyalHostComponentTests: XCTestCase {
                 from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
                 testHostLoaded: false
             ),
+            ["--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: true
+            ),
             ["--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
         )
         XCTAssertEqual(
@@ -283,6 +290,14 @@ final class SeyalHostComponentTests: XCTestCase {
                 executable: "/tmp/seyal-runtime",
                 processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
                 testHostLoaded: false
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: true
             ),
             ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
         )
