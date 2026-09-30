@@ -161,14 +161,22 @@ impl Runtime {
         // Drive SPEC-003 §11 with Runtime's own configured TerminationPolicy.
         // `request_termination` is idempotent for already-terminating /
         // draining executions (no extra signal, no deadline reset).
-        let _ = self.request_termination(attached_execution);
-
-        self.send_terminate_execution_result(
-            token,
-            request.attachment_id,
-            request.request_id,
-            TerminateExecutionResultCode::TerminationRequested,
-        );
+        // If arming §11 fails before the machine starts, do not claim
+        // TerminationRequested — C1 would detach and strand a live execution.
+        match self.request_termination(attached_execution) {
+            Ok(()) => self.send_terminate_execution_result(
+                token,
+                request.attachment_id,
+                request.request_id,
+                TerminateExecutionResultCode::TerminationRequested,
+            ),
+            Err(_) => self.send_terminate_execution_result(
+                token,
+                request.attachment_id,
+                request.request_id,
+                TerminateExecutionResultCode::Error(ErrorCode::InvalidState),
+            ),
+        }
     }
 
     fn send_terminate_execution_result(
