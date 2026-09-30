@@ -13,6 +13,7 @@ pub mod chrome;
 pub mod composer;
 pub mod input_policy;
 pub mod keybinding;
+pub mod navigation;
 pub mod palette;
 pub mod pane_layout;
 pub mod presentation;

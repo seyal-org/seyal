@@ -219,7 +219,7 @@ action = "pane.focus_left"
 
 [[keybindings]]
 keys = "cmd+["
-action = "focus_history.back"
+action = "goto.open"
 "#;
     let table = load_keybinding_table(Some(toml));
     assert!(
@@ -390,11 +390,19 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     .expect("ctrl+r composer history-search");
     assert_eq!(history.context, BindingContext::COMPOSER);
 
-    // Exclusions: ADR-021 pane focus/zoom, SPEC-022 navigation, ADR-018 window
+    // §5.5 focus-history rows (K8 history half)
+    let back = binding_for(&table, "cmd+[", WorkspaceCommandId::FocusHistoryBack)
+        .expect("cmd+[ focus_history.back");
+    assert_eq!(back.context, BindingContext::APP);
+    assert_eq!(back.source, BindingSource::Builtin);
+    let forward = binding_for(&table, "cmd+]", WorkspaceCommandId::FocusHistoryForward)
+        .expect("cmd+] focus_history.forward");
+    assert_eq!(forward.context, BindingContext::APP);
+    assert_eq!(forward.source, BindingSource::Builtin);
+
+    // Exclusions: ADR-021 pane focus/zoom, goto.open (N4), ADR-018 window
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
-    assert!(contexts_for(&table, "cmd+[").is_empty());
-    assert!(contexts_for(&table, "cmd+]").is_empty());
     assert!(contexts_for(&table, "cmd+shift+o").is_empty());
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
