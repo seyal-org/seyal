@@ -27,7 +27,7 @@ ADR-020.
 | 8 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `term_terminfo_present_colorterm_and_terminfo_dirs_absent` |
 | 9 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `osc7_and_pane_title_cannot_steer_cwd_or_program` |
 | 10 | `crates/seyal-runtime/src/launch_policy/tests.rs` → `policy_debug_redacts_program_path_and_env` |
-| 11 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `capability_unavailable_maps_before_spawn`; `crates/seyal-runtime/tests/launch_policy_create.rs` → `capability_unavailable_publishes_zero_executions` |
+| 11 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `capability_unavailable_still_composes_for_explicit_argv`; `crates/seyal-runtime/tests/launch_policy_create.rs` → `capability_unavailable_publishes_zero_executions` |
 | 12 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `developer_explicit_argv_is_not_profile_zero_command_spec`; `crates/seyal-runtime/tests/launch_policy_create.rs` → `developer_explicit_argv_still_creates_one_execution` |
 | 13 | `crates/seyal-runtime/src/shell_integration_policy.rs` → `user_zdotdir_bounds_omit_invalid_values_and_copy_valid` |
 | 14 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `locale_copies_only_lang_and_lc_ctype` |

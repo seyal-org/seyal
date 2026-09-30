@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     apply_post_policy, command_spec_from_policy, resolve, resolve_default_interactive,
-    AccountRecord, EmptyLocaleEnv, LaunchPolicyFailure, LaunchProfileIntent, LocaleEnv, PathProbe,
+    AccountRecord, EmptyLocaleEnv, LaunchProfileIntent, LocaleEnv, PathProbe,
     ResolveInputs, DEFAULT_PATH,
 };
 
@@ -288,9 +288,11 @@ fn osc7_and_pane_title_cannot_steer_cwd_or_program() {
     assert_eq!(out.policy.program(), Path::new("/bin/zsh"));
 }
 
-/// §12 item 11: CapabilityPolicy unavailable → CapabilityUnavailable, no spawn inputs.
+/// §12 items 11–12: unavailable CapabilityPolicy does not block compose;
+/// interactive create owns the `CapabilityUnavailable` gate (see
+/// `launch_policy_create::capability_unavailable_publishes_zero_executions`).
 #[test]
-fn capability_unavailable_maps_before_spawn() {
+fn capability_unavailable_still_composes_for_explicit_argv() {
     let dir = std::env::temp_dir().join(format!(
         "seyal-cap-missing-{}-{}",
         std::process::id(),
@@ -315,11 +317,10 @@ fn capability_unavailable_maps_before_spawn() {
         probe: &probe,
     })
     .expect("resolve");
-    let err = apply_post_policy(command_spec_from_policy(&out), &capability, None).unwrap_err();
-    assert!(matches!(
-        err,
-        crate::RuntimeError::LaunchPolicy(LaunchPolicyFailure::CapabilityUnavailable)
-    ));
+    let spec = apply_post_policy(command_spec_from_policy(&out), &capability, None)
+        .expect("compose must not gate CapabilityUnavailable");
+    assert_eq!(env_get(&spec, "TERM"), Some(OsStr::new(m001_term_name())));
+    assert_eq!(env_get(&spec, "TERMINFO"), Some(dir.as_os_str()));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
