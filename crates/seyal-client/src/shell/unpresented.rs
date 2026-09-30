@@ -66,14 +66,12 @@ impl ShellState {
         Ok(())
     }
 
-    pub(super) fn adopt_execution(
-        &mut self,
+    /// Fail-closed adopt predicates without mutating shell bindings.
+    pub(crate) fn validate_adopt_execution(
+        &self,
         pane_id: PaneId,
         execution: ExecutionId,
     ) -> Result<(), ShellError> {
-        // ADR-018 §8 invariant 4: already-bound rejects before catalog lookup so
-        // the typed reason stays `ExecutionAlreadyBound` even if the unpresented
-        // catalog was not refreshed after a concurrent bind.
         if self.execution_is_bound(execution) {
             return Err(ShellError::ExecutionAlreadyBound);
         }
@@ -84,10 +82,20 @@ impl ShellState {
         if pane_workspace != execution_workspace {
             return Err(ShellError::CrossWorkspaceAdopt);
         }
-        let pane = self.pane_mut(pane_id)?;
+        let pane = self.pane(pane_id)?;
         if pane.execution.is_some() {
             return Err(ShellError::ExecutionAlreadyBound);
         }
+        Ok(())
+    }
+
+    pub(super) fn adopt_execution(
+        &mut self,
+        pane_id: PaneId,
+        execution: ExecutionId,
+    ) -> Result<(), ShellError> {
+        self.validate_adopt_execution(pane_id, execution)?;
+        let pane = self.pane_mut(pane_id)?;
         pane.execution = Some(execution);
         self.unpresented.remove(&execution);
         Ok(())

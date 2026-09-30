@@ -181,3 +181,62 @@ fn close_actions_do_not_emit_terminate_execution() {
     assert!(root.snapshot().pending_effects.is_empty());
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
+
+#[test]
+fn palette_adopt_emits_attach_intent_without_binding() {
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let execution = ExecutionId::from_bytes([0xcd; 16]);
+    root.apply(AppAction::RecordUnpresented {
+        execution,
+        workspace,
+    })
+    .unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    assert!(root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .find(|item| item.id == pane)
+        .unwrap()
+        .execution
+        .is_none());
+
+    let fence = root.fence();
+    root.apply(AppAction::OpenPalette { fence }).unwrap();
+    root.apply(AppAction::SetPaletteQuery {
+        fence: root.fence(),
+        query: "Adopt Unpresented".to_owned(),
+    })
+    .unwrap();
+    root.apply(AppAction::RunPalette {
+        fence: root.fence(),
+    })
+    .unwrap();
+
+    assert_eq!(
+        root.snapshot().pending_effects,
+        vec![NativeEffect::RequestAdoptAttach { pane, execution }]
+    );
+    // Catalog and leaf binding unchanged — Adopt with evidence still works.
+    assert_eq!(root.live_unpresented(), vec![execution]);
+    assert!(root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .find(|item| item.id == pane)
+        .unwrap()
+        .execution
+        .is_none());
+
+    root.apply(AppAction::AckEffect).unwrap();
+    root.apply(AppAction::Adopt {
+        fence: root.fence(),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x44; 16])),
+    })
+    .expect("fenced adopt after attach intent");
+    assert!(root.live_unpresented().is_empty());
+    assert_eq!(root.snapshot().execution, Some(execution));
+}
