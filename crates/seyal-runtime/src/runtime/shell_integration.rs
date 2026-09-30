@@ -5,7 +5,7 @@
 //! `ShellIntegrationPolicy`; nothing here writes instrumentation to the PTY.
 
 #[cfg(target_os = "macos")]
-use seyal_exec::{CommandSpec, ShellIntegrationEvent};
+use seyal_exec::ShellIntegrationEvent;
 
 #[cfg(target_os = "macos")]
 use crate::command_block_timeline::{CommandBlockId, MAX_COMMAND_BYTES};
@@ -20,8 +20,6 @@ use super::integration_state::{BlockExit, Effect, IntegrationEvent, IntegrationS
 use super::Runtime;
 #[cfg(target_os = "macos")]
 use crate::local_ipc::framing::ComposerEligibility;
-#[cfg(target_os = "macos")]
-use crate::ShellIntegrationPolicy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(target_os = "macos")]
@@ -30,9 +28,11 @@ pub(super) enum ShellIntegrationMode {
     Unsupported,
 }
 
-#[cfg(target_os = "macos")]
-pub(super) fn shell_integration_mode(command: &CommandSpec) -> ShellIntegrationMode {
-    if ShellIntegrationPolicy::supports(command) {
+/// Test-only mirror of spawn-time mode selection from
+/// `compose_child_command` / `ShellIntegrationPolicy::supports`.
+#[cfg(all(test, target_os = "macos"))]
+fn shell_integration_mode(command: &seyal_exec::CommandSpec) -> ShellIntegrationMode {
+    if crate::ShellIntegrationPolicy::supports(command) {
         ShellIntegrationMode::ZshHook
     } else {
         ShellIntegrationMode::Unsupported
@@ -386,6 +386,7 @@ mod tests {
 
     #[test]
     fn only_zsh_is_block_capable_and_other_shells_remain_raw() {
+        use seyal_exec::CommandSpec;
         assert_eq!(
             shell_integration_mode(&CommandSpec::new("/bin/zsh")),
             ShellIntegrationMode::ZshHook
