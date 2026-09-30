@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use std::{num::NonZeroU64, path::Path, sync::Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -48,6 +49,7 @@ pub enum StoreError {
 
 pub struct AgentStore {
     pub(crate) conn: Mutex<Connection>,
+    pub(crate) writes_before_fault: AtomicU64,
 }
 
 impl AgentStore {
@@ -72,6 +74,7 @@ impl AgentStore {
         }
         Ok(Self {
             conn: Mutex::new(conn),
+            writes_before_fault: AtomicU64::new(u64::MAX),
         })
     }
 
@@ -84,6 +87,7 @@ impl AgentStore {
         if payload.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
+        self.gate_write()?;
         self.commit_insert(aggregate_id, kind, payload, true)
     }
 
@@ -100,6 +104,7 @@ impl AgentStore {
         if event_payload.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()
@@ -135,6 +140,7 @@ impl AgentStore {
         if payload.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()
@@ -337,6 +343,7 @@ impl AgentStore {
         run_id: crate::AgentRunId,
         bytes: &[u8],
     ) -> Result<u64, StoreError> {
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()

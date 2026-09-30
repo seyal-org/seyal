@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use rusqlite::params;
 
 use crate::{
@@ -143,6 +145,24 @@ impl AgentStore {
         Ok(records)
     }
 
+    /// The next `allowed` commits proceed. The following commit fails before
+    /// its transaction starts, so a refused write publishes nothing.
+    pub fn fail_after_writes(&self, allowed: u64) {
+        self.writes_before_fault.store(allowed, Ordering::Relaxed);
+    }
+
+    pub(crate) fn gate_write(&self) -> Result<(), StoreError> {
+        let remaining = self.writes_before_fault.load(Ordering::Relaxed);
+        if remaining == u64::MAX {
+            return Ok(());
+        }
+        if remaining == 0 {
+            return Err(StoreError::WriteFailed);
+        }
+        self.writes_before_fault.fetch_sub(1, Ordering::Relaxed);
+        Ok(())
+    }
+
     fn commit_identity(
         &self,
         sql: &str,
@@ -150,6 +170,7 @@ impl AgentStore {
         aggregate_id: AggregateId,
         payload: &[u8],
     ) -> Result<AggregateSequence, StoreError> {
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()

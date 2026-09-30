@@ -12,12 +12,13 @@ use std::{
 };
 
 use seyal_agent_backend::{AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep};
-use seyal_agent_core::WorkScopeKind;
+use seyal_agent_core::{BindingGeneration, WorkScopeKind};
 use seyal_agent_protocol::{
     decode_frame, decode_result, encode_command, encode_frame, encode_hello, AgentRunId,
     AggregateRef, AttemptId, ClientSessionId, Command, CommandError, CommandResult, FrameKind,
     Hello, ProtocolVersion, WorkItemId, WorkScopeId, ABSOLUTE_MAX_FRAME_SIZE,
 };
+use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence};
 
 #[test]
 fn standalone_path_survives_disconnect_and_restart() {
@@ -269,6 +270,286 @@ fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+fn observers_keep_independent_sequences_and_ignore_duplicate_observations() {
+    let dir = temp_dir("observers");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::DuplicateLast,
+            ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let run = client.replay(AggregateRef::AgentRun(started.run_id));
+        let scope_events = client.replay(AggregateRef::WorkScope(scope));
+        let item_events = client.replay(AggregateRef::WorkItem(item));
+        let attempt_events = client.replay(AggregateRef::Attempt(attempt));
+        (started, run, scope_events, item_events, attempt_events)
+    });
+    daemon.serve_one().unwrap();
+    let (started, run, scope_events, item_events, attempt_events) = client.join().unwrap();
+    assert_eq!(
+        started.event_count, 4,
+        "duplicate observation is not a second event"
+    );
+    assert_eq!(run, vec![1, 2, 3, 4]);
+    assert_eq!(scope_events, vec![1]);
+    assert_eq!(item_events, vec![1]);
+    assert_eq!(attempt_events, vec![1]);
+
+    let socket = daemon.socket_path();
+    let run_id = started.run_id;
+    let observer = thread::spawn(move || {
+        let mut client = TestClient::connect_with(&socket, vec![2]);
+        let replay = client.replay(AggregateRef::AgentRun(run_id));
+        let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
+        let create = client.command(&Command::CreateWorkScope {
+            session_id: client.session_id,
+            kind: WorkScopeKind::AdHoc,
+        });
+        (replay, snapshot.incorporated_through, create)
+    });
+    daemon.serve_one().unwrap();
+    let (replay, through, create) = observer.join().unwrap();
+    assert_eq!(replay, run);
+    assert_eq!(through, 4);
+    assert_eq!(create, CommandResult::Error(CommandError::Denied));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn replay_window_is_bounded_and_truncation_is_a_history_gap() {
+    let dir = temp_dir("gap");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect_window(&socket, 1);
+        let scope = client.create_work_scope(WorkScopeKind::Project);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let first = client.subscribe(AggregateRef::AgentRun(started.run_id), None);
+        let second = client.subscribe(AggregateRef::AgentRun(started.run_id), Some(1));
+        (started.run_id, first, second)
+    });
+    daemon.serve_one().unwrap();
+    let (run_id, first, second) = client.join().unwrap();
+    assert_eq!(sequences(first), vec![1]);
+    assert_eq!(sequences(second), vec![2]);
+
+    let aggregate = AggregateId::AgentRun(run_id);
+    AgentStore::open(dir.join("agent.db"))
+        .unwrap()
+        .drop_events_before(aggregate, AggregateSequence::from_raw(4).unwrap())
+        .unwrap();
+
+    let socket = daemon.socket_path();
+    let reader = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let gap = client.subscribe(AggregateRef::AgentRun(run_id), None);
+        let tail = client.subscribe(AggregateRef::AgentRun(run_id), Some(3));
+        (gap, tail)
+    });
+    daemon.serve_one().unwrap();
+    let (gap, tail) = reader.join().unwrap();
+    assert_eq!(
+        gap,
+        CommandResult::Gap {
+            requested_after: 1,
+            earliest_available: 4,
+            current_snapshot_sequence: Some(4),
+        }
+    );
+    assert_eq!(sequences(tail), vec![4]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn out_of_order_and_lost_observations_do_not_fabricate_termination() {
+    let dir = temp_dir("order");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![ScriptStep::EmitExact {
+            binding_generation: BindingGeneration::FIRST,
+            ordinal: 3,
+            kind: HostObservationKind::KnownSuccess,
+        }],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        client.command(&Command::StartAgentRun {
+            session_id: client.session_id,
+            attempt_id: attempt,
+        })
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(
+        client.join().unwrap(),
+        CommandResult::Error(CommandError::Failed)
+    );
+    let run_id = only_run(&dir);
+    let socket = daemon.socket_path();
+    let reader = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        (
+            client.read_run(run_id).2,
+            client.replay(AggregateRef::AgentRun(run_id)),
+        )
+    });
+    daemon.serve_one().unwrap();
+    let (liveness, replay) = reader.join().unwrap();
+    assert_eq!(liveness, 1);
+    assert_eq!(replay, vec![1]);
+    drop(daemon);
+
+    let lost_dir = temp_dir("lost");
+    let config = IntegrationConfig {
+        store_path: lost_dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::ObservationDisconnected),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&lost_dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        client.read_run(started.run_id).2
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(client.join().unwrap(), 4);
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(lost_dir);
+}
+
+#[test]
+fn persistence_fault_before_commit_does_not_publish_success() {
+    let dir = temp_dir("fault");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![ScriptStep::Emit(HostObservationKind::KnownSuccess)],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    daemon.fail_after_writes(4);
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        client.command(&Command::StartAgentRun {
+            session_id: client.session_id,
+            attempt_id: attempt,
+        })
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(
+        client.join().unwrap(),
+        CommandResult::Error(CommandError::Failed)
+    );
+    let run_id = only_run(&dir);
+    assert_eq!(
+        AgentStore::open(dir.join("agent.db"))
+            .unwrap()
+            .replay_after(AggregateId::AgentRun(run_id), None)
+            .unwrap()
+            .len(),
+        1
+    );
+    let socket = daemon.socket_path();
+    let reader = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        client.read_run(run_id).2
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(reader.join().unwrap(), 1);
+    drop(daemon);
+
+    let refused = temp_dir("refused");
+    let config = IntegrationConfig {
+        store_path: refused.join("agent.db"),
+        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&refused, config).unwrap();
+    daemon.fail_after_writes(0);
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        client.command(&Command::CreateWorkScope {
+            session_id: client.session_id,
+            kind: WorkScopeKind::Repository,
+        })
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(
+        client.join().unwrap(),
+        CommandResult::Error(CommandError::Failed)
+    );
+    assert!(AgentStore::open(refused.join("agent.db"))
+        .unwrap()
+        .work_scopes()
+        .unwrap()
+        .is_empty());
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(refused);
+}
+
+fn temp_dir(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "seyal-q-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
+fn only_run(dir: &Path) -> AgentRunId {
+    let runs = AgentStore::open(dir.join("agent.db"))
+        .unwrap()
+        .agent_runs()
+        .unwrap();
+    assert_eq!(runs.len(), 1);
+    runs[0].0
+}
+
+fn sequences(result: CommandResult) -> Vec<u64> {
+    match result {
+        CommandResult::Replay { events } => {
+            events.into_iter().map(|event| event.sequence).collect()
+        }
+        other => panic!("replay: {other:?}"),
+    }
+}
+
 struct TestClient {
     stream: UnixStream,
     session_id: ClientSessionId,
@@ -288,6 +569,20 @@ struct Snap {
 impl TestClient {
     fn connect(path: &Path) -> Self {
         Self::connect_with(path, vec![1, 2, 4])
+    }
+
+    fn connect_window(path: &Path, event_window: u32) -> Self {
+        let mut stream = handshake_with(path, event_window);
+        let session_id = match round_trip(
+            &mut stream,
+            &Command::OpenSession {
+                scopes: vec![1, 2, 4],
+            },
+        ) {
+            CommandResult::Opened { session_id } => session_id,
+            other => panic!("open session: {other:?}"),
+        };
+        Self { stream, session_id }
     }
 
     fn connect_with(path: &Path, scopes: Vec<u8>) -> Self {
@@ -397,19 +692,18 @@ impl TestClient {
     }
 
     fn replay(&mut self, aggregate: AggregateRef) -> Vec<u64> {
-        match round_trip(
+        sequences(self.subscribe(aggregate, None))
+    }
+
+    fn subscribe(&mut self, aggregate: AggregateRef, after: Option<u64>) -> CommandResult {
+        round_trip(
             &mut self.stream,
             &Command::Subscribe {
                 session_id: self.session_id,
                 aggregate,
-                after: None,
+                after,
             },
-        ) {
-            CommandResult::Replay { events } => {
-                events.into_iter().map(|event| event.sequence).collect()
-            }
-            other => panic!("replay: {other:?}"),
-        }
+        )
     }
 
     fn read_run(&mut self, run_id: AgentRunId) -> (u64, u64, u8) {
@@ -452,6 +746,10 @@ impl TestClient {
 }
 
 fn handshake(path: &Path) -> UnixStream {
+    handshake_with(path, 32)
+}
+
+fn handshake_with(path: &Path, event_window: u32) -> UnixStream {
     let mut stream = UnixStream::connect(path).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(2)))
@@ -462,7 +760,7 @@ fn handshake(path: &Path) -> UnixStream {
     let hello = Hello {
         supported_versions: vec![ProtocolVersion::V1],
         max_frame_size: 4096,
-        event_window: 32,
+        event_window,
         client_principal_evidence: Vec::new(),
     };
     let frame = encode_hello(&hello, ABSOLUTE_MAX_FRAME_SIZE).unwrap();

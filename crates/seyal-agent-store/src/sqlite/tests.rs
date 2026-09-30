@@ -248,6 +248,22 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
 }
 
 #[test]
+fn refused_write_publishes_no_event() {
+    let file = path("fault.db");
+    let store = AgentStore::open(&file).unwrap();
+    let aggregate = AggregateId::WorkItem(crate::WorkItemId::new());
+    store.fail_after_writes(0);
+    assert_eq!(
+        store.append_event(aggregate, 1, b"nope"),
+        Err(StoreError::WriteFailed)
+    );
+    assert!(store.replay_after(aggregate, None).unwrap().is_empty());
+    store.fail_after_writes(u64::MAX);
+    store.append_event(aggregate, 1, b"yes").unwrap();
+    assert_eq!(store.replay_after(aggregate, None).unwrap().len(), 1);
+}
+
+#[test]
 fn records_append_throughput_snapshot_latency_db_growth_and_recovery() {
     let file = path("measure.db");
     let opened = Instant::now();

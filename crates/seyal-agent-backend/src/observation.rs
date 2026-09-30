@@ -87,10 +87,32 @@ impl ObservationAuthority {
     }
 
     pub fn liveness(&self, run_id: AgentRunId) -> RunLiveness {
-        self.liveness
-            .get(&run_id)
-            .copied()
+        self.recorded_liveness(run_id)
             .unwrap_or(RunLiveness::ScriptedLive)
+    }
+
+    pub fn recorded_liveness(&self, run_id: AgentRunId) -> Option<RunLiveness> {
+        self.liveness.get(&run_id).copied()
+    }
+
+    /// Drop one accepted observation when its event did not commit.
+    pub fn undo_apply(
+        &mut self,
+        observation: &HostObservation,
+        previous_liveness: Option<RunLiveness>,
+        previous_effects: u64,
+    ) {
+        self.applied
+            .remove(&(observation.run_id, observation.ordinal));
+        match previous_liveness {
+            Some(liveness) => {
+                self.liveness.insert(observation.run_id, liveness);
+            }
+            None => {
+                self.liveness.remove(&observation.run_id);
+            }
+        }
+        self.effects_performed = previous_effects;
     }
 
     pub fn work_item_outcome(&self, _run_id: AgentRunId) -> WorkItemOutcome {

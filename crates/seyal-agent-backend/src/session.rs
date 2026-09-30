@@ -140,6 +140,10 @@ impl IntegrationService {
         })
     }
 
+    pub(crate) fn fail_after_writes(&self, allowed: u64) {
+        self.store.fail_after_writes(allowed);
+    }
+
     pub fn handle(
         &mut self,
         frame: Frame,
@@ -383,6 +387,8 @@ impl IntegrationService {
 
     fn commit_observation(&mut self, observation: HostObservation) -> Result<(), CommandError> {
         let before = self.authority.applied_count();
+        let previous_liveness = self.authority.recorded_liveness(observation.run_id);
+        let previous_effects = self.authority.effects_performed();
         self.authority.apply(observation.clone()).map_err(|error| {
             use crate::ObserveError;
             match error {
@@ -398,13 +404,19 @@ impl IntegrationService {
             return Ok(());
         }
         let payload = observation_payload(&observation);
-        self.store
+        if self
+            .store
             .append_event(
                 AggregateId::AgentRun(observation.run_id),
                 EVENT_OBSERVATION,
                 &payload,
             )
-            .map_err(|_| CommandError::Failed)?;
+            .is_err()
+        {
+            self.authority
+                .undo_apply(&observation, previous_liveness, previous_effects);
+            return Err(CommandError::Failed);
+        }
         Ok(())
     }
 

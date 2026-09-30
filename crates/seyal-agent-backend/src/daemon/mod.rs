@@ -159,6 +159,14 @@ impl AgentDaemon {
         self.instance_id
     }
 
+    /// Qualification fault: the next `allowed` store commits succeed, then
+    /// the following commit fails before its transaction starts.
+    pub fn fail_after_writes(&mut self, allowed: u64) {
+        if let Some(service) = self.integration.as_mut() {
+            service.fail_after_writes(allowed);
+        }
+    }
+
     pub fn socket_path(&self) -> PathBuf {
         self.directory.join(SOCKET_NAME)
     }
