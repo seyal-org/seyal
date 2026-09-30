@@ -64,6 +64,14 @@ impl fmt::Display for ShellError {
     }
 }
 
+/// Portable focus triple used by atomic navigation commit checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusCheckpoint {
+    pub active_workspace: WorkspaceId,
+    pub active_tab: TabId,
+    pub focused_pane: PaneId,
+}
+
 /// Typed host → Rust command. One action is one coarse transition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellAction {
@@ -230,6 +238,122 @@ impl ShellState {
 
     pub fn pane_execution(&self, pane: PaneId) -> Result<Option<ExecutionId>, ShellError> {
         Ok(self.pane(pane)?.execution)
+    }
+
+    /// Whether `id` is a current Workspace in this shell.
+    pub fn contains_workspace(&self, id: WorkspaceId) -> bool {
+        self.workspaces.iter().any(|workspace| workspace.id == id)
+    }
+
+    /// Owning Workspace of a current Tab, if any.
+    pub fn workspace_of_tab(&self, id: TabId) -> Option<WorkspaceId> {
+        self.workspaces
+            .iter()
+            .find_map(|workspace| workspace.tab(id).map(|_| workspace.id))
+    }
+
+    /// Owning Workspace and Tab of a current Pane, if any.
+    pub fn location_of_pane(&self, id: PaneId) -> Option<(WorkspaceId, TabId)> {
+        for workspace in &self.workspaces {
+            for tab in &workspace.tabs {
+                if tab.panes.contains_key(&id) {
+                    return Some((workspace.id, tab.id));
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether `pane` is currently a leaf of `tab` inside `workspace`.
+    pub fn tab_contains_leaf(&self, workspace: WorkspaceId, tab: TabId, pane: PaneId) -> bool {
+        self.workspaces
+            .iter()
+            .find(|item| item.id == workspace)
+            .and_then(|item| item.tab(tab))
+            .is_some_and(|item| item.root.contains_leaf(pane))
+    }
+
+    /// Every current Pane bound to `execution`, across all Workspaces and Tabs.
+    pub fn panes_bound_to(&self, execution: ExecutionId) -> Vec<(WorkspaceId, TabId, PaneId)> {
+        let mut bound = Vec::new();
+        for workspace in &self.workspaces {
+            for tab in &workspace.tabs {
+                for pane in tab.panes.values() {
+                    if pane.execution == Some(execution) {
+                        bound.push((workspace.id, tab.id, pane.id));
+                    }
+                }
+            }
+        }
+        bound
+    }
+
+    /// Current focus triple for equality / no-op checks (SPEC-022 R4.4).
+    pub fn focus_checkpoint(&self) -> FocusCheckpoint {
+        let snap = self.snapshot();
+        FocusCheckpoint {
+            active_workspace: snap.active_workspace,
+            active_tab: snap.active_tab,
+            focused_pane: snap.focused_pane,
+        }
+    }
+
+    /// Active Tab and focused Pane currently recorded for `workspace`.
+    pub fn workspace_focus(&self, workspace: WorkspaceId) -> Option<FocusCheckpoint> {
+        let workspace = self.workspace(workspace).ok()?;
+        let tab = workspace.tab(workspace.active_tab)?;
+        Some(FocusCheckpoint {
+            active_workspace: workspace.id,
+            active_tab: tab.id,
+            focused_pane: tab.focused,
+        })
+    }
+
+    /// Focused Pane of `tab` inside `workspace`, if that composition exists.
+    pub fn tab_focused_pane(&self, workspace: WorkspaceId, tab: TabId) -> Option<PaneId> {
+        self.workspace(workspace)
+            .ok()
+            .and_then(|item| item.tab(tab))
+            .map(|item| item.focused)
+    }
+
+    /// Atomically set Workspace + Tab + Pane focus. Validates composition
+    /// before any write so a failure leaves prior focus unchanged.
+    pub fn commit_focus(
+        &mut self,
+        workspace: WorkspaceId,
+        tab: TabId,
+        pane: PaneId,
+    ) -> Result<(), ShellError> {
+        if !self.contains_workspace(workspace) {
+            return Err(ShellError::UnknownWorkspace);
+        }
+        let Some(owner) = self.workspace_of_tab(tab) else {
+            return Err(ShellError::UnknownTab);
+        };
+        if owner != workspace {
+            return Err(ShellError::UnknownTab);
+        }
+        let Some((pane_workspace, pane_tab)) = self.location_of_pane(pane) else {
+            return Err(ShellError::UnknownPane);
+        };
+        if pane_workspace != workspace
+            || pane_tab != tab
+            || !self.tab_contains_leaf(workspace, tab, pane)
+        {
+            return Err(ShellError::UnknownPane);
+        }
+        self.active_workspace = workspace;
+        let workspace_mut = self.workspace_mut(workspace)?;
+        workspace_mut.active_tab = tab;
+        let tab_mut = workspace_mut
+            .tabs
+            .iter_mut()
+            .find(|item| item.id == tab)
+            .ok_or(ShellError::UnknownTab)?;
+        tab_mut.focused = pane;
+        self.last_error = None;
+        Ok(())
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {

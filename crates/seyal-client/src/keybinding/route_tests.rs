@@ -367,6 +367,44 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     ));
 }
 
+// --- §14 item 21: SPEC-022 focus-history bindings (history half) ---
+
+#[test]
+fn item21_cmd_brackets_match_focus_history_goto_still_unknown() {
+    let table = load_keybinding_table(None);
+    assert!(matches!(
+        route(&table, "cmd+[", BindingContext::APP, false),
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ..
+            }
+        }
+    ));
+    assert!(matches!(
+        route(&table, "cmd+]", BindingContext::APP, false),
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ..
+            }
+        }
+    ));
+    // goto.open stays gated (N4 / #1127).
+    assert!(WorkspaceCommandId::parse("goto.open").is_none());
+    assert!(contexts_for_keys(&table, "cmd+shift+o").is_empty());
+}
+
+fn contexts_for_keys(table: &KeybindingTable, keys: &str) -> Vec<BindingContext> {
+    let sequence = super::keys::parse_keys(keys).expect(keys);
+    table
+        .bindings
+        .iter()
+        .filter(|b| b.sequence == sequence)
+        .map(|b| b.context)
+        .collect()
+}
+
 // --- §14 item 20: composer history-search ---
 
 #[test]
