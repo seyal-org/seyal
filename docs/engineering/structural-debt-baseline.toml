@@ -46,9 +46,15 @@ reason = "Global command-palette reducer stays one cohesive open/filter/resolve 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 848
+issue = 1108
+reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1108 adds multi-window OrderFrontMakeKey emission and bounded-queue proofs beside the existing ApplicationRoot suite. Ceiling matches post-W3 LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/tests.rs"
+acknowledged_loc = 872
+issue = 1108
+reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot and native-effect projection proofs beside existing workspace/tab/pane coverage; further extraction would split one containment contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"

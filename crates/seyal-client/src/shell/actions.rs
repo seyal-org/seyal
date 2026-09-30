@@ -19,11 +19,19 @@ impl ShellState {
     }
 
     /// Make `window` product-active and refresh MRU / last_active_workspace.
+    ///
+    /// Emits [`ShellNativeEffect::OrderFrontMakeKey`] only when the
+    /// product-active Window actually changes (W3: keep the host effect
+    /// queue bounded under same-window selection).
     pub(super) fn activate_window(&mut self, window: WindowId) -> Result<(), ShellError> {
         let workspace_id = self
             .find_window(window)
             .map(|(_, workspace)| workspace.id)
             .ok_or(ShellError::UnknownWindow)?;
+        let previous_product = self
+            .workspace(self.active_workspace)
+            .ok()
+            .and_then(|workspace| workspace.active_window);
         let workspace = self.workspace_mut(workspace_id)?;
         if workspace.window(window).is_none() {
             return Err(ShellError::UnknownWindow);
@@ -32,7 +40,9 @@ impl ShellState {
         self.active_workspace = workspace_id;
         self.last_active_workspace = workspace_id;
         self.touch_mru(window);
-        self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        if previous_product != Some(window) {
+            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        }
         Ok(())
     }
 
