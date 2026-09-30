@@ -124,6 +124,9 @@ pub fn resolve(
             if !shell.contains_workspace(workspace) {
                 return Err(NavigationRejection::UnknownWorkspace);
             }
+            // Zero-Window Workspace → NotComposed (R3.2 / test 8b) is unrepresentable
+            // until the window slice (ADR-018 / N5) lands; that slice must add the check
+            // (no spawn, no ActivateWorkspace).
             Ok(ResolvedTarget::Workspace { workspace })
         }
         ResourceAddress::Tab { workspace, tab } => {
@@ -192,7 +195,17 @@ pub fn resolve(
                         pane,
                     })
                 }
-                _ => Err(NavigationRejection::AmbiguousTarget),
+                _ => {
+                    // R3.4 step 2: any unauthorized binding Workspace is
+                    // NavigationDenied, never AmbiguousTarget (test 13a(b)).
+                    if bound
+                        .iter()
+                        .any(|(workspace, _, _)| !principal.allows_workspace(*workspace))
+                    {
+                        return Err(NavigationRejection::NavigationDenied);
+                    }
+                    Err(NavigationRejection::AmbiguousTarget)
+                }
             }
         }
     }
