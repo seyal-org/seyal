@@ -15,8 +15,8 @@ use crate::{
 
 use super::{
     apply_post_policy, command_spec_from_policy, resolve, resolve_default_interactive,
-    AccountRecord, EmptyLocaleEnv, LaunchProfileIntent, LocaleEnv, PathProbe,
-    ResolveInputs, DEFAULT_PATH,
+    AccountRecord, EmptyLocaleEnv, LaunchProfileIntent, LocaleEnv, PathProbe, ResolveInputs,
+    DEFAULT_PATH,
 };
 
 #[derive(Default)]
