@@ -164,13 +164,16 @@ pub enum ShellAction {
     },
     SplitFocused {
         axis: SplitAxis,
+        containment_generation: u64,
     },
     SplitPane {
         id: PaneId,
         axis: SplitAxis,
+        containment_generation: u64,
     },
     ClosePane {
         id: PaneId,
+        containment_generation: u64,
     },
     FocusPane {
         id: PaneId,
@@ -182,11 +185,13 @@ pub enum ShellAction {
     SwapPanes {
         a: PaneId,
         b: PaneId,
+        containment_generation: u64,
     },
     MovePaneBeside {
         pane: PaneId,
         neighbor: PaneId,
         side: MoveSide,
+        containment_generation: u64,
     },
     FocusDirection {
         direction: FocusDirection,
@@ -444,21 +449,49 @@ impl ShellState {
             | ShellAction::MoveTabToWindow { .. }
             | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
             ShellAction::CloseTab { id } => self.close_tab(id),
-            ShellAction::SplitFocused { axis } => {
+            ShellAction::SplitFocused {
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
                 let focused = self.focused_pane_id()?;
                 self.split_pane(focused, axis).map(|_| ())
             }
-            ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
-            ShellAction::ClosePane { id } => self.close_pane(id),
+            ShellAction::SplitPane {
+                id,
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.split_pane(id, axis).map(|_| ())
+            }
+            ShellAction::ClosePane {
+                id,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.close_pane(id)
+            }
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::ZoomPane { id } => self.zoom_pane(id),
             ShellAction::Unzoom => self.unzoom(),
-            ShellAction::SwapPanes { a, b } => self.swap_panes(a, b),
+            ShellAction::SwapPanes {
+                a,
+                b,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.swap_panes(a, b)
+            }
             ShellAction::MovePaneBeside {
                 pane,
                 neighbor,
                 side,
-            } => self.move_pane_beside(pane, neighbor, side),
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.move_pane_beside(pane, neighbor, side)
+            }
             ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }

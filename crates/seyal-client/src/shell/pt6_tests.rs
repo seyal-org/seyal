@@ -162,7 +162,7 @@ fn grow_small_tree(shell: &mut ShellState, rng: &mut Lcg, target_leaves: usize) 
         let ids: Vec<_> = shell.snapshot().panes.iter().map(|p| p.id).collect();
         let id = *rng.pick(&ids);
         shell
-            .apply(ShellAction::SplitPane { id, axis })
+            .apply(ShellAction::SplitPane { id, axis, containment_generation: shell.containment_generation() })
             .expect("split while growing small tree");
     }
 }
@@ -267,7 +267,7 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
             let before_state = shell.clone();
             let before = before_state.snapshot();
             let _ = shell.take_effects();
-            match shell.apply(ShellAction::SwapPanes { a, b }) {
+            match shell.apply(ShellAction::SwapPanes { a, b, containment_generation: shell.containment_generation() }) {
                 Ok(()) => {
                     assert_eq!(pane_ids(&shell.snapshot()), pane_ids(&before));
                     assert_eq!(pane_bindings(&shell.snapshot()), pane_bindings(&before));
@@ -289,6 +289,7 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                 pane,
                 neighbor,
                 side,
+                containment_generation: shell.containment_generation(),
             }) {
                 Ok(()) => {
                     assert_eq!(pane_ids(&shell.snapshot()), pane_ids(&before));
@@ -379,7 +380,7 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
             let id = *rng.pick(&ids);
             let before_state = shell.clone();
             let leaf_count = ids.len();
-            match shell.apply(ShellAction::ClosePane { id }) {
+            match shell.apply(ShellAction::ClosePane { id, containment_generation: shell.containment_generation() }) {
                 Ok(()) => {
                     assert!(!shell.snapshot().panes.is_empty(), "P6: never zero leaves");
                     assert!(shell.snapshot().panes.len() < leaf_count);
@@ -403,6 +404,7 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                     ShellAction::SwapPanes {
                         a: stale,
                         b: ids[0],
+                        containment_generation: shell.containment_generation(),
                     },
                     false,
                 ),
@@ -411,12 +413,13 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                         pane: stale,
                         neighbor: ids[0],
                         side: MoveSide::Right,
+                        containment_generation: shell.containment_generation(),
                     },
                     false,
                 ),
                 2 => (ShellAction::ZoomPane { id: stale }, false),
                 3 => (ShellAction::FocusPane { id: stale }, false),
-                _ => (ShellAction::ClosePane { id: stale }, true),
+                _ => (ShellAction::ClosePane { id: stale, containment_generation: shell.containment_generation() }, true),
             };
             let err = shell.apply(action).expect_err("stale id must reject");
             // Close checks last-pane before unknown-id, so a stale close on a
@@ -437,6 +440,7 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                     pane: id,
                     neighbor: id,
                     side: MoveSide::Left,
+                    containment_generation: shell.containment_generation(),
                 })
                 .expect_err("self-move must reject");
             assert_eq!(err, ShellError::InvalidMoveTarget);
@@ -460,7 +464,7 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
             let _ = shell.apply(ShellAction::ZoomPane { id: zoom_id });
             let before_tree = shell.snapshot().tree.clone();
             let before_state = shell.clone();
-            match shell.apply(ShellAction::ClosePane { id: close_id }) {
+            match shell.apply(ShellAction::ClosePane { id: close_id, containment_generation: shell.containment_generation() }) {
                 Ok(()) => {
                     assert!(!shell.snapshot().panes.is_empty());
                     assert_ne!(shell.snapshot().tree, before_tree);
@@ -496,7 +500,7 @@ fn spec025_p1_generated_swap_and_move_preserve_ids_and_bindings() {
             let _ = shell.take_effects();
             if rng.next_u64().is_multiple_of(2) {
                 shell
-                    .apply(ShellAction::SwapPanes { a, b })
+                    .apply(ShellAction::SwapPanes { a, b, containment_generation: shell.containment_generation() })
                     .expect("swap on distinct leaves");
             } else {
                 let side = *rng.pick(&sides());
@@ -505,6 +509,7 @@ fn spec025_p1_generated_swap_and_move_preserve_ids_and_bindings() {
                         pane: a,
                         neighbor: b,
                         side,
+                        containment_generation: shell.containment_generation(),
                     })
                     .expect("move beside on distinct leaves");
             }
@@ -563,7 +568,7 @@ fn spec025_p4_generated_rejections_are_byte_identical_except_last_error() {
 
         let rejects: &[(ShellAction, ShellError)] = &[
             (
-                ShellAction::SwapPanes { a: id, b: id },
+                ShellAction::SwapPanes { a: id, b: id, containment_generation: shell.containment_generation() },
                 ShellError::InvalidMoveTarget,
             ),
             (
@@ -571,11 +576,12 @@ fn spec025_p4_generated_rejections_are_byte_identical_except_last_error() {
                     pane: id,
                     neighbor: id,
                     side: MoveSide::Right,
+                    containment_generation: shell.containment_generation(),
                 },
                 ShellError::InvalidMoveTarget,
             ),
             (
-                ShellAction::SwapPanes { a: stale, b: id },
+                ShellAction::SwapPanes { a: stale, b: id, containment_generation: shell.containment_generation() },
                 ShellError::UnknownPane,
             ),
             (ShellAction::ZoomPane { id: stale }, ShellError::UnknownPane),
@@ -584,7 +590,7 @@ fn spec025_p4_generated_rejections_are_byte_identical_except_last_error() {
                 ShellError::UnknownPane,
             ),
             (
-                ShellAction::ClosePane { id: stale },
+                ShellAction::ClosePane { id: stale, containment_generation: shell.containment_generation() },
                 ShellError::UnknownPane,
             ),
             (ShellAction::Unzoom, ShellError::NotZoomed),
@@ -668,7 +674,7 @@ fn spec025_p6_close_never_yields_zero_leaves() {
             let id = *rng.pick(&ids);
             let before = shell.clone();
             let count = shell.snapshot().panes.len();
-            match shell.apply(ShellAction::ClosePane { id }) {
+            match shell.apply(ShellAction::ClosePane { id, containment_generation: shell.containment_generation() }) {
                 Ok(()) => {
                     assert!(!shell.snapshot().panes.is_empty());
                     assert_eq!(shell.snapshot().panes.len(), count - 1);
@@ -689,7 +695,7 @@ fn spec025_p6_close_never_yields_zero_leaves() {
                 let only = shell.snapshot().focused_pane;
                 let before = shell.clone();
                 assert_eq!(
-                    shell.apply(ShellAction::ClosePane { id: only }),
+                    shell.apply(ShellAction::ClosePane { id: only, containment_generation: shell.containment_generation() }),
                     Err(ShellError::CannotCloseLastPane)
                 );
                 assert_rejection_byte_identical(&before, &shell, ShellError::CannotCloseLastPane);
@@ -751,11 +757,12 @@ fn spec025_p8_move_swap_zoom_focus_emit_no_terminate_or_provision() {
     let (a, b) = (ids[0], ids[1]);
 
     let actions = [
-        ShellAction::SwapPanes { a, b },
+        ShellAction::SwapPanes { a, b, containment_generation: shell.containment_generation() },
         ShellAction::MovePaneBeside {
             pane: a,
             neighbor: b,
             side: MoveSide::Below,
+            containment_generation: shell.containment_generation(),
         },
         ShellAction::ZoomPane { id: a },
         ShellAction::Unzoom,
