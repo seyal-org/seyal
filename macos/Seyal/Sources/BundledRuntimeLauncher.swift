@@ -256,13 +256,15 @@ final class BundledRuntimeLauncher {
     static func helperArgv(
       executable: String,
       processArguments: [String] = ProcessInfo.processInfo.arguments,
-      testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil
+      testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil,
+      forwardHelperCommand: Bool = false
     ) -> [String] {
       var argv = [executable]
       argv.append(
         contentsOf: IsolatedRuntimeDirectory.helperArguments(
           from: processArguments,
-          testHostLoaded: testHostLoaded
+          testHostLoaded: testHostLoaded,
+          forwardHelperCommand: forwardHelperCommand
         )
       )
       return argv
@@ -300,7 +302,13 @@ final class BundledRuntimeLauncher {
     else { throw BundledRuntimeLaunchError.launchDenied }
 
     let executable = helperURL.path
-    var arguments: [UnsafeMutablePointer<CChar>?] = helperArgv(executable: executable)
+    // XCUI's Seyal.app does not link XCTest. The configuration-file variable
+    // is how that launch is distinguished from a production argv.
+    let launchedByUITest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    var arguments: [UnsafeMutablePointer<CChar>?] = helperArgv(
+      executable: executable,
+      forwardHelperCommand: launchedByUITest
+    )
       .map { strdup($0) as UnsafeMutablePointer<CChar>? }
     arguments.append(nil)
     var environmentPointers = environment

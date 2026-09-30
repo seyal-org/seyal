@@ -28,17 +28,20 @@ enum IsolatedRuntimeDirectory {
 
   static func helperArguments(
     from arguments: [String] = ProcessInfo.processInfo.arguments,
-    testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil
+    testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil,
+    forwardHelperCommand: Bool = false
   ) -> [String] {
     guard let directory = selectedDirectory(from: arguments, testHostLoaded: testHostLoaded)
     else {
       return []
     }
     var forwarded = [flag, directory]
-    // Helper-command tokens after `--runtime-dir PATH` are test-host only.
     // Production Seyal.app must not accept a Runtime command from app argv.
-    // Headed Flow XCUI passes `/bin/zsh` because a bash account shell is Raw.
-    if testHostLoaded, let index = arguments.firstIndex(of: flag) {
+    // The unit-test host loads XCTest. Headed XCUI launches a separate app
+    // that does not, so the launcher opts in with `forwardHelperCommand`
+    // when `XCTestConfigurationFilePath` is set. Flow tests pass `/bin/zsh`
+    // because a bash account shell is full-pane Raw.
+    if testHostLoaded || forwardHelperCommand, let index = arguments.firstIndex(of: flag) {
       let valueIndex = arguments.index(after: index)
       if valueIndex < arguments.endIndex {
         let commandStart = arguments.index(after: valueIndex)
