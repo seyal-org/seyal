@@ -11,13 +11,19 @@
 pub mod app;
 pub mod chrome;
 pub mod composer;
+pub mod goto;
 pub mod input_policy;
+pub mod keybinding;
+pub mod navigation;
 pub mod palette;
 pub mod pane_layout;
 pub mod presentation;
 pub mod recovery;
 pub mod shell;
 pub mod theme;
+
+#[cfg(test)]
+mod goto_tests;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod block_cache;

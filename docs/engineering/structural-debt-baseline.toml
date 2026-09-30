@@ -34,21 +34,21 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 747
-issue = 923
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs."
+acknowledged_loc = 812
+issue = 1118
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1118 adds Goto Open/Scope/Query/Move/Run/Close/CycleScope action variants and the goto snapshot field while goto_apply.rs owns the reducer. N2 Navigate/RunPalette growth is included in this ceiling."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 993
+issue = 1118
+reason = "N2 navigate/palette address tests already landed this suite in the cohesion band; #1118 does not grow the file (goto coverage lives in goto_tests.rs). Ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 919
-issue = 923
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. Snapshot-call metering is cfg(test) thread-local state in visual.rs and is not part of this façade. #923 adds only the pane_region module declaration/re-export and the CannotCloseBoundPane error number; the export itself lives in pane_region.rs."
+acknowledged_loc = 985
+issue = 1118
+reason = "Published C ABI entry points stay one thin façade; #1118 adds goto overlay flags (GOTO/TRUNCATED), scope in reserved, placeholder copy projection, and error numbers 44–46. Product decode for OpenGoto/SetGotoScope/CycleScope lives in decode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -96,8 +96,16 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
+# #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc as one cohesive navigation
+# test module (resolver rejections beside the Navigate commits they feed).
+[[exception]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+ceiling_loc = 1132
+issue = 1101
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it; further N3 history coverage lands in sibling history test modules."
+
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 738
+acknowledged_loc = 824
 issue = 1090
-reason = "Command palette query, rows, and run dispatch stay one reducer. #1090 threads window identity through that reducer; splitting the file would separate the row model from the command it runs."
+reason = "Command palette query, rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows and #1090 threads window identity through the same reducer; splitting the file would separate the row model from the command it runs."
