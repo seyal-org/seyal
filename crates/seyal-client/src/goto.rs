@@ -85,7 +85,9 @@ impl std::fmt::Display for GotoError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GotoAction {
-    Open { scope: GotoScope },
+    Open {
+        scope: GotoScope,
+    },
     SetScope(GotoScope),
     /// Advance to the next target-kind scope (Workspaces→Tabs→Panes→Sessions).
     CycleScope,

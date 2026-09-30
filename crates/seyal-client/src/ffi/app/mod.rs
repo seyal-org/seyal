@@ -823,7 +823,10 @@ pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
             5 => {
                 // Palette / goto placeholder is Rust-owned (ADR-015).
                 state.palette_placeholder = if snap.goto.open {
-                    snap.goto.scope.placeholder(snap.goto.truncated).into_bytes()
+                    snap.goto
+                        .scope
+                        .placeholder(snap.goto.truncated)
+                        .into_bytes()
                 } else if snap.palette.open {
                     b"Type a command...".to_vec()
                 } else {

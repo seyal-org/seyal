@@ -112,9 +112,10 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
             query.stringValue = text
         }
         let isGoto = palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0
+        let truncated = palette.flags & UInt16(SEYAL_APP_PALETTE_TRUNCATED) != 0
         if isGoto || open {
             let placeholder = seyal_app_copy(appHandle, UInt16(SEYAL_APP_COPY_PALETTE_PLACEHOLDER))
-            if let Some(text) = copyUTF8(placeholder.title, placeholder.title_len) {
+            if let text = copyUTF8(placeholder.title, placeholder.title_len) {
                 query.placeholderString = text
             }
         } else {

@@ -329,7 +329,8 @@ fn filter_sessions_scope_lists_only_executions() {
         .expect("bind");
     let mut goto = GotoState::new();
     open_scope(&mut goto, &shell, GotoScope::Sessions);
-    goto.apply(GotoAction::SetQuery("Shared".into()), 0).unwrap();
+    goto.apply(GotoAction::SetQuery("Shared".into()), 0)
+        .unwrap();
     goto.rebuild(&shell.navigation_inventory());
     let snap = goto.snapshot();
     assert_eq!(snap.rows.len(), 1);
@@ -386,10 +387,7 @@ fn cycle_scope_advances_in_rust_owned_order() {
     assert_eq!(goto.snapshot().scope, GotoScope::Sessions);
     goto.apply(GotoAction::CycleScope, 0).unwrap();
     assert_eq!(goto.snapshot().scope, GotoScope::Workspaces);
-    assert_eq!(
-        GotoScope::Panes.placeholder(false),
-        "Go to Panes…"
-    );
+    assert_eq!(GotoScope::Panes.placeholder(false), "Go to Panes…");
     assert_eq!(
         GotoScope::Sessions.placeholder(true),
         "Go to Sessions (truncated)…"

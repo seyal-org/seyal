@@ -301,7 +301,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                     scope: decode_goto_scope(action.reserved)?,
                 })
             }
-        },
+        }
         _ => Err(-6),
     }
 }
