@@ -5,15 +5,18 @@
 
 mod decode;
 mod encode;
+mod error_code;
 mod pane_region;
 mod visual;
+
+use error_code::error_number;
 
 #[cfg(test)]
 mod tests;
 
 use std::{cell::RefCell, collections::HashMap, ptr};
 
-use crate::app::{AppError, ApplicationRoot, APP_ABI_VERSION};
+use crate::app::{ApplicationRoot, APP_ABI_VERSION};
 use crate::chrome::{InspectorMode, LeftPanelMode};
 use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
@@ -206,6 +209,8 @@ impl SeyalAppPalette {
 
 const PALETTE_OPEN: u16 = 1;
 
+/// One projected row. Optional `ResourceAddress` fields are set for palette
+/// navigation rows (SPEC-022 R7.2); `address_len == 0` means no address.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SeyalAppRow {
@@ -220,6 +225,11 @@ pub struct SeyalAppRow {
     pub detail: *const u8,
     pub detail_len: u32,
     pub reserved2: u32,
+    pub address_version: u16,
+    pub address_kind: u16,
+    pub address_len: u16,
+    pub address_pad: u16,
+    pub address_bytes: [u8; 48],
 }
 
 impl SeyalAppRow {
@@ -236,6 +246,11 @@ impl SeyalAppRow {
             detail: ptr::null(),
             detail_len: 0,
             reserved2: 0,
+            address_version: 0,
+            address_kind: 0,
+            address_len: 0,
+            address_pad: 0,
+            address_bytes: [0; 48],
         }
     }
 }
@@ -858,6 +873,11 @@ pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
         detail: ptr::null(),
         detail_len: 0,
         reserved2: 0,
+        address_version: 0,
+        address_kind: 0,
+        address_len: 0,
+        address_pad: 0,
+        address_bytes: [0; 48],
     }
 }
 
@@ -934,44 +954,5 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(Some(id16(lo, hi)?))
     } else {
         Ok(None)
-    }
-}
-
-fn error_number(error: AppError) -> i32 {
-    match error {
-        AppError::UnknownPane => 1,
-        AppError::StalePane => 2,
-        AppError::StaleExecution => 3,
-        AppError::StaleAttachment => 4,
-        AppError::StaleController => 5,
-        AppError::StalePresentationEpoch => 6,
-        AppError::UnboundUnauthorized => 7,
-        AppError::AlreadyBound => 8,
-        AppError::NotController => 9,
-        AppError::DirectInputUnauthorized => 10,
-        AppError::ZeroPtyGeneration => 11,
-        AppError::Frozen => 12,
-        AppError::NoLiveClient => 13,
-        AppError::InvalidPayload => 14,
-        AppError::StaleRecoveryGeneration => 15,
-        AppError::ComposerSubmitDisabled => 16,
-        AppError::StaleComposerRequest => 17,
-        AppError::StaleComposerEpoch => 18,
-        AppError::UnknownAgent => 19,
-        AppError::UnknownAttention => 20,
-        AppError::UnknownChromeWorkspace => 21,
-        AppError::UnknownChromeTab => 22,
-        AppError::ComposerHistoryUnavailable => 23,
-        AppError::ComposerHistoryClosed => 24,
-        AppError::ComposerHistoryNoSelection => 25,
-        AppError::PaletteNotOpen => 26,
-        AppError::PaletteNoSelection => 27,
-        AppError::TabCreationUnavailable => 28,
-        AppError::PaneSplitUnavailable => 29,
-        AppError::UnknownBlock => 30,
-        AppError::CannotCloseLastTab => 31,
-        AppError::CannotCloseLastPane => 32,
-        AppError::CannotCloseBoundPane => 33,
-        AppError::ActionUnavailable => 34,
     }
 }

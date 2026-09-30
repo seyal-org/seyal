@@ -142,6 +142,21 @@ impl ApplicationRoot {
             WorkspaceCommandId::ComposerHistorySearchOpen => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
+            WorkspaceCommandId::FocusHistoryBack => {
+                // R5.5 / R6.8: FocusSeq from the same snapshot history committed.
+                let observed = self
+                    .snapshot()
+                    .focus_history_seq
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.history_back(observed)
+            }
+            WorkspaceCommandId::FocusHistoryForward => {
+                let observed = self
+                    .snapshot()
+                    .focus_history_seq
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.history_forward(observed)
+            }
             WorkspaceCommandId::AppQuit => self.quit(),
         }
     }

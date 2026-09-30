@@ -311,3 +311,63 @@ fn presentation_switch_clear_drops_prefix_without_dispatch() {
         crate::app::PresentationEligibility::Tui
     );
 }
+
+#[test]
+fn command_prefix_not_activated_while_composition_active() {
+    // R8.4: a Command multi-stroke must not begin a prefix wait during IME
+    // composition; completing composition by mouse must not leave a live wait.
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+b>n"
+action = "tab.create"
+context = ["app"]
+"#;
+    let table = load_keybinding_table(Some(toml));
+    let mut chord = ChordPrefixState::new();
+    let t0 = Instant::now();
+    let stroke = normalized_from_notation("cmd+b").expect("cmd+b");
+    let outcome = route_keystroke(&table, &stroke, flow(), true, &mut chord, t0);
+    assert_eq!(outcome, RouteOutcome::UnmatchedCommand);
+    assert!(
+        !chord.is_active(),
+        "composition must block Command prefix activation"
+    );
+
+    // Without composition, the same stroke opens the prefix.
+    let outcome = route_keystroke(&table, &stroke, flow(), false, &mut chord, t0);
+    assert_eq!(outcome, RouteOutcome::PrefixWait);
+    assert!(chord.is_active());
+}
+
+#[test]
+fn bind_clears_active_chord_prefix() {
+    use crate::app::{AppAction, ApplicationRoot, BindingEvidence};
+    use seyal_core::{AttachmentId, ExecutionId};
+
+    let mut root = ApplicationRoot::new();
+    let t0 = Instant::now();
+    root.chord_prefix.force_active_for_test(
+        vec![KeyStroke {
+            modifiers: Modifiers::CTRL,
+            key: KeySym::Char('b'),
+        }],
+        t0,
+    );
+    assert!(root.chord_prefix.is_active());
+
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([7; 16]),
+            attachment: AttachmentId::from_bytes([8; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .expect("bind");
+    assert!(
+        !root.chord_prefix.is_active(),
+        "bind/attach must clear chord prefix"
+    );
+}

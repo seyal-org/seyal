@@ -41,6 +41,8 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
+        self.clear_chord_prefix();
         Ok(())
     }
 
@@ -77,6 +79,8 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(registered);
+        // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
+        self.clear_chord_prefix();
         Ok(())
     }
 
@@ -167,6 +171,8 @@ impl ApplicationRoot {
         });
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();
+        // R8.4 / #1124: new bind/attach must not keep a prior chord prefix.
+        self.clear_chord_prefix();
         Ok(())
     }
 

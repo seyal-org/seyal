@@ -161,6 +161,11 @@ fn route_clean(
         if let Some(command) = match_single_stroke(table, stroke, route) {
             return RouteOutcome::Matched { command };
         }
+        // R8.4: never activate a Command prefix while composition is active —
+        // a later commit (e.g. candidate click) must not complete a stale wait.
+        if composition_active {
+            return RouteOutcome::UnmatchedCommand;
+        }
         // A Command stroke never opens a non-Command chord prefix.
         if let Some(prefix) = open_chord_prefix(table, stroke, route) {
             chord.activate(prefix, now);
