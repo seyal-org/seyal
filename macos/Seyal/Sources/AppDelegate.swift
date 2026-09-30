@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         // SPEC-024 §5.5 `goto.open` default: ⌘⇧O. Same overlay as the palette.
         gotoItem.keyEquivalentModifierMask = [.command, .shift]
-        gotoItem.target = host
+        gotoItem.target = host.liveHost
         viewMenu.addItem(gotoItem)
         viewItem.submenu = viewMenu
 

@@ -192,6 +192,9 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(source.contains("keyEquivalent: \"t\""))
         XCTAssertTrue(source.contains("[.command, .option]"))
         XCTAssertFalse(source.contains("keyDown"))
+        // N5: Go to… must target the ProductChromeHostView that implements openGoto.
+        XCTAssertTrue(source.contains("gotoItem.target = host.liveHost"))
+        XCTAssertFalse(source.contains("gotoItem.target = host\n"))
     }
 
     func testQuitWithThreeWindowsFollowsReplyRule() {
