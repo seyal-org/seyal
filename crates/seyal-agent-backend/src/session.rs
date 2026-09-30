@@ -15,7 +15,7 @@ use seyal_agent_protocol::{
     CommandError, CommandResult, Frame, FrameError, FrameKind, ReplayEvent, SnapshotView,
     MAX_EVENT_WINDOW,
 };
-use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError};
+use seyal_agent_store::{AgentStore, AggregateEventEnvelopeV1, AggregateId, AggregateSequence, StoreError};
 
 use crate::{
     AuthorizationError, AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation,
@@ -154,14 +154,19 @@ impl IntegrationService {
             CommandResult::Error(CommandError::Malformed)
         } else {
             match decode_command(&frame.body) {
-                Ok(command) => self.dispatch(command, event_window),
+                Ok(command) => self.dispatch(command, event_window, max_frame_size),
                 Err(_) => CommandResult::Error(CommandError::Malformed),
             }
         };
         encode_result(&result, max_frame_size).map_err(|_| ServiceError::Failed)
     }
 
-    fn dispatch(&mut self, command: Command, event_window: u32) -> CommandResult {
+    fn dispatch(
+        &mut self,
+        command: Command,
+        event_window: u32,
+        max_frame_size: u32,
+    ) -> CommandResult {
         match command {
             Command::OpenSession { scopes } => self.open_session(scopes),
             Command::ResumeSession { session_id } => self.resume_session(session_id),
@@ -188,7 +193,7 @@ impl IntegrationService {
                 session_id,
                 aggregate,
                 after,
-            } => self.subscribe(session_id, aggregate, after, event_window),
+            } => self.subscribe(session_id, aggregate, after, event_window, max_frame_size),
             Command::CheckGeneration {
                 session_id,
                 run_id,
@@ -329,6 +334,9 @@ impl IntegrationService {
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
         let control = ControlGeneration::FIRST;
+        // Persist the run before host observations. A later allow_run/host
+        // failure returns Failed even though the row remains for recovery
+        // (false failure, not false success).
         if self
             .store
             .mutate_agent_run_and_append(
@@ -446,6 +454,7 @@ impl IntegrationService {
         aggregate: AggregateRef,
         after: Option<u64>,
         event_window: u32,
+        max_frame_size: u32,
     ) -> CommandResult {
         if let Err(error) = self.authorize_observe(session_id, aggregate) {
             return CommandResult::Error(error);
@@ -459,18 +468,9 @@ impl IntegrationService {
         };
         let window = event_window.clamp(1, MAX_EVENT_WINDOW) as usize;
         match self.store.replay_after(to_aggregate(aggregate), after) {
-            Ok(events) => {
-                let events = events
-                    .into_iter()
-                    .take(window)
-                    .map(|event| ReplayEvent {
-                        sequence: event.sequence.get(),
-                        kind: event.kind,
-                        payload: event.payload,
-                    })
-                    .collect();
-                CommandResult::Replay { events }
-            }
+            Ok(events) => CommandResult::Replay {
+                events: fit_replay_events(events, window, max_frame_size),
+            },
             Err(StoreError::History(gap)) => CommandResult::Gap {
                 requested_after: gap.requested_after.get(),
                 earliest_available: gap.earliest_available.get(),
@@ -592,14 +592,51 @@ fn restore_identities(
             BindingGeneration::from_raw(run.binding_generation).ok_or(ServiceError::Failed)?;
         let control =
             ControlGeneration::from_raw(run.control_generation).ok_or(ServiceError::Failed)?;
-        authority
-            .restore_agent_run(id, run.attempt_id, binding, control)
-            .map_err(|_| ServiceError::Failed)?;
+        match authority.restore_agent_run(id, run.attempt_id, binding, control) {
+            Ok(()) => {}
+            Err(DomainError::UnknownAttempt(_)) => {
+                // Migrated/crash-recovered runs may lack WorkScope/WorkItem/
+                // Attempt parents. Quarantine the run as recoverable unknown
+                // liveness instead of refusing daemon startup.
+                authority
+                    .restore_orphaned_agent_run(id, run.attempt_id, binding, control)
+                    .map_err(|_| ServiceError::Failed)?;
+            }
+            Err(_) => return Err(ServiceError::Failed),
+        }
         authority.mark_recovered(id);
         auth.allow_run(principal_id, id)
             .map_err(|_| ServiceError::Failed)?;
     }
     Ok(())
+}
+
+/// Fill a Subscribe window only while the encoded Result frame fits.
+///
+/// The last included sequence is the continuation cursor for the next
+/// `Subscribe{after}` call. An empty window means either no events remain or
+/// the next single event cannot fit the negotiated frame size.
+fn fit_replay_events(
+    events: Vec<AggregateEventEnvelopeV1>,
+    window: usize,
+    max_frame_size: u32,
+) -> Vec<ReplayEvent> {
+    let mut selected = Vec::new();
+    for event in events.into_iter().take(window) {
+        selected.push(ReplayEvent {
+            sequence: event.sequence.get(),
+            kind: event.kind,
+            payload: event.payload,
+        });
+        let probe = CommandResult::Replay {
+            events: selected.clone(),
+        };
+        if encode_result(&probe, max_frame_size).is_err() {
+            selected.pop();
+            break;
+        }
+    }
+    selected
 }
 
 fn to_aggregate(aggregate: AggregateRef) -> AggregateId {

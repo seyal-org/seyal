@@ -15,9 +15,9 @@ use std::{
 use seyal_agent_backend::{AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep};
 use seyal_agent_core::{BindingGeneration, WorkScopeKind};
 use seyal_agent_protocol::{
-    decode_frame, decode_result, encode_command, encode_frame, encode_hello, AgentRunId,
-    AggregateRef, AttemptId, ClientSessionId, Command, CommandError, CommandResult, FrameKind,
-    Hello, ProtocolVersion, WorkItemId, WorkScopeId, ABSOLUTE_MAX_FRAME_SIZE,
+    decode_frame, decode_result, encode_command, encode_frame, encode_hello, encode_result,
+    AgentRunId, AggregateRef, AttemptId, ClientSessionId, Command, CommandError, CommandResult,
+    FrameKind, Hello, ProtocolVersion, WorkItemId, WorkScopeId, ABSOLUTE_MAX_FRAME_SIZE,
 };
 use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence};
 
@@ -523,6 +523,88 @@ fn persistence_fault_before_commit_does_not_publish_success() {
 }
 
 #[test]
+fn bind_integration_recovers_migrated_v2_orphan_run() {
+    let dir = temp_dir("v2-orphan");
+    let store_path = dir.join("agent.db");
+    write_populated_v2_store(&store_path);
+    let config = IntegrationConfig {
+        store_path: store_path.clone(),
+        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let prior_run = AgentRunId::from_bytes([9u8; 16]);
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let run = client.read_run(prior_run);
+        let replay = client.replay(AggregateRef::AgentRun(prior_run));
+        (run, replay)
+    });
+    daemon.serve_one().unwrap();
+    let (run, replay) = client.join().unwrap();
+    assert_eq!(run, (4, 5, 3));
+    assert_eq!(replay, vec![1]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn high_volume_subscribe_fits_frame_and_continues() {
+    const OUTPUT_BYTES: usize = 96 * 1024;
+    let dir = temp_dir("volume-sub");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Output(vec![9; OUTPUT_BYTES])),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect_limits(&socket, ABSOLUTE_MAX_FRAME_SIZE, 1024);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let mut after = None;
+        let mut sequences = Vec::new();
+        let mut pages = 0_u32;
+        loop {
+            match client.subscribe(AggregateRef::AgentRun(started.run_id), after) {
+                CommandResult::Replay { events } if events.is_empty() => break,
+                CommandResult::Replay { events } => {
+                    pages += 1;
+                    assert!(!events.is_empty());
+                    assert!(
+                        events.len() < started.event_count as usize,
+                        "byte budget must shrink the count window for high-volume runs"
+                    );
+                    let frame = encode_result(
+                        &CommandResult::Replay {
+                            events: events.clone(),
+                        },
+                        ABSOLUTE_MAX_FRAME_SIZE,
+                    )
+                    .expect("each page must encode under the negotiated frame size");
+                    assert!(frame.len() as u32 <= ABSOLUTE_MAX_FRAME_SIZE);
+                    after = Some(events.last().unwrap().sequence);
+                    sequences.extend(events.into_iter().map(|event| event.sequence));
+                }
+                other => panic!("subscribe: {other:?}"),
+            }
+        }
+        (started.event_count, pages, sequences)
+    });
+    daemon.serve_one().unwrap();
+    let (event_count, pages, sequences) = client.join().unwrap();
+    assert!(pages >= 2, "high-volume replay must page across frames");
+    assert_eq!(sequences.len() as u64, event_count);
+    assert!(sequences.windows(2).all(|pair| pair[1] == pair[0] + 1));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn records_session_startup_throughput_reconnect_and_storage_growth() {
     const OUTPUT_BYTES: usize = 32 * 1024;
     let dir = temp_dir("measure");
@@ -683,6 +765,97 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
             .unwrap()
             .as_nanos()
     ))
+}
+
+fn write_populated_v2_store(path: &Path) {
+    use rusqlite::{params, Connection};
+    use std::os::unix::fs::DirBuilderExt;
+    if let Some(parent) = path.parent() {
+        match fs::symlink_metadata(parent) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(parent)
+                    .unwrap();
+            }
+            Err(error) => panic!("create store parent: {error}"),
+        }
+    }
+    let conn = Connection::open(path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE aggregate_event (
+            aggregate_kind INTEGER NOT NULL,
+            aggregate_id BLOB NOT NULL,
+            sequence INTEGER NOT NULL,
+            event_id INTEGER NOT NULL,
+            kind INTEGER NOT NULL,
+            payload BLOB NOT NULL,
+            PRIMARY KEY (aggregate_kind, aggregate_id, sequence)
+        );
+        CREATE TABLE aggregate_snapshot (
+            aggregate_kind INTEGER NOT NULL,
+            aggregate_id BLOB NOT NULL,
+            incorporated_through INTEGER NOT NULL,
+            payload BLOB NOT NULL,
+            PRIMARY KEY (aggregate_kind, aggregate_id)
+        );
+        CREATE TABLE aggregate_sequence_hwm (
+            aggregate_kind INTEGER NOT NULL,
+            aggregate_id BLOB NOT NULL,
+            high_water INTEGER NOT NULL,
+            PRIMARY KEY (aggregate_kind, aggregate_id)
+        );
+        CREATE TABLE output_segment (
+            agent_run_id BLOB NOT NULL,
+            segment_index INTEGER NOT NULL,
+            payload BLOB NOT NULL,
+            PRIMARY KEY (agent_run_id, segment_index)
+        );
+        CREATE TABLE agent_run (
+            id BLOB PRIMARY KEY,
+            attempt_id BLOB NOT NULL,
+            binding_generation INTEGER NOT NULL,
+            control_generation INTEGER NOT NULL,
+            liveness TEXT NOT NULL CHECK (liveness = 'unknown')
+        );",
+    )
+    .unwrap();
+    let prior_run = [9u8; 16];
+    let prior_attempt = [8u8; 16];
+    conn.execute(
+        "INSERT INTO agent_run (id, attempt_id, binding_generation, control_generation, liveness)
+         VALUES (?1, ?2, 4, 5, 'unknown')",
+        params![prior_run.to_vec(), prior_attempt.to_vec()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO aggregate_event
+            (aggregate_kind, aggregate_id, sequence, event_id, kind, payload)
+         VALUES (4, ?1, 1, 1, 9, ?2)",
+        params![prior_run.to_vec(), b"kept".to_vec()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
+         VALUES (4, ?1, 1)",
+        params![prior_run.to_vec()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO aggregate_snapshot
+            (aggregate_kind, aggregate_id, incorporated_through, payload)
+         VALUES (4, ?1, 1, ?2)",
+        params![prior_run.to_vec(), b"snap".to_vec()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO output_segment (agent_run_id, segment_index, payload)
+         VALUES (?1, 0, ?2)",
+        params![prior_run.to_vec(), b"seg".to_vec()],
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 2).unwrap();
 }
 
 fn only_run(dir: &Path) -> AgentRunId {

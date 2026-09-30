@@ -15,5 +15,8 @@ seyal-agent-store = { path = "../seyal-agent-store" }
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.189"
 
+[dev-dependencies]
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+
 [lints.rust]
 unsafe_code = "deny"

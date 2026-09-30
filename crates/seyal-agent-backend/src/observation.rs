@@ -82,6 +82,21 @@ impl ObservationAuthority {
             .restore_agent_run(id, attempt_id, binding_generation, control_generation)
     }
 
+    pub fn restore_orphaned_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_orphaned_agent_run(
+            id,
+            attempt_id,
+            binding_generation,
+            control_generation,
+        )
+    }
+
     pub fn mark_recovered(&mut self, run_id: AgentRunId) {
         self.set_liveness(run_id, RunLiveness::UnknownAfterCrash);
     }

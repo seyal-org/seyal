@@ -181,11 +181,18 @@ impl AgentDaemon {
     ///
     /// Disconnect does not drop backend authority. The domain, store, and
     /// open `ClientSession` remain for a later connection to this process.
+    /// Post-auth idle waits do not use the handshake read timeout, and a
+    /// command that fails to encode still returns `CommandError::Failed`
+    /// without dropping the `ClientSession`.
     pub fn serve_one(&mut self) -> Result<(), DaemonError> {
         if self.integration.is_none() {
             return Err(DaemonError::Unavailable);
         }
         let (mut stream, ack) = self.accept_stream()?;
+        // Handshake used `read_timeout`. Watching clients must not be dropped
+        // every handshake interval while waiting for the next command.
+        stream.set_read_timeout(None).map_err(|_| DaemonError::Io)?;
+        stream.set_write_timeout(None).map_err(|_| DaemonError::Io)?;
         let max_frame_size = ack.max_frame_size;
         let event_window = ack.event_window;
         let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
@@ -198,9 +205,16 @@ impl AgentDaemon {
                 crate::session::SessionRead::TimedOut => return Err(DaemonError::TimedOut),
                 crate::session::SessionRead::Io => return Err(DaemonError::Io),
             };
-            let response = service
-                .handle(frame, max_frame_size, event_window)
-                .map_err(|_| DaemonError::Unavailable)?;
+            let response = match service.handle(frame, max_frame_size, event_window) {
+                Ok(response) => response,
+                Err(_) => seyal_agent_protocol::encode_result(
+                    &seyal_agent_protocol::CommandResult::Error(
+                        seyal_agent_protocol::CommandError::Failed,
+                    ),
+                    max_frame_size,
+                )
+                .map_err(|_| DaemonError::Unavailable)?,
+            };
             stream.write_all(&response).map_err(map_io)?;
         }
     }

@@ -333,6 +333,39 @@ impl AgentDomain {
         if !self.attempts.contains_key(&attempt_id) {
             return Err(DomainError::UnknownAttempt(attempt_id));
         }
+        self.insert_restored_agent_run(id, attempt_id, binding_generation, control_generation)
+    }
+
+    /// Recover a persisted AgentRun whose Attempt parent is absent.
+    ///
+    /// Schema migrations and crash recovery may keep a run row after parents
+    /// were never written. The run stays readable with honest unknown
+    /// liveness; creating new work under the missing Attempt remains denied.
+    pub fn restore_orphaned_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: AttemptId,
+        binding_generation: BindingGeneration,
+        control_generation: ControlGeneration,
+    ) -> Result<(), DomainError> {
+        if self.attempts.contains_key(&attempt_id) {
+            return self.restore_agent_run(
+                id,
+                attempt_id,
+                binding_generation,
+                control_generation,
+            );
+        }
+        self.insert_restored_agent_run(id, attempt_id, binding_generation, control_generation)
+    }
+
+    fn insert_restored_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: AttemptId,
+        binding_generation: BindingGeneration,
+        control_generation: ControlGeneration,
+    ) -> Result<(), DomainError> {
         if let Some(existing) = self.agent_runs.get(&id) {
             return if existing.attempt_id == attempt_id
                 && existing.binding_generation == binding_generation
@@ -464,5 +497,35 @@ mod tests {
         assert_eq!(domain.work_item(item).unwrap().work_scope_id(), scope);
         assert_eq!(domain.attempt(attempt).unwrap().work_item_id(), item);
         assert_eq!(domain.agent_run(run).unwrap().attempt_id(), attempt);
+    }
+
+    #[test]
+    fn orphaned_agent_run_restores_without_parent_attempt() {
+        let mut domain = AgentDomain::new();
+        let run = AgentRunId::new();
+        let missing_attempt = AttemptId::new();
+        assert_eq!(
+            domain.restore_agent_run(
+                run,
+                missing_attempt,
+                BindingGeneration::FIRST,
+                ControlGeneration::FIRST,
+            ),
+            Err(DomainError::UnknownAttempt(missing_attempt))
+        );
+        domain
+            .restore_orphaned_agent_run(
+                run,
+                missing_attempt,
+                BindingGeneration::FIRST,
+                ControlGeneration::FIRST,
+            )
+            .unwrap();
+        assert_eq!(domain.agent_run(run).unwrap().attempt_id(), missing_attempt);
+        assert!(domain.attempt(missing_attempt).is_none());
+        assert_eq!(
+            domain.create_agent_run(missing_attempt),
+            Err(DomainError::UnknownAttempt(missing_attempt))
+        );
     }
 }
