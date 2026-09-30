@@ -69,12 +69,6 @@ issue = 1143
 reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; W3 multi-window ABI proofs on the #1108 base grew the suite to 779 LOC. #1143 ratchets acknowledged_loc to the measured size without further growth on this Issue."
 
 [[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 846
-issue = 1143
-reason = "Shell containment/W2a reducer suite stays one sibling tests module; W6 §3.3 coverage lives in shell/unpresented_tests.rs so this file is acknowledged at the post-W3 size without further growth on #1143."
-
-[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
 acknowledged_loc = 856
 issue = 1020
