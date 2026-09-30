@@ -5,6 +5,7 @@
 //! validated before allocation/use.
 
 mod envelope;
+mod execution;
 mod message;
 mod payload;
 
@@ -27,6 +28,12 @@ pub use envelope::{
     ErrorCode, FrameHeader, FramingError, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
     CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, CAP_VIEWPORT_LINE_IDS, HEADER_LEN, MAGIC, MAJOR,
     MAX_EXECUTION_LIST_ENTRIES, MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
+};
+
+pub use execution::{
+    CreateExecutionRequest, CreateExecutionResult, CreateExecutionResultCode,
+    TerminateExecutionRequest, TerminateExecutionResult, TerminateExecutionResultCode,
+    CAP_EXECUTION_PROVISIONING,
 };
 
 pub use message::{decode_message, encode_frame, Message, MessageType};
