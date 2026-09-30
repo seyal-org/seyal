@@ -164,7 +164,7 @@ Hierarchy lane
                                               └→ provisioning implementation → #936
   #1000 ADR-018 Accepted on merge of PR #1085 under #1000 (window/tab lifecycle); children not Ready
   #1004 ADR-019 / SPEC-022 Accepted on merge of PR #1084 under #1004
-  #1001 active (ADR-021/SPEC-025 Proposed via merged #1053) → acceptance before PaneTree op children
+  #1001 ADR-021 / SPEC-025 Accepted on merge of PR #1086 under #1001; PaneTree op children still wait on the Ready gate
 
 Presentation lane
   #865 active under @mahboobmonnamd / PR #1058 (legacy-ref migration pending) → #866 → #867 → #868 → #869
@@ -175,7 +175,7 @@ Presentation lane
 
 Configuration lane
   #993 active under @anulalbs / PR #1006
-  #1002 active under @mahboobmonnamd / PR #1051 (keybinding schema)
+  #1002 SPEC-024 Accepted on merge of PR #1087 under #1002 (keybinding schema)
   #1003 active under @mahboobmonnamd / PR #1050 (startup shell/env/CWD)
 
 Shell-metadata decision
@@ -184,7 +184,7 @@ Shell-metadata decision
     only gates behavior that still needs that remaining contract work
 ```
 
-#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (merged #1053; open #1051 / #1050) and are not available for pickup. #1005 is Done on `master` via #1052. #994 (ADR-017 Accepted on merge of PR #1088) and #1000 (ADR-018 Accepted on merge of PR #1085 under #1000; children not Ready) are not available for pickup; #1004 (ADR-019 / SPEC-022 Accepted on merge of PR #1084 under #1004; not an implemented-behavior claim) is not available for pickup; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is owned by @mahboobmonnamd with implementation PR #1058 open; its legacy `issue/865` / `cursor/live-tail-865-c8cd` refs still await migration to `mahboobmonnamd/issue/865`, and it is not available for pickup. #1010 / #1041 are owned by @crdileep82 (open PRs noted above). #1036 is owned by @mahboobmonnamd via PR #1031. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
+#993 is already active under @anulalbs / PR #1006 and is not available for pickup. #1001 / #1002 / #1003 are active under @mahboobmonnamd (ADR-021 on PR #1086; SPEC-024 on PR #1087; ADR-020 on PR #1089) and are not available for pickup. #1005 is Done on `master` via #1052. #994 (ADR-017 Accepted on merge of PR #1088) and #1000 (ADR-018 Accepted on merge of PR #1085 under #1000; children not Ready) are not available for pickup; #1004 (ADR-019 / SPEC-022 Accepted on merge of PR #1084 under #1004; not an implemented-behavior claim) is not available for pickup; #686 remains active under @mahboobmonnamd with the duration amendment already accepted via merged #1022. #865 is owned by @mahboobmonnamd with implementation PR #1058 open; its legacy `issue/865` / `cursor/live-tail-865-c8cd` refs still await migration to `mahboobmonnamd/issue/865`, and it is not available for pickup. #1010 / #1041 are owned by @crdileep82 (open PRs noted above). #1036 is owned by @mahboobmonnamd via PR #1031. None may edit M002 terminal-state/VT/Unicode/reflow authorities. #923 does not wait for #922 merge; it waits only until #922 publishes a refreshed, consumable action/snapshot head that can be used as the stack base. #936 cannot absorb or invent the execution-provisioning protocol; that boundary is owned by #994 and its eventual accepted implementation child.
 
 Contributor ownership follows #997 / merged PR #998: work remains human-owned, with agents as delegated tools/co-authors. #989 / PR #990 were closed as superseded. New branches use the human owner's namespace per the merged `ISSUE-PROTOCOL.md`.
 
@@ -201,8 +201,8 @@ Current contributor-ready M003 work is maintained in #999. Repeated references b
 - #1004 — standard — human owner @mahboobmonnamd; ADR-019 / SPEC-022 Accepted on merge of PR #1084 under #1004, by a non-author maintainer (not an implemented-behavior claim); not available for pickup.
 - #865 — advanced/core — human owner @mahboobmonnamd; Flow live-tail implementation PR #1058 open on legacy `issue/865` pending migration to `mahboobmonnamd/issue/865`, not available for pickup.
 - #993 — standard — human owner @anulalbs; production config/theme/font startup implementation in PR #1006, not available for pickup.
-- #1001 — standard — human owner @mahboobmonnamd; ADR-021 / SPEC-025 Proposed on `master` via merged #1053; remaining acceptance/DoD still open; not available for pickup.
-- #1002 — standard — human owner @mahboobmonnamd; keybinding/chord schema refinement in open PR #1051, not available for pickup.
+- #1001 — standard — human owner @mahboobmonnamd; ADR-021 / SPEC-025 Accepted on merge of PR #1086 under #1001, by a non-author maintainer (not an implemented-behavior claim); children are not Ready and not available for pickup.
+- #1002 — standard — human owner @mahboobmonnamd; SPEC-024 Accepted on merge of PR #1087 under #1002, by a non-author maintainer (not an implemented-behavior claim); not available for pickup.
 - #1003 — advanced/core — human owner @mahboobmonnamd; startup shell/environment/CWD launch-policy refinement in open PR #1050, not available for pickup.
 - #686 — advanced/core — human owner @mahboobmonnamd; ADR-009 duration amendment accepted on `master` via merged #1022; remaining open work is SPEC-008 alignment, unchecked spike acceptance, and any follow-on implementation-Issue refinement — not available for pickup.
 
@@ -268,7 +268,7 @@ The pane/tab execution provisioning seam required by that decomposition is refin
 
 The window/tab half of that missing contract is refined by #1000: [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md) (**Accepted** on merge of PR #1085 under #1000, by a non-author maintainer; not an implemented-behavior claim) with child decomposition in [`../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md`](../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md). A child must not code window/tab lifecycle behavior before ADR-018 acceptance, and acceptance here does not make any child Ready.
 
-The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 **Accepted** on merge of PR #1084 under #1004). Window/tab lifecycle is ADR-018 **Accepted** on merge of PR #1085 under #1000 (not an implemented-behavior claim). Execution provisioning is ADR-017 **Accepted** on merge of PR #1088 under #994. ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
+The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001: [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Accepted** on merge of PR #1086 under #1001, by a non-author maintainer; not an implemented-behavior claim) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 **Accepted** on merge of PR #1084 under #1004). Window/tab lifecycle is ADR-018 **Accepted** on merge of PR #1085 under #1000 (not an implemented-behavior claim). Execution provisioning is ADR-017 **Accepted** on merge of PR #1088 under #994. A child must not code PaneTree operation behavior before ADR-021 acceptance, and acceptance here does not make any child Ready.
 
 ### 6.3 #923 — split-tree projection after #922
 
@@ -284,7 +284,7 @@ Blocks, composer, Raw, and TUI are projections of one `TerminalExecution`. Do no
 
 ### 6.6 #676 / #993 — configuration frontier
 
-#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is now active under @anulalbs / PR #1006: it wires those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. Keybinding/chord schema (#1002 / open PR #1051) and startup shell/env/CWD launch policy (#1003 / open PR #1050) are already active under @mahboobmonnamd; do not duplicate them or implement #676 wholesale.
+#740 already owns Rust TOML/theme/config semantics. #993 is the first M003 production child and is now active under @anulalbs / PR #1006: it wires those existing semantics into actual app startup and thin-host visual realization. It is intentionally independent from #922/#923. Keybinding/chord schema (#1002 / SPEC-024 accepted on merge of PR #1087) and startup shell/env/CWD launch policy (#1003 / ADR-020 accepted on merge of PR #1089) are already active under @mahboobmonnamd; do not duplicate them or implement #676 wholesale.
 
 ### 6.7 #994 — execution provisioning before #936
 
