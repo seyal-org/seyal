@@ -56,7 +56,7 @@ fn seed_two_workspaces() -> ShellState {
 }
 
 #[test]
-fn production_shell_allows_tab_creation_and_keeps_splits_fail_closed() {
+fn production_shell_keeps_tab_creation_gated_until_wire_driver_and_splits_fail_closed() {
     let mut shell = ShellState::m001_local("/tmp/seyal");
     let snap = shell.snapshot();
     assert_eq!(snap.workspaces.len(), 1);
@@ -66,13 +66,16 @@ fn production_shell_allows_tab_creation_and_keeps_splits_fail_closed() {
     assert_eq!(snap.panes.len(), 1);
     assert_eq!(snap.panes[0].title, "Pane 1");
     assert!(snap.panes[0].allows_implicit_bootstrap);
-    assert!(shell.allows_tab_creation());
+    // Production stays gated until create→attach→bind has a live driver (#1159 review).
+    assert!(!shell.allows_tab_creation());
     assert!(!shell.allows_pane_splitting());
     assert!(!snap.allows_tab_close);
     assert!(!snap.allows_pane_close);
-    shell.apply(ShellAction::CreateTab).expect("tabs allowed");
-    assert_eq!(shell.snapshot().tabs.len(), 2);
-    assert!(shell.snapshot().allows_tab_close);
+    assert_eq!(
+        shell.apply(ShellAction::CreateTab),
+        Err(ShellError::TabCreationUnavailable)
+    );
+    assert_eq!(shell.snapshot().tabs.len(), 1);
     let focused = shell.snapshot().focused_pane;
     assert_eq!(
         shell.apply(ShellAction::SplitPane {

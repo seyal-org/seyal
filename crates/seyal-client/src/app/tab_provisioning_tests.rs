@@ -66,6 +66,7 @@ fn drive_create_tab_to_bound(root: &mut ApplicationRoot, execution: ExecutionId)
 #[test]
 fn create_tab_admits_type_36_with_session_request_id() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     root.apply(AppAction::CreateTab).unwrap();
@@ -90,10 +91,11 @@ fn create_tab_admits_type_36_with_session_request_id() {
 }
 
 #[test]
-fn production_composition_allows_tab_creation_not_pane_splitting() {
+fn production_composition_keeps_tab_creation_gated_and_splits_fail_closed() {
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
-    assert!(snap.shell.allows_tab_creation);
+    // Keep production gated until the wire create→attach→bind driver is live.
+    assert!(!snap.shell.allows_tab_creation);
     assert!(!snap.shell.allows_pane_splitting);
     assert_eq!(
         root.apply(AppAction::SplitFocused {
@@ -106,6 +108,7 @@ fn production_composition_allows_tab_creation_not_pane_splitting() {
 #[test]
 fn n_created_tabs_produce_n_distinct_execution_bindings() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     let mut executions = Vec::new();
@@ -138,6 +141,7 @@ fn n_created_tabs_produce_n_distinct_execution_bindings() {
 #[test]
 fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     drive_create_tab_to_bound(&mut root, exec(0xA1));
@@ -164,6 +168,7 @@ fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
 #[test]
 fn explicit_terminate_is_distinct_from_removing_chrome() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     drive_create_tab_to_bound(&mut root, exec(0x71));
@@ -203,6 +208,7 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
 #[test]
 fn newly_bound_pane_keeps_spec_008_presentation_fence() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     drive_create_tab_to_bound(&mut root, exec(0xF1));
@@ -240,6 +246,7 @@ fn newly_bound_pane_keeps_spec_008_presentation_fence() {
 #[test]
 fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     root.apply(AppAction::CreateTab).unwrap();
@@ -276,6 +283,7 @@ fn capacity_exceeded_create_is_bounded_failure_without_retry_or_bind() {
 #[test]
 fn create_tab_does_not_block_with_fixed_frequency_retry() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.install_wire_client(negotiated_provisioning_client())
         .unwrap();
     root.apply(AppAction::CreateTab).unwrap();
@@ -293,6 +301,7 @@ fn create_tab_does_not_block_with_fixed_frequency_retry() {
 #[test]
 fn palette_lists_new_tab_under_production_policy() {
     let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
     root.apply(AppAction::OpenPalette {
         fence: root.fence(),
     })

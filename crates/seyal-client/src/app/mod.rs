@@ -390,6 +390,13 @@ impl ApplicationRoot {
         Self::with_shell(ShellState::m001_local("local"))
     }
 
+    /// Test-only: enable CreateTab while production `m001_local` stays gated
+    /// until the live create→attach→bind driver exists (#1149 / #1159).
+    #[cfg(test)]
+    pub(crate) fn enable_tab_creation_for_test(&mut self) {
+        self.shell.set_allows_tab_creation_for_test(true);
+    }
+
     pub(crate) fn with_shell(shell: ShellState) -> Self {
         let pane = shell.snapshot().focused_pane;
         let mut composer = ComposerState::new();
