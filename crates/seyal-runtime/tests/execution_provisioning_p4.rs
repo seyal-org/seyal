@@ -882,7 +882,6 @@ fn self_try_lifecycle(h: &mut Harness, client: usize) -> Option<Lifecycle> {
     None
 }
 
-
 #[cfg(feature = "test-fault-injection")]
 #[test]
 fn terminate_reports_invalid_state_when_request_termination_fails() {
