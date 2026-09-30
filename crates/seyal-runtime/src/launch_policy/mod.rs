@@ -21,7 +21,7 @@ mod tests;
 
 pub use account::lookup_effective_account_record;
 pub use argv::{interactive_login_argv, ShellFamily};
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub use compose::apply_post_policy;
 pub use compose::{
     command_spec_from_policy, compose_child_command, resolve_default_interactive,
@@ -30,7 +30,7 @@ pub use compose::{
 
 /// Serialize process-env reads/writes across launch-policy and shell-integration
 /// tests. Parallel `--lib` harnesses must not race on `setenv`/`getenv`.
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) fn process_env_test_lock() -> std::sync::MutexGuard<'static, ()> {
     use std::sync::{Mutex, OnceLock};
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
