@@ -1,10 +1,12 @@
-//! SPEC-024 K1/K2/K3/K5: cold `[[keybindings]]` schema → immutable [`KeybindingTable`],
-//! §6 routing gate, and §11 shortcut projection for menus/AX.
+//! SPEC-024 K1–K6: cold `[[keybindings]]` schema → immutable [`KeybindingTable`],
+//! §6 routing gate, §8 chord prefix state, §11 shortcut projection, and K6
+//! headed-evidence regressions for the implemented catalog.
 //!
 //! Distinct from [`crate::input_policy::InputPolicy`] and theme
-//! [`crate::theme::UserUiSettings`]. Chord prefix runtime state is K4.
+//! [`crate::theme::UserUiSettings`]. Prefix state is product UI state, not VT.
 
 mod builtins;
+mod chord;
 mod keys;
 mod load;
 mod projection;
@@ -14,12 +16,17 @@ mod stroke;
 mod types;
 
 #[cfg(test)]
+mod chord_tests;
+#[cfg(test)]
+mod k6_tests;
+#[cfg(test)]
 mod projection_tests;
 #[cfg(test)]
 mod route_tests;
 #[cfg(test)]
 mod tests;
 
+pub use chord::{ChordPrefixActive, ChordPrefixState, CHORD_PREFIX_TIMEOUT};
 pub use load::{
     keybinding_config_path, load_keybinding_table, load_keybinding_table_from_path,
     process_keybinding_table,

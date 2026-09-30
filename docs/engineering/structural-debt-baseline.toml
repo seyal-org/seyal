@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 812
-issue = 1132
-reason = "ApplicationRoot façade keeps #1110 ActionUnavailable and #1117 history errors. Keybinding match stays in keybinding_apply.rs. History apply stays in focus_history_apply.rs."
+acknowledged_loc = 820
+issue = 1138
+reason = "ApplicationRoot façade keeps ChordPrefixState (#1124/#1138 R8.4) and FocusHistory (#1132). Keybinding match stays in keybinding_apply.rs; history apply stays in focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -46,9 +46,9 @@ reason = "ApplicationRoot unit suite stays a sibling tests module; K3+N3 merge f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 961
-issue = 1125
-reason = "Published C ABI façade keeps #1110 keystroke routing and #1125 shortcut re-exports/AppHandle access for ffi/app/shortcut.rs. History and keybinding error numbers live in error_code.rs; product projection stays in shortcut.rs and keybinding/projection.rs."
+acknowledged_loc = 982
+issue = 1138
+reason = "Published C ABI façade keeps #1125 shortcut re-exports, #1132 history error_code split, and #1124/#1138 PrefixWait mapping. Projection lives in shortcut.rs; chord state stays in keybinding."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

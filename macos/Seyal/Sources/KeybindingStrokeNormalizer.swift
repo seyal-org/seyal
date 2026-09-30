@@ -108,6 +108,7 @@ enum KeybindingStrokeNormalizer {
     }
 
     enum RouteResult {
+        /// SPEC-024 Fallthrough — continue host/IME/terminal input (not a Swift `fallthrough`).
         case fallsThrough
         case consumed
         case nativeCommand

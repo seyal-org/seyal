@@ -10,6 +10,7 @@ use crate::palette::{PaletteAction, PaletteCommand, PaletteRunTarget};
 impl ApplicationRoot {
     pub(super) fn open_palette(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
+        self.clear_chord_prefix();
         self.palette
             .apply(PaletteAction::Open, 0)
             .map_err(palette_error)?;

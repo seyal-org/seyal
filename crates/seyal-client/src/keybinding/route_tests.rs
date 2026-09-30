@@ -1,8 +1,11 @@
 //! SPEC-024 K3 §14 routing / Raw-TUI non-interception tests.
 
+use std::time::Instant;
+
 use crate::presentation::PresentationMode;
 
 use super::builtins::builtin_rows;
+use super::chord::ChordPrefixState;
 use super::load::load_keybinding_table;
 use super::route::{
     fallthrough_is_flow, fallthrough_is_terminal, resolve_tab_ordinal, route_context_set,
@@ -21,7 +24,8 @@ fn route(
     composition: bool,
 ) -> RouteOutcome {
     let stroke = normalized_from_notation(keys).expect(keys);
-    route_keystroke(table, &stroke, ctx, composition)
+    let mut chord = ChordPrefixState::new();
+    route_keystroke(table, &stroke, ctx, composition, &mut chord, Instant::now())
 }
 
 fn raw_ctx() -> BindingContext {
@@ -263,7 +267,8 @@ fn item16_cmd_shift_bracket_matches_both_notations_via_layout_scalars() {
         shift_applied: Some('}'),
     };
     let route = raw_ctx();
-    let from_bracket = route_keystroke(&table, &event, route, false);
+    let mut chord = ChordPrefixState::new();
+    let from_bracket = route_keystroke(&table, &event, route, false, &mut chord, Instant::now());
     assert!(matches!(
         from_bracket,
         RouteOutcome::Matched {
@@ -281,7 +286,8 @@ keys = "cmd+shift+}"
 action = "tab.create"
 "#;
     let table = load_keybinding_table(Some(user));
-    let matched = route_keystroke(&table, &event, route, false);
+    let mut chord = ChordPrefixState::new();
+    let matched = route_keystroke(&table, &event, route, false, &mut chord, Instant::now());
     assert!(matches!(
         matched,
         RouteOutcome::Matched {
@@ -298,8 +304,9 @@ action = "tab.create"
         key: KeySym::Char('ü'),
         shift_applied: Some('Ü'),
     };
+    let mut chord = ChordPrefixState::new();
     assert_eq!(
-        route_keystroke(&table, &non_us, route, false),
+        route_keystroke(&table, &non_us, route, false, &mut chord, Instant::now()),
         RouteOutcome::UnmatchedCommand
     );
 }

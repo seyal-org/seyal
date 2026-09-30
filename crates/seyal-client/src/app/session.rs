@@ -130,7 +130,9 @@ impl ApplicationRoot {
         self.require_fence(fence)?;
         self.shell
             .apply(ShellAction::FocusPane { id: fence.pane })
-            .map_err(|_| AppError::UnknownPane)
+            .map_err(|_| AppError::UnknownPane)?;
+        self.clear_chord_prefix();
+        Ok(())
     }
 
     pub(super) fn bind(
@@ -242,6 +244,7 @@ impl ApplicationRoot {
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
         self.pending_effect = NativeEffect::BoundedDetachThenTerminate;
+        self.clear_chord_prefix();
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
         self.sync_composer_presentation();
