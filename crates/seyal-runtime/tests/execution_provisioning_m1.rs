@@ -453,14 +453,14 @@ fn provisioning_burst_preserves_streamer_fairness() {
     let p95_rank = (spawn_us.len() * 95) / 100;
     let p95 = spawn_us[p95_rank.min(spawn_us.len() - 1)];
     let streamer_advanced = gen_cursor > gen_before;
-    // Operational fairness gate for M1: the hot streamer must advance during
-    // the burst window, and must not stall longer than 500 ms while creates
-    // run on the same reactor (spawn remains inside dispatch per ADR-017 §16).
+    // Local diagnostic only (not an accepted ADR-017 §16 / SPEC-003 §8 gate):
+    // streamer must advance and must not stall longer than 500 ms between creates
+    // while spawn remains inside dispatch.
     let fairness_tripped = !streamer_advanced || longest_stall > Duration::from_millis(500);
-    let fairness_verdict = if fairness_tripped { "MISS" } else { "PASS" };
+    let fairness_verdict = if fairness_tripped { "MISS" } else { "under_threshold" };
 
     println!(
-        "m003_m1_fairness evidence_class=CI burst_creates={} spawn_p50_us={} spawn_p95_us={} spawn_max_us={} streamer_gen_before={} streamer_gen_after={} longest_stall_ms={} burst_wall_ms={} fairness_gate={} adr017_section=16 performance_claim=false",
+        "m003_m1_fairness evidence_class=controlled-host burst_creates={} spawn_p50_us={} spawn_p95_us={} spawn_max_us={} streamer_gen_before={} streamer_gen_after={} longest_stall_ms={} burst_wall_ms={} fairness_diagnostic={} adr017_section=16_diagnostic_only performance_claim=false",
         spawn_us.len(),
         p50,
         p95,
@@ -478,7 +478,7 @@ fn provisioning_burst_preserves_streamer_fairness() {
     );
     assert!(
         !fairness_tripped,
-        "spawn-inside-dispatch tripped the fairness gate (ADR-017 §16); record MISS in evidence — do not add a worker in #1164"
+        "local fairness diagnostic tripped (streamer stall or no progress); record MISS in evidence — do not add a worker in #1164"
     );
 }
 
@@ -597,7 +597,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
     );
 
     println!(
-        "m003_m1_cycle_leak evidence_class=CI cycles={CYCLES} fds_baseline={baseline_fds} fds_after={} executions_baseline={baseline_executions} attachments_baseline={baseline_attachments} controllers_baseline={baseline_controllers} workspaces_baseline={baseline_workspaces} rss_baseline_kib={baseline_rss_kib} rss_after_kib={after_rss_kib} rss_noise_band_kib={RSS_NOISE_KIB} performance_claim=false",
+        "m003_m1_cycle_leak evidence_class=controlled-host cycles={CYCLES} fds_baseline={baseline_fds} fds_after={} executions_baseline={baseline_executions} attachments_baseline={baseline_attachments} controllers_baseline={baseline_controllers} workspaces_baseline={baseline_workspaces} rss_baseline_kib={baseline_rss_kib} rss_after_kib={after_rss_kib} rss_noise_band_kib={RSS_NOISE_KIB} performance_claim=false",
         fd_count(),
     );
 

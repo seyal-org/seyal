@@ -63,7 +63,7 @@ fn main() {
 #[cfg(target_os = "macos")]
 fn run_macos() {
     println!(
-        "m003_provisioning architecture=C1_ProvisioningSession_plus_P3_CreateExecution_UDS evidence_class=CI percentile_method=nearest_rank repetitions={LATENCY_SAMPLES} {PERFORMANCE_CLAIM}"
+        "m003_provisioning architecture=C1_ProvisioningSession_plus_P3_CreateExecution_UDS evidence_class=controlled-host percentile_method=nearest_rank repetitions={LATENCY_SAMPLES} {PERFORMANCE_CLAIM}"
     );
     print_host_metadata();
     measure_latencies();
@@ -359,7 +359,7 @@ fn measure_latencies() {
     published_us.sort_unstable();
     bound_pane_us.sort_unstable();
     println!(
-        "m003_provisioning_latency boundary=request_to_published_execution evidence_class=CI sample_count={} p50_us={} p95_us={} p99_us={} max_us={} {PERFORMANCE_CLAIM}",
+        "m003_provisioning_latency boundary=request_to_published_execution evidence_class=controlled-host sample_count={} p50_us={} p95_us={} p99_us={} max_us={} {PERFORMANCE_CLAIM}",
         published_us.len(),
         percentile_us(&published_us, 50),
         percentile_us(&published_us, 95),
@@ -367,7 +367,7 @@ fn measure_latencies() {
         published_us.last().copied().unwrap_or(0),
     );
     println!(
-        "m003_provisioning_latency boundary=request_to_usable_bound_pane evidence_class=CI sample_count={} p50_us={} p95_us={} p99_us={} max_us={} path=begin_intent_create_attach_bind {PERFORMANCE_CLAIM}",
+        "m003_provisioning_latency boundary=request_to_session_bind_success evidence_class=controlled-host sample_count={} p50_us={} p95_us={} p99_us={} max_us={} path=begin_intent_create_controller_attach_apply_bind_success sleep_poll_1ms {PERFORMANCE_CLAIM}",
         bound_pane_us.len(),
         percentile_us(&bound_pane_us, 50),
         percentile_us(&bound_pane_us, 95),
@@ -407,7 +407,7 @@ fn measure_live_execution_scaling() {
             );
         } else {
             println!(
-                "m003_provisioning_live_executions population_requested={population} population_achieved={created} presentation_pane_count=PLATFORM_LIMITED presentation_reason=headed_chrome_requires_C2_C3 evidence_class=CI elapsed_ms={elapsed_ms:.3} {PERFORMANCE_CLAIM}"
+                "m003_provisioning_live_executions population_requested={population} population_achieved={created} presentation_pane_count=PLATFORM_LIMITED presentation_reason=headed_chrome_requires_C2_C3 evidence_class=controlled-host elapsed_ms={elapsed_ms:.3} {PERFORMANCE_CLAIM}"
             );
         }
         harness.finish();
@@ -432,7 +432,7 @@ fn print_host_metadata() {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .unwrap_or_else(|| "unknown".to_owned());
     println!(
-        "m003_provisioning_host os={} arch={} sha={} build=release_bench evidence_class=CI {PERFORMANCE_CLAIM}",
+        "m003_provisioning_host os={} arch={} sha={} build=release_bench evidence_class=controlled-host {PERFORMANCE_CLAIM}",
         std::env::consts::OS,
         std::env::consts::ARCH,
         sha.trim(),
