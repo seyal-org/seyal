@@ -74,7 +74,7 @@ ADR-018 §5 attachment retention):
 |---|---:|
 | local control connections | 16 |
 | live local attachments | 100 |
-| attachments per connection | 100 |
+| attachments per connection | 100 with `CAP_ATTACHMENT_DELIVERY_CONTROL`; **1** without |
 | controllers per execution | 1 |
 | execution-list entries | 512 |
 | frame payload | 262,144 bytes |
@@ -103,9 +103,14 @@ Counted quantities and the revised maxima:
    `TerminalState` remains one per `ExecutionId` (SPEC-003); attachment count is
    not a second VT or grid authority. Unpresented live executions continue to
    need no attachment.
-3. **Attachments per connection = 100.** Equal to the live-attachment maximum so
-   one connection can retain every presented leaf without consuming the
-   connection budget as a leaf counter.
+3. **Attachments per connection = 100, capability-gated.** Equal to the
+   live-attachment maximum so one connection can retain every presented leaf
+   without consuming the connection budget as a leaf counter. **Only** peers
+   that negotiate `CAP_ATTACHMENT_DELIVERY_CONTROL` (§19) may hold more than one
+   live attachment on a single connection. Legacy peers (capability absent)
+   keep the pre-#1162 per-connection maximum of **1**; Runtime MUST reject a
+   second `Attach` on that connection with the existing capacity-rejection path.
+   The Runtime-wide live-attachment maximum of 100 still applies to every peer.
 4. **Encoded display bytes.** Frame payload and per-client mandatory outbound
    control budgets are unchanged (262,144 bytes each). Presentation output is
    still replaceable and bounded by §11. Under §19, a **suspended** attachment
@@ -115,7 +120,11 @@ Counted quantities and the revised maxima:
    non-suspended attachments. Suspended attachments therefore contribute **zero**
    required DisplayDelta encode/write cost. A full visible-grid snapshot at the
    §5 cell maximum remains chunked within the existing frame payload; this
-   amendment does not raise encode size.
+   amendment does not raise encode size. Aggregate worst case under the revised
+   caps is **100 attachments × (one in-flight + one pending) presentation
+   batches**, plus at most one bounded snapshot per attachment on resume or
+   resync; shareable encode bytes are still produced once per execution update
+   (§10.4) and are not multiplied by attachment count at encode time.
 5. **Client RenderState.** This specification MUST NOT require the client to keep
    a second grid, a canonical grid, or a disposable RenderState for a suspended
    attachment. Releasing renderer/GPU resources for an ADR-018 `Hidden` leaf is a
@@ -123,9 +132,11 @@ Counted quantities and the revised maxima:
    disposable RenderState only from the bounded snapshot path in §12 / §19.3.
 
 Clients that do not negotiate `CAP_ATTACHMENT_DELIVERY_CONTROL` (§19) keep the
-pre-#1162 behavioral envelope for delivery (no suspend) and must still obey the
-revised capacity table when attaching. Fail closed: without the capability there
-is no suspend, and existing non-suspend §5 / §6 / §11 / §12 behavior applies.
+pre-#1162 behavioral envelope: no suspend, and **at most one attachment per
+connection**. Fail closed: without the capability there is no suspend, a second
+`Attach` on the same connection is rejected, and existing non-suspend §5 / §6 /
+§11 / §12 single-attachment behavior applies. The Runtime-wide live-attachment
+maximum of 100 still bounds attach for every peer.
 
 SPEC-003 accepted-but-unwritten input budgets remain authoritative in addition to these limits. SPEC-006 separately bounds Pass 7 client-side accepted-but-not-fully-written wire bytes, unresolved `ResizeRequest` bookkeeping and the single applied-awaiting-projection fence.
 
@@ -416,7 +427,42 @@ For one canonical execution update the target path is:
 N × bounded references/socket deliveries
 ```
 
-Viewer identity is connection state and is deliberately absent from display frame payloads so otherwise identical display bytes can be shared across viewers without per-view serialization.
+**Single-attachment connections (M001 / capability absent).** Viewer identity is
+connection state and is deliberately absent from display frame payloads
+(`DisplaySnapshot` / `DisplayDelta` and the SPEC-011 V2 frames, types 27/28) so
+otherwise identical display bytes can be shared across viewers without per-view
+serialization. With at most one live attachment per connection, the client can
+attribute every presentation frame to that attachment without a payload identity.
+
+**Multi-attachment connections (`CAP_ATTACHMENT_DELIVERY_CONTROL` negotiated).**
+A connection that holds two or more live attachments MUST demultiplex every
+replaceable presentation frame and every other R→C message that would otherwise
+rely on connection-implied attachment identity. Normative rules:
+
+1. Execution-scoped encode remains shareable: Runtime still builds one encoded
+   update representation per execution (§10.4 path above). Encode MUST NOT embed
+   a second VT/grid authority.
+2. On the wire to a multi-attachment peer, each presentation delivery is prefixed
+   with a 16-byte little-endian `u128 AttachmentId` immediately after the ordinary
+   24-byte frame header and before the existing snapshot/delta payload layout.
+   The same prefix applies to SPEC-011 `DisplaySnapshotV2` / `DisplayDeltaV2`
+   (types 27/28) when delivered on a multi-attachment connection. Single-attachment
+   peers (capability absent, or capability present but currently holding exactly
+   one attachment) keep the unprefixed M001 layout so existing clients do not
+   break.
+3. A multi-attachment connection MUST NOT hold two live attachments to the **same**
+   `ExecutionId` at once. That keeps the shareable encode unambiguous while the
+   `AttachmentId` prefix selects the consumer. A second `Attach` for an
+   `ExecutionId` already attached on that connection is rejected
+   (`AlreadyAttached` / capacity path as implemented by W5).
+4. Other connection-implied R→C presentation or metadata frames that name or
+   imply a single attachment (including resume/resync snapshots under §12 / §19.3)
+   carry the same `AttachmentId` prefix when the connection holds more than one
+   live attachment. Mandatory control that is already attachment-scoped by its
+   existing payload (for example type-15 `Error` with only
+   `offending_message_type`) is unchanged; a rejected type 40/41 therefore cannot
+   name which attachment failed, which is acceptable because there is no ack and
+   the client correlates by the request it sent.
 
 ## 11. Backpressure, supersession and slow clients
 
@@ -794,8 +840,16 @@ Allocation hygiene (do not reuse claimed numbers):
 Runtime must reject types 40/41 from a peer that did not advertise the
 capability with `UnknownMessage`. A client must not probe an older Runtime by
 sending an unknown message type. Without the capability there is **no**
-suspend: existing non-suspend attach/delivery/resync behavior applies, and the
-revised §5 capacity table still bounds attach.
+suspend and **no** multi-attachment connection: existing non-suspend
+single-attachment attach/delivery/resync behavior applies; the Runtime-wide
+live-attachment maximum of 100 still bounds attach; per-connection attachment
+count stays at 1 (§5.1). With the capability, multi-attachment demultiplexing
+follows §10.4 and per-connection attachment count may rise to 100.
+
+Capability-bit hygiene relative to concurrent L0 work: open Issue #1116
+(`CAP_LAUNCH_POLICY_DETAIL`) also claims "next free after bit 10" in this file.
+Whichever amendment merges second MUST take bit **12** (or the then-next free
+bit) rather than reuse bit 11.
 
 Types 40 and 41 are legal only in connection state `Attached`, and only for an
 `AttachmentId` that is live on that connection.
