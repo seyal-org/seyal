@@ -102,9 +102,9 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert!(snap.panes[0].allows_implicit_bootstrap);
     assert!(!shell.allows_tab_creation());
     assert!(!shell.allows_pane_splitting());
-    // Hierarchical close is always admitted while a Window exists (W2b).
-    assert!(snap.allows_tab_close);
-    assert!(snap.allows_pane_close);
+    // Presentation close stays gated off in m001 until W4b re-entry lands.
+    assert!(!snap.allows_tab_close);
+    assert!(!snap.allows_pane_close);
     assert_eq!(
         create_tab(&mut shell),
         Err(ShellError::TabCreationUnavailable)

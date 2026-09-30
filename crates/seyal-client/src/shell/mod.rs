@@ -50,6 +50,8 @@ pub enum ShellError {
     UnknownPane,
     TabCreationUnavailable,
     PaneSplitUnavailable,
+    /// Presentation close is gated off until W4b zero-window re-entry ships.
+    PresentationCloseUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
     CannotCloseBoundPane,
@@ -79,6 +81,9 @@ impl ShellError {
             }
             Self::PaneSplitUnavailable => {
                 "Splitting panes is unavailable until a distinct execution route is available."
+            }
+            Self::PresentationCloseUnavailable => {
+                "Closing tabs or panes is unavailable until zero-window re-entry is available."
             }
             Self::CannotCloseLastTab => "The last Tab cannot be closed.",
             Self::CannotCloseLastPane => "The last Pane cannot be closed.",
@@ -236,10 +241,8 @@ pub struct ShellSnapshot {
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
     pub allows_pane_splitting: bool,
-    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused Pane
-    /// would currently be accepted. Hierarchical close always admits the active
-    /// Tab / focused Pane while a Window exists (last Tab → Window, last Pane →
-    /// Tab). Hosts read these instead of re-deriving the rule from counts.
+    /// Whether `CloseTab` / `ClosePane` would currently be accepted. Gated by
+    /// `allows_presentation_close` (off in m001 until W4b) and a live Window.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
 }
@@ -280,6 +283,8 @@ pub struct ShellState {
     containment_generation: u64,
     allows_pane_splitting: bool,
     allows_tab_creation: bool,
+    /// When false, CloseTab/ClosePane/CloseWindow reject and snapshot omits close controls.
+    allows_presentation_close: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
@@ -321,6 +326,7 @@ impl ShellState {
             workspaces: vec![workspace],
             allows_pane_splitting: false,
             allows_tab_creation: false,
+            allows_presentation_close: false,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -380,6 +386,8 @@ impl ShellState {
             containment_generation: 0,
             allows_pane_splitting,
             allows_tab_creation,
+            // Test fixtures that enable tab creation also exercise close; m001 keeps both off.
+            allows_presentation_close: allows_tab_creation,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -410,6 +418,10 @@ impl ShellState {
 
     pub fn allows_tab_creation(&self) -> bool {
         self.allows_tab_creation
+    }
+
+    pub fn allows_presentation_close(&self) -> bool {
+        self.allows_presentation_close
     }
 
     pub fn focused_pane_allows_implicit_bootstrap(&self) -> bool {

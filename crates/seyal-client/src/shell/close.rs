@@ -15,6 +15,9 @@ impl ShellState {
         containment_generation: u64,
     ) -> Result<(), ShellError> {
         self.require_containment_generation(containment_generation)?;
+        if !self.allows_presentation_close {
+            return Err(ShellError::PresentationCloseUnavailable);
+        }
         let (workspace_id, was_product_active) = {
             let (workspace_index, workspace) =
                 self.find_window(id).ok_or(ShellError::UnknownWindow)?;
@@ -52,6 +55,9 @@ impl ShellState {
         containment_generation: u64,
     ) -> Result<(), ShellError> {
         self.require_containment_generation(containment_generation)?;
+        if !self.allows_presentation_close {
+            return Err(ShellError::PresentationCloseUnavailable);
+        }
         let (workspace_id, window_id, tab_index) =
             self.find_tab_location(id).ok_or(ShellError::UnknownTab)?;
         let only_tab = self
@@ -94,6 +100,9 @@ impl ShellState {
         containment_generation: u64,
     ) -> Result<(), ShellError> {
         self.require_containment_generation(containment_generation)?;
+        if !self.allows_presentation_close {
+            return Err(ShellError::PresentationCloseUnavailable);
+        }
         let (workspace_id, _window_id, tab_id) = self
             .find_pane_location(pane_id)
             .ok_or(ShellError::UnknownPane)?;

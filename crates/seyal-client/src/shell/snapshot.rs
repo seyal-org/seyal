@@ -84,8 +84,8 @@ impl ShellState {
                     .collect(),
                 tab.root.clone(),
                 tab.root.layout_description(),
-                true,
-                true,
+                self.allows_presentation_close,
+                self.allows_presentation_close,
             )
         } else {
             (
@@ -254,6 +254,7 @@ impl ShellError {
             Self::CrossWorkspaceMove => 16,
             Self::CrossWorkspaceAdopt => 17,
             Self::ExecutionNotUnpresented => 18,
+            Self::PresentationCloseUnavailable => 19,
         }
     }
 }
