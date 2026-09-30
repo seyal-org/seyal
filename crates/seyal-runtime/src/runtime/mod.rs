@@ -293,7 +293,17 @@ impl Runtime {
             .map(|deadline| deadline.saturating_duration_since(now));
         #[cfg(not(target_os = "macos"))]
         let local: Option<Duration> = None;
-        [requested, execution, rollback, local]
+        // Level-trigger progress: queued CreateExecution work must not sleep
+        // behind the full reactor timeout on an otherwise idle Runtime.
+        #[cfg(target_os = "macos")]
+        let pending_creates = self
+            .local_ipc
+            .as_ref()
+            .filter(|state| !state.pending_creates.is_empty())
+            .map(|_| Duration::ZERO);
+        #[cfg(not(target_os = "macos"))]
+        let pending_creates: Option<Duration> = None;
+        [requested, execution, rollback, local, pending_creates]
             .into_iter()
             .flatten()
             .min()

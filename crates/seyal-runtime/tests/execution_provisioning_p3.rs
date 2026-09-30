@@ -525,6 +525,61 @@ fn outstanding_budget_backpressure_before_spawn() {
     assert!(created <= 5);
 }
 
+#[test]
+fn pending_creates_bound_wait_so_idle_burst_progresses() {
+    let mut h = Harness::empty();
+    h.hello(CAP_EXECUTION_PROVISIONING);
+
+    let mut burst = Vec::new();
+    for request_id in 1..=4u64 {
+        burst.extend_from_slice(&encode_frame(
+            MessageType::CreateExecutionRequest,
+            &CreateExecutionRequest {
+                workspace_id: 0,
+                request_id,
+                launch_profile: 0,
+                rows: 24,
+                columns: 80,
+            }
+            .encode(),
+        ));
+    }
+    h.stream.write_all(&burst).unwrap();
+    // First turn admits one create and queues the rest.
+    h.runtime
+        .poll_once(Some(Duration::from_millis(5)))
+        .expect("admit");
+
+    let start = Instant::now();
+    let mut results = Vec::new();
+    // Level-trigger: non-empty pending_creates must not sleep for max_wait.
+    while results.len() < 4 && start.elapsed() < Duration::from_secs(2) {
+        h.runtime
+            .poll_once(Some(Duration::from_secs(30)))
+            .expect("drain pending");
+        while let Ok((kind, payload)) = try_frame(&mut h) {
+            if kind == MessageType::CreateExecutionResult as u16 {
+                results.push(CreateExecutionResult::decode(&payload).unwrap());
+            }
+        }
+    }
+    assert_eq!(
+        results.len(),
+        4,
+        "queued creates must finish without 30s idle stalls; got {} in {:?}",
+        results.len(),
+        start.elapsed()
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "burst drained in {:?}",
+        start.elapsed()
+    );
+    assert!(results
+        .iter()
+        .all(|r| r.result_code == CreateExecutionResultCode::Created));
+}
+
 fn try_frame(h: &mut Harness) -> Result<(u16, Vec<u8>), ()> {
     if h.buffered.len() >= HEADER_LEN {
         let header = FrameHeader::decode(&h.buffered[..HEADER_LEN]).map_err(|_| ())?;
