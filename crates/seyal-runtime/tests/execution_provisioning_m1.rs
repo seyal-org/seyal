@@ -457,7 +457,11 @@ fn provisioning_burst_preserves_streamer_fairness() {
     // streamer must advance and must not stall longer than 500 ms between creates
     // while spawn remains inside dispatch.
     let fairness_tripped = !streamer_advanced || longest_stall > Duration::from_millis(500);
-    let fairness_verdict = if fairness_tripped { "MISS" } else { "under_threshold" };
+    let fairness_verdict = if fairness_tripped {
+        "MISS"
+    } else {
+        "under_threshold"
+    };
 
     println!(
         "m003_m1_fairness evidence_class=controlled-host burst_creates={} spawn_p50_us={} spawn_p95_us={} spawn_max_us={} streamer_gen_before={} streamer_gen_after={} longest_stall_ms={} burst_wall_ms={} fairness_diagnostic={} adr017_section=16_diagnostic_only performance_claim=false",
