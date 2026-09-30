@@ -97,7 +97,9 @@ pub fn compose_child_command(
 }
 
 /// Test helper: composition returning only the `CommandSpec`.
-#[cfg(test)]
+/// Kept private to macOS lib tests; `compose_child_command` remains the sole
+/// public launch-composition authority.
+#[cfg(all(test, target_os = "macos"))]
 pub fn apply_post_policy(
     command: CommandSpec,
     capability: &CapabilityPolicy,
