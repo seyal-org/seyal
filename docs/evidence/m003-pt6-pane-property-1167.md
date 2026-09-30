@@ -26,7 +26,7 @@ dependency added.
 | P6 close never yields zero leaves | Represented | Drain to last pane + reject |
 | P7 directional neighbor or `NoDirectionalNeighbor` | Represented | Geometric-neighbor check |
 | P8 no terminate/provision on move/swap/zoom/focus | Represented | Effect-surface assertion (portable stand-in) |
-| P9 random sequences incl. stale / self-move / zoom+close | **Partially represented** | 48 seeds × 20 steps cover stale PaneId / self-move / zoom+close; stale `containment_generation` is not generable on this stack (see matrix) |
+| P9 random sequences incl. stale / self-move / zoom+close | **Unrepresented** | Streams cover stale PaneId / self-move / zoom+close, but P9 stays Unrepresented until a generated stale-`containment_generation` action is in the suite (see matrix) |
 
 ## Adversarial matrix (zoom × close × move × stale id × directional miss)
 
@@ -67,8 +67,9 @@ P8’s effect-surface assertion is the portable CI stand-in.
 ## Milestone status
 
 This note does **not** mark M003 or the pane-tree milestone row Done. PT6 is
-evidence that the portable property suite for P1, P2, P4–P9-without-equalize is
-green; equalize (P3) and headed terminate proof remain open.
+evidence that the portable property suite for P1, P2, and P4–P8 is green; P9
+(stale containment generation), equalize (P3), and headed terminate proof
+remain open.
 
 ## Reproduce
 

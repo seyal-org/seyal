@@ -109,9 +109,3 @@ path = "crates/seyal-client/src/palette.rs"
 acknowledged_loc = 744
 issue = 1167
 reason = "Command palette reducer stayed one module after W2a WindowId/containment wiring on the PT1–PT3 stack; #1167 adds no palette edits. Ceiling matches current LOC so the stacked PR can pass the changed-file cohesion gate."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 846
-issue = 1167
-reason = "W2/W3 shell unit suite remains after PT1–PT3 extraction into pt*_tests siblings; #1167 adds pt6_tests.rs only and does not grow this file. Ceiling matches current LOC for the stacked cohesion gate."
