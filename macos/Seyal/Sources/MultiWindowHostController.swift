@@ -121,8 +121,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         if liveKey == key {
             liveHost.removeFromSuperview()
             liveKey = nil
-            // Park the live host on another realized window when present.
-            if let next = orderedKeys.first, let hostWindow = realizations[next] {
+            // Park only on Rust's product-active window (ADR-015).
+            if let next = orderedKeys.first(where: { isProductActive($0) }),
+               let hostWindow = realizations[next] {
                 installLiveHost(in: hostWindow, key: next)
             }
         }
@@ -277,26 +278,27 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     // MARK: - Typed actions (menus)
 
-    /// File → New Window / Dock reopen. Zero windows use ActivateWorkspace
-    /// (ADR-018 §3.3a); otherwise CreateWindow. Host never builds an NSWindow
-    /// without a Rust effect.
+    /// File → New Window / ⌘N: always the target-free New Window intent.
+    /// Rust resolves Workspace (ADR-018 §2.2 / §3.3a). Never ActivateWorkspace.
     @objc func createWindow(_: Any?) {
-        reenterOrCreateWindow()
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
+        _ = seyal_app_apply(appHandle, &action)
+        applyPendingEffectsAndReconcile()
     }
 
-    func reenterOrCreateWindow() {
+    /// Dock reopen: always forward ActivateWorkspace{last_active_workspace}.
+    /// Rust owns create-versus-raise; Swift must not inspect window_count.
+    func handleDockReopen() {
         let shell = seyal_app_shell(appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
         action.target_execution_lo = shell.last_active_workspace_lo
         action.target_execution_hi = shell.last_active_workspace_hi
-        if shell.window_count == 0 {
-            // SELECT_WORKSPACE decodes to ActivateWorkspace (create path).
-            action.kind = UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue)
-        } else {
-            action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
-        }
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
     }

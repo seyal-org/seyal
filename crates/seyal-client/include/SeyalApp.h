@@ -120,12 +120,11 @@ enum SeyalAppActionKind {
     /** Mark reconstruction disconnected after the host drops the live client. */
     SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
     /*
-     * W4a window actions (ADR-018 §2.2). SELECT_WINDOW / CREATE_WINDOW:
-     * target_execution_lo/hi = WindowId / WorkspaceId. CYCLE_WINDOW: reserved
+     * W4a window actions (ADR-018 §2.2). SELECT_WINDOW: target_execution_lo/hi
+     * = WindowId. CREATE_WINDOW is target-free (Rust resolves Workspace from the
+     * product-active Window, else last_active_workspace). CYCLE_WINDOW: reserved
      * = 0 next, 1 previous. REPORT_WINDOW_EVENT: target_execution = WindowId,
      * reserved = event kind (0 became-key … 9 screen/scale). Error 34 = UnknownWindow.
-     * W4b: CLOSE_WINDOW target_execution_lo/hi = WindowId. Host never destroys
-     * locally; Rust emits DestroyWindowRealization.
      */
     SEYAL_APP_ACTION_SELECT_WINDOW = 58,
     SEYAL_APP_ACTION_CYCLE_WINDOW = 59,

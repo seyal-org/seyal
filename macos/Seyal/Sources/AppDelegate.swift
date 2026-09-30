@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         // ADR-018 §3.3a: Dock reopen with no visible windows forwards re-entry.
         if !flag {
-            host?.reenterOrCreateWindow()
+            host?.handleDockReopen()
             return true
         }
         return false
