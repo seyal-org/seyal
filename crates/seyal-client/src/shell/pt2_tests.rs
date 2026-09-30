@@ -86,12 +86,14 @@ fn seed_nested_abc() -> (ShellState, PaneId, PaneId, PaneId) {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split A|B");
     let b = shell.snapshot().focused_pane;
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split B|C under right");
     let c = shell.snapshot().focused_pane;

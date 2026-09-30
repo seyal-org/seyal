@@ -90,6 +90,7 @@ fn seed_grid_2x2() -> (ShellState, PaneId, PaneId, PaneId, PaneId) {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("A|B");
     let b = shell.snapshot().focused_pane;
@@ -99,6 +100,7 @@ fn seed_grid_2x2() -> (ShellState, PaneId, PaneId, PaneId, PaneId) {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split A column");
     let c = shell.snapshot().focused_pane;
@@ -108,6 +110,7 @@ fn seed_grid_2x2() -> (ShellState, PaneId, PaneId, PaneId, PaneId) {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split B column");
     let d = shell.snapshot().focused_pane;
@@ -125,12 +128,14 @@ fn seed_uneven_abc() -> (ShellState, PaneId, PaneId, PaneId) {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("A|B");
     let b = shell.snapshot().focused_pane;
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
         })
         .expect("B/C");
     let c = shell.snapshot().focused_pane;
