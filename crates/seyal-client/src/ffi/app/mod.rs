@@ -379,8 +379,10 @@ pub extern "C" fn seyal_app_route_keystroke(
                 SEYAL_APP_ROUTE_FALLTHROUGH
             }
             Err(error) => {
+                // Matched binding whose invoke failed: still consumed — never
+                // fall through to the PTY (SPEC-024 R10.2 / R10.3 / §14 item 11).
                 let _ = state.root.fail(error);
-                -error_number(error)
+                SEYAL_APP_ROUTE_CONSUMED
             }
         }
     })

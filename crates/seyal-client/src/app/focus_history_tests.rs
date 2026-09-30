@@ -245,3 +245,24 @@ fn close_focused_pane_purges_then_commits_successor() {
     );
     assert_eq!(root.snapshot().shell.focused_pane, p1);
 }
+
+#[test]
+fn tab_select_next_previous_wrap_and_pane_focus_cycles_leaf_order() {
+    let (mut root, _, t1, p1, p2) = two_pane_root();
+    root.apply(AppAction::CreateTab).unwrap();
+    let t_new = root.snapshot().shell.active_tab;
+    assert_ne!(t_new, t1);
+    // At last tab, next wraps to first.
+    root.select_tab_relative(1).unwrap();
+    assert_eq!(root.snapshot().shell.active_tab, t1);
+    // Previous wraps back to last.
+    root.select_tab_relative(-1).unwrap();
+    assert_eq!(root.snapshot().shell.active_tab, t_new);
+
+    root.apply(AppAction::SelectTab { id: t1 }).unwrap();
+    root.apply(AppAction::FocusPane { id: p1 }).unwrap();
+    root.focus_pane_relative(1).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    root.focus_pane_relative(1).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+}
