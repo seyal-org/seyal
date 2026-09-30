@@ -127,6 +127,20 @@ fn configured_shell_invalid_warning_is_created_bit_not_failure() {
     assert_ne!(wire.result_code, ErrorCode::LaunchPolicyRejected as u16);
 }
 
+/// §12 item 17: without CAP_LAUNCH_POLICY_DETAIL, Created.detail_code stays 0.
+#[test]
+fn created_detail_code_is_zero_when_launch_policy_detail_not_negotiated() {
+    let mut runtime = Runtime::new(config("detail-cap-off")).unwrap();
+    let outcome = runtime
+        .create_interactive_execution_with_detail_cap(size(), false)
+        .unwrap();
+    assert_eq!(
+        outcome.detail_code, 0,
+        "ADR-020 §3.10: non-negotiating peer must not see Created warning bits"
+    );
+    shutdown(&mut runtime);
+}
+
 /// Existing SPEC-003 invalid-command rollback stays green beside the new path.
 #[test]
 fn invalid_command_still_rolls_back_with_zero_publications() {
