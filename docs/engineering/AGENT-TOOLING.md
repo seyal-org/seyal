@@ -16,7 +16,7 @@ Codex and GitHub Copilot CLI both discover project skills directly from `.agents
 | Project-context retrieval | thin `project-context` adapter → pinned AI-SDLC `project-context` |
 | Issue decomposition | `issue-refinement` facade → pinned AI-SDLC `work-item-design` + GitHub/Seyal deltas |
 | Implementation planning | thin `implementation-planning` adapter → pinned AI-SDLC `implementation-planning` + Seyal architecture/evidence planning gates |
-| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC `development-readiness` + accepted-plan + Seyal Ready gate |
+| Development readiness | thin `development-readiness` adapter → pinned AI-SDLC `development-readiness` + Issue-body plan + Seyal Ready gate |
 | Implementation | `implement-issue` facade → pinned AI-SDLC `implementation` + Seyal human-owner/branch/test/docs/candidate gates |
 | PR review/re-review | `pr-review` facade → pinned AI-SDLC `pr-review` + Seyal architecture/terminal/evidence merge gates |
 | Review remediation | thin `address-pr-review` adapter → pinned AI-SDLC `address-pr-review` + Seyal one-PR/root-cause/check gates |
@@ -70,7 +70,7 @@ The integration forms are deliberate:
 
 `pr-review` is the single review/re-review discovery surface. It performs the full current-candidate implementation and merge-readiness review, consumes `verification`, and requests specialist review only when risk/policy requires it. There is no lighter diff-only `code-review` pass. `address-pr-review` is the separate remediation entrypoint for an `IN_REVIEW` candidate and must return to one full `pr-review` on that same PR; unfinished accepted scope remains under `implement-issue`.
 
-The accepted-plan comment and the draft/ready candidate stage are defined in `docs/engineering/ISSUE-PROTOCOL.md`. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
+The Issue body is the plan, and the draft/ready candidate stage is defined, in `docs/engineering/ISSUE-PROTOCOL.md`. Skills resolve those GitHub records. They do not keep the plan or the stage only in chat.
 
 Do not also add local `work-item-design` or `implementation` aliases merely to mirror AI-SDLC. That would create overlapping discovery surfaces with the established Seyal facades. The generic source remains under `.sdlc/framework/` and the project facade/adapter contains only the Seyal-specific delta.
 

@@ -132,6 +132,12 @@ if grep -Fq '<!-- seyal-plan-acceptance -->' docs/engineering/ISSUE-PROTOCOL.md 
   || grep -Fq '<!-- seyal-plan-acceptance -->' .agents/skills/development-readiness/SKILL.md; then
   fail "a seyal-plan-acceptance comment must not be an implementation gate"
 fi
+if grep -Fq 'accepted-plan comment' docs/engineering/DEVELOPMENT.md \
+  || grep -Fq 'acceptance comment' docs/engineering/DEVELOPMENT.md \
+  || grep -Fq 'accepted-plan comment' docs/engineering/AGENT-TOOLING.md \
+  || grep -Fq 'The accepted-plan comment and the draft/ready candidate stage' docs/engineering/AGENT-TOOLING.md; then
+  fail "DEVELOPMENT.md/AGENT-TOOLING.md must not require a removed accepted-plan comment gate"
+fi
 grep -Fq '→ the Issue body is the plan' site/src/content/docs/developer/index.mdx || fail "Developer Guide must use the Issue body as the plan"
 if grep -Fq '→ confirmed plan' site/src/content/docs/developer/index.mdx; then
   fail "Developer Guide still says the plan is confirmed in chat"

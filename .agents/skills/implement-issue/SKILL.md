@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Seyal facade for AI-SDLC implementation, adding mandatory human GitHub ownership, accepted-plan/candidate mapping, the one-Issue/worktree/PR workflow, and terminal-specific engineering gates.
+description: Seyal facade for AI-SDLC implementation, adding mandatory human GitHub ownership, Issue-body-plan/candidate mapping, the one-Issue/worktree/PR workflow, and terminal-specific engineering gates.
 ---
 
 # Implement Issue
@@ -85,7 +85,7 @@ Anything that can reach `master` must be production-grade for its intended repos
 
 ## Deterministic branch audit/resume backstop
 
-After accepted-plan/readiness/candidate preflight and before creating a new worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record prevents two people from owning the same implementation Issue at once**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
+After Issue-body-plan/readiness/candidate preflight and before creating a new worktree or editing production files, use the exact branch name `<human-login>/issue/<number>` for new implementation pickups, where `<human-login>` is the freshly verified unique human owner. The **unique human owner record prevents two people from owning the same implementation Issue at once**. Because branches are human-namespaced, branch creation only detects duplicate/resumable work for that same human owner.
 
 1. Fetch remote refs immediately before branch creation.
 2. If the human owner's deterministic `<human-login>/issue/<number>` branch already exists in the canonical repository or the contributor's declared fork, **do not create another implementation worktree or alternate branch**. Stop and report that the Issue has active/resumable work. Resume only when the human owner explicitly asked to continue/resume and the fresh Issue read still proves that same human is the unique owner through either sole assignment or the maintainer-acknowledged external-owner claim.
