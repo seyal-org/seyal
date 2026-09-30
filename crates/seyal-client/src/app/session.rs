@@ -264,7 +264,14 @@ impl ApplicationRoot {
 
     pub(super) fn drain_shell_effects(&mut self) {
         for effect in self.shell.take_effects() {
-            self.pending_effects.push(NativeEffect::from(effect));
+            let native = NativeEffect::from(effect);
+            // Coalesce activation raises: the shipping host generally does
+            // not ack OrderFrontMakeKey, so keep at most one pending raise.
+            if matches!(native, NativeEffect::OrderFrontMakeKey { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::OrderFrontMakeKey { .. }));
+            }
+            self.pending_effects.push(native);
         }
     }
 }
