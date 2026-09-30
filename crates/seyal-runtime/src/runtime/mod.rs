@@ -165,9 +165,10 @@ impl Runtime {
         let timeout = self.bound_wait_by_deadline(max_wait);
         let count = self.reactor.wait(&mut self.events, timeout)?;
         // Within one wait batch, service local control/IPC before PTY/lifecycle
-        // events. SPEC-004 §18.5 disposition must still observe DrainingAfterPrimaryExit
-        // when a terminate races the same turn's primary-exit finalization path;
-        // fairness across dispatches is unchanged.
+        // events. Ordering is for test determinism around §18.5 disposition races
+        // (observe DrainingAfterPrimaryExit when terminate shares a turn with
+        // primary-exit); either interleaving remains spec-valid. Fairness is
+        // unchanged: each ready event is still serviced once per batch.
         let mut processed = 0usize;
         for pass in 0..2 {
             for index in 0..count {
