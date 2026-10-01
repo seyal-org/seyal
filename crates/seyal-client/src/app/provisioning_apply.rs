@@ -291,7 +291,9 @@ impl ApplicationRoot {
     ///
     /// Correlates by `request_id` (not focused Pane). On
     /// [`ProvisioningEffect::Detach`], releases the shell binding and clears
-    /// Controller authority / `client_handle`.
+    /// Controller authority for that pane. The shared `client_handle` stays
+    /// registered so remaining tabs can still admit create/terminate (ADR-017
+    /// §6.1 detach vs execution dispose); unregister is quit / attach-replace.
     #[cfg(target_os = "macos")]
     pub fn absorb_wire_terminate_result(
         &mut self,
@@ -377,7 +379,8 @@ impl ApplicationRoot {
             // ADR-017 §6.1 detach-only: keep the shared LocalDisplayClient /
             // client_handle registered so remaining tabs can still admit
             // create/terminate on the same connection. Unregister happens on
-            // explicit terminate absorption, attach replace, or quit.
+            // attach replace, quit, or ApplicationRoot drop — not on pane
+            // detach or per-execution terminate absorb.
         }
     }
 

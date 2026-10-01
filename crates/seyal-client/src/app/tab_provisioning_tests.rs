@@ -451,7 +451,8 @@ fn terminate_after_bootstrap_floor_admits_request_id_at_least_two() {
 #[test]
 fn explicit_terminate_admits_type_38_on_registry_client_without_install_wire_client() {
     // Production path: wire_client is None; admit goes through client_handle.
-    // Must not clear/unregister the handle before type 38 is written.
+    // Must not clear/unregister the handle before type 38 is written, and the
+    // shared registry client stays after terminate absorb (C2 multi-tab).
     let mut root = ApplicationRoot::new();
     assert!(root.wire_client().is_none());
     let client = negotiated_provisioning_client();
@@ -472,7 +473,7 @@ fn explicit_terminate_admits_type_38_on_registry_client_without_install_wire_cli
     assert_eq!(
         root.live_client_handle_for_test(),
         Some(handle),
-        "client_handle must stay registered until TerminateExecutionResult"
+        "client_handle must stay registered while type 38 is admitted"
     );
     assert!(root.wire_client().is_none());
     assert_ne!(
@@ -513,7 +514,15 @@ fn explicit_terminate_admits_type_38_on_registry_client_without_install_wire_cli
     root.absorb_wire_terminate_result(false)
         .expect("absorb terminate via client_handle")
         .expect("terminate result present");
-    assert_eq!(root.live_client_handle_for_test(), None);
+    assert_eq!(
+        root.live_client_handle_for_test(),
+        Some(handle),
+        "terminate result detaches authority only; shared client_handle stays for CreateTab / remaining tabs"
+    );
+    assert!(
+        crate::ffi::with_client(handle, |_| ()).is_some(),
+        "registry entry must remain after terminate absorb"
+    );
     assert_eq!(
         root.snapshot().eligibility,
         PresentationEligibility::Unbound
