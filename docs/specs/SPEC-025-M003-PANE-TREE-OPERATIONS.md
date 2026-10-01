@@ -1,10 +1,11 @@
 # SPEC-025 — M003 intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Accepted under #1001 / ADR-021 (normative contract; not an implemented-behavior claim)
+- **Status:** Proposed under #1001 / ADR-021 (not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Issue:** #1001 — parent #674, epic #665
-- **Authority:** ADR-021. This document is the observable contract for review.
-- **Consumes:** Accepted
+- **Authority:** normative only after ADR-021 is Accepted. Until then this
+  document is the Proposed observable contract for review.
+- **Consumes:** Proposed
   [`ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md);
   ADR-015; ADR-009 / SPEC-008; Proposed ADR-019 / SPEC-022 for focus-history
   recording of committed transitions (do not redefine history here)
@@ -25,7 +26,7 @@ This specification defines deterministic before/after behavior for:
 - property-test invariants implementers must preserve
 
 It matches the types already present on `origin/master` in
-`crates/seyal-client/src/shell/{mod.rs,tree.rs}` (`PaneTree`, `PaneId`, `ShellAction`,
+`crates/seyal-client/src/shell.rs` (`PaneTree`, `PaneId`, `ShellAction`,
 `ShellError`, per-Tab `focused`) and extends them; existing code is not
 architectural authority.
 
@@ -70,8 +71,6 @@ I2.4 A Pane never owns PTY/VT/grid/renderer/child.
 I2.5 These operations never create, destroy, bind, or unbind an
 `ExecutionId`.
 
-I2.6 If `zoomed == Some(z)` then `focused == z`.
-
 ## 3. Actions
 
 ```text
@@ -93,14 +92,14 @@ topology, zoom, equalize, or focus successors locally as authority.
 ## 4. Rejection taxonomy
 
 Every rejection leaves the Tab (and `ShellState`) byte-identical to the
-pre-action state except `last_error`, which equals the rejection code
-(names may map onto today's `ShellError` variants plus new ones):
+pre-action state and sets a typed last-error (names may map onto today's
+`ShellError` variants plus new ones):
 
 | Code | When |
 | --- | --- |
 | `UnknownWorkspace` / `UnknownTab` / `UnknownPane` | identity missing in authoritative state |
 | `CannotCloseLastPane` | close would leave zero leaves |
-| `InvalidMoveTarget` | `pane == neighbor` or `SwapPanes` with `a == b`; neighbor not a leaf of the same Tab |
+| `InvalidMoveTarget` | `pane == neighbor`; neighbor not a leaf of the same Tab; move would orphan incorrectly |
 | `NoDirectionalNeighbor` | no geometric neighbor in that direction |
 | `NotZoomed` | `Unzoom` while `zoomed.is_none()` |
 | `PaneSplitUnavailable` | existing gate when split provisioning is closed |
@@ -140,7 +139,9 @@ Zoom: if `zoomed == Some(C)` → `None`; else unchanged if still valid.
 
 **Before:** distinct leaves `A`, `B` in the same Tab.  
 **After success:** the two leaf slots exchange `PaneId`s; no other nodes
-change; pane records unchanged; focus unchanged; `zoomed = None`.
+change; pane records unchanged; focus unchanged; `zoomed` remapped only if it
+referenced a swapped identity still present (it still names the same PaneId,
+so zoom overlay follows the Pane, not the slot — `zoomed` value unchanged).
 
 ### 5.4 Move beside
 
@@ -170,7 +171,6 @@ and both started as leaves) or if either id is unknown.
 
 **ZoomPane(id):** require `id` leaf; set `zoomed = Some(id)`; set
 `focused = id`. Topology and ratios unchanged.
-`ZoomPane(id)` when `zoomed == Some(id)` is a successful no-op. `ZoomPane(id)` when `zoomed == Some(z)` and `z ≠ id` sets `zoomed = Some(id)` and `focused = id`.
 
 **Unzoom:** require `zoomed.is_some()`; set `zoomed = None`; focus unchanged.
 
@@ -184,7 +184,7 @@ other leaves remain authoritative state but are not shown as split regions.
 ancestor Split of `focused` becomes `1/2`; if `root` is a Leaf, success
 no-op.
 
-Topology, PaneIds, and focus unchanged; on success `zoomed = None` (ADR-021 §3), including the no-op cases. If ratio fields are not yet
+Topology, PaneIds, focus, and zoom unchanged. If ratio fields are not yet
 present (#928 not landed), both actions are success no-ops (no alternate
 layout invented).
 
@@ -245,7 +245,7 @@ R8.3 No secret material in tree/zoom/focus snapshots.
 
 ## 9. Compatibility with current master
 
-| Current `shell/{mod.rs,tree.rs}` behavior | This contract |
+| Current `shell.rs` behavior | This contract |
 | --- | --- |
 | Split focuses new leaf | unchanged (§5.1) |
 | Close uses `first_pane()` of remaining root | tightened to sibling-first (§5.2) — intentional, tested change for production children |
@@ -276,9 +276,10 @@ P3. For every successful `Equalize*`: leaf set, axes, and child identities are
     unchanged; every ratio in scope equals `1/2` when ratios exist.
 
 P4. Every rejection leaves the full `ShellState` byte-identical to the
-    pre-action state except `last_error`, which equals the rejection code.
+    pre-action value (including `last_error` replacement rules already used by
+    the shell reducer).
 
-P5. After every successful transition: I2.1–I2.3 and I2.6 hold.
+P5. After every successful transition: I2.1–I2.3 hold.
 
 P6. `ClosePane` never yields zero leaves; last-pane close always rejects.
 
@@ -298,7 +299,7 @@ P9. Sequence generation: random valid action streams over small trees preserve
 3. Close focused leaf; sibling-first successor (fixture with nested splits
    proving not whole-tree `first_pane`)  
 4. Close last pane → `CannotCloseLastPane`  
-5. Stale `PaneId` on every action → typed reject, byte-identical state except `last_error`  
+5. Stale `PaneId` on every action → typed reject, byte-identical state  
 6. Swap preserves ids + bindings; topology slots exchanged  
 7. Move beside each side; removed old slot collapsed; ids preserved  
 8. Move `pane == neighbor` → `InvalidMoveTarget`  

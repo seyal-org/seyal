@@ -1,6 +1,6 @@
 # ADR-019 — Local Resource Addressing and navigation authority
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-09-24
 - **Issue:** #1004 (refinement) — parent #674, epic #665
 - **Numbering:** Allocation across concurrent M003 refinements is
