@@ -31,11 +31,11 @@ use seyal_runtime::local_ipc::framing::{
     TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers,
 };
 
+pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
 };
-pub use attach::force_bootstrap_attach_failure_for_test;
 
 pub(crate) const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_BUFFERED_BYTES: usize = (MAX_FRAME_PAYLOAD as usize + HEADER_LEN) * 2;
