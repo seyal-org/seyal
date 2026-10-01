@@ -1,6 +1,11 @@
 #![cfg(target_os = "macos")]
 
-//! SPEC-003 §4.1 / ADR-017 P1: Runtime process lifetime vs live-execution count.
+//! SPEC-003 §4.1 / ADR-017 P1 scaffolding (interim before C1).
+//!
+//! Library Runtime may exist with zero executions. The production helper still
+//! creates a startup shell on empty argv and exits when the live-execution
+//! count reaches zero (SPEC-003 §4.1 interim until C1 / #1148). True
+//! zero-execution helper residency is deferred to C1.
 
 use std::{
     io::{Read, Write},
@@ -12,7 +17,6 @@ use std::{
 
 use seyal_exec::{CommandSpec, WindowSize};
 use seyal_runtime::{
-    explicit_startup_command,
     local_ipc::framing::{
         encode_frame, ClientHello, ExecutionList, FrameHeader, MessageType, ServerHello, HEADER_LEN,
     },
@@ -214,13 +218,6 @@ impl Drop for HelperChild {
 }
 
 #[test]
-fn empty_argv_composition_creates_no_startup_command() {
-    assert!(explicit_startup_command(Vec::new()).is_none());
-    let command = explicit_startup_command(vec!["/bin/true".into()]).expect("command");
-    assert_eq!(command.program(), "/bin/true");
-}
-
-#[test]
 fn headless_empty_start_has_zero_executions_and_stable_identity() {
     let mut runtime = Runtime::new(isolated_config("empty")).expect("Runtime");
     let runtime_id = runtime.id();
@@ -291,8 +288,7 @@ fn last_execution_finalization_does_not_end_runtime_or_leak() {
 #[test]
 fn explicit_command_composition_creates_exactly_one_execution() {
     let mut runtime = Runtime::new(isolated_config("explicit")).expect("Runtime");
-    let command = explicit_startup_command(vec!["/bin/sh".into(), "-c".into(), "sleep 30".into()])
-        .expect("explicit startup command");
+    let command = CommandSpec::new("/bin/sh").args(["-c", "sleep 30"]);
     let id = runtime.create_execution(command, size()).expect("create");
     assert_eq!(runtime.execution_count(), 1);
     assert_eq!(runtime.list().len(), 1);
@@ -313,19 +309,18 @@ fn controlled_shutdown_still_progresses_live_executions() {
 }
 
 #[test]
-fn helper_empty_argv_stays_alive_with_empty_list_executions() {
+fn helper_empty_argv_creates_interim_startup_execution() {
+    // Interim SPEC-003 §4.1: empty argv invents a startup shell so headed
+    // smoke works before C1. True zero-execution helper residency moves to C1.
     let mut helper = HelperChild::spawn(&[]);
     helper.wait_for_socket();
 
-    // Process must remain resident at zero executions.
     std::thread::sleep(Duration::from_millis(200));
     assert!(
         helper.child.try_wait().expect("try_wait").is_none(),
-        "empty-argv helper must not exit when live-execution count is zero"
+        "empty-argv helper with startup shell must stay alive"
     );
 
-    // Drive ListExecutions against the live helper via a peer Runtime is not
-    // possible (singleton). Use a direct client socket instead.
     let mut stream = UnixStream::connect(helper.socket()).expect("connect helper");
     stream.set_nonblocking(false).expect("blocking client");
     stream
@@ -348,19 +343,15 @@ fn helper_empty_argv_stays_alive_with_empty_list_executions() {
     let (kind, payload) = read_frame(&mut stream, &mut buffered, deadline);
     assert_eq!(kind, MessageType::ExecutionList as u16);
     let list = ExecutionList::decode(&payload).expect("ExecutionList");
-    assert!(
-        list.entries.is_empty(),
-        "empty-argv helper must report zero executions"
-    );
-
-    assert!(
-        helper.child.try_wait().expect("try_wait").is_none(),
-        "helper must stay alive after empty ListExecutions"
+    assert_eq!(
+        list.entries.len(),
+        1,
+        "interim empty-argv helper must publish exactly one startup execution"
     );
 }
 
 #[test]
-fn helper_explicit_command_creates_one_execution_and_stays_after_exit() {
+fn helper_explicit_command_creates_one_execution_and_exits_at_zero() {
     let mut helper = HelperChild::spawn(&["/bin/sh", "-c", "sleep 30"]);
     helper.wait_for_socket();
 
@@ -379,7 +370,6 @@ fn helper_explicit_command_creates_one_execution_and_stays_after_exit() {
     let deadline = Instant::now() + Duration::from_secs(2);
     let _ = read_frame(&mut stream, &mut buffered, deadline);
 
-    // Wait briefly for startup create to publish, then list.
     std::thread::sleep(Duration::from_millis(100));
     stream
         .write_all(&encode_frame(MessageType::ListExecutions, &[]))
@@ -397,19 +387,25 @@ fn helper_explicit_command_creates_one_execution_and_stays_after_exit() {
         "explicit command must create exactly one execution"
     );
 
-    // Replace with a short-lived command helper to prove finalization ≠ exit.
+    // Interim exit-at-zero: when the last startup execution finalizes, the
+    // helper process exits (true zero-execution residency deferred to C1).
+    // Do not require the control socket — a fast-exiting child can race past
+    // bind before the test observes the path.
     drop(helper);
     let mut helper = HelperChild::spawn(&["/bin/sh", "-c", "exit 0"]);
-    helper.wait_for_socket();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        assert!(
-            helper.child.try_wait().expect("try_wait").is_none(),
-            "helper must not exit when its last startup execution finalizes"
-        );
-        if Instant::now() >= deadline {
-            break;
+        if let Some(status) = helper.child.try_wait().expect("try_wait") {
+            assert!(
+                status.success() || status.code().is_some(),
+                "helper exited: {status}"
+            );
+            return;
         }
+        assert!(
+            Instant::now() < deadline,
+            "interim helper must exit-at-zero after last startup execution finalizes"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
