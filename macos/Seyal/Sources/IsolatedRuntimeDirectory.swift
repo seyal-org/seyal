@@ -41,13 +41,23 @@ enum IsolatedRuntimeDirectory {
     // `forwardHelperCommand` via a Debug-only launch-environment gate;
     // Release compiles that gate out. Flow tests pass `/bin/zsh` because a
     // bash account shell is full-pane Raw.
-    if testHostLoaded || forwardHelperCommand, let index = arguments.firstIndex(of: flag) {
-      let valueIndex = arguments.index(after: index)
-      if valueIndex < arguments.endIndex {
-        let commandStart = arguments.index(after: valueIndex)
-        if commandStart < arguments.endIndex {
-          forwarded.append(contentsOf: arguments[commandStart...])
+    if testHostLoaded || forwardHelperCommand {
+      if let index = arguments.firstIndex(of: flag) {
+        let valueIndex = arguments.index(after: index)
+        if valueIndex < arguments.endIndex {
+          let commandStart = arguments.index(after: valueIndex)
+          if commandStart < arguments.endIndex {
+            forwarded.append(contentsOf: arguments[commandStart...])
+          }
         }
+      }
+      // XCTest host (component tests) often has no trailing command and no
+      // `--runtime-dir` in process argv — only a synthesized directory. Under
+      // true P1 empty-argv, the helper would create no execution and headed
+      // component smoke would hang. Supply a Flow-capable default shell for
+      // the test host only; production empty-argv stays empty.
+      if testHostLoaded, forwarded.count == 2 {
+        forwarded.append("/bin/zsh")
       }
     }
     return forwarded

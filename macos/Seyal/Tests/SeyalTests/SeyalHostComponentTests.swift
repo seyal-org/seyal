@@ -248,6 +248,17 @@ final class SeyalHostComponentTests: XCTestCase {
             IsolatedRuntimeDirectory.helperArguments(from: ["Seyal"], testHostLoaded: false),
             []
         )
+        // XCTest host with no `--runtime-dir` still synthesizes a directory and
+        // must supply a default Flow shell so true-P1 empty-argv helpers create
+        // one execution for headed component smoke (IME live callbacks).
+        let testHostOnly = IsolatedRuntimeDirectory.helperArguments(
+            from: ["Seyal"],
+            testHostLoaded: true
+        )
+        XCTAssertEqual(testHostOnly.count, 3)
+        XCTAssertEqual(testHostOnly[0], "--runtime-dir")
+        XCTAssertTrue(testHostOnly[1].hasPrefix("/"))
+        XCTAssertEqual(testHostOnly[2], "/bin/zsh")
         XCTAssertEqual(
             IsolatedRuntimeDirectory.helperArguments(
                 from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso"],
