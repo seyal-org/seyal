@@ -89,7 +89,14 @@ fn rss_kib(pid: u32) -> Option<u64> {
         .ok()
 }
 
-fn cpu_time(pid: u32) -> Option<Duration> {
+struct CpuSample {
+    elapsed: Duration,
+    /// True when the sample can see less than one second. A whole-second
+    /// reading cannot support a 500 ms idle bound.
+    subsecond: bool,
+}
+
+fn cpu_time(pid: u32) -> Option<CpuSample> {
     if cfg!(target_os = "linux") {
         let text = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         let rest = text.rsplit_once(')')?.1;
@@ -97,13 +104,31 @@ fn cpu_time(pid: u32) -> Option<Duration> {
         let utime: u64 = fields.nth(11)?.parse().ok()?;
         let stime: u64 = fields.next()?.parse().ok()?;
         let ticks = sysconf_ticks()?;
-        return Some(Duration::from_secs_f64((utime + stime) as f64 / ticks));
+        return Some(CpuSample {
+            elapsed: Duration::from_secs_f64((utime + stime) as f64 / ticks),
+            subsecond: ticks >= 10.0,
+        });
     }
     let output = ProcessCommand::new("ps")
         .args(["-o", "time=", "-p", &pid.to_string()])
         .output()
         .ok()?;
-    parse_ps_time(String::from_utf8(output.stdout).ok()?.trim())
+    let text = String::from_utf8(output.stdout).ok()?;
+    let text = text.trim();
+    Some(CpuSample {
+        elapsed: parse_ps_time(text)?,
+        subsecond: text.contains('.'),
+    })
+}
+
+fn assert_child_alive(child: &mut Child, stage: &str) {
+    match child.try_wait() {
+        Ok(None) => {}
+        Ok(Some(status)) => panic!(
+            "child daemon exited during {stage} ({status}); a deadline exit is a failure, not a finished run"
+        ),
+        Err(error) => panic!("could not read child status during {stage}: {error}"),
+    }
 }
 
 fn sysconf_ticks() -> Option<f64> {
@@ -161,7 +186,8 @@ fn child_daemon_entry() {
         .unwrap_or(60_u64);
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(deadline));
-        std::process::exit(0);
+        eprintln!("ab-0.6 child_deadline_exceeded seconds={deadline} performance_claim=false");
+        std::process::exit(2);
     });
     let dir = std::path::PathBuf::from(dir);
     let mut daemon = AgentDaemon::bind_integration(
@@ -186,17 +212,21 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
     let mut child = spawn_child(&dir, 4096);
     let socket = dir.join("agent.sock");
     let startup = wait_ready(&socket);
-    let before = cpu_time(child.0.id());
+    assert_child_alive(&mut child.0, "startup");
+    let before = cpu_time(child.0.id()).expect("idle CPU sample before the window");
     thread::sleep(Duration::from_secs(2));
-    let after = cpu_time(child.0.id());
+    let after = cpu_time(child.0.id()).expect("idle CPU sample after the window");
+    assert_child_alive(&mut child.0, "idle window");
+    assert!(
+        before.subsecond && after.subsecond,
+        "CPU sample has no sub-second resolution; a 500ms idle bound cannot be checked"
+    );
+    let busy = after.elapsed.saturating_sub(before.elapsed);
+    assert!(
+        busy < Duration::from_millis(500),
+        "idle daemon used {busy:?} of CPU in 2s"
+    );
     let idle_rss = rss_kib(child.0.id());
-    if let (Some(before), Some(after)) = (before, after) {
-        let busy = after.saturating_sub(before);
-        assert!(
-            busy < Duration::from_millis(500),
-            "idle daemon used {busy:?} of CPU in 2s"
-        );
-    }
 
     let socket_for_client = socket.clone();
     let creator = thread::spawn(move || {
@@ -219,11 +249,12 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
     });
     // The child is already serving. Wait for the client to finish.
     let (session_id, started, replay, through) = creator.join().unwrap();
+    assert_child_alive(&mut child.0, "measured workflow");
     let post_rss = rss_kib(child.0.id());
     child.0.kill().unwrap();
     child.0.wait().unwrap();
 
-    let restarted = spawn_child(&dir, 4096);
+    let mut restarted = spawn_child(&dir, 4096);
     let restart = wait_ready(&socket);
     let socket_for_client = socket.clone();
     let run_id = started.run_id;
@@ -251,6 +282,7 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
         )
     });
     let (old, liveness, events, again, stale_binding, stale_control) = checker.join().unwrap();
+    assert_child_alive(&mut restarted.0, "restarted workflow");
     assert_eq!(old, CommandResult::Error(CommandError::RejectedSession));
     assert_eq!(liveness.2, 3);
     assert_eq!(liveness.0, binding);
@@ -265,10 +297,7 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
     let wal_bytes = fs::metadata(dir.join("agent.db-wal"))
         .map(|meta| meta.len())
         .unwrap_or(0);
-    let idle_cpu_ms = match (before, after) {
-        (Some(before), Some(after)) => after.saturating_sub(before).as_millis(),
-        _ => 0,
-    };
+    let idle_cpu_ms = after.elapsed.saturating_sub(before.elapsed).as_millis();
     eprintln!(
         "ab-0.6 process_measurement performance_claim=false host_class={} os={} arch={} build_mode={} startup_us={} restart_us={} idle_window_ms=2000 idle_cpu_ms={} idle_rss_kib={} post_run_rss_kib={} db_bytes={} wal_bytes={}",
         host_class(),
@@ -294,6 +323,7 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
         let mut child = spawn_child(&dir, 512 * 1024);
         let socket = dir.join("agent.sock");
         wait_ready(&socket);
+        assert_child_alive(&mut child.0, "write iteration");
         let socket_for_client = socket.clone();
         let writer = thread::spawn(move || {
             let mut client = TestClient::connect(&socket_for_client);
@@ -318,7 +348,7 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
         .unwrap()
         .agent_runs()
         .unwrap();
-    let child = spawn_child(&dir, 4096);
+    let mut child = spawn_child(&dir, 4096);
     let socket = dir.join("agent.sock");
     wait_ready(&socket);
     let socket_for_client = socket;
@@ -330,6 +360,7 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
             .collect::<Vec<_>>()
     });
     let liveness = reader.join().unwrap();
+    assert_child_alive(&mut child.0, "liveness read");
     assert!(liveness.iter().all(|code| *code == 3));
     drop(child);
     let _ = fs::remove_dir_all(dir);
@@ -363,7 +394,7 @@ fn campaign_high_volume_session_workload() {
     let mut samples = Vec::new();
     for index in 0..5 {
         let dir = temp_dir(&format!("campaign-{index}"));
-        let child = spawn_child(&dir, 4 * 1024 * 1024);
+        let mut child = spawn_child(&dir, 4 * 1024 * 1024);
         let socket = dir.join("agent.sock");
         let startup = wait_ready(&socket);
         let socket_for_client = socket.clone();
@@ -414,6 +445,7 @@ fn campaign_high_volume_session_workload() {
         let again = resumed.join().unwrap();
         let reconnect = reconnect_started.elapsed();
         assert_eq!(again, through);
+        assert_child_alive(&mut child.0, "campaign workload");
         let rss = rss_kib(child.0.id());
         let db = fs::metadata(dir.join("agent.db"))
             .map(|meta| meta.len())
