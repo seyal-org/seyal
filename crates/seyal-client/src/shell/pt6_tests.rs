@@ -643,7 +643,6 @@ fn spec025_p6_close_never_yields_zero_leaves() {
                 break;
             }
             let id = *rng.pick(&ids);
-            let before = shell.clone();
             let count = shell.snapshot().panes.len();
             match shell.apply(ShellAction::ClosePane {
                 id,
