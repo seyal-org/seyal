@@ -24,6 +24,13 @@ impl Connection {
         &mut self,
         snapshot: EncodedDisplayBatch,
     ) {
+        // Attach advertises current_generation on Attached before the snapshot
+        // bytes leave the host. Superseding that snapshot leaves the peer with
+        // Attached gen N and DisplaySnapshot gen M (local_ipc_protocol flake).
+        if self.attach_snapshot_pin {
+            self.deferred_after_attach = Some(snapshot);
+            return;
+        }
         self.display_generation = snapshot.generation;
         #[cfg(feature = "benchmark-instrumentation")]
         {
@@ -35,6 +42,21 @@ impl Connection {
         self.pending_display = Some(snapshot.into_transport_batches().into());
         #[cfg(feature = "benchmark-instrumentation")]
         update_display_queue_high_water(self.display_queue_bytes());
+    }
+
+    /// Clear the attach pin once the attach snapshot is fully on the wire, then
+    /// apply any fanout snapshot that was deferred while the pin was held.
+    pub(in crate::local_ipc::connection) fn release_attach_pin_if_idle(&mut self) {
+        if !self.attach_snapshot_pin
+            || self.display_inflight.is_some()
+            || self.pending_display.is_some()
+        {
+            return;
+        }
+        self.attach_snapshot_pin = false;
+        if let Some(deferred) = self.deferred_after_attach.take() {
+            self.queue_snapshot(deferred);
+        }
     }
 
     pub(in crate::local_ipc::connection) fn try_queue_delta(
@@ -120,7 +142,10 @@ impl LocalIpcServer {
         }
         connection.queued_control_bytes = new_total;
         connection.mandatory.push_back(OutboundItem::new(attached));
+        connection.deferred_after_attach = None;
         connection.queue_snapshot(snapshot);
+        // Pin after queueing so the attach snapshot itself is not deferred.
+        connection.attach_snapshot_pin = true;
         Ok(())
     }
 
@@ -208,6 +233,11 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
     loop {
         if connection.display_inflight.is_none() {
             let Some(batches) = connection.pending_display.take() else {
+                connection.release_attach_pin_if_idle();
+                // A deferred fanout snapshot may have just been queued.
+                if connection.pending_display.is_some() {
+                    continue;
+                }
                 break;
             };
             if batches.is_empty() {

@@ -56,6 +56,8 @@ fn connection() -> Connection {
         display_inflight: None,
         pending_display: None,
         display_generation: 1,
+        attach_snapshot_pin: false,
+        deferred_after_attach: None,
     }
 }
 
@@ -88,6 +90,49 @@ fn snapshot_supersedes_not_started_pending_state() {
     connection.queue_snapshot(encode_snapshot(&snapshot(9)).unwrap());
     assert_eq!(connection.display_generation, 9);
     assert!(connection.has_snapshot_delivery());
+}
+
+#[test]
+fn attach_pin_defers_fanout_supersession_until_attach_snapshot_flushes() {
+    let mut connection = connection();
+    connection.queue_snapshot(encode_snapshot(&snapshot(136)).unwrap());
+    connection.attach_snapshot_pin = true;
+    connection.queue_snapshot(encode_snapshot(&snapshot(201)).unwrap());
+    assert_eq!(
+        connection
+            .pending_display
+            .as_ref()
+            .and_then(|batches| batches.front())
+            .unwrap()
+            .generation,
+        136,
+        "fanout must not replace the attach snapshot while Attached gen is pinned"
+    );
+    assert_eq!(connection.display_generation, 136);
+    assert_eq!(
+        connection
+            .deferred_after_attach
+            .as_ref()
+            .map(|batch| batch.generation),
+        Some(201)
+    );
+
+    // Simulate attach snapshot fully flushed.
+    connection.pending_display = None;
+    connection.display_inflight = None;
+    connection.release_attach_pin_if_idle();
+    assert!(!connection.attach_snapshot_pin);
+    assert_eq!(connection.display_generation, 201);
+    assert_eq!(
+        connection
+            .pending_display
+            .as_ref()
+            .and_then(|batches| batches.front())
+            .unwrap()
+            .generation,
+        201
+    );
+    assert!(connection.deferred_after_attach.is_none());
 }
 
 #[test]
@@ -144,6 +189,8 @@ fn mandatory_frame_waits_for_a_partially_written_display_frame() {
         }),
         pending_display: None,
         display_generation: 1,
+        attach_snapshot_pin: false,
+        deferred_after_attach: None,
     };
 
     outbound::flush_outbound(&mut connection).unwrap();
@@ -187,6 +234,8 @@ fn partial_after_display_frame_finishes_before_mandatory_and_display_work() {
             total_bytes: 2,
         }])),
         display_generation: 1,
+        attach_snapshot_pin: false,
+        deferred_after_attach: None,
     };
 
     outbound::flush_outbound(&mut connection).unwrap();
