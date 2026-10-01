@@ -101,3 +101,9 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/attach/mod.rs"
+acknowledged_loc = 725
+issue = 1136
+reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1136 adds ADR-017 §6.3 best-effort dispose after Created when attach/snapshot fails, plus a test-only force-fail hook. Further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
