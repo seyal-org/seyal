@@ -6,9 +6,9 @@
 //! - **Running** Blocks use a damage-driven clip of the prepared primary frame
 //!   into the Block output region (SPEC-008 §5.2). Hosts must not invent a history
 //!   range such as `start + 511`.
-//! - Clip rows are derived from Runtime viewport `LineId`s: only primary rows
-//!   whose line id is `>= start_line` are drawn. Preceding prompts/output still
-//!   on screen are excluded.
+//! - Clip rows follow SPEC-004 §8.1: start at the first visible row whose id
+//!   equals `start_line`, then through the last visible row. If `start_line` is
+//!   absent from the paired vector, the clip is the entire paired viewport.
 //! - **Completed** Blocks keep the trusted finite history span.
 //! - Raw/TUI and conflicting evidence fail closed.
 
@@ -45,8 +45,10 @@ pub enum LiveTailProjection {
 /// Map a running Block's `start_line` onto the current primary viewport.
 ///
 /// `viewport_line_ids[row]` is the absolute primary `LineId` for that prepared
-/// row. Returns `None` when the mapping cannot be established (fail closed):
-/// empty viewport, missing ids, or no visible row belongs to the Block yet.
+/// row. Per SPEC-004 §8.1 the clip starts at the first row whose id equals
+/// `start_line` and runs through the last visible row; when `start_line` is
+/// absent, the clip is the entire paired viewport. Returns `None` only when
+/// the paired vector is empty, oversized, or contains a zero id.
 pub fn map_primary_clip(start_line: u64, viewport_line_ids: &[u64]) -> Option<(u16, u16)> {
     if start_line == 0 || viewport_line_ids.is_empty() {
         return None;
@@ -57,21 +59,16 @@ pub fn map_primary_clip(start_line: u64, viewport_line_ids: &[u64]) -> Option<(u
     if viewport_line_ids.contains(&0) {
         return None;
     }
-    let first_index = viewport_line_ids.iter().position(|&id| id >= start_line)?;
-    // Contiguous owned run only. A later row with id < start_line (CSI T /
-    // reverse-index) must not be drawn inside this Block; stop before it.
-    let mut row_count: u16 = 0;
-    for id in viewport_line_ids.iter().skip(first_index) {
-        if *id < start_line {
-            break;
-        }
-        row_count = row_count.saturating_add(1);
-    }
+    // Exact id match only — LineIds are non-monotonic; do not infer from order.
+    let first_index = viewport_line_ids
+        .iter()
+        .position(|&id| id == start_line)
+        .unwrap_or(0);
+    let row_count = u16::try_from(viewport_line_ids.len() - first_index).ok()?;
     if row_count == 0 {
         return None;
     }
-    let first = u16::try_from(first_index).ok()?;
-    Some((first, row_count))
+    Some((u16::try_from(first_index).ok()?, row_count))
 }
 
 /// Project one Block's Flow output path for the current presentation.
@@ -130,34 +127,37 @@ mod tests {
     #[test]
     fn reordered_viewport_line_ids_still_map_from_first_owned_row() {
         // After CSI T / insert-line, unique LineIds need not be monotonic in
-        // row order. Mapping still starts at the first id >= start_line.
+        // row order. Mapping starts at the first exact id match (§8.1).
         let ids = [1_u64, 4, 2];
-        assert_eq!(map_primary_clip(2, &ids), Some((1, 2)));
+        assert_eq!(map_primary_clip(2, &ids), Some((2, 1)));
     }
 
     #[test]
-    fn reordered_preceding_row_is_not_drawn_inside_running_block() {
-        // CSI T / reverse-index can place an older line between owned rows.
-        // The clip stops before that row instead of painting it in the Block.
+    fn reordered_viewport_keeps_clip_through_last_visible_row() {
+        // An intervening older line does not truncate the clip: §8.1 runs from
+        // the first exact match through the last visible row.
         let ids = [30_u64, 10, 31];
-        assert_eq!(map_primary_clip(30, &ids), Some((0, 1)));
+        assert_eq!(map_primary_clip(30, &ids), Some((0, 3)));
     }
 
     #[test]
     fn scrolled_off_start_keeps_full_viewport_for_running_block() {
-        // start_line has left the viewport; every visible row belongs to the
-        // running Block.
+        // start_line has left the viewport; absent id ⇒ entire paired viewport.
         let ids = [100_u64, 101, 102, 103];
         assert_eq!(map_primary_clip(20, &ids), Some((0, 4)));
     }
 
     #[test]
-    fn start_not_yet_on_viewport_fails_closed() {
+    fn start_absent_from_viewport_uses_entire_paired_viewport() {
         let ids = [1_u64, 2, 3];
-        assert_eq!(map_primary_clip(50, &ids), None);
+        assert_eq!(map_primary_clip(50, &ids), Some((0, 3)));
         assert_eq!(
             project_block_output(PresentationMode::Flow, 50, None, true, &ids),
-            LiveTailProjection::FailClosed
+            LiveTailProjection::PrimaryFrame(PrimaryFrameClip {
+                start_line: 50,
+                first_row: 0,
+                row_count: 3,
+            })
         );
     }
 
