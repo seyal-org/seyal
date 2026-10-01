@@ -11,10 +11,10 @@ use seyal_runtime::{
     local_ipc::framing::{
         Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
         CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
-        Role, CAP_COMMAND_BLOCKS, HEADER_LEN,
+        Role, TerminateExecutionRequest, TerminateExecutionResult, CAP_COMMAND_BLOCKS, HEADER_LEN,
     },
     pass8::BLOCK_STATE_MESSAGE_TYPE,
-    ExecutionId,
+    AttachmentId, ExecutionId,
 };
 
 use super::provisioning_wire::provisioning_negotiated;
@@ -251,6 +251,38 @@ pub(crate) fn best_effort_dispose_never_bound_execution(
             break;
         }
         std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// ADR-017 §6.3 row 2: Attached as Controller, never bound → exactly one
+/// TerminateExecutionRequest on that existing attachment; detach only after the
+/// result (dropping the stream). Never opens a second attach.
+fn best_effort_terminate_on_existing_attachment(
+    stream: &mut UnixStream,
+    attachment_id: AttachmentId,
+    execution_id: ExecutionId,
+    deadline: Instant,
+) {
+    let _ = send_control_until(
+        stream,
+        MessageType::TerminateExecutionRequest,
+        &TerminateExecutionRequest {
+            attachment_id,
+            execution_id,
+            request_id: 1,
+        }
+        .encode(),
+        deadline,
+    );
+    while Instant::now() < deadline {
+        match read_blocking_frame_until(stream, deadline) {
+            Ok((kind, payload)) if kind == MessageType::TerminateExecutionResult => {
+                let _ = TerminateExecutionResult::decode(&payload);
+                return;
+            }
+            Ok(_) => continue, // drain display/control until terminate result
+            Err(_) => return,
+        }
     }
 }
 
@@ -518,6 +550,14 @@ impl LocalDisplayClient {
         }
         let attached = Attached::decode(&payload).map_err(|_| ClientError::Protocol)?;
         if attached.execution_id != execution_id || attached.granted_role != role {
+            if execution_provisioning_negotiated && attached.granted_role == Role::Controller {
+                best_effort_terminate_on_existing_attachment(
+                    &mut stream,
+                    attached.attachment_id,
+                    execution_id,
+                    deadline,
+                );
+            }
             return Err(ClientError::InvalidAttachment);
         }
 
@@ -529,7 +569,7 @@ impl LocalDisplayClient {
         let mut resync_available = true;
         let mut quarantined_remainder = None;
         let mut deferred_control = Vec::new();
-        let (cache, mut batch) = loop {
+        let snapshot = loop {
             let mut stale_remainder_hint = None;
             let attempt = (|| {
                 let first_frame = match quarantined_remainder.take() {
@@ -567,7 +607,7 @@ impl LocalDisplayClient {
             })();
 
             match attempt {
-                Ok(snapshot) => break snapshot,
+                Ok(snapshot) => break Ok(snapshot),
                 Err(ClientError::Display | ClientError::Protocol | ClientError::Capacity)
                     if resync_available =>
                 {
@@ -583,11 +623,35 @@ impl LocalDisplayClient {
                     resync_available = false;
                     quarantined_remainder = Some(stale_remainder_hint);
                 }
-                Err(error) => return Err(error),
+                Err(error) => break Err(error),
+            }
+        };
+        let (cache, mut batch) = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                // ADR-017 §6.3 row 2: already Attached, never bound → terminate
+                // on this attachment before detach (drop stream). No second attach.
+                if execution_provisioning_negotiated && role == Role::Controller {
+                    best_effort_terminate_on_existing_attachment(
+                        &mut stream,
+                        attached.attachment_id,
+                        execution_id,
+                        deadline,
+                    );
+                }
+                return Err(error);
             }
         };
         if cache.generation != attached.current_generation || cache.rows == 0 || cache.columns == 0
         {
+            if execution_provisioning_negotiated && role == Role::Controller {
+                best_effort_terminate_on_existing_attachment(
+                    &mut stream,
+                    attached.attachment_id,
+                    execution_id,
+                    deadline,
+                );
+            }
             return Err(ClientError::Protocol);
         }
 
