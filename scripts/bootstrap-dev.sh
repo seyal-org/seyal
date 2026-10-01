@@ -12,13 +12,12 @@ AI_SDLC_REPO="https://github.com/mahboobmonnamd/ai-sdlc.git"
 AI_SDLC_COMMIT="8d1cac09aef61bb3fb1431c35a114ef047aca12c"
 AI_SDLC_SKILLS=(
   project-context
-  work-item-design
-  implementation-planning
   development-readiness
+  work-item-design
   implementation
+  code-review
   verification
   pr-review
-  address-pr-review
 )
 
 info() { printf '[seyal bootstrap] %s\n' "$*"; }
@@ -218,8 +217,8 @@ PY
 verify_repo_skills() {
   local required=(
     architecture-change implement-issue issue-refinement milestone-validation
-    performance-gate pr-review address-pr-review security-review vt-tdd project-context
-    implementation-planning development-readiness verification
+    performance-gate pr-review code-review security-review vt-tdd project-context
+    development-readiness verification
     macos-native-design macos-ui-testing macos-accessibility visual-regression
     terminal-conformance metal-renderer rust-fuzzing apple-platform-docs image-to-code
   )
