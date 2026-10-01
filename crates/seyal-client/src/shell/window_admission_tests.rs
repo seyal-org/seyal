@@ -3,8 +3,8 @@
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{
-    ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed,
+    ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
+    ShellWorkspaceSeed,
 };
 
 fn occupied_and_empty() -> (ShellState, WorkspaceId) {

@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_runtime::{ExecutionId, 
+use seyal_runtime::{
     local_ipc::{
         discovery::{
             control_socket_path, ensure_verified_runtime_dir, resolved_runtime_dir, DiscoveryError,
@@ -17,6 +17,7 @@ use seyal_runtime::{ExecutionId,
         },
     },
     pass8::CAP_BLOCK_METADATA,
+    ExecutionId,
 };
 
 use super::{server_error, ClientError};

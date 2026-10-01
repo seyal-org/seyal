@@ -26,11 +26,11 @@ mod pt2_tests;
 #[cfg(test)]
 mod pt6_tests;
 #[cfg(test)]
-mod window_admission_tests;
-#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
+#[cfg(test)]
+mod window_admission_tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -705,7 +705,6 @@ impl ShellState {
             }
         }
     }
-
 
     fn zoom_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;

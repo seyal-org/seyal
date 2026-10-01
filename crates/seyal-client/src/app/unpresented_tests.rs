@@ -66,13 +66,11 @@ fn terminate_queues_adr005_effect_not_from_close() {
         root.apply(AppAction::TerminateExecution { execution }),
         Err(AppError::TerminationNotRequested)
     );
-    assert!(
-        !root
-            .snapshot()
-            .pending_effects
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. }))
-    );
+    assert!(!root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
     assert_eq!(root.live_unpresented(), vec![execution]);
 }
 

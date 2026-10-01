@@ -651,7 +651,8 @@ fn spec025_p6_close_never_yields_zero_leaves() {
             }) {
                 Ok(()) => {
                     let _ = shell.take_effects();
-                    if shell.snapshot().active_window.is_none() || shell.snapshot().panes.is_empty() {
+                    if shell.snapshot().active_window.is_none() || shell.snapshot().panes.is_empty()
+                    {
                         break;
                     }
                     if count > 1 {

@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 933
+acknowledged_loc = 939
 issue = 1158
-reason = "ApplicationRoot keeps W4b close/unpresented dispatch (#1158) together with N4 goto, N5 activation-episode fields, and N3 FocusHistory (#1156). Close apply stays in chrome_apply.rs; history apply stays in focus_history_apply.rs; activation retry stays in activation.rs. Ceiling matches merged LOC."
+reason = "ApplicationRoot keeps W4b close/unpresented dispatch (#1158) with N4/N5/N3 and restored base PT/W6 adopt/terminate dispatch after absorbing issue/1108 content omitted by an earlier ours-merge. Close apply stays in chrome_apply.rs; history apply stays in focus_history_apply.rs. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -64,21 +64,21 @@ reason = "C ABI façade keeps W3 window extraction and N4/N3 error numbers 35-49
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 981
+acknowledged_loc = 984
 issue = 1158
-reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after the N6 merge (#1156) and the W4b containment-generation close calls (#1158). Cross-window coverage lives in activation_tests.rs; history integration lives in history_integration_tests.rs. Ceiling matches merged LOC."
+reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after N6 (#1156), W4b close (#1158), and restored base stack content from issue/1108. Cross-window coverage lives in activation_tests.rs. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 825
+acknowledged_loc = 937
 issue = 1158
-reason = "ShellState keeps W3 window containment, N4 navigation helpers, and N5 Tab→Window placement (#1144/#1156) plus the W4b zero-window product-active Window (#1158). Inventory enumeration lives in inventory.rs; close lives in close.rs. Ceiling matches merged LOC."
+reason = "ShellState keeps W3/N4/N5 plus W4b zero-window product-active Window (#1158) and restored PT/W6 pane_ops/unpresented helpers absorbed from issue/1108 after an earlier ours-merge omitted them. Inventory stays in inventory.rs; close stays in close.rs. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 718
+acknowledged_loc = 724
 issue = 1158
-reason = "Action decode stays one FFI sibling. HistoryBack and HistoryForward stay at 65 and 66 after Navigate/goto 62-64 (#1156); CloseWindow is 67 (#1158) so Navigate remains 62. Ceiling matches merged LOC."
+reason = "Action decode stays one FFI sibling. HistoryBack/Forward 65/66, CloseWindow 67 (#1158), and restored base ADOPT_UNPRESENTED 68 from issue/1108 remain here. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
