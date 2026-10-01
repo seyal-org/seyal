@@ -54,9 +54,6 @@ fn adopt_keeps_execution_id_and_uses_fresh_attachment() {
 #[test]
 fn terminate_queues_adr005_effect_not_from_close() {
     let mut root = ApplicationRoot::new();
-    while !root.snapshot().pending_effects.is_empty() {
-        root.apply(AppAction::AckEffect).unwrap();
-    }
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::new();
     root.apply(AppAction::RecordUnpresented {
@@ -64,12 +61,19 @@ fn terminate_queues_adr005_effect_not_from_close() {
         workspace,
     })
     .unwrap();
-    root.apply(AppAction::TerminateExecution { execution })
-        .unwrap();
+    // Without a live Runtime accept, terminate must fail closed and keep the id.
     assert_eq!(
-        root.snapshot().pending_effects,
-        vec![NativeEffect::TerminateExecution { execution }]
+        root.apply(AppAction::TerminateExecution { execution }),
+        Err(AppError::TerminationNotRequested)
     );
+    assert!(
+        !root
+            .snapshot()
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. }))
+    );
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
 #[test]
@@ -105,9 +109,6 @@ fn palette_lists_unpresented_without_auto_select() {
 #[test]
 fn palette_terminate_dispatches_typed_action() {
     let mut root = ApplicationRoot::new();
-    while !root.snapshot().pending_effects.is_empty() {
-        root.apply(AppAction::AckEffect).unwrap();
-    }
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::from_bytes([0x33; 16]);
     root.apply(AppAction::RecordUnpresented {
@@ -115,22 +116,23 @@ fn palette_terminate_dispatches_typed_action() {
         workspace,
     })
     .unwrap();
-    let fence = root.fence();
-    root.apply(AppAction::OpenPalette { fence }).unwrap();
+    root.apply(AppAction::OpenPalette {
+        fence: root.fence(),
+    })
+    .unwrap();
     root.apply(AppAction::SetPaletteQuery {
         fence: root.fence(),
         query: "Terminate Unpresented".to_owned(),
     })
     .unwrap();
-    root.apply(AppAction::RunPalette {
-        fence: root.fence(),
-        address: None,
-    })
-    .unwrap();
     assert_eq!(
-        root.snapshot().pending_effects,
-        vec![NativeEffect::TerminateExecution { execution }]
+        root.apply(AppAction::RunPalette {
+            fence: root.fence(),
+            address: None,
+        }),
+        Err(AppError::TerminationNotRequested)
     );
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
 #[test]

@@ -53,6 +53,11 @@ pub enum MessageType {
     HostSearch = 33,
     /// Native mouse event. Runtime encodes SGR/X10 from canonical modes.
     TerminalMouse = 34,
+    /// Connection-level request to reap one execution. Payload is the
+    /// 16-byte `ExecutionId` only. Valid before attachment, like `ListExecutions`.
+    /// Acceptance is the same message echoed with that id. Rejection is `Error`
+    /// with this type as the offending message. There is no separate ack type.
+    TerminateExecution = 35,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -90,6 +95,7 @@ impl MessageType {
             32 => Self::CopiedText,
             33 => Self::HostSearch,
             34 => Self::TerminalMouse,
+            35 => Self::TerminateExecution,
             _ => return None,
         })
     }
@@ -130,6 +136,7 @@ pub enum Message<'a> {
     CopiedText(InputRef<'a>),
     HostSearch(HostSearch<'a>),
     TerminalMouse(TerminalMouse),
+    TerminateExecution(crate::ExecutionId),
 }
 
 pub fn decode_message<'a>(
@@ -191,6 +198,12 @@ pub fn decode_message<'a>(
         MessageType::CopiedText => Message::CopiedText(InputRef::decode(payload)?),
         MessageType::HostSearch => Message::HostSearch(HostSearch::decode(payload)?),
         MessageType::TerminalMouse => Message::TerminalMouse(TerminalMouse::decode(payload)?),
+        MessageType::TerminateExecution => {
+            let Ok(bytes) = <[u8; 16]>::try_from(payload) else {
+                return Err(FramingError::ExactLengthMismatch);
+            };
+            Message::TerminateExecution(crate::ExecutionId::from_bytes(bytes))
+        }
     })
 }
 

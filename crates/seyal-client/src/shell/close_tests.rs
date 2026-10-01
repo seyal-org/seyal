@@ -194,6 +194,7 @@ fn close_pane_unbinds_collapses_and_keeps_sibling_focus() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .unwrap();
     let created = shell.snapshot().focused_pane;
@@ -644,6 +645,7 @@ fn close_enablement_admits_hierarchical_removal_while_a_window_exists() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("splits allowed");
     let two_panes = shell.snapshot();
@@ -706,6 +708,7 @@ fn split_focus_and_close_panes() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let snap = shell.snapshot();
@@ -721,6 +724,7 @@ fn split_focus_and_close_panes() {
         .apply(ShellAction::SplitPane {
             id: original,
             axis: SplitAxis::Down,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("nested split");
     assert_eq!(shell.snapshot().tabs[0].pane_count, 3);
@@ -773,6 +777,7 @@ fn execution_bound_pane_close_unbinds_without_terminate() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let created = shell.snapshot().focused_pane;

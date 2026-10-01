@@ -23,7 +23,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::SplitFocused { axis })
+        self.apply_shell(ShellAction::SplitFocused { axis, containment_generation: self.shell.containment_generation() })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         let _ = self
             .chrome

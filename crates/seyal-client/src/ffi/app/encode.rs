@@ -47,6 +47,8 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
         AppError::UnknownWindow => 34,
+        // W4a window-creation policy (nav errors keep 35–49 on this stack).
+        AppError::WindowCreationUnavailable => 52,
         AppError::NavigationUnsupportedKind => 35,
         AppError::NavigationDenied => 36,
         AppError::NavigationUnknownWorkspace => 37,
@@ -65,6 +67,7 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         // W6 adopt errors follow the landed navigation range 35–49.
         AppError::CrossWorkspaceAdopt => 50,
         AppError::ExecutionNotUnpresented => 51,
+        AppError::TerminationNotRequested => 53,
     }
 }
 

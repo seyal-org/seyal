@@ -2,6 +2,7 @@ mod attach;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod terminate;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -140,6 +141,19 @@ pub struct LocalDisplayClient {
 impl LocalDisplayClient {
     pub fn socket_fd(&self) -> i32 {
         self.stream.as_raw_fd()
+    }
+
+    /// entry or leave a terminate effect queued.
+    pub(crate) fn send_terminate_execution(
+        &mut self,
+        execution: ExecutionId,
+    ) -> Result<(), ClientError> {
+        if !self.outbound.is_empty() {
+            return Err(ClientError::Io);
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        discovery::send_terminate_execution_until(&mut self.stream, execution, deadline)?;
+        self.read_terminate_acceptance(execution, deadline)
     }
 
     pub fn execution_id(&self) -> ExecutionId {

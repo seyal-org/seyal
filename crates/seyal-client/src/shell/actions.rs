@@ -97,7 +97,10 @@ impl ShellState {
         containment_generation: u64,
     ) -> Result<(), ShellError> {
         self.require_containment_generation(containment_generation)?;
-        let _ = self.workspace(workspace)?;
+        let occupied = !self.workspace(workspace)?.windows.is_empty();
+        if occupied && !self.allows_window_creation {
+            return Err(ShellError::WindowCreationUnavailable);
+        }
         let window = self.new_window_record(workspace)?;
         let window_id = window.id;
         self.workspace_mut(workspace)?.push_window(window);

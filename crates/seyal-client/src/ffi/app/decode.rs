@@ -342,6 +342,12 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_hi,
             )?),
         }),
+        68 => Ok(AppAction::AdoptUnpresented {
+            execution: ExecutionId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
         _ => Err(-6),
     }
 }

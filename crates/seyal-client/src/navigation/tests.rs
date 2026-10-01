@@ -435,6 +435,7 @@ fn rejection_ambiguous_target() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let second = shell
@@ -822,6 +823,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let second = shell
@@ -946,6 +948,7 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+                    containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let created = shell.snapshot().focused_pane;

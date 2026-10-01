@@ -110,10 +110,8 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert_eq!(shell.snapshot().tabs.len(), 2);
     let focused = shell.snapshot().focused_pane;
     assert_eq!(
-        shell.apply(ShellAction::SplitPane {
-            id: focused,
-            axis: SplitAxis::Right
-        }),
+        shell.apply(ShellAction::SplitPane { id: focused, axis: SplitAxis::Right
+        , containment_generation: shell.containment_generation() }),
         Err(ShellError::PaneSplitUnavailable)
     );
     // Rejected split leaves tab inventory and single-pane layout unchanged.

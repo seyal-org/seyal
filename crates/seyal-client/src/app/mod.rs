@@ -104,6 +104,7 @@ pub enum AppError {
     UnknownBlock,
     CannotCloseBoundPane,
     UnknownWindow,
+    WindowCreationUnavailable,
     NavigationUnsupportedKind,
     NavigationDenied,
     NavigationUnknownWorkspace,
@@ -118,6 +119,7 @@ pub enum AppError {
     NavigationHistoryUnavailable,
     CrossWorkspaceAdopt,
     ExecutionNotUnpresented,
+    TerminationNotRequested,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -381,6 +383,9 @@ pub enum AppAction {
     Adopt {
         fence: AppFence,
         evidence: BindingEvidence,
+    },
+    AdoptUnpresented {
+        execution: ExecutionId,
     },
     TerminateExecution {
         execution: ExecutionId,
@@ -797,6 +802,7 @@ impl ApplicationRoot {
                 workspace,
             } => self.record_unpresented(execution, workspace),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            AppAction::AdoptUnpresented { execution } => self.adopt_unpresented_command(execution),
             AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
             AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
             AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),

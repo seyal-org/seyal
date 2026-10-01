@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_runtime::{
+use seyal_runtime::{ExecutionId, 
     local_ipc::{
         discovery::{
             control_socket_path, ensure_verified_runtime_dir, resolved_runtime_dir, DiscoveryError,
@@ -323,6 +323,24 @@ pub(crate) fn send_control_until(
         }
     }
     Ok(())
+}
+
+pub(crate) fn terminate_execution_payload(execution: ExecutionId) -> [u8; 16] {
+    execution.to_bytes()
+}
+
+/// One explicit terminate write. The payload is the execution id only.
+pub(crate) fn send_terminate_execution_until(
+    stream: &mut UnixStream,
+    execution: ExecutionId,
+    deadline: Instant,
+) -> Result<(), ClientError> {
+    send_control_until(
+        stream,
+        MessageType::TerminateExecution,
+        &terminate_execution_payload(execution),
+        deadline,
+    )
 }
 
 #[cfg(test)]

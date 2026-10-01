@@ -161,7 +161,12 @@ enum SeyalAppActionKind {
      * W4b close (ADR-018 §2.5). target_execution_lo/hi = WindowId.
      * Placed after landed navigation actions 62-66 so Navigate stays 62.
      */
-    SEYAL_APP_ACTION_CLOSE_WINDOW = 67
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 67,
+    /**
+     * Adopt one live-unpresented execution into the focused Pane (W6).
+     * target_execution_lo/hi = ExecutionId. Follows CloseWindow so Navigate stays 62.
+     */
+    SEYAL_APP_ACTION_ADOPT_UNPRESENTED = 68
 };
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
