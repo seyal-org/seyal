@@ -320,6 +320,12 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
         }
+        composer.onCommandConsumed = { [weak self] in
+            self?.reconcileChrome()
+        }
+        pane.inputSurface.onCommandConsumed = { [weak self] in
+            self?.reconcileChrome()
+        }
         composer.onHistoryOpened = { [weak self] in
             self?.reconcileChrome()
         }

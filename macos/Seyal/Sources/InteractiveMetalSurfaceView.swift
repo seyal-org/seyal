@@ -12,6 +12,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     static let maxHeldKeyboardKinds = 256
     var onBridgeBecameUsable: (() -> Void)?
     var onRequestComposerFocus: (() -> Void)?
+    /// A Rust table match already changed product state. The chrome host projects it.
+    var onCommandConsumed: (() -> Void)?
     var observedAlternateScreen = false
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
@@ -145,6 +147,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             compositionActive: hasMarkedText()
         ) {
         case .consumed:
+            onCommandConsumed?()
             return true
         case .nativeCommand, .fallsThrough:
             return super.performKeyEquivalent(with: event)
@@ -162,6 +165,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         ) {
         case .consumed:
             // ApplicationCommand matched in Rust — zero PTY bytes.
+            onCommandConsumed?()
             return
         case .nativeCommand:
             super.keyDown(with: event)

@@ -30,6 +30,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     var onSubmitRaw: ((String) -> Int32)?
     /// Rust accepted OpenComposerHistory; the host reconciles the overlay.
     var onHistoryOpened: (() -> Void)?
+    /// A table match changed product chrome (palette, tabs, presentation).
+    var onCommandConsumed: (() -> Void)?
 
     private let appHandle: UInt64
     private let textView = ComposerTextView()
@@ -242,6 +244,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         ) {
         case .consumed:
             reconcile()
+            onCommandConsumed?()
             let history = seyal_app_composer_history(appHandle)
             if history.flags & UInt16(SEYAL_APP_HISTORY_OPEN) != 0 {
                 onHistoryOpened?()
