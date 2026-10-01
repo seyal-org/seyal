@@ -90,6 +90,7 @@ impl IntegrationService {
         })
     }
 
+    #[cfg(any(test, feature = "test-fault-injection"))]
     pub(crate) fn fail_after_writes(&self, allowed: u64) {
         self.store.fail_after_writes(allowed);
     }

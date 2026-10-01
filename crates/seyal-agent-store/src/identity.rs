@@ -147,6 +147,7 @@ impl AgentStore {
 
     /// The next `allowed` commits proceed. The following commit fails before
     /// its transaction starts, so a refused write publishes nothing.
+    #[cfg(any(test, feature = "test-fault-injection"))]
     pub fn fail_after_writes(&self, allowed: u64) {
         self.writes_before_fault.store(allowed, Ordering::Relaxed);
     }

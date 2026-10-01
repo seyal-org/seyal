@@ -22,6 +22,11 @@ runtime_failure_matrix() {
     --test macos_pty
 }
 
+agent_failure_matrix() {
+  cargo_pinned test -p seyal-agent-backend --locked --features test-fault-injection \
+    --test integration_path --test session_bounds --test process_qualification -- --show-output
+}
+
 case "$cmd" in
   bootstrap)
     bash scripts/bootstrap-toolchain.sh

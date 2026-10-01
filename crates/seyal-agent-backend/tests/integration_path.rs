@@ -450,6 +450,7 @@ fn out_of_order_and_lost_observations_do_not_fabricate_termination() {
     let _ = fs::remove_dir_all(lost_dir);
 }
 
+#[cfg(feature = "test-fault-injection")]
 #[test]
 fn persistence_fault_before_commit_does_not_publish_success() {
     let dir = temp_dir("fault");
