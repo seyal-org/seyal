@@ -27,7 +27,7 @@ ADR-020.
 | 8 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `term_terminfo_present_colorterm_and_terminfo_dirs_absent` |
 | 9 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `osc7_and_pane_title_cannot_steer_cwd_or_program` |
 | 10 | `crates/seyal-runtime/src/launch_policy/tests.rs` → `policy_debug_redacts_program_path_and_env` |
-| 11 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `capability_unavailable_still_composes_for_explicit_argv`; `crates/seyal-runtime/tests/launch_policy_create.rs` → `capability_unavailable_publishes_zero_executions` |
+| 11 | Interactive create gate: `crates/seyal-runtime/tests/launch_policy_create.rs` → `capability_unavailable_publishes_zero_executions`. Explicit-argv compose bypass fixture (L2 / #1111, inherited via L3 base): `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `capability_unavailable_still_composes_for_explicit_argv` |
 | 12 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `developer_explicit_argv_is_not_profile_zero_command_spec`; `crates/seyal-runtime/tests/launch_policy_create.rs` → `developer_explicit_argv_still_creates_one_execution` |
 | 13 | `crates/seyal-runtime/src/shell_integration_policy.rs` → `user_zdotdir_bounds_omit_invalid_values_and_copy_valid` |
 | 14 | `crates/seyal-runtime/src/launch_policy/compose_tests.rs` → `locale_copies_only_lang_and_lc_ctype` |
@@ -41,7 +41,7 @@ ADR-020.
 |---|---|
 | SPEC-023 §11 one resolution attempt per create; N ≥ 8 policy-failure injections; no unbounded reactor hot loop; unrelated live streaming execution keeps advancing (`damage_generation`); shutdown retains signal/reap while the primary was live | `crates/seyal-runtime/tests/launch_policy_create.rs` → `launch_policy_failure_n_times_does_not_hot_loop_or_starve_streaming_pty` (**new**) |
 
-Failure class used for injection: `LaunchPolicyFailure::CapabilityUnavailable` via an empty CapabilityPolicy terminfo directory (production create-path gate). No production launch-policy behavior change was required; the existing one-attempt-per-create path stayed green under N-times injection.
+Failure class used for injection: `LaunchPolicyFailure::CapabilityUnavailable` via an empty CapabilityPolicy terminfo directory (interactive create-path gate). This L5 PR is test-only plus this evidence note; the production `compose_child_command` CapabilityUnavailable relocation (explicit argv must still compose) lives on L2 / PR #1111 and is inherited through the L3 base. The existing one-attempt-per-create path stayed green under N-times injection.
 
 ## Reproduce
 
