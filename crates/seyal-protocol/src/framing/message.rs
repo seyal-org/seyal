@@ -1,6 +1,10 @@
 //! SPEC-004 message-type tags, borrowed message enum, and payload dispatch.
 
 use super::envelope::{FrameHeader, FramingError, HEADER_LEN, MAX_FRAME_PAYLOAD};
+use super::execution::{
+    CreateExecutionRequest, CreateExecutionResult, TerminateExecutionRequest,
+    TerminateExecutionResult,
+};
 use super::payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList, HostSearch,
     HostSelection, InputRef, LifecycleMessage, Resize, Resync, ServerHello, TerminalMouse,
@@ -53,6 +57,14 @@ pub enum MessageType {
     HostSearch = 33,
     /// Native mouse event. Runtime encodes SGR/X10 from canonical modes.
     TerminalMouse = 34,
+    /// SPEC-004 §18: create a new TerminalExecution (capability bit 10).
+    CreateExecutionRequest = 36,
+    /// SPEC-004 §18: create-execution result.
+    CreateExecutionResult = 37,
+    /// SPEC-004 §18: request termination of an attached execution.
+    TerminateExecutionRequest = 38,
+    /// SPEC-004 §18: terminate-execution result.
+    TerminateExecutionResult = 39,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -90,6 +102,10 @@ impl MessageType {
             32 => Self::CopiedText,
             33 => Self::HostSearch,
             34 => Self::TerminalMouse,
+            36 => Self::CreateExecutionRequest,
+            37 => Self::CreateExecutionResult,
+            38 => Self::TerminateExecutionRequest,
+            39 => Self::TerminateExecutionResult,
             _ => return None,
         })
     }
@@ -130,6 +146,10 @@ pub enum Message<'a> {
     CopiedText(InputRef<'a>),
     HostSearch(HostSearch<'a>),
     TerminalMouse(TerminalMouse),
+    CreateExecutionRequest(CreateExecutionRequest),
+    CreateExecutionResult(CreateExecutionResult),
+    TerminateExecutionRequest(TerminateExecutionRequest),
+    TerminateExecutionResult(TerminateExecutionResult),
 }
 
 pub fn decode_message<'a>(
@@ -191,6 +211,18 @@ pub fn decode_message<'a>(
         MessageType::CopiedText => Message::CopiedText(InputRef::decode(payload)?),
         MessageType::HostSearch => Message::HostSearch(HostSearch::decode(payload)?),
         MessageType::TerminalMouse => Message::TerminalMouse(TerminalMouse::decode(payload)?),
+        MessageType::CreateExecutionRequest => {
+            Message::CreateExecutionRequest(CreateExecutionRequest::decode(payload)?)
+        }
+        MessageType::CreateExecutionResult => {
+            Message::CreateExecutionResult(CreateExecutionResult::decode(payload)?)
+        }
+        MessageType::TerminateExecutionRequest => {
+            Message::TerminateExecutionRequest(TerminateExecutionRequest::decode(payload)?)
+        }
+        MessageType::TerminateExecutionResult => {
+            Message::TerminateExecutionResult(TerminateExecutionResult::decode(payload)?)
+        }
     })
 }
 
