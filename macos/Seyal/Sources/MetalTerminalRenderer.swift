@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Metal
 import QuartzCore
@@ -48,7 +47,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     let gpuCompletionMailbox = GPUCompletionMailbox()
     /// Coalesces main-queue drain wakeups from GPU completion handlers.
     let gpuCompletionWakeScheduled = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
-
     var stats = MetalRendererStats()
     var persistentDisplayFailure: MetalTerminalRendererError?
     var onNeedsCurrentFrame: (() -> Void)?
@@ -56,14 +54,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
 
     init(device: MTLDevice, terminalFont: SeyalResolvedFontSpec = .canonicalTerminal) throws {
         gpuCompletionWakeScheduled.initialize(to: 0)
-        // Seed from Rust theme for the current appearance so the first present
-        // does not flash hardcoded dark cell defaults under light appearance.
-        let appearance = NSApp.effectiveAppearance
-        let theme = NativeThemeRealization.theme(for: appearance)
-        self.defaultTerminalColors = SIMD2<UInt32>(
-            theme.terminalDefaultForeground,
-            theme.terminalDefaultBackground
-        )
+        self.defaultTerminalColors = Self.themeSeededDefaultColors()
         self.device = device
         guard MemoryLayout<TerminalInstance>.stride == 48 else {
             throw MetalTerminalRendererError.invalidInstanceLayout

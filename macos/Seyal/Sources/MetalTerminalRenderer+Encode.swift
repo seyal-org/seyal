@@ -3,6 +3,14 @@ import Metal
 import QuartzCore
 
 extension MetalTerminalRenderer {
+
+    /// Nonisolated seed from Rust theme via AppleInterfaceStyle (avoid dark flash).
+    static func themeSeededDefaultColors() -> SIMD2<UInt32> {
+        let light = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") != "Dark"
+        let packed = seyal_app_visual(light ? 1 : 0)
+        return SIMD2(packed.text.byteSwapped, packed.canvas.byteSwapped)
+    }
+
     func setDefaultTerminalColors(foreground: UInt32, background: UInt32) {
         guard defaultTerminalColors.x != foreground || defaultTerminalColors.y != background else { return }
         defaultTerminalColors = SIMD2<UInt32>(foreground, background)
