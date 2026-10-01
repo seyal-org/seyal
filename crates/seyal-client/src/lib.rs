@@ -44,8 +44,8 @@ pub mod pass8_benchmark;
 
 #[cfg(target_os = "macos")]
 pub use local::{
-    cell_from_point, derive_grid_geometry, ClientError, DiscoveryFailure, GridGeometry,
-    InputAdmissionFailure, LocalDisplayClient, ResizeFailure,
+    cell_from_point, derive_grid_geometry, force_bootstrap_attach_failure_for_test, ClientError,
+    DiscoveryFailure, GridGeometry, InputAdmissionFailure, LocalDisplayClient, ResizeFailure,
 };
 
 #[cfg(target_os = "macos")]

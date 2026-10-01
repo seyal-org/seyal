@@ -35,6 +35,17 @@ const DISPLAY_CHUNK_INDEX_OFFSET: usize = 32;
 const DISPLAY_CHUNK_COUNT_OFFSET: usize = 34;
 const DISPLAY_CHUNK_SEQUENCE_END: usize = 36;
 
+thread_local! {
+    static FORCE_BOOTSTRAP_ATTACH_FAILURE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Test hook: after bootstrap CreateExecution succeeds, force the attach stream
+/// closed so `connect_first_running` exercises ADR-017 §6.3 dispose.
+pub fn force_bootstrap_attach_failure_for_test(force: bool) {
+    FORCE_BOOTSTRAP_ATTACH_FAILURE.with(|flag| flag.set(force));
+}
+
 fn display_chunk_remainder_hint(frame: &[u8]) -> Option<usize> {
     let header = FrameHeader::decode(frame).ok()?;
     let message_type = MessageType::from_u16(header.message_type)?;
@@ -213,6 +224,36 @@ fn create_profile_zero_execution(
     }
 }
 
+/// ADR-017 §6.3 row 1: never-bound Created execution → Controller attach solely
+/// to dispose, then exactly one TerminateExecutionRequest. Best-effort only:
+/// attach/terminate failures do not retry. Used when bootstrap create succeeded
+/// but the subsequent attach/snapshot path failed before a live product bind.
+pub(crate) fn best_effort_dispose_never_bound_execution(
+    socket_path: &Path,
+    execution_id: ExecutionId,
+    deadline: Instant,
+) {
+    let mut client = match LocalDisplayClient::connect_execution_until(
+        socket_path,
+        execution_id,
+        Role::Controller,
+        deadline,
+    ) {
+        Ok(client) => client,
+        Err(_) => return, // dispose attach failed — no second attempt (§6.3)
+    };
+    if client.submit_terminate_execution(execution_id).is_err() {
+        return;
+    }
+    while Instant::now() < deadline {
+        let _ = client.poll_prepare();
+        if client.take_terminate_result().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 impl LocalDisplayClient {
     /// Attach to one explicitly selected execution. Native panes must use
     /// this entry point so two panes cannot accidentally share the first
@@ -249,7 +290,7 @@ impl LocalDisplayClient {
     /// role to its single running execution. Controller remains the permanent
     /// native-pane default; read-only native qualification may use Observer
     /// without borrowing controller authority from the app it will launch.
-    pub(crate) fn connect_first_running_as_until(
+    pub fn connect_first_running_as_until(
         role: Role,
         deadline: Instant,
     ) -> Result<Self, ClientError> {
@@ -287,6 +328,13 @@ impl LocalDisplayClient {
             Err(error) => return Err(error),
         };
 
+        #[cfg(target_os = "macos")]
+        if created_bootstrap && FORCE_BOOTSTRAP_ATTACH_FAILURE.with(|flag| flag.get()) {
+            // Close the Ready stream so finish_attach fails after Created; the
+            // production Err branch must still dispose the orphan.
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+
         if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
             drop(stream);
             stream = connect_stream_until(&socket_path, deadline)?;
@@ -301,7 +349,7 @@ impl LocalDisplayClient {
         let block_metadata_negotiated =
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
-        let mut client = Self::finish_attach_with_deadline(
+        let mut client = match Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
@@ -311,7 +359,16 @@ impl LocalDisplayClient {
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
             deadline,
-        )?;
+        ) {
+            Ok(client) => client,
+            Err(error) if created_bootstrap => {
+                // ADR-017 §6.3: Created but attach/snapshot failed → dispose
+                // the never-bound orphan. Preserve the original attach error.
+                best_effort_dispose_never_bound_execution(&socket_path, execution_id, deadline);
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         // Bootstrap CreateExecution used request_id 1 on this stream; the
         // client's allocator must not reuse it (Runtime rejects <= last).
         if created_bootstrap {
