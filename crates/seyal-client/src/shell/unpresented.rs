@@ -102,13 +102,23 @@ impl ShellState {
         Ok(())
     }
 
-    pub(super) fn terminate_execution(&mut self, execution: ExecutionId) -> Result<(), ShellError> {
+    /// Fail-closed terminate predicates without queuing an effect or dropping
+    /// the catalog entry.
+    pub(crate) fn validate_terminate_execution(
+        &self,
+        execution: ExecutionId,
+    ) -> Result<(), ShellError> {
         if self.execution_is_bound(execution) {
             return Err(ShellError::ExecutionAlreadyBound);
         }
         if !self.unpresented.contains_key(&execution) {
             return Err(ShellError::ExecutionNotUnpresented);
         }
+        Ok(())
+    }
+
+    pub(super) fn terminate_execution(&mut self, execution: ExecutionId) -> Result<(), ShellError> {
+        self.validate_terminate_execution(execution)?;
         self.push_effect(ShellNativeEffect::TerminateExecution { execution });
         Ok(())
     }

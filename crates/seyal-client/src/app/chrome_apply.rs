@@ -9,9 +9,8 @@ use crate::shell::{ShellAction, SplitAxis};
 impl ApplicationRoot {
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
-        let window = snap.active_window.ok_or(AppError::UnknownChromeTab)?;
         self.apply_shell(ShellAction::CreateTab {
-            window,
+            window: snap.active_window,
             containment_generation: snap.containment_generation,
         })
         .map_err(|_| AppError::TabCreationUnavailable)?;
@@ -35,13 +34,8 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        let generation = self.shell.containment_generation();
-        self.apply_shell(ShellAction::CloseTab {
-            id,
-            containment_generation: generation,
-        })
-        .map_err(close_tab_error)?;
-        self.release_authority_if_unbound();
+        self.apply_shell(ShellAction::CloseTab { id })
+            .map_err(close_tab_error)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -49,56 +43,16 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        let generation = self.shell.containment_generation();
+        let snap = self.shell.snapshot();
         self.apply_shell(ShellAction::ClosePane {
             id,
-            containment_generation: generation,
+            containment_generation: snap.containment_generation,
         })
         .map_err(close_pane_error)?;
-        self.release_authority_if_unbound();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
-    }
-
-    pub(super) fn close_window(&mut self, id: seyal_core::WindowId) -> Result<(), AppError> {
-        let generation = self.shell.containment_generation();
-        self.apply_shell(ShellAction::CloseWindow {
-            id,
-            containment_generation: generation,
-        })
-        .map_err(|error| match error {
-            ShellError::PresentationCloseUnavailable => AppError::PresentationCloseUnavailable,
-            _ => AppError::UnknownChromeTab,
-        })?;
-        self.release_authority_if_unbound();
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
-    fn release_authority_if_unbound(&mut self) {
-        let Some(bound) = self.authority else {
-            return;
-        };
-        if self
-            .shell
-            .pane_execution(bound.pane)
-            .ok()
-            .flatten()
-            .is_some()
-        {
-            return;
-        }
-        // Presentation removal detaches; execution stays live-unpresented (ADR-018 §3.1).
-        self.authority = None;
-        #[cfg(target_os = "macos")]
-        if let Some(handle) = self.client_handle.take() {
-            let _ = crate::ffi::unregister_client(handle.raw());
-        }
-        self.sync_composer_presentation();
     }
 
     pub(crate) fn apply_shell(

@@ -18,13 +18,8 @@ pub enum NativeEffect {
         window: WindowId,
     },
     /// Explicit ADR-005 terminate for one live-unpresented execution (§3.3).
+    /// Queued only after `request_termination` has accepted the id.
     TerminateExecution {
-        execution: ExecutionId,
-    },
-    /// Palette/host intent: attach Runtime evidence, then commit via [`super::AppAction::Adopt`].
-    /// Does not mutate shell bindings by itself.
-    RequestAdoptAttach {
-        pane: seyal_core::PaneId,
         execution: ExecutionId,
     },
 }
@@ -53,15 +48,12 @@ impl NativeEffect {
             Self::DestroyWindowRealization { .. } => 3,
             Self::OrderFrontMakeKey { .. } => 4,
             Self::TerminateExecution { .. } => 5,
-            Self::RequestAdoptAttach { .. } => 6,
         }
     }
 
     pub fn window(self) -> Option<WindowId> {
         match self {
-            Self::BoundedDetachThenTerminate
-            | Self::TerminateExecution { .. }
-            | Self::RequestAdoptAttach { .. } => None,
+            Self::BoundedDetachThenTerminate | Self::TerminateExecution { .. } => None,
             Self::RealizeWindow { window }
             | Self::DestroyWindowRealization { window }
             | Self::OrderFrontMakeKey { window } => Some(window),
@@ -70,9 +62,7 @@ impl NativeEffect {
 
     pub fn execution(self) -> Option<ExecutionId> {
         match self {
-            Self::TerminateExecution { execution } | Self::RequestAdoptAttach { execution, .. } => {
-                Some(execution)
-            }
+            Self::TerminateExecution { execution } => Some(execution),
             _ => None,
         }
     }

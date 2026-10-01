@@ -248,7 +248,7 @@ mod root_tests {
             }],
             WorkspaceId::m001_default(),
             true,
-            true,
+            false,
         )
         .expect("fixture");
         ApplicationRoot::with_shell(shell)
@@ -307,22 +307,26 @@ mod root_tests {
         assert!(!regions[1].live);
         assert_eq!(root.snapshot().shell.focused_pane, bound);
 
-        // Bound Pane close unbinds and collapses onto the sibling. The
-        // remaining unbound focused Pane hosts the live surface for re-bind.
-        root.apply(AppAction::ClosePane { id: bound }).unwrap();
+        // The bound Pane cannot close; the unbound one collapses the tree.
+        assert_eq!(
+            root.apply(AppAction::ClosePane { id: bound }),
+            Err(AppError::CannotCloseBoundPane)
+        );
+        assert_eq!(root.pane_regions().len(), 2);
+        root.apply(AppAction::ClosePane { id: created }).unwrap();
         let regions = root.pane_regions();
         assert_eq!(regions.len(), 1);
-        assert_eq!(regions[0].pane, created);
-        assert!(regions[0].focused && regions[0].live);
+        assert_eq!(regions[0].pane, bound);
+        assert!(regions[0].live);
 
         // Stale PaneIds fail closed and leave the projection unchanged.
         assert_eq!(
-            root.apply(AppAction::FocusPane { id: bound }),
+            root.apply(AppAction::FocusPane { id: created }),
             Err(AppError::UnknownPane)
         );
         assert_eq!(
-            root.apply(AppAction::ClosePane { id: bound }),
-            Err(AppError::UnknownPane)
+            root.apply(AppAction::ClosePane { id: created }),
+            Err(AppError::CannotCloseLastPane)
         );
         assert_eq!(root.pane_regions(), regions);
     }

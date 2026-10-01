@@ -65,9 +65,9 @@ fn terminate_queues_adr005_effect_not_from_close() {
         root.apply(AppAction::TerminateExecution { execution }),
         Err(AppError::TerminationNotRequested)
     );
-    assert_eq!(
-        root.snapshot().pending_effects,
-        vec![NativeEffect::TerminateExecution { execution }]
+    assert!(
+        root.snapshot().pending_effects.is_empty(),
+        "a failed runtime request must not queue terminate"
     );
     assert_eq!(root.live_unpresented(), vec![execution]);
 }
@@ -125,9 +125,9 @@ fn palette_terminate_dispatches_typed_action() {
         }),
         Err(AppError::TerminationNotRequested)
     );
-    assert_eq!(
-        root.snapshot().pending_effects,
-        vec![NativeEffect::TerminateExecution { execution }]
+    assert!(
+        root.snapshot().pending_effects.is_empty(),
+        "palette terminate does not queue an effect when the runtime was not asked"
     );
     assert_eq!(root.live_unpresented(), vec![execution]);
 }
@@ -177,11 +177,10 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    // m001 gates presentation close until W4b; rejection must still avoid
-    // TerminateExecution and leave the bound execution presented.
+    // The last pane cannot close, and close does not emit terminate.
     assert_eq!(
         root.apply(AppAction::ClosePane { id: pane }),
-        Err(AppError::PresentationCloseUnavailable)
+        Err(AppError::CannotCloseLastPane)
     );
     assert!(root
         .snapshot()
@@ -193,7 +192,7 @@ fn close_actions_do_not_emit_terminate_execution() {
 }
 
 #[test]
-fn palette_adopt_emits_attach_intent_without_binding() {
+fn palette_adopt_rejects_before_bind_when_attach_is_unavailable() {
     let mut root = ApplicationRoot::new();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::from_bytes([0xcd; 16]);
@@ -220,16 +219,13 @@ fn palette_adopt_emits_attach_intent_without_binding() {
         query: "Adopt Unpresented".to_owned(),
     })
     .unwrap();
-    root.apply(AppAction::RunPalette {
-        fence: root.fence(),
-    })
-    .unwrap();
-
     assert_eq!(
-        root.snapshot().pending_effects,
-        vec![NativeEffect::RequestAdoptAttach { pane, execution }]
+        root.apply(AppAction::RunPalette {
+            fence: root.fence(),
+        }),
+        Err(AppError::NoLiveClient)
     );
-    // Catalog and leaf binding unchanged — Adopt with evidence still works.
+    assert!(root.snapshot().pending_effects.is_empty());
     assert_eq!(root.live_unpresented(), vec![execution]);
     assert!(root
         .snapshot()
@@ -240,13 +236,27 @@ fn palette_adopt_emits_attach_intent_without_binding() {
         .unwrap()
         .execution
         .is_none());
+}
 
-    root.apply(AppAction::AckEffect).unwrap();
+#[test]
+fn palette_adopt_rejects_already_bound_before_attach() {
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let execution = ExecutionId::from_bytes([0xab; 16]);
+    root.apply(AppAction::RecordUnpresented {
+        execution,
+        workspace,
+    })
+    .unwrap();
     root.apply(AppAction::Adopt {
         fence: root.fence(),
-        evidence: evidence(execution, AttachmentId::from_bytes([0x44; 16])),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x11; 16])),
     })
-    .expect("fenced adopt after attach intent");
-    assert!(root.live_unpresented().is_empty());
+    .unwrap();
+    assert_eq!(
+        root.apply(AppAction::AdoptUnpresented { execution }),
+        Err(AppError::AlreadyBound)
+    );
     assert_eq!(root.snapshot().execution, Some(execution));
+    assert!(root.live_unpresented().is_empty());
 }

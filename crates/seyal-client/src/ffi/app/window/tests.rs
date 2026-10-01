@@ -127,7 +127,7 @@ fn round_trip_windows(n: usize) {
         );
         if window.flags & 1 != 0 {
             seen_active = true;
-            assert_eq!(Some(expected_window.id), expected.active_window);
+            assert_eq!(expected_window.id, expected.active_window);
         }
         if wi == 1 {
             assert_ne!(window.flags & 2, 0, "attention flag");

@@ -55,6 +55,8 @@ pub enum MessageType {
     TerminalMouse = 34,
     /// Connection-level request to reap one execution. Payload is the
     /// 16-byte `ExecutionId` only. Valid before attachment, like `ListExecutions`.
+    /// Acceptance is the same message echoed with that id. Rejection is `Error`
+    /// with this type as the offending message. There is no separate ack type.
     TerminateExecution = 35,
 }
 impl MessageType {

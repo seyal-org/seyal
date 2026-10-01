@@ -114,37 +114,40 @@ fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
 }
 
 #[test]
-fn close_unknown_ids_and_sole_tab_reject_while_presentation_close_gated() {
-    // m001 keeps presentation close gated until W4b zero-window re-entry.
-    // Unknown identities and the sole Tab share PresentationCloseUnavailable.
+fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
+    // The M001 production shell starts with exactly one Tab and one
+    // Pane, so ShellState's "cannot close last" guard rejects CloseTab/
+    // ClosePane before an id is even looked up (shell.rs close_tab/
+    // close_pane), whether the id is real or not. This exercises the
+    // new close_tab_error/close_pane_error mapping surfaces that
+    // distinct cause rather than collapsing it to an unknown-id error.
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
     let only_tab = snap.shell.tabs[0].id;
     let only_pane = snap.shell.panes[0].id;
 
-    assert!(!snap.shell.allows_tab_close);
-    assert!(!snap.shell.allows_pane_close);
     assert_eq!(
         root.apply(AppAction::CloseTab { id: TabId::new() }),
-        Err(AppError::PresentationCloseUnavailable)
+        Err(AppError::CannotCloseLastTab)
     );
     assert_eq!(
         root.apply(AppAction::ClosePane { id: PaneId::new() }),
-        Err(AppError::PresentationCloseUnavailable)
+        Err(AppError::CannotCloseLastPane)
     );
     assert_eq!(
         root.apply(AppAction::CloseTab { id: only_tab }),
-        Err(AppError::PresentationCloseUnavailable)
+        Err(AppError::CannotCloseLastTab)
     );
     assert_eq!(
         root.apply(AppAction::ClosePane { id: only_pane }),
-        Err(AppError::PresentationCloseUnavailable)
+        Err(AppError::CannotCloseLastPane)
     );
-    assert_eq!(root.snapshot().shell.tabs.len(), 1);
-    assert_eq!(root.snapshot().shell.panes.len(), 1);
-    assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
-    assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
-    assert_eq!(root.snapshot().shell.windows.len(), 1);
+    // A rejected mutation does not remove the only Tab/Pane.
+    let after = root.snapshot();
+    assert_eq!(after.shell.tabs.len(), 1);
+    assert_eq!(after.shell.panes.len(), 1);
+    assert_eq!(after.shell.tabs[0].id, only_tab);
+    assert_eq!(after.shell.panes[0].id, only_pane);
 }
 
 #[test]

@@ -1,5 +1,7 @@
 use super::*;
-use seyal_runtime::local_ipc::framing::{ErrorCode, ErrorMessage, MessageType};
+use seyal_runtime::local_ipc::framing::{
+    encode_frame, ErrorCode, ErrorMessage, FrameHeader, MessageType, HEADER_LEN,
+};
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
 
@@ -483,12 +485,45 @@ fn v2_sent_bound_advances_only_after_wire_complete() {
     );
 }
 
+fn spawn_terminate_peer(
+    mut peer: UnixStream,
+    accepts: Vec<bool>,
+) -> std::thread::JoinHandle<Vec<[u8; 16]>> {
+    std::thread::spawn(move || {
+        peer.set_nonblocking(false).expect("blocking peer");
+        let mut seen = Vec::new();
+        for accept in accepts {
+            let mut header = [0u8; HEADER_LEN];
+            peer.read_exact(&mut header).expect("header");
+            let header = FrameHeader::decode(&header).expect("frame");
+            assert_eq!(header.message_type, MessageType::TerminateExecution as u16);
+            assert_eq!(header.payload_len, 16);
+            let mut payload = [0u8; 16];
+            peer.read_exact(&mut payload).expect("payload");
+            let reply = if accept {
+                encode_frame(MessageType::TerminateExecution, &payload)
+            } else {
+                encode_frame(
+                    MessageType::Error,
+                    &ErrorMessage {
+                        error_code: ErrorCode::InvalidState as u16,
+                        offending_message_type: MessageType::TerminateExecution as u16,
+                        detail_code: 0,
+                    }
+                    .encode(),
+                )
+            };
+            peer.write_all(&reply).expect("reply");
+            seen.push(payload);
+        }
+        seen
+    })
+}
+
 #[test]
-fn unpresented_terminate_writes_execution_id_only_after_send() {
+fn unpresented_terminate_keeps_catalog_until_runtime_accepts() {
     use crate::app::{AppAction, AppError, ApplicationRoot, NativeEffect};
     use seyal_core::WorkspaceId;
-    use seyal_runtime::local_ipc::framing::{FrameHeader, HEADER_LEN};
-    use std::io::Read;
 
     let mut root = ApplicationRoot::new();
     let workspace = WorkspaceId::m001_default();
@@ -503,39 +538,34 @@ fn unpresented_terminate_writes_execution_id_only_after_send() {
         Err(AppError::TerminationNotRequested)
     );
     assert_eq!(root.live_unpresented(), vec![target]);
+    assert!(
+        root.snapshot().pending_effects.is_empty(),
+        "a missed write must not queue terminate"
+    );
+
+    let (ours, peer) = UnixStream::pair().expect("pair");
+    ours.set_nonblocking(true).expect("nonblocking");
+    let reply = spawn_terminate_peer(peer, vec![false, true]);
+    root.attach_client(root.fence(), test_client(ours))
+        .expect("attach");
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution: target }),
+        Err(AppError::TerminationNotRequested)
+    );
+    assert_eq!(root.live_unpresented(), vec![target]);
+    assert!(root.snapshot().pending_effects.is_empty());
+
+    root.apply(AppAction::TerminateExecution { execution: target })
+        .expect("accepted terminate");
+    assert_eq!(
+        reply.join().expect("peer"),
+        vec![target.to_bytes(), target.to_bytes()]
+    );
+    assert!(root.live_unpresented().is_empty());
     assert_eq!(
         root.snapshot().pending_effects,
         vec![NativeEffect::TerminateExecution { execution: target }]
     );
-
-    let (ours, mut peer) = UnixStream::pair().expect("pair");
-    ours.set_nonblocking(true).expect("nonblocking");
-    root.attach_client(root.fence(), test_client(ours))
-        .expect("attach");
-    root.apply(AppAction::AckEffect).unwrap();
-    root.apply(AppAction::TerminateExecution { execution: target })
-        .expect("terminate sent");
-    assert!(root.live_unpresented().is_empty());
-    assert!(root.snapshot().pending_effects.iter().any(|effect| {
-        matches!(
-            effect,
-            NativeEffect::TerminateExecution { execution } if *execution == target
-        )
-    }));
-
-    let mut header = [0u8; HEADER_LEN];
-    peer.read_exact(&mut header).expect("header");
-    let header = FrameHeader::decode(&header).expect("frame");
-    assert_eq!(header.message_type, MessageType::TerminateExecution as u16);
-    assert_eq!(header.payload_len, 16);
-    let mut payload = [0u8; 16];
-    peer.read_exact(&mut payload).expect("payload");
-    assert_eq!(payload, target.to_bytes());
-    assert_eq!(
-        payload,
-        super::discovery::terminate_execution_payload(target)
-    );
-
     assert_eq!(
         root.apply(AppAction::TerminateExecution { execution: target }),
         Err(AppError::ExecutionNotUnpresented)

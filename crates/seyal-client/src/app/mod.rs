@@ -27,7 +27,7 @@ mod unpresented_tests;
 
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
 
 use crate::chrome::{
     AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
@@ -85,7 +85,6 @@ pub enum AppError {
     PaletteNoSelection,
     TabCreationUnavailable,
     PaneSplitUnavailable,
-    PresentationCloseUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
     UnknownBlock,
@@ -225,9 +224,6 @@ pub enum AppAction {
         id: TabId,
     },
     CreateTab,
-    CloseWindow {
-        id: WindowId,
-    },
     CloseTab {
         id: TabId,
     },
@@ -301,6 +297,10 @@ pub enum AppAction {
     Adopt {
         fence: AppFence,
         evidence: BindingEvidence,
+    },
+    /// Palette and ABI entry: attach the existing execution, then bind it.
+    AdoptUnpresented {
+        execution: ExecutionId,
     },
     TerminateExecution {
         execution: ExecutionId,
@@ -629,7 +629,6 @@ impl ApplicationRoot {
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => self.create_tab(),
-            AppAction::CloseWindow { id } => self.close_window(id),
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
@@ -652,6 +651,7 @@ impl ApplicationRoot {
                 workspace,
             } => self.record_unpresented(execution, workspace),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            AppAction::AdoptUnpresented { execution } => self.adopt_unpresented_command(execution),
             AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
         };
         match result {
@@ -746,8 +746,6 @@ pub(super) fn chrome_error(error: ChromeError) -> AppError {
 pub(super) fn close_tab_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        ShellError::PresentationCloseUnavailable => AppError::PresentationCloseUnavailable,
-        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownChromeTab,
     }
 }
@@ -756,8 +754,6 @@ pub(super) fn close_pane_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
         ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        ShellError::PresentationCloseUnavailable => AppError::PresentationCloseUnavailable,
-        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownPane,
     }
 }

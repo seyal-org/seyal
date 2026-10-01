@@ -46,15 +46,15 @@ reason = "Global command-palette reducer stays one cohesive open/filter/resolve 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 845
-issue = 1153
-reason = "Former app.rs #[cfg(test)] suite; #1153 keeps gated presentation-close proofs beside #1108 multi-window coverage. Ceiling matches post-merge LOC."
+acknowledged_loc = 848
+issue = 1108
+reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1108 adds multi-window OrderFrontMakeKey emission and bounded-queue proofs beside the existing ApplicationRoot suite. Ceiling matches post-W3 LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 718
-issue = 1143
-reason = "Shell reducer suite stays one module after merging #1108 zoom/containment coverage with #1143 presentation-close proofs. Close fixtures live in close_tests.rs; zoom fixtures live in pt1_tests.rs."
+acknowledged_loc = 894
+issue = 1122
+reason = "Shell reducer suite stays one module. #1122 adds tab-scoped zoom and containment_generation Split/Close fence proofs beside the multi-window snapshot coverage from #1108; further extraction would split one containment contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -64,9 +64,9 @@ reason = "Published C ABI entry points and handle/row scratch stay one thin enco
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 791
-issue = 1143
-reason = "ABI contract suite stays one module after merging #1108 zoom tab-record coverage with #1143 gated presentation-close expectations."
+acknowledged_loc = 779
+issue = 1122
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1122 only updates the published SeyalAppTab size assertion after the trailing zoom overlay fields grew the W3 tab record."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

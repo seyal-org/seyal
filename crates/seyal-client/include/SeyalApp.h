@@ -118,7 +118,14 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
-    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /**
+     * Adopt one live-unpresented execution into the focused Pane.
+     * target_execution_lo/hi = ExecutionId. Rust validates, then runs the
+     * existing Attach handshake and binds only after a fresh AttachmentId
+     * is allocated. No new PTY and no new ExecutionId.
+     */
+    SEYAL_APP_ACTION_ADOPT_UNPRESENTED = 58
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */

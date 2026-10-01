@@ -179,7 +179,15 @@ impl Runtime {
         // Signal and arm the existing graceful/forced/drain deadlines only.
         // The reactor poll reaps; this handler must not wait.
         match self.request_termination(id) {
-            Ok(()) => {}
+            Ok(()) => {
+                // Echo type 35 so the client can tell acceptance from a later
+                // `InvalidState` without a second message type. The reactor
+                // still finalizes; this frame is only the accept handshake.
+                let _ = self.send_mandatory_frame(
+                    token,
+                    framing::encode_frame(MessageType::TerminateExecution, &id.to_bytes()),
+                );
+            }
             Err(crate::RuntimeError::UnknownExecution) => {
                 self.send_error(
                     token,

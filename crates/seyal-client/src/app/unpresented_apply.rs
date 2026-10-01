@@ -64,33 +64,88 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Palette adopt: validate and emit an attach intent only.
+    /// Palette and ABI adopt entry.
     ///
-    /// ADR-018 §6: do not bind the leaf here. Shell binding commits only through
-    /// [`AppAction::Adopt`] after Runtime attachment evidence exists.
+    /// Rejects already-bound, cross-workspace, and retired or missing ids
+    /// before any attach or bind. A successful call runs the existing Runtime
+    /// `Attach` handshake (fresh `AttachmentId`, same `ExecutionId`, no new
+    /// PTY) and removes the catalog entry only after the pane bind commits.
     pub(super) fn adopt_unpresented_command(
         &mut self,
         execution: ExecutionId,
     ) -> Result<(), AppError> {
-        let snap = self.shell.snapshot();
-        let pane = snap.focused_pane;
-        // Fail closed on the same predicates AdoptExecution would, without mutating.
+        let pane = self.shell.snapshot().focused_pane;
         self.shell
             .validate_adopt_execution(pane, execution)
             .map_err(unpresented_shell_error)?;
-        self.pending_effects
-            .push(NativeEffect::RequestAdoptAttach { pane, execution });
-        Ok(())
+        self.attach_and_bind_unpresented(pane, execution)
     }
 
     pub(super) fn terminate_execution(&mut self, execution: ExecutionId) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::TerminateExecution { execution })
+        self.shell
+            .validate_terminate_execution(execution)
             .map_err(unpresented_shell_error)?;
+        // The catalog and the terminate effect stay untouched until Runtime
+        // has accepted this one attempt. A failed write or `InvalidState`
+        // leaves the id in place so a later apply can request again.
         if self.request_runtime_termination(execution).is_err() {
             return Err(AppError::TerminationNotRequested);
         }
+        self.apply_shell(ShellAction::TerminateExecution { execution })
+            .map_err(unpresented_shell_error)?;
         self.apply_shell(ShellAction::ForgetUnpresented { execution })
             .map_err(unpresented_shell_error)
+    }
+
+    fn attach_and_bind_unpresented(
+        &mut self,
+        pane: seyal_core::PaneId,
+        execution: ExecutionId,
+    ) -> Result<(), AppError> {
+        #[cfg(target_os = "macos")]
+        {
+            let client = crate::LocalDisplayClient::connect_execution_id(
+                execution,
+                seyal_runtime::local_ipc::framing::Role::Controller,
+            )
+            .map_err(|_| AppError::NoLiveClient)?;
+            if client.execution_id() != execution {
+                return Err(AppError::ExecutionNotUnpresented);
+            }
+            let evidence = BindingEvidence {
+                execution: client.execution_id(),
+                attachment: client.attachment_id(),
+                controller: matches!(
+                    client.role(),
+                    seyal_runtime::local_ipc::framing::Role::Controller
+                ),
+                pty_generation: client.cache().generation.max(1),
+                alternate_screen: client.cache().alternate_screen,
+            };
+            let registered =
+                crate::ffi::register_app_client(client).map_err(|_| AppError::AlreadyBound)?;
+            let fence = self.fence();
+            if fence.pane != pane {
+                let _ = crate::ffi::unregister_client(registered.raw());
+                return Err(AppError::StalePane);
+            }
+            if let Err(error) = self.adopt(fence, evidence) {
+                let _ = crate::ffi::unregister_client(registered.raw());
+                return Err(error);
+            }
+            if let Some(previous) = self.client_handle.take()
+                && previous.raw() != registered.raw()
+            {
+                let _ = crate::ffi::unregister_client(previous.raw());
+            }
+            self.client_handle = Some(registered);
+            Ok(())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (self, pane, execution);
+            Err(AppError::NoLiveClient)
+        }
     }
 
     /// One IPC attempt on the live local client. `Err` means the runtime was
