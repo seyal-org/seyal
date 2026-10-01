@@ -567,7 +567,8 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     assert!(root.snapshot().palette.rows.is_empty());
     assert_eq!(
         root.apply(AppAction::RunPalette {
-            fence: root.fence()
+            fence: root.fence(),
+            address: None,
         }),
         Err(AppError::PaletteNoSelection)
     );
@@ -591,6 +592,7 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     assert!(root.snapshot().chrome.inspector_visible);
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .unwrap();
     let after = root.snapshot();

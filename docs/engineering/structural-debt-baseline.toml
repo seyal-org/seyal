@@ -34,15 +34,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 797
-issue = 1123
-reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions beside the existing apply path; window identity and the action that targets it stay in this façade."
+acknowledged_loc = 903
+issue = 1156
+reason = "ApplicationRoot keeps W4a window dispatch, N4 goto, N5 activation-episode fields, and N3 FocusHistory ownership on the N6 merge. History apply stays in focus_history_apply.rs; activation retry stays in activation.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 875
-issue = 1123
-reason = "ApplicationRoot tests stay one module. #1123 adds multi-window host action proofs beside the #1108 OrderFrontMakeKey and bounded-queue coverage; ceiling matches post-merge LOC."
+acknowledged_loc = 877
+issue = 1144
+reason = "N5 navigate/palette suites live in navigate_tests.rs; this module keeps ApplicationRoot apply proofs and absorbed #1123/#1108 multi-window coverage. Ceiling matches post-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
@@ -52,15 +52,39 @@ reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 901
-issue = 1123
-reason = "The C ABI façade stays one encode/decode surface after the window extraction. #1123 adds the close-action export beside the existing window exports."
+acknowledged_loc = 948
+issue = 1156
+reason = "Façade keeps W3 window extraction, N4 goto error numbers, and N3 history error numbers shifted to 48 and 49 so UnknownWindow stays 34. History action decode stays in decode.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 836
+issue = 1144
+reason = "N2 address-carrying palette rows already placed this module in the cohesion band. N5 only updates CreateTab struct construction in tests; goto stays a sibling module."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 978
+issue = 1156
+reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after the N6 merge of multi-window seeds and N3 history call sites. Cross-window coverage lives in activation_tests.rs; history integration lives in history_integration_tests.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/mod.rs"
+acknowledged_loc = 798
+issue = 1144
+reason = "ShellState keeps W3 window containment, N4 navigation helpers, and N5 Tab→Window placement accessors. Inventory enumeration lives in inventory.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/decode.rs"
+acknowledged_loc = 713
+issue = 1156
+reason = "Action decode stays one FFI sibling. The N6 merge adds HistoryBack and HistoryForward at codes 65 and 66 after window actions 58–61 and Navigate/goto 62–64, which places this module in the cohesion-review band."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 779
-issue = 1123
-reason = "ABI contract tests stay one module. #1123 adds the multi-window snapshot proofs beside the existing handle tests."
+acknowledged_loc = 781
+issue = 1144
+reason = "W3/W4a FFI window-effect ABI coverage plus N4 error-number shifts land this suite in the cohesion band on the N5 merge base. N5 does not grow the file; ceiling matches current rustfmt-normalized LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -102,9 +126,4 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 744
-issue = 1092
-reason = "Command palette query, rows, and run dispatch stay one reducer. #1092 adds the window and tab actions that the palette runs; splitting the file would separate the row model from those actions."
 

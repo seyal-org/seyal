@@ -74,23 +74,35 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             {
                 break
             }
-            applyEffect(effect)
+            let continueDrain = applyEffect(effect)
             ackOneEffect()
+            // Activation failure re-queues in Rust; stop this turn so retry is
+            // level-triggered on the next product change, not a hot loop.
+            if !continueDrain { break }
         }
         orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
     }
 
-    private func applyEffect(_ effect: SeyalAppNativeEffect) {
+    private func applyEffect(_ effect: SeyalAppNativeEffect) -> Bool {
         let key = WindowKey(lo: effect.window_lo, hi: effect.window_hi)
         switch effect.kind {
         case UInt16(SEYAL_APP_EFFECT_REALIZE_WINDOW):
             realize(key)
+            return true
         case UInt16(SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION):
             destroyRealization(key)
+            return true
         case UInt16(SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY):
+            // Realize only the WindowId Rust named. Never pick a substitute.
+            // Missing realization → typed ActivationFailed; Rust owns bounded retry.
+            guard realizations[key] != nil else {
+                reportActivationFailed(key)
+                return false
+            }
             orderFrontMakeKey(key)
+            return true
         default:
-            break
+            return true
         }
     }
 
@@ -325,6 +337,14 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func reportWindowEvent(window: NSWindow, event: UInt32) {
         guard let key = key(for: window) else { return }
+        reportWindowEvent(key: key, event: event)
+    }
+
+    private func reportActivationFailed(_ key: WindowKey) {
+        reportWindowEvent(key: key, event: SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED)
+    }
+
+    private func reportWindowEvent(key: WindowKey, event: UInt32) {
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
