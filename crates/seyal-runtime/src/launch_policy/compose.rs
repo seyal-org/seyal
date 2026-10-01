@@ -61,16 +61,16 @@ pub struct ComposedChildCommand {
 /// Apply CapabilityPolicy then ShellIntegrationPolicy when eligible.
 ///
 /// Production `Runtime::create_execution` and compose tests both call this.
+///
+/// `CapabilityUnavailable` is **not** gated here: it rejects interactive
+/// create only (`Runtime::create_interactive_execution*`). Explicit argv
+/// `create_execution` must still compose and spawn when the M001 terminfo
+/// entry is absent (SPEC-023 §12 items 11–12).
 pub fn compose_child_command(
     command: CommandSpec,
     capability: &CapabilityPolicy,
     shell_integration: Option<&ShellIntegrationPolicy>,
 ) -> Result<ComposedChildCommand, RuntimeError> {
-    if !capability.is_available() {
-        return Err(RuntimeError::LaunchPolicy(
-            LaunchPolicyFailure::CapabilityUnavailable,
-        ));
-    }
     let command = capability.apply(command);
     #[cfg(target_os = "macos")]
     {
