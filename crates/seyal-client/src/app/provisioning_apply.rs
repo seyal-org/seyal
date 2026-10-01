@@ -199,10 +199,7 @@ impl ApplicationRoot {
     /// On `Created`, queues `AttachController` for the host (no automatic attach).
     #[cfg(target_os = "macos")]
     pub fn absorb_wire_create_result(&mut self) -> Result<Option<CreateExecutionResult>, AppError> {
-        let Some(client) = self.wire_client.as_mut() else {
-            return Err(AppError::NoLiveClient);
-        };
-        let Some(result) = client.take_create_result() else {
+        let Some(result) = self.take_wire_create_result()? else {
             return Ok(None);
         };
         let Some(intent) = self
@@ -231,18 +228,19 @@ impl ApplicationRoot {
 
     /// After a successful create, record Controller attach and bind the Pane
     /// through ShellState + [`ProvisioningSession::apply_bind_success`].
+    ///
+    /// Correlates by the create's connection-scoped `request_id` (never the
+    /// focused Pane), so interleaved outstanding creates bind their own Pane.
     pub fn complete_create_attach_and_bind(
         &mut self,
+        request_id: u64,
         attachment: AttachmentId,
     ) -> Result<ExecutionId, AppError> {
-        let pane = self.shell.snapshot().focused_pane;
-        let intent = self
+        let owner = self
             .provisioning
-            .pending_intent(pane)
-            .cloned()
+            .pending_create_by_request_id(request_id)
+            .map(|intent| intent.owner)
             .ok_or(AppError::ProvisioningRejected)?;
-        let request_id = intent.request_id;
-        let owner = intent.owner;
         let effects = self
             .provisioning
             .apply_attach_success(owner, request_id, attachment);
@@ -268,6 +266,24 @@ impl ApplicationRoot {
             }
         }
         bound.ok_or(AppError::ProvisioningRejected)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn take_wire_create_result(&mut self) -> Result<Option<CreateExecutionResult>, AppError> {
+        if let Some(client) = self.wire_client.as_mut() {
+            return Ok(client.take_create_result());
+        }
+        if let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        {
+            return match crate::ffi::with_client_mut(handle, |client| client.take_create_result()) {
+                Some(result) => Ok(result),
+                None => Err(AppError::NoLiveClient),
+            };
+        }
+        Err(AppError::NoLiveClient)
     }
 
     /// Apply a terminate result from the wire client or registry client (P4).

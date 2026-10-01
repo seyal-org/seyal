@@ -56,7 +56,7 @@ fn drive_create_tab_to_bound(root: &mut ApplicationRoot, execution: ExecutionId)
     root.absorb_wire_create_result()
         .expect("absorb create")
         .expect("create result present");
-    root.complete_create_attach_and_bind(attachment(execution.to_bytes()[0]))
+    root.complete_create_attach_and_bind(intent.request_id, attachment(execution.to_bytes()[0]))
         .expect("attach+bind");
     assert_eq!(
         root.provisioning().recorded_execution(pane),
@@ -92,10 +92,117 @@ fn create_tab_admits_type_36_with_session_request_id() {
 }
 
 #[test]
+fn interleaved_outstanding_creates_bind_by_request_id_not_focused_pane() {
+    let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+
+    root.apply(AppAction::CreateTab).unwrap();
+    let pane_a = root.snapshot().shell.focused_pane;
+    let intent_a = root.provisioning().pending_intent(pane_a).unwrap().clone();
+    root.apply(AppAction::CreateTab).unwrap();
+    let pane_b = root.snapshot().shell.focused_pane;
+    let intent_b = root.provisioning().pending_intent(pane_b).unwrap().clone();
+    assert_ne!(pane_a, pane_b);
+    assert_ne!(
+        intent_a.request_id, intent_b.request_id,
+        "two panes on one wire connection must not both use the same request_id"
+    );
+    assert!(intent_b.request_id > intent_a.request_id);
+
+    let exec_a = exec(0xA1);
+    let exec_b = exec(0xB2);
+    for (intent, execution) in [(&intent_a, exec_a), (&intent_b, exec_b)] {
+        root.wire_client_mut()
+            .unwrap()
+            .accept_create_result(CreateExecutionResult {
+                execution_id: execution,
+                request_id: intent.request_id,
+                result_code: CreateExecutionResultCode::Created,
+                detail_code: 0,
+            })
+            .unwrap();
+    }
+    // Both results queued; absorb drains in arrival order without losing one.
+    let first = root.absorb_wire_create_result().unwrap().unwrap();
+    let second = root.absorb_wire_create_result().unwrap().unwrap();
+    assert_eq!(first.request_id, intent_a.request_id);
+    assert_eq!(second.request_id, intent_b.request_id);
+    assert!(root.absorb_wire_create_result().unwrap().is_none());
+
+    // Focus is on pane B; completing A's request must bind A, never B.
+    assert_eq!(root.snapshot().shell.focused_pane, pane_b);
+    root.complete_create_attach_and_bind(intent_a.request_id, attachment(1))
+        .unwrap();
+    assert_eq!(root.provisioning().recorded_execution(pane_a), Some(exec_a));
+    assert_eq!(root.provisioning().recorded_execution(pane_b), None);
+    assert_eq!(root.shell.pane_execution(pane_a).unwrap(), Some(exec_a));
+    assert_eq!(root.shell.pane_execution(pane_b).unwrap(), None);
+    assert!(root.provisioning().pending_intent(pane_b).is_some());
+
+    root.complete_create_attach_and_bind(intent_b.request_id, attachment(2))
+        .unwrap();
+    assert_eq!(root.provisioning().recorded_execution(pane_b), Some(exec_b));
+    assert_eq!(root.shell.pane_execution(pane_b).unwrap(), Some(exec_b));
+
+    assert_eq!(
+        root.complete_create_attach_and_bind(intent_a.request_id, attachment(3)),
+        Err(AppError::ProvisioningRejected),
+        "a completed request id must not bind again"
+    );
+}
+
+#[test]
+fn create_result_is_absorbed_from_registry_client_without_install_wire_client() {
+    // Same absorb `poll_client` runs after poll_prepare on the production path.
+    let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
+    root.attach_client(root.fence(), negotiated_provisioning_client())
+        .expect("register Controller into CLIENTS");
+    assert!(root.wire_client().is_none());
+    let handle = root.live_client_handle_for_test().unwrap();
+
+    root.apply(AppAction::CreateTab).unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    let intent = root.provisioning().pending_intent(pane).unwrap().clone();
+    let admitted = crate::ffi::with_client(handle, |client| {
+        client.has_pending_create(intent.request_id)
+    })
+    .unwrap();
+    assert!(admitted, "type 36 must be admitted on the registry client");
+
+    let execution = exec(0xC3);
+    crate::ffi::with_client_mut(handle, |client| {
+        client
+            .accept_create_result(CreateExecutionResult {
+                execution_id: execution,
+                request_id: intent.request_id,
+                result_code: CreateExecutionResultCode::Created,
+                detail_code: 0,
+            })
+            .unwrap();
+    })
+    .unwrap();
+    let result = root
+        .absorb_wire_create_result()
+        .expect("absorb via client_handle")
+        .expect("create result present");
+    assert_eq!(result.request_id, intent.request_id);
+    root.complete_create_attach_and_bind(intent.request_id, attachment(7))
+        .unwrap();
+    assert_eq!(
+        root.provisioning().recorded_execution(pane),
+        Some(execution)
+    );
+}
+
+#[test]
 fn production_composition_keeps_tab_creation_gated_and_splits_fail_closed() {
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
-    // Keep production gated until the wire create→attach→bind driver is live.
+    // Production stays gated: the permanent path has one live client/authority
+    // and no per-pane attach driver for a new execution yet (Refs #1149).
     assert!(!snap.shell.allows_tab_creation);
     assert!(!snap.shell.allows_pane_splitting);
     assert_eq!(

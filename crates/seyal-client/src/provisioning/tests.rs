@@ -454,6 +454,50 @@ fn section_7_n_simultaneous_panes_distinct_owners_and_ids() {
     assert_eq!(ids.len(), 3);
     assert_ne!(ids[0].0, ids[1].0);
     assert_ne!(ids[1].0, ids[2].0);
+    assert!(
+        ids.windows(2).all(|pair| pair[0].1 < pair[1].1),
+        "request ids are connection-scoped and must not restart per pane owner"
+    );
+}
+
+#[test]
+fn request_ids_are_strictly_increasing_across_panes_sharing_one_connection() {
+    let mut session = ProvisioningSession::new();
+    let pane_a = PaneId::new();
+    let pane_b = PaneId::new();
+    let ProvisioningEffect::SendCreate {
+        request_id: id_a, ..
+    } = session.begin_intent(pane_a, None).unwrap()
+    else {
+        panic!();
+    };
+    let ProvisioningEffect::SendCreate {
+        request_id: id_b, ..
+    } = session.begin_intent(pane_b, None).unwrap()
+    else {
+        panic!();
+    };
+    assert_eq!(id_a, 1);
+    assert_eq!(id_b, 2, "second pane must not also receive request_id=1");
+
+    // Terminate/dispose ids continue the same space (types 36 and 38 share it).
+    let owner_a = session.owner_for_pane(pane_a).unwrap();
+    session.apply_create_result(owner_a, id_a, CreateOutcome::Created(exec(2)));
+    let effects = session.apply_attach_failure(owner_a, id_a, true);
+    assert_eq!(
+        effects,
+        vec![ProvisioningEffect::AttachController {
+            owner: owner_a,
+            execution: exec(2)
+        }]
+    );
+    let ProvisioningEffect::SendCreate {
+        request_id: id_c, ..
+    } = session.begin_intent(PaneId::new(), None).unwrap()
+    else {
+        panic!();
+    };
+    assert_eq!(id_c, 3);
 }
 
 #[test]

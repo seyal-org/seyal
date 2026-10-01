@@ -159,7 +159,7 @@ impl LocalDisplayClient {
     }
 
     pub fn take_create_result(&mut self) -> Option<CreateExecutionResult> {
-        self.last_create_result.take()
+        self.last_create_result.pop_front()
     }
 
     pub fn take_terminate_result(&mut self) -> Option<TerminateExecutionResult> {
@@ -174,7 +174,7 @@ impl LocalDisplayClient {
             // Unknown/duplicate: drop; never treat as success for binding.
             return Ok(());
         }
-        self.last_create_result = Some(result);
+        self.last_create_result.push_back(result);
         Ok(())
     }
 

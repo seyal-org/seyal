@@ -61,7 +61,7 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         next_provisioning_request_id: 1,
         pending_create_requests: std::collections::HashSet::new(),
         pending_terminate_requests: std::collections::HashSet::new(),
-        last_create_result: None,
+        last_create_result: VecDeque::new(),
         last_terminate_result: None,
     }
 }

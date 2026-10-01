@@ -105,7 +105,9 @@ enum PendingKind {
 pub struct ProvisioningSession {
     next_owner: u64,
     pane_owners: HashMap<PaneId, ConnectionOwner>,
-    next_request_id: HashMap<ConnectionOwner, u64>,
+    /// Strictly increasing across every owner: C2 shares one wire connection,
+    /// and request ids are connection-scoped (ADR-017 §5.2 / SPEC-004 §18.2).
+    next_request_id: u64,
     pending_by_key: HashMap<(ConnectionOwner, u64), PendingIntent>,
     pending_kind: HashMap<(ConnectionOwner, u64), PendingKind>,
     /// Pane → create request_id while a create intent is outstanding.
@@ -199,7 +201,6 @@ impl ProvisioningSession {
         let owner = ConnectionOwner(self.next_owner.saturating_add(1).max(1));
         self.next_owner = owner.0;
         self.pane_owners.insert(pane, owner);
-        self.next_request_id.entry(owner).or_insert(1);
         owner
     }
 
@@ -216,7 +217,7 @@ impl ProvisioningSession {
             return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
         }
         let owner = self.claim_connection(pane);
-        let request_id = self.allocate_request_id(owner)?;
+        let request_id = self.allocate_request_id()?;
         let (geometry, needs_bootstrap_resize) = match geometry {
             Some(geometry) => {
                 geometry.validate()?;
@@ -485,7 +486,7 @@ impl ProvisioningSession {
                 self.pane_pending.remove(&pane);
             }
         }
-        let dispose_id = match self.allocate_request_id(owner) {
+        let dispose_id = match self.allocate_request_id() {
             Ok(id) => id,
             Err(_) => {
                 self.unreferenced.insert(execution);
@@ -639,20 +640,14 @@ impl ProvisioningSession {
         self.pane_pending.remove(&pane);
     }
 
-    fn allocate_request_id(&mut self, owner: ConnectionOwner) -> Result<u64, ProvisioningFailure> {
-        let counter = self.next_request_id.entry(owner).or_insert(1);
-        let request_id = *counter;
-        if request_id == 0 {
-            return Err(ProvisioningFailure::CreateRejected(
-                ErrorCode::MalformedPayload,
-            ));
-        }
+    fn allocate_request_id(&mut self) -> Result<u64, ProvisioningFailure> {
+        let request_id = self.next_request_id.max(1);
         let Some(next) = request_id.checked_add(1) else {
             return Err(ProvisioningFailure::CreateRejected(
                 ErrorCode::MalformedPayload,
             ));
         };
-        *counter = next;
+        self.next_request_id = next;
         Ok(request_id)
     }
 
@@ -674,7 +669,7 @@ impl ProvisioningSession {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Vec<ProvisioningEffect> {
-        let terminate_id = match self.allocate_request_id(owner) {
+        let terminate_id = match self.allocate_request_id() {
             Ok(id) => id,
             Err(_) => {
                 self.unreferenced.insert(execution);

@@ -46,9 +46,15 @@ reason = "Portable provisioning reducer stays one cold-path authority after inte
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
-acknowledged_loc = 753
-issue = 1136
-reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
+acknowledged_loc = 797
+issue = 1149
+reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/attach/mod.rs"
+acknowledged_loc = 725
+issue = 1149
+reason = "Single-line initializer change for the queued create-result field (interleaved outstanding creates must not overwrite each other); attach responsibilities are unchanged."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"

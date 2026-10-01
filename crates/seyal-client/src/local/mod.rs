@@ -31,11 +31,11 @@ use seyal_runtime::local_ipc::framing::{
     TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers,
 };
 
+pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
 };
-pub use attach::force_bootstrap_attach_failure_for_test;
 
 pub(crate) const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_BUFFERED_BYTES: usize = (MAX_FRAME_PAYLOAD as usize + HEADER_LEN) * 2;
@@ -144,7 +144,7 @@ pub struct LocalDisplayClient {
     pub(crate) next_provisioning_request_id: u64,
     pub(crate) pending_create_requests: std::collections::HashSet<u64>,
     pub(crate) pending_terminate_requests: std::collections::HashSet<u64>,
-    pub(crate) last_create_result: Option<CreateExecutionResult>,
+    pub(crate) last_create_result: VecDeque<CreateExecutionResult>,
     pub(crate) last_terminate_result: Option<TerminateExecutionResult>,
 }
 
@@ -653,7 +653,7 @@ pub(crate) fn reconstruction_probe_client(
         next_provisioning_request_id: 1,
         pending_create_requests: std::collections::HashSet::new(),
         pending_terminate_requests: std::collections::HashSet::new(),
-        last_create_result: None,
+        last_create_result: VecDeque::new(),
         last_terminate_result: None,
     }
 }

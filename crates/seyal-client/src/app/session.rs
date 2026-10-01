@@ -122,6 +122,9 @@ impl ApplicationRoot {
         // Production path: absorb type-39 after poll_prepare decoded it into
         // the registry client. `still_listed=true` is the safe Failed-outcome
         // default without a fresh list snapshot (keeps an unreferenced record).
+        // Drain create results (one per admitted request) before terminate so
+        // interleaved creates each advance their own pending intent by id.
+        while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);

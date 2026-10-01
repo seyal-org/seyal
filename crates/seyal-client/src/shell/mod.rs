@@ -497,18 +497,22 @@ impl ShellState {
         tab.panes.get(&tab.focused).ok_or(ShellError::UnknownPane)
     }
 
+    /// Pane lookup is by id across every Tab: a create result may complete for a
+    /// background Tab's leaf after focus moved on (ADR-017 request-id correlation).
     fn pane(&self, id: PaneId) -> Result<&Pane, ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
-        let tab = workspace
-            .tab(workspace.active_tab)
-            .ok_or(ShellError::UnknownTab)?;
-        tab.panes.get(&id).ok_or(ShellError::UnknownPane)
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| workspace.tabs.iter())
+            .find_map(|tab| tab.panes.get(&id))
+            .ok_or(ShellError::UnknownPane)
     }
 
     fn pane_mut(&mut self, id: PaneId) -> Result<&mut Pane, ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        tab.panes.get_mut(&id).ok_or(ShellError::UnknownPane)
+        self.workspaces
+            .iter_mut()
+            .flat_map(|workspace| workspace.tabs.iter_mut())
+            .find_map(|tab| tab.panes.get_mut(&id))
+            .ok_or(ShellError::UnknownPane)
     }
 
     fn workspace(&self, id: WorkspaceId) -> Result<&Workspace, ShellError> {
