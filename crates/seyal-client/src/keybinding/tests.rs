@@ -1,5 +1,3 @@
-//! SPEC-024 §14 items 1, 2–3, 8, 14, 15, and 22 (K1 + K2).
-
 use std::path::Path;
 
 use crate::input_policy::load_input_policy;
@@ -89,7 +87,7 @@ keys = "cmd+["
 action = "tab.select_previous"
 
 [[keybindings]]
-keys = "cmd+`"
+keys = "cmd+ctrl+f"
 action = "command_palette.open"
 
 [[keybindings]]
@@ -116,7 +114,7 @@ keys = "cmd+greater"
 action = "pane.split_down"
 "#;
     let table = load_keybinding_table(Some(toml));
-    // User cmd+k replaces builtin → DuplicateSequence; cmd+` is reserved.
+    // User cmd+k replaces builtin → DuplicateSequence; cmd+ctrl+f is reserved.
     assert!(
         diag_categories(&table).contains(&DiagnosticCategory::DuplicateSequence),
         "expected DuplicateSequence for cmd+k override: {:?}",
@@ -124,7 +122,7 @@ action = "pane.split_down"
     );
     assert!(
         diag_categories(&table).contains(&DiagnosticCategory::ReservedCommandCollision),
-        "expected ReservedCommandCollision for cmd+`: {:?}",
+        "expected ReservedCommandCollision for cmd+ctrl+f: {:?}",
         table.diagnostics
     );
     assert!(binding_for(&table, "ctrl+b>n", WorkspaceCommandId::TabCreate).is_some());
@@ -406,6 +404,8 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
 
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
+    assert!(contexts_for(&table, "cmd+w").is_empty());
+    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
 }
 
 #[test]
@@ -498,6 +498,51 @@ action = "none"
     let table = load_keybinding_table(Some(toml));
     assert!(diag_categories(&table).contains(&DiagnosticCategory::ReservedCommandCollision));
     assert!(!diag_categories(&table).contains(&DiagnosticCategory::UnbindNoEffect));
+}
+
+#[test]
+fn reserved_any_stroke_in_chord_is_rejected() {
+    // §14 item 3 / accepted §7.1: reserved Command stroke anywhere in a chord.
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+q>x"
+action = "tab.create"
+
+[[keybindings]]
+keys = "cmd+h>x"
+action = "tab.create"
+
+[[keybindings]]
+keys = "ctrl+b>cmd+q"
+action = "tab.create"
+
+[[keybindings]]
+keys = "cmd+`"
+action = "tab.select_next"
+"#;
+    let table = load_keybinding_table(Some(toml));
+    for keys in ["cmd+q>x", "cmd+h>x", "ctrl+b>cmd+q"] {
+        assert!(
+            table.diagnostics.iter().any(|d| d.category
+                == DiagnosticCategory::ReservedCommandCollision
+                && d.keys_notation == keys),
+            "expected ReservedCommandCollision for chord {keys}: {:?}",
+            table.diagnostics
+        );
+        assert!(
+            contexts_for(&table, keys).is_empty(),
+            "reserved-stroke chord {keys} must not bind"
+        );
+    }
+    // Accepted §4.2 removed cmd+`; a user bind is allowed (not reserved).
+    assert!(
+        !table.diagnostics.iter().any(|d| {
+            d.category == DiagnosticCategory::ReservedCommandCollision && d.keys_notation == "cmd+`"
+        }),
+        "cmd+` must not be reserved: {:?}",
+        table.diagnostics
+    );
+    assert!(binding_for(&table, "cmd+`", WorkspaceCommandId::TabSelectNext).is_some());
 }
 
 // --- SPEC-024 §14 item 15: partial overlap and unbind ---

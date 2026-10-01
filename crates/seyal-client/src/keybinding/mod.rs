@@ -1,5 +1,5 @@
 //! SPEC-024 K1–K6: cold `[[keybindings]]` schema → immutable [`KeybindingTable`],
-//! §6 routing gate, §8 chord prefix state, §11 shortcut projection, and K6
+//! §6 routing gate, §8 chord prefix state machine, §11 shortcut projection, and K6
 //! headed-evidence regressions for the implemented catalog.
 //!
 //! Distinct from [`crate::input_policy::InputPolicy`] and theme

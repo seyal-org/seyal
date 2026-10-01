@@ -430,6 +430,7 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
     focus_history: FocusHistory,
@@ -480,6 +481,7 @@ impl ApplicationRoot {
         }
     }
 
+    /// R8.4: clear chord prefix without dispatch and without PTY bytes.
     pub(crate) fn clear_chord_prefix(&mut self) {
         self.chord_prefix.clear();
     }
