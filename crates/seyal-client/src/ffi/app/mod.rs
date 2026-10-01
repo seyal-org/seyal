@@ -960,4 +960,3 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(None)
     }
 }
-
