@@ -22,8 +22,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::SplitFocused { axis })
-            .map_err(|_| AppError::PaneSplitUnavailable)?;
+        let snap = self.shell.snapshot();
+        self.apply_shell(ShellAction::SplitFocused {
+            axis,
+            containment_generation: snap.containment_generation,
+        })
+        .map_err(|_| AppError::PaneSplitUnavailable)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -58,8 +62,12 @@ impl ApplicationRoot {
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
         let focus_before = self.shell.focus_checkpoint();
         let was_focused = focus_before.focused_pane == id;
-        self.apply_shell(ShellAction::ClosePane { id })
-            .map_err(close_pane_error)?;
+        let snap = self.shell.snapshot();
+        self.apply_shell(ShellAction::ClosePane {
+            id,
+            containment_generation: snap.containment_generation,
+        })
+        .map_err(close_pane_error)?;
         // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
         let focus_after = self.shell.focus_checkpoint();
         let successor = if was_focused {

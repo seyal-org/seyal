@@ -28,7 +28,9 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppShell) == 112);
     REQUIRE(offsetof(SeyalAppShell, containment_generation) == 72);
     REQUIRE(sizeof(SeyalAppWindow) == 72);
-    REQUIRE(sizeof(SeyalAppTab) == 64);
+    REQUIRE(sizeof(SeyalAppTab) == 80);
+    REQUIRE(offsetof(SeyalAppTab, zoomed_pane_lo) == 64);
+    REQUIRE(offsetof(SeyalAppTab, zoomed_pane_hi) == 72);
     REQUIRE(sizeof(SeyalAppPaneLeaf) == 56);
     REQUIRE(sizeof(SeyalAppPaneTreeNode) == 32);
     REQUIRE(sizeof(SeyalAppNativeEffect) == 24);

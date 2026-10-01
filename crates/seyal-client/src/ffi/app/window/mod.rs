@@ -58,6 +58,9 @@ pub struct SeyalAppTab {
     pub title: *const u8,
     pub title_len: u32,
     pub reserved: u32,
+    /// Trailing zoom overlay (`0/0` when not zoomed). Size-gated; do not reorder prior fields.
+    pub zoomed_pane_lo: u64,
+    pub zoomed_pane_hi: u64,
 }
 
 #[repr(C)]
@@ -136,6 +139,8 @@ impl SeyalAppTab {
             title: ptr::null(),
             title_len: 0,
             reserved: 0,
+            zoomed_pane_lo: 0,
+            zoomed_pane_hi: 0,
         }
     }
 }
@@ -270,6 +275,10 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
                 &mut state.window_scratch.tree_nodes,
             );
             let tree_node_count = state.window_scratch.tree_nodes.len() - tree_start;
+            let (zoomed_lo, zoomed_hi) = match tab.zoomed {
+                Some(id) => split_id(id.to_bytes()),
+                None => (0, 0),
+            };
             state.window_scratch.tabs.push((
                 wi,
                 ti,
@@ -287,6 +296,8 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
                     title: title.0 as *const u8,
                     title_len: title.1,
                     reserved: 0,
+                    zoomed_pane_lo: zoomed_lo,
+                    zoomed_pane_hi: zoomed_hi,
                 },
             ));
             for (pi, pane) in tab.panes.iter().enumerate() {

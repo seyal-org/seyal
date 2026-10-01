@@ -70,6 +70,20 @@ impl PaneTree {
         }
     }
 
+    /// Pre-order first leaf of the surviving sibling of `closing` (SPEC-025 §5.2).
+    pub(super) fn sibling_first_leaf(&self, closing: PaneId) -> Option<PaneId> {
+        match self {
+            Self::Leaf(_) => None,
+            Self::Split { first, second, .. } => match (&**first, &**second) {
+                (Self::Leaf(id), _) if *id == closing => second.first_pane(),
+                (_, Self::Leaf(id)) if *id == closing => first.first_pane(),
+                _ => first
+                    .sibling_first_leaf(closing)
+                    .or_else(|| second.sibling_first_leaf(closing)),
+            },
+        }
+    }
+
     pub(super) fn pane_ids(&self) -> Vec<PaneId> {
         match self {
             Self::Leaf(id) => vec![*id],

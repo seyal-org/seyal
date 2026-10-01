@@ -238,6 +238,7 @@ fn destroyed_pane_fails_closed_no_retarget() {
         .apply(ShellAction::SplitPane {
             id: pane_a,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let sibling = shell
@@ -248,7 +249,10 @@ fn destroyed_pane_fails_closed_no_retarget() {
         .find(|id| *id != pane_a && *id != pane_b)
         .expect("sibling");
     shell
-        .apply(ShellAction::ClosePane { id: pane_a })
+        .apply(ShellAction::ClosePane {
+            id: pane_a,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("destroy unbound pane_a");
     let focus_before = shell.snapshot().focused_pane;
     let active_before = shell.active_window_id();
