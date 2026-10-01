@@ -231,11 +231,13 @@ pub(in crate::local_ipc::connection) struct Connection {
     pub(in crate::local_ipc::connection) pending_display: Option<VecDeque<EncodedDisplayBatch>>,
     pub(in crate::local_ipc::connection) display_generation: u64,
     /// When set, an attach `Attached` frame has advertised `current_generation`
-    /// for the pending/inflight attach snapshot. Fanout must not supersede that
-    /// snapshot (or the peer observes Attached gen N with DisplaySnapshot gen M).
+    /// for a snapshot that is still only in `pending_display` (not yet inflight).
+    /// Fanout must not supersede that pending snapshot or the peer observes
+    /// Attached gen N with DisplaySnapshot gen M. Cleared when the attach
+    /// snapshot enters inflight.
     pub(in crate::local_ipc::connection) attach_snapshot_pin: bool,
     /// Snapshot that arrived while [`Self::attach_snapshot_pin`] was held; applied
-    /// once the attach snapshot has fully flushed.
+    /// once the attach snapshot starts inflight.
     pub(in crate::local_ipc::connection) deferred_after_attach: Option<EncodedDisplayBatch>,
 }
 
