@@ -11,8 +11,7 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     }
 }
 
-/// Runtime published `Available` for the bound attachment: the only way
-/// the composer becomes submittable.
+/// Runtime `Available` for the bound attachment is what makes the composer submittable.
 fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
@@ -863,6 +862,7 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
 #[test]
 fn create_window_is_target_free_and_uses_active_workspace() {
     let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation(true);
     let before = root.snapshot().shell.clone();
     let workspace = before.active_workspace;
     let window_count = before.windows.len();

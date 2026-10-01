@@ -93,6 +93,7 @@ fn matrix_shell(
         workspace,
         true,
         true,
+        false,
     )
     .expect("fixture");
     if let Some(execution) = bind_a {

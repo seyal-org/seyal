@@ -1,5 +1,4 @@
 //! Global keyboard-first command palette (#932 / SPEC-022 N2).
-//!
 //! Rust owns open/query/selected-index state and a **frozen** projection of
 //! rows captured on Open / SetQuery. Navigation rows carry
 //! [`ResourceAddress`]; Run uses that stored address (or a host-echoed one),
@@ -522,6 +521,7 @@ mod tests {
             workspace,
             true,
             true,
+            false,
         )
         .expect("fixture")
     }

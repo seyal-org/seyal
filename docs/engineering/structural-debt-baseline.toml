@@ -46,9 +46,9 @@ reason = "N5 navigate/palette suites live in navigate_tests.rs; this module keep
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 894
-issue = 1122
-reason = "Shell reducer suite stays one module. #1122 adds tab-scoped zoom and containment_generation Split/Close fence proofs beside the multi-window snapshot coverage from #1108; further extraction would split one containment contract table."
+acknowledged_loc = 898
+issue = 1123
+reason = "Shell reducer suite stays one module. #1122 zoom and containment-fence proofs sit beside #1108 multi-window coverage; #1123 adds the window-creation flag on those fixtures."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -64,15 +64,15 @@ reason = "N2 address-carrying palette rows already placed this module in the coh
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-acknowledged_loc = 978
-issue = 1156
-reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after the N6 merge of multi-window seeds and N3 history call sites. Cross-window coverage lives in activation_tests.rs; history integration lives in history_integration_tests.rs."
+acknowledged_loc = 985
+issue = 1123
+reason = "N1/N2 resolver tests stay one suite after the N6 multi-window seeds. #1122 containment fences and the #1123 window-creation flag add arguments at existing Split/Close and fixture calls. Cross-window coverage lives in activation_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 798
-issue = 1144
-reason = "ShellState keeps W3 window containment, N4 navigation helpers, and N5 Tab→Window placement accessors. Inventory enumeration lives in inventory.rs."
+acknowledged_loc = 880
+issue = 1123
+reason = "ShellState keeps W3 containment, N4/N5 placement, and the PT1 Split/Close fence merged from #1122. #1123 adds window-creation admission beside tab creation. Inventory enumeration lives in inventory.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"

@@ -1,5 +1,4 @@
 //! Versioned one-Pane application-root C ABI.
-//!
 //! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
@@ -944,5 +943,6 @@ fn error_number(error: AppError) -> i32 {
         AppError::GotoUnsupportedScope => 47,
         AppError::NavigationStaleHistoryCursor => 48,
         AppError::NavigationHistoryUnavailable => 49,
+        AppError::WindowCreationUnavailable => 50,
     }
 }

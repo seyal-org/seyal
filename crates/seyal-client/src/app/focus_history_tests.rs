@@ -46,6 +46,7 @@ fn two_pane_root() -> (ApplicationRoot, WorkspaceId, TabId, PaneId, PaneId) {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);

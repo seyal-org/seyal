@@ -227,7 +227,12 @@ impl ApplicationRoot {
             workspace,
             containment_generation: generation,
         })
-        .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        .map_err(|error| match error {
+            crate::shell::ShellError::WindowCreationUnavailable => {
+                AppError::WindowCreationUnavailable
+            }
+            _ => AppError::UnknownChromeWorkspace,
+        })?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

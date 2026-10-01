@@ -83,6 +83,7 @@ fn seed_shell() -> (ShellState, WorkspaceId, WorkspaceId, TabId, PaneId) {
         w1,
         true,
         true,
+        false,
     )
     .expect("seed");
     (shell, w1, w2, t1, p1)

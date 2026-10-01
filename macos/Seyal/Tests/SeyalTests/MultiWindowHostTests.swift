@@ -98,7 +98,7 @@ final class MultiWindowHostTests: XCTestCase {
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 2)
         let snapshotOrder = host.snapshotOrderedWindowKeys()
-        XCTAssertEqual(snapshotOrder.count, 3)
+        XCTAssertEqual(snapshotOrder.count, 1)
         XCTAssertEqual(host.orderedKeys, snapshotOrder)
         let source = try! String(
             contentsOf: URL(fileURLWithPath: #filePath)
@@ -119,7 +119,7 @@ final class MultiWindowHostTests: XCTestCase {
         let host = MultiWindowHostController()
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 1)
-        XCTAssertEqual(host.orderedKeys.count, 2)
+        XCTAssertEqual(host.orderedKeys.count, 1)
         // Destroy-realization: quit cleanup applies destroy for every WindowId.
         host.performQuitCleanup()
         XCTAssertTrue(host.orderedKeys.isEmpty)
@@ -197,11 +197,11 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertFalse(source.contains("gotoItem.target = host\n"))
     }
 
-    func testQuitWithThreeWindowsFollowsReplyRule() {
+    func testQuitReplyRuleAfterRejectedExtraWindows() {
         let host = MultiWindowHostController()
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 2)
-        XCTAssertEqual(host.orderedKeys.count, 3)
+        XCTAssertEqual(host.orderedKeys.count, 1)
         switch host.forwardRequestQuit() {
         case .failure(let error):
             XCTFail("RequestQuit failed: \(error)")
@@ -226,14 +226,33 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
+    func testCreateWindowRejectedDoesNotMoveLiveHost() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        let beforeCount = seyal_app_shell(host.appHandle).window_count
+        let liveWindow = host.liveHost.window
+        XCTAssertNotNil(liveWindow)
+        host.createWindow(nil)
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 50, "WindowCreationUnavailable")
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
+        XCTAssertTrue(host.liveHost.window === liveWindow)
+        XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
+    }
+
     private func createExtraWindows(on host: MultiWindowHostController, count: Int) {
         for _ in 0..<count {
+            let beforeCount = seyal_app_shell(host.appHandle).window_count
+            let liveWindow = host.liveHost.window
             var action = SeyalAppAction()
             action.version = UInt16(SEYAL_APP_ABI_VERSION)
             action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
             action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
-            XCTAssertEqual(seyal_app_apply(host.appHandle, &action), 0)
+            XCTAssertEqual(seyal_app_apply(host.appHandle, &action), -4)
+            XCTAssertEqual(seyal_app_last_error(host.appHandle), 50, "WindowCreationUnavailable")
             host.applyPendingEffectsAndReconcile()
+            XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
+            XCTAssertTrue(host.liveHost.window === liveWindow)
+            XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
         }
     }
 }

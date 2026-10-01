@@ -62,6 +62,7 @@ fn two_window_shell() -> (ShellState, WindowId, WindowId, TabId, TabId, PaneId, 
         workspace,
         true,
         true,
+        false,
     )
     .expect("fixture");
     (shell, win_a, win_b, tab_a, tab_b, pane_a, pane_b)
@@ -166,6 +167,7 @@ fn same_window_navigate_emits_no_activation() {
         workspace,
         true,
         true,
+        false,
     )
     .expect("fixture");
 

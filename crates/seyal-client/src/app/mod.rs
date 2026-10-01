@@ -95,6 +95,7 @@ pub enum AppError {
     GotoNoSelection,
     GotoUnsupportedScope,
     TabCreationUnavailable,
+    WindowCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,

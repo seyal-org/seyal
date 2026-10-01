@@ -3,10 +3,9 @@ import XCTest
 @testable import Seyal
 
 /// N6 headed host evidence (SPEC-022 §12 items 31–33) using the existing
-/// SeyalTests FFI harness. Default M001 shell disallows SplitFocused/CreateTab,
-/// so a second Pane comes from CreateWindow (already on this branch). Real PTY
-/// multi-pane executions remain harness-limited; see
-/// docs/evidence/m003-n6-navigation-1156.md.
+/// SeyalTests FFI harness. The production default rejects SplitFocused, CreateTab,
+/// and a second Window until close exists. Real PTY multi-pane executions remain
+/// harness-limited; see docs/evidence/m003-n6-navigation-1156.md.
 final class NavigationEvidenceHostTests: XCTestCase {
     private func makeHandle() -> UInt64 {
         let handle = seyal_app_create()
@@ -72,28 +71,19 @@ final class NavigationEvidenceHostTests: XCTestCase {
         return (shell.focused_pane_lo, shell.focused_pane_hi)
     }
 
-    /// Second Pane via CreateWindow — SplitFocused is disallowed on M001 default.
-    /// Focus identity is on `seyal_app_shell` (snapshot.pane is the fence/bound Pane).
-    private func createSecondWindowPane(_ handle: UInt64) -> (lo: UInt64, hi: UInt64) {
+    /// Production default rejects a second Window. Focus and window count stay put.
+    private func rejectExtraWindow(_ handle: UInt64) {
         let before = focusedPane(handle)
-        let shell = seyal_app_shell(handle)
+        let beforeCount = seyal_app_shell(handle).window_count
         XCTAssertEqual(
-            apply(
-                handle,
-                kind: UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue),
-                targetLo: shell.last_active_workspace_lo,
-                targetHi: shell.last_active_workspace_hi
-            ),
-            0
+            apply(handle, kind: UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)),
+            -4
         )
-        ackPendingEffects(handle)
+        XCTAssertEqual(seyal_app_last_error(handle), 50, "WindowCreationUnavailable")
+        XCTAssertEqual(seyal_app_shell(handle).window_count, beforeCount)
         let after = focusedPane(handle)
-        XCTAssertTrue(
-            after.lo != before.lo || after.hi != before.hi,
-            "CreateWindow must focus a new Pane"
-        )
-        XCTAssertEqual(seyal_app_shell(handle).window_count, 2)
-        return after
+        XCTAssertEqual(after.lo, before.lo)
+        XCTAssertEqual(after.hi, before.hi)
     }
 
     private func packAddress(from row: SeyalAppRow) -> Data {
@@ -173,7 +163,7 @@ final class NavigationEvidenceHostTests: XCTestCase {
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         bindSyntheticExecution(handle)
         let paneA = focusedPane(handle)
-        let paneB = createSecondWindowPane(handle)
+        rejectExtraWindow(handle)
 
         navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi)
         let focused = focusedPane(handle)
@@ -186,7 +176,6 @@ final class NavigationEvidenceHostTests: XCTestCase {
         )
         XCTAssertEqual(snap.execution_lo, 0x1156)
         XCTAssertEqual(snap.execution_hi, 0x1156)
-        XCTAssertTrue(paneB.lo != paneA.lo || paneB.hi != paneA.hi)
     }
 
     /// Item 32 (host path): Navigate away and back keeps the same ExecutionId.
@@ -198,9 +187,7 @@ final class NavigationEvidenceHostTests: XCTestCase {
         XCTAssertEqual(bound.execution_lo, 0xA11E)
         XCTAssertEqual(bound.execution_hi, 0xA11E)
         let paneA = focusedPane(handle)
-
-        let paneB = createSecondWindowPane(handle)
-        XCTAssertTrue(paneB.lo != paneA.lo || paneB.hi != paneA.hi)
+        rejectExtraWindow(handle)
 
         navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi)
         let backFocus = focusedPane(handle)
@@ -220,39 +207,13 @@ final class NavigationEvidenceHostTests: XCTestCase {
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         bindSyntheticExecution(handle)
         let paneA = focusedPane(handle)
-        let paneB = createSecondWindowPane(handle)
+        rejectExtraWindow(handle)
 
-        // CreateWindow focused B without recording history. Record A then B.
-        navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi) // FocusSeq 1
-        navigateGotoToPane(handle, paneLo: paneB.lo, paneHi: paneB.hi) // FocusSeq 2
-        XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
-        XCTAssertEqual(focusedPane(handle).hi, paneB.hi)
-
-        XCTAssertEqual(
-            apply(
-                handle,
-                kind: UInt16(SEYAL_APP_ACTION_HISTORY_BACK.rawValue),
-                payload: focusSeqPayload(2)
-            ),
-            0
-        )
-        ackPendingEffects(handle)
-        let afterBack = focusedPane(handle)
-        XCTAssertEqual(afterBack.lo, paneA.lo)
-        XCTAssertEqual(afterBack.hi, paneA.hi)
-
-        XCTAssertEqual(
-            apply(
-                handle,
-                kind: UInt16(SEYAL_APP_ACTION_HISTORY_FORWARD.rawValue),
-                payload: focusSeqPayload(1)
-            ),
-            0
-        )
-        ackPendingEffects(handle)
-        let afterForward = focusedPane(handle)
-        XCTAssertEqual(afterForward.lo, paneB.lo)
-        XCTAssertEqual(afterForward.hi, paneB.hi)
+        // One Pane on the production default. A second Window is not admitted,
+        // so this records the bound Pane and checks the stale-cursor rejection.
+        navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi)
+        XCTAssertEqual(focusedPane(handle).lo, paneA.lo)
+        XCTAssertEqual(focusedPane(handle).hi, paneA.hi)
 
         XCTAssertEqual(
             apply(
@@ -263,6 +224,7 @@ final class NavigationEvidenceHostTests: XCTestCase {
             -4
         )
         XCTAssertEqual(seyal_app_last_error(handle), 48)
-        XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
+        XCTAssertEqual(focusedPane(handle).lo, paneA.lo)
+        XCTAssertEqual(focusedPane(handle).hi, paneA.hi)
     }
 }

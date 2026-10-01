@@ -74,6 +74,7 @@ fn twin_shell() -> (
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     (shell, w1, w2, t1, t2, p1, p2)
@@ -244,6 +245,7 @@ fn truncated_enumeration_is_reported_and_stable() {
         workspace,
         true,
         true,
+        false,
     )
     .expect("fixture");
 

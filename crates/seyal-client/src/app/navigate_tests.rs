@@ -75,6 +75,7 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -166,6 +167,7 @@ fn palette_run_by_address_not_rebinding_ordinal() {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
