@@ -48,6 +48,7 @@ case "$cmd" in
     bash scripts/check-toolchain.sh
     cargo_pinned test --workspace --locked
     runtime_failure_matrix
+    agent_failure_matrix
     bash scripts/test-macos-ui.sh
     ;;
   ui-test)
@@ -85,6 +86,7 @@ case "$cmd" in
     cargo_pinned clippy --workspace --all-targets --all-features -- -D warnings
     cargo_pinned test --workspace --locked
     runtime_failure_matrix
+    agent_failure_matrix
     ;;
   bench)
     bash scripts/check-toolchain.sh
