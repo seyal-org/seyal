@@ -8,7 +8,8 @@ import XCTest
 /// the relaunch-reconnect case stays on one fixture Runtime.
 enum IsolatedHostedRuntime {
   static let flag = "--runtime-dir"
-  /// Must match `BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey`.
+  /// Must match `BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey`
+  /// (Debug-only in Seyal.app). Release builds ignore this variable.
   /// Xcode leaves `XCTestConfigurationFilePath` on the test runner, so the
   /// app under test only sees a variable this launch sets.
   static let forwardCommandEnvironmentKey = "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"

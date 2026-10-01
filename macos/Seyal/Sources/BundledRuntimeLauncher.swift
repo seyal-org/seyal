@@ -38,16 +38,34 @@ final class BundledRuntimeLauncher {
   static let helperIdentifier = "dev.seyal.Seyal.runtime"
   static let helperRelativePath = "Contents/Helpers/seyal-runtime"
   static let systemPath = "/usr/bin:/bin:/usr/sbin:/sbin"
-  /// Set by `IsolatedHostedRuntime` on `XCUIApplication.launchEnvironment`.
-  /// Xcode does not copy the test runner's `XCTestConfigurationFilePath` into
-  /// Seyal.app, and production argv must not select the helper command.
-  static let uiTestForwardRuntimeCommandEnvironmentKey = "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
 
-  static func uiTestRequestsHelperCommand(
-    environment: [String: String] = ProcessInfo.processInfo.environment
-  ) -> Bool {
-    environment[uiTestForwardRuntimeCommandEnvironmentKey] == "1"
-  }
+  #if DEBUG
+    /// Set by `IsolatedHostedRuntime` on `XCUIApplication.launchEnvironment`.
+    /// Compiled only into Debug; Release never reads this variable or forwards
+    /// trailing helper-command argv from the app launch path.
+    static let uiTestForwardRuntimeCommandEnvironmentKey =
+      "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+
+    /// Debug/XCUI only. Pass `allowUiTestOverride: false` to assert Release
+    /// semantics from Debug component tests.
+    static func uiTestRequestsHelperCommand(
+      environment: [String: String] = ProcessInfo.processInfo.environment,
+      allowUiTestOverride: Bool = true
+    ) -> Bool {
+      guard allowUiTestOverride else { return false }
+      return environment[uiTestForwardRuntimeCommandEnvironmentKey] == "1"
+    }
+  #else
+    /// Release builds never honor a UI-test helper-command override.
+    static func uiTestRequestsHelperCommand(
+      environment: [String: String] = ProcessInfo.processInfo.environment,
+      allowUiTestOverride: Bool = false
+    ) -> Bool {
+      _ = environment
+      _ = allowUiTestOverride
+      return false
+    }
+  #endif
 
   /// The launch is synchronous and currently invoked by the recovery
   /// coordinator on one executor. Retain its typed outcome only until that
@@ -312,11 +330,16 @@ final class BundledRuntimeLauncher {
     else { throw BundledRuntimeLaunchError.launchDenied }
 
     let executable = helperURL.path
-    // XCUI's Seyal.app does not link XCTest, and Xcode does not copy the test
-    // runner environment into it. The UI test sets this variable itself.
+    // Helper-command forwarding after `--runtime-dir` is Debug/XCUI only.
+    // Release always passes `false` so the env var and trailing argv are ignored.
+    #if DEBUG
+      let forwardHelperCommand = uiTestRequestsHelperCommand()
+    #else
+      let forwardHelperCommand = false
+    #endif
     var arguments: [UnsafeMutablePointer<CChar>?] = helperArgv(
       executable: executable,
-      forwardHelperCommand: uiTestRequestsHelperCommand()
+      forwardHelperCommand: forwardHelperCommand
     )
       .map { strdup($0) as UnsafeMutablePointer<CChar>? }
     arguments.append(nil)

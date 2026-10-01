@@ -36,10 +36,11 @@ enum IsolatedRuntimeDirectory {
       return []
     }
     var forwarded = [flag, directory]
-    // Production Seyal.app must not accept a Runtime command from app argv.
-    // The unit-test host loads XCTest. Headed XCUI launches a separate app
-    // that does not, so that launch opts in with `forwardHelperCommand`.
-    // Flow tests pass `/bin/zsh` because a bash account shell is full-pane Raw.
+    // Production / Release Seyal.app must not accept a Runtime command from
+    // app argv. The unit-test host loads XCTest. Debug XCUI sets
+    // `forwardHelperCommand` via a Debug-only launch-environment gate;
+    // Release compiles that gate out. Flow tests pass `/bin/zsh` because a
+    // bash account shell is full-pane Raw.
     if testHostLoaded || forwardHelperCommand, let index = arguments.firstIndex(of: flag) {
       let valueIndex = arguments.index(after: index)
       if valueIndex < arguments.endIndex {
