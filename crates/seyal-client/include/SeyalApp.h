@@ -129,7 +129,14 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_WINDOW = 58,
     SEYAL_APP_ACTION_CYCLE_WINDOW = 59,
     SEYAL_APP_ACTION_CREATE_WINDOW = 60,
-    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 61
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 61,
+    /**
+     * Adopt one live-unpresented execution into the focused Pane.
+     * target_execution_lo/hi = ExecutionId. Rust validates, then runs the
+     * existing Attach handshake and binds only after a fresh AttachmentId
+     * is allocated. No new PTY and no new ExecutionId.
+     */
+    SEYAL_APP_ACTION_ADOPT_UNPRESENTED = 62
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -543,6 +550,7 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
 #define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 5u
+#define SEYAL_APP_EFFECT_TERMINATE_EXECUTION 6u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u

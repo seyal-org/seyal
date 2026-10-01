@@ -17,6 +17,7 @@ use seyal_runtime::{
         },
     },
     pass8::CAP_BLOCK_METADATA,
+    ExecutionId,
 };
 
 use super::{server_error, ClientError};
@@ -298,6 +299,24 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
         }
         Err(error) => Err(error),
     }
+}
+
+pub(crate) fn terminate_execution_payload(execution: ExecutionId) -> [u8; 16] {
+    execution.to_bytes()
+}
+
+/// One explicit terminate write. The payload is the execution id only.
+pub(crate) fn send_terminate_execution_until(
+    stream: &mut UnixStream,
+    execution: ExecutionId,
+    deadline: Instant,
+) -> Result<(), ClientError> {
+    send_control_until(
+        stream,
+        MessageType::TerminateExecution,
+        &terminate_execution_payload(execution),
+        deadline,
+    )
 }
 
 pub(crate) fn send_control_until(

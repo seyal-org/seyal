@@ -2,6 +2,7 @@ mod attach;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod terminate;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -202,6 +203,25 @@ impl LocalDisplayClient {
 
     pub fn wants_write(&self) -> bool {
         !self.outbound.is_empty()
+    }
+
+    /// Write one `TerminateExecution` frame and read the accept handshake.
+    ///
+    /// One attempt. A busy outbound FIFO is not drained here, so this cannot
+    /// interleave with a partial control frame or spin. `Ok` means Runtime
+    /// echoed the same id (request_termination accepted). `Err` means the
+    /// write failed or Runtime rejected; the caller must not drop the catalog
+    /// entry or leave a terminate effect queued.
+    pub(crate) fn send_terminate_execution(
+        &mut self,
+        execution: ExecutionId,
+    ) -> Result<(), ClientError> {
+        if !self.outbound.is_empty() {
+            return Err(ClientError::Io);
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        discovery::send_terminate_execution_until(&mut self.stream, execution, deadline)?;
+        self.read_terminate_acceptance(execution, deadline)
     }
 
     /// Read-only, bounded Runtime metadata. The terminal display cache remains

@@ -13,6 +13,7 @@ mod native_effect;
 mod palette_apply;
 mod recovery_apply;
 mod session;
+mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
@@ -21,6 +22,8 @@ pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 mod recovery_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
 
 use std::time::{Duration, Instant};
 
@@ -87,6 +90,11 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    CrossWorkspaceAdopt,
+    ExecutionNotUnpresented,
+    /// The terminate action was validated, but no runtime termination request
+    /// was made. The unpresented catalog entry is unchanged.
+    TerminationNotRequested,
     UnknownWindow,
 }
 
@@ -280,6 +288,24 @@ pub enum AppAction {
     },
     ClearBlockSelection {
         fence: AppFence,
+    },
+    SyncLiveUnpresented {
+        entries: Vec<(ExecutionId, WorkspaceId)>,
+    },
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    Adopt {
+        fence: AppFence,
+        evidence: BindingEvidence,
+    },
+    /// Palette and ABI entry: attach the existing execution, then bind it.
+    AdoptUnpresented {
+        execution: ExecutionId,
+    },
+    TerminateExecution {
+        execution: ExecutionId,
     },
     /// ADR-018 §2.2 window selection (W4a).
     SelectWindow {
@@ -490,11 +516,13 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
+        let unpresented = self.shell.live_unpresented(shell.active_workspace);
+        let palette = self.palette.snapshot_with_unpresented(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
+            &unpresented,
         );
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
@@ -672,6 +700,14 @@ impl ApplicationRoot {
             }
             AppAction::RunPalette { fence } => self.run_palette(fence),
             AppAction::ClosePalette { fence } => self.close_palette(fence),
+            AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            AppAction::RecordUnpresented {
+                execution,
+                workspace,
+            } => self.record_unpresented(execution, workspace),
+            AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            AppAction::AdoptUnpresented { execution } => self.adopt_unpresented_command(execution),
+            AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
             AppAction::SelectWindow { id } => self.select_window(id),
             AppAction::CycleWindow { direction } => self.cycle_window(direction),
             AppAction::CreateWindow => self.create_window(),

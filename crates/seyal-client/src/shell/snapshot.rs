@@ -228,6 +228,8 @@ impl ShellError {
             Self::NotZoomed => 17,
             Self::InvalidMoveTarget => 18,
             Self::WindowCreationUnavailable => 19,
+            Self::CrossWorkspaceAdopt => 20,
+            Self::ExecutionNotUnpresented => 21,
         }
     }
 }

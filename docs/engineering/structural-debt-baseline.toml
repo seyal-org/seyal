@@ -34,9 +34,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 805
-issue = 1123
-reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions and the quit-deadline field beside the existing apply path; window identity and the action that targets it stay in this façade."
+acknowledged_loc = 841
+issue = 1143
+reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions and the quit deadline; #1143 adds unpresented adopt and terminate. Both stay on this façade."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/palette.rs"
+acknowledged_loc = 810
+issue = 1143
+reason = "Global command-palette reducer stays one cohesive open/filter/resolve module. #1143 adds AdoptUnpresented and TerminateUnpresented; #1123 only threads the window-creation admission flag through the existing fixture."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -51,10 +57,16 @@ issue = 1123
 reason = "Shell reducer suite stays one module. #1122 zoom and containment-fence proofs sit beside #1108 multi-window coverage; #1123 adds the window-creation flag on those fixtures."
 
 [[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/mod.rs"
+acknowledged_loc = 753
+issue = 1143
+reason = "ShellState stays the composition reducer. #1123 adds window-creation admission; #1143 adds unpresented adopt and terminate dispatch. Splitting those actions out would separate the error and effect types from the reducer that emits them."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 947
-issue = 1123
-reason = "The C ABI façade stays one encode/decode surface after the window extraction. #1123 adds the quit-fixture seed exports beside the existing window exports."
+acknowledged_loc = 907
+issue = 1143
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade. #1143 keeps AppError numbering in encode.rs; #1123 adds the quit-fixture seed exports beside the window exports."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -101,10 +113,4 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 745
-issue = 1123
-reason = "Command palette query, rows, and run dispatch stay one reducer. #1123 adds the window-creation admission flag to the existing fixture call; splitting the file would separate the row model from those actions."
 
