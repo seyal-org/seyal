@@ -30,6 +30,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testTerminateLaterRepliesOnceOnCleanupComplete() {
         let host = seededQuitHost(windows: 3)
+        defer { host.performQuitCleanup() }
         XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 3)
         XCTAssertEqual(host.orderedKeys.count, 3)
         XCTAssertEqual(
@@ -65,6 +66,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testBackstopRepliesOnceWhenCleanupNeverCompletes() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         var replies = 0
         let fired = expectation(description: "backstop reply")
@@ -106,6 +108,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testBootstrapRealizesOneWindowWithTabbingDisallowed() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         XCTAssertEqual(host.orderedKeys.count, 1)
         XCTAssertEqual(host.realizedTabbingModes(), [.disallowed])
@@ -115,6 +118,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testUIOrderFollowsSnapshotNotNSAppWindows() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 2)
         let snapshotOrder = host.snapshotOrderedWindowKeys()
@@ -137,6 +141,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testDestroyRealizationRemovesWindow() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 1)
         XCTAssertEqual(host.orderedKeys.count, 1)
@@ -147,6 +152,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testEventForwardingReportsBecameKey() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         guard let key = host.orderedKeys.first else {
             return XCTFail("expected bootstrap window")
@@ -216,6 +222,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testQuitReplyRuleAfterRejectedExtraWindows() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 2)
         XCTAssertEqual(host.orderedKeys.count, 1)
@@ -239,6 +246,7 @@ final class MultiWindowHostTests: XCTestCase {
 
     func testCreateWindowRejectedDoesNotMoveLiveHost() {
         let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
         let beforeCount = seyal_app_shell(host.appHandle).window_count
         let liveWindow = host.liveHost.window
