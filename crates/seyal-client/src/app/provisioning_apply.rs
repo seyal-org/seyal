@@ -5,7 +5,8 @@ use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
 use seyal_protocol::framing::ErrorCode;
 #[cfg(target_os = "macos")]
 use seyal_protocol::local_ipc::framing::{
-    CreateExecutionResult, CreateExecutionResultCode, TerminateExecutionResultCode,
+    CreateExecutionResult, CreateExecutionResultCode, TerminateExecutionResult,
+    TerminateExecutionResultCode,
 };
 
 #[cfg(all(test, target_os = "macos"))]
@@ -156,6 +157,12 @@ impl ApplicationRoot {
 
     /// Explicit terminate of the fenced Controller execution (P4). Distinct
     /// from removing Tab/Pane chrome.
+    ///
+    /// ADR-017 §6.2 / termination invariant: admit type 38 on the still-
+    /// registered Controller client **before** releasing authority or
+    /// unregistering `client_handle`. Shell unbind and detach happen only
+    /// after [`Self::absorb_wire_terminate_result`] sees
+    /// `TerminateExecutionResult`.
     pub(super) fn terminate_execution(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
         let bound = self.authority.ok_or(AppError::UnboundUnauthorized)?;
@@ -175,8 +182,6 @@ impl ApplicationRoot {
                 .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
             "explicit terminate must queue a P4 TerminateExecutionRequest"
         );
-        let _ = self.shell.release_execution(bound.pane);
-        self.clear_authority_for_pane(bound.pane);
         self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
@@ -265,25 +270,27 @@ impl ApplicationRoot {
         bound.ok_or(AppError::ProvisioningRejected)
     }
 
-    /// Apply a terminate result from the wire client (P4 correlation).
+    /// Apply a terminate result from the wire client or registry client (P4).
+    ///
+    /// Correlates by `request_id` (not focused Pane). On
+    /// [`ProvisioningEffect::Detach`], releases the shell binding and clears
+    /// Controller authority / `client_handle`.
     #[cfg(target_os = "macos")]
     pub fn absorb_wire_terminate_result(
         &mut self,
         still_listed: bool,
     ) -> Result<Option<()>, AppError> {
-        let Some(client) = self.wire_client.as_mut() else {
-            return Err(AppError::NoLiveClient);
-        };
-        let Some(result) = client.take_terminate_result() else {
+        let Some(result) = self.take_wire_terminate_result()? else {
             return Ok(None);
         };
-        // Find owner by scanning pending terminate via recorded owner map is
-        // not exposed; host supplies correlation through the client's pending set.
-        // Use focused pane's owner when present.
-        let pane = self.shell.snapshot().focused_pane;
-        let Some(owner) = self.provisioning.owner_for_pane(pane) else {
+        let Some(intent) = self
+            .provisioning
+            .pending_terminate_by_request_id(result.request_id)
+            .cloned()
+        else {
             return Ok(Some(()));
         };
+        let pane = intent.pane;
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
@@ -291,19 +298,52 @@ impl ApplicationRoot {
             TerminateExecutionResultCode::Error(code) => TerminateOutcome::Failed(code),
         };
         let effects = self.provisioning.apply_terminate_result(
-            owner,
+            intent.owner,
             result.request_id,
             outcome,
             still_listed,
         );
-        let _ = self.dispatch_wire_effects(
-            effects,
-            WireDispatchContext {
-                workspace_id: 0,
-                launch_profile: 0,
-            },
-        );
+        for effect in effects {
+            match effect {
+                ProvisioningEffect::Detach { .. } => {
+                    let _ = self.shell.release_execution(pane);
+                    self.clear_authority_for_pane(pane);
+                }
+                other => {
+                    self.dispatch_wire_effects(
+                        vec![other],
+                        WireDispatchContext {
+                            workspace_id: 0,
+                            launch_profile: 0,
+                        },
+                    )?;
+                }
+            }
+        }
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(Some(()))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn take_wire_terminate_result(&mut self) -> Result<Option<TerminateExecutionResult>, AppError> {
+        if let Some(client) = self.wire_client.as_mut() {
+            return Ok(client.take_terminate_result());
+        }
+        if let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        {
+            return match crate::ffi::with_client_mut(handle, |client| {
+                client.take_terminate_result()
+            }) {
+                Some(result) => Ok(result),
+                None => Err(AppError::NoLiveClient),
+            };
+        }
+        Err(AppError::NoLiveClient)
     }
 
     fn clear_authority_for_pane(&mut self, pane: PaneId) {

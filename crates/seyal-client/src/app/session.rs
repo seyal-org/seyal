@@ -119,6 +119,10 @@ impl ApplicationRoot {
             bound.pty_generation = generation;
         }
         self.derive_presentation(alternate)?;
+        // Production path: absorb type-39 after poll_prepare decoded it into
+        // the registry client. `still_listed=true` is the safe Failed-outcome
+        // default without a fresh list snapshot (keeps an unreferenced record).
+        let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())

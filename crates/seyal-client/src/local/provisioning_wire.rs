@@ -127,6 +127,24 @@ impl LocalDisplayClient {
         })
     }
 
+    /// True when this connection has admitted a terminate with `request_id`.
+    pub fn has_pending_terminate(&self, request_id: u64) -> bool {
+        self.pending_terminate_requests.contains(&request_id)
+    }
+
+    /// True when an admitted terminate frame is still sitting in the outbound
+    /// FIFO (false after a successful flush to the socket).
+    pub fn has_outbound_terminate(&self, request_id: u64) -> bool {
+        self.outbound.iter().any(|pending| {
+            matches!(
+                pending.kind,
+                OutboundKind::TerminateExecution {
+                    request_id: id
+                } if id == request_id
+            )
+        })
+    }
+
     /// Advance the connection-local allocator past `request_id` without
     /// issuing a second id for the same create/terminate.
     fn observe_provisioning_request_id(&mut self, request_id: u64) -> Result<(), ClientError> {

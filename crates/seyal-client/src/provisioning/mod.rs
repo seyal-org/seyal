@@ -176,6 +176,21 @@ impl ProvisioningSession {
             })
     }
 
+    /// Locate a pending terminate intent by connection-local `request_id`.
+    pub fn pending_terminate_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
+        self.pending_by_key
+            .iter()
+            .find_map(|((owner, id), intent)| {
+                if *id == request_id
+                    && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
+                {
+                    Some(intent)
+                } else {
+                    None
+                }
+            })
+    }
+
     /// Assign per-pane connection ownership. Hosts cannot choose an execution.
     pub fn claim_connection(&mut self, pane: PaneId) -> ConnectionOwner {
         if let Some(owner) = self.pane_owners.get(&pane).copied() {

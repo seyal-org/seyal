@@ -3,7 +3,8 @@
 use seyal_core::{AttachmentId, ExecutionId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{
-    CreateExecutionResult, CreateExecutionResultCode, MessageType, HEADER_LEN,
+    CreateExecutionResult, CreateExecutionResultCode, MessageType, TerminateExecutionResult,
+    TerminateExecutionResultCode, HEADER_LEN,
 };
 
 use super::provisioning_apply::negotiated_provisioning_client;
@@ -175,10 +176,11 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
     let pane = root.snapshot().shell.focused_pane;
     let tab = root.snapshot().shell.active_tab;
     let execution = exec(0x71);
+    let wire_attachment = root.wire_client().unwrap().attachment_id();
 
     root.adopt_authority_for_provisioned_pane(BindingEvidence {
         execution,
-        attachment: attachment(9),
+        attachment: wire_attachment,
         controller: true,
         pty_generation: 1,
         alternate_screen: false,
@@ -196,13 +198,131 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
         "explicit terminate must not remove tab chrome"
     );
     assert!(root.snapshot().shell.tabs.iter().any(|item| item.id == tab));
-    assert_eq!(root.shell.pane_execution(pane).unwrap(), None);
+    // Authority stays until TerminateExecutionResult; shell binding still present.
+    assert_eq!(root.shell.pane_execution(pane).unwrap(), Some(execution));
     assert_eq!(root.provisioning().recorded_execution(pane), None);
+    assert_ne!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound
+    );
+    let request_id = (1..=8u64)
+        .find_map(|id| {
+            root.provisioning()
+                .pending_terminate_by_request_id(id)
+                .map(|intent| intent.request_id)
+        })
+        .expect("pending terminate retained until result");
+    assert!(
+        root.wire_client()
+            .unwrap()
+            .has_pending_terminate(request_id)
+            || root
+                .wire_client()
+                .unwrap()
+                .has_outbound_terminate(request_id),
+        "type 38 must be admitted before detach"
+    );
+
+    root.wire_client_mut()
+        .unwrap()
+        .accept_terminate_result(TerminateExecutionResult {
+            attachment_id: wire_attachment,
+            request_id,
+            result_code: TerminateExecutionResultCode::TerminationRequested,
+            detail_code: 0,
+        })
+        .unwrap();
+    root.absorb_wire_terminate_result(false)
+        .expect("absorb terminate")
+        .expect("terminate result present");
+    assert_eq!(root.shell.pane_execution(pane).unwrap(), None);
     assert_eq!(
         root.snapshot().eligibility,
         PresentationEligibility::Unbound
     );
     assert_eq!(root.provisioning().automatic_retries(), 0);
+    assert!(root
+        .provisioning()
+        .pending_terminate_by_request_id(request_id)
+        .is_none());
+}
+
+#[test]
+fn explicit_terminate_admits_type_38_on_registry_client_without_install_wire_client() {
+    // Production path: wire_client is None; admit goes through client_handle.
+    // Must not clear/unregister the handle before type 38 is written.
+    let mut root = ApplicationRoot::new();
+    assert!(root.wire_client().is_none());
+    let client = negotiated_provisioning_client();
+    let execution = client.execution_id();
+    let attachment_id = client.attachment_id();
+    root.attach_client(root.fence(), client)
+        .expect("register Controller into CLIENTS");
+    assert!(root.wire_client().is_none());
+    let handle = root
+        .live_client_handle_for_test()
+        .expect("production path retains registry handle");
+
+    root.apply(AppAction::TerminateExecution {
+        fence: root.fence(),
+    })
+    .expect("terminate must admit while handle is live");
+
+    assert_eq!(
+        root.live_client_handle_for_test(),
+        Some(handle),
+        "client_handle must stay registered until TerminateExecutionResult"
+    );
+    assert!(root.wire_client().is_none());
+    assert_ne!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound
+    );
+
+    let request_id = (1..=8u64)
+        .find_map(|id| {
+            root.provisioning()
+                .pending_terminate_by_request_id(id)
+                .map(|intent| intent.request_id)
+        })
+        .expect("PendingKind::Terminate must remain until result");
+    let admitted = crate::ffi::with_client(handle, |client| {
+        client.has_pending_terminate(request_id) || client.has_outbound_terminate(request_id)
+    })
+    .expect("registry client still present");
+    assert!(
+        admitted,
+        "type 38 must be written on the still-registered client_handle (no install_wire_client)"
+    );
+
+    crate::ffi::with_client_mut(handle, |client| {
+        client
+            .accept_terminate_result(TerminateExecutionResult {
+                attachment_id,
+                request_id,
+                result_code: TerminateExecutionResultCode::TerminationRequested,
+                detail_code: 0,
+            })
+            .expect("accept terminate result");
+    })
+    .expect("registry client");
+    // Same absorb production `poll_client` invokes after poll_prepare. Probe
+    // clients drop their socket peer, so poll_prepare would disconnect; drive
+    // absorb directly to prove registry-client correlation and detach.
+    root.absorb_wire_terminate_result(false)
+        .expect("absorb terminate via client_handle")
+        .expect("terminate result present");
+    assert_eq!(root.live_client_handle_for_test(), None);
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound
+    );
+    assert_eq!(root.snapshot().execution, None);
+    assert!(!root.provisioning().is_unreferenced(execution));
+    assert!(root
+        .provisioning()
+        .pending_terminate_by_request_id(request_id)
+        .is_none());
 }
 
 #[test]

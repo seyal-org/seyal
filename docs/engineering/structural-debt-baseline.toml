@@ -40,9 +40,9 @@ reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-s
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 716
+acknowledged_loc = 731
 issue = 1149
-reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate plus pending_create_by_request_id so wire create results correlate to the session intent without a second allocator or session."
+reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create_by_request_id, and pending_terminate_by_request_id so wire create/terminate results correlate to the session intent without a second allocator or focused-pane guess."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
