@@ -4,6 +4,12 @@
 //! `ClientSession` in place. A new process mints a new `BackendInstanceId` and
 //! therefore rejects every session opened by the previous process.
 
+mod frame_io;
+mod recovery;
+mod wire;
+
+pub(crate) use frame_io::{read_session_frame, SessionRead};
+
 use std::path::PathBuf;
 
 use seyal_agent_core::{
@@ -11,81 +17,24 @@ use seyal_agent_core::{
     WorkScopeId, WorkScopeKind,
 };
 use seyal_agent_protocol::{
-    accepted_body_len, decode_command, decode_frame, encode_result, AggregateRef, Command,
-    CommandError, CommandResult, Frame, FrameError, FrameKind, ReplayEvent, SnapshotView,
-    MAX_EVENT_WINDOW,
+    decode_command, encode_result, AggregateRef, Command, CommandError, CommandResult, Frame,
+    FrameKind, SnapshotView, MAX_EVENT_WINDOW,
 };
-use seyal_agent_store::{AgentStore, AggregateEventEnvelopeV1, AggregateId, AggregateSequence, StoreError};
+use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError};
 
 use crate::{
-    AuthorizationError, AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation,
-    HostObservationKind, ObservationAuthority, PrincipalKind, RunLiveness, ScriptStep,
+    AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, ObservationAuthority,
+    PrincipalKind, ScriptStep,
+};
+
+use recovery::restore_identities;
+use wire::{
+    fit_replay_events, liveness_code, map_auth, map_domain, observation_payload, snapshot_payload,
+    to_aggregate,
 };
 
 const OUTPUT_CHUNK: usize = 1024;
 const EVENT_OBSERVATION: u16 = 2;
-
-pub(crate) enum SessionRead {
-    Frame(Frame),
-    Disconnected,
-    Oversized,
-    Malformed,
-    TimedOut,
-    Io,
-}
-
-pub(crate) fn read_session_frame(
-    stream: &mut impl std::io::Read,
-    max_frame_size: u32,
-) -> SessionRead {
-    let mut header = [0; 10];
-    match stream.read_exact(&mut header) {
-        Ok(()) => {}
-        Err(error) if is_disconnect(&error) => return SessionRead::Disconnected,
-        Err(error) => return map_read_error(error),
-    }
-    let body_len = match accepted_body_len(&header, max_frame_size) {
-        Ok(len) => len,
-        Err(FrameError::Oversized) => return SessionRead::Oversized,
-        Err(_) => return SessionRead::Malformed,
-    };
-    let mut body = vec![0; body_len];
-    if body_len > 0
-        && let Err(error) = stream.read_exact(&mut body)
-    {
-        return if is_disconnect(&error) {
-            SessionRead::Io
-        } else {
-            map_read_error(error)
-        };
-    }
-    let mut bytes = Vec::with_capacity(header.len() + body.len());
-    bytes.extend_from_slice(&header);
-    bytes.extend_from_slice(&body);
-    match decode_frame(&bytes, max_frame_size) {
-        Ok(frame) => SessionRead::Frame(frame),
-        Err(_) => SessionRead::Malformed,
-    }
-}
-
-fn is_disconnect(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::UnexpectedEof
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::BrokenPipe
-    )
-}
-
-fn map_read_error(error: std::io::Error) -> SessionRead {
-    if error.kind() == std::io::ErrorKind::TimedOut
-        || error.kind() == std::io::ErrorKind::WouldBlock
-    {
-        SessionRead::TimedOut
-    } else {
-        SessionRead::Io
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct IntegrationConfig {
@@ -562,166 +511,5 @@ impl IntegrationService {
                 .map(|_| ())
         };
         decision.map_err(map_auth)
-    }
-}
-
-fn restore_identities(
-    store: &AgentStore,
-    authority: &mut ObservationAuthority,
-    auth: &mut AuthorizationRepository,
-    principal_id: seyal_agent_core::ClientPrincipalId,
-) -> Result<(), ServiceError> {
-    for (id, kind) in store.work_scopes().map_err(|_| ServiceError::Failed)? {
-        let kind = WorkScopeKind::from_code(kind).ok_or(ServiceError::Failed)?;
-        authority
-            .restore_work_scope(id, kind)
-            .map_err(|_| ServiceError::Failed)?;
-    }
-    for (id, scope) in store.work_items().map_err(|_| ServiceError::Failed)? {
-        authority
-            .restore_work_item(id, scope)
-            .map_err(|_| ServiceError::Failed)?;
-    }
-    for (id, item) in store.attempts().map_err(|_| ServiceError::Failed)? {
-        authority
-            .restore_attempt(id, item)
-            .map_err(|_| ServiceError::Failed)?;
-    }
-    for (id, run) in store.agent_runs().map_err(|_| ServiceError::Failed)? {
-        let binding =
-            BindingGeneration::from_raw(run.binding_generation).ok_or(ServiceError::Failed)?;
-        let control =
-            ControlGeneration::from_raw(run.control_generation).ok_or(ServiceError::Failed)?;
-        match authority.restore_agent_run(id, run.attempt_id, binding, control) {
-            Ok(()) => {}
-            Err(DomainError::UnknownAttempt(_)) => {
-                // Migrated/crash-recovered runs may lack WorkScope/WorkItem/
-                // Attempt parents. Quarantine the run as recoverable unknown
-                // liveness instead of refusing daemon startup.
-                authority
-                    .restore_orphaned_agent_run(id, run.attempt_id, binding, control)
-                    .map_err(|_| ServiceError::Failed)?;
-            }
-            Err(_) => return Err(ServiceError::Failed),
-        }
-        authority.mark_recovered(id);
-        auth.allow_run(principal_id, id)
-            .map_err(|_| ServiceError::Failed)?;
-    }
-    Ok(())
-}
-
-/// Fill a Subscribe window only while the encoded Result frame fits.
-///
-/// The last included sequence is the continuation cursor for the next
-/// `Subscribe{after}` call. An empty window means either no events remain or
-/// the next single event cannot fit the negotiated frame size.
-fn fit_replay_events(
-    events: Vec<AggregateEventEnvelopeV1>,
-    window: usize,
-    max_frame_size: u32,
-) -> Vec<ReplayEvent> {
-    let mut selected = Vec::new();
-    for event in events.into_iter().take(window) {
-        selected.push(ReplayEvent {
-            sequence: event.sequence.get(),
-            kind: event.kind,
-            payload: event.payload,
-        });
-        let probe = CommandResult::Replay {
-            events: selected.clone(),
-        };
-        if encode_result(&probe, max_frame_size).is_err() {
-            selected.pop();
-            break;
-        }
-    }
-    selected
-}
-
-fn to_aggregate(aggregate: AggregateRef) -> AggregateId {
-    match aggregate {
-        AggregateRef::WorkScope(id) => AggregateId::WorkScope(id),
-        AggregateRef::WorkItem(id) => AggregateId::WorkItem(id),
-        AggregateRef::Attempt(id) => AggregateId::Attempt(id),
-        AggregateRef::AgentRun(id) => AggregateId::AgentRun(id),
-    }
-}
-
-fn snapshot_payload(authority: &ObservationAuthority, run_id: AgentRunId) -> Vec<u8> {
-    let run = authority.domain().agent_run(run_id);
-    let mut payload = vec![liveness_code(authority.liveness(run_id))];
-    if let Some(run) = run {
-        payload.extend_from_slice(&run.binding_generation().get().to_le_bytes());
-        payload.extend_from_slice(&run.control_generation().get().to_le_bytes());
-    }
-    payload
-}
-
-fn liveness_code(liveness: RunLiveness) -> u8 {
-    match liveness {
-        RunLiveness::ScriptedLive => 1,
-        RunLiveness::KnownTerminated => 2,
-        RunLiveness::UnknownAfterCrash => 3,
-        RunLiveness::ObservationLost => 4,
-    }
-}
-
-fn observation_payload(observation: &HostObservation) -> Vec<u8> {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&observation.ordinal.to_le_bytes());
-    match &observation.kind {
-        HostObservationKind::Started => payload.push(1),
-        HostObservationKind::Progress { step } => {
-            payload.push(2);
-            payload.extend_from_slice(&step.to_le_bytes());
-        }
-        HostObservationKind::KnownSuccess => payload.push(3),
-        HostObservationKind::KnownFailure => payload.push(4),
-        HostObservationKind::HarnessCrashed | HostObservationKind::UnknownLiveness => {
-            payload.push(5)
-        }
-        HostObservationKind::ObservationDisconnected => payload.push(6),
-        HostObservationKind::ObservationReconnected => payload.push(7),
-        HostObservationKind::Output(bytes) => {
-            payload.push(8);
-            payload.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-            payload.extend_from_slice(bytes);
-        }
-        HostObservationKind::Result(bytes) => {
-            payload.push(9);
-            payload.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-            payload.extend_from_slice(bytes);
-        }
-        HostObservationKind::EffectUnknown => payload.push(10),
-        HostObservationKind::Delayed { ticks } => {
-            payload.push(11);
-            payload.extend_from_slice(&ticks.to_le_bytes());
-        }
-    }
-    payload
-}
-
-fn map_auth(error: AuthorizationError) -> CommandError {
-    match error {
-        AuthorizationError::UnknownSession | AuthorizationError::StaleBackendInstance => {
-            CommandError::RejectedSession
-        }
-        AuthorizationError::Malformed | AuthorizationError::ReplayedRequest => {
-            CommandError::Malformed
-        }
-        _ => CommandError::Denied,
-    }
-}
-
-fn map_domain(error: DomainError) -> CommandError {
-    match error {
-        DomainError::StaleBindingGeneration { .. } => CommandError::StaleBinding,
-        DomainError::StaleControlGeneration { .. } => CommandError::StaleControl,
-        DomainError::UnknownWorkScope(_)
-        | DomainError::UnknownWorkItem(_)
-        | DomainError::UnknownAttempt(_)
-        | DomainError::UnknownAgentRun(_) => CommandError::NotFound,
-        DomainError::GenerationExhausted | DomainError::Conflict => CommandError::Failed,
     }
 }

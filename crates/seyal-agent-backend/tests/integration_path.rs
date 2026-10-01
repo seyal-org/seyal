@@ -757,14 +757,22 @@ fn cpu_percent() -> Option<f64> {
 }
 
 fn temp_dir(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
+    let name = format!(
         "seyal-q-{label}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
-    ))
+    );
+    let candidate = std::env::temp_dir().join(&name);
+    // macOS `sun_path` is 104 bytes including the trailing NUL. `agent.sock`
+    // needs ten more bytes, so a long `TMPDIR` cannot host the socket.
+    if candidate.join("agent.sock").as_os_str().len() < 104 {
+        candidate
+    } else {
+        std::path::PathBuf::from("/tmp").join(name)
+    }
 }
 
 fn write_populated_v2_store(path: &Path) {
@@ -774,10 +782,7 @@ fn write_populated_v2_store(path: &Path) {
         match fs::symlink_metadata(parent) {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::DirBuilder::new()
-                    .mode(0o700)
-                    .create(parent)
-                    .unwrap();
+                fs::DirBuilder::new().mode(0o700).create(parent).unwrap();
             }
             Err(error) => panic!("create store parent: {error}"),
         }
