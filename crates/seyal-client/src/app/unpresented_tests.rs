@@ -223,4 +223,13 @@ fn close_window_keeps_bound_execution_live_and_enumerable() {
         .any(|effect| matches!(effect, NativeEffect::DestroyWindowRealization { .. })));
     assert_eq!(root.live_unpresented(), vec![execution]);
     assert!(root.snapshot().shell.active_window.is_none());
+    assert_eq!(
+        root.snapshot().eligibility,
+        super::PresentationEligibility::Unbound,
+        "B1: after CloseWindow, cleared authority must project Unbound so host recovery cannot open_first"
+    );
+    assert!(
+        root.fence().execution.is_none(),
+        "fence must not claim an execution after CloseWindow unbind"
+    );
 }

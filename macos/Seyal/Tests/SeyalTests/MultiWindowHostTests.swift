@@ -222,6 +222,11 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
         XCTAssertNil(host.realizedWindow(for: key))
+        XCTAssertEqual(
+            seyal_app_snapshot(host.appHandle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue),
+            "B1: CloseWindow must leave Unbound so recovery cannot open_first"
+        )
         let effect = seyal_app_native_effect(host.appHandle, 0)
         XCTAssertNotEqual(
             effect.kind,
