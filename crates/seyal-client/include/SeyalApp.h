@@ -459,6 +459,14 @@ typedef struct SeyalAppTheme {
  */
 #define SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE 4u
 #define SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE 8u
+/*
+ * Whether the focused Pane may implicitly open_first / bootstrap a Runtime
+ * execution without AdoptExecution (ADR-018 §3.3 / B1). Cleared on
+ * CloseWindow→CreateWindow re-entry panes; true only for cold-start panes.
+ * Hosts must read this live from seyal_app_shell rather than a construction-
+ * time Swift default.
+ */
+#define SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP 16u
 
 /*
  * Multi-window shell header (#1108 / ADR-018 §2.1). window_count / effect_count
@@ -535,6 +543,7 @@ typedef struct SeyalAppTab {
 /* SeyalAppPaneLeaf.flags / presentation_tier (ADR-018 §5) */
 #define SEYAL_APP_PANE_FOCUSED 1u
 #define SEYAL_APP_PANE_HAS_EXECUTION 2u
+#define SEYAL_APP_PANE_ALLOWS_IMPLICIT_BOOTSTRAP 4u
 #define SEYAL_APP_TIER_FOCUSED 0u
 #define SEYAL_APP_TIER_VISIBLE 1u
 #define SEYAL_APP_TIER_HIDDEN 2u

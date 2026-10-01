@@ -288,6 +288,47 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(delegateSource.contains("hasVisibleWindows"))
     }
 
+    /// B1: recovery must consume live Rust `allows_implicit` — after
+    /// CloseWindow→CreateWindow the shell flag is clear so open_first is gated.
+    func testCloseWindowCreateWindowClearsImplicitBootstrapHostGate() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
+        let cold = seyal_app_shell(host.appHandle)
+        XCTAssertNotEqual(
+            cold.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP),
+            0,
+            "cold-start pane may open_first"
+        )
+        guard let key = host.orderedKeys.first else {
+            return XCTFail("expected bootstrap window")
+        }
+        host.forwardCloseWindow(key)
+        host.createWindow(nil)
+        let reentry = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(reentry.window_count, 1)
+        XCTAssertEqual(
+            reentry.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP),
+            0,
+            "B1: CreateWindow after CloseWindow must clear focused allows_implicit so recovery cannot open_first"
+        )
+        let recoverySource = try! String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/ProductChromeHostView+Recovery.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            recoverySource.contains("SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP"),
+            "recovery must read live Rust shell flag"
+        )
+        XCTAssertFalse(
+            recoverySource.contains("pane.inputSurface.allowsImplicitExecutionBootstrap"),
+            "recovery must not trust construction-time MetalSurfaceView let"
+        )
+    }
+
     func testTabCreationAdmittedPaneSplittingOff() {
         let host = MultiWindowHostController()
         host.bootstrapAfterLaunch()

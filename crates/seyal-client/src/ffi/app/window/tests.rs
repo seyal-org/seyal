@@ -162,6 +162,19 @@ fn round_trip_windows(n: usize) {
             PresentationTier::Unpresented => 3,
         };
         assert_eq!(pane.presentation_tier, tier);
+        if expected_pane.allows_implicit_bootstrap {
+            assert_ne!(
+                pane.flags & 4,
+                0,
+                "pane leaf must project allows_implicit_bootstrap"
+            );
+        } else {
+            assert_eq!(
+                pane.flags & 4,
+                0,
+                "re-entry / non-bootstrap panes clear allows_implicit"
+            );
+        }
 
         let node = seyal_app_tab_tree_node(handle, wi, 0, 0);
         assert_eq!(node.version, APP_ABI_VERSION);
@@ -205,6 +218,64 @@ fn ffi_round_trip_two_windows() {
 #[test]
 fn ffi_round_trip_eight_windows() {
     round_trip_windows(8);
+}
+
+/// B1 host gate: after CloseWindow→CreateWindow the focused Pane must clear
+/// `SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP` so Swift recovery cannot open_first.
+#[test]
+fn close_window_create_window_clears_implicit_bootstrap_shell_flag() {
+    let handle = seyal_app_create();
+    let cold = seyal_app_shell(handle);
+    assert_ne!(
+        cold.flags & 16,
+        0,
+        "cold-start focused pane admits implicit bootstrap"
+    );
+    let pane = seyal_app_pane_leaf(handle, 0, 0, 0);
+    assert_ne!(
+        pane.flags & 4,
+        0,
+        "cold-start pane leaf admits implicit bootstrap"
+    );
+
+    let window = seyal_app_window(handle, 0);
+    assert_ne!(window.size, 0);
+    let mut id_bytes = [0u8; 16];
+    id_bytes[..8].copy_from_slice(&window.window_lo.to_le_bytes());
+    id_bytes[8..].copy_from_slice(&window.window_hi.to_le_bytes());
+    let id = WindowId::from_bytes(id_bytes);
+    let generation = seyal_app_shell(handle).containment_generation;
+    apply_on_handle(
+        handle,
+        ShellAction::CloseWindow {
+            id,
+            containment_generation: generation,
+        },
+    );
+    assert_eq!(seyal_app_shell(handle).window_count, 0);
+
+    let generation = seyal_app_shell(handle).containment_generation;
+    apply_on_handle(
+        handle,
+        ShellAction::CreateWindow {
+            workspace: WorkspaceId::m001_default(),
+            containment_generation: generation,
+        },
+    );
+    let reentry = seyal_app_shell(handle);
+    assert_eq!(reentry.window_count, 1);
+    assert_eq!(
+        reentry.flags & 16,
+        0,
+        "B1: CreateWindow after CloseWindow must clear focused allows_implicit so recovery cannot open_first"
+    );
+    let reentry_pane = seyal_app_pane_leaf(handle, 0, 0, 0);
+    assert_eq!(
+        reentry_pane.flags & 4,
+        0,
+        "B1: re-entry pane leaf must clear allows_implicit_bootstrap"
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
 }
 
 #[test]

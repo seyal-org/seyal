@@ -98,10 +98,12 @@ extension ProductChromeHostView {
         let executionIdentity = pane.inputSurface.requestedExecutionIdentity
         // B1 / ADR-018 §3.3: Rust clears `allows_implicit_execution_bootstrap` on
         // CloseWindow→CreateWindow re-entry panes so recovery cannot open_first
-        // past live-unpresented W6 authority. Cold-start panes stay Unbound until
-        // attach succeeds but keep allows_implicit=true — do not gate on
-        // eligibility Unbound here or production launch never connects.
-        let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap
+        // past live-unpresented W6 authority. Cold-start panes keep the shell
+        // flag set. Read live Rust authority from seyal_app_shell — never the
+        // construction-time MetalSurfaceView let (defaults true and is never
+        // refreshed after CreateWindow).
+        let allowsImplicit = seyal_app_shell(pane.appHandle).flags
+            & UInt16(SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP) != 0
         recoveryLifecycleQueue.async { [weak self] in
             // Queue delay consumes the Rust-issued budget rather than resetting it.
             let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt

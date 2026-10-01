@@ -23,6 +23,9 @@ const TAB_FLAG_ACTIVE: u16 = 1;
 const TAB_FLAG_ATTENTION: u16 = 2;
 const PANE_FLAG_FOCUSED: u16 = 1;
 const PANE_FLAG_HAS_EXECUTION: u16 = 2;
+const PANE_FLAG_ALLOWS_IMPLICIT_BOOTSTRAP: u16 = 4;
+/// Focused Pane may call `open_first` without AdoptExecution (ADR-018 §3.3 / B1).
+const SHELL_FLAG_ALLOWS_IMPLICIT_BOOTSTRAP: u16 = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -304,6 +307,9 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
                 if pane.execution.is_some() {
                     flags |= PANE_FLAG_HAS_EXECUTION;
                 }
+                if pane.allows_implicit_bootstrap {
+                    flags |= PANE_FLAG_ALLOWS_IMPLICIT_BOOTSTRAP;
+                }
                 state.window_scratch.panes.push((
                     wi,
                     ti,
@@ -470,6 +476,15 @@ pub(super) fn fill_shell_header(state: &AppHandle) -> SeyalAppShell {
     }
     if shell.allows_pane_close {
         flags |= SHELL_FLAG_ALLOWS_PANE_CLOSE;
+    }
+    // B1: host recovery must consume current Rust authority, not a Swift let.
+    if shell
+        .panes
+        .iter()
+        .find(|pane| pane.id == shell.focused_pane)
+        .is_some_and(|pane| pane.allows_implicit_bootstrap)
+    {
+        flags |= SHELL_FLAG_ALLOWS_IMPLICIT_BOOTSTRAP;
     }
     SeyalAppShell {
         version: APP_ABI_VERSION,
