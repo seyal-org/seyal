@@ -707,6 +707,11 @@ final class SeyalHostComponentTests: XCTestCase {
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.
     @MainActor
+    func testTerminalDefaultCellColorsFollowThemeWithoutRebuildingPreparedFrames() {
+        XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
+    }
+
+    @MainActor
     func testM002RendererPrepareSubmissionContractWritesCohort() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1254,6 +1259,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let theme = NativeThemeRealization.theme(from: visual)
         XCTAssertEqual(theme.appearance.name, NSAppearance.Name.aqua)
+        XCTAssertEqual(theme.terminalDefaultForeground, visual.text.byteSwapped)
+        XCTAssertEqual(theme.terminalDefaultBackground, visual.canvas.byteSwapped)
         XCTAssertEqual(theme.uiFontSize, 16, accuracy: 0.01)
         XCTAssertEqual(theme.terminalFontSize, 18, accuracy: 0.01)
         XCTAssertEqual(theme.windowPadding, 12, accuracy: 0.01)

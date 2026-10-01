@@ -150,11 +150,11 @@ extension MetalTerminalRenderer {
                     uvRect: uvRect,
                     foreground: resolveTerminalColor(
                         cell.foreground,
-                        defaultRGBA: 0xffe9_e1d8
+                        defaultRGBA: 0
                     ),
                     background: resolveTerminalColor(
                         cell.background,
-                        defaultRGBA: 0xff10_0d0b
+                        defaultRGBA: 0
                     ),
                     flags: flags,
                     atlasSlice: atlasSlice
@@ -211,6 +211,12 @@ extension MetalTerminalRenderer {
             &renderMode,
             length: MemoryLayout<UInt32>.stride,
             index: 2
+        )
+        var defaultColors = SIMD2<UInt32>(defaultTerminalForeground, defaultTerminalBackground)
+        encoder.setFragmentBytes(
+            &defaultColors,
+            length: MemoryLayout<SIMD2<UInt32>>.stride,
+            index: 3
         )
         if let atlasTexture {
             encoder.setFragmentTexture(atlasTexture, index: 0)

@@ -32,6 +32,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     var currentMetrics: TerminalFontMetrics?
     var currentScale: CGFloat = 0
     var currentAlternateScreen = false
+    var defaultTerminalForeground: UInt32 = 0xffe9_e1d8
+    var defaultTerminalBackground: UInt32 = 0xff10_0d0b
     var framesInFlight = 0
     var deferredDamage = DamageMask()
     var deferredNeedsFullRebuild = false
@@ -165,6 +167,16 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         drainGPUCompletionsIfNeeded()
         guard visible, persistentDisplayFailure == nil, instanceBuffer != nil else { return }
         needsPresent = true
+    }
+
+    func setDefaultTerminalColors(foreground: UInt32, background: UInt32) {
+        guard defaultTerminalForeground != foreground || defaultTerminalBackground != background else {
+            return
+        }
+        defaultTerminalForeground = foreground
+        defaultTerminalBackground = background
+        needsPresent = true
+        requestPresent()
     }
 
     func setVisible(_ value: Bool) {
@@ -483,8 +495,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                     origin: origin,
                     size: size,
                     uvRect: uvRect,
-                    foreground: resolveTerminalColor(cell.foreground, defaultRGBA: 0xffe9_e1d8),
-                    background: resolveTerminalColor(cell.background, defaultRGBA: 0xff10_0d0b),
+                    foreground: resolveTerminalColor(cell.foreground, defaultRGBA: 0),
+                    background: resolveTerminalColor(cell.background, defaultRGBA: 0),
                     flags: flags,
                     atlasSlice: atlasSlice
                 )
