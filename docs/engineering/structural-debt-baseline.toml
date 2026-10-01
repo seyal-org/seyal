@@ -40,21 +40,27 @@ reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-s
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 848
+issue = 1108
+reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1108 adds multi-window OrderFrontMakeKey emission and bounded-queue proofs beside the existing ApplicationRoot suite. Ceiling matches post-W3 LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/tests.rs"
+acknowledged_loc = 872
+issue = 1108
+reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot and native-effect projection proofs beside existing workspace/tab/pane coverage; further extraction would split one containment contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 919
-issue = 923
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. Snapshot-call metering is cfg(test) thread-local state in visual.rs and is not part of this façade. #923 adds only the pane_region module declaration/re-export and the CannotCloseBoundPane error number; the export itself lives in pane_region.rs."
+acknowledged_loc = 900
+issue = 1108
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/, ratcheting this façade down from the prior 919 LOC #923 ceiling."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 773
-issue = 1065
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1065 imports encode-owned SNAP/block-row flag constants after those flags moved out of the façade, and the steady-state snapshot call-counter proof lives beside the counter in visual.rs."
+acknowledged_loc = 779
+issue = 1108
+reason = "ABI contract suite stays one module. #1108 adds the multi-window snapshot FFI proofs beside the existing handle tests; further extraction would split one contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -102,8 +108,3 @@ acknowledged_loc = 744
 issue = 1092
 reason = "Command palette query, rows, and run dispatch stay one reducer. #1092 adds the window and tab actions that the palette runs; splitting the file would separate the row model from those actions."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 846
-issue = 1092
-reason = "Shell inventory tests stay one module beside ShellState. #1092 adds the window and tab action proofs; a numbered split would hide which action the assertion covers."

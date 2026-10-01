@@ -128,8 +128,7 @@ impl ApplicationRoot {
 impl ApplicationRoot {
     pub(super) fn focus(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
-        self.shell
-            .apply(ShellAction::FocusPane { id: fence.pane })
+        self.apply_shell(ShellAction::FocusPane { id: fence.pane })
             .map_err(|_| AppError::UnknownPane)
     }
 
@@ -145,12 +144,11 @@ impl ApplicationRoot {
         if evidence.pty_generation == 0 {
             return Err(AppError::ZeroPtyGeneration);
         }
-        self.shell
-            .apply(ShellAction::BindExecution {
-                pane: fence.pane,
-                execution: evidence.execution,
-            })
-            .map_err(|_| AppError::AlreadyBound)?;
+        self.apply_shell(ShellAction::BindExecution {
+            pane: fence.pane,
+            execution: evidence.execution,
+        })
+        .map_err(|_| AppError::AlreadyBound)?;
         let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
             .ok_or(AppError::ZeroPtyGeneration)?;
         self.presentation
@@ -241,7 +239,8 @@ impl ApplicationRoot {
 
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
-        self.pending_effect = NativeEffect::BoundedDetachThenTerminate;
+        self.pending_effects
+            .push(NativeEffect::BoundedDetachThenTerminate);
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
         self.sync_composer_presentation();
@@ -249,8 +248,23 @@ impl ApplicationRoot {
     }
 
     pub(super) fn ack_effect(&mut self) -> Result<(), AppError> {
-        self.pending_effect = NativeEffect::None;
+        if !self.pending_effects.is_empty() {
+            self.pending_effects.remove(0);
+        }
         Ok(())
+    }
+
+    pub(super) fn drain_shell_effects(&mut self) {
+        for effect in self.shell.take_effects() {
+            let native = NativeEffect::from(effect);
+            // Coalesce activation raises: the shipping host generally does
+            // not ack OrderFrontMakeKey, so keep at most one pending raise.
+            if matches!(native, NativeEffect::OrderFrontMakeKey { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::OrderFrontMakeKey { .. }));
+            }
+            self.pending_effects.push(native);
+        }
     }
 }
 

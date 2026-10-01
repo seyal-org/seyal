@@ -9,12 +9,11 @@ use crate::shell::{ShellAction, SplitAxis};
 impl ApplicationRoot {
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
         let snap = self.shell.snapshot();
-        self.shell
-            .apply(ShellAction::CreateTab {
-                window: snap.active_window,
-                containment_generation: snap.containment_generation,
-            })
-            .map_err(|_| AppError::TabCreationUnavailable)?;
+        self.apply_shell(ShellAction::CreateTab {
+            window: snap.active_window,
+            containment_generation: snap.containment_generation,
+        })
+        .map_err(|_| AppError::TabCreationUnavailable)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -22,8 +21,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::SplitFocused { axis })
+        self.apply_shell(ShellAction::SplitFocused { axis })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         let _ = self
             .chrome
@@ -32,8 +30,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::CloseTab { id })
+        self.apply_shell(ShellAction::CloseTab { id })
             .map_err(close_tab_error)?;
         let _ = self
             .chrome
@@ -42,13 +39,23 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::ClosePane { id })
+        self.apply_shell(ShellAction::ClosePane { id })
             .map_err(close_pane_error)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    pub(crate) fn apply_shell(
+        &mut self,
+        action: ShellAction,
+    ) -> Result<(), crate::shell::ShellError> {
+        let result = self.shell.apply(action);
+        if result.is_ok() {
+            self.drain_shell_effects();
+        }
+        result
     }
 
     pub(super) fn set_left_panel(&mut self, mode: LeftPanelMode) -> Result<(), AppError> {
@@ -109,16 +116,14 @@ impl ApplicationRoot {
             .map_err(chrome_error)?;
         if let Some(workspace) = effect.select_workspace {
             let generation = self.shell.containment_generation();
-            self.shell
-                .apply(ShellAction::ActivateWorkspace {
-                    workspace,
-                    containment_generation: generation,
-                })
-                .map_err(|_| AppError::UnknownChromeWorkspace)?;
+            self.apply_shell(ShellAction::ActivateWorkspace {
+                workspace,
+                containment_generation: generation,
+            })
+            .map_err(|_| AppError::UnknownChromeWorkspace)?;
         }
         if let Some(tab) = effect.select_tab {
-            self.shell
-                .apply(ShellAction::SelectTab { id: tab })
+            self.apply_shell(ShellAction::SelectTab { id: tab })
                 .map_err(|_| AppError::UnknownChromeTab)?;
         }
         let _ = self
@@ -129,12 +134,11 @@ impl ApplicationRoot {
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
         let generation = self.shell.containment_generation();
-        self.shell
-            .apply(ShellAction::ActivateWorkspace {
-                workspace: id,
-                containment_generation: generation,
-            })
-            .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.apply_shell(ShellAction::ActivateWorkspace {
+            workspace: id,
+            containment_generation: generation,
+        })
+        .map_err(|_| AppError::UnknownChromeWorkspace)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -142,8 +146,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::SelectTab { id })
+        self.apply_shell(ShellAction::SelectTab { id })
             .map_err(|_| AppError::UnknownChromeTab)?;
         let _ = self
             .chrome
@@ -152,8 +155,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn focus_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::FocusPane { id })
+        self.apply_shell(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
         let _ = self
             .chrome

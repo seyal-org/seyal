@@ -365,8 +365,8 @@ fn quit_freezes_and_emits_one_native_effect() {
     let snap = root.snapshot();
     assert!(snap.frozen);
     assert_eq!(
-        snap.pending_effect,
-        NativeEffect::BoundedDetachThenTerminate
+        snap.pending_effects.as_slice(),
+        &[NativeEffect::BoundedDetachThenTerminate]
     );
     assert_eq!(
         root.apply(AppAction::Focus {
@@ -375,7 +375,38 @@ fn quit_freezes_and_emits_one_native_effect() {
         Err(AppError::Frozen)
     );
     root.apply(AppAction::AckEffect).unwrap();
-    assert_eq!(root.snapshot().pending_effect, NativeEffect::None);
+    assert!(root.snapshot().pending_effects.is_empty());
+}
+
+#[test]
+fn repeated_same_window_selection_keeps_effect_queue_bounded() {
+    let mut root = ApplicationRoot::new();
+    let tab = root.snapshot().shell.active_tab;
+    for _ in 0..32 {
+        root.apply(AppAction::SelectTab { id: tab }).unwrap();
+    }
+    let effects = root.snapshot().pending_effects;
+    assert!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. }))
+            .count()
+            <= 1,
+        "OrderFrontMakeKey must stay coalesced, got {effects:?}"
+    );
+    // Quit after selections still emits exactly one terminate effect and remains acodable.
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert!(
+        snap.pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
+        "quit effect must remain present after prior selections"
+    );
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
 }
 
 #[test]
