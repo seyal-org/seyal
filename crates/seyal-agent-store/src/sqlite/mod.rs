@@ -410,7 +410,8 @@ impl AgentStore {
         first_ordinal: u64,
         last_ordinal: u64,
     ) -> Result<OutputAppend, StoreError> {
-        let payload_probe = encode_output_ref(0, 0, bytes.len() as u64, first_ordinal, last_ordinal);
+        let payload_probe =
+            encode_output_ref(0, 0, bytes.len() as u64, first_ordinal, last_ordinal);
         if payload_probe.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }

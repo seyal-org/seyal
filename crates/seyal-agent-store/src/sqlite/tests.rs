@@ -231,9 +231,7 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
     let store = AgentStore::open(&file).unwrap();
     let run = crate::AgentRunId::new();
     let bytes = vec![7; OUTPUT_SEGMENT_LEN * 2 + 10];
-    let first = store
-        .append_output_event(run, 2, &bytes, 1, 3)
-        .unwrap();
+    let first = store.append_output_event(run, 2, &bytes, 1, 3).unwrap();
     assert_eq!(first.segment_count, 3);
     assert_eq!(first.first_segment_index, 0);
     assert_eq!(store.output_segment_count(run).unwrap(), 3);
@@ -270,18 +268,13 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
     drop(store);
     let reopened = AgentStore::open(&file).unwrap();
     assert_eq!(reopened.output_segment_count(run).unwrap(), 5);
-    let third = reopened
-        .append_output_event(run, 2, &[1], 7, 7)
-        .unwrap();
+    let third = reopened.append_output_event(run, 2, &[1], 7, 7).unwrap();
     assert_eq!(third.first_segment_index, 5);
     assert_eq!(third.segment_count, 1);
     assert_eq!(reopened.output_segment_count(run).unwrap(), 6);
 
     let aggregate = AggregateId::AgentRun(run);
-    let before_confine = reopened
-        .replay_after(aggregate, None)
-        .unwrap()
-        .len();
+    let before_confine = reopened.replay_after(aggregate, None).unwrap().len();
     reopened.confine_database().unwrap();
     assert_eq!(
         reopened.append_event(aggregate, 1, &vec![1; 8192]),
