@@ -1,3 +1,4 @@
+/// Whole frame, including the 10-byte header. The largest body is this value minus the header.
 pub const ABSOLUTE_MAX_FRAME_SIZE: u32 = 64 * 1024;
 const HEADER_LEN: usize = 10;
 const MAGIC: &[u8; 4] = b"AGB1";

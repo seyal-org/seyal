@@ -120,45 +120,62 @@ fn results_round_trip() {
 }
 
 #[test]
-fn replay_frame_size_matches_published_overhead() {
-    let cases = [
-        vec![],
-        vec![ReplayEvent {
-            sequence: 1,
-            kind: 2,
-            payload: b"one".to_vec(),
-        }],
-        vec![
-            ReplayEvent {
+fn absolute_max_frame_size_includes_the_header() {
+    let max = crate::ABSOLUTE_MAX_FRAME_SIZE;
+    let header = 10_usize;
+    let too_large = vec![0_u8; max as usize];
+    assert_eq!(
+        crate::encode_frame(crate::FrameKind::Result, &too_large, max),
+        Err(crate::FrameError::Oversized)
+    );
+    let fitting = vec![0_u8; max as usize - header];
+    let frame = crate::encode_frame(crate::FrameKind::Result, &fitting, max).unwrap();
+    assert_eq!(frame.len(), max as usize);
+    assert_eq!(frame.len(), header + fitting.len());
+}
+
+#[test]
+fn replay_budget_is_what_the_encoder_accepts() {
+    let max = crate::ABSOLUTE_MAX_FRAME_SIZE;
+    let empty = encode_result(&CommandResult::Replay { events: vec![] }, max).unwrap();
+    let one_byte = encode_result(
+        &CommandResult::Replay {
+            events: vec![ReplayEvent {
                 sequence: 1,
                 kind: 2,
-                payload: Vec::new(),
-            },
-            ReplayEvent {
-                sequence: 2,
-                kind: 9,
-                payload: b"ab".to_vec(),
-            },
-            ReplayEvent {
-                sequence: 3,
-                kind: 8,
-                payload: vec![7; 40],
-            },
-        ],
-    ];
-    for events in cases {
-        let expected = REPLAY_RESULT_OVERHEAD
-            + events
-                .iter()
-                .map(|event| REPLAY_EVENT_OVERHEAD + event.payload.len())
-                .sum::<usize>();
-        let frame = encode_result(
+                payload: vec![0xAB],
+            }],
+        },
+        max,
+    )
+    .unwrap();
+    // Constants are checked against the encoder, not used as the expected length.
+    assert_eq!(empty.len(), REPLAY_RESULT_OVERHEAD);
+    let event_overhead = one_byte.len() - empty.len() - 1;
+    assert_eq!(event_overhead, REPLAY_EVENT_OVERHEAD);
+    let max_payload = (max as usize) - empty.len() - event_overhead;
+    assert!(encode_result(
+        &CommandResult::Replay {
+            events: vec![ReplayEvent {
+                sequence: 1,
+                kind: 2,
+                payload: vec![7; max_payload],
+            }],
+        },
+        max,
+    )
+    .is_ok());
+    assert_eq!(
+        encode_result(
             &CommandResult::Replay {
-                events: events.clone(),
+                events: vec![ReplayEvent {
+                    sequence: 1,
+                    kind: 2,
+                    payload: vec![7; max_payload + 1],
+                }],
             },
-            crate::ABSOLUTE_MAX_FRAME_SIZE,
-        )
-        .unwrap();
-        assert_eq!(frame.len(), expected);
-    }
+            max,
+        ),
+        Err(crate::FrameError::Oversized)
+    );
 }
