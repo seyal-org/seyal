@@ -366,7 +366,7 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
     let _ = fs::remove_dir_all(dir);
 }
 
-fn replay_identity(dir: &Path) -> Vec<(u128, Vec<u64>, Option<u64>)> {
+fn replay_identity(dir: &Path) -> Vec<(u128, Vec<u64>, Option<u64>, u64, u64)> {
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     let mut records = Vec::new();
     for (id, _) in store.agent_runs().unwrap() {
@@ -376,6 +376,17 @@ fn replay_identity(dir: &Path) -> Vec<(u128, Vec<u64>, Option<u64>)> {
         if let Some(first) = sequences.first() {
             assert_eq!(*first, 1);
         }
+        let mut referenced_segments = 0_u64;
+        for event in &events {
+            if let Some((_, count, _, _, _)) = seyal_agent_store::decode_output_ref(&event.payload) {
+                referenced_segments += u64::from(count);
+            }
+        }
+        let stored_segments = store.output_segment_count(id).unwrap();
+        assert_eq!(
+            referenced_segments, stored_segments,
+            "segment refs must match stored segment rows after reopen"
+        );
         let through = store
             .get_snapshot(AggregateId::AgentRun(id))
             .unwrap()
@@ -383,7 +394,13 @@ fn replay_identity(dir: &Path) -> Vec<(u128, Vec<u64>, Option<u64>)> {
         if let (Some(last), Some(through)) = (sequences.last(), through) {
             assert!(through <= *last);
         }
-        records.push((u128::from_le_bytes(id.to_bytes()), sequences, through));
+        records.push((
+            u128::from_le_bytes(id.to_bytes()),
+            sequences,
+            through,
+            referenced_segments,
+            stored_segments,
+        ));
     }
     records
 }
@@ -453,9 +470,16 @@ fn campaign_high_volume_session_workload() {
         let wal = fs::metadata(dir.join("agent.db-wal"))
             .map(|meta| meta.len())
             .unwrap_or(0);
+        let store = AgentStore::open(dir.join("agent.db")).unwrap();
+        let segments = store.output_segment_count(started.run_id).unwrap();
+        let run_events = store
+            .replay_after(AggregateId::AgentRun(started.run_id), None)
+            .unwrap()
+            .len() as u64;
+        drop(store);
         let output = 4 * 1024 * 1024;
         eprintln!(
-            "ab-0.6 campaign performance_claim=false host_class={} repetition={} startup_us={} append_us={} events={} events_per_s={} snapshot_us={} replay_us={} reconnect_us={} rss_kib={} db_bytes={} wal_bytes={} bytes_per_output_byte={}",
+            "ab-0.6 campaign performance_claim=false host_class={} repetition={} startup_us={} append_us={} events={} events_per_s={} snapshot_us={} replay_us={} reconnect_us={} rss_kib={} db_bytes={} wal_bytes={} segments={} run_events={} bytes_per_output_byte={}",
             host_class(),
             index,
             startup.as_micros(),
@@ -468,6 +492,8 @@ fn campaign_high_volume_session_workload() {
             rss.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
             db,
             wal,
+            segments,
+            run_events,
             (db + wal) as f64 / output as f64
         );
         samples.push((startup, append, snapshot_latency, replay_latency, reconnect));

@@ -517,8 +517,46 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         .work_scopes()
         .unwrap()
         .is_empty());
+
+    let segment_fault = temp_dir("segment-fault");
+    let config = IntegrationConfig {
+        store_path: segment_fault.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Output(vec![2; 8192])),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&segment_fault, config).unwrap();
+    // create scope/item/attempt/run use writes; fault the output segment commit.
+    daemon.fail_after_writes(5);
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        client.command(&Command::StartAgentRun {
+            session_id: client.session_id,
+            attempt_id: attempt,
+        })
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(
+        client.join().unwrap(),
+        CommandResult::Error(CommandError::Failed)
+    );
+    let store = AgentStore::open(segment_fault.join("agent.db")).unwrap();
+    let run_id = store.agent_runs().unwrap()[0].0;
+    assert_eq!(store.output_segment_count(run_id).unwrap(), 0);
+    let events = store
+        .replay_after(AggregateId::AgentRun(run_id), None)
+        .unwrap();
+    assert!(events
+        .iter()
+        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_none()));
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::remove_dir_all(refused);
+    let _ = fs::remove_dir_all(segment_fault);
 }
 
 #[test]
@@ -548,15 +586,22 @@ fn bind_integration_recovers_migrated_v2_orphan_run() {
 
 #[test]
 fn high_volume_subscribe_fits_frame_and_continues() {
-    const OUTPUT_BYTES: usize = 96 * 1024;
+    // Output now collapses to one segment-ref event, so this row proves
+    // byte-budget paging with many bounded Result payloads instead.
+    const RESULTS: usize = 200;
+    const RESULT_BYTES: usize = 400;
     let dir = temp_dir("volume-sub");
+    let mut script = vec![ScriptStep::Emit(HostObservationKind::Started)];
+    for step in 0..RESULTS {
+        script.push(ScriptStep::Emit(HostObservationKind::Result(vec![
+            (step % 251) as u8;
+            RESULT_BYTES
+        ])));
+    }
+    script.push(ScriptStep::Emit(HostObservationKind::KnownSuccess));
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::Output(vec![9; OUTPUT_BYTES])),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
+        script,
     };
     let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
     let socket = daemon.socket_path();
@@ -601,6 +646,110 @@ fn high_volume_subscribe_fits_frame_and_continues() {
     assert_eq!(sequences.len() as u64, event_count);
     assert!(sequences.windows(2).all(|pair| pair[1] == pair[0] + 1));
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn high_volume_output_uses_segments_end_to_end() {
+    const OUTPUT_BYTES: usize = 256 * 1024;
+    let dir = temp_dir("segments-e2e");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Output(vec![9; OUTPUT_BYTES])),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let events = client.replay_all(AggregateRef::AgentRun(started.run_id));
+        (started, events)
+    });
+    daemon.serve_one().unwrap();
+    let (started, events) = client.join().unwrap();
+    // create-run + Started + one output ref + KnownSuccess
+    assert_eq!(started.event_count, 4);
+    assert_eq!(events.len(), 4);
+    let output = events
+        .iter()
+        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+        .expect("one output-ref event");
+    let (first_index, segments, byte_length, first_ordinal, last_ordinal) =
+        seyal_agent_store::decode_output_ref(&output.payload).unwrap();
+    assert_eq!(first_index, 0);
+    assert_eq!(segments as usize, OUTPUT_BYTES / seyal_agent_store::OUTPUT_SEGMENT_LEN);
+    assert_eq!(byte_length as usize, OUTPUT_BYTES);
+    assert!(first_ordinal >= 1);
+    assert!(last_ordinal >= first_ordinal);
+    assert!(events
+        .iter()
+        .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+        .count()
+        == 1);
+    let store = AgentStore::open(dir.join("agent.db")).unwrap();
+    assert_eq!(
+        store.output_segment_count(started.run_id).unwrap(),
+        segments as u64
+    );
+    drop(daemon);
+    drop(store);
+
+    let reopened = AgentStore::open(dir.join("agent.db")).unwrap();
+    assert_eq!(
+        reopened.output_segment_count(started.run_id).unwrap(),
+        segments as u64
+    );
+    let again = reopened
+        .replay_after(AggregateId::AgentRun(started.run_id), None)
+        .unwrap();
+    assert_eq!(again.len(), 4);
+    let _ = fs::remove_dir_all(dir);
+
+    let tiny = temp_dir("segments-tiny");
+    let mut one_byte = Vec::new();
+    one_byte.push(ScriptStep::Emit(HostObservationKind::Started));
+    for _ in 0..1000 {
+        one_byte.push(ScriptStep::Emit(HostObservationKind::Output(vec![1])));
+    }
+    one_byte.push(ScriptStep::Emit(HostObservationKind::KnownSuccess));
+    let config = IntegrationConfig {
+        store_path: tiny.join("agent.db"),
+        script: one_byte,
+    };
+    let mut daemon = AgentDaemon::bind_integration(&tiny, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let events = client.replay_all(AggregateRef::AgentRun(started.run_id));
+        (started, events)
+    });
+    daemon.serve_one().unwrap();
+    let (started, events) = client.join().unwrap();
+    assert_eq!(started.event_count, 4);
+    let output = events
+        .iter()
+        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload))
+        .expect("coalesced one-byte outputs");
+    assert_eq!(output.1, 1);
+    assert_eq!(output.2, 1000);
+    assert_eq!(
+        AgentStore::open(tiny.join("agent.db"))
+            .unwrap()
+            .output_segment_count(started.run_id)
+            .unwrap(),
+        1
+    );
+    let _ = fs::remove_dir_all(tiny);
 }
 
 #[test]
@@ -652,9 +801,9 @@ fn records_session_startup_throughput_reconnect_and_storage_growth() {
     daemon.serve_one().unwrap();
     let (session_id, started, through, replay, append, snapshot_latency, replay_latency) =
         client.join().unwrap();
-    assert_eq!(started.event_count, 34);
-    assert_eq!(replay.len(), 34);
-    assert_eq!(through, 34);
+    assert_eq!(started.event_count, 3);
+    assert_eq!(replay.len(), 3);
+    assert_eq!(through, 3);
 
     let socket = daemon.socket_path();
     let run_id = started.run_id;
@@ -671,7 +820,7 @@ fn records_session_startup_throughput_reconnect_and_storage_growth() {
     let reconnect = reconnect_started.elapsed();
     let (again, replay_len) = resumed.join().unwrap();
     assert_eq!(again, through);
-    assert_eq!(replay_len, 34);
+    assert_eq!(replay_len, 3);
 
     let bytes_after = AgentStore::open(dir.join("agent.db"))
         .unwrap()

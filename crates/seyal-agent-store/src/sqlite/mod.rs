@@ -13,10 +13,59 @@ use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
 
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
+/// Discriminant for a RunEvent payload that references `output_segment` rows.
+pub const OUTPUT_REF_KIND: u8 = 8;
+/// Fixed size of [`encode_output_ref`] (kind + indices + lengths + ordinals).
+pub const OUTPUT_REF_LEN: usize = 1 + 4 + 4 + 8 + 8 + 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputAppend {
+    pub sequence: AggregateSequence,
+    pub first_segment_index: u32,
+    pub segment_count: u32,
+    pub byte_length: u64,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PersistedLiveness {
     Unknown,
+}
+
+/// Encode a SPEC-017 §10 output reference. Raw output bytes never appear here.
+pub fn encode_output_ref(
+    first_segment_index: u32,
+    segment_count: u32,
+    byte_length: u64,
+    first_ordinal: u64,
+    last_ordinal: u64,
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(OUTPUT_REF_LEN);
+    payload.push(OUTPUT_REF_KIND);
+    payload.extend_from_slice(&first_segment_index.to_le_bytes());
+    payload.extend_from_slice(&segment_count.to_le_bytes());
+    payload.extend_from_slice(&byte_length.to_le_bytes());
+    payload.extend_from_slice(&first_ordinal.to_le_bytes());
+    payload.extend_from_slice(&last_ordinal.to_le_bytes());
+    payload
+}
+
+/// Decode a segment reference payload. Returns `None` when the shape is wrong.
+pub fn decode_output_ref(payload: &[u8]) -> Option<(u32, u32, u64, u64, u64)> {
+    if payload.len() != OUTPUT_REF_LEN || payload[0] != OUTPUT_REF_KIND {
+        return None;
+    }
+    let first_segment_index = u32::from_le_bytes(payload[1..5].try_into().ok()?);
+    let segment_count = u32::from_le_bytes(payload[5..9].try_into().ok()?);
+    let byte_length = u64::from_le_bytes(payload[9..17].try_into().ok()?);
+    let first_ordinal = u64::from_le_bytes(payload[17..25].try_into().ok()?);
+    let last_ordinal = u64::from_le_bytes(payload[25..33].try_into().ok()?);
+    Some((
+        first_segment_index,
+        segment_count,
+        byte_length,
+        first_ordinal,
+        last_ordinal,
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -348,11 +397,23 @@ impl AgentStore {
         Ok(())
     }
 
-    pub fn append_output(
+    /// Persist high-volume output as bounded segments plus exactly one RunEvent
+    /// whose payload is a fixed-size segment reference (SPEC-017 §10).
+    ///
+    /// Segments and the referencing event share one transaction: a fault before
+    /// commit leaves neither behind.
+    pub fn append_output_event(
         &self,
         run_id: crate::AgentRunId,
+        event_kind: u16,
         bytes: &[u8],
-    ) -> Result<u64, StoreError> {
+        first_ordinal: u64,
+        last_ordinal: u64,
+    ) -> Result<OutputAppend, StoreError> {
+        let payload_probe = encode_output_ref(0, 0, bytes.len() as u64, first_ordinal, last_ordinal);
+        if payload_probe.len() > MAX_EVENT_PAYLOAD {
+            return Err(StoreError::PayloadTooLarge);
+        }
         self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
@@ -365,7 +426,12 @@ impl AgentStore {
                 |row| row.get(0),
             )
             .map_err(|_| StoreError::Corrupt)?;
-        let mut segments = 0_u64;
+        let first_segment_index = if bytes.is_empty() {
+            0
+        } else {
+            (index + 1) as u32
+        };
+        let mut segments = 0_u32;
         for chunk in bytes.chunks(OUTPUT_SEGMENT_LEN) {
             index += 1;
             segments += 1;
@@ -375,8 +441,21 @@ impl AgentStore {
             )
             .map_err(|_| StoreError::WriteFailed)?;
         }
+        let payload = encode_output_ref(
+            first_segment_index,
+            segments,
+            bytes.len() as u64,
+            first_ordinal,
+            last_ordinal,
+        );
+        let sequence = insert_event(&tx, AggregateId::AgentRun(run_id), event_kind, &payload)?;
         tx.commit().map_err(|_| StoreError::WriteFailed)?;
-        Ok(segments)
+        Ok(OutputAppend {
+            sequence,
+            first_segment_index,
+            segment_count: segments,
+            byte_length: bytes.len() as u64,
+        })
     }
 
     pub fn output_segment_count(&self, run_id: crate::AgentRunId) -> Result<u64, StoreError> {

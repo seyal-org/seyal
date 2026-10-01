@@ -28,15 +28,19 @@ fn bounded_config(idle: Duration, write: Duration) -> DaemonConfig {
 #[test]
 fn slow_subscriber_is_dropped_and_resyncs_from_cursor() {
     let dir = temp_dir("slow-sub");
+    let mut script = vec![ScriptStep::Emit(HostObservationKind::Started)];
+    for step in 0..128 {
+        script.push(ScriptStep::Emit(HostObservationKind::Result(vec![
+            (step % 251) as u8;
+            1024
+        ])));
+    }
     let mut daemon = AgentDaemon::bind_integration_with(
         &dir,
         bounded_config(Duration::from_secs(30), Duration::from_millis(200)),
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![
-                ScriptStep::Emit(HostObservationKind::Started),
-                ScriptStep::Emit(HostObservationKind::Output(vec![3; 256 * 1024])),
-            ],
+            script,
         },
     )
     .unwrap();
@@ -136,7 +140,7 @@ fn subscribe_fails_explicitly_when_one_event_cannot_fit() {
             store_path: dir.join("agent.db"),
             script: vec![
                 ScriptStep::Emit(HostObservationKind::Started),
-                ScriptStep::Emit(HostObservationKind::Output(vec![4; 2048])),
+                ScriptStep::Emit(HostObservationKind::Result(vec![4; 2048])),
             ],
         },
     )

@@ -230,21 +230,67 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
     let file = path("output.db");
     let store = AgentStore::open(&file).unwrap();
     let run = crate::AgentRunId::new();
-    let segments = store
-        .append_output(run, &vec![7; OUTPUT_SEGMENT_LEN * 2 + 10])
+    let bytes = vec![7; OUTPUT_SEGMENT_LEN * 2 + 10];
+    let first = store
+        .append_output_event(run, 2, &bytes, 1, 3)
         .unwrap();
-    assert_eq!(segments, 3);
+    assert_eq!(first.segment_count, 3);
+    assert_eq!(first.first_segment_index, 0);
     assert_eq!(store.output_segment_count(run).unwrap(), 3);
-    let aggregate = AggregateId::AgentRun(run);
-    let committed = store.append_event(aggregate, 1, b"before").unwrap();
-    store.confine_database().unwrap();
+    let events = store
+        .replay_after(AggregateId::AgentRun(run), None)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].sequence, first.sequence);
+    let decoded = decode_output_ref(&events[0].payload).expect("output ref");
+    assert_eq!(decoded, (0, 3, bytes.len() as u64, 1, 3));
+
+    store.fail_after_writes(0);
     assert_eq!(
-        store.append_event(aggregate, 1, &vec![1; 8192]),
+        store.append_output_event(run, 2, &[9], 4, 4),
         Err(StoreError::WriteFailed)
     );
-    let events = store.replay_after(aggregate, None).unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].sequence, committed);
+    assert_eq!(store.output_segment_count(run).unwrap(), 3);
+    assert_eq!(
+        store
+            .replay_after(AggregateId::AgentRun(run), None)
+            .unwrap()
+            .len(),
+        1
+    );
+    store.fail_after_writes(u64::MAX);
+
+    let second = store
+        .append_output_event(run, 2, &vec![8; OUTPUT_SEGMENT_LEN + 1], 5, 6)
+        .unwrap();
+    assert_eq!(second.segment_count, 2);
+    assert_eq!(second.first_segment_index, 3);
+    assert_eq!(store.output_segment_count(run).unwrap(), 5);
+
+    drop(store);
+    let reopened = AgentStore::open(&file).unwrap();
+    assert_eq!(reopened.output_segment_count(run).unwrap(), 5);
+    let third = reopened
+        .append_output_event(run, 2, &[1], 7, 7)
+        .unwrap();
+    assert_eq!(third.first_segment_index, 5);
+    assert_eq!(third.segment_count, 1);
+    assert_eq!(reopened.output_segment_count(run).unwrap(), 6);
+
+    let aggregate = AggregateId::AgentRun(run);
+    let before_confine = reopened
+        .replay_after(aggregate, None)
+        .unwrap()
+        .len();
+    reopened.confine_database().unwrap();
+    assert_eq!(
+        reopened.append_event(aggregate, 1, &vec![1; 8192]),
+        Err(StoreError::WriteFailed)
+    );
+    assert_eq!(
+        reopened.replay_after(aggregate, None).unwrap().len(),
+        before_confine
+    );
 }
 
 #[test]

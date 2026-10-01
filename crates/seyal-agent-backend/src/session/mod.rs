@@ -21,11 +21,13 @@ use seyal_agent_protocol::{
     FrameKind, SnapshotView, ABSOLUTE_MAX_FRAME_SIZE, MAX_EVENT_WINDOW, REPLAY_EVENT_OVERHEAD,
     REPLAY_RESULT_OVERHEAD,
 };
-use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError};
+use seyal_agent_store::{
+    AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN,
+};
 
 use crate::{
-    AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, ObservationAuthority,
-    PrincipalKind, ScriptStep,
+    AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, HostObservationKind,
+    ObservationAuthority, PrincipalKind, ScriptStep,
 };
 
 use recovery::restore_identities;
@@ -315,10 +317,8 @@ impl IntegrationService {
             Ok(observations) => observations,
             Err(_) => return CommandResult::Error(CommandError::Failed),
         };
-        for observation in observations {
-            if let Err(error) = self.commit_observation(observation) {
-                return CommandResult::Error(error);
-            }
+        if let Err(error) = self.commit_observation_batch(observations) {
+            return CommandResult::Error(error);
         }
         let aggregate = AggregateId::AgentRun(run_id);
         let events = match self.store.replay_after(aggregate, None) {
@@ -342,6 +342,94 @@ impl IntegrationService {
             control_generation: control.get(),
             event_count: events.len() as u64,
         }
+    }
+
+    fn commit_observation_batch(
+        &mut self,
+        observations: Vec<HostObservation>,
+    ) -> Result<(), CommandError> {
+        let mut index = 0;
+        while index < observations.len() {
+            if matches!(observations[index].kind, HostObservationKind::Output(_)) {
+                let run_id = observations[index].run_id;
+                let mut end = index + 1;
+                while end < observations.len()
+                    && observations[end].run_id == run_id
+                    && matches!(observations[end].kind, HostObservationKind::Output(_))
+                {
+                    end += 1;
+                }
+                self.commit_output_group(&observations[index..end])?;
+                index = end;
+            } else {
+                self.commit_observation(observations[index].clone())?;
+                index += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn commit_output_group(&mut self, group: &[HostObservation]) -> Result<(), CommandError> {
+        let mut applied = Vec::new();
+        let mut joined = Vec::new();
+        let mut first_ordinal = None;
+        let mut last_ordinal = None;
+        for observation in group {
+            let previous_liveness = self.authority.recorded_liveness(observation.run_id);
+            let previous_effects = self.authority.effects_performed();
+            let before = self.authority.applied_count();
+            self.authority.apply(observation.clone()).map_err(|error| {
+                use crate::ObserveError;
+                match error {
+                    ObserveError::StaleGeneration => CommandError::StaleBinding,
+                    ObserveError::Domain(DomainError::StaleControlGeneration { .. }) => {
+                        CommandError::StaleControl
+                    }
+                    ObserveError::Domain(DomainError::UnknownAgentRun(_)) => CommandError::NotFound,
+                    _ => CommandError::Failed,
+                }
+            })?;
+            if self.authority.applied_count() == before {
+                continue;
+            }
+            if let HostObservationKind::Output(bytes) = &observation.kind {
+                joined.extend_from_slice(bytes);
+                if first_ordinal.is_none() {
+                    first_ordinal = Some(observation.ordinal);
+                }
+                last_ordinal = Some(observation.ordinal);
+            }
+            applied.push((observation.clone(), previous_liveness, previous_effects));
+        }
+        if applied.is_empty() {
+            return Ok(());
+        }
+        let run_id = applied[0].0.run_id;
+        let first = first_ordinal.unwrap_or(applied[0].0.ordinal);
+        let last = last_ordinal.unwrap_or(applied[0].0.ordinal);
+        if OUTPUT_REF_LEN
+            > (ABSOLUTE_MAX_FRAME_SIZE as usize)
+                .saturating_sub(REPLAY_RESULT_OVERHEAD)
+                .saturating_sub(REPLAY_EVENT_OVERHEAD)
+        {
+            for (observation, previous_liveness, previous_effects) in applied.into_iter().rev() {
+                self.authority
+                    .undo_apply(&observation, previous_liveness, previous_effects);
+            }
+            return Err(CommandError::Failed);
+        }
+        if self
+            .store
+            .append_output_event(run_id, EVENT_OBSERVATION, &joined, first, last)
+            .is_err()
+        {
+            for (observation, previous_liveness, previous_effects) in applied.into_iter().rev() {
+                self.authority
+                    .undo_apply(&observation, previous_liveness, previous_effects);
+            }
+            return Err(CommandError::Failed);
+        }
+        Ok(())
     }
 
     fn commit_observation(&mut self, observation: HostObservation) -> Result<(), CommandError> {

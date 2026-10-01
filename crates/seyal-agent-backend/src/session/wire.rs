@@ -90,10 +90,9 @@ pub(super) fn observation_payload(observation: &HostObservation) -> Vec<u8> {
         }
         HostObservationKind::ObservationDisconnected => payload.push(6),
         HostObservationKind::ObservationReconnected => payload.push(7),
-        HostObservationKind::Output(bytes) => {
-            payload.push(8);
-            payload.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-            payload.extend_from_slice(bytes);
+        // High-volume Output is persisted only through AgentStore::append_output_event.
+        HostObservationKind::Output(_) => {
+            unreachable!("output observations use append_output_event, not observation_payload")
         }
         HostObservationKind::Result(bytes) => {
             payload.push(9);
