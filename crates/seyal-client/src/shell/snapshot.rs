@@ -26,6 +26,8 @@ pub struct WindowTabSnapshot {
     pub title: String,
     pub attention: bool,
     pub focused_pane: PaneId,
+    /// Tab-scoped zoom overlay; topology unchanged while set (ADR-021 §3).
+    pub zoomed: Option<PaneId>,
     pub panes: Vec<PaneLeafSnapshot>,
     pub tree: PaneTree,
     pub layout: LayoutDescription,
@@ -81,6 +83,7 @@ impl ShellState {
                 .collect(),
             active_tab: window.active_tab,
             focused_pane: tab.focused,
+            zoomed: tab.zoomed,
             panes: tab
                 .root
                 .pane_ids()
@@ -153,6 +156,7 @@ fn tab_snapshot(tab: &Tab, window: &Window, product_window: WindowId) -> WindowT
         title: tab.title.clone(),
         attention: tab.attention,
         focused_pane: tab.focused,
+        zoomed: tab.zoomed,
         panes: tab
             .root
             .pane_ids()
@@ -220,6 +224,7 @@ impl ShellError {
             Self::StaleContainment => 14,
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
+            Self::NotZoomed => 17,
         }
     }
 }

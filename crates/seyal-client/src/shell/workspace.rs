@@ -23,6 +23,8 @@ pub(super) struct Tab {
     pub(super) panes: HashMap<PaneId, Pane>,
     pub(super) root: PaneTree,
     pub(super) focused: PaneId,
+    /// Tab-scoped presentation overlay; never a second layout authority (ADR-021 §3).
+    pub(super) zoomed: Option<PaneId>,
 }
 
 /// One Window inside a Workspace. `workspace_id` is fixed at construction.
@@ -351,6 +353,7 @@ impl Tab {
             panes,
             root: PaneTree::Leaf(pane_id),
             focused: pane_id,
+            zoomed: None,
         }
     }
 
@@ -378,6 +381,7 @@ impl Tab {
             panes: HashMap::new(),
             root: PaneTree::Leaf(PaneId::new()),
             focused: PaneId::new(),
+            zoomed: None,
         }
     }
 }
