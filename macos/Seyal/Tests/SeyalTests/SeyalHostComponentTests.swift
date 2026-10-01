@@ -1279,6 +1279,14 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(warnings.count, 2)
         XCTAssertTrue(warnings[0].contains("default shell"))
         XCTAssertTrue(warnings[1].contains("home directory"))
+        // Reserved bits stay silent; Rust selects which bits are warnings.
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.warningMessages(detailCode: 0b11 | (1 << 7)).count,
+            2
+        )
+        XCTAssertTrue(LaunchPolicyProductCopy.warningMessages(detailCode: 1 << 7).isEmpty)
+        let failureSurfaced = LaunchPolicyProductCopy.messages(resultCode: 17, detailCode: 2)
+        XCTAssertEqual(failureSurfaced, ["Shell unavailable"])
     }
 
     @MainActor

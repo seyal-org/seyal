@@ -546,9 +546,9 @@ int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_
 
 /*
  * Launch-policy product copy (ADR-015 / SPEC-023 §9). Rust owns the fixed
- * non-secret UTF-8; native hosts only render it. Pointers are to static
- * storage. result_code 17 + detail 1–4 are failures; Created.detail_code bit
- * index 0/1 are success-after-fallback warnings.
+ * non-secret UTF-8 and which result/detail codes map to failure vs warning
+ * strings. Native hosts only render what seyal_launch_policy_copies returns.
+ * Pointers are to static storage.
  */
 typedef struct SeyalLaunchPolicyCopy {
     const uint8_t *text;
@@ -558,6 +558,12 @@ typedef struct SeyalLaunchPolicyCopy {
 
 SeyalLaunchPolicyCopy seyal_launch_policy_failure_copy(uint16_t result_code, uint32_t detail_code);
 SeyalLaunchPolicyCopy seyal_launch_policy_warning_copy(uint32_t bit_index);
+/* Fill out with selected copies; returns count written (or full count when out is NULL). */
+uint32_t seyal_launch_policy_copies(
+    uint16_t result_code,
+    uint32_t detail_code,
+    SeyalLaunchPolicyCopy *out,
+    uint32_t capacity);
 
 int32_t seyal_app_last_error(uint64_t handle);
 

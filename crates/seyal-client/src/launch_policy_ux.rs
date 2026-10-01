@@ -61,6 +61,19 @@ pub fn launch_policy_warning_copies(detail_code: u32) -> Vec<&'static str> {
     out
 }
 
+/// Selected product copies for a create-result pair (ADR-015).
+///
+/// `result_code == 0` (Created) yields warning copies from `detail_code`.
+/// Any non-zero result yields the single failure copy. Native hosts must not
+/// re-decide which codes or bits are failures vs warnings.
+pub fn launch_policy_copies(result_code: u16, detail_code: u32) -> Vec<&'static str> {
+    if result_code == 0 {
+        launch_policy_warning_copies(detail_code)
+    } else {
+        vec![launch_policy_failure_copy(result_code, detail_code)]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +128,29 @@ mod tests {
             assert!(!copy.contains('/'));
             assert_ne!(copy, GENERIC_FAILURE);
         }
+    }
+
+    #[test]
+    fn copies_selects_failure_or_warnings_from_result_pair() {
+        assert_eq!(
+            launch_policy_copies(
+                ErrorCode::LaunchPolicyRejected as u16,
+                DETAIL_SHELL_FALLBACK_EXHAUSTED
+            ),
+            vec![SHELL_UNAVAILABLE]
+        );
+        assert_eq!(
+            launch_policy_copies(0, WARN_CONFIGURED_SHELL_INVALID | (1 << 7)),
+            vec![SHELL_FALLBACK_WARNING]
+        );
+        assert_eq!(
+            launch_policy_copies(0, WARN_CONFIGURED_SHELL_INVALID | WARN_CWD_OVERRIDE_INVALID),
+            vec![SHELL_FALLBACK_WARNING, CWD_FALLBACK_WARNING]
+        );
+        assert!(launch_policy_copies(0, 1 << 7).is_empty());
+        assert_eq!(
+            launch_policy_copies(ErrorCode::InternalFailure as u16, 1),
+            vec![GENERIC_FAILURE]
+        );
     }
 }

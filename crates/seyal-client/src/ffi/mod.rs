@@ -106,7 +106,8 @@ pub use input::{
 };
 #[allow(unused_imports)]
 pub use launch_policy::{
-    seyal_launch_policy_failure_copy, seyal_launch_policy_warning_copy, SeyalLaunchPolicyCopy,
+    seyal_launch_policy_copies, seyal_launch_policy_failure_copy, seyal_launch_policy_warning_copy,
+    SeyalLaunchPolicyCopy,
 };
 #[allow(unused_imports)]
 pub use session::{
