@@ -1,7 +1,10 @@
 //! SPEC-024 §14 items 12 and 19 (menu half); AX label privacy.
 
 use super::load::load_keybinding_table;
-use super::projection::{project_shortcuts, projected_item_for, ProjectedShortcut};
+use super::projection::{
+    project_shortcuts, projected_item_for, workspace_command_ffi_id, workspace_command_from_ffi_id,
+    ProjectedShortcut,
+};
 use super::route::route_context_set;
 use super::types::{BindingContext, KeySym, Modifiers, WorkspaceCommand, WorkspaceCommandId};
 use crate::presentation::PresentationMode;
@@ -139,4 +142,20 @@ action = "command_palette.open"
         "{}",
         palette.accessibility_label
     );
+}
+
+/// `goto.open` is a normal menu-visible workspace command (K8 binding, K5 projection).
+#[test]
+fn goto_open_projects_with_stable_menu_id() {
+    let table = load_keybinding_table(None);
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+    let goto = item_for(WorkspaceCommandId::GotoOpen, &projection);
+    assert_eq!(goto.key_equivalent_notation.as_deref(), Some("cmd+shift+o"));
+    assert!(goto.enabled, "goto.open permitted on the app route");
+    assert!(goto.accessibility_label.starts_with("Go to…"));
+    assert_eq!(workspace_command_ffi_id(WorkspaceCommandId::GotoOpen), 21);
+    let round_trip = workspace_command_from_ffi_id(21, 0).expect("menu id 21");
+    assert_eq!(round_trip.id, WorkspaceCommandId::GotoOpen);
+    assert!(round_trip.ordinal.is_none());
 }

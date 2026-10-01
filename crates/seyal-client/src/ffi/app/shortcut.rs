@@ -108,6 +108,7 @@ fn encode_cold_row(item: &crate::keybinding::ProjectedShortcut) -> ColdRow {
         crate::keybinding::WorkspaceCommandId::PaneSplitDown => "Split Down",
         crate::keybinding::WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         crate::keybinding::WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
+        crate::keybinding::WorkspaceCommandId::GotoOpen => "Go to…",
         other => other.as_str(),
     }
     .to_owned();

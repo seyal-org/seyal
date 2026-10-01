@@ -48,6 +48,7 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneSplitDown
         | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
+        | WorkspaceCommandId::GotoOpen
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
@@ -76,6 +77,7 @@ fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PaneSplitDown => "Split Down",
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
+        WorkspaceCommandId::GotoOpen => "Go to…",
         WorkspaceCommandId::FocusHistoryBack => "Back",
         WorkspaceCommandId::FocusHistoryForward => "Forward",
         other => other.as_str(),
@@ -206,6 +208,7 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::AppQuit => 18,
         WorkspaceCommandId::FocusHistoryBack => 19,
         WorkspaceCommandId::FocusHistoryForward => 20,
+        WorkspaceCommandId::GotoOpen => 21,
     }
 }
 
@@ -232,6 +235,7 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         18 => WorkspaceCommandId::AppQuit,
         19 => WorkspaceCommandId::FocusHistoryBack,
         20 => WorkspaceCommandId::FocusHistoryForward,
+        21 => WorkspaceCommandId::GotoOpen,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {
