@@ -23,7 +23,7 @@ pub use tokens::{
     ResolvedMaterial, SeamRole, Srgb, TypographyRole, LUA_ACCEPTED_INPUT, LUA_FORBIDDEN_DOMAINS,
     LUA_RUNTIME_STATUS,
 };
-pub(crate) use toml::{parse_toml, TomlError};
+pub(crate) use toml::{parse_toml, TomlError, TomlValue};
 
 #[cfg(test)]
 mod tests {
