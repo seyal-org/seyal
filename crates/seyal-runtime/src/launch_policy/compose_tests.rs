@@ -233,12 +233,9 @@ fn poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration() {
     })
     .expect("zsh");
     let (si_dir, si) = materialize_shell_policy();
-    let zsh_spec =
-        apply_post_policy(command_spec_from_policy(&zsh), &capability, Some(&si)).expect("zsh apply");
-    assert_eq!(
-        env_keys(&zsh_spec),
-        base_keys(&["ZDOTDIR", NONCE_FD_ENV])
-    );
+    let zsh_spec = apply_post_policy(command_spec_from_policy(&zsh), &capability, Some(&si))
+        .expect("zsh apply");
+    assert_eq!(env_keys(&zsh_spec), base_keys(&["ZDOTDIR", NONCE_FD_ENV]));
     assert_eq!(zsh_spec.inherited_fd_count(), 1);
 
     // Eligible zsh with valid process ZDOTDIR → SEYAL_USER_ZDOTDIR present.
@@ -246,8 +243,8 @@ fn poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration() {
     std::fs::create_dir_all(&user_zdot).unwrap();
     // SAFETY: still holds process_env_test_lock.
     unsafe { std::env::set_var("ZDOTDIR", &user_zdot) };
-    let with_user =
-        apply_post_policy(command_spec_from_policy(&zsh), &capability, Some(&si)).expect("with user");
+    let with_user = apply_post_policy(command_spec_from_policy(&zsh), &capability, Some(&si))
+        .expect("with user");
     assert_eq!(
         env_keys(&with_user),
         base_keys(&["ZDOTDIR", NONCE_FD_ENV, USER_ZDOTDIR_ENV])
