@@ -474,7 +474,6 @@ impl ShellState {
         self.allows_window_creation
     }
 
-    /// Test-only split of window-creation admission from tab-creation (W4b).
     #[cfg(test)]
     pub(crate) fn set_allows_window_creation(&mut self, allows: bool) {
         self.allows_window_creation = allows;
