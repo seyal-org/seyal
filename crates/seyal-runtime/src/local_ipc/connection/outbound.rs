@@ -44,13 +44,11 @@ impl Connection {
         update_display_queue_high_water(self.display_queue_bytes());
     }
 
-    /// Clear the attach pin once the attach snapshot is fully on the wire, then
-    /// apply any fanout snapshot that was deferred while the pin was held.
-    pub(in crate::local_ipc::connection) fn release_attach_pin_if_idle(&mut self) {
-        if !self.attach_snapshot_pin
-            || self.display_inflight.is_some()
-            || self.pending_display.is_some()
-        {
+    /// Clear the attach pin once the attach snapshot has entered inflight (first
+    /// byte delivery started). Fanout may then fill `pending_display`; the peer
+    /// still observes Attached gen N with the in-flight snapshot gen N first.
+    pub(in crate::local_ipc::connection) fn clear_attach_pin_starting_inflight(&mut self) {
+        if !self.attach_snapshot_pin {
             return;
         }
         self.attach_snapshot_pin = false;
@@ -233,17 +231,15 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
     loop {
         if connection.display_inflight.is_none() {
             let Some(batches) = connection.pending_display.take() else {
-                connection.release_attach_pin_if_idle();
-                // A deferred fanout snapshot may have just been queued.
-                if connection.pending_display.is_some() {
-                    continue;
-                }
                 break;
             };
             if batches.is_empty() {
                 continue;
             }
             connection.display_inflight = Some(DisplayItem::new(batches));
+            // Attach snapshot is now ordered after Attached on the wire; further
+            // fanout may supersede pending without violating Attached.generation.
+            connection.clear_attach_pin_starting_inflight();
         }
         let Some(item) = connection.display_inflight.as_mut() else {
             break;

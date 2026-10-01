@@ -117,12 +117,11 @@ fn attach_pin_defers_fanout_supersession_until_attach_snapshot_flushes() {
         Some(201)
     );
 
-    // Simulate attach snapshot fully flushed.
-    connection.pending_display = None;
-    connection.display_inflight = None;
-    connection.release_attach_pin_if_idle();
+    // Simulate attach snapshot moving to inflight (delivery started).
+    let batches = connection.pending_display.take().unwrap();
+    connection.display_inflight = Some(crate::local_ipc::connection::DisplayItem::new(batches));
+    connection.clear_attach_pin_starting_inflight();
     assert!(!connection.attach_snapshot_pin);
-    assert_eq!(connection.display_generation, 201);
     assert_eq!(
         connection
             .pending_display
@@ -130,7 +129,8 @@ fn attach_pin_defers_fanout_supersession_until_attach_snapshot_flushes() {
             .and_then(|batches| batches.front())
             .unwrap()
             .generation,
-        201
+        201,
+        "deferred fanout applies once attach snapshot is inflight"
     );
     assert!(connection.deferred_after_attach.is_none());
 }
