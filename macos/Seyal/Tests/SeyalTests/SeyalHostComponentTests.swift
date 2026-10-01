@@ -1315,18 +1315,6 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
-    func testKeybindingRouteFallthroughStaysDistinct() {
-        let routed: [KeybindingStrokeNormalizer.RouteResult] = [
-            .consumed,
-            .nativeCommand,
-            .`fallthrough`,
-        ]
-        guard case .`fallthrough` = routed[2] else {
-            return XCTFail("unmatched keys must stay on the fallthrough route")
-        }
-        XCTAssertEqual(routed.count, 3)
-    }
-
 }
 
 @discardableResult

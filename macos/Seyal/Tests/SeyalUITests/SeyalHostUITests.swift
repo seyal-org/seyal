@@ -116,17 +116,6 @@ final class SeyalHostUITests: XCTestCase {
         waitForUsablePty(in: app)
     }
 
-    func testUnmatchedComposerKeyLeavesTheHostRunning() throws {
-        let app = hostedApp()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        let composer = app.descendants(matching: .any)["seyal-composer"]
-        XCTAssertTrue(composer.firstMatch.waitForExistence(timeout: 10))
-        composer.firstMatch.click()
-        app.typeText("a")
-        XCTAssertEqual(app.state, .runningForeground)
-        XCTAssertTrue(composer.firstMatch.exists)
-    }
-
     /// #993: cold `SEYAL_CONFIG` TOML must drive Rust-resolved appearance /
     /// font size / padding / material preference into the headed host.
     func testColdConfigTomlDrivesVisibleAppearanceFontsAndPadding() throws {

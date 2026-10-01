@@ -52,59 +52,18 @@ impl TomlValue {
             _ => None,
         }
     }
-
-    /// Array-of-tables (`[[name]]`) values: every element must be a table.
-    pub fn as_array_of_tables(&self) -> Option<Vec<&BTreeMap<String, TomlValue>>> {
-        match self {
-            Self::Array(values) => {
-                let mut tables = Vec::with_capacity(values.len());
-                for value in values {
-                    tables.push(value.as_table()?);
-                }
-                Some(tables)
-            }
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TomlError(pub String);
 
-#[derive(Clone, Debug)]
-enum WriteTarget {
-    /// Nested table path such as `[ui]` / `[input]`.
-    Table(Vec<String>),
-    /// Last element of an array-of-tables such as `[[keybindings]]`.
-    ArrayTable { key: String, index: usize },
-}
-
 pub fn parse_toml(text: &str) -> Result<BTreeMap<String, TomlValue>, TomlError> {
     let mut root = BTreeMap::new();
-    let mut target = WriteTarget::Table(Vec::new());
+    let mut current_path: Vec<String> = Vec::new();
     for (index, raw_line) in text.split('\n').enumerate() {
         let line_number = index + 1;
         let stripped = strip_comment(raw_line).trim().to_owned();
         if stripped.is_empty() {
-            continue;
-        }
-        if stripped.starts_with("[[") {
-            if !stripped.ends_with("]]") {
-                return Err(TomlError(format!(
-                    "line {line_number}: invalid array-of-tables header"
-                )));
-            }
-            let name = stripped[2..stripped.len() - 2].trim();
-            if name.is_empty() || name.contains('.') {
-                return Err(TomlError(format!(
-                    "line {line_number}: unsupported array-of-tables name"
-                )));
-            }
-            let index = push_array_table(&mut root, name);
-            target = WriteTarget::ArrayTable {
-                key: name.to_owned(),
-                index,
-            };
             continue;
         }
         if stripped.starts_with('[') {
@@ -117,7 +76,7 @@ pub fn parse_toml(text: &str) -> Result<BTreeMap<String, TomlValue>, TomlError> 
             if name.is_empty() {
                 return Err(TomlError(format!("line {line_number}: empty table name")));
             }
-            target = WriteTarget::Table(name.split('.').map(str::to_owned).collect());
+            current_path = name.split('.').map(str::to_owned).collect();
             continue;
         }
         let Some(equals) = stripped.find('=') else {
@@ -132,58 +91,11 @@ pub fn parse_toml(text: &str) -> Result<BTreeMap<String, TomlValue>, TomlError> 
         }
         let value = parse_value(raw_value)
             .map_err(|error| TomlError(format!("line {line_number}: {}", error.0)))?;
-        match &target {
-            WriteTarget::Table(path) => {
-                let mut full = path.clone();
-                full.push(key.to_owned());
-                set_path(&mut root, &full, value);
-            }
-            WriteTarget::ArrayTable {
-                key: array_key,
-                index,
-            } => {
-                set_array_table_field(&mut root, array_key, *index, key, value)?;
-            }
-        }
+        let mut path = current_path.clone();
+        path.push(key.to_owned());
+        set_path(&mut root, &path, value);
     }
     Ok(root)
-}
-
-fn push_array_table(root: &mut BTreeMap<String, TomlValue>, name: &str) -> usize {
-    match root.get_mut(name) {
-        Some(TomlValue::Array(items)) => {
-            items.push(TomlValue::Table(BTreeMap::new()));
-            items.len() - 1
-        }
-        _ => {
-            root.insert(
-                name.to_owned(),
-                TomlValue::Array(vec![TomlValue::Table(BTreeMap::new())]),
-            );
-            0
-        }
-    }
-}
-
-fn set_array_table_field(
-    root: &mut BTreeMap<String, TomlValue>,
-    array_key: &str,
-    index: usize,
-    field: &str,
-    value: TomlValue,
-) -> Result<(), TomlError> {
-    let Some(TomlValue::Array(items)) = root.get_mut(array_key) else {
-        return Err(TomlError(format!(
-            "array-of-tables '{array_key}' missing while writing field"
-        )));
-    };
-    let Some(TomlValue::Table(table)) = items.get_mut(index) else {
-        return Err(TomlError(format!(
-            "array-of-tables '{array_key}' index {index} missing while writing field"
-        )));
-    };
-    table.insert(field.to_owned(), value);
-    Ok(())
 }
 
 fn set_path(root: &mut BTreeMap<String, TomlValue>, path: &[String], value: TomlValue) {
@@ -238,9 +150,6 @@ fn parse_value(raw: &str) -> Result<TomlValue, TomlError> {
     if raw.starts_with('"') {
         return parse_string(raw).map(TomlValue::String);
     }
-    if raw.starts_with('\'') {
-        return parse_literal_string(raw).map(TomlValue::String);
-    }
     if raw.starts_with('[') {
         return parse_array(raw);
     }
@@ -248,14 +157,6 @@ fn parse_value(raw: &str) -> Result<TomlValue, TomlError> {
         return Ok(TomlValue::Number(number));
     }
     Err(TomlError(format!("unsupported value '{raw}'")))
-}
-
-/// TOML single-quoted literal string (no escapes; used for keys like `cmd+\``).
-fn parse_literal_string(raw: &str) -> Result<String, TomlError> {
-    if raw.len() < 2 || !raw.starts_with('\'') || !raw.ends_with('\'') {
-        return Err(TomlError("unterminated literal string".into()));
-    }
-    Ok(raw[1..raw.len() - 1].to_owned())
 }
 
 fn parse_string(raw: &str) -> Result<String, TomlError> {

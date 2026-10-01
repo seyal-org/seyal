@@ -164,7 +164,7 @@ Hierarchy lane
                                                 └→ provisioning implementation → #936
   #1000 active under @mahboobmonnamd / PR #1055 (window/tab lifecycle)
   #1004 active under @mahboobmonnamd / PR #1057 (addressing/focus history)
-  #1001 active (ADR-021/SPEC-025 Accepted; not an implemented-behavior claim) → PaneTree op children still wait on the Ready gate
+  #1001 active (ADR-021/SPEC-025 Proposed via merged #1053) → acceptance before PaneTree op children
 
 Presentation lane
   #865 active under @mahboobmonnamd / PR #1058 (legacy-ref migration pending) → #866 → #867 → #868 → #869
@@ -201,7 +201,7 @@ Current contributor-ready M003 work is maintained in #999. Repeated references b
 - #1004 — standard — human owner @mahboobmonnamd; local resource addressing/goto/focus-history semantics in open PR #1057 (Proposed ADR-019 / SPEC-022), not available for pickup.
 - #865 — advanced/core — human owner @mahboobmonnamd; Flow live-tail implementation PR #1058 open on legacy `issue/865` pending migration to `mahboobmonnamd/issue/865`, not available for pickup.
 - #993 — standard — human owner @anulalbs; production config/theme/font startup implementation in PR #1006, not available for pickup.
-- #1001 — standard — human owner @mahboobmonnamd; ADR-021 / SPEC-025 Accepted (not an implemented-behavior claim); children are not Ready and not available for pickup.
+- #1001 — standard — human owner @mahboobmonnamd; ADR-021 / SPEC-025 Proposed on `master` via merged #1053; remaining acceptance/DoD still open; not available for pickup.
 - #1002 — standard — human owner @mahboobmonnamd; keybinding/chord schema refinement in open PR #1051, not available for pickup.
 - #1003 — advanced/core — human owner @mahboobmonnamd; startup shell/environment/CWD launch-policy refinement in open PR #1050, not available for pickup.
 - #686 — advanced/core — human owner @mahboobmonnamd; ADR-009 duration amendment accepted on `master` via merged #1022; remaining open work is SPEC-008 alignment, unchecked spike acceptance, and any follow-on implementation-Issue refinement — not available for pickup.
@@ -268,7 +268,7 @@ The pane/tab execution provisioning seam required by that decomposition is refin
 
 The window/tab half of that missing contract is refined by #1000: [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md) (**Accepted**; not an implemented-behavior claim) with child decomposition in [`../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md`](../engineering/M003-WINDOW-TAB-LIFECYCLE-DECOMPOSITION.md). A child must not code window/tab lifecycle behavior before ADR-018 acceptance, and acceptance here does not make any child Ready.
 
-The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Accepted**; not an implemented-behavior claim) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 **Accepted**; not an implemented-behavior claim). Window/tab lifecycle is ADR-018 **Accepted** (not an implemented-behavior claim). Execution provisioning remains #994 (ADR-017 **Accepted**; not an implemented-behavior claim). A child must not code PaneTree operation behavior before ADR-021 acceptance, and acceptance here does not make any child Ready.
+The pane move/reparent/zoom/equalize/directional-focus half of that missing contract is refined by #1001 (active under @mahboobmonnamd): [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md) (**Proposed** on `master` via merged #1053) with observable behavior in [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md) and child decomposition in [`../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md`](../engineering/M003-PANE-TREE-OPERATIONS-DECOMPOSITION.md). Focus-history retention and Resource Addressing are #1004 (ADR-019 **Proposed** on `master` via merged #1057). Window/tab lifecycle is ADR-018 **Accepted** (not an implemented-behavior claim). Execution provisioning remains #994 (open PR #1056). ADR-021 / SPEC-025 are not Accepted until acceptance is recorded; a child must not code PaneTree operation behavior before ADR-021 acceptance.
 
 ### 6.3 #923 — split-tree projection after #922
 

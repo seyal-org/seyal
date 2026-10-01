@@ -5,7 +5,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::focus_direction::is_geometric_neighbor;
 use super::*;
 use seyal_core::{ExecutionId, WindowId};
 
@@ -222,15 +221,6 @@ fn sides() -> [MoveSide; 4] {
     ]
 }
 
-fn directions() -> [FocusDirection; 4] {
-    [
-        FocusDirection::Left,
-        FocusDirection::Right,
-        FocusDirection::Up,
-        FocusDirection::Down,
-    ]
-}
-
 /// Adversarial / property action kinds for P9 streams.
 #[derive(Clone, Copy)]
 enum StreamKind {
@@ -239,7 +229,6 @@ enum StreamKind {
     Zoom,
     Unzoom,
     Focus,
-    FocusDir,
     Close,
     StaleId,
     SelfMove,
@@ -252,7 +241,6 @@ const STREAM_KINDS: &[StreamKind] = &[
     StreamKind::Zoom,
     StreamKind::Unzoom,
     StreamKind::Focus,
-    StreamKind::FocusDir,
     StreamKind::Close,
     StreamKind::StaleId,
     StreamKind::SelfMove,
@@ -356,32 +344,6 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                     assert_tab_invariants(&shell.snapshot());
                 }
                 Err(err) => assert_rejection_byte_identical(&before_state, shell, err),
-            }
-        }
-        StreamKind::FocusDir => {
-            let direction = *rng.pick(&directions());
-            let focused = snap.focused_pane;
-            let before_state = shell.clone();
-            let before_tree = snap.tree.clone();
-            let _ = shell.take_effects();
-            match shell.apply(ShellAction::FocusDirection { direction }) {
-                Ok(()) => {
-                    let chosen = shell.snapshot().focused_pane;
-                    assert!(
-                        is_geometric_neighbor(&before_tree, focused, chosen, direction),
-                        "P7: success must focus a geometric neighbor"
-                    );
-                    assert_no_terminate_or_provision_effects(&shell.take_effects());
-                    assert_tab_invariants(&shell.snapshot());
-                }
-                Err(ShellError::NoDirectionalNeighbor) => {
-                    assert_rejection_byte_identical(
-                        &before_state,
-                        shell,
-                        ShellError::NoDirectionalNeighbor,
-                    );
-                }
-                Err(err) => panic!("unexpected focus-dir error: {err:?}"),
             }
         }
         StreamKind::Close => {
@@ -585,11 +547,6 @@ fn spec025_p4_generated_rejections_are_byte_identical_except_last_error() {
         let stale = PaneId::new();
         let id = ids[0];
 
-        // Focus a leaf and try Left; may miss (reject) or succeed depending on layout.
-        shell
-            .apply(ShellAction::FocusPane { id })
-            .expect("focus for directional sample");
-
         let rejects: &[(ShellAction, ShellError)] = &[
             (
                 ShellAction::SwapPanes {
@@ -638,36 +595,6 @@ fn spec025_p4_generated_rejections_are_byte_identical_except_last_error() {
             assert_rejection_byte_identical(&before, &shell, expected);
         }
 
-        // Directional miss: try all directions from each leaf; at least one miss.
-        let mut saw_miss = false;
-        for &focused in &ids {
-            shell
-                .apply(ShellAction::FocusPane { id: focused })
-                .expect("focus");
-            for &direction in &directions() {
-                let before = shell.clone();
-                match shell.apply(ShellAction::FocusDirection { direction }) {
-                    Ok(()) => {
-                        shell
-                            .apply(ShellAction::FocusPane { id: focused })
-                            .expect("restore");
-                    }
-                    Err(ShellError::NoDirectionalNeighbor) => {
-                        assert_rejection_byte_identical(
-                            &before,
-                            &shell,
-                            ShellError::NoDirectionalNeighbor,
-                        );
-                        saw_miss = true;
-                    }
-                    Err(err) => panic!("unexpected: {err:?}"),
-                }
-            }
-        }
-        assert!(
-            saw_miss || ids.len() == 1,
-            "P4 directional-miss sample for seed {seed}"
-        );
         let _ = rng.next_u64();
     }
 }
@@ -747,49 +674,6 @@ fn spec025_p6_close_never_yields_zero_leaves() {
 }
 
 #[test]
-fn spec025_p7_generated_directional_focus_neighbor_or_reject() {
-    for seed in 1u64..=16 {
-        let mut rng = Lcg::from_seed(seed.wrapping_add(500));
-        let mut shell = seed_splittable();
-        grow_small_tree(&mut shell, &mut rng, 2 + (seed as usize % 3));
-        let ids: Vec<_> = shell.snapshot().panes.iter().map(|p| p.id).collect();
-        for &focused in &ids {
-            shell
-                .apply(ShellAction::FocusPane { id: focused })
-                .expect("focus");
-            for &direction in &directions() {
-                let before = shell.clone();
-                let before_tree = before.snapshot().tree.clone();
-                let _ = shell.take_effects();
-                match shell.apply(ShellAction::FocusDirection { direction }) {
-                    Ok(()) => {
-                        let chosen = shell.snapshot().focused_pane;
-                        assert!(is_geometric_neighbor(
-                            &before_tree,
-                            focused,
-                            chosen,
-                            direction
-                        ));
-                        assert_no_terminate_or_provision_effects(&shell.take_effects());
-                        shell
-                            .apply(ShellAction::FocusPane { id: focused })
-                            .expect("restore");
-                    }
-                    Err(ShellError::NoDirectionalNeighbor) => {
-                        assert_rejection_byte_identical(
-                            &before,
-                            &shell,
-                            ShellError::NoDirectionalNeighbor,
-                        );
-                    }
-                    Err(err) => panic!("unexpected: {err:?}"),
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn spec025_p8_move_swap_zoom_focus_emit_no_terminate_or_provision() {
     let mut rng = Lcg::from_seed(42);
     let mut shell = seed_splittable();
@@ -812,12 +696,6 @@ fn spec025_p8_move_swap_zoom_focus_emit_no_terminate_or_provision() {
         ShellAction::ZoomPane { id: a },
         ShellAction::Unzoom,
         ShellAction::FocusPane { id: b },
-        ShellAction::FocusDirection {
-            direction: FocusDirection::Right,
-        },
-        ShellAction::FocusDirection {
-            direction: FocusDirection::Left,
-        },
     ];
 
     for action in actions {

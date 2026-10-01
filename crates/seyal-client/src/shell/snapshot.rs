@@ -226,7 +226,6 @@ impl ShellError {
             Self::CrossWorkspaceMove => 16,
             Self::NotZoomed => 17,
             Self::InvalidMoveTarget => 18,
-            Self::NoDirectionalNeighbor => 19,
         }
     }
 }

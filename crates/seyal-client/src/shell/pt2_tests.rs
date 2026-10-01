@@ -164,7 +164,7 @@ fn spec025_6_swap_preserves_ids_bindings_and_exchanges_slots() {
     let after = shell.snapshot();
     assert_identity_preserved(&before, &after);
     assert_eq!(after.focused_pane, b, "focus stays on B");
-    assert_eq!(after.zoomed, None, "structural swap clears zoom");
+    assert_eq!(after.zoomed, before.zoomed, "swap leaves zoom unchanged");
     assert_eq!(
         after.tree,
         PaneTree::Split {

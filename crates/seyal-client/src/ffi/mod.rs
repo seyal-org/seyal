@@ -76,10 +76,10 @@ pub use app::{
     seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
     seyal_app_destroy, seyal_app_last_error, seyal_app_native_effect, seyal_app_option_as_alt,
     seyal_app_palette, seyal_app_palette_row, seyal_app_pane_leaf, seyal_app_pane_region,
-    seyal_app_record_compatible, seyal_app_recovery_param, seyal_app_route_keystroke,
-    seyal_app_shell, seyal_app_shell_row, seyal_app_snapshot, seyal_app_tab,
-    seyal_app_tab_tree_node, seyal_app_test_reload_ui_configuration, seyal_app_theme,
-    seyal_app_visual, seyal_app_visual_warning, seyal_app_window,
+    seyal_app_record_compatible, seyal_app_recovery_param, seyal_app_shell, seyal_app_shell_row,
+    seyal_app_snapshot, seyal_app_tab, seyal_app_tab_tree_node,
+    seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
+    seyal_app_visual_warning, seyal_app_window,
 };
 #[allow(unused_imports)]
 pub use display::{
