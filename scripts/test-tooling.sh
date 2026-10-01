@@ -23,7 +23,7 @@ done
 grep -q 'XCODEBUILD_MCP_VERSION=' scripts/bootstrap-dev.sh || fail "XcodeBuildMCP is not pinned"
 grep -q 'AI_SDLC_REPO=' scripts/bootstrap-dev.sh || fail "AI-SDLC repository is not declared"
 grep -Eq 'AI_SDLC_COMMIT="[0-9a-f]{40}"' scripts/bootstrap-dev.sh || fail "AI-SDLC must be pinned by full commit SHA"
-grep -q 'AI_SDLC_COMMIT="8d329477e41f00e82435fe47d49cfedd724aefc5"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include merged working-loop revision"
+grep -q 'AI_SDLC_COMMIT="8d1cac09aef61bb3fb1431c35a114ef047aca12c"' scripts/bootstrap-dev.sh || fail "AI-SDLC pin must include work-item-is-the-plan revision"
 grep -q '^AI_SDLC_SKILLS=(' scripts/bootstrap-dev.sh || fail "AI-SDLC skill manifest is missing"
 grep -q '^ensure_ai_sdlc()' scripts/bootstrap-dev.sh || fail "AI-SDLC materialization is missing"
 for generic_skill in project-context development-readiness work-item-design implementation code-review verification pr-review; do
