@@ -16,9 +16,13 @@ production throughput or idle-cost claim.
   before this qualification's new tests.
 - **N** means coverage added on `mahboobmonnamd/issue/1029` after `409c65bc`.
 
-A row can be both. CI job links are absent from this commit: Foundation Quality
-has not run on this head yet. They are filled from the run on the docs-only
-commit that follows, without changing the measured code.
+A row can be both. CI links below are Foundation Quality run
+[36807610454](https://github.com/seyal-org/seyal/actions/runs/36807610454)
+and M001 Production Fuzz run
+[36807610567](https://github.com/seyal-org/seyal/actions/runs/36807610567),
+both on `937926498526d30f2f1b4a4d80bdf342731a73ef`. That commit is docs-only
+over the measured code head. The campaign test stays `#[ignore]`, so CI does
+not run it.
 
 ## Environment
 
@@ -34,9 +38,24 @@ Developer host, release profile, `cargo test --release -p seyal-agent-backend --
 | Toolchain file | `rust-toolchain.toml` channel `1.98.0` |
 | Build | `--release` |
 
-CI Linux (`rust-and-harness-quality`) and CI macOS (`native-macos-smoke`) are
-not recorded here. Their `ab-0.6` lines are copied after that run with
-`gh run view <id> --log | rg "ab-0.6 "`.
+CI is debug, `host_class=ci`, from
+`gh run view 36807610454 --log | rg "ab-0.6 "`. Linux is
+`rust-and-harness-quality`. macOS is `native-macos-smoke`, which runs the
+agent tests twice (format-lint step, then the unit/PTY step). Both samples
+are kept.
+
+```text
+ab-0.6 measurement performance_claim=false host_class=ci os=linux arch=x86_64 build_mode=debug workload=output_32kib_plus_started run_count=1 percentile_method=single_sample startup_us=11493 idle_rss_kib=7416 idle_cpu=140 append_us=26684 events=34 events_per_s=1274 snapshot_us=116 replay_us=400 reconnect_us=572 db_bytes_before=69632 db_bytes_after=114688
+ab-0.6 process_measurement performance_claim=false host_class=ci os=linux arch=x86_64 build_mode=debug startup_us=9454 restart_us=5179 idle_window_ms=2000 idle_cpu_ms=0 idle_rss_kib=5612 post_run_rss_kib=5636 db_bytes=4096 wal_bytes=284312
+ab-0.6 measurement performance_claim=false host_class=ci os=macos arch=aarch64 build_mode=debug workload=output_32kib_plus_started run_count=1 percentile_method=single_sample startup_us=16847 idle_rss_kib=6640 idle_cpu=0.9 append_us=8591 events=34 events_per_s=3957 snapshot_us=200 replay_us=945 reconnect_us=955 db_bytes_before=69632 db_bytes_after=114688
+ab-0.6 process_measurement performance_claim=false host_class=ci os=macos arch=aarch64 build_mode=debug startup_us=43242 restart_us=32920 idle_window_ms=2000 idle_cpu_ms=0 idle_rss_kib=4544 post_run_rss_kib=4608 db_bytes=4096 wal_bytes=284312
+ab-0.6 measurement performance_claim=false host_class=ci os=macos arch=aarch64 build_mode=debug workload=output_32kib_plus_started run_count=1 percentile_method=single_sample startup_us=10558 idle_rss_kib=6688 idle_cpu=1.9 append_us=23990 events=34 events_per_s=1417 snapshot_us=107 replay_us=584 reconnect_us=839 db_bytes_before=69632 db_bytes_after=114688
+ab-0.6 process_measurement performance_claim=false host_class=ci os=macos arch=aarch64 build_mode=debug startup_us=44531 restart_us=41814 idle_window_ms=2000 idle_cpu_ms=0 idle_rss_kib=4256 post_run_rss_kib=4480 db_bytes=4096 wal_bytes=284312
+```
+
+Linux and macOS process measurements both report `idle_cpu_ms=0` inside the
+2 second window, which is under the 500 ms bound. The same WAL-versus-database
+split appears: `db_bytes=4096`, `wal_bytes=284312`.
 
 ## Dependency proof
 
@@ -124,9 +143,11 @@ counting the database file and the WAL together. Repetition 3 startup
 
 Grade `developer-local-campaign`. Nightly `nightly-2026-08-20`. Flags
 `-max_total_time=600 -timeout=10 -rss_limit_mb=1024 -print_final_stats=1`.
-Writable corpus stayed in `/tmp` and was not committed. CI grade for the same
-targets is `ci-smoke` once `M001 Production Fuzz` runs; that grade is not
-claimed here.
+Writable corpus stayed in `/tmp` and was not committed. M001 Production Fuzz
+run [36807610567](https://github.com/seyal-org/seyal/actions/runs/36807610567)
+completed green, including `agent_protocol_decode` and
+`agent_harness_observation`. That run is grade `ci-smoke`. It is not the
+600 second campaign below.
 
 | Target | Committed seeds | Execs | Duration | Coverage | Features | Crashes | Peak RSS |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -254,7 +275,7 @@ All 20 rows have a named test or proof on code head
 and none of the six questions produced an unimplementable assumption. The
 limits above are AB-1 work, not a reason to stop for an architecture correction.
 
-This recommendation is not the exit. The 2026-09-29 note still holds on the
-gates that are outside this file: green required CI on the final head,
-independent review, and the owner's update to #1023. Do not treat this
-document as that update.
+This recommendation is not the exit. Foundation Quality run 36807610454 and
+M001 Production Fuzz run 36807610567 were green on
+`937926498526d30f2f1b4a4d80bdf342731a73ef`. Independent review and the owner's
+update to #1023 are still open. Do not treat this document as that update.
