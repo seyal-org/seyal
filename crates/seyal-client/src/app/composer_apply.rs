@@ -7,6 +7,12 @@ use crate::chrome::ChromeAction;
 use crate::composer::{ComposerAction, RuntimeBlockRecord, RuntimeComposerEligibility};
 
 impl ApplicationRoot {
+    pub(super) fn composer_eligible_for(&self, eligibility: PresentationEligibility) -> bool {
+        eligibility == PresentationEligibility::Flow
+            && !self.frozen
+            && self.recovery.state().stage != crate::recovery::RecoveryStage::ExecutionEnded
+    }
+
     pub(super) fn sync_composer_presentation(&mut self) {
         let pane = self.shell.snapshot().focused_pane;
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });

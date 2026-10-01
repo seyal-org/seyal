@@ -2,6 +2,19 @@ import AppKit
 import Foundation
 
 extension MetalSurfaceView {
+  /// Recovery remains pinned to the accepted execution after its transport
+  /// disconnects. An implicit first attach is only a bootstrap; its accepted
+  /// identity must not be forgotten and replaced with whichever execution is
+  /// running later.
+  var recoveryExecutionIdentity: String? {
+    if let requestedExecutionIdentity { return requestedExecutionIdentity }
+    guard let bridge else { return nil }
+    return Self.identityString((
+      low: bridge.lastRecoveryResult.executionIDLow,
+      high: bridge.lastRecoveryResult.executionIDHigh
+    ))
+  }
+
   /// Snapshot recovery stage (`SeyalAppRecoveryStage`). Zero handle → disconnected.
   var runtimeRecoveryStage: UInt16 {
     guard recoveryAppHandle != 0 else {
