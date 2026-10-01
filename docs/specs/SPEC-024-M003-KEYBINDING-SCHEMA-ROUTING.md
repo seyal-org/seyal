@@ -1,6 +1,6 @@
 # SPEC-024 — M003 local keybinding schema, conflicts and routing
 
-- **Status:** Proposed (refinement output of #1002; not an implemented-behavior claim; not Accepted)
+- **Status:** Accepted (refinement output of #1002; not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Architecture authority:** ADR-015 (Rust product UI / thin native host); Foundation §5.1 / §13 (cold precompiled keybinding lookup; TOML canonical static config). **No new ADR:** see §0.
 - **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership); ADR-015 menu/command forwarding.
@@ -414,6 +414,21 @@ goto.open                      # SPEC-022 gated (§5.5)
 app.quit                    # still subject to reserved Cmd-Q path; explicit bind of app.quit to non-reserved keys is allowed
 ```
 
+R5.0.1 `window.new` and `window.close` are gated on ADR-018 (#1000) by the
+R5.1.3 rule: each id, and the `cmd+n` builtin row, enters the production
+catalog only in the same or a later PR that lands its typed Rust action, and
+only after ADR-018 is Accepted. Before that the id is `UnknownAction` at load
+and `cmd+n` is an ordinary unbound Command stroke (§6.2 step 2c).
+
+R5.0.2 `tab.select_next` / `tab.select_previous` move one position in the
+focused window's tab order and wrap cyclically. `pane.focus_next` /
+`pane.focus_previous` move one leaf in depth-first leaf order of the focused
+Tab's PaneTree and wrap cyclically. With one Tab or one Pane respectively, the
+result is `ActionUnavailable` (§10.2). `tab.close_focused` /
+`pane.close_focused` resolve to `CloseTab` / `ClosePane` of the focused item
+from the same snapshot as the dispatch and surface their existing rejections
+unchanged.
+
 Naming compatibility with master (informational, not authority):
 
 | WorkspaceCommandId | Existing typed action (approx.) |
@@ -693,14 +708,23 @@ After parsing all builtin + user entries:
    and §6.1 specificity picks at runtime.
 7. Two different sequences that share a proper chord prefix are allowed; the
    prefix waits per §8.
+8. **Prefix shadowing.** If a surviving binding's sequence S is a proper prefix
+   of another surviving binding's sequence T, and some §6.1 route context set
+   contains at least one context bit of each, the binding for T is dropped with
+   a `ChordPrefixShadowed` diagnostic naming both action ids and sources,
+   regardless of declaration order. To use T, a user first unbinds S in those
+   contexts (§7.3). At runtime a stroke that completes a surviving binding
+   therefore never also opens a chord prefix, and no dispatch ever waits on the
+   §8 timeout. Step 8 is applied to bindings in ascending sequence length; a
+   binding already dropped by step 8 is not a surviving binding and shadows nothing.
 
 Worked examples:
 
 | Earlier | Later | Result |
 |---|---|---|
 | builtin `cmd+k` → `command_palette.open` `[app]` | user `cmd+k` → `tab.create` `[app, raw]` | user owns `app` and `raw`; builtin loses its only bit and is dropped; one `DuplicateSequence` (`app`) |
-| user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `window.new` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
-| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `window.new` `[raw]` | disjoint; both remain; in Raw, `window.new` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
+| user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `pane.split_down` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
+| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `pane.split_down` `[raw]` | disjoint; both remain; in Raw, `pane.split_down` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
 
 ### 7.2 Diagnostics (non-secret)
 
@@ -715,6 +739,7 @@ KeybindingDiagnostic {
     ReservedCommandCollision,
     TerminalPassthroughProtected,
     DuplicateSequence,
+    ChordPrefixShadowed,
     UnbindNoEffect,
     UnknownFieldIgnored,
     TableIgnored,
@@ -763,7 +788,8 @@ action = "none"          # remove builtin pane.split_right; key goes to ordinary
 ## 8. Chords
 
 R8.1 A chord is a `BindingSequence` of length ≥ 2. After the first stroke
-matches a registered prefix, Rust enters `ChordPrefixActive { depth, deadline }`
+matches a registered prefix, Rust enters
+`ChordPrefixActive { prefix: [KeyStroke; 1..=3], deadline }`
 in product UI state (not VT state).
 
 R8.2 Prefix timeout: **1000 ms** of no completing stroke cancels the prefix
@@ -775,9 +801,11 @@ R8.3 An unmatched continuation cancels the prefix and does not synthesize
 terminal bytes for the prefix. The continuation event is reclassified from a
 clean state (composition rules still apply).
 
-R8.4 Chord state clears on: focus loss, presentation-route change, palette open,
-composition start, detach/reconnect, or process backgrounding as appropriate to
-kill stale prefixes.
+R8.4 Chord state clears, without dispatch and without PTY bytes, on each of:
+key-window or first-responder change, application deactivation,
+presentation-route or route-context-set change, palette open, composition
+start, detach/reconnect, and any menu-invoked `WorkspaceCommand` (R6.4.1). At
+most one `ChordPrefixActive` exists per process.
 
 R8.5 **M003: chords are cold-start only** (same as the table). No runtime API
 adds chords.
@@ -917,7 +945,11 @@ Production Issues derived from this specification must include measurable cases:
    (e.g. `cmd+k`) still resolves while composition is active (§6.2 step 2).
 8. `option_as_alt` true/false unchanged by keybinding load.
 9. Chord: `ctrl+b>n` dispatches once; timeout clears prefix; no PTY echo of
-   prefix.
+   prefix. builtin `cmd+k` plus user `cmd+k>t` `[app]` → chord dropped with
+   `ChordPrefixShadowed`; after `keys = "cmd+k"` `action = "none"` the chord
+   survives; user `ctrl+b` `[flow]` plus `ctrl+b>n` `[raw]` both survive; the
+   three-sequence case S=`ctrl+b` `[flow]`, T=`ctrl+b>n` `[flow, raw]`,
+   U=`ctrl+b>n>x` `[raw]` leaves S and U and drops T.
 10. Cold-only: simulated theme reload leaves `KeybindingTable` pointer/identity
     unchanged.
 11. Stale/unavailable action invoke → `ActionUnavailable`; no PTY fallback.
@@ -981,6 +1013,8 @@ this PR does not satisfy.
 - [ ] SPEC-024 Accepted (separate review; gates every production child).
 - [ ] ADR-021 / SPEC-025 Accepted (gates only the §5.1 pane-verb bindings).
 - [ ] ADR-019 / SPEC-022 Accepted (gates only the §5.5 navigation bindings).
+- [ ] ADR-018 Accepted (gates only `window.new` / `window.close` and the
+      `cmd+n` builtin).
 
 ## 16. Explicit non-goals / deferred
 

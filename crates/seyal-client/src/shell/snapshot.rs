@@ -265,6 +265,7 @@ impl ShellError {
             Self::WindowCreationUnavailable => 19,
             Self::NotZoomed => 20,
             Self::InvalidMoveTarget => 21,
+            Self::NoDirectionalNeighbor => 22,
         }
     }
 }

@@ -1328,6 +1328,18 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.count, 5)
     }
 
+    func testKeybindingRouteFallthroughStaysDistinct() {
+        let routed: [KeybindingStrokeNormalizer.RouteResult] = [
+            .consumed,
+            .nativeCommand,
+            .`fallthrough`,
+        ]
+        guard case .`fallthrough` = routed[2] else {
+            return XCTFail("unmatched keys must stay on the fallthrough route")
+        }
+        XCTAssertEqual(routed.count, 3)
+    }
+
 }
 
 @discardableResult

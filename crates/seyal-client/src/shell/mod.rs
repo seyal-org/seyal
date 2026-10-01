@@ -8,6 +8,7 @@
 mod actions;
 mod close;
 mod effects;
+mod focus_direction;
 mod inventory;
 mod pane_ops;
 mod snapshot;
@@ -24,6 +25,8 @@ mod pt1_tests;
 #[cfg(test)]
 mod pt2_tests;
 #[cfg(test)]
+mod pt3_tests;
+#[cfg(test)]
 mod pt6_tests;
 #[cfg(test)]
 mod tests;
@@ -38,6 +41,8 @@ use std::fmt;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 pub use effects::ShellNativeEffect;
+pub(crate) use focus_direction::directional_neighbor;
+pub use focus_direction::FocusDirection;
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
@@ -84,6 +89,7 @@ pub enum ShellError {
     ExecutionNotUnpresented,
     NotZoomed,
     InvalidMoveTarget,
+    NoDirectionalNeighbor,
 }
 
 impl ShellError {
@@ -124,6 +130,7 @@ impl ShellError {
             Self::ExecutionNotUnpresented => {
                 "This execution is not a live-unpresented execution in this Workspace."
             }
+            Self::NoDirectionalNeighbor => "No directional neighbor pane in that direction.",
         }
     }
 }
@@ -231,6 +238,9 @@ pub enum ShellAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    FocusDirection {
+        direction: FocusDirection,
     },
     BindExecution {
         pane: PaneId,
@@ -762,6 +772,7 @@ impl ShellState {
                 self.require_containment_generation(containment_generation)?;
                 self.move_pane_beside(pane, neighbor, side)
             }
+            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::SplitFocused {
                 axis,
                 containment_generation,

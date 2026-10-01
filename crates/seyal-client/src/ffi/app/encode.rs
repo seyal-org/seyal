@@ -68,6 +68,9 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         AppError::CrossWorkspaceAdopt => 50,
         AppError::ExecutionNotUnpresented => 51,
         AppError::TerminationNotRequested => 53,
+        // K7 keybinding / directional focus (after W4b/W6 codes).
+        AppError::ActionUnavailable => 54,
+        AppError::NoDirectionalNeighbor => 55,
     }
 }
 
