@@ -95,6 +95,33 @@ impl PaneTree {
         }
     }
 
+    pub(super) fn contains_leaf(&self, target: PaneId) -> bool {
+        match self {
+            Self::Leaf(id) => *id == target,
+            Self::Split { first, second, .. } => {
+                first.contains_leaf(target) || second.contains_leaf(target)
+            }
+        }
+    }
+
+    /// Exchange leaf `PaneId`s in place (SPEC-025 §5.3). Topology nodes unchanged.
+    pub(super) fn swapping_leaves(&self, a: PaneId, b: PaneId) -> PaneTree {
+        match self {
+            Self::Leaf(id) if *id == a => Self::Leaf(b),
+            Self::Leaf(id) if *id == b => Self::Leaf(a),
+            Self::Leaf(_) => self.clone(),
+            Self::Split {
+                axis,
+                first,
+                second,
+            } => Self::Split {
+                axis: *axis,
+                first: Box::new(first.swapping_leaves(a, b)),
+                second: Box::new(second.swapping_leaves(a, b)),
+            },
+        }
+    }
+
     pub(super) fn layout_description(&self) -> LayoutDescription {
         match self {
             Self::Leaf(_) => LayoutDescription::Single,

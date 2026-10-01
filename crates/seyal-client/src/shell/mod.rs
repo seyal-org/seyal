@@ -7,12 +7,17 @@
 
 mod actions;
 mod effects;
+mod pane_ops;
 mod snapshot;
 mod tree;
 mod workspace;
 
 #[cfg(test)]
 mod pt1_tests;
+#[cfg(test)]
+mod pt2_tests;
+#[cfg(test)]
+mod pt6_tests;
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +26,7 @@ use std::fmt;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 pub use effects::ShellNativeEffect;
+pub use pane_ops::MoveSide;
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
@@ -56,6 +62,7 @@ pub enum ShellError {
     MoveWouldNotChangeContainment,
     CrossWorkspaceMove,
     NotZoomed,
+    InvalidMoveTarget,
 }
 
 impl ShellError {
@@ -86,6 +93,7 @@ impl ShellError {
             }
             Self::CrossWorkspaceMove => "Tabs cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
+            Self::InvalidMoveTarget => "Invalid pane move or swap target.",
         }
     }
 }
@@ -168,6 +176,17 @@ pub enum ShellAction {
         id: PaneId,
     },
     Unzoom,
+    SwapPanes {
+        a: PaneId,
+        b: PaneId,
+        containment_generation: u64,
+    },
+    MovePaneBeside {
+        pane: PaneId,
+        neighbor: PaneId,
+        side: MoveSide,
+        containment_generation: u64,
+    },
     BindExecution {
         pane: PaneId,
         execution: ExecutionId,
@@ -447,6 +466,23 @@ impl ShellState {
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::ZoomPane { id } => self.zoom_pane(id),
             ShellAction::Unzoom => self.unzoom(),
+            ShellAction::SwapPanes {
+                a,
+                b,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.swap_panes(a, b)
+            }
+            ShellAction::MovePaneBeside {
+                pane,
+                neighbor,
+                side,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.move_pane_beside(pane, neighbor, side)
+            }
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }
     }
