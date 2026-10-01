@@ -230,6 +230,7 @@ impl ShellError {
             Self::WindowCreationUnavailable => 19,
             Self::CrossWorkspaceAdopt => 20,
             Self::ExecutionNotUnpresented => 21,
+            Self::NoDirectionalNeighbor => 22,
         }
     }
 }

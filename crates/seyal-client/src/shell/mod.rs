@@ -7,6 +7,7 @@
 
 mod actions;
 mod effects;
+mod focus_direction;
 mod pane_ops;
 mod snapshot;
 mod tree;
@@ -17,6 +18,8 @@ mod workspace;
 mod pt1_tests;
 #[cfg(test)]
 mod pt2_tests;
+#[cfg(test)]
+mod pt3_tests;
 #[cfg(test)]
 mod pt6_tests;
 #[cfg(test)]
@@ -32,6 +35,8 @@ use std::fmt;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 pub use effects::ShellNativeEffect;
+pub(crate) use focus_direction::directional_neighbor;
+pub use focus_direction::FocusDirection;
 pub use pane_ops::MoveSide;
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
@@ -76,6 +81,7 @@ pub enum ShellError {
     ExecutionNotUnpresented,
     NotZoomed,
     InvalidMoveTarget,
+    NoDirectionalNeighbor,
 }
 
 impl ShellError {
@@ -116,6 +122,7 @@ impl ShellError {
             }
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
+            Self::NoDirectionalNeighbor => "No directional neighbor pane in that direction.",
         }
     }
 }
@@ -208,6 +215,9 @@ pub enum ShellAction {
         neighbor: PaneId,
         side: MoveSide,
         containment_generation: u64,
+    },
+    FocusDirection {
+        direction: FocusDirection,
     },
     BindExecution {
         pane: PaneId,
@@ -550,6 +560,7 @@ impl ShellState {
                 self.require_containment_generation(containment_generation)?;
                 self.move_pane_beside(pane, neighbor, side)
             }
+            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
             ShellAction::RecordUnpresented { .. }
             | ShellAction::ForgetUnpresented { .. }

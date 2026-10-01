@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 841
-issue = 1143
-reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions and the quit deadline; #1143 adds unpresented adopt and terminate. Both stay on this façade."
+acknowledged_loc = 863
+issue = 1145
+reason = "ApplicationRoot stays the product-state façade. #1123/#1143 multi-window and unpresented adopt/terminate remain here; #1145 adds ActionUnavailable and NoDirectionalNeighbor for K7 keybinding verbs. Match/dispatch stay in keybinding_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -58,15 +58,15 @@ reason = "Shell reducer suite stays one module. #1122 zoom and containment-fence
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 753
-issue = 1143
-reason = "ShellState stays the composition reducer. #1123 adds window-creation admission; #1143 adds unpresented adopt and terminate dispatch. Splitting those actions out would separate the error and effect types from the reducer that emits them."
+acknowledged_loc = 764
+issue = 1145
+reason = "ShellState stays the composition reducer. #1123/#1143 window-creation and unpresented adopt/terminate remain; #1145 keeps FocusDirection dispatch and NoDirectionalNeighbor for K7 neighbor verbs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 907
-issue = 1143
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade. #1143 keeps AppError numbering in encode.rs; #1123 adds the quit-fixture seed exports beside the window exports."
+acknowledged_loc = 963
+issue = 1145
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade. #1143/#1123 quit-fixture and AppError numbering in encode.rs remain; #1145 keeps seyal_app_route_keystroke and adds ActionUnavailable/NoDirectionalNeighbor codes in encode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

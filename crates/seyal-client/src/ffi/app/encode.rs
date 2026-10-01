@@ -51,6 +51,8 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         AppError::CrossWorkspaceAdopt => 36,
         AppError::ExecutionNotUnpresented => 37,
         AppError::TerminationNotRequested => 38,
+        AppError::ActionUnavailable => 39,
+        AppError::NoDirectionalNeighbor => 40,
     }
 }
 
