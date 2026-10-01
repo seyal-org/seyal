@@ -39,6 +39,7 @@ use crate::composer::{
     RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
+use crate::keybinding::ChordPrefixState;
 use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
@@ -429,6 +430,8 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
+    pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
     focus_history: FocusHistory,
     #[cfg(target_os = "macos")]
@@ -470,11 +473,17 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
             focus_history: FocusHistory::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
+    }
+
+    /// R8.4: clear chord prefix without dispatch and without PTY bytes.
+    pub(crate) fn clear_chord_prefix(&mut self) {
+        self.chord_prefix.clear();
     }
 
     /// Active Tab's Pane regions (#923). The one live surface belongs to the
@@ -788,6 +797,7 @@ impl ApplicationRoot {
                 epoch: current.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.clear_chord_prefix();
         self.sync_composer_presentation();
         Ok(())
     }

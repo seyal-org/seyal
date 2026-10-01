@@ -1391,5 +1391,5 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
     }
     return nil
 
-
 }
+

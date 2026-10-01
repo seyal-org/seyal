@@ -1,6 +1,7 @@
-//! SPEC-024 K3: dispatch matched WorkspaceCommands from the routing gate.
+//! SPEC-024 K3/K4: dispatch matched WorkspaceCommands; own chord prefix wait.
 
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use crate::composer::ComposerAction;
 use crate::goto::GotoScope;
@@ -31,17 +32,27 @@ impl ApplicationRoot {
         )
     }
 
-    /// Route one already-normalized stroke (§6.2). Matched commands are applied
-    /// here so ApplicationCommand paths write zero PTY bytes.
+    /// Route one already-normalized stroke (§6.2 / §8). Matched commands are
+    /// applied here so ApplicationCommand / prefix-wait paths write zero PTY bytes.
     pub fn route_normalized_keystroke(
         &mut self,
         stroke: &NormalizedStroke,
         composer_first_responder: bool,
         composition_active: bool,
     ) -> Result<RouteOutcome, AppError> {
+        if composition_active {
+            self.clear_chord_prefix();
+        }
         let table = process_keybinding_table();
         let route = self.keybinding_route_context(composer_first_responder);
-        let outcome = route_keystroke(table, stroke, route, composition_active);
+        let outcome = route_keystroke(
+            table,
+            stroke,
+            route,
+            composition_active,
+            &mut self.chord_prefix,
+            Instant::now(),
+        );
         match outcome {
             RouteOutcome::Matched { command } => {
                 self.invoke_workspace_command(command, route)?;
@@ -55,10 +66,11 @@ impl ApplicationRoot {
 
     /// R6.4.1: re-validate a menu-invoked WorkspaceCommand against the route.
     pub fn validate_menu_workspace_command(
-        &self,
+        &mut self,
         command: WorkspaceCommand,
         composer_first_responder: bool,
     ) -> Result<(), AppError> {
+        self.clear_chord_prefix();
         let table = process_keybinding_table();
         let route = self.keybinding_route_context(composer_first_responder);
         validate_workspace_command(table, command, route).map_err(invoke_error)
@@ -195,12 +207,13 @@ impl ApplicationRoot {
                 epoch: snap.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.clear_chord_prefix();
         Ok(())
     }
 
     /// Gate menu-originated CreateTab when the palette owns focus (R6.4.1).
     pub(super) fn require_workspace_command_for_menu(
-        &self,
+        &mut self,
         id: WorkspaceCommandId,
     ) -> Result<(), AppError> {
         self.validate_menu_workspace_command(WorkspaceCommand { id, ordinal: None }, false)

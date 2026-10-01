@@ -74,7 +74,8 @@ fn finalize(
     pending: Vec<PendingEntry>,
     mut diagnostics: Vec<KeybindingDiagnostic>,
 ) -> KeybindingTable {
-    let bindings = resolve_conflicts(pending, &mut diagnostics);
+    let resolved = resolve_conflicts(pending, &mut diagnostics);
+    let bindings = apply_prefix_shadowing(resolved, &mut diagnostics);
     let chord_prefix_index = build_chord_prefix_index(&bindings);
     KeybindingTable {
         bindings,
@@ -83,11 +84,21 @@ fn finalize(
     }
 }
 
+/// Surviving bind after §7.1 steps 3–6 / §7.3 (still carries keys notation).
+struct ResolvedBinding {
+    sequence: BindingSequence,
+    keys_notation: String,
+    action: WorkspaceCommand,
+    action_label: String,
+    context: BindingContext,
+    source: BindingSource,
+}
+
 /// SPEC-024 §7.1 steps 3–6 and §7.3 unbind tombstones.
 fn resolve_conflicts(
     pending: Vec<PendingEntry>,
     diagnostics: &mut Vec<KeybindingDiagnostic>,
-) -> Vec<CompiledBinding> {
+) -> Vec<ResolvedBinding> {
     let mut live: Vec<Option<PendingEntry>> = Vec::new();
 
     for entry in pending {
@@ -130,13 +141,103 @@ fn resolve_conflicts(
 
     live.into_iter()
         .flatten()
-        .map(|entry| CompiledBinding {
+        .map(|entry| ResolvedBinding {
             sequence: entry.sequence,
+            keys_notation: entry.keys_notation,
             action: entry.action.expect("bind entries retain WorkspaceCommand"),
+            action_label: entry.action_label,
             context: entry.context,
             source: entry.source,
         })
         .collect()
+}
+
+/// SPEC-024 §7.1 step 8: proper-prefix shadowing across co-occurring route sets.
+fn apply_prefix_shadowing(
+    bindings: Vec<ResolvedBinding>,
+    diagnostics: &mut Vec<KeybindingDiagnostic>,
+) -> Vec<CompiledBinding> {
+    let mut live: Vec<Option<ResolvedBinding>> = bindings.into_iter().map(Some).collect();
+    let mut order: Vec<usize> = (0..live.len()).collect();
+    order.sort_by_key(|&i| {
+        live[i]
+            .as_ref()
+            .map(|b| b.sequence.strokes().len())
+            .unwrap_or(usize::MAX)
+    });
+
+    for &i in &order {
+        let (s_seq, s_ctx, s_label, s_source, s_keys) = {
+            let Some(shorter) = live[i].as_ref() else {
+                continue;
+            };
+            (
+                shorter.sequence.clone(),
+                shorter.context,
+                shorter.action_label.clone(),
+                shorter.source,
+                shorter.keys_notation.clone(),
+            )
+        };
+
+        for (j, slot) in live.iter_mut().enumerate() {
+            if j == i {
+                continue;
+            }
+            let Some(longer) = slot.as_ref() else {
+                continue;
+            };
+            if !is_proper_prefix(&s_seq, &longer.sequence) {
+                continue;
+            }
+            if !contexts_can_co_occur(s_ctx, longer.context) {
+                continue;
+            }
+            diagnostics.push(KeybindingDiagnostic {
+                category: DiagnosticCategory::ChordPrefixShadowed,
+                keys_notation: longer.keys_notation.clone(),
+                action: longer.action_label.clone(),
+                source: longer.source,
+                message: format!(
+                    "chord prefix shadowed: {} ({:?}) is a proper prefix of {} ({:?}) in a co-occurring route context set; shorter keys={s_keys}",
+                    s_label, s_source, longer.action_label, longer.source
+                ),
+            });
+            *slot = None;
+        }
+    }
+
+    live.into_iter()
+        .flatten()
+        .map(|entry| CompiledBinding {
+            sequence: entry.sequence,
+            action: entry.action,
+            context: entry.context,
+            source: entry.source,
+        })
+        .collect()
+}
+
+fn is_proper_prefix(shorter: &BindingSequence, longer: &BindingSequence) -> bool {
+    let s = shorter.strokes();
+    let l = longer.strokes();
+    s.len() < l.len() && l.starts_with(s)
+}
+
+/// True when some §6.1 route context set intersects both binding contexts.
+fn contexts_can_co_occur(a: BindingContext, b: BindingContext) -> bool {
+    const ROUTE_SETS: [BindingContext; 5] = [
+        BindingContext::PALETTE,
+        BindingContext::APP.union(BindingContext::FLOW),
+        BindingContext::APP
+            .union(BindingContext::FLOW)
+            .union(BindingContext::COMPOSER),
+        BindingContext::APP.union(BindingContext::RAW),
+        BindingContext::APP.union(BindingContext::TUI),
+    ];
+    ROUTE_SETS
+        .iter()
+        .any(|route| !route.intersection(a).is_empty() && !route.intersection(b).is_empty())
 }
 
 fn duplicate_sequence_diag(
