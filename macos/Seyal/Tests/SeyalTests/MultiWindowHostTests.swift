@@ -306,26 +306,25 @@ final class MultiWindowHostTests: XCTestCase {
         host.createWindow(nil)
         let reentry = seyal_app_shell(host.appHandle)
         XCTAssertEqual(reentry.window_count, 1)
-        XCTAssertEqual(
-            reentry.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP),
-            0,
+        let allowsImplicit =
+            reentry.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP) != 0
+        XCTAssertFalse(
+            allowsImplicit,
             "B1: CreateWindow after CloseWindow must clear focused allows_implicit so recovery cannot open_first"
         )
-        let recoverySource = try! String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/ProductChromeHostView+Recovery.swift"),
-            encoding: .utf8
+        // Behavioral gate (not source-string grep): drive the same open path
+        // ProductChromeHostView+Recovery uses after reading the live shell flag.
+        // With no pinned execution identity and allows_implicit false, the glue
+        // must return .blocked without calling seyal_bridge_open_first_until.
+        let outcome = openRuntimeRecoveryHandle(
+            executionIdentity: nil,
+            allowsImplicitExecutionBootstrap: allowsImplicit,
+            remainingBudget: 1.0
         )
-        XCTAssertTrue(
-            recoverySource.contains("SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP"),
-            "recovery must read live Rust shell flag"
-        )
-        XCTAssertFalse(
-            recoverySource.contains("pane.inputSurface.allowsImplicitExecutionBootstrap"),
-            "recovery must not trust construction-time MetalSurfaceView let"
+        XCTAssertEqual(
+            outcome,
+            .blocked,
+            "B1: re-entry recovery must block open_first when Rust clears allows_implicit"
         )
     }
 
