@@ -4,8 +4,9 @@ Qualification record for Issue #1029 on PR #1170. This is not the exit
 decision. The exit stays pending independent human review and is posted on
 #1023 only by the human owner.
 
-Measured at code head `c9116bc93842ef3848a1e63bd64ac5adbb7793d5`. Confirm
-later docs-only commits with
+Measured at code head `c9116bc93842ef3848a1e63bd64ac5adbb7793d5`. Later
+commits through `84031b73ce51c657bf1ae4b4807a01d80299ed5e` are docs, rustfmt,
+and a clippy type-alias only. Confirm with
 `git diff --stat c9116bc93842ef3848a1e63bd64ac5adbb7793d5..HEAD`.
 
 Every number below is labeled `performance_claim=false`. None of them is a
@@ -17,21 +18,18 @@ production throughput or idle-cost claim.
   before this qualification's new tests.
 - **N** means coverage added on `mahboobmonnamd/issue/1029` after `409c65bc`.
 
-A row can be both. Exact-head CI for this measured revision is recorded after
-push; until those runs finish, the developer release samples below are the
-retained measurement evidence. Prior docs-only head `a037b2cd` had green
-Foundation Quality
-[36842302119](https://github.com/seyal-org/seyal/actions/runs/36842302119)
-and M001 Production Fuzz
-[36809402719](https://github.com/seyal-org/seyal/actions/runs/36809402719).
+A row can be both. Exact-head CI on `84031b73ce51c657bf1ae4b4807a01d80299ed5e`:
+
+- Foundation Quality
+  [36895766996](https://github.com/seyal-org/seyal/actions/runs/36895766996)
+- M001 Production Fuzz
+  [36895767040](https://github.com/seyal-org/seyal/actions/runs/36895767040)
+
 The campaign test stays `#[ignore]`, so CI does not run it.
 
 Fuzz decoder and harness applicator sources are unchanged since
-`2e69e023e7ba40f928d280005e386dc27e405566`
-(`git diff --stat 2e69e023 -- fuzz/crates/seyal-agent-protocol
-crates/seyal-agent-backend/src/observation.rs` is empty of decoder/harness
-changes). The 600s developer campaigns below remain valid for that surface.
-CI-smoke fuzz must still pass on the exact final head.
+`2e69e023e7ba40f928d280005e386dc27e405566`. The 600s developer campaigns below
+remain valid for that surface. CI-smoke fuzz is green on the exact final head.
 
 ## Environment
 
@@ -269,7 +267,9 @@ All 20 rows have a named test or proof on code head
 and none of the six questions produced an unimplementable assumption. Row 15
 now exercises the session path through bounded segments.
 
-This recommendation is not the exit. Exact-head Foundation Quality and M001
-Production Fuzz must be green on the final head. Independent review and the
-owner's update to #1023 are still open. Do not treat this document as that
-update.
+This recommendation is not the exit. Exact-head Foundation Quality
+[36895766996](https://github.com/seyal-org/seyal/actions/runs/36895766996) and
+M001 Production Fuzz
+[36895767040](https://github.com/seyal-org/seyal/actions/runs/36895767040) are
+green on `84031b73`. Independent review on that head and the owner's update to
+#1023 are still open. Do not treat this document as that update.
