@@ -257,10 +257,14 @@ pub(crate) fn best_effort_dispose_never_bound_execution(
 /// ADR-017 §6.3 row 2: Attached as Controller, never bound → exactly one
 /// TerminateExecutionRequest on that existing attachment; detach only after the
 /// result (dropping the stream). Never opens a second attach.
+///
+/// `request_id` must be strictly greater than any provisioning id already used
+/// on this connection (bootstrap CreateExecution uses 1 → pass 2).
 fn best_effort_terminate_on_existing_attachment(
     stream: &mut UnixStream,
     attachment_id: AttachmentId,
     execution_id: ExecutionId,
+    request_id: u64,
     deadline: Instant,
 ) {
     let _ = send_control_until(
@@ -269,18 +273,20 @@ fn best_effort_terminate_on_existing_attachment(
         &TerminateExecutionRequest {
             attachment_id,
             execution_id,
-            request_id: 1,
+            request_id,
         }
         .encode(),
         deadline,
     );
     while Instant::now() < deadline {
         match read_blocking_frame_until(stream, deadline) {
-            Ok((kind, payload)) if kind == MessageType::TerminateExecutionResult => {
-                let _ = TerminateExecutionResult::decode(&payload);
-                return;
+            Ok((kind, payload)) => {
+                if kind == MessageType::TerminateExecutionResult {
+                    let _ = TerminateExecutionResult::decode(&payload);
+                    return;
+                }
+                // Drain display/control until terminate result.
             }
-            Ok(_) => continue, // drain display/control until terminate result
             Err(_) => return,
         }
     }
@@ -381,6 +387,7 @@ impl LocalDisplayClient {
         let block_metadata_negotiated =
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
+        let dispose_request_id = if created_bootstrap { 2 } else { 1 };
         let mut client = match Self::finish_attach_with_deadline(
             stream,
             execution_id,
@@ -390,6 +397,7 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
+            dispose_request_id,
             deadline,
         ) {
             Ok(client) => client,
@@ -459,6 +467,7 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
+            1,
             deadline,
         )
     }
@@ -491,6 +500,7 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             false,
             provisioning_negotiated(server_hello.server_capabilities),
+            1,
             deadline,
         )
     }
@@ -514,6 +524,7 @@ impl LocalDisplayClient {
             runtime_id,
             block_metadata_negotiated,
             false,
+            1,
             Instant::now() + STARTUP_TIMEOUT,
         )
     }
@@ -528,6 +539,7 @@ impl LocalDisplayClient {
         runtime_id: u128,
         block_metadata_negotiated: bool,
         execution_provisioning_negotiated: bool,
+        dispose_request_id: u64,
         deadline: Instant,
     ) -> Result<Self, ClientError> {
         send_control_until(
@@ -555,6 +567,7 @@ impl LocalDisplayClient {
                     &mut stream,
                     attached.attachment_id,
                     execution_id,
+                    dispose_request_id,
                     deadline,
                 );
             }
@@ -636,6 +649,7 @@ impl LocalDisplayClient {
                         &mut stream,
                         attached.attachment_id,
                         execution_id,
+                        dispose_request_id,
                         deadline,
                     );
                 }
@@ -649,6 +663,7 @@ impl LocalDisplayClient {
                     &mut stream,
                     attached.attachment_id,
                     execution_id,
+                    dispose_request_id,
                     deadline,
                 );
             }
