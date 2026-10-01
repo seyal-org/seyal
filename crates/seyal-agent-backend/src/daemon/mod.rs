@@ -177,7 +177,7 @@ impl AgentDaemon {
 
     /// Qualification fault: the next `allowed` store commits succeed, then
     /// the following commit fails before its transaction starts.
-    #[cfg(any(test, feature = "test-fault-injection"))]
+    #[cfg(feature = "test-fault-injection")]
     pub fn fail_after_writes(&mut self, allowed: u64) {
         if let Some(service) = self.integration.as_mut() {
             service.fail_after_writes(allowed);
