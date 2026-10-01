@@ -1,10 +1,7 @@
-//! SPEC-024 §6 routing gate: context sets, match order, chords (§8), invoke re-validation.
-
-use std::time::Instant;
+//! SPEC-024 §6 routing gate: context sets, match order, invoke re-validation.
 
 use crate::presentation::PresentationMode;
 
-use super::chord::ChordPrefixState;
 use super::reserved::is_reserved_sequence;
 use super::stroke::{stroke_matches, NormalizedStroke};
 use super::types::{
@@ -12,15 +9,13 @@ use super::types::{
     WorkspaceCommandId,
 };
 
-/// Outcome of one key event through SPEC-024 §6.2 (including §8 chords).
+/// Outcome of one key event through SPEC-024 §6.2 (K3: no chord prefixes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RouteOutcome {
     /// §4.2 reserved Command — native AppKit/menu only; never PTY.
     ReservedCommand,
     /// Table match → typed WorkspaceCommand. Writes zero PTY bytes.
     Matched { command: WorkspaceCommand },
-    /// Chord prefix consumed; waiting for the next stroke. Writes zero PTY bytes.
-    PrefixWait,
     /// Command miss → ordinary native app/menu; never composition, never PTY.
     UnmatchedCommand,
     /// Non-Command skipped while composition owns the event (§9 / §6.2 step 3).
@@ -30,7 +25,7 @@ pub enum RouteOutcome {
 }
 
 impl RouteOutcome {
-    /// ApplicationCommand / prefix-wait paths never write PTY bytes (SPEC-024 §6.2 / §8).
+    /// ApplicationCommand paths never write PTY bytes (SPEC-024 §6.2 / item 4).
     pub fn writes_pty_bytes(self) -> bool {
         matches!(self, Self::Fallthrough)
     }
@@ -98,61 +93,12 @@ fn best_intersecting_specificity(binding_ctx: BindingContext, route: BindingCont
         .unwrap_or(0)
 }
 
-/// Route one already-normalized stroke through §6.2 / §8.
+/// Route one already-normalized stroke through §6.2 (single-stroke only; chords are K4).
 pub fn route_keystroke(
     table: &KeybindingTable,
     stroke: &NormalizedStroke,
     route: BindingContext,
     composition_active: bool,
-    chord: &mut ChordPrefixState,
-    now: Instant,
-) -> RouteOutcome {
-    let _ = chord.expire_if_due(now);
-
-    if chord.is_active() {
-        return route_with_active_prefix(table, stroke, route, composition_active, chord, now);
-    }
-
-    route_clean(table, stroke, route, composition_active, chord, now)
-}
-
-fn route_with_active_prefix(
-    table: &KeybindingTable,
-    stroke: &NormalizedStroke,
-    route: BindingContext,
-    composition_active: bool,
-    chord: &mut ChordPrefixState,
-    now: Instant,
-) -> RouteOutcome {
-    let prefix = chord
-        .active()
-        .expect("active prefix")
-        .prefix
-        .strokes()
-        .to_vec();
-
-    if let Some(command) = match_extended_complete(table, &prefix, stroke, route) {
-        chord.clear();
-        return RouteOutcome::Matched { command };
-    }
-
-    if let Some(extended) = match_extended_prefix(table, &prefix, stroke, route) {
-        chord.extend(extended, now);
-        return RouteOutcome::PrefixWait;
-    }
-
-    // R8.3: unmatched continuation cancels prefix; reclassify from clean state.
-    chord.clear();
-    route_clean(table, stroke, route, composition_active, chord, now)
-}
-
-fn route_clean(
-    table: &KeybindingTable,
-    stroke: &NormalizedStroke,
-    route: BindingContext,
-    composition_active: bool,
-    chord: &mut ChordPrefixState,
-    now: Instant,
 ) -> RouteOutcome {
     if stroke.has_command() {
         if is_reserved_event(stroke) {
@@ -161,16 +107,6 @@ fn route_clean(
         if let Some(command) = match_single_stroke(table, stroke, route) {
             return RouteOutcome::Matched { command };
         }
-        // R8.4: never activate a Command prefix while composition is active —
-        // a later commit (e.g. candidate click) must not complete a stale wait.
-        if composition_active {
-            return RouteOutcome::UnmatchedCommand;
-        }
-        // A Command stroke never opens a non-Command chord prefix.
-        if let Some(prefix) = open_chord_prefix(table, stroke, route) {
-            chord.activate(prefix, now);
-            return RouteOutcome::PrefixWait;
-        }
         return RouteOutcome::UnmatchedCommand;
     }
 
@@ -178,20 +114,14 @@ fn route_clean(
         return RouteOutcome::CompositionConsumes;
     }
 
-    // Completing a surviving single-stroke binding never also opens a prefix (§7.1 step 8).
     if let Some(command) = match_single_stroke(table, stroke, route) {
         return RouteOutcome::Matched { command };
     }
-
-    if let Some(prefix) = open_chord_prefix(table, stroke, route) {
-        chord.activate(prefix, now);
-        return RouteOutcome::PrefixWait;
-    }
-
     RouteOutcome::Fallthrough
 }
 
 fn is_reserved_event(stroke: &NormalizedStroke) -> bool {
+    // Reserved set is exact Command sequences; compare as a one-stroke BindingSequence.
     let as_binding = KeyStroke {
         modifiers: stroke.modifiers,
         key: stroke.key,
@@ -202,6 +132,7 @@ fn is_reserved_event(stroke: &NormalizedStroke) -> bool {
     if is_reserved_sequence(&sequence) {
         return true;
     }
+    // Shift-applied form of a reserved stroke (e.g. cmd+shift+}` vs cmd+shift+]).
     if let Some(ch) = stroke.shift_applied {
         let shifted = KeyStroke {
             modifiers: stroke.modifiers,
@@ -219,95 +150,13 @@ fn match_single_stroke(
     stroke: &NormalizedStroke,
     route: BindingContext,
 ) -> Option<WorkspaceCommand> {
-    match_binding_length(table, stroke, route, 1, &[])
-}
-
-fn open_chord_prefix(
-    table: &KeybindingTable,
-    stroke: &NormalizedStroke,
-    route: BindingContext,
-) -> Option<BindingSequence> {
-    for (prefix, indices) in &table.chord_prefix_index {
-        if prefix.strokes().len() != 1 {
-            continue;
-        }
-        if !stroke_matches(&prefix.strokes()[0], stroke) {
-            continue;
-        }
-        let usable = indices.iter().any(|&index| {
-            table
-                .bindings
-                .get(index)
-                .is_some_and(|b| !b.context.intersection(route).is_empty())
-        });
-        if usable {
-            return Some(prefix.clone());
-        }
-    }
-    None
-}
-
-fn match_extended_complete(
-    table: &KeybindingTable,
-    prefix: &[KeyStroke],
-    stroke: &NormalizedStroke,
-    route: BindingContext,
-) -> Option<WorkspaceCommand> {
-    let want_len = prefix.len() + 1;
-    match_binding_length(table, stroke, route, want_len, prefix)
-}
-
-fn match_extended_prefix(
-    table: &KeybindingTable,
-    prefix: &[KeyStroke],
-    stroke: &NormalizedStroke,
-    route: BindingContext,
-) -> Option<BindingSequence> {
-    let want_len = prefix.len() + 1;
-    for (candidate, indices) in &table.chord_prefix_index {
-        if candidate.strokes().len() != want_len {
-            continue;
-        }
-        if !candidate.strokes().starts_with(prefix) {
-            continue;
-        }
-        if !stroke_matches(&candidate.strokes()[prefix.len()], stroke) {
-            continue;
-        }
-        let usable = indices.iter().any(|&index| {
-            table
-                .bindings
-                .get(index)
-                .is_some_and(|b| !b.context.intersection(route).is_empty())
-        });
-        if usable {
-            return Some(candidate.clone());
-        }
-    }
-    None
-}
-
-fn match_binding_length(
-    table: &KeybindingTable,
-    stroke: &NormalizedStroke,
-    route: BindingContext,
-    len: usize,
-    prefix: &[KeyStroke],
-) -> Option<WorkspaceCommand> {
     let mut best: Option<(u8, usize, WorkspaceCommand)> = None;
     for (index, binding) in table.bindings.iter().enumerate() {
-        let strokes = binding.sequence.strokes();
-        if strokes.len() != len {
+        if binding.sequence.strokes().len() != 1 {
             continue;
         }
-        if len > 1 {
-            if !strokes.starts_with(prefix) {
-                continue;
-            }
-            if !stroke_matches(&strokes[prefix.len()], stroke) {
-                continue;
-            }
-        } else if !stroke_matches(&strokes[0], stroke) {
+        let binding_stroke = &binding.sequence.strokes()[0];
+        if !stroke_matches(binding_stroke, stroke) {
             continue;
         }
         let overlap = binding.context.intersection(route);

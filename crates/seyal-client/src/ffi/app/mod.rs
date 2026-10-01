@@ -208,13 +208,7 @@ impl SeyalAppPalette {
 }
 
 const PALETTE_OPEN: u16 = 1;
-/// Overlay is projecting the navigation-only goto surface (N4).
-const PALETTE_GOTO: u16 = 2;
-/// Goto enumeration was truncated past GOTO_ENUMERATION_BOUND (SPEC-022 R7.6).
-const PALETTE_TRUNCATED: u16 = 4;
 
-/// One projected row. Optional `ResourceAddress` fields are set for palette
-/// navigation rows (SPEC-022 R7.2); `address_len == 0` means no address.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SeyalAppRow {
@@ -229,11 +223,6 @@ pub struct SeyalAppRow {
     pub detail: *const u8,
     pub detail_len: u32,
     pub reserved2: u32,
-    pub address_version: u16,
-    pub address_kind: u16,
-    pub address_len: u16,
-    pub address_pad: u16,
-    pub address_bytes: [u8; 48],
 }
 
 impl SeyalAppRow {
@@ -250,11 +239,6 @@ impl SeyalAppRow {
             detail: ptr::null(),
             detail_len: 0,
             reserved2: 0,
-            address_version: 0,
-            address_kind: 0,
-            address_len: 0,
-            address_pad: 0,
-            address_bytes: [0; 48],
         }
     }
 }
@@ -373,9 +357,7 @@ pub extern "C" fn seyal_app_route_keystroke(
             composer_focused != 0,
             composition_active != 0,
         ) {
-            Ok(RouteOutcome::Matched { .. }) | Ok(RouteOutcome::PrefixWait) => {
-                SEYAL_APP_ROUTE_CONSUMED
-            }
+            Ok(RouteOutcome::Matched { .. }) => SEYAL_APP_ROUTE_CONSUMED,
             Ok(RouteOutcome::ReservedCommand) | Ok(RouteOutcome::UnmatchedCommand) => {
                 SEYAL_APP_ROUTE_NATIVE_COMMAND
             }
@@ -813,12 +795,6 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
         if snap.palette.open {
             flags |= PALETTE_OPEN;
         }
-        if snap.goto.open {
-            flags |= PALETTE_GOTO;
-            if snap.goto.truncated {
-                flags |= PALETTE_TRUNCATED;
-            }
-        }
         SeyalAppPalette {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppPalette>() as u16,
@@ -831,12 +807,7 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
                 state.palette_query.as_ptr()
             },
             query_utf8_len: state.palette_query.len() as u32,
-            // Low byte: GotoScope discriminant while goto is open; else 0.
-            reserved: if snap.goto.open {
-                snap.goto.scope as u8 as u32
-            } else {
-                0
-            },
+            reserved: 0,
         }
     })
 }
@@ -888,11 +859,6 @@ pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
         detail: ptr::null(),
         detail_len: 0,
         reserved2: 0,
-        address_version: 0,
-        address_kind: 0,
-        address_len: 0,
-        address_pad: 0,
-        address_bytes: [0; 48],
     }
 }
 

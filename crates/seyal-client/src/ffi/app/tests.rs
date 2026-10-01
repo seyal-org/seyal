@@ -55,7 +55,7 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(size_of::<SeyalAppAxNode>(), 72);
     assert_eq!(size_of::<SeyalAppAccessibility>(), 24);
     assert_eq!(size_of::<SeyalAppShell>(), 64);
-    assert_eq!(size_of::<SeyalAppRow>(), 112);
+    assert_eq!(size_of::<SeyalAppRow>(), 56);
     assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
     assert_eq!(size_of::<SeyalAppTheme>(), 16);
     assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);

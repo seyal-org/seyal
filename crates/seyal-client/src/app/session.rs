@@ -41,8 +41,6 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
-        // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
-        self.clear_chord_prefix();
         Ok(())
     }
 
@@ -79,8 +77,6 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(registered);
-        // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
-        self.clear_chord_prefix();
         Ok(())
     }
 
@@ -134,9 +130,7 @@ impl ApplicationRoot {
         self.require_fence(fence)?;
         self.shell
             .apply(ShellAction::FocusPane { id: fence.pane })
-            .map_err(|_| AppError::UnknownPane)?;
-        self.clear_chord_prefix();
-        Ok(())
+            .map_err(|_| AppError::UnknownPane)
     }
 
     pub(super) fn bind(
@@ -171,8 +165,6 @@ impl ApplicationRoot {
         });
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();
-        // R8.4 / #1124: new bind/attach must not keep a prior chord prefix.
-        self.clear_chord_prefix();
         Ok(())
     }
 
@@ -250,7 +242,6 @@ impl ApplicationRoot {
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
         self.pending_effect = NativeEffect::BoundedDetachThenTerminate;
-        self.clear_chord_prefix();
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
         self.sync_composer_presentation();

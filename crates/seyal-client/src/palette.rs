@@ -1,25 +1,33 @@
-//! Global keyboard-first command palette (#932 / SPEC-022 N2).
+//! Global keyboard-first command palette (#932).
 //!
-//! Rust owns open/query/selected-index state and a **frozen** projection of
-//! rows captured on Open / SetQuery. Navigation rows carry
-//! [`ResourceAddress`]; Run uses that stored address (or a host-echoed one),
-//! never a freshly rebuilt ordinal. Verb/chrome rows keep a stored
-//! [`PaletteCommand`]. Filtering is a plain case-insensitive prefix/substring
-//! match, not a general fuzzy-ranking engine.
+//! Rust owns open/query/selected-index state. The command list itself is
+//! never stored: [`build_commands`] derives it fresh from the current
+//! [`ShellSnapshot`]/[`ChromeSnapshot`] every time the palette is opened,
+//! filtered, navigated, or run, so it can never present a stale or invented
+//! action. Filtering is a plain case-insensitive prefix/substring match, not
+//! a general fuzzy-ranking engine (explicitly out of scope). This module
+//! owns no Workspace/Tab/Pane/Agent/Attention identity of its own and
+//! invents no product action; it only enumerates ones that already exist on
+//! [`crate::shell::ShellState`] and [`crate::chrome::ChromeState`]. Hosts
+//! dispatch [`PaletteAction`] and render [`PaletteSnapshot`].
+
+use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use crate::chrome::{AgentId, AttentionId, ChromeSnapshot, InspectorMode, LeftPanelMode};
-use crate::navigation::ResourceAddress;
 use crate::shell::{ShellSnapshot, SplitAxis};
 
 /// Maximum rows projected to the host for one filter result.
 pub const PALETTE_VISIBLE_ROWS: usize = 12;
 
-/// A non-navigation product action the palette can run. Navigation targets use
-/// [`ResourceAddress`] on the row instead (SPEC-022 R7.2 / R7.5).
+/// A product action the palette can run. Never stored across snapshots;
+/// always resolved from the currently selected, currently filtered row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaletteCommand {
     CreateTab,
     SplitFocused(SplitAxis),
+    SwitchWorkspace(WorkspaceId),
+    SwitchTab(TabId),
+    FocusPane(PaneId),
     SetLeftPanel(LeftPanelMode),
     SetShellVisibility {
         left: bool,
@@ -31,19 +39,11 @@ pub enum PaletteCommand {
     FocusAgent(AgentId),
 }
 
-/// What Run executes for the current selection (never a re-resolved ordinal).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PaletteRunTarget {
-    Navigate(ResourceAddress),
-    Command(PaletteCommand),
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PaletteEntry {
     label: String,
     category: &'static str,
-    address: Option<ResourceAddress>,
-    command: Option<PaletteCommand>,
+    command: PaletteCommand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,12 +79,11 @@ pub enum PaletteAction {
     Close,
 }
 
-/// One read-only projected row. Navigation rows carry `address`.
+/// One read-only projected row. `category` groups rows in the host overlay.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaletteRow {
     pub label: String,
     pub category: &'static str,
-    pub address: Option<ResourceAddress>,
 }
 
 /// Read-only projection for native hosts.
@@ -104,8 +103,6 @@ pub struct PaletteState {
     query: String,
     selected: usize,
     last_error: Option<PaletteError>,
-    /// Frozen on Open / SetQuery. Run reads from this list, never rebuilds.
-    projected: Vec<PaletteEntry>,
 }
 
 impl PaletteState {
@@ -121,8 +118,11 @@ impl PaletteState {
         &self.query
     }
 
-    /// `row_count` is the frozen projected count; only
-    /// [`PaletteAction::MoveSelection`] uses it.
+    /// `row_count` is the filtered row count at the moment of the call; only
+    /// [`PaletteAction::MoveSelection`] uses it. The palette does not own
+    /// shell/chrome data, so it cannot compute this itself — the caller
+    /// (`ApplicationRoot`) derives it from a fresh [`build_commands`] +
+    /// [`filter`] pass, the same one it uses to answer the next snapshot.
     pub fn apply(&mut self, action: PaletteAction, row_count: usize) -> Result<(), PaletteError> {
         self.last_error = None;
         match action {
@@ -131,7 +131,6 @@ impl PaletteState {
                     self.open = true;
                     self.query.clear();
                     self.selected = 0;
-                    self.projected.clear();
                 }
                 Ok(())
             }
@@ -142,7 +141,6 @@ impl PaletteState {
                 if self.query != query {
                     self.query = query;
                     self.selected = 0;
-                    self.projected.clear();
                 }
                 Ok(())
             }
@@ -166,33 +164,24 @@ impl PaletteState {
         }
     }
 
-    /// Rebuild the frozen projection from authoritative shell/chrome state.
-    /// Called after Open and SetQuery so Run never re-resolves by ordinal.
-    pub fn rebuild(
-        &mut self,
-        shell: &ShellSnapshot,
-        chrome: &ChromeSnapshot,
-        allows_tab_creation: bool,
-        allows_pane_splitting: bool,
-    ) {
-        if !self.open {
-            self.projected.clear();
-            return;
-        }
-        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
-        self.projected = filter(&commands, &self.query);
-        self.selected = clamp(self.selected, self.projected.len());
-    }
-
     /// Close without going through `apply`; used after a successful Run.
     pub fn close(&mut self) {
         self.open = false;
         self.query.clear();
         self.selected = 0;
-        self.projected.clear();
     }
 
-    pub fn snapshot(&self) -> PaletteSnapshot {
+    /// `allows_tab_creation`/`allows_pane_splitting` are [`crate::shell::ShellState`]
+    /// policy, not part of [`ShellSnapshot`]; the caller passes them through
+    /// so a palette command that would deterministically fail is never shown
+    /// (functional-only rule: omit rather than offer a fake action).
+    pub fn snapshot(
+        &self,
+        shell: &ShellSnapshot,
+        chrome: &ChromeSnapshot,
+        allows_tab_creation: bool,
+        allows_pane_splitting: bool,
+    ) -> PaletteSnapshot {
         if !self.open {
             return PaletteSnapshot {
                 open: false,
@@ -202,14 +191,14 @@ impl PaletteState {
                 last_error: self.last_error,
             };
         }
-        let selected = clamp(self.selected, self.projected.len());
-        let rows = self
-            .projected
+        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
+        let filtered = filter(&commands, &self.query);
+        let selected = clamp(self.selected, filtered.len());
+        let rows = filtered
             .iter()
             .map(|entry| PaletteRow {
                 label: entry.label.clone(),
                 category: entry.category,
-                address: entry.address,
             })
             .collect();
         PaletteSnapshot {
@@ -221,19 +210,23 @@ impl PaletteState {
         }
     }
 
-    /// Target bound to the current frozen selection, or `None` while closed /
-    /// with no matching row. Does **not** rebuild against live state.
-    pub fn selected_target(&self) -> Option<PaletteRunTarget> {
+    /// The command bound to the current selection, or `None` while closed or
+    /// with no matching row. Always resolved against a fresh command list.
+    pub fn resolve(
+        &self,
+        shell: &ShellSnapshot,
+        chrome: &ChromeSnapshot,
+        allows_tab_creation: bool,
+        allows_pane_splitting: bool,
+    ) -> Option<PaletteCommand> {
         if !self.open {
             return None;
         }
-        let entry = self
-            .projected
-            .get(clamp(self.selected, self.projected.len()))?;
-        if let Some(address) = entry.address {
-            return Some(PaletteRunTarget::Navigate(address));
-        }
-        entry.command.clone().map(PaletteRunTarget::Command)
+        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
+        let filtered = filter(&commands, &self.query);
+        filtered
+            .get(clamp(self.selected, filtered.len()))
+            .map(|entry| entry.command.clone())
     }
 
     fn fail(&mut self, error: PaletteError) -> Result<(), PaletteError> {
@@ -283,22 +276,19 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: "New Tab".to_owned(),
             category: "Navigation",
-            address: None,
-            command: Some(PaletteCommand::CreateTab),
+            command: PaletteCommand::CreateTab,
         });
     }
     if allows_pane_splitting {
         entries.push(PaletteEntry {
             label: "Split Pane Right".to_owned(),
             category: "Navigation",
-            address: None,
-            command: Some(PaletteCommand::SplitFocused(SplitAxis::Right)),
+            command: PaletteCommand::SplitFocused(SplitAxis::Right),
         });
         entries.push(PaletteEntry {
             label: "Split Pane Down".to_owned(),
             category: "Navigation",
-            address: None,
-            command: Some(PaletteCommand::SplitFocused(SplitAxis::Down)),
+            command: PaletteCommand::SplitFocused(SplitAxis::Down),
         });
     }
 
@@ -309,10 +299,7 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: format!("Switch to Workspace: {}", workspace.name),
             category: "Workspace",
-            address: Some(ResourceAddress::Workspace {
-                workspace: workspace.id,
-            }),
-            command: None,
+            command: PaletteCommand::SwitchWorkspace(workspace.id),
         });
     }
 
@@ -323,11 +310,7 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: format!("Switch to Tab: {}", tab.title),
             category: "Tab",
-            address: Some(ResourceAddress::Tab {
-                workspace: shell.active_workspace,
-                tab: tab.id,
-            }),
-            command: None,
+            command: PaletteCommand::SwitchTab(tab.id),
         });
     }
 
@@ -338,12 +321,7 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: format!("Focus Pane: {}", pane.title),
             category: "Pane",
-            address: Some(ResourceAddress::Pane {
-                workspace: shell.active_workspace,
-                tab: shell.active_tab,
-                pane: pane.id,
-            }),
-            command: None,
+            command: PaletteCommand::FocusPane(pane.id),
         });
     }
 
@@ -354,8 +332,7 @@ fn build_commands(
     entries.push(PaletteEntry {
         label: format!("Show {} in Left Panel", left_panel_label(other_left_panel)),
         category: "View",
-        address: None,
-        command: Some(PaletteCommand::SetLeftPanel(other_left_panel)),
+        command: PaletteCommand::SetLeftPanel(other_left_panel),
     });
 
     entries.push(PaletteEntry {
@@ -365,12 +342,11 @@ fn build_commands(
             "Show Left Panel".to_owned()
         },
         category: "View",
-        address: None,
-        command: Some(PaletteCommand::SetShellVisibility {
+        command: PaletteCommand::SetShellVisibility {
             left: !chrome.left_visible,
             inspector: chrome.inspector_visible,
             tab_strip: chrome.tab_strip_visible,
-        }),
+        },
     });
     entries.push(PaletteEntry {
         label: if chrome.inspector_visible {
@@ -379,12 +355,11 @@ fn build_commands(
             "Show Inspector".to_owned()
         },
         category: "View",
-        address: None,
-        command: Some(PaletteCommand::SetShellVisibility {
+        command: PaletteCommand::SetShellVisibility {
             left: chrome.left_visible,
             inspector: !chrome.inspector_visible,
             tab_strip: chrome.tab_strip_visible,
-        }),
+        },
     });
     entries.push(PaletteEntry {
         label: if chrome.tab_strip_visible {
@@ -393,12 +368,11 @@ fn build_commands(
             "Show Tab Strip".to_owned()
         },
         category: "View",
-        address: None,
-        command: Some(PaletteCommand::SetShellVisibility {
+        command: PaletteCommand::SetShellVisibility {
             left: chrome.left_visible,
             inspector: chrome.inspector_visible,
             tab_strip: !chrome.tab_strip_visible,
-        }),
+        },
     });
 
     for mode in [
@@ -415,8 +389,7 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: format!("Inspector: {}", inspector_mode_label(mode)),
             category: "View",
-            address: None,
-            command: Some(PaletteCommand::SetInspectorMode(mode)),
+            command: PaletteCommand::SetInspectorMode(mode),
         });
     }
 
@@ -424,8 +397,7 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: format!("Attention: {}", item.title),
             category: "Attention",
-            address: None,
-            command: Some(PaletteCommand::OpenAttention(item.id.clone())),
+            command: PaletteCommand::OpenAttention(item.id.clone()),
         });
     }
 
@@ -436,8 +408,7 @@ fn build_commands(
         entries.push(PaletteEntry {
             label: format!("Focus Agent: {}", agent.name),
             category: "Agent",
-            address: None,
-            command: Some(PaletteCommand::FocusAgent(agent.id.clone())),
+            command: PaletteCommand::FocusAgent(agent.id.clone()),
         });
     }
 
@@ -465,7 +436,7 @@ fn classify(query: &str, label: &str) -> Option<MatchClass> {
     None
 }
 
-fn filter(entries: &[PaletteEntry], query: &str) -> Vec<PaletteEntry> {
+fn filter<'a>(entries: &'a [PaletteEntry], query: &str) -> Vec<&'a PaletteEntry> {
     let query = query.to_lowercase();
     let mut scored: Vec<(MatchClass, &PaletteEntry)> = entries
         .iter()
@@ -479,7 +450,7 @@ fn filter(entries: &[PaletteEntry], query: &str) -> Vec<PaletteEntry> {
     scored
         .into_iter()
         .take(PALETTE_VISIBLE_ROWS)
-        .map(|(_, entry)| entry.clone())
+        .map(|(_, entry)| entry)
         .collect()
 }
 
@@ -516,33 +487,22 @@ mod tests {
             true,
             true,
         )
-        .expect("fixture")
+        .expect("seed shell")
     }
 
     fn labels(rows: &[PaletteRow]) -> Vec<&str> {
         rows.iter().map(|row| row.label.as_str()).collect()
     }
 
-    fn open_rebuilt(
-        palette: &mut PaletteState,
-        shell: &ShellSnapshot,
-        chrome: &ChromeSnapshot,
-        tabs: bool,
-        splits: bool,
-    ) {
-        palette.apply(PaletteAction::Open, 0).unwrap();
-        palette.rebuild(shell, chrome, tabs, splits);
-    }
-
     #[test]
-    fn closed_palette_rejects_query_and_move() {
+    fn closed_palette_snapshots_empty_and_every_action_but_open_fails_closed() {
         let shell = seed_shell().snapshot();
         let chrome = ChromeState::new().snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        let snap = palette.snapshot();
+        let snap = palette.snapshot(&shell, &chrome, true, true);
         assert!(!snap.open);
         assert!(snap.rows.is_empty());
-        assert!(palette.selected_target().is_none());
+        assert!(palette.resolve(&shell, &chrome, true, true).is_none());
         assert_eq!(
             palette.apply(PaletteAction::SetQuery("x".into()), 0),
             Err(PaletteError::NotOpen)
@@ -553,7 +513,6 @@ mod tests {
         );
         // Close while already closed is idempotent, not an error.
         assert_eq!(palette.apply(PaletteAction::Close, 0), Ok(()));
-        let _ = chrome;
     }
 
     #[test]
@@ -561,15 +520,14 @@ mod tests {
         let shell = seed_shell().snapshot();
         let chrome = ChromeState::new().snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &shell, &chrome, true, true);
-        let snap = palette.snapshot();
+        palette.apply(PaletteAction::Open, 0).unwrap();
+        let snap = palette.snapshot(&shell, &chrome, true, true);
         assert!(snap.open);
         assert!(labels(&snap.rows).contains(&"New Tab"));
         assert!(!labels(&snap.rows).contains(&"Switch to Tab: Core Terminal"));
         palette
             .apply(PaletteAction::SetQuery("split".into()), 0)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true);
         palette.apply(PaletteAction::Open, 0).unwrap();
         assert_eq!(palette.query(), "split", "reopen is a no-op while open");
     }
@@ -578,8 +536,7 @@ mod tests {
         PaletteEntry {
             label: label.to_owned(),
             category: "Test",
-            address: None,
-            command: Some(PaletteCommand::CreateTab),
+            command: PaletteCommand::CreateTab,
         }
     }
 
@@ -617,8 +574,8 @@ mod tests {
         let snap = shell.snapshot();
         let chrome = ChromeState::new().snapshot(&snap, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &snap, &chrome, true, true);
-        let rows = palette.snapshot().rows;
+        palette.apply(PaletteAction::Open, 0).unwrap();
+        let rows = palette.snapshot(&snap, &chrome, true, true).rows;
         let labels = labels(&rows);
         assert!(labels.contains(&"New Tab"));
         assert!(labels.contains(&"Split Pane Right"));
@@ -634,11 +591,6 @@ mod tests {
             !labels.iter().any(|label| label.starts_with("Focus Pane:")),
             "single-Pane Tab has no other Pane to focus"
         );
-        let tab_row = rows
-            .iter()
-            .find(|row| row.label == "Switch to Tab: Core Terminal")
-            .expect("tab row");
-        assert!(matches!(tab_row.address, Some(ResourceAddress::Tab { .. })));
     }
 
     #[test]
@@ -646,65 +598,66 @@ mod tests {
         let shell = seed_shell().snapshot();
         let chrome = ChromeState::new().snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &shell, &chrome, true, true);
-        let row_count = palette.snapshot().rows.len();
+        palette.apply(PaletteAction::Open, 0).unwrap();
+        let row_count = palette.snapshot(&shell, &chrome, true, true).rows.len();
         palette
             .apply(PaletteAction::MoveSelection(1), row_count)
             .unwrap();
-        assert_eq!(palette.snapshot().selected, 1);
+        assert_eq!(palette.snapshot(&shell, &chrome, true, true).selected, 1);
         palette
             .apply(PaletteAction::MoveSelection(50), row_count)
             .unwrap();
-        assert_eq!(palette.snapshot().selected, row_count - 1);
+        assert_eq!(
+            palette.snapshot(&shell, &chrome, true, true).selected,
+            row_count - 1
+        );
         palette
             .apply(PaletteAction::MoveSelection(-50), row_count)
             .unwrap();
-        assert_eq!(palette.snapshot().selected, 0);
+        assert_eq!(palette.snapshot(&shell, &chrome, true, true).selected, 0);
         palette
             .apply(PaletteAction::SetQuery("split".into()), row_count)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true);
         assert_eq!(
-            palette.snapshot().selected,
+            palette.snapshot(&shell, &chrome, true, true).selected,
             0,
             "filter change resets selection"
         );
     }
 
     #[test]
-    fn selected_target_tracks_selection_and_closing_clears_it() {
+    fn resolve_tracks_selection_and_closing_stops_resolving() {
         let shell = seed_shell().snapshot();
         let chrome = ChromeState::new().snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &shell, &chrome, true, true);
+        palette.apply(PaletteAction::Open, 0).unwrap();
         palette
             .apply(PaletteAction::SetQuery("split pane down".into()), 0)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true);
         assert_eq!(
-            palette.selected_target(),
-            Some(PaletteRunTarget::Command(PaletteCommand::SplitFocused(
-                SplitAxis::Down
-            )))
+            palette.resolve(&shell, &chrome, true, true),
+            Some(PaletteCommand::SplitFocused(SplitAxis::Down))
         );
         palette.close();
         assert!(!palette.is_open());
-        assert!(palette.selected_target().is_none());
+        assert!(palette.resolve(&shell, &chrome, true, true).is_none());
         assert_eq!(palette.query(), "", "close clears the query");
     }
 
     #[test]
-    fn no_match_has_no_selected_target() {
+    fn no_match_resolves_to_none() {
         let shell = seed_shell().snapshot();
         let chrome = ChromeState::new().snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &shell, &chrome, true, true);
+        palette.apply(PaletteAction::Open, 0).unwrap();
         palette
             .apply(PaletteAction::SetQuery("zzz-no-such-command".into()), 0)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true);
-        assert!(palette.snapshot().rows.is_empty());
-        assert!(palette.selected_target().is_none());
+        assert!(palette
+            .snapshot(&shell, &chrome, true, true)
+            .rows
+            .is_empty());
+        assert!(palette.resolve(&shell, &chrome, true, true).is_none());
     }
 
     #[test]
@@ -741,11 +694,11 @@ mod tests {
             .unwrap();
         let snap = chrome.snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &shell, &snap, true, true);
-        let rows = palette.snapshot().rows;
+        palette.apply(PaletteAction::Open, 0).unwrap();
+        let rows = palette.snapshot(&shell, &snap, true, true).rows;
         assert!(labels(&rows).contains(&"Attention: Build failed"));
         assert!(labels(&rows).contains(&"Focus Agent: Claude"));
-        // A selected agent is not offered again after a rebuild.
+        // A selected agent is not offered again.
         chrome
             .apply(
                 ChromeAction::SelectAgent {
@@ -755,8 +708,7 @@ mod tests {
             )
             .unwrap();
         let after = chrome.snapshot(&shell, &[]);
-        palette.rebuild(&shell, &after, true, true);
-        let rows = palette.snapshot().rows;
+        let rows = palette.snapshot(&shell, &after, true, true).rows;
         assert!(!labels(&rows).contains(&"Focus Agent: Claude"));
     }
 
@@ -765,8 +717,8 @@ mod tests {
         let shell = ShellState::m001_local("local").snapshot();
         let chrome = ChromeState::new().snapshot(&shell, &[]);
         let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &shell, &chrome, false, false);
-        let rows = palette.snapshot().rows;
+        palette.apply(PaletteAction::Open, 0).unwrap();
+        let rows = palette.snapshot(&shell, &chrome, false, false).rows;
         let labels = labels(&rows);
         assert!(!labels.contains(&"New Tab"));
         assert!(!labels.contains(&"Split Pane Right"));
@@ -774,44 +726,6 @@ mod tests {
         assert!(
             !labels.is_empty(),
             "view/inspector toggle commands remain available"
-        );
-    }
-
-    #[test]
-    fn frozen_projection_ignores_live_shell_changes_until_rebuild() {
-        let mut shell = seed_shell();
-        shell.apply(ShellAction::CreateTab).unwrap();
-        let snap = shell.snapshot();
-        let chrome = ChromeState::new().snapshot(&snap, &[]);
-        let mut palette = PaletteState::new();
-        open_rebuilt(&mut palette, &snap, &chrome, true, true);
-        palette
-            .apply(PaletteAction::SetQuery("Switch to Tab: Core".into()), 0)
-            .unwrap();
-        palette.rebuild(&snap, &chrome, true, true);
-        let address = match palette.selected_target() {
-            Some(PaletteRunTarget::Navigate(address)) => address,
-            other => panic!("expected navigate target, got {other:?}"),
-        };
-        // Select the other tab in live shell so a fresh ordinal rebuild would
-        // omit "Core Terminal" and put a different row at index 0.
-        let core = match address {
-            ResourceAddress::Tab { tab, .. } => tab,
-            _ => panic!("expected tab address"),
-        };
-        let other = snap
-            .tabs
-            .iter()
-            .map(|tab| tab.id)
-            .find(|id| *id != core)
-            .expect("other tab");
-        shell
-            .apply(ShellAction::SelectTab { id: other })
-            .expect("select");
-        // Frozen selection still carries the original address.
-        assert_eq!(
-            palette.selected_target(),
-            Some(PaletteRunTarget::Navigate(address))
         );
     }
 }

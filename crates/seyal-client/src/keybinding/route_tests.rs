@@ -1,11 +1,8 @@
 //! SPEC-024 K3 §14 routing / Raw-TUI non-interception tests.
 
-use std::time::Instant;
-
 use crate::presentation::PresentationMode;
 
 use super::builtins::builtin_rows;
-use super::chord::ChordPrefixState;
 use super::load::load_keybinding_table;
 use super::route::{
     fallthrough_is_flow, fallthrough_is_terminal, resolve_tab_ordinal, route_context_set,
@@ -24,8 +21,7 @@ fn route(
     composition: bool,
 ) -> RouteOutcome {
     let stroke = normalized_from_notation(keys).expect(keys);
-    let mut chord = ChordPrefixState::new();
-    route_keystroke(table, &stroke, ctx, composition, &mut chord, Instant::now())
+    route_keystroke(table, &stroke, ctx, composition)
 }
 
 fn raw_ctx() -> BindingContext {
@@ -266,8 +262,7 @@ fn item16_cmd_shift_bracket_matches_both_notations_via_layout_scalars() {
         shift_applied: Some('}'),
     };
     let route = raw_ctx();
-    let mut chord = ChordPrefixState::new();
-    let from_bracket = route_keystroke(&table, &event, route, false, &mut chord, Instant::now());
+    let from_bracket = route_keystroke(&table, &event, route, false);
     assert!(matches!(
         from_bracket,
         RouteOutcome::Matched {
@@ -285,8 +280,7 @@ keys = "cmd+shift+}"
 action = "tab.create"
 "#;
     let table = load_keybinding_table(Some(user));
-    let mut chord = ChordPrefixState::new();
-    let matched = route_keystroke(&table, &event, route, false, &mut chord, Instant::now());
+    let matched = route_keystroke(&table, &event, route, false);
     assert!(matches!(
         matched,
         RouteOutcome::Matched {
@@ -303,9 +297,8 @@ action = "tab.create"
         key: KeySym::Char('ü'),
         shift_applied: Some('Ü'),
     };
-    let mut chord = ChordPrefixState::new();
     assert_eq!(
-        route_keystroke(&table, &non_us, route, false, &mut chord, Instant::now()),
+        route_keystroke(&table, &non_us, route, false),
         RouteOutcome::UnmatchedCommand
     );
 }
@@ -373,86 +366,19 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     ));
 }
 
-// --- §14 item 21: SPEC-022 navigation (goto.open + focus-history Back/Forward) ---
-
 #[test]
-fn item21_cmd_shift_o_dispatches_goto_open() {
-    let table = load_keybinding_table(None);
-    let matched = route(&table, "cmd+shift+o", raw_ctx(), false);
-    assert!(matches!(
-        matched,
-        RouteOutcome::Matched {
-            command: WorkspaceCommand {
-                id: WorkspaceCommandId::GotoOpen,
-                ordinal: None,
-            }
-        }
-    ));
-    assert!(!matched.writes_pty_bytes());
-
-    let flow = route(
-        &table,
-        "cmd+shift+o",
-        route_context_set(false, PresentationMode::Flow, false),
-        false,
-    );
-    assert_eq!(
-        flow.matched_command().map(|c| c.id),
-        Some(WorkspaceCommandId::GotoOpen)
-    );
-}
-
-#[test]
-fn item21_unbind_cmd_shift_o_stops_goto_open() {
-    // R11.2: after unbind, the table must not match ⌘⇧O to goto.open. The
-    // native menu must not hardcode the equivalent (AppDelegate), so AppKit
-    // cannot reopen goto when the table says none.
+fn item19_unbind_escape_stops_palette_close() {
     let unbind = r#"
 [[keybindings]]
-keys = "cmd+shift+o"
+keys = "escape"
 action = "none"
-context = ["app"]
+context = ["palette"]
 "#;
     let table = load_keybinding_table(Some(unbind));
     assert_eq!(
-        route(&table, "cmd+shift+o", raw_ctx(), false),
-        RouteOutcome::UnmatchedCommand
+        route(&table, "escape", palette_ctx(), false),
+        RouteOutcome::Fallthrough
     );
-    assert_eq!(
-        route(
-            &table,
-            "cmd+shift+o",
-            route_context_set(false, PresentationMode::Flow, false),
-            false,
-        ),
-        RouteOutcome::UnmatchedCommand
-    );
-}
-
-#[test]
-fn item21_cmd_bracket_dispatches_focus_history() {
-    let table = load_keybinding_table(None);
-    let back = route(&table, "cmd+[", raw_ctx(), false);
-    assert!(matches!(
-        back,
-        RouteOutcome::Matched {
-            command: WorkspaceCommand {
-                id: WorkspaceCommandId::FocusHistoryBack,
-                ordinal: None,
-            }
-        }
-    ));
-    assert!(!back.writes_pty_bytes());
-    let forward = route(&table, "cmd+]", raw_ctx(), false);
-    assert!(matches!(
-        forward,
-        RouteOutcome::Matched {
-            command: WorkspaceCommand {
-                id: WorkspaceCommandId::FocusHistoryForward,
-                ordinal: None,
-            }
-        }
-    ));
 }
 
 // --- §14 item 20: composer history-search ---
