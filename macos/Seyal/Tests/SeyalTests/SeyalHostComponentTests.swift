@@ -238,6 +238,54 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(composer.isHidden, "nested TUI refresh must hide composer")
     }
 
+    @MainActor
+    func testShellExitRecoveryKeepsFlowAndHidesComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        view.reconcileChrome()
+        let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertFalse(composer.isHidden, "a live Flow execution shows its composer")
+
+        var begin = SeyalAppAction()
+        begin.version = bind.version
+        begin.size = bind.size
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        begin.target_pty_generation = 0
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+
+        var ended = SeyalAppAction()
+        ended.version = bind.version
+        ended.size = bind.size
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.target_pty_generation = 1
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+
+        let snapshot = seyal_app_snapshot(handle)
+        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
+        XCTAssertEqual(view.recoveryText(snapshot), "shell exited")
+        view.reconcileChrome()
+        XCTAssertTrue(composer.isHidden, "an ended shell cannot accept Flow commands")
+        XCTAssertEqual(seyal_app_composer(handle).mode, UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
+    }
+
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
         XCTAssertEqual(BundledRuntimeLauncher.helperRelativePath, "Contents/Helpers/seyal-runtime")
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
