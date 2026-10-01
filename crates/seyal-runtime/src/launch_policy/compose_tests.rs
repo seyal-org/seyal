@@ -130,28 +130,72 @@ fn helper_like_empty_locale_still_resolves() {
     assert!(spec.clears_environment());
 }
 
-/// §12 item 7: poisoned parent keys absent; child key set is allowlist ∪ carve-outs.
+/// §12 item 7: poisoned parent keys absent; child key set equals exactly
+/// §6 required ∪ present valid locale ∪ §6.1 carve-outs (bash / zsh±ZDOTDIR).
 #[test]
 fn poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration() {
-    let zsh_record = account("/bin/zsh");
-    let probe = MapProbe::default()
-        .shell("/bin/zsh", true)
-        .cwd("/Users/alice", true);
+    let _guard = super::process_env_test_lock();
+
+    let poison_keys = [
+        "DYLD_INSERT_LIBRARIES",
+        "SSH_AUTH_SOCK",
+        "AWS_SECRET_ACCESS_KEY",
+        "LC_ALL",
+        "TERMINFO_DIRS",
+    ];
+    let originals: Vec<_> = poison_keys
+        .iter()
+        .map(|key| (*key, std::env::var_os(key)))
+        .collect();
+    let original_zdotdir = std::env::var_os("ZDOTDIR");
+    // SAFETY: test holds process_env_test_lock; no concurrent env readers/writers.
+    unsafe {
+        std::env::set_var("DYLD_INSERT_LIBRARIES", "/evil/inject.dylib");
+        std::env::set_var("SSH_AUTH_SOCK", "/tmp/evil.sock");
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", "not-a-real-secret");
+        std::env::set_var("LC_ALL", "evil.UTF-8");
+        std::env::set_var("TERMINFO_DIRS", "/evil/terminfo");
+        std::env::remove_var("ZDOTDIR");
+    }
+
+    let restore_env = || {
+        // SAFETY: still holds process_env_test_lock.
+        unsafe {
+            for (key, value) in &originals {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+            match &original_zdotdir {
+                Some(v) => std::env::set_var("ZDOTDIR", v),
+                None => std::env::remove_var("ZDOTDIR"),
+            }
+        }
+    };
+
     let locale = MapLocale::default().set("LANG", "C");
-    let out = resolve(ResolveInputs {
-        intent: &LaunchProfileIntent::default_interactive(),
-        account: Some(&zsh_record),
-        process_shell: None,
-        tmpdir: Some(Path::new("/var/folders/tmp")),
-        locale: &locale,
-        probe: &probe,
-    })
-    .expect("resolve");
-
     let capability = CapabilityPolicy::bundled().expect("capability");
-    let zsh_base = command_spec_from_policy(&out);
 
-    // Not eligible (bash program) — no shell-integration carve-outs.
+    let base_keys = |extra: &[&str]| -> HashSet<String> {
+        let mut keys = HashSet::from([
+            "HOME".into(),
+            "USER".into(),
+            "LOGNAME".into(),
+            "SHELL".into(),
+            "PATH".into(),
+            "TMPDIR".into(),
+            "LANG".into(),
+            "TERM".into(),
+            "TERMINFO".into(),
+        ]);
+        for key in extra {
+            keys.insert((*key).into());
+        }
+        keys
+    };
+
+    // Not eligible (bash) — §6 required ∪ LANG; no shell-integration carve-outs.
     let bash_record = account("/bin/bash");
     let bash_probe = MapProbe::default()
         .shell("/bin/bash", true)
@@ -166,68 +210,55 @@ fn poisoned_parent_env_absent_and_key_set_exact_with_and_without_integration() {
     })
     .expect("bash");
     let bash_spec =
-        apply_post_policy(command_spec_from_policy(&bash), &capability, None).expect("apply");
-    let keys = env_keys(&bash_spec);
-    for forbidden in [
-        "DYLD_INSERT_LIBRARIES",
-        "SSH_AUTH_SOCK",
-        "COLORTERM",
-        "TERMINFO_DIRS",
-    ] {
-        assert!(!keys.contains(forbidden), "leaked {forbidden}");
-    }
-    assert!(keys.contains("HOME"));
-    assert!(keys.contains("USER"));
-    assert!(keys.contains("LOGNAME"));
-    assert!(keys.contains("SHELL"));
-    assert!(keys.contains("PATH"));
-    assert!(keys.contains("TMPDIR"));
-    assert!(keys.contains("LANG"));
-    assert!(keys.contains("TERM"));
-    assert!(keys.contains("TERMINFO"));
-    assert!(!keys.contains("ZDOTDIR"));
-    assert!(!keys.contains(USER_ZDOTDIR_ENV));
-    assert!(!keys.contains(NONCE_FD_ENV));
+        apply_post_policy(command_spec_from_policy(&bash), &capability, None).expect("bash apply");
+    assert_eq!(env_keys(&bash_spec), base_keys(&[]));
     assert_eq!(env_get(&bash_spec, "PATH"), Some(OsStr::new(DEFAULT_PATH)));
     assert_eq!(
         env_get(&bash_spec, "TERM"),
         Some(OsStr::new(m001_term_name()))
     );
 
-    // Eligible zsh — carve-outs present; SEYAL_USER_ZDOTDIR absent without process ZDOTDIR.
-    let _guard = super::process_env_test_lock();
-    let original = std::env::var_os("ZDOTDIR");
-    // SAFETY: test holds process_env_test_lock; no concurrent env readers in this process.
-    unsafe { std::env::remove_var("ZDOTDIR") };
+    // Eligible zsh without process ZDOTDIR — carve-outs ZDOTDIR + SEYAL_NONCE_FD only.
+    let zsh_record = account("/bin/zsh");
+    let zsh_probe = MapProbe::default()
+        .shell("/bin/zsh", true)
+        .cwd("/Users/alice", true);
+    let zsh = resolve(ResolveInputs {
+        intent: &LaunchProfileIntent::default_interactive(),
+        account: Some(&zsh_record),
+        process_shell: None,
+        tmpdir: Some(Path::new("/var/folders/tmp")),
+        locale: &locale,
+        probe: &zsh_probe,
+    })
+    .expect("zsh");
     let (si_dir, si) = materialize_shell_policy();
-    let zsh_spec = apply_post_policy(zsh_base, &capability, Some(&si)).expect("zsh apply");
-    let keys = env_keys(&zsh_spec);
-    assert!(keys.contains("ZDOTDIR"));
-    assert!(keys.contains(NONCE_FD_ENV));
-    assert!(!keys.contains(USER_ZDOTDIR_ENV));
-    assert!(!keys.contains("DYLD_INSERT_LIBRARIES"));
+    let zsh_spec =
+        apply_post_policy(command_spec_from_policy(&zsh), &capability, Some(&si)).expect("zsh apply");
+    assert_eq!(
+        env_keys(&zsh_spec),
+        base_keys(&["ZDOTDIR", NONCE_FD_ENV])
+    );
     assert_eq!(zsh_spec.inherited_fd_count(), 1);
 
-    // Eligible with valid process ZDOTDIR → SEYAL_USER_ZDOTDIR present.
+    // Eligible zsh with valid process ZDOTDIR → SEYAL_USER_ZDOTDIR present.
     let user_zdot = si_dir.join("user");
     std::fs::create_dir_all(&user_zdot).unwrap();
-    // SAFETY: test holds LOCK.
+    // SAFETY: still holds process_env_test_lock.
     unsafe { std::env::set_var("ZDOTDIR", &user_zdot) };
-    let with_user = apply_post_policy(command_spec_from_policy(&out), &capability, Some(&si))
-        .expect("with user zdotdir");
+    let with_user =
+        apply_post_policy(command_spec_from_policy(&zsh), &capability, Some(&si)).expect("with user");
+    assert_eq!(
+        env_keys(&with_user),
+        base_keys(&["ZDOTDIR", NONCE_FD_ENV, USER_ZDOTDIR_ENV])
+    );
     assert_eq!(
         env_get(&with_user, USER_ZDOTDIR_ENV).map(PathBuf::from),
         Some(user_zdot)
     );
 
-    // SAFETY: restore process env under LOCK.
-    unsafe {
-        match original {
-            Some(value) => std::env::set_var("ZDOTDIR", value),
-            None => std::env::remove_var("ZDOTDIR"),
-        }
-    }
-    std::fs::remove_dir_all(si_dir).unwrap();
+    let _ = std::fs::remove_dir_all(si_dir);
+    restore_env();
 }
 
 /// §12 item 8: TERM/TERMINFO present; COLORTERM and TERMINFO_DIRS absent.
