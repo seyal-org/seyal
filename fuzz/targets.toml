@@ -88,6 +88,14 @@ corpus = "fuzz/corpus/block-state-decode"
 adapter = "fuzz/targets/block-state-decode"
 libfuzzer = "pass8_block_state_decode"
 
+[[target]]
+name = "execution-provisioning-decode"
+owner_pass = 3
+status = "active"
+corpus = "fuzz/corpus/execution-provisioning-decode"
+adapter = "fuzz/targets/execution-provisioning-decode"
+libfuzzer = "execution_provisioning_decode"
+
 # Legacy Candidate-B shared-projection comparator. Not production Candidate-D
 # coverage. Retained only for isolated comparator evidence behind
 # `benchmark-shared-projection`; never cite as §6.9 production fuzz.

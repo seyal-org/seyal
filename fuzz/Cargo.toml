@@ -64,6 +64,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "execution_provisioning_decode"
+path = "fuzz_targets/execution_provisioning_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "vt_byte_parser"
 path = "fuzz_targets/vt_byte_parser.rs"
 test = false
