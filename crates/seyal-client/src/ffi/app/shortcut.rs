@@ -4,9 +4,8 @@ use std::sync::OnceLock;
 
 use crate::app::APP_ABI_VERSION;
 use crate::keybinding::{
-    encode_menu_key_equivalent, process_keybinding_table, project_shortcuts,
-    workspace_command_ffi_id, workspace_command_from_ffi_id, workspace_command_permitted,
-    BindingContext,
+    command_title, encode_menu_key_equivalent, menu_command_permitted, process_keybinding_table,
+    project_shortcuts, workspace_command_ffi_id, workspace_command_from_ffi_id, BindingContext,
 };
 
 use super::APPS;
@@ -98,20 +97,7 @@ fn encode_cold_row(item: &crate::keybinding::ProjectedShortcut) -> ColdRow {
         }
         None => (0, 0, 0),
     };
-    let title = match item.command.id {
-        crate::keybinding::WorkspaceCommandId::CommandPaletteOpen => "Command Palette",
-        crate::keybinding::WorkspaceCommandId::TabCreate => "New Tab",
-        crate::keybinding::WorkspaceCommandId::TabCloseFocused => "Close Tab",
-        crate::keybinding::WorkspaceCommandId::TabSelectPrevious => "Previous Tab",
-        crate::keybinding::WorkspaceCommandId::TabSelectNext => "Next Tab",
-        crate::keybinding::WorkspaceCommandId::PaneSplitRight => "Split Right",
-        crate::keybinding::WorkspaceCommandId::PaneSplitDown => "Split Down",
-        crate::keybinding::WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
-        crate::keybinding::WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
-        crate::keybinding::WorkspaceCommandId::GotoOpen => "Go to…",
-        other => other.as_str(),
-    }
-    .to_owned();
+    let title = command_title(item.command).to_owned();
     let hints = item
         .hints
         .iter()
@@ -184,8 +170,7 @@ pub extern "C" fn seyal_app_shortcut_enabled(
             return 0;
         };
         let route = state.root.keybinding_route_context(composer_focused != 0);
-        let table = process_keybinding_table();
-        u8::from(workspace_command_permitted(table, command, route))
+        u8::from(menu_command_permitted(command, route))
     })
 }
 

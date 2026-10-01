@@ -480,6 +480,33 @@ final class ProductChromeHostView: NSView {
         }
     }
 
+    /// R6.2.1: route Command keys through Rust before AppKit's main-menu
+    /// key-equivalent pass. Matched/unmatched ApplicationCommand strokes never
+    /// reach projected `NSMenuItem` equivalents; reserved §4.2 still do.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let responder = window?.firstResponder as? NSView
+        let composerFocused = responder.map { $0 === composer || $0.isDescendant(of: composer) } ?? false
+        switch KeybindingStrokeNormalizer.route(
+            appHandle: pane.appHandle,
+            event: event,
+            composerFocused: composerFocused,
+            compositionActive: false
+        ) {
+        case .consumed:
+            reconcileChrome()
+            routeFocus()
+            return true
+        case .nativeCommand:
+            return super.performKeyEquivalent(with: event)
+        case .fallsThrough:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+
     /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the
     /// command-palette overlay; default scope is Panes.
     @objc func openGoto() {

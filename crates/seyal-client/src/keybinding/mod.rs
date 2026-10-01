@@ -32,13 +32,14 @@ pub use load::{
     process_keybinding_table,
 };
 pub use projection::{
-    encode_menu_key_equivalent, project_shortcuts, projected_item_for, workspace_command_ffi_id,
-    workspace_command_from_ffi_id, KeybindingShortcutProjection, ProjectedShortcut, ShortcutHint,
+    command_title, encode_menu_key_equivalent, project_shortcuts, projected_item_for,
+    workspace_command_ffi_id, workspace_command_from_ffi_id, KeybindingShortcutProjection,
+    ProjectedShortcut, ShortcutHint,
 };
 pub use route::{
-    fallthrough_is_flow, fallthrough_is_terminal, resolve_tab_ordinal, route_context_set,
-    route_keystroke, validate_workspace_command, workspace_command_permitted, InvokeError,
-    RouteOutcome,
+    fallthrough_is_flow, fallthrough_is_terminal, menu_command_permitted, resolve_tab_ordinal,
+    route_context_set, route_keystroke, validate_workspace_command, workspace_command_permitted,
+    InvokeError, RouteOutcome,
 };
 pub use stroke::NormalizedStroke;
 pub use types::{

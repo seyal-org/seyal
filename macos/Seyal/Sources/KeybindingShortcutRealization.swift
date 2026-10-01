@@ -26,15 +26,19 @@ enum KeybindingShortcutRealization {
     }
 
     /// Apply cold key equivalent + AX label from the Rust projection (startup only).
+    /// Title is always realized from the projection so §7.3 unbind cannot blank the item.
     static func realize(_ menuItem: NSMenuItem, commandId: UInt16) {
         menuItem.representedObject = commandId
         guard let row = item(commandId: commandId) else {
+            menuItem.title = fallbackTitle(commandId)
             menuItem.keyEquivalent = ""
             menuItem.keyEquivalentModifierMask = []
             return
         }
         if let title = copyUTF8(row.title, row.title_len), !title.isEmpty {
             menuItem.title = title
+        } else {
+            menuItem.title = fallbackTitle(commandId)
         }
         if row.has_key_equivalent != 0 {
             menuItem.keyEquivalent = keyEquivalentString(row)
@@ -45,6 +49,21 @@ enum KeybindingShortcutRealization {
         }
         if let label = copyUTF8(row.accessibility_label, row.accessibility_label_len) {
             menuItem.setAccessibilityLabel(label)
+        }
+    }
+
+    private static func fallbackTitle(_ commandId: UInt16) -> String {
+        switch commandId {
+        case commandPaletteOpen: return "Command Palette"
+        case tabCreate: return "New Tab"
+        case tabCloseFocused: return "Close Tab"
+        case tabSelectPrevious: return "Previous Tab"
+        case tabSelectNext: return "Next Tab"
+        case paneSplitRight: return "Split Right"
+        case paneSplitDown: return "Split Down"
+        case presentationToggleRaw: return "Toggle Raw"
+        case presentationToggleTui: return "Toggle TUI"
+        default: return "Command"
         }
     }
 

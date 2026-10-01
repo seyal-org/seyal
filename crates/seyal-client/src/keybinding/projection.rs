@@ -1,6 +1,6 @@
 //! SPEC-024 §11: read-only `KeybindingShortcutProjection` for menus and AX.
 
-use super::route::workspace_command_permitted;
+use super::route::menu_command_permitted;
 use super::types::{
     BindingContext, BindingSequence, KeyStroke, KeySym, KeybindingTable, NamedKey,
     WorkspaceCommand, WorkspaceCommandId,
@@ -66,7 +66,7 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
 }
 
 /// Human title for menu/AX (no terminal text).
-fn command_title(command: WorkspaceCommand) -> &'static str {
+pub fn command_title(command: WorkspaceCommand) -> &'static str {
     match command.id {
         WorkspaceCommandId::CommandPaletteOpen => "Command Palette",
         WorkspaceCommandId::TabCreate => "New Tab",
@@ -84,23 +84,33 @@ fn command_title(command: WorkspaceCommand) -> &'static str {
     }
 }
 
-/// Build the §11 projection for `route` (enabled bits follow R6.4.2).
+/// Every menu-visible command (R11.1), independent of binding presence (§7.3).
+fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
+    [
+        WorkspaceCommandId::CommandPaletteOpen,
+        WorkspaceCommandId::TabCreate,
+        WorkspaceCommandId::TabCloseFocused,
+        WorkspaceCommandId::TabSelectPrevious,
+        WorkspaceCommandId::TabSelectNext,
+        WorkspaceCommandId::PaneSplitRight,
+        WorkspaceCommandId::PaneSplitDown,
+        WorkspaceCommandId::PresentationToggleRaw,
+        WorkspaceCommandId::PresentationToggleTui,
+        WorkspaceCommandId::GotoOpen,
+        WorkspaceCommandId::FocusHistoryBack,
+        WorkspaceCommandId::FocusHistoryForward,
+    ]
+    .into_iter()
+    .map(|id| WorkspaceCommand { id, ordinal: None })
+}
+
+/// Build the §11 projection for `route` (enabled bits follow R6.4.2 / R11.3).
 pub fn project_shortcuts(
     table: &KeybindingTable,
     route: BindingContext,
 ) -> KeybindingShortcutProjection {
-    let mut order: Vec<WorkspaceCommand> = Vec::new();
-    for binding in &table.bindings {
-        if !is_menu_visible(binding.action) {
-            continue;
-        }
-        if !order.contains(&binding.action) {
-            order.push(binding.action);
-        }
-    }
-
-    let items = order
-        .into_iter()
+    let items = menu_visible_commands()
+        .filter(|command| is_menu_visible(*command))
         .map(|command| project_one(table, command, route))
         .collect();
     KeybindingShortcutProjection { items }
@@ -149,7 +159,7 @@ fn project_one(
         key_equivalent: key_equivalent.as_ref().map(|(_, stroke, _)| *stroke),
         key_equivalent_notation: key_equivalent.map(|(_, _, notation)| notation),
         hints,
-        enabled: workspace_command_permitted(table, command, route),
+        enabled: menu_command_permitted(command, route),
         accessibility_label,
     }
 }

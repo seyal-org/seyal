@@ -92,7 +92,8 @@ final class KeybindingEvidenceTests: XCTestCase {
         )
     }
 
-    /// §14.4: unmatched / reserved Command stay on the native-Command path (no PTY).
+    /// §14.4: unmatched Command is ApplicationCommand-consumed (zero PTY, no
+    /// menu key-equivalent steal); reserved stays on the native-Command path.
     func testUnmatchedAndReservedCommandAreNativeCommandNotFallthrough() {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -100,7 +101,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         let unmatched = seyal_app_route_keystroke(
             handle, 1, 0, keyU, 0, 0, 0
         )
-        XCTAssertEqual(unmatched, 2, "unmatched Command → native Command handling")
+        XCTAssertEqual(unmatched, 1, "unmatched Command → consumed (R6.2.1, no menu steal)")
 
         let reserved = seyal_app_route_keystroke(
             handle, 1, 0, keyQ, 0, 0, 0

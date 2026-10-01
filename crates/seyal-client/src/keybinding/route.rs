@@ -327,8 +327,8 @@ fn match_binding_length(
     best.map(|(_, _, command)| command)
 }
 
-/// R6.4.1 / §10.2: menu or keybinding invoke is permitted only when some
-/// surviving binding for the command intersects the current route context set.
+/// Surviving-binding intersect check (key-match diagnostics / legacy callers).
+/// Menu enablement and invoke re-validation use [`menu_command_permitted`] (R11.3).
 pub fn workspace_command_permitted(
     table: &KeybindingTable,
     command: WorkspaceCommand,
@@ -340,13 +340,51 @@ pub fn workspace_command_permitted(
         .any(|binding| binding.action == command && !binding.context.intersection(route).is_empty())
 }
 
+/// Inherent menu contexts for a WorkspaceCommand (independent of key bindings).
+/// M003 menu-visible commands are `app`-context; palette-only commands stay
+/// `palette` so R6.4.2 can enable them while the palette owns the route.
+pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
+    match command.id {
+        WorkspaceCommandId::CommandPaletteClose => BindingContext::PALETTE,
+        WorkspaceCommandId::CommandPaletteOpen
+        | WorkspaceCommandId::TabCreate
+        | WorkspaceCommandId::TabCloseFocused
+        | WorkspaceCommandId::TabSelectPrevious
+        | WorkspaceCommandId::TabSelectNext
+        | WorkspaceCommandId::TabSelectOrdinal
+        | WorkspaceCommandId::PaneSplitRight
+        | WorkspaceCommandId::PaneSplitDown
+        | WorkspaceCommandId::PaneCloseFocused
+        | WorkspaceCommandId::PaneFocusNext
+        | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PresentationSetFlow
+        | WorkspaceCommandId::PresentationSetRaw
+        | WorkspaceCommandId::PresentationSetTui
+        | WorkspaceCommandId::PresentationToggleRaw
+        | WorkspaceCommandId::PresentationToggleTui
+        | WorkspaceCommandId::ComposerHistorySearchOpen
+        | WorkspaceCommandId::AppQuit
+        | WorkspaceCommandId::FocusHistoryBack
+        | WorkspaceCommandId::FocusHistoryForward
+        | WorkspaceCommandId::GotoOpen => BindingContext::APP,
+    }
+}
+
+/// R11.3 / R6.4.1: menu enabled/permitted follows the route context set, not
+/// binding presence. Unbinding a key (§7.3) must not hide or disable the command.
+pub fn menu_command_permitted(command: WorkspaceCommand, route: BindingContext) -> bool {
+    !menu_command_contexts(command)
+        .intersection(route)
+        .is_empty()
+}
+
 /// Re-validate a menu-invoked (or synthetic) WorkspaceCommand against the route.
 pub fn validate_workspace_command(
-    table: &KeybindingTable,
+    _table: &KeybindingTable,
     command: WorkspaceCommand,
     route: BindingContext,
 ) -> Result<(), InvokeError> {
-    if workspace_command_permitted(table, command, route) {
+    if menu_command_permitted(command, route) {
         Ok(())
     } else {
         Err(InvokeError::ActionUnavailable)

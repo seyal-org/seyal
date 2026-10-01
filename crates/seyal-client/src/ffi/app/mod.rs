@@ -378,12 +378,15 @@ pub extern "C" fn seyal_app_route_keystroke(
             composer_focused != 0,
             composition_active != 0,
         ) {
-            Ok(RouteOutcome::Matched { .. }) | Ok(RouteOutcome::PrefixWait) => {
+            Ok(RouteOutcome::Matched { .. })
+            | Ok(RouteOutcome::PrefixWait)
+            | Ok(RouteOutcome::UnmatchedCommand) => {
+                // Unmatched Command is ApplicationCommand miss: zero PTY and do
+                // not fall through to AppKit menu key-equivalent dispatch (R6.2.1).
+                // ReservedCommand still returns NATIVE_COMMAND so Edit/AppKit run.
                 SEYAL_APP_ROUTE_CONSUMED
             }
-            Ok(RouteOutcome::ReservedCommand) | Ok(RouteOutcome::UnmatchedCommand) => {
-                SEYAL_APP_ROUTE_NATIVE_COMMAND
-            }
+            Ok(RouteOutcome::ReservedCommand) => SEYAL_APP_ROUTE_NATIVE_COMMAND,
             Ok(RouteOutcome::CompositionConsumes) | Ok(RouteOutcome::Fallthrough) => {
                 SEYAL_APP_ROUTE_FALLTHROUGH
             }

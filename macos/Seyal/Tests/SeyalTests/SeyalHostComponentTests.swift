@@ -1372,6 +1372,34 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(row.has_key_equivalent, 0)
     }
 
+    /// R6.2.1: Command key equivalents route through Rust before the main menu.
+    @MainActor
+    func testPerformKeyEquivalentRoutesCommandBeforeMenu() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        XCTAssertTrue(
+            view.performKeyEquivalent(with: event),
+            "matched cmd+k must be consumed before AppKit menu dispatch"
+        )
+        let palette = seyal_app_palette(view.pane.appHandle)
+        XCTAssertNotEqual(
+            palette.flags & UInt16(SEYAL_APP_PALETTE_OPEN),
+            0,
+            "Rust should have opened the palette via route_keystroke"
+        )
+    }
+
 }
 
 @discardableResult

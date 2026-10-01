@@ -159,3 +159,80 @@ fn goto_open_projects_with_stable_menu_id() {
     assert_eq!(round_trip.id, WorkspaceCommandId::GotoOpen);
     assert!(round_trip.ordinal.is_none());
 }
+
+/// §7.3 / R11.1 / R11.3: unbinding a projected command keeps title + route enablement.
+#[test]
+fn unbind_projected_command_keeps_title_and_route_enablement() {
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+t"
+action = "none"
+"#;
+    let table = load_keybinding_table(Some(toml));
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+    let new_tab = item_for(WorkspaceCommandId::TabCreate, &projection);
+    assert!(
+        new_tab.key_equivalent.is_none(),
+        "unbind removes the menu key equivalent"
+    );
+    assert!(
+        new_tab.hints.is_empty(),
+        "no surviving bindings means no hints"
+    );
+    assert!(
+        new_tab.enabled,
+        "enabled follows the app route, not binding presence"
+    );
+    assert_eq!(
+        new_tab.accessibility_label, "New Tab",
+        "title remains present after unbind"
+    );
+
+    let palette_open = route_context_set(true, PresentationMode::Flow, false);
+    let when_open = project_shortcuts(&table, palette_open);
+    let new_tab_open = item_for(WorkspaceCommandId::TabCreate, &when_open);
+    assert!(
+        !new_tab_open.enabled,
+        "palette modal still disables non-palette menu commands"
+    );
+}
+
+/// R6.2.1 specificity: Raw-only rebind of cmd+t wins over builtin app tab.create.
+#[test]
+fn item_specificity_raw_rebind_of_projected_cmd_t() {
+    use super::chord::ChordPrefixState;
+    use super::route::{route_keystroke, RouteOutcome};
+    use super::stroke::NormalizedStroke;
+    use super::types::{KeySym, Modifiers};
+    use std::time::Instant;
+
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+t"
+action = "pane.split_down"
+context = ["raw"]
+"#;
+    let table = load_keybinding_table(Some(toml));
+    let event = NormalizedStroke {
+        modifiers: Modifiers::CMD,
+        key: KeySym::Char('t'),
+        shift_applied: None,
+    };
+    let mut chord = ChordPrefixState::new();
+    let raw = route_context_set(false, PresentationMode::Raw, false);
+    let matched = route_keystroke(&table, &event, raw, false, &mut chord, Instant::now());
+    assert!(
+        matches!(
+            matched,
+            RouteOutcome::Matched {
+                command: WorkspaceCommand {
+                    id: WorkspaceCommandId::PaneSplitDown,
+                    ..
+                }
+            }
+        ),
+        "Raw specificity must beat app tab.create before any menu path: {matched:?}"
+    );
+}
+
