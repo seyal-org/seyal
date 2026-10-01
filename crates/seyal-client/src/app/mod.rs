@@ -16,7 +16,7 @@ mod session;
 mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
-pub use native_effect::NativeEffect;
+pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
 mod recovery_tests;
@@ -25,9 +25,9 @@ mod tests;
 #[cfg(test)]
 mod unpresented_tests;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::chrome::{
     AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
@@ -84,6 +84,7 @@ pub enum AppError {
     PaletteNotOpen,
     PaletteNoSelection,
     TabCreationUnavailable,
+    WindowCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
@@ -94,6 +95,7 @@ pub enum AppError {
     /// The terminate action was validated, but no runtime termination request
     /// was made. The unpresented catalog entry is unchanged.
     TerminationNotRequested,
+    UnknownWindow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -305,6 +307,36 @@ pub enum AppAction {
     TerminateExecution {
         execution: ExecutionId,
     },
+    /// ADR-018 §2.2 window selection (W4a).
+    SelectWindow {
+        id: WindowId,
+    },
+    CycleWindow {
+        direction: crate::shell::CycleDirection,
+    },
+    /// Target-free New Window (ADR-018 §2.2 / §3.3a): Rust resolves Workspace.
+    CreateWindow,
+    /// Forwarded native window presentation input; host derives no product state.
+    ReportWindowEvent {
+        window: WindowId,
+        event: WindowNativeEvent,
+    },
+}
+
+/// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum WindowNativeEvent {
+    BecameKey = 0,
+    ResignedKey = 1,
+    BecameMain = 2,
+    ResignedMain = 3,
+    OcclusionChanged = 4,
+    Miniaturized = 5,
+    Deminiaturized = 6,
+    EnteredFullscreen = 7,
+    ExitedFullscreen = 8,
+    ScreenOrScaleChanged = 9,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -380,8 +412,15 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    /// Last forwarded window presentation event (test/host observability; not product state).
+    last_window_event: Option<(WindowId, WindowNativeEvent)>,
+    /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
+    quit_deadline: Option<Instant>,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
+    /// Extra live display attachments owned by this root (quit detaches all of them).
+    #[cfg(target_os = "macos")]
+    live_attachments: Vec<crate::ffi::ClientRegistryHandle>,
 }
 
 impl Default for ApplicationRoot {
@@ -396,7 +435,8 @@ impl ApplicationRoot {
     }
 
     pub(crate) fn with_shell(shell: ShellState) -> Self {
-        let pane = shell.snapshot().focused_pane;
+        let snap = shell.snapshot();
+        let pane = snap.focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
@@ -404,6 +444,16 @@ impl ApplicationRoot {
             mode: PresentationMode::Flow,
             input_route: InputRoute::Frozen,
         });
+        // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
+        let mut pending_effects = Vec::new();
+        for window in &snap.windows {
+            pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
+        }
+        if !snap.windows.is_empty() {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey {
+                window: snap.active_window,
+            });
+        }
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
@@ -411,7 +461,7 @@ impl ApplicationRoot {
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
-            pending_effects: Vec::new(),
+            pending_effects,
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
@@ -419,8 +469,12 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            last_window_event: None,
+            quit_deadline: None,
             #[cfg(target_os = "macos")]
             client_handle: None,
+            #[cfg(target_os = "macos")]
+            live_attachments: Vec::new(),
         }
     }
 
@@ -514,6 +568,7 @@ impl ApplicationRoot {
                     | AppAction::CancelRecovery
                     | AppAction::DisconnectReconstruction
                     | AppAction::Quit
+                    | AppAction::ReportWindowEvent { .. }
             )
         {
             return self.fail(AppError::Frozen);
@@ -653,6 +708,12 @@ impl ApplicationRoot {
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
             AppAction::AdoptUnpresented { execution } => self.adopt_unpresented_command(execution),
             AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
+            AppAction::SelectWindow { id } => self.select_window(id),
+            AppAction::CycleWindow { direction } => self.cycle_window(direction),
+            AppAction::CreateWindow => self.create_window(),
+            AppAction::ReportWindowEvent { window, event } => {
+                self.report_window_event(window, event)
+            }
         };
         match result {
             Ok(()) => {

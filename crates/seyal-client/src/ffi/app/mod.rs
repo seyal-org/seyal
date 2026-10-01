@@ -1,5 +1,4 @@
 //! Versioned one-Pane application-root C ABI.
-//!
 //! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
@@ -353,6 +352,52 @@ pub extern "C" fn seyal_app_create() -> u64 {
         );
     });
     handle
+}
+
+/// Test harness: replace `handle` with `windows` realizations and the same
+/// number of live attachments. Window-creation admission stays off.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_quit_case(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            match state.root.install_quit_fixture(windows as usize) {
+                Ok(()) => 0,
+                Err(()) => -3,
+            }
+        })
+    }
+}
+
+/// Test harness: live display attachments still registered for `handle`.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_live_attachment_count(handle: u64) -> u32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handle;
+        0
+    }
+    #[cfg(target_os = "macos")]
+    {
+        APPS.with(|apps| {
+            apps.borrow()
+                .get(&handle)
+                .map(|state| state.root.live_attachment_count() as u32)
+                .unwrap_or(0)
+        })
+    }
 }
 
 #[unsafe(no_mangle)]

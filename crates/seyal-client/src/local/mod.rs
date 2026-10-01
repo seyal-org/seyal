@@ -136,9 +136,29 @@ pub struct LocalDisplayClient {
     pub(crate) last_sent_v2_action_id: u32,
     pub(crate) highest_v2_error_id: u32,
     pub(crate) last_admitted_mouse_action_id: u32,
+    /// Other end of an in-process probe pair. Production clients leave this
+    /// empty. Dropping it before the quit `Detach` write raises SIGPIPE in
+    /// the AppKit process, which does not ignore that signal.
+    pub(crate) probe_peer: Option<UnixStream>,
 }
 
 impl LocalDisplayClient {
+    /// One nonblocking `Detach` write. Does not wait for `Detached` (SPEC-009 §6)
+    /// and does not retry. The caller drops the client immediately after.
+    pub fn request_bounded_detach(&mut self) {
+        use std::io::Write;
+        let payload = seyal_runtime::local_ipc::framing::Detach {
+            attachment_id: self.attachment_id,
+        }
+        .encode();
+        let frame = encode_frame(MessageType::Detach, &payload);
+        // Keep a probe peer alive across this write. A closed pair raises
+        // SIGPIPE in the AppKit process.
+        let _peer = &self.probe_peer;
+        let _ = self.stream.set_nonblocking(true);
+        let _ = self.stream.write_all(&frame);
+    }
+
     pub fn socket_fd(&self) -> i32 {
         self.stream.as_raw_fd()
     }
@@ -580,9 +600,10 @@ pub(crate) fn validate_composer_status(
         && current.is_none_or(|current| status.revision > current.revision)
 }
 
-/// In-process client for reconstruction-fact tests. Rows and columns are the
-/// same gate `finish_attach` uses for a committed snapshot (`> 0`).
-#[cfg(test)]
+/// In-process client for reconstruction-fact tests and the quit-fixture seed.
+/// Rows and columns are the same gate `finish_attach` uses for a committed
+/// snapshot (`> 0`).
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn reconstruction_probe_client(
     role: Role,
     rows: u16,
@@ -591,7 +612,7 @@ pub(crate) fn reconstruction_probe_client(
     execution_id: ExecutionId,
     attachment_id: AttachmentId,
 ) -> LocalDisplayClient {
-    let (stream, _peer) = UnixStream::pair().expect("probe socket");
+    let (stream, peer) = UnixStream::pair().expect("probe socket");
     let mut cache = seyal_runtime::display::empty_cache();
     cache.rows = rows;
     cache.columns = columns;
@@ -648,6 +669,7 @@ pub(crate) fn reconstruction_probe_client(
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        probe_peer: Some(peer),
     }
 }
 

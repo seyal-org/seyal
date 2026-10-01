@@ -59,6 +59,7 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        probe_peer: None,
     }
 }
 
@@ -539,7 +540,11 @@ fn unpresented_terminate_keeps_catalog_until_runtime_accepts() {
     );
     assert_eq!(root.live_unpresented(), vec![target]);
     assert!(
-        root.snapshot().pending_effects.is_empty(),
+        !root
+            .snapshot()
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
         "a missed write must not queue terminate"
     );
 
@@ -553,7 +558,11 @@ fn unpresented_terminate_keeps_catalog_until_runtime_accepts() {
         Err(AppError::TerminationNotRequested)
     );
     assert_eq!(root.live_unpresented(), vec![target]);
-    assert!(root.snapshot().pending_effects.is_empty());
+    assert!(!root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
 
     root.apply(AppAction::TerminateExecution { execution: target })
         .expect("accepted terminate");
@@ -562,10 +571,12 @@ fn unpresented_terminate_keeps_catalog_until_runtime_accepts() {
         vec![target.to_bytes(), target.to_bytes()]
     );
     assert!(root.live_unpresented().is_empty());
-    assert_eq!(
-        root.snapshot().pending_effects,
-        vec![NativeEffect::TerminateExecution { execution: target }]
-    );
+    assert!(root.snapshot().pending_effects.iter().any(|effect| {
+        matches!(
+            effect,
+            NativeEffect::TerminateExecution { execution } if *execution == target
+        )
+    }));
     assert_eq!(
         root.apply(AppAction::TerminateExecution { execution: target }),
         Err(AppError::ExecutionNotUnpresented)

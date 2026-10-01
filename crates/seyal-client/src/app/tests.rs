@@ -11,8 +11,7 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     }
 }
 
-/// Runtime published `Available` for the bound attachment: the only way
-/// the composer becomes submittable.
+/// Runtime `Available` for the bound attachment is what makes the composer submittable.
 fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
@@ -361,12 +360,18 @@ fn tui_controller_without_client_is_authorized_but_has_no_second_pty() {
 #[test]
 fn quit_freezes_and_emits_one_native_effect() {
     let mut root = ApplicationRoot::new();
+    // Drain bootstrap realize/order-front so Quit is the sole pending effect under test.
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
     root.apply(AppAction::Quit).unwrap();
     let snap = root.snapshot();
     assert!(snap.frozen);
     assert_eq!(
         snap.pending_effects.as_slice(),
-        &[NativeEffect::BoundedDetachThenTerminate]
+        &[NativeEffect::BoundedDetachThenTerminate {
+            deadline_ms: QUIT_CLEANUP_DEADLINE_MS
+        }]
     );
     assert_eq!(
         root.apply(AppAction::Focus {
@@ -375,7 +380,47 @@ fn quit_freezes_and_emits_one_native_effect() {
         Err(AppError::Frozen)
     );
     root.apply(AppAction::AckEffect).unwrap();
+    assert_eq!(
+        root.snapshot().pending_effects.as_slice(),
+        &[NativeEffect::QuitCleanupComplete]
+    );
+    root.apply(AppAction::AckEffect).unwrap();
     assert!(root.snapshot().pending_effects.is_empty());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn quit_three_windows_and_three_attachments_detaches_before_cleanup_complete() {
+    let mut root = ApplicationRoot::new();
+    root.install_quit_fixture(3).expect("fixture");
+    let snap = root.snapshot();
+    assert_eq!(snap.shell.windows.len(), 3);
+    assert!(!snap.shell.allows_window_creation);
+    assert_eq!(root.live_attachment_count(), 3);
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    assert_eq!(
+        root.live_attachment_count(),
+        3,
+        "acking realize effects must not detach"
+    );
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert_eq!(
+        snap.pending_effects.as_slice(),
+        &[NativeEffect::BoundedDetachThenTerminate {
+            deadline_ms: QUIT_CLEANUP_DEADLINE_MS
+        }]
+    );
+    assert_eq!(root.live_attachment_count(), 3);
+    root.apply(AppAction::AckEffect).unwrap();
+    assert_eq!(root.live_attachment_count(), 0);
+    assert_eq!(
+        root.snapshot().pending_effects.as_slice(),
+        &[NativeEffect::QuitCleanupComplete]
+    );
 }
 
 #[test]
@@ -401,7 +446,7 @@ fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     assert!(
         snap.pending_effects
             .iter()
-            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
         "quit effect must remain present after prior selections"
     );
     while !root.snapshot().pending_effects.is_empty() {
@@ -844,5 +889,22 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
             id: AttentionId::new("missing"),
         }),
         Err(AppError::UnknownAttention)
+    );
+}
+
+#[test]
+fn create_window_is_target_free_and_uses_active_workspace() {
+    let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation(true);
+    let before = root.snapshot().shell.clone();
+    let workspace = before.active_workspace;
+    let window_count = before.windows.len();
+    root.apply(AppAction::CreateWindow)
+        .expect("target-free create");
+    let after = root.snapshot().shell;
+    assert_eq!(after.windows.len(), window_count + 1);
+    assert_eq!(
+        after.active_workspace, workspace,
+        "with a product-active Window, New Window targets that Workspace"
     );
 }

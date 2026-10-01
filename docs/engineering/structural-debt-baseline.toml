@@ -34,39 +34,45 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 784
+acknowledged_loc = 841
 issue = 1143
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade. #1143 adds TerminationNotRequested so a failed unpresented terminate does not pretend the runtime was asked to reap."
+reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions and the quit deadline; #1143 adds unpresented adopt and terminate. Both stay on this façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 809
+acknowledged_loc = 810
 issue = 1143
-reason = "Global command-palette reducer stays one cohesive open/filter/resolve module; #1143 adds §3.3 AdoptUnpresented/TerminateUnpresented command variants and snapshot_with_unpresented plumbing without storing a stale command list."
+reason = "Global command-palette reducer stays one cohesive open/filter/resolve module. #1143 adds AdoptUnpresented and TerminateUnpresented; #1123 only threads the window-creation admission flag through the existing fixture."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 848
-issue = 1108
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1108 adds multi-window OrderFrontMakeKey emission and bounded-queue proofs beside the existing ApplicationRoot suite. Ceiling matches post-W3 LOC."
+acknowledged_loc = 910
+issue = 1123
+reason = "ApplicationRoot tests stay one module. #1123 adds the three-window quit detach proof beside the #1108 OrderFrontMakeKey and bounded-queue coverage; ceiling matches post-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 894
-issue = 1122
-reason = "Shell reducer suite stays one module. #1122 adds tab-scoped zoom and containment_generation Split/Close fence proofs beside the multi-window snapshot coverage from #1108; further extraction would split one containment contract table."
+acknowledged_loc = 898
+issue = 1123
+reason = "Shell reducer suite stays one module. #1122 zoom and containment-fence proofs sit beside #1108 multi-window coverage; #1123 adds the window-creation flag on those fixtures."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/mod.rs"
+acknowledged_loc = 753
+issue = 1143
+reason = "ShellState stays the composition reducer. #1123 adds window-creation admission; #1143 adds unpresented adopt and terminate dispatch. Splitting those actions out would separate the error and effect types from the reducer that emits them."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 863
+acknowledged_loc = 907
 issue = 1143
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1143 moves AppError→number mapping into encode.rs beside snapshot encoding, ratcheting this façade down from the prior 900 LOC #1108 ceiling."
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade. #1143 keeps AppError numbering in encode.rs; #1123 adds the quit-fixture seed exports beside the window exports."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
 acknowledged_loc = 779
-issue = 1122
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1122 only updates the published SeyalAppTab size assertion after the trailing zoom overlay fields grew the W3 tab record."
+issue = 1123
+reason = "ABI contract tests stay one module. #1123 adds the multi-window snapshot proofs beside the existing handle tests."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -107,5 +113,4 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
-
 

@@ -70,6 +70,7 @@ fn seed_two_workspaces() -> ShellState {
         workspace_a(),
         true,
         true,
+        false,
     )
     .expect("seed")
 }

@@ -1314,7 +1314,7 @@ final class SeyalHostComponentTests: XCTestCase {
 }
 
 @discardableResult
-private func reloadUiConfig(path: String) -> Int32 {
+func reloadUiConfig(path: String) -> Int32 {
     let bytes = Array(path.utf8)
     return bytes.withUnsafeBufferPointer { buffer in
         seyal_app_test_reload_ui_configuration(buffer.baseAddress, bytes.count)

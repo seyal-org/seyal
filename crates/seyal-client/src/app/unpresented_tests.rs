@@ -66,7 +66,11 @@ fn terminate_queues_adr005_effect_not_from_close() {
         Err(AppError::TerminationNotRequested)
     );
     assert!(
-        root.snapshot().pending_effects.is_empty(),
+        !root
+            .snapshot()
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
         "a failed runtime request must not queue terminate"
     );
     assert_eq!(root.live_unpresented(), vec![execution]);
@@ -126,7 +130,11 @@ fn palette_terminate_dispatches_typed_action() {
         Err(AppError::TerminationNotRequested)
     );
     assert!(
-        root.snapshot().pending_effects.is_empty(),
+        !root
+            .snapshot()
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
         "palette terminate does not queue an effect when the runtime was not asked"
     );
     assert_eq!(root.live_unpresented(), vec![execution]);
@@ -225,7 +233,11 @@ fn palette_adopt_rejects_before_bind_when_attach_is_unavailable() {
         }),
         Err(AppError::NoLiveClient)
     );
-    assert!(root.snapshot().pending_effects.is_empty());
+    assert!(!root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
     assert_eq!(root.live_unpresented(), vec![execution]);
     assert!(root
         .snapshot()

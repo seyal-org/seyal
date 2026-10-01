@@ -46,9 +46,11 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
-        AppError::CrossWorkspaceAdopt => 34,
-        AppError::ExecutionNotUnpresented => 35,
-        AppError::TerminationNotRequested => 36,
+        AppError::UnknownWindow => 34,
+        AppError::WindowCreationUnavailable => 35,
+        AppError::CrossWorkspaceAdopt => 36,
+        AppError::ExecutionNotUnpresented => 37,
+        AppError::TerminationNotRequested => 38,
     }
 }
 

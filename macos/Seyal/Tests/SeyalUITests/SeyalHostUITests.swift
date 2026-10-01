@@ -906,4 +906,10 @@ final class SeyalHostUITests: XCTestCase {
         }
         return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
     }
+
+    func testHostLaunchesOneWindowThroughTheMultiWindowController() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+    }
 }
