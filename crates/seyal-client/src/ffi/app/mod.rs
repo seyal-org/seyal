@@ -1,5 +1,4 @@
 //! Versioned one-Pane application-root C ABI.
-//!
 //! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
@@ -14,7 +13,7 @@ mod tests;
 
 use std::{cell::RefCell, collections::HashMap, ptr};
 
-use crate::app::{AppError, ApplicationRoot, APP_ABI_VERSION};
+use crate::app::{ApplicationRoot, APP_ABI_VERSION};
 use crate::chrome::{InspectorMode, LeftPanelMode};
 use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
@@ -27,7 +26,7 @@ use super::allocate_handle;
 use decode::decode_action;
 use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
+    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, error_number,
 };
 
 pub use pane_region::seyal_app_pane_region;
@@ -408,6 +407,52 @@ pub extern "C" fn seyal_app_create() -> u64 {
         );
     });
     handle
+}
+
+/// Test harness: replace `handle` with `windows` realizations and the same
+/// number of live attachments. Window-creation admission stays off.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_quit_case(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            match state.root.install_quit_fixture(windows as usize) {
+                Ok(()) => 0,
+                Err(()) => -3,
+            }
+        })
+    }
+}
+
+/// Test harness: live display attachments still registered for `handle`.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_live_attachment_count(handle: u64) -> u32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handle;
+        0
+    }
+    #[cfg(target_os = "macos")]
+    {
+        APPS.with(|apps| {
+            apps.borrow()
+                .get(&handle)
+                .map(|state| state.root.live_attachment_count() as u32)
+                .unwrap_or(0)
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -916,42 +961,3 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
     }
 }
 
-fn error_number(error: AppError) -> i32 {
-    match error {
-        AppError::UnknownPane => 1,
-        AppError::StalePane => 2,
-        AppError::StaleExecution => 3,
-        AppError::StaleAttachment => 4,
-        AppError::StaleController => 5,
-        AppError::StalePresentationEpoch => 6,
-        AppError::UnboundUnauthorized => 7,
-        AppError::AlreadyBound => 8,
-        AppError::NotController => 9,
-        AppError::DirectInputUnauthorized => 10,
-        AppError::ZeroPtyGeneration => 11,
-        AppError::Frozen => 12,
-        AppError::NoLiveClient => 13,
-        AppError::InvalidPayload => 14,
-        AppError::StaleRecoveryGeneration => 15,
-        AppError::ComposerSubmitDisabled => 16,
-        AppError::StaleComposerRequest => 17,
-        AppError::StaleComposerEpoch => 18,
-        AppError::UnknownAgent => 19,
-        AppError::UnknownAttention => 20,
-        AppError::UnknownChromeWorkspace => 21,
-        AppError::UnknownChromeTab => 22,
-        AppError::ComposerHistoryUnavailable => 23,
-        AppError::ComposerHistoryClosed => 24,
-        AppError::ComposerHistoryNoSelection => 25,
-        AppError::PaletteNotOpen => 26,
-        AppError::PaletteNoSelection => 27,
-        AppError::TabCreationUnavailable => 28,
-        AppError::PaneSplitUnavailable => 29,
-        AppError::UnknownBlock => 30,
-        AppError::CannotCloseLastTab => 31,
-        AppError::CannotCloseLastPane => 32,
-        AppError::CannotCloseBoundPane => 33,
-        AppError::ActionUnavailable => 34,
-        AppError::NoDirectionalNeighbor => 35,
-    }
-}

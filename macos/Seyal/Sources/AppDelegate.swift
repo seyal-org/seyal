@@ -2,49 +2,30 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var window: NSWindow?
-    private var host: ProductChromeHostView?
+    private var host: MultiWindowHostController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let host = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
+        let host = MultiWindowHostController()
         self.host = host
-
-        let window = NSWindow(
-            contentRect: host.bounds,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Seyal"
-        window.minSize = NSSize(width: 960, height: 640)
-        // Appearance comes from Rust-resolved visual preference at host apply.
-        let platform = NSApp.effectiveAppearance
-        // Bounded non-secret diagnostics once per cold load — not on every chrome reconcile.
-        NativeThemeRealization.surfaceColdDiagnosticsOnce(for: platform)
-        let resolved = NativeThemeRealization.theme(for: platform)
-        window.appearance = resolved.appearance
-        window.contentView = host
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
-
-        installMenus()
-        host.activateAfterWindowPresentation()
-        NSApp.activate(ignoringOtherApps: true)
+        installMenus(targeting: host)
+        host.bootstrapAfterLaunch()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // ADR-018 §2.5: last-window-close never quits in M003 (W4b).
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        host?.requestQuit()
-        host?.detachForTermination()
-        return .terminateNow
+        guard let host else {
+            return .terminateNow
+        }
+        return host.applicationShouldTerminate()
     }
 
-    private func installMenus() {
+    private func installMenus(targeting host: MultiWindowHostController) {
         let mainMenu = NSMenu()
+
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
@@ -54,6 +35,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "q"
         )
         appItem.submenu = appMenu
+
+        let fileItem = NSMenuItem()
+        mainMenu.addItem(fileItem)
+        let fileMenu = NSMenu(title: "File")
+        let newWindow = NSMenuItem(
+            title: "New Window",
+            action: #selector(MultiWindowHostController.createWindow(_:)),
+            keyEquivalent: "n"
+        )
+        newWindow.target = host
+        fileMenu.addItem(newWindow)
+        let newTab = NSMenuItem(
+            title: "New Tab",
+            action: #selector(MultiWindowHostController.createTab(_:)),
+            keyEquivalent: "t"
+        )
+        newTab.target = host
+        fileMenu.addItem(newTab)
+        fileItem.submenu = fileMenu
 
         let editItem = NSMenuItem()
         mainMenu.addItem(editItem)
@@ -71,13 +71,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(ProductChromeHostView.openCommandPalette),
             keyEquivalent: "k"
         )
-        // Global command palette (#932). Target-less: AppKit walks the
-        // responder chain, but `host` is the content view and not always
-        // first responder (e.g. the terminal surface is), so target it
-        // explicitly at the chrome host that owns the Rust-backed overlay.
-        paletteItem.target = host
+        paletteItem.target = host.liveHost
         viewMenu.addItem(paletteItem)
         viewItem.submenu = viewMenu
+
+        let windowItem = NSMenuItem()
+        mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        let cycleNext = NSMenuItem(
+            title: "Cycle Next Window",
+            action: #selector(MultiWindowHostController.cycleWindowNext(_:)),
+            keyEquivalent: "`"
+        )
+        cycleNext.keyEquivalentModifierMask = [.command]
+        cycleNext.target = host
+        windowMenu.addItem(cycleNext)
+        let cyclePrev = NSMenuItem(
+            title: "Cycle Previous Window",
+            action: #selector(MultiWindowHostController.cycleWindowPrevious(_:)),
+            keyEquivalent: "`"
+        )
+        cyclePrev.keyEquivalentModifierMask = [.command, .shift]
+        cyclePrev.target = host
+        windowMenu.addItem(cyclePrev)
+        windowMenu.addItem(NSMenuItem.separator())
+        // ⌥⌘1…9 select by snapshot order — NSMenuItem key equivalents only.
+        for index in 1...9 {
+            let item = NSMenuItem(
+                title: "Select Window \(index)",
+                action: #selector(MultiWindowHostController.selectWindowByTag(_:)),
+                keyEquivalent: "\(index)"
+            )
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.tag = index - 1
+            item.target = host
+            windowMenu.addItem(item)
+        }
+        windowItem.submenu = windowMenu
 
         NSApp.mainMenu = mainMenu
     }

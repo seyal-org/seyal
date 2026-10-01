@@ -1,5 +1,7 @@
 use super::*;
-use seyal_runtime::local_ipc::framing::{ErrorCode, ErrorMessage, MessageType};
+use seyal_runtime::local_ipc::framing::{
+    encode_frame, ErrorCode, ErrorMessage, FrameHeader, MessageType, HEADER_LEN,
+};
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
 
@@ -57,6 +59,7 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        probe_peer: None,
     }
 }
 
@@ -481,4 +484,138 @@ fn v2_sent_bound_advances_only_after_wire_complete() {
             .unwrap(),
         Some(InputAdmissionFailure::ClientBackpressure)
     );
+}
+
+fn spawn_terminate_peer(
+    mut peer: UnixStream,
+    accepts: Vec<bool>,
+) -> std::thread::JoinHandle<Vec<[u8; 16]>> {
+    std::thread::spawn(move || {
+        peer.set_nonblocking(false).expect("blocking peer");
+        let mut seen = Vec::new();
+        for accept in accepts {
+            let mut header = [0u8; HEADER_LEN];
+            peer.read_exact(&mut header).expect("header");
+            let header = FrameHeader::decode(&header).expect("frame");
+            assert_eq!(header.message_type, MessageType::TerminateExecution as u16);
+            assert_eq!(header.payload_len, 16);
+            let mut payload = [0u8; 16];
+            peer.read_exact(&mut payload).expect("payload");
+            let reply = if accept {
+                encode_frame(MessageType::TerminateExecution, &payload)
+            } else {
+                encode_frame(
+                    MessageType::Error,
+                    &ErrorMessage {
+                        error_code: ErrorCode::InvalidState as u16,
+                        offending_message_type: MessageType::TerminateExecution as u16,
+                        detail_code: 0,
+                    }
+                    .encode(),
+                )
+            };
+            peer.write_all(&reply).expect("reply");
+            seen.push(payload);
+        }
+        seen
+    })
+}
+
+#[test]
+fn unpresented_terminate_keeps_catalog_until_runtime_accepts() {
+    use crate::app::{AppAction, AppError, ApplicationRoot, NativeEffect};
+    use seyal_core::WorkspaceId;
+
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let target = ExecutionId::from_bytes([0x44; 16]);
+    root.apply(AppAction::RecordUnpresented {
+        execution: target,
+        workspace,
+    })
+    .unwrap();
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution: target }),
+        Err(AppError::TerminationNotRequested)
+    );
+    assert_eq!(root.live_unpresented(), vec![target]);
+    assert!(
+        !root
+            .snapshot()
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
+        "a missed write must not queue terminate"
+    );
+
+    let (ours, peer) = UnixStream::pair().expect("pair");
+    ours.set_nonblocking(true).expect("nonblocking");
+    let reply = spawn_terminate_peer(peer, vec![false, true]);
+    root.attach_client(root.fence(), test_client(ours))
+        .expect("attach");
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution: target }),
+        Err(AppError::TerminationNotRequested)
+    );
+    assert_eq!(root.live_unpresented(), vec![target]);
+    assert!(!root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
+
+    root.apply(AppAction::TerminateExecution { execution: target })
+        .expect("accepted terminate");
+    assert_eq!(
+        reply.join().expect("peer"),
+        vec![target.to_bytes(), target.to_bytes()]
+    );
+    assert!(root.live_unpresented().is_empty());
+    assert!(root.snapshot().pending_effects.iter().any(|effect| {
+        matches!(
+            effect,
+            NativeEffect::TerminateExecution { execution } if *execution == target
+        )
+    }));
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution: target }),
+        Err(AppError::ExecutionNotUnpresented)
+    );
+}
+
+#[test]
+fn terminate_acceptance_appends_after_a_partial_frame() {
+    let (client_stream, mut server) = UnixStream::pair().expect("pair");
+    let mut client = test_client(client_stream);
+    let execution = ExecutionId::from_bytes([9; 16]);
+    let earlier = encode_frame(MessageType::Goodbye, &[]);
+    let other_error = encode_frame(
+        MessageType::Error,
+        &ErrorMessage {
+            error_code: ErrorCode::InvalidState as u16,
+            offending_message_type: MessageType::Resize as u16,
+            detail_code: 0,
+        }
+        .encode(),
+    );
+    let echo = encode_frame(MessageType::TerminateExecution, &execution.to_bytes());
+    client.buffered.extend_from_slice(&earlier[..3]);
+    server
+        .write_all(&earlier[3..])
+        .expect("rest of the earlier frame");
+    server.write_all(&other_error).expect("unrelated error");
+    server.write_all(&echo).expect("accept echo");
+    drop(server);
+
+    client
+        .read_terminate_acceptance(
+            execution,
+            std::time::Instant::now() + std::time::Duration::from_secs(1),
+        )
+        .expect("echo accepted");
+
+    let mut kept = earlier.clone();
+    kept.extend_from_slice(&other_error);
+    assert_eq!(client.buffered, kept);
+    assert_eq!(client.read_offset, 0);
 }

@@ -118,8 +118,37 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
-    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /*
+     * W4a window actions (ADR-018 §2.2). SELECT_WINDOW: target_execution_lo/hi
+     * = WindowId. CREATE_WINDOW is target-free (Rust resolves Workspace from the
+     * product-active Window, else last_active_workspace). CYCLE_WINDOW: reserved
+     * = 0 next, 1 previous. REPORT_WINDOW_EVENT: target_execution = WindowId,
+     * reserved = event kind (0 became-key … 9 screen/scale). Error 34 = UnknownWindow.
+     */
+    SEYAL_APP_ACTION_SELECT_WINDOW = 58,
+    SEYAL_APP_ACTION_CYCLE_WINDOW = 59,
+    SEYAL_APP_ACTION_CREATE_WINDOW = 60,
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 61,
+    /**
+     * Adopt one live-unpresented execution into the focused Pane.
+     * target_execution_lo/hi = ExecutionId. Rust validates, then runs the
+     * existing Attach handshake and binds only after a fresh AttachmentId
+     * is allocated. No new PTY and no new ExecutionId.
+     */
+    SEYAL_APP_ACTION_ADOPT_UNPRESENTED = 62
 };
+
+#define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_KEY 1u
+#define SEYAL_APP_WINDOW_EVENT_BECAME_MAIN 2u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_MAIN 3u
+#define SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED 4u
+#define SEYAL_APP_WINDOW_EVENT_MINIATURIZED 5u
+#define SEYAL_APP_WINDOW_EVENT_DEMINIATURIZED 6u
+#define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
+#define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
+#define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
 enum SeyalAppComposerEligibility {
@@ -503,8 +532,9 @@ typedef struct SeyalAppPaneTreeNode {
 
 /*
  * ADR-018 §2.4 native effects in commit order.
- * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
- *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
+ * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
+ *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
+ *       5 QuitCleanupComplete.
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -519,6 +549,8 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
+#define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 5u
+#define SEYAL_APP_EFFECT_TERMINATE_EXECUTION 6u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u
@@ -606,7 +638,7 @@ uint8_t seyal_app_option_as_alt(uint64_t handle);
  * PageUp=23, PageDown=24, Delete=25).
  * shift_applied: Unicode scalar or 0.
  * Returns: 0 fallthrough, 1 consumed (zero PTY), 2 native Command handling,
- * negative = -AppError (34 = ActionUnavailable).
+ * negative = -AppError (39 = ActionUnavailable; 40 = NoDirectionalNeighbor).
  */
 int32_t seyal_app_route_keystroke(
     uint64_t handle,
@@ -703,6 +735,9 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+/* Test harness: N windows and N attachments, admission stays off. */
+int32_t seyal_app_test_seed_quit_case(uint64_t handle, uint32_t windows);
+uint32_t seyal_app_test_live_attachment_count(uint64_t handle);
 
 int32_t seyal_app_last_error(uint64_t handle);
 

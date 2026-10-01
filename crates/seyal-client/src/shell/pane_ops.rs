@@ -40,8 +40,7 @@ impl ShellState {
         if !tab.panes.contains_key(&a) || !tab.panes.contains_key(&b) {
             return Err(ShellError::UnknownPane);
         }
-        // ADR-021 §3 / PT1: successful structural mutation clears zoom.
-        tab.zoomed = None;
+        // SPEC-025 §5.3: the zoom overlay follows the PaneId, not the slot.
         tab.root = tab.root.swapping_leaves(a, b);
         self.bump_containment_generation();
         Ok(())
@@ -67,7 +66,7 @@ impl ShellState {
         if !root_without.contains_leaf(neighbor) {
             return Err(ShellError::InvalidMoveTarget);
         }
-        // ADR-021 §3 / PT1: successful structural mutation clears zoom.
+        // SPEC-025 §5.4: a successful move-beside clears the zoom overlay.
         tab.zoomed = None;
         tab.root = root_without.replacing(neighbor, side.split_beside(pane, neighbor));
         self.bump_containment_generation();

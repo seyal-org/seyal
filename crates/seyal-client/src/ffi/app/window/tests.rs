@@ -11,9 +11,9 @@ use crate::shell::{
 };
 
 use super::super::{
-    seyal_app_create, seyal_app_destroy, seyal_app_native_effect, seyal_app_pane_leaf,
-    seyal_app_record_compatible, seyal_app_shell, seyal_app_tab, seyal_app_tab_tree_node,
-    seyal_app_window, SeyalAppShell, APPS,
+    seyal_app_apply, seyal_app_create, seyal_app_destroy, seyal_app_last_error,
+    seyal_app_native_effect, seyal_app_pane_leaf, seyal_app_record_compatible, seyal_app_shell,
+    seyal_app_tab, seyal_app_tab_tree_node, seyal_app_window, SeyalAppAction, SeyalAppShell, APPS,
 };
 use super::{
     SeyalAppNativeEffect, SeyalAppPaneLeaf, SeyalAppPaneTreeNode, SeyalAppTab, SeyalAppWindow,
@@ -58,6 +58,7 @@ fn seed_n_windows(n: usize) -> ShellState {
         }],
         workspace,
         false,
+        true,
         true,
     )
     .expect("seeded shell")
@@ -285,6 +286,14 @@ fn effects_emit_in_commit_order() {
         ]
     );
     install_shell(handle, seed_n_windows(1));
+    // Drain bootstrap RealizeWindow + OrderFrontMakeKey from with_shell.
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        while !state.root.snapshot().pending_effects.is_empty() {
+            state.root.apply(crate::app::AppAction::AckEffect).unwrap();
+        }
+    });
     let generation = seyal_app_shell(handle).containment_generation;
     apply_on_handle(
         handle,
@@ -331,5 +340,23 @@ fn bindings_and_focused_tier_round_trip() {
         (pane_row.execution_lo, pane_row.execution_hi),
         split(execution.to_bytes())
     );
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn production_create_window_apply_is_rejected() {
+    let handle = seyal_app_create();
+    let before = seyal_app_shell(handle).window_count;
+    let mut action: SeyalAppAction = unsafe { std::mem::zeroed() };
+    action.version = APP_ABI_VERSION;
+    action.size = size_of::<SeyalAppAction>() as u16;
+    action.kind = 60;
+    assert_eq!(unsafe { seyal_app_apply(handle, &action) }, -4);
+    assert_eq!(
+        seyal_app_last_error(handle),
+        35,
+        "WindowCreationUnavailable"
+    );
+    assert_eq!(seyal_app_shell(handle).window_count, before);
     assert_eq!(seyal_app_destroy(handle), 0);
 }

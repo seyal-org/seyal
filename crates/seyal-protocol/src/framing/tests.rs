@@ -72,6 +72,30 @@ fn display_message_ids_replace_candidate_b_projection_messages() {
     assert_eq!(MessageType::from_u16(32), Some(MessageType::CopiedText));
     assert_eq!(MessageType::from_u16(33), Some(MessageType::HostSearch));
     assert_eq!(MessageType::from_u16(34), Some(MessageType::TerminalMouse));
+    assert_eq!(
+        MessageType::from_u16(35),
+        Some(MessageType::TerminateExecution)
+    );
+}
+
+#[test]
+fn terminate_execution_payload_is_the_execution_id() {
+    let id = ExecutionId::from_bytes([0xab; 16]);
+    let header = FrameHeader::new(MessageType::TerminateExecution as u16, 16);
+    match decode_message(&header, &id.to_bytes()).unwrap() {
+        Message::TerminateExecution(decoded) => assert_eq!(decoded, id),
+        other => panic!("expected TerminateExecution, got {other:?}"),
+    }
+    let short = FrameHeader::new(MessageType::TerminateExecution as u16, 15);
+    assert_eq!(
+        decode_message(&short, &[0; 15]),
+        Err(FramingError::ExactLengthMismatch)
+    );
+    let long = FrameHeader::new(MessageType::TerminateExecution as u16, 17);
+    assert_eq!(
+        decode_message(&long, &[0; 17]),
+        Err(FramingError::ExactLengthMismatch)
+    );
 }
 
 #[test]

@@ -362,9 +362,15 @@ fn relocate_window_pointers(state: &mut AppHandle) {
 }
 
 fn encode_effect(effect: NativeEffect) -> SeyalAppNativeEffect {
-    let (window_lo, window_hi) = match effect.window() {
-        Some(window) => split_id(window.to_bytes()),
-        None => (0, 0),
+    // kind 1 BoundedDetachThenTerminate: window_lo carries relative deadline_ms.
+    // TerminateExecution reuses the same 128-bit split for ExecutionId; kind selects.
+    let (window_lo, window_hi) = match effect {
+        NativeEffect::BoundedDetachThenTerminate { deadline_ms } => (deadline_ms, 0),
+        NativeEffect::TerminateExecution { execution } => split_id(execution.to_bytes()),
+        other => match other.window() {
+            Some(window) => split_id(window.to_bytes()),
+            None => (0, 0),
+        },
     };
     SeyalAppNativeEffect {
         version: APP_ABI_VERSION,

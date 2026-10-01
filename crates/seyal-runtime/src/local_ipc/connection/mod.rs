@@ -116,10 +116,18 @@ pub enum ConnectionState {
 impl ConnectionState {
     pub fn validate_incoming(self, message_type: MessageType) -> Result<(), StateError> {
         use MessageType::*;
+        // `TerminateExecution` is connection-level, like `ListExecutions`: the
+        // payload names an unpresented execution and carries no attachment.
+        // Ready accepts it before attachment. Attached accepts it so a headed
+        // client already attached to a different execution can request the
+        // reap on that live socket.
         let allowed = matches!(
             (self, message_type),
             (Self::AwaitHello, ClientHello)
-                | (Self::Ready, ListExecutions | Attach | Goodbye)
+                | (
+                    Self::Ready,
+                    ListExecutions | TerminateExecution | Attach | Goodbye
+                )
                 | (
                     Self::Attached,
                     Input
@@ -131,6 +139,7 @@ impl ConnectionState {
                         | Resync
                         | Detach
                         | Goodbye
+                        | TerminateExecution
                 )
         );
         allowed.then_some(()).ok_or(StateError::InvalidState)
