@@ -354,7 +354,7 @@ fn production_create_window_apply_is_rejected() {
     assert_eq!(unsafe { seyal_app_apply(handle, &action) }, -4);
     assert_eq!(
         seyal_app_last_error(handle),
-        50,
+        35,
         "WindowCreationUnavailable"
     );
     assert_eq!(seyal_app_shell(handle).window_count, before);

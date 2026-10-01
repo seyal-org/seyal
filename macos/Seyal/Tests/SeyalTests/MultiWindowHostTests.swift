@@ -29,57 +29,77 @@ final class MultiWindowHostTests: XCTestCase {
     }
 
     func testTerminateLaterRepliesOnceOnCleanupComplete() {
+        let host = seededQuitHost(windows: 3)
+        XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 3)
+        XCTAssertEqual(host.orderedKeys.count, 3)
+        XCTAssertEqual(
+            host.realizedTabbingModes(),
+            [.disallowed, .disallowed, .disallowed]
+        )
         var replies = 0
-        let coordinator = ApplicationQuitCoordinator()
-        var backstop: (() -> Void)?
-        let reply = coordinator.beginForTest(
-            forwardFailed: false,
-            scheduleBackstop: { fire in backstop = fire },
-            performNativeCleanup: {},
-            ackUntilCleanupComplete: { true },
+        let reply = host.quitCoordinatorForTests.beginTerminateLater(
+            forwardRequestQuit: { host.forwardRequestQuit() },
+            performNativeCleanup: { host.performQuitCleanup() },
+            ackUntilCleanupComplete: { host.ackUntilQuitCleanupComplete() },
             reply: { replies += 1 }
         )
         XCTAssertEqual(reply, .terminateLater)
+        XCTAssertEqual(host.quitCoordinatorForTests.armedDeadlineMs, 500)
+        XCTAssertTrue(host.quitCoordinatorForTests.didArmBackstop)
         XCTAssertEqual(replies, 1)
-        XCTAssertEqual(coordinator.replyCount, 1)
-        // Late backstop must not reply twice.
-        backstop?()
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 0)
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+        host.quitCoordinatorForTests.signalCleanupComplete()
+        XCTAssertEqual(replies, 1)
+        let silent = expectation(description: "cancelled backstop does not reply again")
+        silent.isInverted = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(700)) {
+            if replies != 1 {
+                silent.fulfill()
+            }
+        }
+        wait(for: [silent], timeout: 1.2)
         XCTAssertEqual(replies, 1)
     }
 
     func testBackstopRepliesOnceWhenCleanupNeverCompletes() {
+        let host = MultiWindowHostController()
+        host.bootstrapAfterLaunch()
         var replies = 0
-        let coordinator = ApplicationQuitCoordinator()
-        var backstop: (() -> Void)?
-        let reply = coordinator.beginForTest(
-            forwardFailed: false,
-            scheduleBackstop: { fire in backstop = fire },
+        let fired = expectation(description: "backstop reply")
+        let reply = host.quitCoordinatorForTests.beginTerminateLater(
+            forwardRequestQuit: { host.forwardRequestQuit() },
             performNativeCleanup: {},
             ackUntilCleanupComplete: { false },
-            reply: { replies += 1 }
+            reply: {
+                replies += 1
+                fired.fulfill()
+            }
         )
         XCTAssertEqual(reply, .terminateLater)
         XCTAssertEqual(replies, 0)
-        backstop?()
+        XCTAssertEqual(host.quitCoordinatorForTests.armedDeadlineMs, 500)
+        XCTAssertTrue(host.quitCoordinatorForTests.didArmBackstop)
+        wait(for: [fired], timeout: 2.0)
         XCTAssertEqual(replies, 1)
-        coordinator.signalCleanupComplete()
+        host.quitCoordinatorForTests.signalCleanupComplete()
         XCTAssertEqual(replies, 1)
     }
 
     func testForwardingFailureRepliesImmediately() {
         var replies = 0
         let coordinator = ApplicationQuitCoordinator()
-        var backstopArmed = false
-        let reply = coordinator.beginForTest(
-            forwardFailed: true,
-            scheduleBackstop: { _ in backstopArmed = true },
+        let reply = coordinator.beginTerminateLater(
+            forwardRequestQuit: { .failure(QuitForwardError.missingDeadline) },
             performNativeCleanup: {},
             ackUntilCleanupComplete: { false },
             reply: { replies += 1 }
         )
         XCTAssertEqual(reply, .terminateLater)
         XCTAssertEqual(replies, 1)
-        XCTAssertFalse(backstopArmed)
+        XCTAssertFalse(coordinator.didArmBackstop)
+        XCTAssertEqual(coordinator.armedDeadlineMs, 0)
         coordinator.signalCleanupComplete()
         XCTAssertEqual(replies, 1)
     }
@@ -192,9 +212,6 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertTrue(source.contains("keyEquivalent: \"t\""))
         XCTAssertTrue(source.contains("[.command, .option]"))
         XCTAssertFalse(source.contains("keyDown"))
-        // N5: Go to… must target the ProductChromeHostView that implements openGoto.
-        XCTAssertTrue(source.contains("gotoItem.target = host.liveHost"))
-        XCTAssertFalse(source.contains("gotoItem.target = host\n"))
     }
 
     func testQuitReplyRuleAfterRejectedExtraWindows() {
@@ -202,21 +219,15 @@ final class MultiWindowHostTests: XCTestCase {
         host.bootstrapAfterLaunch()
         createExtraWindows(on: host, count: 2)
         XCTAssertEqual(host.orderedKeys.count, 1)
-        switch host.forwardRequestQuit() {
-        case .failure(let error):
-            XCTFail("RequestQuit failed: \(error)")
-        case .success(let deadline):
-            XCTAssertEqual(deadline, 500)
-        }
         var replies = 0
-        let result = host.quitCoordinatorForTests.beginForTest(
-            forwardFailed: false,
-            scheduleBackstop: { _ in },
+        let result = host.quitCoordinatorForTests.beginTerminateLater(
+            forwardRequestQuit: { host.forwardRequestQuit() },
             performNativeCleanup: { host.performQuitCleanup() },
             ackUntilCleanupComplete: { host.ackUntilQuitCleanupComplete() },
             reply: { replies += 1 }
         )
         XCTAssertEqual(result, .terminateLater)
+        XCTAssertEqual(host.quitCoordinatorForTests.armedDeadlineMs, 500)
         XCTAssertEqual(replies, 1)
         XCTAssertTrue(host.orderedKeys.isEmpty)
     }
@@ -233,10 +244,17 @@ final class MultiWindowHostTests: XCTestCase {
         let liveWindow = host.liveHost.window
         XCTAssertNotNil(liveWindow)
         host.createWindow(nil)
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 50, "WindowCreationUnavailable")
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 35, "WindowCreationUnavailable")
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
         XCTAssertTrue(host.liveHost.window === liveWindow)
         XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
+    }
+
+    private func seededQuitHost(windows: UInt32) -> MultiWindowHostController {
+        let host = MultiWindowHostController()
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, windows), 0)
+        host.bootstrapAfterLaunch()
+        return host
     }
 
     private func createExtraWindows(on host: MultiWindowHostController, count: Int) {
@@ -248,7 +266,7 @@ final class MultiWindowHostTests: XCTestCase {
             action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
             action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
             XCTAssertEqual(seyal_app_apply(host.appHandle, &action), -4)
-            XCTAssertEqual(seyal_app_last_error(host.appHandle), 50, "WindowCreationUnavailable")
+            XCTAssertEqual(seyal_app_last_error(host.appHandle), 35, "WindowCreationUnavailable")
             host.applyPendingEffectsAndReconcile()
             XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
             XCTAssertTrue(host.liveHost.window === liveWindow)

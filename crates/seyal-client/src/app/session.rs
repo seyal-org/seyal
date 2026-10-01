@@ -5,9 +5,7 @@ use super::*;
 #[cfg(target_os = "macos")]
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
-        if let Some(handle) = self.client_handle.take() {
-            let _ = crate::ffi::unregister_client(handle.raw());
-        }
+        self.release_live_attachments();
     }
 }
 
@@ -78,6 +76,93 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(registered);
         Ok(())
+    }
+
+    /// Replace composition with `windows` realized windows and the same number
+    /// of live display attachments. Admission stays off.
+    pub(crate) fn install_quit_fixture(&mut self, windows: usize) -> Result<(), ()> {
+        if !(1..=16).contains(&windows) {
+            return Err(());
+        }
+        let workspace = WorkspaceId::m001_default();
+        let mut window_seeds = Vec::with_capacity(windows);
+        let mut active = WindowId::new();
+        for index in 0..windows {
+            let window = WindowId::new();
+            if index == 0 {
+                active = window;
+            }
+            let tab = TabId::new();
+            let pane = PaneId::new();
+            window_seeds.push(crate::shell::ShellWindowSeed {
+                id: window,
+                active_tab: tab,
+                tabs: vec![crate::shell::ShellTabSeed {
+                    id: tab,
+                    title: format!("Terminal {}", index + 1),
+                    attention: false,
+                    pane: crate::shell::ShellPaneSeed {
+                        id: pane,
+                        title: "Pane 1".to_owned(),
+                        allows_implicit_execution_bootstrap: false,
+                    },
+                }],
+            });
+        }
+        let shell = crate::shell::ShellState::from_workspaces(
+            vec![crate::shell::ShellWorkspaceSeed {
+                id: workspace,
+                name: "Local".to_owned(),
+                detail: Some("local".to_owned()),
+                attention: false,
+                active_window: active,
+                windows: window_seeds,
+            }],
+            workspace,
+            false,
+            false,
+            false,
+        )
+        .map_err(|_| ())?;
+        *self = Self::with_shell(shell);
+        self.attach_probe_attachments(windows)
+    }
+
+    fn attach_probe_attachments(&mut self, count: usize) -> Result<(), ()> {
+        use seyal_runtime::local_ipc::framing::Role;
+        self.live_attachments.clear();
+        for index in 0..count {
+            let tag = u8::try_from(index + 1).map_err(|_| ())?;
+            let execution = ExecutionId::from_bytes([tag; 16]);
+            let attachment = AttachmentId::from_bytes([tag; 16]);
+            let client = crate::local::reconstruction_probe_client(
+                Role::Controller,
+                24,
+                80,
+                1,
+                execution,
+                attachment,
+            );
+            let registered = crate::ffi::register_app_client(client).map_err(|_| ())?;
+            self.live_attachments.push(registered);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn live_attachment_count(&self) -> usize {
+        let mut raws = Vec::new();
+        if let Some(handle) = &self.client_handle {
+            raws.push(handle.raw());
+        }
+        for handle in &self.live_attachments {
+            let raw = handle.raw();
+            if !raws.contains(&raw) {
+                raws.push(raw);
+            }
+        }
+        raws.into_iter()
+            .filter(|raw| crate::ffi::client_registry_contains(*raw))
+            .count()
     }
 
     /// Diagnostic: handle registered in the sole `CLIENTS` attach map (#1066).
@@ -239,10 +324,10 @@ impl ApplicationRoot {
 
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
+        let deadline_ms = QUIT_CLEANUP_DEADLINE_MS;
+        self.quit_deadline = Some(Instant::now() + Duration::from_millis(deadline_ms));
         self.pending_effects
-            .push(NativeEffect::BoundedDetachThenTerminate {
-                deadline_ms: QUIT_CLEANUP_DEADLINE_MS,
-            });
+            .push(NativeEffect::BoundedDetachThenTerminate { deadline_ms });
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
         self.sync_composer_presentation();
@@ -254,12 +339,58 @@ impl ApplicationRoot {
             return Ok(());
         }
         let removed = self.pending_effects.remove(0);
-        // ADR-018 §4: after the host acks BoundedDetachThenTerminate, Rust
-        // signals cleanup-complete so native can reply(toApplicationShouldTerminate).
-        if matches!(removed, NativeEffect::BoundedDetachThenTerminate { .. }) {
-            self.pending_effects.push(NativeEffect::QuitCleanupComplete);
+        if let NativeEffect::BoundedDetachThenTerminate { deadline_ms } = removed {
+            // Detach first. Cleanup-complete is the signal after that pass,
+            // not a side effect of seeing the deadline effect.
+            self.complete_bounded_detach(deadline_ms);
         }
         Ok(())
+    }
+
+    /// One bounded detach pass for every live attachment, then cleanup-complete.
+    ///
+    /// The write does not wait for `Detached` and does not retry. If `deadline`
+    /// has already passed, the same single pass still runs and completion is
+    /// reported so termination is not deferred past the deadline.
+    fn complete_bounded_detach(&mut self, deadline_ms: u64) {
+        let deadline = self
+            .quit_deadline
+            .take()
+            .unwrap_or_else(|| Instant::now() + Duration::from_millis(deadline_ms));
+        // Consult the deadline so expiry cannot start a second wait. The pass
+        // below is the only detach attempt either way.
+        let _remaining = deadline.saturating_duration_since(Instant::now());
+        self.release_live_attachments();
+        self.pending_effects.push(NativeEffect::QuitCleanupComplete);
+    }
+
+    fn release_live_attachments(&mut self) -> usize {
+        #[cfg(target_os = "macos")]
+        {
+            let primary = self.client_handle.take().map(|handle| handle.raw());
+            let extras = std::mem::take(&mut self.live_attachments);
+            let mut raws = Vec::new();
+            for handle in extras {
+                raws.push(handle.raw());
+            }
+            if let Some(raw) = primary
+                && !raws.contains(&raw)
+            {
+                raws.push(raw);
+            }
+            let mut released = 0;
+            for raw in raws {
+                if let Some(mut client) = crate::ffi::unregister_client(raw) {
+                    client.request_bounded_detach();
+                    released += 1;
+                }
+            }
+            released
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            0
+        }
     }
 
     pub(super) fn drain_shell_effects(&mut self) {

@@ -1,6 +1,6 @@
 # SPEC-022 — M003 local Resource Addressing, goto and focus history
 
-- **Status:** Accepted (behavior contract for #1004 children; not an implemented-behavior claim)
+- **Status:** Proposed (refinement output of #1004; not an implemented-behavior claim)
 - **Date:** 2026-09-24
 - **Architecture:** ADR-019; consumes ADR-007, ADR-015, ADR-009/SPEC-008, SPEC-009, and the focus-successor rules of ADR-021 / SPEC-025 (#1001)
 - **Issue:** #1004 — parent #674, epic #665

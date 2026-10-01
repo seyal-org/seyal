@@ -211,13 +211,7 @@ impl SeyalAppPalette {
 }
 
 const PALETTE_OPEN: u16 = 1;
-/// Overlay is projecting the navigation-only goto surface (N4).
-const PALETTE_GOTO: u16 = 2;
-/// Goto enumeration was truncated past GOTO_ENUMERATION_BOUND (SPEC-022 R7.6).
-const PALETTE_TRUNCATED: u16 = 4;
 
-/// One projected row. Optional `ResourceAddress` fields are set for palette
-/// navigation rows (SPEC-022 R7.2); `address_len == 0` means no address.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SeyalAppRow {
@@ -232,11 +226,6 @@ pub struct SeyalAppRow {
     pub detail: *const u8,
     pub detail_len: u32,
     pub reserved2: u32,
-    pub address_version: u16,
-    pub address_kind: u16,
-    pub address_len: u16,
-    pub address_pad: u16,
-    pub address_bytes: [u8; 48],
 }
 
 impl SeyalAppRow {
@@ -253,11 +242,6 @@ impl SeyalAppRow {
             detail: ptr::null(),
             detail_len: 0,
             reserved2: 0,
-            address_version: 0,
-            address_kind: 0,
-            address_len: 0,
-            address_pad: 0,
-            address_bytes: [0; 48],
         }
     }
 }
@@ -368,6 +352,52 @@ pub extern "C" fn seyal_app_create() -> u64 {
         );
     });
     handle
+}
+
+/// Test harness: replace `handle` with `windows` realizations and the same
+/// number of live attachments. Window-creation admission stays off.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_quit_case(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            match state.root.install_quit_fixture(windows as usize) {
+                Ok(()) => 0,
+                Err(()) => -3,
+            }
+        })
+    }
+}
+
+/// Test harness: live display attachments still registered for `handle`.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_live_attachment_count(handle: u64) -> u32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handle;
+        0
+    }
+    #[cfg(target_os = "macos")]
+    {
+        APPS.with(|apps| {
+            apps.borrow()
+                .get(&handle)
+                .map(|state| state.root.live_attachment_count() as u32)
+                .unwrap_or(0)
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -733,12 +763,6 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
         if snap.palette.open {
             flags |= PALETTE_OPEN;
         }
-        if snap.goto.open {
-            flags |= PALETTE_GOTO;
-            if snap.goto.truncated {
-                flags |= PALETTE_TRUNCATED;
-            }
-        }
         SeyalAppPalette {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppPalette>() as u16,
@@ -751,12 +775,7 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
                 state.palette_query.as_ptr()
             },
             query_utf8_len: state.palette_query.len() as u32,
-            // Low byte: GotoScope discriminant while goto is open; else 0.
-            reserved: if snap.goto.open {
-                snap.goto.scope as u8 as u32
-            } else {
-                0
-            },
+            reserved: 0,
         }
     })
 }
@@ -808,11 +827,6 @@ pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
         detail: ptr::null(),
         detail_len: 0,
         reserved2: 0,
-        address_version: 0,
-        address_kind: 0,
-        address_len: 0,
-        address_pad: 0,
-        address_bytes: [0; 48],
     }
 }
 
@@ -928,21 +942,6 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
         AppError::UnknownWindow => 34,
-        AppError::NavigationUnsupportedKind => 35,
-        AppError::NavigationDenied => 36,
-        AppError::NavigationUnknownWorkspace => 37,
-        AppError::NavigationUnknownTab => 38,
-        AppError::NavigationUnknownPane => 39,
-        AppError::NavigationUnknownExecution => 40,
-        AppError::NavigationNotComposed => 41,
-        AppError::NavigationTargetTerminated => 42,
-        AppError::NavigationTargetUnbound => 43,
-        AppError::NavigationAmbiguousTarget => 44,
-        AppError::GotoNotOpen => 45,
-        AppError::GotoNoSelection => 46,
-        AppError::GotoUnsupportedScope => 47,
-        AppError::NavigationStaleHistoryCursor => 48,
-        AppError::NavigationHistoryUnavailable => 49,
-        AppError::WindowCreationUnavailable => 50,
+        AppError::WindowCreationUnavailable => 35,
     }
 }

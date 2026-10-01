@@ -5,6 +5,9 @@ import Foundation
 @MainActor
 final class ApplicationQuitCoordinator {
     private(set) var replyCount = 0
+    /// Deadline carried by `BoundedDetachThenTerminate`, once the backstop is armed.
+    private(set) var armedDeadlineMs: UInt64 = 0
+    private(set) var didArmBackstop = false
     private var awaitingReply = false
     private var backstopWorkItem: DispatchWorkItem?
     private var replyHandler: (() -> Void)?
@@ -26,6 +29,8 @@ final class ApplicationQuitCoordinator {
             return .terminateLater
         case .success(let deadlineMs):
             awaitingReply = true
+            armedDeadlineMs = deadlineMs
+            didArmBackstop = true
             let work = DispatchWorkItem { [weak self] in
                 self?.replyOnce()
             }
@@ -41,31 +46,6 @@ final class ApplicationQuitCoordinator {
             }
             return .terminateLater
         }
-    }
-
-    /// Test hook with injectable backstop (no wall clock).
-    @discardableResult
-    func beginForTest(
-        forwardFailed: Bool,
-        scheduleBackstop: (_ fire: @escaping () -> Void) -> Void,
-        performNativeCleanup: () -> Void,
-        ackUntilCleanupComplete: () -> Bool,
-        reply: @escaping () -> Void
-    ) -> NSApplication.TerminateReply {
-        replyHandler = reply
-        if forwardFailed {
-            replyOnce()
-            return .terminateLater
-        }
-        awaitingReply = true
-        scheduleBackstop { [weak self] in
-            self?.replyOnce()
-        }
-        performNativeCleanup()
-        if ackUntilCleanupComplete() {
-            replyOnce()
-        }
-        return .terminateLater
     }
 
     /// Late Rust cleanup-complete after the backstop already replied is ignored.

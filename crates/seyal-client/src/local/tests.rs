@@ -57,6 +57,7 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        probe_peer: None,
     }
 }
 

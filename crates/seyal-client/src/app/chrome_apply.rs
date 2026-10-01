@@ -4,7 +4,6 @@ use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
-use crate::navigation::{matches_destroyed_pane, matches_destroyed_tab, ResourceAddress};
 use crate::shell::{CycleDirection, ShellAction, SplitAxis};
 
 impl ApplicationRoot {
@@ -35,24 +34,8 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_active = focus_before.active_tab == id;
         self.apply_shell(ShellAction::CloseTab { id })
             .map_err(close_tab_error)?;
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
-        // product close path — surfaces do not scan history themselves.
-        let focus_after = self.shell.focus_checkpoint();
-        let successor = if was_active {
-            Some(ResourceAddress::Pane {
-                workspace: focus_after.active_workspace,
-                tab: focus_after.active_tab,
-                pane: focus_after.focused_pane,
-            })
-        } else {
-            None
-        };
-        self.focus_history
-            .on_destroy(|addr| matches_destroyed_tab(addr, id), successor);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -60,27 +43,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_focused = focus_before.focused_pane == id;
         let snap = self.shell.snapshot();
         self.apply_shell(ShellAction::ClosePane {
             id,
             containment_generation: snap.containment_generation,
         })
         .map_err(close_pane_error)?;
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
-        let focus_after = self.shell.focus_checkpoint();
-        let successor = if was_focused {
-            Some(ResourceAddress::Pane {
-                workspace: focus_after.active_workspace,
-                tab: focus_after.active_tab,
-                pane: focus_after.focused_pane,
-            })
-        } else {
-            None
-        };
-        self.focus_history
-            .on_destroy(|addr| matches_destroyed_pane(addr, id), successor);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -255,9 +223,6 @@ impl ApplicationRoot {
         }
         // Disposable presentation input only — never mutates window/tab/pane product state.
         self.last_window_event = Some((window, event));
-        // SPEC-022 §5: ActivationFailed may re-emit WindowActivation under budget;
-        // BecameKey clears the episode. Focus is never rolled back.
-        self.handle_activation_window_event(window, event);
         Ok(())
     }
 

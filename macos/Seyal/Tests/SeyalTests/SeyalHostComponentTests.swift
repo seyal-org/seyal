@@ -35,7 +35,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 112)
-        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
+        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 56)
         let live = seyal_app_create()
         // Core Terminal chrome is visible by default (#922).
         let chrome = seyal_app_chrome(live)
@@ -1315,20 +1315,6 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
-
-    @MainActor
-    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
-        var empty = SeyalAppRow()
-        XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
-        var row = SeyalAppRow()
-        row.address_version = 1
-        row.address_kind = 2
-        row.address_len = 1
-        let payload = try XCTUnwrap(CommandPaletteOverlayView.addressPayload(for: row))
-        XCTAssertEqual(Array(payload.prefix(4)), [1, 0, 2, 0])
-        XCTAssertEqual(payload.count, 5)
-    }
-
 }
 
 @discardableResult
@@ -1355,5 +1341,4 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
-
 }

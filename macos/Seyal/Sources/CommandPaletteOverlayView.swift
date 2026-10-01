@@ -111,19 +111,10 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         if query.stringValue != text {
             query.stringValue = text
         }
-        let isGoto = palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0
-        let truncated = palette.flags & UInt16(SEYAL_APP_PALETTE_TRUNCATED) != 0
-        if isGoto {
-            let scope = gotoScopeName(UInt8(palette.reserved & 0xff))
-            query.placeholderString = truncated
-                ? "Go to \(scope) (truncated)…"
-                : "Go to \(scope)…"
-        } else {
-            query.placeholderString = "Type a command..."
-        }
+        query.placeholderString = "Type a command..."
         selected = Int(palette.selected)
         rebuildRows(count: Int(palette.row_count))
-        setAccessibilityValue(truncated ? "\(palette.row_count) truncated" : "\(palette.row_count)")
+        setAccessibilityValue("\(palette.row_count)")
         if !wasOpen {
             wasOpen = true
             focusQuery()
@@ -148,9 +139,6 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         case #selector(NSResponder.cancelOperation(_:)), #selector(NSStandardKeyBindingResponding.complete(_:)):
             // NSTextField's field editor reports Escape as either selector.
             close()
-        case #selector(NSResponder.insertTab(_:)):
-            // Scope modes stay separated: Tab cycles Workspaces→Tabs→Panes→Sessions.
-            cycleGotoScope()
         default:
             return false
         }
@@ -160,41 +148,15 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
     // MARK: Actions
 
     private func move(by delta: Int32) {
-        dispatchAction(
-            kind: UInt16(SEYAL_APP_ACTION_MOVE_PALETTE_SELECTION.rawValue),
-            reserved: UInt32(bitPattern: delta)
-        )
-    }
-
-    static func addressPayload(for row: SeyalAppRow) -> Data? {
-        guard row.address_len > 0 else { return nil }
-        var payload = Data()
-        var version = row.address_version.littleEndian
-        var kind = row.address_kind.littleEndian
-        payload.append(Data(bytes: &version, count: 2))
-        payload.append(Data(bytes: &kind, count: 2))
-        withUnsafeBytes(of: row.address_bytes) { bytes in
-            payload.append(contentsOf: bytes.prefix(Int(row.address_len)))
-        }
-        return payload
+        dispatch(kind: UInt16(SEYAL_APP_ACTION_MOVE_PALETTE_SELECTION.rawValue), reserved: UInt32(bitPattern: delta))
     }
 
     private func run() {
-        // Echo the frozen row's ResourceAddress when present (SPEC-022 R7.2).
-        // Verb/chrome rows have address_len == 0; Rust runs the stored command.
-        let row = seyal_app_palette_row(appHandle, UInt32(selected))
-        if let payload = Self.addressPayload(for: row) {
-            dispatchAction(
-                kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue),
-                payloadBytes: payload
-            )
-        } else {
-            dispatchAction(kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue))
-        }
+        dispatch(kind: UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue))
     }
 
     private func close() {
-        dispatchAction(kind: UInt16(SEYAL_APP_ACTION_CLOSE_PALETTE.rawValue))
+        dispatch(kind: UInt16(SEYAL_APP_ACTION_CLOSE_PALETTE.rawValue))
     }
 
     /// AppKit hit-tests to the deepest view under the cursor; a click that
@@ -216,17 +178,6 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
     }
 
     private func dispatch(kind: UInt16, payload: String? = nil, reserved: UInt32 = 0) {
-        let bytes = payload.map { Data($0.utf8) }
-        dispatchAction(kind: kind, payloadBytes: bytes, reserved: reserved)
-    }
-
-    /// Byte-payload apply path. Named distinctly from `dispatch(payload:)` so
-    /// defaulted call sites are not ambiguous under current Swift overload rules.
-    private func dispatchAction(
-        kind: UInt16,
-        payloadBytes: Data? = nil,
-        reserved: UInt32 = 0
-    ) {
         let snapshot = seyal_app_snapshot(appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -234,15 +185,10 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         action.kind = kind
         action.applySnapshotFence(snapshot)
         action.reserved = reserved
-        if let payloadBytes {
-            payloadBytes.withUnsafeBytes { buffer in
-                action.payload = buffer.bindMemory(to: UInt8.self).baseAddress
-                action.payload_len = UInt32(payloadBytes.count)
-                _ = seyal_app_apply(appHandle, &action)
-            }
-        } else {
-            action.payload = nil
-            action.payload_len = 0
+        let utf8 = Array((payload ?? "").utf8)
+        utf8.withUnsafeBufferPointer { buffer in
+            action.payload = payload == nil ? nil : buffer.baseAddress
+            action.payload_len = payload == nil ? 0 : UInt32(buffer.count)
             _ = seyal_app_apply(appHandle, &action)
         }
         onChanged?()
@@ -260,40 +206,6 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         action.applySnapshotFence(snapshot)
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
         onChanged?()
-    }
-
-    /// Navigation-only goto surface (SPEC-022 N4). Reuses this overlay;
-    /// default scope is Panes.
-    func requestOpenGoto(scope: SeyalAppGotoScope = SEYAL_APP_GOTO_PANES) {
-        let snapshot = seyal_app_snapshot(appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_OPEN_GOTO.rawValue)
-        action.reserved = UInt32(scope.rawValue)
-        action.applySnapshotFence(snapshot)
-        guard seyal_app_apply(appHandle, &action) == 0 else { return }
-        onChanged?()
-    }
-
-    private func cycleGotoScope() {
-        let palette = seyal_app_palette(appHandle)
-        guard palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0 else { return }
-        let next = (Int(palette.reserved & 0xff) + 1) % 4
-        dispatchAction(
-            kind: UInt16(SEYAL_APP_ACTION_SET_GOTO_SCOPE.rawValue),
-            reserved: UInt32(next)
-        )
-    }
-
-    private func gotoScopeName(_ value: UInt8) -> String {
-        switch value {
-        case UInt8(SEYAL_APP_GOTO_WORKSPACES.rawValue): return "Workspaces"
-        case UInt8(SEYAL_APP_GOTO_TABS.rawValue): return "Tabs"
-        case UInt8(SEYAL_APP_GOTO_PANES.rawValue): return "Panes"
-        case UInt8(SEYAL_APP_GOTO_SESSIONS.rawValue): return "Sessions"
-        default: return "…"
-        }
     }
 
     // MARK: Projection
