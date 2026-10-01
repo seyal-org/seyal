@@ -30,10 +30,8 @@ impl ApplicationRoot {
                     .presentation
                     .apply(crate::presentation::PresentationAction::ClearIdentity);
                 self.sync_composer_presentation();
-                #[cfg(target_os = "macos")]
-                if let Some(handle) = self.client_handle.take() {
-                    let _ = crate::ffi::unregister_client(handle.raw());
-                }
+                // ADR-017 §6.1 detach-only: keep client_handle registered for
+                // remaining panes on the same connection.
             }
         } else {
             // Outstanding create for this pane: keep the request until the
