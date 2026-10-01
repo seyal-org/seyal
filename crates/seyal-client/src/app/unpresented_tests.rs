@@ -124,6 +124,7 @@ fn palette_terminate_dispatches_typed_action() {
     .unwrap();
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .unwrap();
     assert_eq!(

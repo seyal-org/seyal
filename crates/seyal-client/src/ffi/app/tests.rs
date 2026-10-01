@@ -61,7 +61,9 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(size_of::<super::SeyalAppPaneLeaf>(), 56);
     assert_eq!(size_of::<super::SeyalAppPaneTreeNode>(), 32);
     assert_eq!(size_of::<super::SeyalAppNativeEffect>(), 24);
-    assert_eq!(size_of::<SeyalAppRow>(), 56);
+    assert_eq!(size_of::<SeyalAppRow>(), 112);
+    assert_eq!(offset_of!(SeyalAppRow, address_version), 56);
+    assert_eq!(offset_of!(SeyalAppRow, address_bytes), 64);
     assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
     assert_eq!(size_of::<SeyalAppTheme>(), 16);
     assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);
@@ -398,7 +400,7 @@ fn close_window_action_removes_window_without_terminate_effect() {
     let close = SeyalAppAction {
         version: APP_ABI_VERSION,
         size: size_of::<SeyalAppAction>() as u16,
-        kind: 62, // CLOSE_WINDOW
+        kind: 67, // CLOSE_WINDOW
         flags: 0,
         fence_pane_lo: 0,
         fence_pane_hi: 0,

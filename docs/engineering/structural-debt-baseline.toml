@@ -34,21 +34,21 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 829
+acknowledged_loc = 933
 issue = 1158
-reason = "ApplicationRoot keeps W4a window dispatch and W2b close plus W6 unpresented actions on the W4b merge. Close apply stays in chrome_apply.rs; quit effects stay in native_effect.rs."
+reason = "ApplicationRoot keeps W4b close/unpresented dispatch (#1158) together with N4 goto, N5 activation-episode fields, and N3 FocusHistory (#1156). Close apply stays in chrome_apply.rs; history apply stays in focus_history_apply.rs; activation retry stays in activation.rs. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 809
-issue = 1143
-reason = "Global command-palette reducer stays one cohesive open/filter/resolve module; #1143 adds §3.3 AdoptUnpresented/TerminateUnpresented command variants and snapshot_with_unpresented plumbing without storing a stale command list."
+acknowledged_loc = 866
+issue = 1158
+reason = "Frozen address-carrying palette rows (#1144/#1156) stay one reducer, and #1143/#1158 adopt/terminate commands are included in that frozen rebuild. Goto stays a sibling module. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 871
+acknowledged_loc = 873
 issue = 1158
-reason = "W4b admits CreateTab on the production shell and absorbs #1123/#1108 multi-window ApplicationRoot proofs. Ceiling matches post-merge LOC."
+reason = "W4b CreateTab admission and zero-window proofs (#1158) stay beside N5 navigate coverage moved to navigate_tests.rs and absorbed #1123/#1108 multi-window ApplicationRoot proofs (#1144/#1156). Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
@@ -58,15 +58,33 @@ reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 863
-issue = 1143
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1143 moves AppError→number mapping into encode.rs beside snapshot encoding, ratcheting this façade down from the prior 900 LOC #1108 ceiling."
+acknowledged_loc = 894
+issue = 1158
+reason = "C ABI façade keeps W3 window extraction and N4/N3 error numbers 35-49 (#1156) while AppError mapping stays in encode.rs (#1143), including W6 adopt errors 50-51 (#1158). History action decode stays in decode.rs. Ceiling matches merged LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 981
+issue = 1158
+reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after the N6 merge (#1156) and the W4b containment-generation close calls (#1158). Cross-window coverage lives in activation_tests.rs; history integration lives in history_integration_tests.rs. Ceiling matches merged LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/mod.rs"
+acknowledged_loc = 825
+issue = 1158
+reason = "ShellState keeps W3 window containment, N4 navigation helpers, and N5 Tab→Window placement (#1144/#1156) plus the W4b zero-window product-active Window (#1158). Inventory enumeration lives in inventory.rs; close lives in close.rs. Ceiling matches merged LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/decode.rs"
+acknowledged_loc = 718
+issue = 1158
+reason = "Action decode stays one FFI sibling. HistoryBack and HistoryForward stay at 65 and 66 after Navigate/goto 62-64 (#1156); CloseWindow is 67 (#1158) so Navigate remains 62. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 873
+acknowledged_loc = 875
 issue = 1158
-reason = "W4b adds CLOSE_WINDOW ABI coverage plus zero-window ActivateWorkspace re-entry and updates production shell flag expectations for tab-creation admission."
+reason = "W4b CLOSE_WINDOW ABI coverage and zero-window ActivateWorkspace re-entry (#1158) stay beside W3/W4a window-effect ABI coverage and N4 error-number shifts (#1144/#1156). Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"

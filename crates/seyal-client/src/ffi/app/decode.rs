@@ -9,6 +9,7 @@ use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
+use crate::navigation::{decode_resource_address, FocusSeq, ResourceAddress};
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
@@ -226,7 +227,10 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             fence,
             delta: action.reserved as i32,
         }),
-        50 => Ok(AppAction::RunPalette { fence }),
+        50 => Ok(AppAction::RunPalette {
+            fence,
+            address: decode_optional_address(action.payload, action.payload_len)?,
+        }),
         51 => Ok(AppAction::ClosePalette { fence }),
         52 => Ok(AppAction::ApplyRuntimeComposerStatus {
             fence,
@@ -282,7 +286,8 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
          * CREATE_WINDOW: target-free (Workspace resolved in Rust).
          * CYCLE_WINDOW: reserved = 0 next, 1 previous.
          * REPORT_WINDOW_EVENT: target_execution = WindowId; reserved = event kind.
-         * CLOSE_WINDOW: target_execution_lo/hi = WindowId.
+         * CLOSE_WINDOW (67): target_execution_lo/hi = WindowId.
+         * NAVIGATE (62) through HISTORY_FORWARD (66) keep the landed N6 codes.
          */
         58 => Ok(AppAction::SelectWindow {
             id: WindowId::from_bytes(id16(
@@ -305,7 +310,33 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             event: window_native_event(action.reserved)?,
         }),
-        62 => Ok(AppAction::CloseWindow {
+        // Atomic Navigate(address) (SPEC-022 §4 / N2). Payload is the
+        // versioned/size-tagged address record (see decode_required_address).
+        62 => Ok(AppAction::Navigate {
+            fence,
+            address: decode_required_address(action.payload, action.payload_len)?,
+        }),
+        63 => Ok(AppAction::OpenGoto {
+            fence,
+            scope: decode_goto_scope(action.reserved)?,
+        }),
+        64 => Ok(AppAction::SetGotoScope {
+            fence,
+            scope: decode_goto_scope(action.reserved)?,
+        }),
+        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
+        // as little-endian u64; empty payload is invalid. Codes sit after
+        // window actions 58–61 and Navigate/goto 62–64.
+        65 => Ok(AppAction::HistoryBack {
+            fence,
+            observed: decode_focus_seq(action.payload, action.payload_len)?,
+        }),
+        66 => Ok(AppAction::HistoryForward {
+            fence,
+            observed: decode_focus_seq(action.payload, action.payload_len)?,
+        }),
+        // W4b CloseWindow. Code follows landed navigation actions 62–66.
+        67 => Ok(AppAction::CloseWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
@@ -328,8 +359,47 @@ fn window_native_event(code: u32) -> Result<crate::app::WindowNativeEvent, i32> 
         7 => WindowNativeEvent::EnteredFullscreen,
         8 => WindowNativeEvent::ExitedFullscreen,
         9 => WindowNativeEvent::ScreenOrScaleChanged,
+        10 => WindowNativeEvent::ActivationFailed,
         _ => return Err(-6),
     })
+}
+
+fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
+    crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
+}
+
+/// Payload layout for an optional address: empty → None; otherwise
+/// `version(u16 LE) + kind(u16 LE) + address bytes`.
+fn decode_optional_address(
+    payload: *const u8,
+    payload_len: u32,
+) -> Result<Option<ResourceAddress>, i32> {
+    if payload_len == 0 {
+        return Ok(None);
+    }
+    Ok(Some(decode_required_address(payload, payload_len)?))
+}
+
+fn decode_required_address(payload: *const u8, payload_len: u32) -> Result<ResourceAddress, i32> {
+    if payload_len < 4 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — when payload_len != 0, payload addresses that many bytes.
+    let bytes = unsafe { slice::from_raw_parts(payload, payload_len as usize) };
+    let version = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let kind = u16::from_le_bytes([bytes[2], bytes[3]]);
+    decode_resource_address(version, kind, &bytes[4..]).map_err(|_| -6)
+}
+
+fn decode_focus_seq(payload: *const u8, payload_len: u32) -> Result<FocusSeq, i32> {
+    if payload_len != 8 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — payload_len bytes are readable.
+    let bytes = unsafe { slice::from_raw_parts(payload, 8) };
+    let mut raw = [0_u8; 8];
+    raw.copy_from_slice(bytes);
+    Ok(FocusSeq::from_raw(u64::from_le_bytes(raw)))
 }
 
 fn continuity_of_bytes(bytes: [u8; 16]) -> ContinuityIdentity {

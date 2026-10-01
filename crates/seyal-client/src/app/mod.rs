@@ -7,8 +7,11 @@
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
 mod accessibility;
+mod activation;
 mod chrome_apply;
 mod composer_apply;
+mod focus_history_apply;
+mod goto_apply;
 mod native_effect;
 mod palette_apply;
 mod recovery_apply;
@@ -16,8 +19,14 @@ mod session;
 mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
+use activation::PendingWindowActivation;
+pub use activation::{ActivationHostFailure, WINDOW_ACTIVATION_ATTEMPT_BUDGET};
 pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
+#[cfg(test)]
+mod focus_history_tests;
+#[cfg(test)]
+mod navigate_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
@@ -37,6 +46,8 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::goto::{GotoScope, GotoSnapshot, GotoState};
+use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
@@ -83,6 +94,9 @@ pub enum AppError {
     UnknownChromeTab,
     PaletteNotOpen,
     PaletteNoSelection,
+    GotoNotOpen,
+    GotoNoSelection,
+    GotoUnsupportedScope,
     TabCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
@@ -90,6 +104,18 @@ pub enum AppError {
     UnknownBlock,
     CannotCloseBoundPane,
     UnknownWindow,
+    NavigationUnsupportedKind,
+    NavigationDenied,
+    NavigationUnknownWorkspace,
+    NavigationUnknownTab,
+    NavigationUnknownPane,
+    NavigationUnknownExecution,
+    NavigationNotComposed,
+    NavigationTargetTerminated,
+    NavigationTargetUnbound,
+    NavigationAmbiguousTarget,
+    NavigationStaleHistoryCursor,
+    NavigationHistoryUnavailable,
     CrossWorkspaceAdopt,
     ExecutionNotUnpresented,
 }
@@ -273,11 +299,54 @@ pub enum AppAction {
         fence: AppFence,
         delta: i32,
     },
-    /// Run the command bound to the current selection, then close.
+    /// Run the selected palette row. When `address` is `Some`, Navigate that
+    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
+    /// selected verb/chrome command. Never re-resolves by ordinal.
     RunPalette {
         fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    /// Atomic Navigate(address) commit (SPEC-022 §4).
+    Navigate {
+        fence: AppFence,
+        address: ResourceAddress,
+    },
+    /// Focus-history Back (SPEC-022 R6.5 / R6.8).
+    HistoryBack {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    /// Focus-history Forward (SPEC-022 R6.5 / R6.8).
+    HistoryForward {
+        fence: AppFence,
+        observed: FocusSeq,
     },
     ClosePalette {
+        fence: AppFence,
+    },
+    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+    OpenGoto {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoScope {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MoveGotoSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected goto row by stored/host-echoed address.
+    RunGoto {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    CloseGoto {
         fence: AppFence,
     },
     /// Bind the inspector to one Block of the focused Pane (#935).
@@ -319,6 +388,9 @@ pub enum AppAction {
 }
 
 /// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
+///
+/// `ActivationFailed` is the SPEC-022 §5 host-failure report for a WindowActivation
+/// the host could not realize. It does not alter portable focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub enum WindowNativeEvent {
@@ -332,6 +404,8 @@ pub enum WindowNativeEvent {
     EnteredFullscreen = 7,
     ExitedFullscreen = 8,
     ScreenOrScaleChanged = 9,
+    /// Host could not realize the WindowActivation effect for this WindowId.
+    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -380,6 +454,10 @@ pub struct AppSnapshot {
     pub composer: Option<ComposerSnapshot>,
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
+    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
+    /// when history is empty.
+    pub focus_history_seq: Option<FocusSeq>,
+    pub goto: GotoSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,6 +487,12 @@ pub struct ApplicationRoot {
     palette: PaletteState,
     /// Last forwarded window presentation event (test/host observability; not product state).
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
+    /// In-flight WindowActivation episode after cross-window Navigate (N5).
+    pending_activation: Option<PendingWindowActivation>,
+    /// Typed host-failure record for the latest activation episode (SPEC-022 R5.4).
+    last_activation_failure: Option<ActivationHostFailure>,
+    focus_history: FocusHistory,
+    goto: GotoState,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -458,6 +542,10 @@ impl ApplicationRoot {
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
             last_window_event: None,
+            pending_activation: None,
+            last_activation_failure: None,
+            focus_history: FocusHistory::new(),
+            goto: GotoState::new(),
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
@@ -501,14 +589,11 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let unpresented = self.shell.live_unpresented(shell.active_workspace);
-        let palette = self.palette.snapshot_with_unpresented(
-            &shell,
-            &chrome,
-            self.shell.allows_tab_creation(),
-            self.shell.allows_pane_splitting(),
-            &unpresented,
-        );
+        // When goto is open, the existing overlay ABI carries goto rows
+        // (one overlay component; ADR-019 §8). Unpresented adopt/terminate
+        // rows are frozen into the palette projection on Open / SetQuery.
+        let palette = self.overlay_palette_snapshot();
+        let goto = self.goto.snapshot();
         let eligibility = self.eligibility();
         let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
         AppSnapshot {
@@ -541,6 +626,8 @@ impl ApplicationRoot {
             composer,
             chrome,
             palette,
+            focus_history_seq: self.focus_history.cursor_seq(),
+            goto,
         }
     }
 
@@ -684,7 +771,19 @@ impl ApplicationRoot {
             AppAction::MovePaletteSelection { fence, delta } => {
                 self.move_palette_selection(fence, delta)
             }
-            AppAction::RunPalette { fence } => self.run_palette(fence),
+            AppAction::RunPalette { fence, address } => self.run_palette(fence, address),
+            AppAction::Navigate { fence, address } => {
+                self.require_fence(fence)?;
+                self.navigate_address(address)
+            }
+            AppAction::HistoryBack { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_back(observed)
+            }
+            AppAction::HistoryForward { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_forward(observed)
+            }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::SelectWindow { id } => self.select_window(id),
             AppAction::CycleWindow { direction } => self.cycle_window(direction),
@@ -699,6 +798,12 @@ impl ApplicationRoot {
             } => self.record_unpresented(execution, workspace),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
             AppAction::TerminateExecution { execution } => self.terminate_execution(execution),
+            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
+            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
+            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
+            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
+            AppAction::CloseGoto { fence } => self.close_goto(fence),
         };
         match result {
             Ok(()) => {
