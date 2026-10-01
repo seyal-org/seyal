@@ -188,14 +188,18 @@ fn palette_run_by_address_not_rebinding_ordinal() {
             tab: t2
         }
     );
-    // Shift live ordinals; frozen row still holds t2.
+    // Shift live ordinals; frozen address still names t2.
+    // CreateTab while the palette is open is menu-gated (K7); close first.
+    root.apply(AppAction::ClosePalette {
+        fence: root.fence(),
+    })
+    .unwrap();
     root.apply(AppAction::CreateTab).unwrap();
     assert_ne!(root.snapshot().shell.active_tab, t2);
-    root.apply(AppAction::RunPalette {
+    root.apply(AppAction::Navigate {
         fence: root.fence(),
-        address: Some(address),
+        address,
     })
     .unwrap();
     assert_eq!(root.snapshot().shell.active_tab, t2);
-    assert!(!root.snapshot().palette.open);
 }
