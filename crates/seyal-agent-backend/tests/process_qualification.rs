@@ -366,7 +366,9 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
     let _ = fs::remove_dir_all(dir);
 }
 
-fn replay_identity(dir: &Path) -> Vec<(u128, Vec<u64>, Option<u64>, u64, u64)> {
+type ReplayIdentityRow = (u128, Vec<u64>, Option<u64>, u64, u64);
+
+fn replay_identity(dir: &Path) -> Vec<ReplayIdentityRow> {
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     let mut records = Vec::new();
     for (id, _) in store.agent_runs().unwrap() {
