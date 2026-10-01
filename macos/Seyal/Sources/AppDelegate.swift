@@ -77,6 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // explicitly at the chrome host that owns the Rust-backed overlay.
         paletteItem.target = host
         viewMenu.addItem(paletteItem)
+        let gotoItem = NSMenuItem(
+            title: "Go to…",
+            action: #selector(ProductChromeHostView.openGoto),
+            keyEquivalent: "o"
+        )
+        // SPEC-024 §5.5 `goto.open` default: ⌘⇧O. Same overlay as the palette.
+        gotoItem.keyEquivalentModifierMask = [.command, .shift]
+        gotoItem.target = host
+        viewMenu.addItem(gotoItem)
         viewItem.submenu = viewMenu
 
         NSApp.mainMenu = mainMenu

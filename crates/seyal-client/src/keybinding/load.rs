@@ -1,0 +1,365 @@
+//! Cold load of `[[keybindings]]` into an immutable [`KeybindingTable`].
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use crate::theme::{parse_toml, ui_config_path, TomlError, TomlValue};
+
+use super::keys::{parse_keys, KeysError};
+use super::types::{
+    BindingContext, BindingSequence, BindingSource, CompiledBinding, DiagnosticCategory,
+    KeybindingDiagnostic, KeybindingTable, Ordinal1To9, WorkspaceCommand, WorkspaceCommandId,
+};
+
+const KNOWN_FIELDS: &[&str] = &["keys", "action", "context", "ordinal"];
+
+/// Same file selection as SPEC-006 §21.3 / `input_policy_config_path`.
+pub fn keybinding_config_path() -> Option<std::path::PathBuf> {
+    ui_config_path()
+}
+
+pub fn load_keybinding_table_from_path(path: Option<&Path>) -> KeybindingTable {
+    let text = path.and_then(|path| std::fs::read_to_string(path).ok());
+    load_keybinding_table(text.as_deref())
+}
+
+/// Parse and validate `[[keybindings]]` from TOML text. Missing/unreadable /
+/// whole-file parse failure → empty table (defaults deferred to K2). Invalid
+/// entries fail closed: they contribute no binding and never a partial row.
+pub fn load_keybinding_table(toml_text: Option<&str>) -> KeybindingTable {
+    let Some(text) = toml_text else {
+        return KeybindingTable::empty();
+    };
+    let root = match parse_toml(text) {
+        Ok(root) => root,
+        Err(TomlError(_)) => return KeybindingTable::empty(),
+    };
+    compile_keybindings_from_root(&root)
+}
+
+fn compile_keybindings_from_root(root: &BTreeMap<String, TomlValue>) -> KeybindingTable {
+    let mut diagnostics = Vec::new();
+    let Some(value) = root.get("keybindings") else {
+        return KeybindingTable::empty();
+    };
+    let Some(entries) = value.as_array_of_tables() else {
+        diagnostics.push(KeybindingDiagnostic {
+            category: DiagnosticCategory::TableIgnored,
+            keys_notation: String::new(),
+            action: String::new(),
+            source: BindingSource::User { index: 0 },
+            message: "keybindings ignored; expected array of tables".into(),
+        });
+        return KeybindingTable {
+            bindings: Vec::new(),
+            chord_prefix_index: Vec::new(),
+            diagnostics,
+        };
+    };
+
+    let mut bindings = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let source = BindingSource::User {
+            index: index as u32,
+        };
+        match compile_entry(entry, source, &mut diagnostics) {
+            Some(binding) => bindings.push(binding),
+            None => {
+                // Fail closed for this row: no partial CompiledBinding.
+            }
+        }
+    }
+
+    let chord_prefix_index = build_chord_prefix_index(&bindings);
+    KeybindingTable {
+        bindings,
+        chord_prefix_index,
+        diagnostics,
+    }
+}
+
+fn compile_entry(
+    entry: &BTreeMap<String, TomlValue>,
+    source: BindingSource,
+    diagnostics: &mut Vec<KeybindingDiagnostic>,
+) -> Option<CompiledBinding> {
+    for key in entry.keys() {
+        if !KNOWN_FIELDS.contains(&key.as_str()) {
+            diagnostics.push(KeybindingDiagnostic {
+                category: DiagnosticCategory::UnknownFieldIgnored,
+                keys_notation: string_field(entry, "keys").unwrap_or_default(),
+                action: string_field(entry, "action").unwrap_or_default(),
+                source,
+                message: format!("unknown field {key} ignored"),
+            });
+        }
+    }
+
+    let keys_notation = match string_field(entry, "keys") {
+        Some(keys) => keys,
+        None => {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidKeys,
+                "",
+                string_field(entry, "action").as_deref().unwrap_or_default(),
+                source,
+                "keys missing or not a string",
+            ));
+            return None;
+        }
+    };
+    let action_raw = match string_field(entry, "action") {
+        Some(action) => action,
+        None => {
+            diagnostics.push(diag(
+                DiagnosticCategory::UnknownAction,
+                &keys_notation,
+                "",
+                source,
+                "action missing or not a string",
+            ));
+            return None;
+        }
+    };
+
+    let sequence = match parse_keys(&keys_notation) {
+        Ok(sequence) => sequence,
+        Err(KeysError::ChordTooLong) => {
+            diagnostics.push(diag(
+                DiagnosticCategory::ChordTooLong,
+                &keys_notation,
+                &action_raw,
+                source,
+                "chord longer than 4 strokes",
+            ));
+            return None;
+        }
+        Err(_) => {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidKeys,
+                &keys_notation,
+                &action_raw,
+                source,
+                "invalid keys notation",
+            ));
+            return None;
+        }
+    };
+
+    let context = parse_context(entry, &keys_notation, &action_raw, source, diagnostics)?;
+
+    if action_raw == "none" {
+        if entry.contains_key("ordinal") {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidActionArgument,
+                &keys_notation,
+                &action_raw,
+                source,
+                "ordinal forbidden on action none",
+            ));
+        }
+        // Unbind tombstones are validated but contribute no binding in K1.
+        return None;
+    }
+
+    if looks_like_disallowed_payload(&action_raw) {
+        diagnostics.push(diag(
+            DiagnosticCategory::DisallowedActionPayload,
+            &keys_notation,
+            &action_raw,
+            source,
+            "action embeds a disallowed payload",
+        ));
+        return None;
+    }
+
+    let Some(id) = WorkspaceCommandId::parse(&action_raw) else {
+        diagnostics.push(diag(
+            DiagnosticCategory::UnknownAction,
+            &keys_notation,
+            &action_raw,
+            source,
+            "unknown action id",
+        ));
+        return None;
+    };
+
+    let ordinal = match resolve_ordinal(entry, id, &keys_notation, &action_raw, source, diagnostics)
+    {
+        Ok(ordinal) => ordinal,
+        Err(()) => return None,
+    };
+
+    Some(CompiledBinding {
+        sequence,
+        action: WorkspaceCommand { id, ordinal },
+        context,
+        source,
+    })
+}
+
+fn resolve_ordinal(
+    entry: &BTreeMap<String, TomlValue>,
+    id: WorkspaceCommandId,
+    keys_notation: &str,
+    action_raw: &str,
+    source: BindingSource,
+    diagnostics: &mut Vec<KeybindingDiagnostic>,
+) -> Result<Option<Ordinal1To9>, ()> {
+    let has_ordinal = entry.contains_key("ordinal");
+    if id == WorkspaceCommandId::TabSelectOrdinal {
+        let Some(value) = entry.get("ordinal") else {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidActionArgument,
+                keys_notation,
+                action_raw,
+                source,
+                "ordinal required for tab.select_ordinal",
+            ));
+            return Err(());
+        };
+        let Some(number) = value.as_number() else {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidActionArgument,
+                keys_notation,
+                action_raw,
+                source,
+                "ordinal must be an integer 1..=9",
+            ));
+            return Err(());
+        };
+        if number.fract() != 0.0 || number < 0.0 || number > 255.0 {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidActionArgument,
+                keys_notation,
+                action_raw,
+                source,
+                "ordinal must be an integer 1..=9",
+            ));
+            return Err(());
+        }
+        let Some(ordinal) = Ordinal1To9::new(number as u8) else {
+            diagnostics.push(diag(
+                DiagnosticCategory::InvalidActionArgument,
+                keys_notation,
+                action_raw,
+                source,
+                "ordinal must be an integer 1..=9",
+            ));
+            return Err(());
+        };
+        return Ok(Some(ordinal));
+    }
+    if has_ordinal {
+        diagnostics.push(diag(
+            DiagnosticCategory::InvalidActionArgument,
+            keys_notation,
+            action_raw,
+            source,
+            "ordinal forbidden for this action",
+        ));
+        return Err(());
+    }
+    Ok(None)
+}
+
+fn parse_context(
+    entry: &BTreeMap<String, TomlValue>,
+    keys_notation: &str,
+    action_raw: &str,
+    source: BindingSource,
+    diagnostics: &mut Vec<KeybindingDiagnostic>,
+) -> Option<BindingContext> {
+    let Some(value) = entry.get("context") else {
+        return Some(BindingContext::APP);
+    };
+    let Some(items) = value.as_string_array() else {
+        diagnostics.push(diag(
+            DiagnosticCategory::InvalidKeys,
+            keys_notation,
+            action_raw,
+            source,
+            "context must be an array of strings",
+        ));
+        return None;
+    };
+    if items.is_empty() {
+        diagnostics.push(diag(
+            DiagnosticCategory::InvalidKeys,
+            keys_notation,
+            action_raw,
+            source,
+            "context must be non-empty",
+        ));
+        return None;
+    }
+    let mut context = BindingContext::EMPTY;
+    for item in items {
+        let bit = match item.as_str() {
+            "app" => BindingContext::APP,
+            "flow" => BindingContext::FLOW,
+            "raw" => BindingContext::RAW,
+            "tui" => BindingContext::TUI,
+            "composer" => BindingContext::COMPOSER,
+            "palette" => BindingContext::PALETTE,
+            _ => {
+                diagnostics.push(diag(
+                    DiagnosticCategory::InvalidKeys,
+                    keys_notation,
+                    action_raw,
+                    source,
+                    "unknown context token",
+                ));
+                return None;
+            }
+        };
+        context.insert(bit);
+    }
+    Some(context)
+}
+
+fn looks_like_disallowed_payload(action: &str) -> bool {
+    action.contains("://")
+        || action.contains('/')
+        || action.contains(' ')
+        || action.contains(';')
+        || action.starts_with("shell:")
+        || action.starts_with("exec:")
+        || action.chars().filter(|c| *c == '.').count() > 2
+}
+
+fn string_field(entry: &BTreeMap<String, TomlValue>, key: &str) -> Option<String> {
+    entry.get(key)?.as_str().map(str::to_owned)
+}
+
+fn diag(
+    category: DiagnosticCategory,
+    keys_notation: &str,
+    action: &str,
+    source: BindingSource,
+    message: &str,
+) -> KeybindingDiagnostic {
+    KeybindingDiagnostic {
+        category,
+        keys_notation: keys_notation.to_owned(),
+        action: action.to_owned(),
+        source,
+        message: message.to_owned(),
+    }
+}
+
+fn build_chord_prefix_index(bindings: &[CompiledBinding]) -> Vec<(BindingSequence, Vec<usize>)> {
+    let mut map: BTreeMap<BindingSequence, Vec<usize>> = BTreeMap::new();
+    for (index, binding) in bindings.iter().enumerate() {
+        let strokes = binding.sequence.strokes();
+        if strokes.len() < 2 {
+            continue;
+        }
+        for len in 1..strokes.len() {
+            if let Ok(prefix) = BindingSequence::try_from_strokes(strokes[..len].to_vec()) {
+                map.entry(prefix).or_default().push(index);
+            }
+        }
+    }
+    map.into_iter().collect()
+}
