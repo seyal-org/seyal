@@ -160,6 +160,23 @@ impl ApplicationRoot {
             .map_err(|_| AppError::AlreadyBound)?;
         self.provisioning
             .record_adopted_binding(fence.pane, evidence.execution);
+        #[cfg(target_os = "macos")]
+        if let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        {
+            if let Some(next) = crate::ffi::with_client(handle, |client| {
+                client.next_provisioning_request_id
+            }) {
+                self.provisioning.seed_next_request_id(next);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(client) = self.wire_client.as_ref() {
+            self.provisioning
+                .seed_next_request_id(client.next_provisioning_request_id);
+        }
         let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
             .ok_or(AppError::ZeroPtyGeneration)?;
         self.presentation

@@ -355,6 +355,58 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
 }
 
 #[test]
+fn terminate_after_bootstrap_floor_admits_request_id_at_least_two() {
+    // After headed bootstrap, create used request_id 1 and the live client
+    // advances to next=2. Session must seed from that floor so terminate is
+    // not rejected by Runtime as a non-increasing id.
+    let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
+    let mut client = negotiated_provisioning_client();
+    client.next_provisioning_request_id = 2;
+    root.install_wire_client(client).unwrap();
+    root.provisioning_mut().seed_next_request_id(2);
+
+    drive_create_tab_to_bound(&mut root, exec(0x91));
+    let pane = root.snapshot().shell.focused_pane;
+    let execution = exec(0x91);
+    let wire_attachment = root.wire_client().unwrap().attachment_id();
+    root.adopt_authority_for_provisioned_pane(BindingEvidence {
+        execution,
+        attachment: wire_attachment,
+        controller: true,
+        pty_generation: 1,
+        alternate_screen: false,
+    })
+    .unwrap();
+
+    root.apply(AppAction::TerminateExecution {
+        fence: root.fence(),
+    })
+    .unwrap();
+    let request_id = (1..=16u64)
+        .find_map(|id| {
+            root.provisioning()
+                .pending_terminate_by_request_id(id)
+                .map(|intent| intent.request_id)
+        })
+        .expect("pending terminate");
+    assert!(
+        request_id >= 2,
+        "terminate must not reuse bootstrap create id 1; got {request_id}"
+    );
+    assert!(
+        root.wire_client()
+            .unwrap()
+            .has_pending_terminate(request_id)
+            || root
+                .wire_client()
+                .unwrap()
+                .has_outbound_terminate(request_id)
+    );
+    let _ = pane;
+}
+
+#[test]
 fn explicit_terminate_admits_type_38_on_registry_client_without_install_wire_client() {
     // Production path: wire_client is None; admit goes through client_handle.
     // Must not clear/unregister the handle before type 38 is written.

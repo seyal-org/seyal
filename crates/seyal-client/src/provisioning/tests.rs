@@ -795,3 +795,19 @@ fn per_pane_connection_ownership_is_distinct() {
     assert_ne!(oa, ob);
     assert_eq!(session.claim_connection(a), oa);
 }
+
+#[test]
+fn seed_next_request_id_raises_floor_past_bootstrap_create() {
+    let mut session = ProvisioningSession::new();
+    // Bootstrap CreateExecution consumed id 1 on the shared wire connection.
+    session.seed_next_request_id(2);
+    let pane = PaneId::new();
+    let effect = session.begin_intent(pane, None).unwrap();
+    let ProvisioningEffect::SendCreate { request_id, .. } = effect else {
+        panic!("expected SendCreate");
+    };
+    assert!(
+        request_id >= 2,
+        "session must not reuse bootstrap create id 1; got {request_id}"
+    );
+}

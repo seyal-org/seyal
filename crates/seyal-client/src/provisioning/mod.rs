@@ -640,6 +640,14 @@ impl ProvisioningSession {
         self.pane_pending.remove(&pane);
     }
 
+    /// Raise the connection-scoped request-id floor to match a live wire client
+    /// that already consumed ids (e.g. bootstrap CreateExecution used 1 → next 2).
+    pub fn seed_next_request_id(&mut self, next: u64) {
+        if next > self.next_request_id {
+            self.next_request_id = next;
+        }
+    }
+
     fn allocate_request_id(&mut self) -> Result<u64, ProvisioningFailure> {
         let request_id = self.next_request_id.max(1);
         let Some(next) = request_id.checked_add(1) else {

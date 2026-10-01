@@ -40,15 +40,15 @@ reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-s
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 731
+acknowledged_loc = 734
 issue = 1149
-reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create_by_request_id, and pending_terminate_by_request_id so wire create/terminate results correlate to the session intent without a second allocator or focused-pane guess."
+reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create/terminate_by_request_id, connection-scoped request ids, and seed_next_request_id so post-bootstrap terminate cannot reuse create id 1."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
-acknowledged_loc = 797
+acknowledged_loc = 813
 issue = 1149
-reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
+reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id and bootstrap floor seeding coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -110,6 +110,6 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 789
+acknowledged_loc = 804
 issue = 1149
-reason = "Connect/attach/bootstrap create stay one cold-path attach module after #1136 ADR-017 §6.3 dispose (row-1 never-Attached + row-2 Attached-then-fail terminate) and #1149 queued create-result initializer; further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
+reason = "Connect/attach/bootstrap create stay one cold-path attach module after #1136 ADR-017 §6.3 dispose (row-1/row-2, post-create dispose request_id) and #1149 queued create-result initializer; further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
