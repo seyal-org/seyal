@@ -2,6 +2,7 @@ mod attach;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod terminate;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -15,8 +16,8 @@ use seyal_runtime::{
     display::{decode_chunk, DisplayCache},
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus, ErrorCode,
-        ErrorMessage, FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle,
-        MessageType, ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle, MessageType,
+        ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
@@ -201,36 +202,6 @@ impl LocalDisplayClient {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
         discovery::send_terminate_execution_until(&mut self.stream, execution, deadline)?;
         self.read_terminate_acceptance(execution, deadline)
-    }
-
-    /// Read until the type-35 echo or an `Error` for that request.
-    /// Unrelated frames stay buffered for the normal poll path. One wait, no
-    /// retry of the terminate write.
-    fn read_terminate_acceptance(
-        &mut self,
-        execution: ExecutionId,
-        deadline: std::time::Instant,
-    ) -> Result<(), ClientError> {
-        let expected = execution.to_bytes();
-        loop {
-            let frame = attach::read_blocking_raw_frame_until(&mut self.stream, deadline)?;
-            let header =
-                FrameHeader::decode(&frame[..HEADER_LEN]).map_err(|_| ClientError::Protocol)?;
-            let payload = &frame[HEADER_LEN..];
-            match MessageType::from_u16(header.message_type) {
-                Some(MessageType::TerminateExecution) => {
-                    if payload == expected.as_slice() {
-                        return Ok(());
-                    }
-                    return Err(ClientError::Protocol);
-                }
-                Some(MessageType::Error) => {
-                    let error = ErrorMessage::decode(payload).map_err(|_| ClientError::Protocol)?;
-                    return Err(server_error(error.error_code));
-                }
-                _ => self.buffered.extend_from_slice(&frame),
-            }
-        }
     }
 
     /// Read-only, bounded Runtime metadata. The terminal display cache remains

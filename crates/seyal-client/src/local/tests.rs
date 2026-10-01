@@ -571,3 +571,40 @@ fn unpresented_terminate_keeps_catalog_until_runtime_accepts() {
         Err(AppError::ExecutionNotUnpresented)
     );
 }
+
+#[test]
+fn terminate_acceptance_appends_after_a_partial_frame() {
+    let (client_stream, mut server) = UnixStream::pair().expect("pair");
+    let mut client = test_client(client_stream);
+    let execution = ExecutionId::from_bytes([9; 16]);
+    let earlier = encode_frame(MessageType::Goodbye, &[]);
+    let other_error = encode_frame(
+        MessageType::Error,
+        &ErrorMessage {
+            error_code: ErrorCode::InvalidState as u16,
+            offending_message_type: MessageType::Resize as u16,
+            detail_code: 0,
+        }
+        .encode(),
+    );
+    let echo = encode_frame(MessageType::TerminateExecution, &execution.to_bytes());
+    client.buffered.extend_from_slice(&earlier[..3]);
+    server
+        .write_all(&earlier[3..])
+        .expect("rest of the earlier frame");
+    server.write_all(&other_error).expect("unrelated error");
+    server.write_all(&echo).expect("accept echo");
+    drop(server);
+
+    client
+        .read_terminate_acceptance(
+            execution,
+            std::time::Instant::now() + std::time::Duration::from_secs(1),
+        )
+        .expect("echo accepted");
+
+    let mut kept = earlier.clone();
+    kept.extend_from_slice(&other_error);
+    assert_eq!(client.buffered, kept);
+    assert_eq!(client.read_offset, 0);
+}
