@@ -3,6 +3,13 @@ import Metal
 import QuartzCore
 
 extension MetalTerminalRenderer {
+    func setDefaultTerminalColors(foreground: UInt32, background: UInt32) {
+        guard defaultTerminalColors.x != foreground || defaultTerminalColors.y != background else { return }
+        defaultTerminalColors = SIMD2<UInt32>(foreground, background)
+        needsPresent = true
+        requestPresent()
+    }
+
     func allocateInstanceBuffer(rows: Int, columns: Int) throws {
         let count = rows * columns
         let byteCount = count * MemoryLayout<TerminalInstance>.stride
@@ -212,7 +219,7 @@ extension MetalTerminalRenderer {
             length: MemoryLayout<UInt32>.stride,
             index: 2
         )
-        var defaultColors = SIMD2<UInt32>(defaultTerminalForeground, defaultTerminalBackground)
+        var defaultColors = defaultTerminalColors
         encoder.setFragmentBytes(
             &defaultColors,
             length: MemoryLayout<SIMD2<UInt32>>.stride,
