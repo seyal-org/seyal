@@ -256,6 +256,28 @@ final class SeyalHostComponentTests: XCTestCase {
             ["--runtime-dir", "/tmp/seyal-iso"]
         )
         XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: true
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false,
+                forwardHelperCommand: true
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        XCTAssertEqual(
             BundledRuntimeLauncher.helperArgv(
                 executable: "/tmp/seyal-runtime",
                 processArguments: ["Seyal"],
@@ -271,6 +293,95 @@ final class SeyalHostComponentTests: XCTestCase {
             ),
             ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
         )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: true
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false,
+                forwardHelperCommand: true
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        // Release / production launch path: the env-var gate must not enable
+        // helper-command forwarding, and trailing argv after `--runtime-dir`
+        // PATH stays ignored even when the variable is set to "1".
+        let releaseForward = BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+            environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"],
+            allowUiTestOverride: false
+        )
+        XCTAssertFalse(releaseForward)
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: [
+                    "Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh", "--evil",
+                ],
+                testHostLoaded: false,
+                forwardHelperCommand: releaseForward
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: [
+                    "Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh", "--evil",
+                ],
+                testHostLoaded: false,
+                forwardHelperCommand: releaseForward
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso"]
+        )
+        #if DEBUG
+            XCTAssertEqual(
+                BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey,
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+            )
+            XCTAssertFalse(BundledRuntimeLauncher.uiTestRequestsHelperCommand(environment: [:]))
+            XCTAssertFalse(
+                BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                    environment: ["XCTestConfigurationFilePath": "/tmp/config"]
+                )
+            )
+            XCTAssertFalse(
+                BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                    environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "0"]
+                )
+            )
+            XCTAssertTrue(
+                BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                    environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"]
+                )
+            )
+            XCTAssertEqual(
+                BundledRuntimeLauncher.helperArgv(
+                    executable: "/tmp/seyal-runtime",
+                    processArguments: [
+                        "Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh",
+                    ],
+                    testHostLoaded: false,
+                    forwardHelperCommand: BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                        environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"]
+                    )
+                ),
+                ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+            )
+        #endif
     }
 
     @MainActor

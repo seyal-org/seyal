@@ -28,13 +28,29 @@ enum IsolatedRuntimeDirectory {
 
   static func helperArguments(
     from arguments: [String] = ProcessInfo.processInfo.arguments,
-    testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil
+    testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil,
+    forwardHelperCommand: Bool = false
   ) -> [String] {
     guard let directory = selectedDirectory(from: arguments, testHostLoaded: testHostLoaded)
     else {
       return []
     }
-    return [flag, directory]
+    var forwarded = [flag, directory]
+    // Production / Release Seyal.app must not accept a Runtime command from
+    // app argv. The unit-test host loads XCTest. Debug XCUI sets
+    // `forwardHelperCommand` via a Debug-only launch-environment gate;
+    // Release compiles that gate out. Flow tests pass `/bin/zsh` because a
+    // bash account shell is full-pane Raw.
+    if testHostLoaded || forwardHelperCommand, let index = arguments.firstIndex(of: flag) {
+      let valueIndex = arguments.index(after: index)
+      if valueIndex < arguments.endIndex {
+        let commandStart = arguments.index(after: valueIndex)
+        if commandStart < arguments.endIndex {
+          forwarded.append(contentsOf: arguments[commandStart...])
+        }
+      }
+    }
+    return forwarded
   }
 
   static func explicitDirectory(from arguments: [String]) -> String? {
