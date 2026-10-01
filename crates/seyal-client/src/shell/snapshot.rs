@@ -226,7 +226,8 @@ impl ShellError {
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
             Self::NotZoomed => 17,
-            Self::WindowCreationUnavailable => 18,
+            Self::InvalidMoveTarget => 18,
+            Self::WindowCreationUnavailable => 19,
         }
     }
 }
