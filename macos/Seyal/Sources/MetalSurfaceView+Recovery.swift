@@ -36,7 +36,8 @@ extension MetalSurfaceView {
       recoveryAppHandle != 0,
       !isRustRecoveryEpisodeActive,
       runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue),
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     else { return }
     beginRustRecoveryEpisode()
   }
@@ -49,7 +50,8 @@ extension MetalSurfaceView {
       bridge?.isConnected != true,
       bridge?.clientHandle == 0,
       recoveryAppHandle != 0,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     else { return bridge?.isConnected == true }
     beginRustRecoveryEpisode()
     return bridge?.isConnected == true
@@ -66,7 +68,8 @@ extension MetalSurfaceView {
       recoveryAppHandle != 0
     else { return false }
     if !isRustRecoveryEpisodeActive,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     {
       beginRustRecoveryEpisode()
     }

@@ -446,7 +446,9 @@ impl ApplicationRoot {
             self.shell.allows_pane_splitting(),
         );
         let eligibility = self.eligibility();
-        let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
+        let composer_eligible = eligibility == PresentationEligibility::Flow
+            && !self.frozen
+            && self.recovery.state().stage != RecoveryStage::ExecutionEnded;
         AppSnapshot {
             generation: self.snapshot_generation,
             // The fence Pane, not the focused one: host actions fenced from

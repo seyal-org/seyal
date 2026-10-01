@@ -251,6 +251,19 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     ))
   }
 
+  /// Recovery remains pinned to the accepted execution after its transport
+  /// disconnects. An implicit first attach is only a bootstrap; its accepted
+  /// identity must not be forgotten and replaced with whichever execution is
+  /// running later.
+  var recoveryExecutionIdentity: String? {
+    if let requestedExecutionIdentity { return requestedExecutionIdentity }
+    guard let bridge else { return nil }
+    return Self.identityString((
+      low: bridge.lastRecoveryResult.executionIDLow,
+      high: bridge.lastRecoveryResult.executionIDHigh
+    ))
+  }
+
   var terminalRuntimeIdentity: String? {
     guard terminalBridgeIsConnected, let bridge else { return nil }
     return Self.identityString(bridge.runtimeIdentityWords)

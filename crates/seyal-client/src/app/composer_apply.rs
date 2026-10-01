@@ -21,6 +21,10 @@ impl ApplicationRoot {
             mode,
             input_route,
         });
+        let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
+            pane,
+            ended: self.recovery.state().stage == crate::recovery::RecoveryStage::ExecutionEnded,
+        });
     }
 
     pub(super) fn set_composer_draft(

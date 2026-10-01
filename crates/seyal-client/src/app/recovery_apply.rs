@@ -35,6 +35,9 @@ impl ApplicationRoot {
             }
             return Ok(());
         }
+        if outcome == AttemptOutcome::ExecutionEnded {
+            self.sync_composer_presentation();
+        }
         self.pending_recovery = effects;
         Ok(())
     }

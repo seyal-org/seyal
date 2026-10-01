@@ -30,6 +30,7 @@ pub enum RecoveryStage {
     Usable,
     Exhausted,
     Blocked,
+    ExecutionEnded,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -144,6 +145,7 @@ pub enum AttemptOutcome {
     EndpointMissing,
     Retryable,
     ControllerBusy,
+    ExecutionEnded,
     Blocked,
 }
 
@@ -156,6 +158,9 @@ pub enum AttemptOutcome {
 /// one-launch-per-episode path; Rust launch-once accounting still prevents
 /// a second spawn while a just-started helper binds the canonical endpoint.
 pub fn classify_open_result(failure_class: u8, retryable: bool) -> AttemptOutcome {
+    if failure_class == 7 {
+        return AttemptOutcome::ExecutionEnded;
+    }
     if !retryable {
         return AttemptOutcome::Blocked;
     }
@@ -370,6 +375,12 @@ impl RecoveryCoordinator {
                 self.scheduled = false;
                 self.deadline = None;
                 self.state.stage = RecoveryStage::Blocked;
+                Vec::new()
+            }
+            AttemptOutcome::ExecutionEnded => {
+                self.scheduled = false;
+                self.deadline = None;
+                self.state.stage = RecoveryStage::ExecutionEnded;
                 Vec::new()
             }
         }
