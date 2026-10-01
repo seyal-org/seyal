@@ -158,6 +158,7 @@ impl Workspace {
         self.tabs().find(|tab| tab.id == id)
     }
 
+    #[cfg(test)]
     pub(super) fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.windows
             .iter_mut()
