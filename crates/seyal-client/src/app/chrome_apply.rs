@@ -158,6 +158,7 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        self.record_focused_pane();
         Ok(())
     }
 
@@ -168,6 +169,7 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        self.record_focused_pane();
         Ok(())
     }
 
@@ -178,7 +180,19 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        self.record_focused_pane();
         Ok(())
+    }
+
+    /// Pane that actually received focus (SPEC-022 R6.3).
+    fn record_focused_pane(&mut self) {
+        let focus = self.shell.focus_checkpoint();
+        self.focus_history
+            .record_user_commit(ResourceAddress::Pane {
+                workspace: focus.active_workspace,
+                tab: focus.active_tab,
+                pane: focus.focused_pane,
+            });
     }
 
     pub(super) fn replace_chrome(

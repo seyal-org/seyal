@@ -203,23 +203,18 @@ impl FocusHistory {
         Ok(self.entries[idx + 1].target)
     }
 
-    /// Remove the cursor entry after a failed traversal apply (R6.9).
-    pub fn remove_cursor_entry(&mut self) {
-        let Some(idx) = self.cursor else {
-            return;
-        };
-        if idx >= self.entries.len() {
-            self.cursor = None;
-            return;
+    /// Drop the failed traversal target and point the cursor at `focused` (R6.9).
+    ///
+    /// `focused` is the cursor seq from before the prepare step. Focus did not
+    /// change, so the cursor must still name that entry when it remains.
+    pub(crate) fn remove_failed_traversal_target(&mut self, focused: Option<FocusSeq>) {
+        if let Some(idx) = self.cursor {
+            if idx < self.entries.len() {
+                self.entries.remove(idx);
+            }
         }
-        self.entries.remove(idx);
-        self.cursor = if self.entries.is_empty() {
-            None
-        } else if idx == 0 {
-            Some(0)
-        } else {
-            Some(idx - 1)
-        };
+        self.cursor =
+            focused.and_then(|seq| self.entries.iter().position(|entry| entry.seq == seq));
     }
 
     fn require_cursor_seq(&self, observed: FocusSeq) -> Result<(), NavigationRejection> {

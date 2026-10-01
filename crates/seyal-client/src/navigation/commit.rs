@@ -100,20 +100,19 @@ pub fn history_back(
     inventory: &impl ExecutionInventory,
     principal: NavigationPrincipal<'_>,
 ) -> Result<ResolvedTarget, NavigationRejection> {
+    let before = history.clone();
     let target = history.prepare_back(observed)?;
-    match navigate(
-        target,
-        shell,
-        inventory,
-        principal,
-        NavigateHistory::ApplyOnly,
-    ) {
-        Ok(resolved) => Ok(resolved),
-        Err(error) => {
-            history.remove_cursor_entry();
-            Err(error)
-        }
-    }
+    finish_traversal(
+        history,
+        before,
+        navigate(
+            target,
+            shell,
+            inventory,
+            principal,
+            NavigateHistory::ApplyOnly,
+        ),
+    )
 }
 
 /// Forward one history entry, then apply-only Navigate (R6.5 / R6.8 / R6.9).
@@ -124,20 +123,53 @@ pub fn history_forward(
     inventory: &impl ExecutionInventory,
     principal: NavigationPrincipal<'_>,
 ) -> Result<ResolvedTarget, NavigationRejection> {
+    let before = history.clone();
     let target = history.prepare_forward(observed)?;
-    match navigate(
-        target,
-        shell,
-        inventory,
-        principal,
-        NavigateHistory::ApplyOnly,
-    ) {
+    finish_traversal(
+        history,
+        before,
+        navigate(
+            target,
+            shell,
+            inventory,
+            principal,
+            NavigateHistory::ApplyOnly,
+        ),
+    )
+}
+
+/// Resolution failure is the only traversal error that drops an entry (R6.9).
+/// Every other navigate error restores the pre-move snapshot (R8.1).
+fn finish_traversal(
+    history: &mut FocusHistory,
+    before: FocusHistory,
+    result: Result<ResolvedTarget, NavigationRejection>,
+) -> Result<ResolvedTarget, NavigationRejection> {
+    match result {
         Ok(resolved) => Ok(resolved),
+        Err(error) if is_resolution_failure(error) => {
+            let focused = before.cursor_seq();
+            history.remove_failed_traversal_target(focused);
+            Err(error)
+        }
         Err(error) => {
-            history.remove_cursor_entry();
+            *history = before;
             Err(error)
         }
     }
+}
+
+fn is_resolution_failure(error: NavigationRejection) -> bool {
+    matches!(
+        error,
+        NavigationRejection::UnknownWorkspace
+            | NavigationRejection::UnknownTab
+            | NavigationRejection::UnknownPane
+            | NavigationRejection::UnknownExecution
+            | NavigationRejection::NotComposed
+            | NavigationRejection::TargetTerminated
+            | NavigationRejection::TargetUnbound
+    )
 }
 
 fn record_if_needed(history: NavigateHistory<'_>, pane_address: ResourceAddress) {

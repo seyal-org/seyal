@@ -5,7 +5,7 @@ use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use super::{
     history_back, history_forward, navigate, EmptyExecutionInventory, FocusHistory, FocusSeq,
-    NavigateHistory, NavigationPrincipal, NavigationRejection, ResourceAddress,
+    NavigateHistory, NavigationPrincipal, NavigationRejection, ResourceAddress, WorkspaceAccess,
 };
 
 fn workspace_b() -> WorkspaceId {
@@ -168,6 +168,8 @@ fn stale_history_cursor_rejects_without_focus_move() {
     )
     .unwrap();
     let focused_before = shell.snapshot().focused_pane;
+    let seq = history.cursor_seq();
+    let len = history.len();
     assert_eq!(
         history_back(
             FocusSeq::from_raw(1),
@@ -179,6 +181,8 @@ fn stale_history_cursor_rejects_without_focus_move() {
         Err(NavigationRejection::StaleHistoryCursor)
     );
     assert_eq!(shell.snapshot().focused_pane, focused_before);
+    assert_eq!(history.cursor_seq(), seq);
+    assert_eq!(history.len(), len);
 }
 
 #[test]
@@ -223,5 +227,170 @@ fn back_applies_pane_address_without_stored_window() {
     )
     .expect("back applies address in current placement");
     assert_eq!(shell.snapshot().active_workspace, w1);
+    assert_eq!(shell.snapshot().focused_pane, p1);
+}
+
+fn targets(history: &FocusHistory) -> Vec<ResourceAddress> {
+    history.entries().iter().map(|entry| entry.target).collect()
+}
+
+fn pane_addr(workspace: WorkspaceId, tab: TabId, pane: PaneId) -> ResourceAddress {
+    ResourceAddress::Pane {
+        workspace,
+        tab,
+        pane,
+    }
+}
+
+/// History `[A, B, C]` with the shell focused on C. `B` does not resolve.
+fn history_with_dead_middle() -> (
+    ShellState,
+    FocusHistory,
+    ResourceAddress,
+    ResourceAddress,
+    ResourceAddress,
+    PaneId,
+) {
+    let (shell, w1, _, t1, p1) = seed_shell();
+    let t2 = shell
+        .snapshot()
+        .tabs
+        .iter()
+        .find(|tab| tab.id != t1)
+        .expect("second tab")
+        .id;
+    let p2 = shell.tab_focused_pane(w1, t2).expect("pane A");
+    let addr_a = pane_addr(w1, t2, p2);
+    let addr_b = pane_addr(w1, t1, PaneId::from_bytes([0xab; 16]));
+    let addr_c = pane_addr(w1, t1, p1);
+    let mut history = FocusHistory::new();
+    history.record_user_commit(addr_a);
+    history.record_user_commit(addr_b);
+    history.record_user_commit(addr_c);
+    (shell, history, addr_a, addr_b, addr_c, p1)
+}
+
+#[test]
+fn resolution_failure_on_back_keeps_cursor_on_focused_entry() {
+    let (mut shell, mut history, addr_a, _, addr_c, p1) = history_with_dead_middle();
+    assert_eq!(shell.snapshot().focused_pane, p1);
+    let seq_c = history.cursor_seq().unwrap();
+    assert_eq!(
+        history_back(
+            seq_c,
+            &mut history,
+            &mut shell,
+            &EmptyExecutionInventory,
+            NavigationPrincipal::local_user(),
+        ),
+        Err(NavigationRejection::UnknownPane)
+    );
+    assert_eq!(shell.snapshot().focused_pane, p1);
+    assert_eq!(targets(&history), vec![addr_a, addr_c]);
+    assert_eq!(history.cursor_target(), Some(addr_c));
+    assert_eq!(history.cursor_index(), Some(1));
+}
+
+#[test]
+fn resolution_failure_on_forward_keeps_cursor_on_focused_entry() {
+    let (mut shell, mut history, addr_a, _, addr_c, _) = history_with_dead_middle();
+    let t2_pane = match addr_a {
+        ResourceAddress::Pane { tab, pane, .. } => (tab, pane),
+        _ => unreachable!(),
+    };
+    shell
+        .commit_focus(shell.snapshot().active_workspace, t2_pane.0, t2_pane.1)
+        .expect("focus A");
+    let head = history.cursor_seq().unwrap();
+    history.prepare_back(head).unwrap();
+    let on_dead = history.cursor_seq().unwrap();
+    history.prepare_back(on_dead).unwrap();
+    let seq_a = history.cursor_seq().unwrap();
+    assert_eq!(history.cursor_target(), Some(addr_a));
+    assert_eq!(
+        history_forward(
+            seq_a,
+            &mut history,
+            &mut shell,
+            &EmptyExecutionInventory,
+            NavigationPrincipal::local_user(),
+        ),
+        Err(NavigationRejection::UnknownPane)
+    );
+    assert_eq!(shell.snapshot().focused_pane, t2_pane.1);
+    assert_eq!(targets(&history), vec![addr_a, addr_c]);
+    assert_eq!(history.cursor_target(), Some(addr_a));
+    assert_eq!(history.cursor_index(), Some(0));
+}
+
+#[test]
+fn denied_traversal_restores_history_without_deleting() {
+    let (mut shell, mut history, addr_a, addr_b, addr_c, p1) = history_with_dead_middle();
+    let seq_c = history.cursor_seq().unwrap();
+    let before = targets(&history);
+    assert_eq!(before, vec![addr_a, addr_b, addr_c]);
+    let denied = NavigationPrincipal {
+        local_navigation: true,
+        workspaces: WorkspaceAccess::Only(&[]),
+    };
+    assert_eq!(
+        history_back(
+            seq_c,
+            &mut history,
+            &mut shell,
+            &EmptyExecutionInventory,
+            denied,
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+    assert_eq!(shell.snapshot().focused_pane, p1);
+    assert_eq!(targets(&history), before);
+    assert_eq!(history.cursor_seq(), Some(seq_c));
+    assert_eq!(history.len(), 3);
+}
+
+#[test]
+fn history_unavailable_at_end_does_not_delete() {
+    let (mut shell, mut history, addr_a, addr_b, addr_c, p1) = history_with_dead_middle();
+    let head = history.cursor_seq().unwrap();
+    history.prepare_back(head).unwrap();
+    let on_dead = history.cursor_seq().unwrap();
+    history.prepare_back(on_dead).unwrap();
+    let seq_a = history.cursor_seq().unwrap();
+    let before = targets(&history);
+    assert_eq!(before, vec![addr_a, addr_b, addr_c]);
+    assert_eq!(
+        history_back(
+            seq_a,
+            &mut history,
+            &mut shell,
+            &EmptyExecutionInventory,
+            NavigationPrincipal::local_user(),
+        ),
+        Err(NavigationRejection::HistoryUnavailable)
+    );
+    assert_eq!(shell.snapshot().focused_pane, p1);
+    assert_eq!(targets(&history), before);
+    assert_eq!(history.cursor_seq(), Some(seq_a));
+
+    // Return the cursor to the head without apply; Forward is then unavailable.
+    let mid = history.prepare_forward(seq_a).unwrap();
+    assert_eq!(mid, addr_b);
+    let on_b = history.cursor_seq().unwrap();
+    let at_c = history.prepare_forward(on_b).unwrap();
+    assert_eq!(at_c, addr_c);
+    let seq_c = history.cursor_seq().unwrap();
+    assert_eq!(
+        history_forward(
+            seq_c,
+            &mut history,
+            &mut shell,
+            &EmptyExecutionInventory,
+            NavigationPrincipal::local_user(),
+        ),
+        Err(NavigationRejection::HistoryUnavailable)
+    );
+    assert_eq!(targets(&history), before);
+    assert_eq!(history.cursor_seq(), Some(seq_c));
     assert_eq!(shell.snapshot().focused_pane, p1);
 }

@@ -246,6 +246,77 @@ fn close_focused_pane_purges_then_commits_successor() {
     assert_eq!(root.snapshot().shell.focused_pane, p1);
 }
 
+fn focus_history_back(root: &mut ApplicationRoot) {
+    root.invoke_workspace_command(
+        WorkspaceCommand {
+            id: WorkspaceCommandId::FocusHistoryBack,
+            ordinal: None,
+        },
+        BindingContext::APP,
+    )
+    .unwrap();
+}
+
+#[test]
+fn pane_and_tab_focus_enter_history_so_back_returns_to_previous() {
+    let (mut root, _, t1, p1, p2) = two_pane_root();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+
+    root.apply(AppAction::FocusPane { id: p2 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    focus_history_back(&mut root);
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+
+    // A later ⌘[ undoes the next focus change; it does not skip that pane.
+    root.apply(AppAction::FocusPane { id: p2 }).unwrap();
+    focus_history_back(&mut root);
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+
+    root.apply(AppAction::CreateTab).unwrap();
+    let t_new = root.snapshot().shell.active_tab;
+    let p_new = root.snapshot().shell.focused_pane;
+    assert_ne!(t_new, t1);
+    root.select_tab_relative(1).unwrap();
+    assert_eq!(root.snapshot().shell.active_tab, t1);
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    root.select_tab_relative(-1).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p_new);
+    focus_history_back(&mut root);
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().shell.active_tab, t1);
+}
+
+#[test]
+fn failed_pane_and_tab_focus_does_not_record_history() {
+    let (mut root, _, _, p1, _) = two_pane_root();
+    let seq = root.snapshot().focus_history_seq;
+    assert_eq!(
+        root.apply(AppAction::FocusPane {
+            id: PaneId::from_bytes([0xee; 16]),
+        }),
+        Err(AppError::UnknownPane)
+    );
+    assert_eq!(
+        root.apply(AppAction::SelectTab {
+            id: TabId::from_bytes([0xee; 16]),
+        }),
+        Err(AppError::UnknownChromeTab)
+    );
+    assert_eq!(root.snapshot().focus_history_seq, seq);
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(
+        root.invoke_workspace_command(
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ordinal: None,
+            },
+            BindingContext::APP,
+        ),
+        Err(AppError::NavigationHistoryUnavailable)
+    );
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+}
+
 #[test]
 fn tab_select_next_previous_wrap_and_pane_focus_cycles_leaf_order() {
     let (mut root, _, t1, p1, p2) = two_pane_root();
