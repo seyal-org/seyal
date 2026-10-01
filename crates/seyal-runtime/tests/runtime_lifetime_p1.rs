@@ -217,7 +217,6 @@ impl Drop for HelperChild {
     }
 }
 
-
 #[test]
 fn headless_empty_start_has_zero_executions_and_stable_identity() {
     let mut runtime = Runtime::new(isolated_config("empty")).expect("Runtime");
