@@ -21,9 +21,7 @@ use seyal_agent_protocol::{
     FrameKind, SnapshotView, ABSOLUTE_MAX_FRAME_SIZE, MAX_EVENT_WINDOW, REPLAY_EVENT_OVERHEAD,
     REPLAY_RESULT_OVERHEAD,
 };
-use seyal_agent_store::{
-    AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN,
-};
+use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN};
 
 use crate::{
     AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, HostObservationKind,

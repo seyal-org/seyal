@@ -683,15 +683,20 @@ fn high_volume_output_uses_segments_end_to_end() {
     let (first_index, segments, byte_length, first_ordinal, last_ordinal) =
         seyal_agent_store::decode_output_ref(&output.payload).unwrap();
     assert_eq!(first_index, 0);
-    assert_eq!(segments as usize, OUTPUT_BYTES / seyal_agent_store::OUTPUT_SEGMENT_LEN);
+    assert_eq!(
+        segments as usize,
+        OUTPUT_BYTES / seyal_agent_store::OUTPUT_SEGMENT_LEN
+    );
     assert_eq!(byte_length as usize, OUTPUT_BYTES);
     assert!(first_ordinal >= 1);
     assert!(last_ordinal >= first_ordinal);
-    assert!(events
-        .iter()
-        .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
-        .count()
-        == 1);
+    assert!(
+        events
+            .iter()
+            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+            .count()
+            == 1
+    );
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         store.output_segment_count(started.run_id).unwrap(),

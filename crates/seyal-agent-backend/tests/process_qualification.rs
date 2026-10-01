@@ -378,7 +378,8 @@ fn replay_identity(dir: &Path) -> Vec<(u128, Vec<u64>, Option<u64>, u64, u64)> {
         }
         let mut referenced_segments = 0_u64;
         for event in &events {
-            if let Some((_, count, _, _, _)) = seyal_agent_store::decode_output_ref(&event.payload) {
+            if let Some((_, count, _, _, _)) = seyal_agent_store::decode_output_ref(&event.payload)
+            {
                 referenced_segments += u64::from(count);
             }
         }

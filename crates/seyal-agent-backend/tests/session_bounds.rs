@@ -31,7 +31,8 @@ fn slow_subscriber_is_dropped_and_resyncs_from_cursor() {
     let mut script = vec![ScriptStep::Emit(HostObservationKind::Started)];
     for step in 0..128 {
         script.push(ScriptStep::Emit(HostObservationKind::Result(vec![
-            (step % 251) as u8;
+            (step % 251)
+                as u8;
             1024
         ])));
     }
