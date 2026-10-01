@@ -49,8 +49,9 @@ impl ApplicationRoot {
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
         let tab = snap.active_tab;
-        let workspace = snap.active_workspace.to_bytes();
-        let workspace_id = u128::from_le_bytes(workspace);
+        // SPEC-004 §18.2 / ADR-017 §5.2: M003 create admits only workspace_id 0.
+        let workspace_id = 0u128;
+        self.seed_provisioning_request_floor_from_wire();
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
@@ -373,10 +374,10 @@ impl ApplicationRoot {
                 .presentation
                 .apply(crate::presentation::PresentationAction::ClearIdentity);
             self.sync_composer_presentation();
-            #[cfg(target_os = "macos")]
-            if let Some(handle) = self.client_handle.take() {
-                let _ = crate::ffi::unregister_client(handle.raw());
-            }
+            // ADR-017 §6.1 detach-only: keep the shared LocalDisplayClient /
+            // client_handle registered so remaining tabs can still admit
+            // create/terminate on the same connection. Unregister happens on
+            // explicit terminate absorption, attach replace, or quit.
         }
     }
 
@@ -433,6 +434,30 @@ impl ApplicationRoot {
             }
         }
         Ok(())
+    }
+
+    /// Raise the portable session request_id floor to the live wire client's
+    /// next id so CreateTab cannot reuse bootstrap's connection-local id 1.
+    fn seed_provisioning_request_floor_from_wire(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(client) = self.wire_client.as_ref() {
+                self.provisioning
+                    .seed_next_request_id(client.next_provisioning_request_id);
+                return;
+            }
+            if let Some(handle) = self
+                .client_handle
+                .as_ref()
+                .map(crate::ffi::ClientRegistryHandle::raw)
+            {
+                if let Some(next) =
+                    crate::ffi::with_client(handle, |client| client.next_provisioning_request_id)
+                {
+                    self.provisioning.seed_next_request_id(next);
+                }
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]

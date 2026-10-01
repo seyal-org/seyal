@@ -88,7 +88,35 @@ fn create_tab_admits_type_36_with_session_request_id() {
         client.has_outbound_create(request_id) || client.has_pending_create(request_id),
         "SendCreate must reach LocalDisplayClient::submit_create_execution_with_id"
     );
+    if client.has_outbound_create(request_id) {
+        assert_eq!(
+            client.admitted_create_workspace_id(request_id),
+            Some(0),
+            "M003 create must encode workspace_id 0 (SPEC-004 §18.2)"
+        );
+    }
     let _ = (HEADER_LEN, MessageType::CreateExecutionRequest);
+}
+
+#[test]
+fn create_tab_seeds_request_id_past_bootstrap_floor() {
+    let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
+    let mut client = negotiated_provisioning_client();
+    // Bootstrap create already consumed connection-local id 1.
+    client.next_provisioning_request_id = 2;
+    root.install_wire_client(client).unwrap();
+    root.apply(AppAction::CreateTab).unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    let request_id = root
+        .provisioning()
+        .pending_intent(pane)
+        .expect("pending")
+        .request_id;
+    assert!(
+        request_id >= 2,
+        "CreateTab must not reuse bootstrap request_id 1; got {request_id}"
+    );
 }
 
 #[test]
@@ -264,6 +292,16 @@ fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
     assert_ne!(tab_a, tab_b);
     assert_ne!(pane_a, pane_b);
 
+    // Make tab_b the authority pane, then close it (detach-only).
+    let wire_attachment = root.wire_client().unwrap().attachment_id();
+    root.adopt_authority_for_provisioned_pane(BindingEvidence {
+        execution: exec_b,
+        attachment: wire_attachment,
+        controller: true,
+        pty_generation: 1,
+        alternate_screen: false,
+    })
+    .unwrap();
     root.apply(AppAction::CloseTab { id: tab_b }).unwrap();
     assert_eq!(root.snapshot().shell.tabs.len(), 2);
     assert!(root.provisioning().is_unreferenced(exec_b));
@@ -271,6 +309,10 @@ fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
     assert_eq!(root.provisioning().recorded_execution(pane_a), Some(exec_a));
     assert_eq!(root.provisioning().recorded_execution(pane_b), None);
     assert_eq!(root.provisioning().automatic_retries(), 0);
+    assert!(
+        root.wire_client().is_some(),
+        "detach-only close must keep the shared wire client for remaining tabs"
+    );
 }
 
 #[test]

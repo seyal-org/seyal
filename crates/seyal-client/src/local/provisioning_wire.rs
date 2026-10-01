@@ -114,6 +114,28 @@ impl LocalDisplayClient {
         self.pending_create_requests.contains(&request_id)
     }
 
+    /// Workspace id encoded on an still-queued type-36 create (test/host assert).
+    pub fn admitted_create_workspace_id(&self, request_id: u64) -> Option<u128> {
+        for pending in &self.outbound {
+            if matches!(
+                pending.kind,
+                OutboundKind::CreateExecution {
+                    request_id: id
+                } if id == request_id
+            ) {
+                if pending.bytes.len() < seyal_protocol::framing::HEADER_LEN {
+                    return None;
+                }
+                return CreateExecutionRequest::decode(
+                    &pending.bytes[seyal_protocol::framing::HEADER_LEN..],
+                )
+                .ok()
+                .map(|request| request.workspace_id);
+            }
+        }
+        None
+    }
+
     /// True when an admitted create frame is still sitting in the outbound FIFO
     /// (false after a successful flush to the socket).
     pub fn has_outbound_create(&self, request_id: u64) -> bool {
