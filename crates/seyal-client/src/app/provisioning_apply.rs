@@ -369,6 +369,10 @@ impl ApplicationRoot {
             .is_some_and(|authority| authority.pane == pane)
         {
             self.authority = None;
+            let _ = self
+                .presentation
+                .apply(crate::presentation::PresentationAction::ClearIdentity);
+            self.sync_composer_presentation();
             #[cfg(target_os = "macos")]
             if let Some(handle) = self.client_handle.take() {
                 let _ = crate::ffi::unregister_client(handle.raw());
