@@ -450,12 +450,10 @@ impl ApplicationRoot {
                 .client_handle
                 .as_ref()
                 .map(crate::ffi::ClientRegistryHandle::raw)
-            {
-                if let Some(next) =
+                && let Some(next) =
                     crate::ffi::with_client(handle, |client| client.next_provisioning_request_id)
-                {
-                    self.provisioning.seed_next_request_id(next);
-                }
+            {
+                self.provisioning.seed_next_request_id(next);
             }
         }
     }
