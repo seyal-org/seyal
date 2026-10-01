@@ -57,7 +57,7 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(size_of::<SeyalAppShell>(), 112);
     assert_eq!(offset_of!(SeyalAppShell, containment_generation), 72);
     assert_eq!(size_of::<super::SeyalAppWindow>(), 72);
-    assert_eq!(size_of::<super::SeyalAppTab>(), 64);
+    assert_eq!(size_of::<super::SeyalAppTab>(), 80);
     assert_eq!(size_of::<super::SeyalAppPaneLeaf>(), 56);
     assert_eq!(size_of::<super::SeyalAppPaneTreeNode>(), 32);
     assert_eq!(size_of::<super::SeyalAppNativeEffect>(), 24);

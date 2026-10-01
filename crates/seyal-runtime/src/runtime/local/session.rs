@@ -57,6 +57,7 @@ impl Runtime {
         match kind {
             MessageType::ClientHello => self.handle_hello(token, payload),
             MessageType::ListExecutions => self.handle_list_executions(token, payload),
+            MessageType::TerminateExecution => self.handle_terminate_execution(token, payload),
             MessageType::Attach => self.handle_attach(token, payload),
             MessageType::Detach => self.handle_detach(token, payload),
             MessageType::Input => self.handle_input(token, payload),
@@ -163,6 +164,37 @@ impl Runtime {
                 &ExecutionList { entries }.encode(),
             ),
         );
+    }
+
+    fn handle_terminate_execution(&mut self, token: u64, payload: &[u8]) {
+        let Ok(bytes) = <[u8; 16]>::try_from(payload) else {
+            self.send_error(
+                token,
+                ErrorCode::MalformedPayload,
+                MessageType::TerminateExecution as u16,
+            );
+            return;
+        };
+        let id = crate::ExecutionId::from_bytes(bytes);
+        // Signal and arm the existing graceful/forced/drain deadlines only.
+        // The reactor poll reaps; this handler must not wait.
+        match self.request_termination(id) {
+            Ok(()) => {}
+            Err(crate::RuntimeError::UnknownExecution) => {
+                self.send_error(
+                    token,
+                    ErrorCode::InvalidExecution,
+                    MessageType::TerminateExecution as u16,
+                );
+            }
+            Err(_) => {
+                self.send_error(
+                    token,
+                    ErrorCode::InvalidState,
+                    MessageType::TerminateExecution as u16,
+                );
+            }
+        }
     }
 
     fn handle_attach(&mut self, token: u64, payload: &[u8]) {

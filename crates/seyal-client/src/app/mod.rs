@@ -92,6 +92,9 @@ pub enum AppError {
     CannotCloseBoundPane,
     CrossWorkspaceAdopt,
     ExecutionNotUnpresented,
+    /// The terminate action was validated, but no runtime termination request
+    /// was made. The unpresented catalog entry is unchanged.
+    TerminationNotRequested,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

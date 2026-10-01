@@ -114,7 +114,8 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert_eq!(
         shell.apply(ShellAction::SplitPane {
             id: focused,
-            axis: SplitAxis::Right
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::PaneSplitUnavailable)
     );

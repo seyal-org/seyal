@@ -16,6 +16,8 @@ mod workspace;
 #[cfg(test)]
 mod close_tests;
 #[cfg(test)]
+mod pt1_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
@@ -68,6 +70,7 @@ pub enum ShellError {
     /// Adopt/terminate of an execution that is not live-unpresented here
     /// (unknown, retired, or finalized).
     ExecutionNotUnpresented,
+    NotZoomed,
 }
 
 impl ShellError {
@@ -106,6 +109,7 @@ impl ShellError {
             Self::ExecutionNotUnpresented => {
                 "This execution is not a live-unpresented execution in this Workspace."
             }
+            Self::NotZoomed => "The Tab is not zoomed.",
         }
     }
 }
@@ -175,10 +179,12 @@ pub enum ShellAction {
     },
     SplitFocused {
         axis: SplitAxis,
+        containment_generation: u64,
     },
     SplitPane {
         id: PaneId,
         axis: SplitAxis,
+        containment_generation: u64,
     },
     ClosePane {
         id: PaneId,
@@ -187,6 +193,10 @@ pub enum ShellAction {
     FocusPane {
         id: PaneId,
     },
+    ZoomPane {
+        id: PaneId,
+    },
+    Unzoom,
     BindExecution {
         pane: PaneId,
         execution: ExecutionId,
@@ -207,8 +217,9 @@ pub enum ShellAction {
         pane: PaneId,
         execution: ExecutionId,
     },
-    /// Explicit disposition. Queues [`ShellNativeEffect::TerminateExecution`];
-    /// never produced by presentation close (W2b/W4b).
+    /// Explicit disposition. Queues [`ShellNativeEffect::TerminateExecution`]
+    /// and leaves the catalog entry until the runtime request is made.
+    /// Never produced by presentation close (W2b/W4b).
     TerminateExecution {
         execution: ExecutionId,
     },
@@ -232,6 +243,8 @@ pub struct ShellSnapshot {
     pub active_tab: TabId,
     /// Placeholder identity when [`Self::active_window`] is `None`.
     pub focused_pane: PaneId,
+    /// Active-Tab zoom overlay (`None` when not zoomed).
+    pub zoomed: Option<PaneId>,
     pub panes: Vec<PaneSnapshot>,
     pub tree: PaneTree,
     pub layout: LayoutDescription,
@@ -477,12 +490,25 @@ impl ShellState {
             ShellAction::CloseWindow { .. }
             | ShellAction::CloseTab { .. }
             | ShellAction::ClosePane { .. } => self.dispatch_close(action),
-            ShellAction::SplitFocused { axis } => {
+            ShellAction::SplitFocused {
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
                 let focused = self.focused_pane_id()?;
                 self.split_pane(focused, axis).map(|_| ())
             }
-            ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
+            ShellAction::SplitPane {
+                id,
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.split_pane(id, axis).map(|_| ())
+            }
             ShellAction::FocusPane { id } => self.focus_pane(id),
+            ShellAction::ZoomPane { id } => self.zoom_pane(id),
+            ShellAction::Unzoom => self.unzoom(),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
             ShellAction::RecordUnpresented { .. }
             | ShellAction::ForgetUnpresented { .. }
@@ -508,6 +534,8 @@ impl ShellState {
             allows_implicit_execution_bootstrap: false,
         };
         let id = pane.id;
+        // ADR-021 §3: successful structural mutation clears zoom.
+        tab.zoomed = None;
         tab.panes.insert(id, pane);
         tab.root = tab.root.replacing(
             pane_id,
@@ -528,7 +556,31 @@ impl ShellState {
         if !tab.panes.contains_key(&id) {
             return Err(ShellError::UnknownPane);
         }
+        if tab.zoomed.is_some_and(|zoomed| zoomed != id) {
+            tab.zoomed = None;
+        }
         tab.focused = id;
+        Ok(())
+    }
+
+    fn zoom_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if !tab.panes.contains_key(&id) {
+            return Err(ShellError::UnknownPane);
+        }
+        tab.zoomed = Some(id);
+        tab.focused = id;
+        Ok(())
+    }
+
+    fn unzoom(&mut self) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if tab.zoomed.is_none() {
+            return Err(ShellError::NotZoomed);
+        }
+        tab.zoomed = None;
         Ok(())
     }
 

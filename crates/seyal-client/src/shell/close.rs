@@ -123,16 +123,19 @@ impl ShellState {
                 return Err(ShellError::UnknownPane);
             };
             let released = pane.execution.take();
+            let sibling_successor = tab.root.sibling_first_leaf(pane_id);
             let Some(root) = tab.root.removing(pane_id) else {
                 return Err(ShellError::UnknownPane);
             };
             tab.root = root;
             tab.panes.remove(&pane_id);
+            if tab.zoomed == Some(pane_id) {
+                tab.zoomed = None;
+            }
             if tab.focused == pane_id || !tab.panes.contains_key(&tab.focused) {
-                // Surviving sibling subtree's pre-order first leaf (ADR-021 / §3.2).
-                tab.focused = tab
-                    .root
-                    .first_pane()
+                // Surviving sibling subtree's pre-order first leaf (SPEC-025 §5.2).
+                tab.focused = sibling_successor
+                    .or_else(|| tab.root.first_pane())
                     .expect("remaining Pane tree must contain a Pane");
             }
             released

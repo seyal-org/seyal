@@ -2,12 +2,17 @@
 #![cfg(target_os = "macos")]
 
 use std::{
+    io::{Read, Write},
+    os::unix::net::UnixStream,
     sync::Mutex,
     time::{Duration, Instant},
 };
 
 use seyal_exec::{CommandSpec, WindowSize};
-use seyal_runtime::{ExecutionLifecycle, LocalIpcMode, Runtime, RuntimeConfig};
+use seyal_runtime::{
+    local_ipc::framing::{encode_frame, ClientHello, FrameHeader, MessageType, HEADER_LEN},
+    ExecutionId, ExecutionLifecycle, LocalIpcMode, Runtime, RuntimeConfig,
+};
 
 #[cfg(feature = "test-fault-injection")]
 use seyal_exec::test_fault::{self as exec_fault, FaultPoint as ExecFaultPoint};
@@ -41,11 +46,104 @@ fn config(test: &str) -> RuntimeConfig {
     config
 }
 
+fn config_with_ipc(test: &str) -> RuntimeConfig {
+    let mut config = config(test);
+    // macOS `sockaddr_un` is 104 bytes. `std::env::temp_dir()` is too long
+    // once `control.sock` is appended, so the test socket lives under `/tmp`.
+    config.local_ipc = LocalIpcMode::Enabled {
+        runtime_dir_override: Some(std::path::PathBuf::from(format!(
+            "/tmp/w6-{}-{test}",
+            std::process::id()
+        ))),
+    };
+    config
+}
+
 fn shutdown(runtime: &mut Runtime) {
     runtime.begin_shutdown().expect("begin shutdown");
     runtime
         .run_until_empty(Instant::now() + Duration::from_secs(3))
         .expect("shutdown completes");
+}
+
+fn write_frame(stream: &mut UnixStream, kind: MessageType, payload: &[u8]) {
+    let frame = encode_frame(kind, payload);
+    stream.set_nonblocking(false).expect("blocking write");
+    stream.write_all(&frame).expect("write frame");
+}
+
+fn read_frame(runtime: &mut Runtime, stream: &mut UnixStream, deadline: Instant) -> (u16, Vec<u8>) {
+    stream.set_nonblocking(true).expect("nonblocking");
+    let mut buffered = Vec::new();
+    loop {
+        if buffered.len() >= HEADER_LEN {
+            let header = FrameHeader::decode(&buffered[..HEADER_LEN]).expect("header");
+            let total = HEADER_LEN + header.payload_len as usize;
+            if buffered.len() >= total {
+                let frame = buffered.drain(..total).collect::<Vec<_>>();
+                return (header.message_type, frame[HEADER_LEN..].to_vec());
+            }
+        }
+        let mut chunk = [0u8; 4096];
+        match stream.read(&mut chunk) {
+            Ok(0) => panic!("control connection closed"),
+            Ok(count) => buffered.extend_from_slice(&chunk[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                runtime
+                    .poll_once(Some(Duration::from_millis(10)))
+                    .expect("poll");
+            }
+            Err(error) => panic!("control read failed: {error}"),
+        }
+        assert!(Instant::now() < deadline, "timed out reading control frame");
+    }
+}
+
+/// Hello into Ready, then write `TerminateExecution` without polling it in.
+/// The caller polls so the production handler reaches `request_termination`.
+fn queue_terminate_execution(runtime: &mut Runtime, id: ExecutionId) -> UnixStream {
+    let path = runtime
+        .local_ipc_socket_path()
+        .expect("local IPC bound")
+        .to_path_buf();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut stream = loop {
+        match UnixStream::connect(&path) {
+            Ok(stream) => break stream,
+            Err(_) => {
+                assert!(Instant::now() < deadline, "control connect timed out");
+                runtime
+                    .poll_once(Some(Duration::from_millis(10)))
+                    .expect("poll");
+            }
+        }
+    };
+    write_frame(
+        &mut stream,
+        MessageType::ClientHello,
+        &ClientHello {
+            client_capabilities: 0,
+        }
+        .encode(),
+    );
+    let (kind, _) = read_frame(runtime, &mut stream, deadline);
+    assert_eq!(kind, MessageType::ServerHello as u16);
+    write_frame(&mut stream, MessageType::TerminateExecution, &id.to_bytes());
+    stream
+}
+
+fn dispatch_terminate(runtime: &mut Runtime, id: ExecutionId) {
+    let _control = queue_terminate_execution(runtime, id);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while runtime.lookup(id).map(|summary| summary.lifecycle) == Some(ExecutionLifecycle::Running) {
+        assert!(
+            Instant::now() < deadline,
+            "terminate frame was not dispatched"
+        );
+        runtime
+            .poll_once(Some(Duration::from_millis(10)))
+            .expect("poll");
+    }
 }
 
 fn wait_until(runtime: &mut Runtime, deadline: Instant, mut pred: impl FnMut(&Runtime) -> bool) {
@@ -63,7 +161,7 @@ fn wait_until(runtime: &mut Runtime, deadline: Instant, mut pred: impl FnMut(&Ru
 #[test]
 fn terminate_unpresented_does_not_stall_sibling_pty_output() {
     let _guard = serialized();
-    let mut runtime = Runtime::new(config("sibling-progress")).expect("Runtime");
+    let mut runtime = Runtime::new(config_with_ipc("sibling-progress")).expect("Runtime");
 
     // Unpresented: created, never attached/bound — W6 terminate target.
     let unpresented = runtime
@@ -97,9 +195,7 @@ fn terminate_unpresented_does_not_stall_sibling_pty_output() {
         .terminal()
         .damage_generation();
 
-    runtime
-        .request_termination(unpresented)
-        .expect("terminate unpresented");
+    dispatch_terminate(&mut runtime, unpresented);
     assert_ne!(
         runtime.lookup(unpresented).map(|s| s.lifecycle),
         Some(ExecutionLifecycle::Running)
@@ -143,6 +239,7 @@ fn n_times_reap_failure_stays_bounded_while_sibling_progresses() {
     let mut cfg = config("reap-bound-sibling");
     cfg.graceful_termination = Duration::from_millis(20);
     cfg.forced_reap = Duration::from_millis(20);
+    cfg.local_ipc = config_with_ipc("reap-bound-sibling").local_ipc;
     let mut runtime = Runtime::new(cfg).expect("Runtime");
 
     let target = runtime
@@ -175,8 +272,10 @@ fn n_times_reap_failure_stays_bounded_while_sibling_progresses() {
         .damage_generation();
 
     // Persistent unreapability: bounded retries, no fixed-frequency hot loop.
+    // The frame is queued on a Ready connection before the fault is armed so
+    // handshake polls do not consume the failure budget.
+    let _control = queue_terminate_execution(&mut runtime, target);
     exec_fault::fail_times(ExecFaultPoint::ChildTryWait, 64);
-    runtime.request_termination(target).expect("terminate");
 
     let failed_deadline = Instant::now() + Duration::from_secs(3);
     let mut saw_failed = false;

@@ -26,6 +26,8 @@ pub struct WindowTabSnapshot {
     pub title: String,
     pub attention: bool,
     pub focused_pane: PaneId,
+    /// Tab-scoped zoom overlay; topology unchanged while set (ADR-021 §3).
+    pub zoomed: Option<PaneId>,
     pub panes: Vec<PaneLeafSnapshot>,
     pub tree: PaneTree,
     pub layout: LayoutDescription,
@@ -60,6 +62,7 @@ impl ShellState {
             tabs,
             active_tab,
             focused_pane,
+            zoomed,
             panes,
             tree,
             layout,
@@ -70,6 +73,7 @@ impl ShellState {
                 self.tabs_for_workspace_projection(workspace),
                 window.active_tab,
                 tab.focused,
+                tab.zoomed,
                 tab.root
                     .pane_ids()
                     .into_iter()
@@ -92,6 +96,7 @@ impl ShellState {
                 Vec::new(),
                 nil_tab,
                 nil_pane,
+                None,
                 Vec::new(),
                 PaneTree::Leaf(nil_pane),
                 LayoutDescription::Single,
@@ -120,6 +125,7 @@ impl ShellState {
             tabs,
             active_tab,
             focused_pane,
+            zoomed,
             panes,
             tree,
             layout,
@@ -185,6 +191,7 @@ fn tab_snapshot(tab: &Tab, window: &Window, product_window: Option<WindowId>) ->
         title: tab.title.clone(),
         attention: tab.attention,
         focused_pane: tab.focused,
+        zoomed: tab.zoomed,
         panes: tab
             .root
             .pane_ids()
@@ -255,6 +262,7 @@ impl ShellError {
             Self::CrossWorkspaceAdopt => 17,
             Self::ExecutionNotUnpresented => 18,
             Self::PresentationCloseUnavailable => 19,
+            Self::NotZoomed => 20,
         }
     }
 }

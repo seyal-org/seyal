@@ -148,6 +148,7 @@ fn adopt_rejects_execution_already_bound_elsewhere() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     let second = shell.snapshot().focused_pane;
@@ -231,6 +232,7 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     let created = shell.snapshot().focused_pane;
@@ -256,7 +258,12 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
         shell.take_effects(),
         vec![ShellNativeEffect::TerminateExecution { execution }]
     );
-    assert!(shell.live_unpresented(workspace_a()).is_empty());
+    // The shell action does not reap. The catalog stays until the runtime
+    // request is made, so a later apply can request again.
+    assert_eq!(shell.live_unpresented(workspace_a()), vec![execution]);
+    shell
+        .apply(ShellAction::ForgetUnpresented { execution })
+        .unwrap();
     assert_eq!(
         shell.apply(ShellAction::TerminateExecution { execution }),
         Err(ShellError::ExecutionNotUnpresented)

@@ -482,3 +482,62 @@ fn v2_sent_bound_advances_only_after_wire_complete() {
         Some(InputAdmissionFailure::ClientBackpressure)
     );
 }
+
+#[test]
+fn unpresented_terminate_writes_execution_id_only_after_send() {
+    use crate::app::{AppAction, AppError, ApplicationRoot, NativeEffect};
+    use seyal_core::WorkspaceId;
+    use seyal_runtime::local_ipc::framing::{FrameHeader, HEADER_LEN};
+    use std::io::Read;
+
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let target = ExecutionId::from_bytes([0x44; 16]);
+    root.apply(AppAction::RecordUnpresented {
+        execution: target,
+        workspace,
+    })
+    .unwrap();
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution: target }),
+        Err(AppError::TerminationNotRequested)
+    );
+    assert_eq!(root.live_unpresented(), vec![target]);
+    assert_eq!(
+        root.snapshot().pending_effects,
+        vec![NativeEffect::TerminateExecution { execution: target }]
+    );
+
+    let (ours, mut peer) = UnixStream::pair().expect("pair");
+    ours.set_nonblocking(true).expect("nonblocking");
+    root.attach_client(root.fence(), test_client(ours))
+        .expect("attach");
+    root.apply(AppAction::AckEffect).unwrap();
+    root.apply(AppAction::TerminateExecution { execution: target })
+        .expect("terminate sent");
+    assert!(root.live_unpresented().is_empty());
+    assert!(root.snapshot().pending_effects.iter().any(|effect| {
+        matches!(
+            effect,
+            NativeEffect::TerminateExecution { execution } if *execution == target
+        )
+    }));
+
+    let mut header = [0u8; HEADER_LEN];
+    peer.read_exact(&mut header).expect("header");
+    let header = FrameHeader::decode(&header).expect("frame");
+    assert_eq!(header.message_type, MessageType::TerminateExecution as u16);
+    assert_eq!(header.payload_len, 16);
+    let mut payload = [0u8; 16];
+    peer.read_exact(&mut payload).expect("payload");
+    assert_eq!(payload, target.to_bytes());
+    assert_eq!(
+        payload,
+        super::discovery::terminate_execution_payload(target)
+    );
+
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution: target }),
+        Err(AppError::ExecutionNotUnpresented)
+    );
+}

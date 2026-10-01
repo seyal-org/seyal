@@ -3,7 +3,8 @@
 //! Enumeration is deterministic (`BTreeMap` by `ExecutionId`) and never
 //! auto-selects (SPEC-009 §8.2). Adoption rebinds the same `ExecutionId` into a
 //! Pane leaf; Runtime supplies a fresh `AttachmentId` on the attach path.
-//! `TerminateExecution` only queues the existing ADR-005 termination effect.
+//! `TerminateExecution` queues the existing ADR-005 termination effect. The
+//! unpresented catalog entry stays until the runtime request has been made.
 
 use std::collections::BTreeMap;
 
@@ -105,7 +106,7 @@ impl ShellState {
         if self.execution_is_bound(execution) {
             return Err(ShellError::ExecutionAlreadyBound);
         }
-        if self.unpresented.remove(&execution).is_none() {
+        if !self.unpresented.contains_key(&execution) {
             return Err(ShellError::ExecutionNotUnpresented);
         }
         self.push_effect(ShellNativeEffect::TerminateExecution { execution });

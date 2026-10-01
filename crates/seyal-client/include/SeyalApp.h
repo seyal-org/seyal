@@ -461,6 +461,9 @@ typedef struct SeyalAppTab {
     const uint8_t *title;
     uint32_t title_len;
     uint32_t reserved;
+    /* Trailing PT1 zoom overlay; 0/0 when not zoomed. Size-gated fail-closed. */
+    uint64_t zoomed_pane_lo;
+    uint64_t zoomed_pane_hi;
 } SeyalAppTab;
 
 /* SeyalAppPaneLeaf.flags / presentation_tier (ADR-018 §5) */

@@ -61,12 +61,15 @@ fn terminate_queues_adr005_effect_not_from_close() {
         workspace,
     })
     .unwrap();
-    root.apply(AppAction::TerminateExecution { execution })
-        .unwrap();
+    assert_eq!(
+        root.apply(AppAction::TerminateExecution { execution }),
+        Err(AppError::TerminationNotRequested)
+    );
     assert_eq!(
         root.snapshot().pending_effects,
         vec![NativeEffect::TerminateExecution { execution }]
     );
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
 #[test]
@@ -116,14 +119,17 @@ fn palette_terminate_dispatches_typed_action() {
         query: "Terminate Unpresented".to_owned(),
     })
     .unwrap();
-    root.apply(AppAction::RunPalette {
-        fence: root.fence(),
-    })
-    .unwrap();
+    assert_eq!(
+        root.apply(AppAction::RunPalette {
+            fence: root.fence(),
+        }),
+        Err(AppError::TerminationNotRequested)
+    );
     assert_eq!(
         root.snapshot().pending_effects,
         vec![NativeEffect::TerminateExecution { execution }]
     );
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
 #[test]

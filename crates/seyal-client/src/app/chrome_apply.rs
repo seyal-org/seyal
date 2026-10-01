@@ -22,8 +22,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::SplitFocused { axis })
-            .map_err(|_| AppError::PaneSplitUnavailable)?;
+        let snap = self.shell.snapshot();
+        self.apply_shell(ShellAction::SplitFocused {
+            axis,
+            containment_generation: snap.containment_generation,
+        })
+        .map_err(|_| AppError::PaneSplitUnavailable)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

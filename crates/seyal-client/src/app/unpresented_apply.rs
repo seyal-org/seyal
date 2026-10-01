@@ -85,7 +85,42 @@ impl ApplicationRoot {
 
     pub(super) fn terminate_execution(&mut self, execution: ExecutionId) -> Result<(), AppError> {
         self.apply_shell(ShellAction::TerminateExecution { execution })
+            .map_err(unpresented_shell_error)?;
+        if self.request_runtime_termination(execution).is_err() {
+            return Err(AppError::TerminationNotRequested);
+        }
+        self.apply_shell(ShellAction::ForgetUnpresented { execution })
             .map_err(unpresented_shell_error)
+    }
+
+    /// One IPC attempt on the live local client. `Err` means the runtime was
+    /// not asked to reap; the catalog entry must stay.
+    fn request_runtime_termination(&mut self, execution: ExecutionId) -> Result<(), ()> {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(handle) = self
+                .client_handle
+                .as_ref()
+                .map(crate::ffi::ClientRegistryHandle::raw)
+            else {
+                return Err(());
+            };
+            match crate::ffi::with_client_mut(handle, |client| {
+                client.send_terminate_execution(execution)
+            }) {
+                Some(Ok(())) => Ok(()),
+                Some(Err(_)) => Err(()),
+                None => {
+                    self.client_handle = None;
+                    Err(())
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (self, execution);
+            Err(())
+        }
     }
 }
 

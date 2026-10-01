@@ -184,6 +184,21 @@ impl LocalDisplayClient {
         !self.outbound.is_empty()
     }
 
+    /// Write one `TerminateExecution` frame on this live socket.
+    ///
+    /// One attempt. A busy outbound FIFO is not drained here, so this cannot
+    /// interleave with a partial control frame or spin.
+    pub(crate) fn send_terminate_execution(
+        &mut self,
+        execution: ExecutionId,
+    ) -> Result<(), ClientError> {
+        if !self.outbound.is_empty() {
+            return Err(ClientError::Io);
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+        discovery::send_terminate_execution_until(&mut self.stream, execution, deadline)
+    }
+
     /// Read-only, bounded Runtime metadata. The terminal display cache remains
     /// independent and authoritative for cells/pixels.
     pub fn block_timeline(&self) -> &BlockTimeline {
