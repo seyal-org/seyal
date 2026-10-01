@@ -51,12 +51,6 @@ issue = 1149
 reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 725
-issue = 1149
-reason = "Single-line initializer change for the queued create-result field (interleaved outstanding creates must not overwrite each other); attach responsibilities are unchanged."
-
-[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
 acknowledged_loc = 851
 issue = 1149
@@ -117,5 +111,5 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
 acknowledged_loc = 789
-issue = 1136
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1136 adds ADR-017 §6.3 row-1 dispose after Created when attach never succeeds, and row-2 terminate-on-existing-attachment when Attached then snapshot fails. Further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
+issue = 1149
+reason = "Connect/attach/bootstrap create stay one cold-path attach module after #1136 ADR-017 §6.3 dispose (row-1 never-Attached + row-2 Attached-then-fail terminate) and #1149 queued create-result initializer; further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
