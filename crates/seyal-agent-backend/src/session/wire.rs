@@ -1,39 +1,49 @@
 //! Encode and map session results without owning the session.
 
 use seyal_agent_core::{AgentRunId, DomainError};
-use seyal_agent_protocol::{encode_result, AggregateRef, CommandError, CommandResult, ReplayEvent};
+use seyal_agent_protocol::{
+    AggregateRef, CommandError, ReplayEvent, REPLAY_EVENT_OVERHEAD, REPLAY_RESULT_OVERHEAD,
+};
 use seyal_agent_store::{AggregateEventEnvelopeV1, AggregateId};
 
 use crate::{
     AuthorizationError, HostObservation, HostObservationKind, ObservationAuthority, RunLiveness,
 };
 
+pub(super) enum ReplayPage {
+    Events(Vec<ReplayEvent>),
+    /// The next event alone exceeds the negotiated frame size.
+    NextEventTooLarge,
+}
+
 /// Fill a Subscribe window only while the encoded Result frame fits.
 ///
-/// The last included sequence is the continuation cursor for the next
-/// `Subscribe{after}` call. An empty window means either no events remain or
-/// the next single event cannot fit the negotiated frame size.
+/// Byte accounting is incremental. The last included sequence is the
+/// continuation cursor. An empty [`ReplayPage::Events`] means no events remain.
 pub(super) fn fit_replay_events(
     events: Vec<AggregateEventEnvelopeV1>,
     window: usize,
     max_frame_size: u32,
-) -> Vec<ReplayEvent> {
+) -> ReplayPage {
     let mut selected = Vec::new();
+    let mut used = REPLAY_RESULT_OVERHEAD;
+    let budget = max_frame_size as usize;
     for event in events.into_iter().take(window) {
+        let need = REPLAY_EVENT_OVERHEAD.saturating_add(event.payload.len());
+        if used.saturating_add(need) > budget {
+            if selected.is_empty() {
+                return ReplayPage::NextEventTooLarge;
+            }
+            break;
+        }
+        used += need;
         selected.push(ReplayEvent {
             sequence: event.sequence.get(),
             kind: event.kind,
             payload: event.payload,
         });
-        let probe = CommandResult::Replay {
-            events: selected.clone(),
-        };
-        if encode_result(&probe, max_frame_size).is_err() {
-            selected.pop();
-            break;
-        }
     }
-    selected
+    ReplayPage::Events(selected)
 }
 
 pub(super) fn to_aggregate(aggregate: AggregateRef) -> AggregateId {

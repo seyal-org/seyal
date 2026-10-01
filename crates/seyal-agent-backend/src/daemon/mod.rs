@@ -30,6 +30,10 @@ pub struct DaemonConfig {
     pub read_timeout: Duration,
     pub max_frame_size: u32,
     pub event_window: u32,
+    /// Idle wait after HelloAck. Expiry ends `serve_one` as a normal disconnect.
+    pub session_idle_timeout: Duration,
+    /// Write budget for one result frame. A stalled subscriber is dropped.
+    pub session_write_timeout: Duration,
 }
 
 impl Default for DaemonConfig {
@@ -38,6 +42,8 @@ impl Default for DaemonConfig {
             read_timeout: Duration::from_secs(2),
             max_frame_size: ABSOLUTE_MAX_FRAME_SIZE,
             event_window: 256,
+            session_idle_timeout: Duration::from_secs(30),
+            session_write_timeout: Duration::from_secs(2),
         }
     }
 }
@@ -87,6 +93,8 @@ impl AgentDaemon {
         if config.max_frame_size == 0
             || config.max_frame_size > ABSOLUTE_MAX_FRAME_SIZE
             || config.event_window == 0
+            || config.session_idle_timeout.is_zero()
+            || config.session_write_timeout.is_zero()
         {
             return Err(DaemonError::Handshake(HandshakeError::InvalidLimit));
         }
@@ -148,7 +156,15 @@ impl AgentDaemon {
         directory: impl Into<PathBuf>,
         integration: crate::session::IntegrationConfig,
     ) -> Result<Self, DaemonError> {
-        let mut daemon = Self::bind(directory)?;
+        Self::bind_integration_with(directory, DaemonConfig::default(), integration)
+    }
+
+    pub fn bind_integration_with(
+        directory: impl Into<PathBuf>,
+        config: DaemonConfig,
+        integration: crate::session::IntegrationConfig,
+    ) -> Result<Self, DaemonError> {
+        let mut daemon = Self::bind_with(directory, config)?;
         let service = crate::session::IntegrationService::open(daemon.instance_id, &integration)
             .map_err(|_| DaemonError::Unavailable)?;
         daemon.integration = Some(service);
@@ -181,18 +197,24 @@ impl AgentDaemon {
     ///
     /// Disconnect does not drop backend authority. The domain, store, and
     /// open `ClientSession` remain for a later connection to this process.
-    /// Post-auth idle waits do not use the handshake read timeout, and a
-    /// command that fails to encode still returns `CommandError::Failed`
-    /// without dropping the `ClientSession`.
+    /// An idle authenticated client ends this call as a normal disconnect.
+    /// A subscriber that does not read within `session_write_timeout` is
+    /// dropped with `TimedOut` and must resync from its cursor. A command
+    /// that fails to encode still returns `CommandError::Failed` without
+    /// dropping the `ClientSession`.
     pub fn serve_one(&mut self) -> Result<(), DaemonError> {
         if self.integration.is_none() {
             return Err(DaemonError::Unavailable);
         }
+        let idle = self.config.session_idle_timeout;
+        let write_timeout = self.config.session_write_timeout;
         let (mut stream, ack) = self.accept_stream()?;
-        // Handshake used `read_timeout`. Watching clients must not be dropped
-        // every handshake interval while waiting for the next command.
-        stream.set_read_timeout(None).map_err(|_| DaemonError::Io)?;
-        stream.set_write_timeout(None).map_err(|_| DaemonError::Io)?;
+        stream
+            .set_read_timeout(Some(idle))
+            .map_err(|_| DaemonError::Io)?;
+        stream
+            .set_write_timeout(Some(write_timeout))
+            .map_err(|_| DaemonError::Io)?;
         let max_frame_size = ack.max_frame_size;
         let event_window = ack.event_window;
         let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
@@ -202,7 +224,7 @@ impl AgentDaemon {
                 crate::session::SessionRead::Disconnected => return Ok(()),
                 crate::session::SessionRead::Oversized => return Err(DaemonError::Oversized),
                 crate::session::SessionRead::Malformed => return Err(DaemonError::Malformed),
-                crate::session::SessionRead::TimedOut => return Err(DaemonError::TimedOut),
+                crate::session::SessionRead::TimedOut => return Ok(()),
                 crate::session::SessionRead::Io => return Err(DaemonError::Io),
             };
             let response = match service.handle(frame, max_frame_size, event_window) {
@@ -215,7 +237,15 @@ impl AgentDaemon {
                 )
                 .map_err(|_| DaemonError::Unavailable)?,
             };
-            stream.write_all(&response).map_err(map_io)?;
+            stream.write_all(&response).map_err(|error| {
+                if error.kind() == io::ErrorKind::TimedOut
+                    || error.kind() == io::ErrorKind::WouldBlock
+                {
+                    DaemonError::TimedOut
+                } else {
+                    map_io(error)
+                }
+            })?;
         }
     }
 

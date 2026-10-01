@@ -118,3 +118,47 @@ fn results_round_trip() {
         assert_eq!(decode_result(&decoded.body).unwrap(), result);
     }
 }
+
+#[test]
+fn replay_frame_size_matches_published_overhead() {
+    let cases = [
+        vec![],
+        vec![ReplayEvent {
+            sequence: 1,
+            kind: 2,
+            payload: b"one".to_vec(),
+        }],
+        vec![
+            ReplayEvent {
+                sequence: 1,
+                kind: 2,
+                payload: Vec::new(),
+            },
+            ReplayEvent {
+                sequence: 2,
+                kind: 9,
+                payload: b"ab".to_vec(),
+            },
+            ReplayEvent {
+                sequence: 3,
+                kind: 8,
+                payload: vec![7; 40],
+            },
+        ],
+    ];
+    for events in cases {
+        let expected = REPLAY_RESULT_OVERHEAD
+            + events
+                .iter()
+                .map(|event| REPLAY_EVENT_OVERHEAD + event.payload.len())
+                .sum::<usize>();
+        let frame = encode_result(
+            &CommandResult::Replay {
+                events: events.clone(),
+            },
+            crate::ABSOLUTE_MAX_FRAME_SIZE,
+        )
+        .unwrap();
+        assert_eq!(frame.len(), expected);
+    }
+}

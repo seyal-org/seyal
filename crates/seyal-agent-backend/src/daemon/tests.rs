@@ -211,6 +211,7 @@ fn malformed_and_incompatible_clients_do_not_stick_the_daemon() {
             read_timeout: Duration::from_millis(200),
             max_frame_size: 1024,
             event_window: 32,
+            ..DaemonConfig::default()
         },
     )
     .unwrap();

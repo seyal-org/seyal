@@ -18,7 +18,8 @@ use seyal_agent_core::{
 };
 use seyal_agent_protocol::{
     decode_command, encode_result, AggregateRef, Command, CommandError, CommandResult, Frame,
-    FrameKind, SnapshotView, MAX_EVENT_WINDOW,
+    FrameKind, SnapshotView, ABSOLUTE_MAX_FRAME_SIZE, MAX_EVENT_WINDOW, REPLAY_EVENT_OVERHEAD,
+    REPLAY_RESULT_OVERHEAD,
 };
 use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError};
 
@@ -30,7 +31,7 @@ use crate::{
 use recovery::restore_identities;
 use wire::{
     fit_replay_events, liveness_code, map_auth, map_domain, observation_payload, snapshot_payload,
-    to_aggregate,
+    to_aggregate, ReplayPage,
 };
 
 const OUTPUT_CHUNK: usize = 1024;
@@ -343,6 +344,13 @@ impl IntegrationService {
     }
 
     fn commit_observation(&mut self, observation: HostObservation) -> Result<(), CommandError> {
+        let payload = observation_payload(&observation);
+        let max_payload = (ABSOLUTE_MAX_FRAME_SIZE as usize)
+            .saturating_sub(REPLAY_RESULT_OVERHEAD)
+            .saturating_sub(REPLAY_EVENT_OVERHEAD);
+        if payload.len() > max_payload {
+            return Err(CommandError::Failed);
+        }
         let before = self.authority.applied_count();
         let previous_liveness = self.authority.recorded_liveness(observation.run_id);
         let previous_effects = self.authority.effects_performed();
@@ -360,7 +368,6 @@ impl IntegrationService {
         if self.authority.applied_count() == before {
             return Ok(());
         }
-        let payload = observation_payload(&observation);
         if self
             .store
             .append_event(
@@ -416,9 +423,13 @@ impl IntegrationService {
             None => None,
         };
         let window = event_window.clamp(1, MAX_EVENT_WINDOW) as usize;
-        match self.store.replay_after(to_aggregate(aggregate), after) {
-            Ok(events) => CommandResult::Replay {
-                events: fit_replay_events(events, window, max_frame_size),
+        match self
+            .store
+            .replay_page(to_aggregate(aggregate), after, window)
+        {
+            Ok(events) => match fit_replay_events(events, window, max_frame_size) {
+                ReplayPage::Events(events) => CommandResult::Replay { events },
+                ReplayPage::NextEventTooLarge => CommandResult::Error(CommandError::Failed),
             },
             Err(StoreError::History(gap)) => CommandResult::Gap {
                 requested_after: gap.requested_after.get(),

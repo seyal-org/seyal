@@ -13,6 +13,12 @@ use crate::{
 const MAX_SCOPES: usize = 8;
 const MAX_REPLAY_EVENTS: usize = MAX_EVENT_WINDOW as usize;
 
+/// Bytes before the first replay event: 10-byte frame header, status, result
+/// code, replay variant, and event count.
+pub const REPLAY_RESULT_OVERHEAD: usize = 16;
+/// Bytes before a replay event payload: sequence, kind, and length.
+pub const REPLAY_EVENT_OVERHEAD: usize = 14;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AggregateRef {
     WorkScope(WorkScopeId),

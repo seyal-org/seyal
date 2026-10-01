@@ -10,7 +10,8 @@ mod handshake;
 
 pub use command::{
     decode_command, decode_result, encode_command, encode_result, AggregateRef, Command,
-    CommandError, CommandResult, ReplayEvent, SnapshotView,
+    CommandError, CommandResult, ReplayEvent, SnapshotView, REPLAY_EVENT_OVERHEAD,
+    REPLAY_RESULT_OVERHEAD,
 };
 pub use frame::{
     accepted_body_len, decode_frame, encode_frame, push_untrusted, Frame, FrameError, FrameKind,

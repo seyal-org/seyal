@@ -349,12 +349,7 @@ impl AgentDomain {
         control_generation: ControlGeneration,
     ) -> Result<(), DomainError> {
         if self.attempts.contains_key(&attempt_id) {
-            return self.restore_agent_run(
-                id,
-                attempt_id,
-                binding_generation,
-                control_generation,
-            );
+            return self.restore_agent_run(id, attempt_id, binding_generation, control_generation);
         }
         self.insert_restored_agent_run(id, attempt_id, binding_generation, control_generation)
     }

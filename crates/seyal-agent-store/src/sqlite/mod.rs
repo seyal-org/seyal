@@ -8,20 +8,9 @@ use crate::{
     SnapshotPosition,
 };
 
-const SCHEMA_VERSION: i32 = 3;
-const IDENTITY_TABLES: &str = "
-CREATE TABLE IF NOT EXISTS work_scope (
-    id BLOB PRIMARY KEY,
-    kind INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS work_item (
-    id BLOB PRIMARY KEY,
-    work_scope_id BLOB NOT NULL
-);
-CREATE TABLE IF NOT EXISTS attempt (
-    id BLOB PRIMARY KEY,
-    work_item_id BLOB NOT NULL
-);";
+mod schema;
+use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
+
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
 
@@ -211,6 +200,26 @@ impl AgentStore {
         aggregate_id: AggregateId,
         requested_after: Option<AggregateSequence>,
     ) -> Result<Vec<AggregateEventEnvelopeV1>, StoreError> {
+        self.replay_after_limited(aggregate_id, requested_after, i64::MAX)
+    }
+
+    /// Replay at most `limit` events after the cursor. History gaps are unchanged.
+    pub fn replay_page(
+        &self,
+        aggregate_id: AggregateId,
+        requested_after: Option<AggregateSequence>,
+        limit: usize,
+    ) -> Result<Vec<AggregateEventEnvelopeV1>, StoreError> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        self.replay_after_limited(aggregate_id, requested_after, limit)
+    }
+
+    fn replay_after_limited(
+        &self,
+        aggregate_id: AggregateId,
+        requested_after: Option<AggregateSequence>,
+        limit: i64,
+    ) -> Result<Vec<AggregateEventEnvelopeV1>, StoreError> {
         let conn = self.conn.lock().expect("agent store lock");
         let (kind, id) = aggregate_key(aggregate_id);
         let earliest: Option<i64> = conn
@@ -294,11 +303,12 @@ impl AgentStore {
             .prepare(
                 "SELECT sequence, event_id, kind, payload FROM aggregate_event
                  WHERE aggregate_kind = ?1 AND aggregate_id = ?2 AND sequence > ?3
-                 ORDER BY sequence",
+                 ORDER BY sequence
+                 LIMIT ?4",
             )
             .map_err(|_| StoreError::Corrupt)?;
         let rows = statement
-            .query_map(params![kind, id, after], |row| {
+            .query_map(params![kind, id, after, limit], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
@@ -579,101 +589,6 @@ pub(crate) fn insert_event(
     )
     .map_err(|_| StoreError::WriteFailed)?;
     AggregateSequence::from_raw(next as u64).ok_or(StoreError::Corrupt)
-}
-
-fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
-    if from >= SCHEMA_VERSION {
-        return Ok(());
-    }
-    // One transaction so a failed migration cannot publish the new version.
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|_| StoreError::WriteFailed)?;
-    if from < 2 {
-        tx.execute_batch(
-            "CREATE TABLE IF NOT EXISTS aggregate_sequence_hwm (
-                aggregate_kind INTEGER NOT NULL,
-                aggregate_id BLOB NOT NULL,
-                high_water INTEGER NOT NULL,
-                PRIMARY KEY (aggregate_kind, aggregate_id)
-            );",
-        )
-        .map_err(|_| StoreError::WriteFailed)?;
-        // Backfill from the max of retained events and snapshot frontiers.
-        tx.execute_batch(
-            "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
-             SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
-               SELECT aggregate_kind, aggregate_id, sequence AS seq FROM aggregate_event
-               UNION ALL
-               SELECT aggregate_kind, aggregate_id, incorporated_through AS seq FROM aggregate_snapshot
-             ) GROUP BY aggregate_kind, aggregate_id;",
-        )
-        .map_err(|_| StoreError::WriteFailed)?;
-    }
-    if from < 3 {
-        tx.execute_batch(IDENTITY_TABLES)
-            .map_err(|_| StoreError::WriteFailed)?;
-    }
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(|_| StoreError::WriteFailed)?;
-    tx.commit().map_err(|_| StoreError::WriteFailed)?;
-    Ok(())
-}
-
-fn initialize(conn: &Connection) -> Result<(), StoreError> {
-    conn.execute_batch(
-        "CREATE TABLE aggregate_event (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            sequence INTEGER NOT NULL,
-            event_id INTEGER NOT NULL,
-            kind INTEGER NOT NULL,
-            payload BLOB NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id, sequence)
-        );
-        CREATE TABLE aggregate_snapshot (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            incorporated_through INTEGER NOT NULL,
-            payload BLOB NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id)
-        );
-        CREATE TABLE aggregate_sequence_hwm (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            high_water INTEGER NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id)
-        );
-        CREATE TABLE output_segment (
-            agent_run_id BLOB NOT NULL,
-            segment_index INTEGER NOT NULL,
-            payload BLOB NOT NULL,
-            PRIMARY KEY (agent_run_id, segment_index)
-        );
-        CREATE TABLE agent_run (
-            id BLOB PRIMARY KEY,
-            attempt_id BLOB NOT NULL,
-            binding_generation INTEGER NOT NULL,
-            control_generation INTEGER NOT NULL,
-            liveness TEXT NOT NULL CHECK (liveness = 'unknown')
-        );
-        CREATE TABLE work_scope (
-            id BLOB PRIMARY KEY,
-            kind INTEGER NOT NULL
-        );
-        CREATE TABLE work_item (
-            id BLOB PRIMARY KEY,
-            work_scope_id BLOB NOT NULL
-        );
-        CREATE TABLE attempt (
-            id BLOB PRIMARY KEY,
-            work_item_id BLOB NOT NULL
-        );",
-    )
-    .map_err(|_| StoreError::WriteFailed)?;
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(|_| StoreError::WriteFailed)?;
-    Ok(())
 }
 
 fn aggregate_key(id: AggregateId) -> (i64, Vec<u8>) {
