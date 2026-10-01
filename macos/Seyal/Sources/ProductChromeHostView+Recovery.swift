@@ -96,12 +96,12 @@ extension ProductChromeHostView {
         ackRecovery()
         let issuedAt = ProcessInfo.processInfo.systemUptime
         let executionIdentity = pane.inputSurface.requestedExecutionIdentity
-        // B1 / ADR-018 §3.3: unbound panes after CloseWindow stay live-unpresented
-        // and enumerable for W6. Never open_first without a Rust AdoptExecution /
-        // Bind decision — eligibility Unbound means authority is cleared.
-        let snap = seyal_app_snapshot(pane.appHandle)
-        let unbound = snap.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue)
-        let allowsImplicit = !unbound && pane.inputSurface.allowsImplicitExecutionBootstrap
+        // B1 / ADR-018 §3.3: Rust clears `allows_implicit_execution_bootstrap` on
+        // CloseWindow→CreateWindow re-entry panes so recovery cannot open_first
+        // past live-unpresented W6 authority. Cold-start panes stay Unbound until
+        // attach succeeds but keep allows_implicit=true — do not gate on
+        // eligibility Unbound here or production launch never connects.
+        let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap
         recoveryLifecycleQueue.async { [weak self] in
             // Queue delay consumes the Rust-issued budget rather than resetting it.
             let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt
