@@ -10,7 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_client::{ClientError, DiscoveryFailure, LocalDisplayClient};
+use seyal_client::{
+    force_bootstrap_attach_failure_for_test, ClientError, DiscoveryFailure, LocalDisplayClient,
+};
 use seyal_exec::{CommandSpec, WindowSize};
 use seyal_protocol::runtime_dir::{
     control_socket_leaf, override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
@@ -177,4 +179,53 @@ fn empty_runtime_controller_creates_profile_zero_then_attaches() {
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn bootstrap_attach_failure_after_created_disposes_never_bound_execution() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    force_bootstrap_attach_failure_for_test(true);
+    let attach_error =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5));
+    force_bootstrap_attach_failure_for_test(false);
+    assert!(
+        attach_error.is_err(),
+        "forced bootstrap attach failure must surface the attach error"
+    );
+
+    // Observer must not bootstrap-create; it fail-closes on an empty Runtime.
+    let settle = Instant::now() + Duration::from_secs(3);
+    let mut emptied = false;
+    while Instant::now() < settle {
+        thread::sleep(Duration::from_millis(20));
+        match LocalDisplayClient::connect_first_running_as_until(
+            Role::Observer,
+            Instant::now() + Duration::from_secs(1),
+        ) {
+            Err(ClientError::NoRunningExecution) => {
+                emptied = true;
+                break;
+            }
+            Ok(client) => {
+                drop(client);
+                emptied = false;
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        emptied,
+        "Created orphan must be disposed; Observer must see NoRunningExecution"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+    let _ = socket_path;
 }
