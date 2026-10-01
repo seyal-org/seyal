@@ -301,7 +301,9 @@ fn parse_line(line: &str) -> Result<crate::ScriptStep, crate::ScriptError> {
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, crate::ScriptError> {
-    if !text.len().is_multiple_of(2) || text.len() > 8192 {
+    // Byte length can be even while a window still splits a multibyte scalar.
+    // Reject that before slicing so malformed harness text stays an error.
+    if !text.is_ascii() || !text.len().is_multiple_of(2) || text.len() > 8192 {
         return Err(crate::ScriptError::MalformedScript);
     }
     (0..text.len())
@@ -593,6 +595,9 @@ mod tests {
     fn malformed_scripts_are_bounded() {
         assert!(parse_script("emit nope").is_err());
         assert!(parse_script("").is_err());
+        // Minimized libFuzzer crash: even byte length, odd char boundary.
+        assert!(parse_script("emit result e\u{00c2}e").is_err());
+        assert!(parse_script("emit output e\u{00c2}e").is_err());
         let huge = "x".repeat(70_000);
         assert!(parse_script(&huge).is_err());
         let mut state = 9_u64;
