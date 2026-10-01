@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Metal
 import QuartzCore
@@ -32,7 +33,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     var currentMetrics: TerminalFontMetrics?
     var currentScale: CGFloat = 0
     var currentAlternateScreen = false
-    var defaultTerminalColors = SIMD2<UInt32>(0xffe9_e1d8, 0xff10_0d0b)
+    var defaultTerminalColors: SIMD2<UInt32>
     var framesInFlight = 0
     var deferredDamage = DamageMask()
     var deferredNeedsFullRebuild = false
@@ -55,6 +56,14 @@ final class MetalTerminalRenderer: @unchecked Sendable {
 
     init(device: MTLDevice, terminalFont: SeyalResolvedFontSpec = .canonicalTerminal) throws {
         gpuCompletionWakeScheduled.initialize(to: 0)
+        // Seed from Rust theme for the current appearance so the first present
+        // does not flash hardcoded dark cell defaults under light appearance.
+        let appearance = NSApp.effectiveAppearance
+        let theme = NativeThemeRealization.theme(for: appearance)
+        self.defaultTerminalColors = SIMD2<UInt32>(
+            theme.terminalDefaultForeground,
+            theme.terminalDefaultBackground
+        )
         self.device = device
         guard MemoryLayout<TerminalInstance>.stride == 48 else {
             throw MetalTerminalRendererError.invalidInstanceLayout
