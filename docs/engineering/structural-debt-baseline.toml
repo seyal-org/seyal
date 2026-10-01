@@ -102,9 +102,10 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
+# #1167 PT6: stacked W2a surfaces already in the cohesion band vs master; this
+# Issue does not grow them (property suite lives in shell/pt6_tests.rs).
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
 acknowledged_loc = 744
-issue = 1092
-reason = "Command palette query, rows, and run dispatch stay one reducer. #1092 adds the window and tab actions that the palette runs; splitting the file would separate the row model from those actions."
-
+issue = 1167
+reason = "Command palette reducer stayed one module after W2a WindowId/containment wiring on the PT1–PT3 stack; #1167 adds no palette edits. Ceiling matches current LOC so the stacked PR can pass the changed-file cohesion gate."

@@ -20,6 +20,8 @@ mod pt2_tests;
 #[cfg(test)]
 mod pt3_tests;
 #[cfg(test)]
+mod pt6_tests;
+#[cfg(test)]
 mod tests;
 
 use std::fmt;
