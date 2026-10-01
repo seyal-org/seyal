@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 939
+acknowledged_loc = 947
 issue = 1158
-reason = "ApplicationRoot keeps W4b close/unpresented dispatch (#1158) with N4/N5/N3 and restored base PT/W6 adopt/terminate dispatch after absorbing issue/1108 content omitted by an earlier ours-merge. Close apply stays in chrome_apply.rs; history apply stays in focus_history_apply.rs. Ceiling matches merged LOC."
+reason = "ApplicationRoot keeps W4b close/unpresented dispatch (#1158) with N4/N5/N3 and restored base PT/W6 adopt/terminate dispatch after absorbing issue/1108. Restored quit_deadline + live_attachments fields required by bounded quit detach (#1108/#1158). Close apply stays in chrome_apply.rs; history apply stays in focus_history_apply.rs. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -46,9 +46,9 @@ reason = "Frozen address-carrying palette rows (#1144/#1156) stay one reducer, a
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 873
+acknowledged_loc = 908
 issue = 1158
-reason = "W4b CreateTab admission and zero-window proofs (#1158) stay beside N5 navigate coverage moved to navigate_tests.rs and absorbed #1123/#1108 multi-window ApplicationRoot proofs (#1144/#1156). Ceiling matches merged LOC."
+reason = "W4b CreateTab admission and zero-window proofs (#1158) stay beside N5 navigate coverage moved to navigate_tests.rs and absorbed #1123/#1108 multi-window ApplicationRoot proofs (#1144/#1156), including restored quit multi-attachment detach fixture from issue/1108. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
@@ -58,9 +58,9 @@ reason = "Shell reducer suite stays one module. #1108 adds multi-window snapshot
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 894
+acknowledged_loc = 938
 issue = 1158
-reason = "C ABI façade keeps W3 window extraction and N4/N3 error numbers 35-49 (#1156) while AppError mapping stays in encode.rs (#1143), including W6 adopt errors 50-51 (#1158). History action decode stays in decode.rs. Ceiling matches merged LOC."
+reason = "C ABI façade keeps W3 window extraction and N4/N3 error numbers 35-49 (#1156) while AppError mapping stays in encode.rs (#1143), including W6 adopt errors 50-51 (#1158). Restored quit-fixture seed/live-attachment test ABIs from issue/1108. History action decode stays in decode.rs. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/navigation/tests.rs"

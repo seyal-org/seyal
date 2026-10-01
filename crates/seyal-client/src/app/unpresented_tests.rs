@@ -232,4 +232,35 @@ fn close_window_keeps_bound_execution_live_and_enumerable() {
         root.fence().execution.is_none(),
         "fence must not claim an execution after CloseWindow unbind"
     );
+
+    // Re-entry must not auto-reattach the live-unpresented execution. CreateWindow
+    // seeds a bootstrap-gated pane; eligibility stays Unbound until Rust Adopt/Bind.
+    root.apply(AppAction::CreateWindow)
+        .expect("zero-window re-entry CreateWindow");
+    assert_eq!(
+        root.live_unpresented(),
+        vec![execution],
+        "CreateWindow must leave the prior execution live-unpresented"
+    );
+    assert_eq!(
+        root.snapshot().eligibility,
+        super::PresentationEligibility::Unbound,
+        "CreateWindow must not bind authority without AdoptExecution"
+    );
+    assert!(
+        root.fence().execution.is_none(),
+        "re-entry fence must stay execution-free until Adopt/Bind"
+    );
+    let snap = root.snapshot();
+    let focused = snap.shell.focused_pane;
+    let pane = snap
+        .shell
+        .panes
+        .iter()
+        .find(|pane| pane.id == focused)
+        .expect("focused pane after CreateWindow");
+    assert!(
+        !pane.allows_implicit_bootstrap,
+        "B1: CreateWindow pane must gate implicit bootstrap so recovery cannot open_first"
+    );
 }

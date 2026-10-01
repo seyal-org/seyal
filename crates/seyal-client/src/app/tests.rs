@@ -377,6 +377,41 @@ fn quit_freezes_and_emits_one_native_effect() {
     assert!(root.snapshot().pending_effects.is_empty());
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn quit_three_windows_and_three_attachments_detaches_before_cleanup_complete() {
+    let mut root = ApplicationRoot::new();
+    root.install_quit_fixture(3).expect("fixture");
+    let snap = root.snapshot();
+    assert_eq!(snap.shell.windows.len(), 3);
+    assert!(!snap.shell.allows_window_creation);
+    assert_eq!(root.live_attachment_count(), 3);
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    assert_eq!(
+        root.live_attachment_count(),
+        3,
+        "acking realize effects must not detach"
+    );
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert_eq!(
+        snap.pending_effects.as_slice(),
+        &[NativeEffect::BoundedDetachThenTerminate {
+            deadline_ms: QUIT_CLEANUP_DEADLINE_MS
+        }]
+    );
+    assert_eq!(root.live_attachment_count(), 3);
+    root.apply(AppAction::AckEffect).unwrap();
+    assert_eq!(root.live_attachment_count(), 0);
+    assert_eq!(
+        root.snapshot().pending_effects.as_slice(),
+        &[NativeEffect::QuitCleanupComplete]
+    );
+}
+
 #[test]
 fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     let mut root = ApplicationRoot::new();

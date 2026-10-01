@@ -34,7 +34,7 @@ mod tests;
 #[cfg(test)]
 mod unpresented_tests;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
@@ -498,8 +498,13 @@ pub struct ApplicationRoot {
     last_activation_failure: Option<ActivationHostFailure>,
     focus_history: FocusHistory,
     goto: GotoState,
+    /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
+    quit_deadline: Option<Instant>,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
+    /// Extra live display attachments owned by this root (quit detaches all of them).
+    #[cfg(target_os = "macos")]
+    live_attachments: Vec<crate::ffi::ClientRegistryHandle>,
 }
 
 impl Default for ApplicationRoot {
@@ -551,8 +556,11 @@ impl ApplicationRoot {
             last_activation_failure: None,
             focus_history: FocusHistory::new(),
             goto: GotoState::new(),
+            quit_deadline: None,
             #[cfg(target_os = "macos")]
             client_handle: None,
+            #[cfg(target_os = "macos")]
+            live_attachments: Vec::new(),
         }
     }
 

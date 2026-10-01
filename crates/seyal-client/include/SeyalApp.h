@@ -766,6 +766,9 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+/* Test harness: N windows and N attachments, admission stays off. */
+int32_t seyal_app_test_seed_quit_case(uint64_t handle, uint32_t windows);
+uint32_t seyal_app_test_live_attachment_count(uint64_t handle);
 
 int32_t seyal_app_last_error(uint64_t handle);
 
