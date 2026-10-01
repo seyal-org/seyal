@@ -28,6 +28,10 @@ impl Modifiers {
     pub const fn bits(self) -> u8 {
         self.0
     }
+
+    pub(crate) const fn from_bits_truncated(bits: u8) -> Self {
+        Self(bits)
+    }
 }
 
 /// Named non-character keys from SPEC-024 §3.2.

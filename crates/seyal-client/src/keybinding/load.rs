@@ -9,8 +9,9 @@ use super::builtins::{compile_builtin_entries, PendingEntry};
 use super::keys::{parse_keys, KeysError};
 use super::reserved::is_reserved_sequence;
 use super::types::{
-    BindingContext, BindingSequence, BindingSource, CompiledBinding, DiagnosticCategory,
-    KeybindingDiagnostic, KeybindingTable, Ordinal1To9, WorkspaceCommand, WorkspaceCommandId,
+    BindingContext, BindingSequence, BindingSource, CompiledBinding, DiagnosticCategory, KeyStroke,
+    KeybindingDiagnostic, KeybindingTable, Modifiers, Ordinal1To9, WorkspaceCommand,
+    WorkspaceCommandId,
 };
 
 const KNOWN_FIELDS: &[&str] = &["keys", "action", "context", "ordinal"];
@@ -256,6 +257,7 @@ fn compile_entry(
             ));
             return None;
         }
+        // Unbinds are exempt from TerminalPassthroughProtected (§7.1 step 1).
         return Some(PendingEntry {
             sequence,
             keys_notation,
@@ -264,6 +266,17 @@ fn compile_entry(
             context,
             source,
         });
+    }
+
+    if violates_terminal_passthrough(sequence.strokes().first(), context) {
+        diagnostics.push(diag(
+            DiagnosticCategory::TerminalPassthroughProtected,
+            &keys_notation,
+            &action_raw,
+            source,
+            "terminal-capable first stroke cannot claim app context",
+        ));
+        return None;
     }
 
     if looks_like_disallowed_payload(&action_raw) {
@@ -422,6 +435,18 @@ fn parse_context(
         context.insert(bit);
     }
     Some(context)
+}
+
+/// SPEC-024 R6.3.2: terminal-capable first stroke + `app` → reject.
+pub(crate) fn violates_terminal_passthrough(
+    first: Option<&KeyStroke>,
+    context: BindingContext,
+) -> bool {
+    let Some(first) = first else {
+        return false;
+    };
+    let terminal_capable = !first.modifiers.contains(Modifiers::CMD);
+    terminal_capable && context.contains(BindingContext::APP)
 }
 
 fn looks_like_disallowed_payload(action: &str) -> bool {

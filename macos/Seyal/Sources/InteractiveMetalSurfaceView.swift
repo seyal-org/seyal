@@ -12,6 +12,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     static let maxHeldKeyboardKinds = 256
     var onBridgeBecameUsable: (() -> Void)?
     var onRequestComposerFocus: (() -> Void)?
+    /// A Rust table match already changed product state. The chrome host projects it.
+    var onCommandConsumed: (() -> Void)?
     var observedAlternateScreen = false
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
@@ -133,8 +135,44 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         submitNativeMouse(event, kind: 4, buttonOverride: button)
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch KeybindingStrokeNormalizer.route(
+            appHandle: appHandle,
+            event: event,
+            composerFocused: false,
+            compositionActive: hasMarkedText()
+        ) {
+        case .consumed:
+            onCommandConsumed?()
+            return true
+        case .nativeCommand, .fallsThrough:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let compositionActive = hasMarkedText()
+        switch KeybindingStrokeNormalizer.route(
+            appHandle: appHandle,
+            event: event,
+            composerFocused: false,
+            compositionActive: compositionActive
+        ) {
+        case .consumed:
+            // ApplicationCommand matched in Rust — zero PTY bytes.
+            onCommandConsumed?()
+            return
+        case .nativeCommand:
+            super.keyDown(with: event)
+            return
+        case .fallsThrough:
+            break
+        }
         if flags.contains(.command) {
             super.keyDown(with: event)
             return

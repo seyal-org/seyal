@@ -1,12 +1,70 @@
 import AppKit
 
+/// Single-line palette query. Forwards every stroke to the Rust keybinding
+/// router (ADR-015). A consumed WorkspaceCommand is already applied; this
+/// view does not choose `command_palette.close` or any other command.
+@MainActor
+private final class PaletteQueryEditor: NSTextView {
+    var routeKeystroke: ((NSEvent) -> KeybindingStrokeNormalizer.RouteResult)?
+    var onRouted: (() -> Void)?
+    var onMoveSelection: ((Int32) -> Void)?
+    var onRunSelection: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        switch routeKeystroke?(event) ?? .fallsThrough {
+        case .consumed:
+            onRouted?()
+            return true
+        case .nativeCommand, .fallsThrough:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let marked = hasMarkedText()
+        switch routeKeystroke?(event) ?? .fallsThrough {
+        case .consumed:
+            onRouted?()
+            return
+        case .nativeCommand:
+            super.keyDown(with: event)
+            return
+        case .fallsThrough:
+            if marked {
+                super.keyDown(with: event)
+                return
+            }
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) {
+            super.keyDown(with: event)
+            return
+        }
+        switch event.specialKey {
+        case .some(.upArrow):
+            onMoveSelection?(-1)
+        case .some(.downArrow):
+            onMoveSelection?(1)
+        case .some(.carriageReturn), .some(.newline), .some(.enter):
+            onRunSelection?()
+        case .some(.tab), .some(.backTab):
+            break
+        default:
+            if event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}" {
+                return
+            }
+            super.keyDown(with: event)
+        }
+    }
+}
+
 /// Thin projection of the Rust global command palette (#932).
 /// Open/closed, query, rows and selection are read from
 /// `seyal_app_palette`; keys and clicks only dispatch actions. This view
 /// keeps no command list of its own and invents no action the host has not
 /// been told about by Rust.
 @MainActor
-final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
+final class CommandPaletteOverlayView: NSView, NSTextViewDelegate {
     /// Rust state changed; the host should reconcile chrome.
     var onChanged: (() -> Void)?
     /// Overlay closed (run/escape/click-outside); the host should restore
@@ -15,7 +73,8 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
 
     private let appHandle: UInt64
     private let card = NSView()
-    private let query = NSTextField(string: "")
+    private let query = PaletteQueryEditor()
+    private let placeholder = NSTextField(labelWithString: "Type a command...")
     private let rows = NSStackView()
     private var rowViews: [(label: NSTextField, category: NSTextField)] = []
     private var theme: NativeTheme?
@@ -45,13 +104,33 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         card.setAccessibilityRole(.group)
 
         query.delegate = self
-        query.isBordered = false
+        query.isRichText = false
+        query.isAutomaticQuoteSubstitutionEnabled = false
+        query.isAutomaticDashSubstitutionEnabled = false
+        query.isAutomaticTextReplacementEnabled = false
         query.drawsBackground = false
         query.focusRingType = .none
         query.font = .systemFont(ofSize: 15, weight: .regular)
+        query.textContainer?.lineFragmentPadding = 4
+        query.textContainer?.widthTracksTextView = true
+        query.textContainer?.maximumNumberOfLines = 1
+        query.textContainerInset = NSSize(width: 0, height: 2)
+        query.isHorizontallyResizable = false
+        query.isVerticallyResizable = false
         query.translatesAutoresizingMaskIntoConstraints = false
         query.setAccessibilityIdentifier("seyal-command-palette-query")
-        query.cell?.sendsActionOnEndEditing = false
+        query.setAccessibilityElement(true)
+        query.routeKeystroke = { [weak self] event in
+            self?.routePaletteKeystroke(event) ?? .fallsThrough
+        }
+        query.onRouted = { [weak self] in self?.onChanged?() }
+        query.onMoveSelection = { [weak self] delta in self?.move(by: delta) }
+        query.onRunSelection = { [weak self] in self?.run() }
+
+        placeholder.font = .systemFont(ofSize: 15, weight: .regular)
+        placeholder.textColor = .placeholderTextColor
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
+        placeholder.setAccessibilityElement(false)
 
         rows.orientation = .vertical
         rows.alignment = .leading
@@ -59,6 +138,7 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         rows.translatesAutoresizingMaskIntoConstraints = false
         rows.setAccessibilityIdentifier("seyal-command-palette-rows")
 
+        card.addSubview(placeholder)
         card.addSubview(query)
         card.addSubview(rows)
         addSubview(card)
@@ -69,9 +149,12 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
             card.topAnchor.constraint(equalTo: topAnchor, constant: 96),
             card.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -48),
             cardWidth,
-            query.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            query.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            query.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            query.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            query.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            query.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            query.heightAnchor.constraint(equalToConstant: 24),
+            placeholder.leadingAnchor.constraint(equalTo: query.leadingAnchor, constant: 6),
+            placeholder.centerYAnchor.constraint(equalTo: query.centerYAnchor),
             rows.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
             rows.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
             rows.topAnchor.constraint(equalTo: query.bottomAnchor, constant: 12),
@@ -93,6 +176,8 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
     func apply(theme: NativeTheme) {
         self.theme = theme
         query.textColor = theme.text
+        query.insertionPointColor = theme.text
+        placeholder.textColor = theme.muted
         paint()
     }
 
@@ -108,10 +193,10 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
             return
         }
         let text = copyUTF8(palette.query_utf8, palette.query_utf8_len) ?? ""
-        if query.stringValue != text {
-            query.stringValue = text
+        if query.string != text {
+            query.string = text
         }
-        query.placeholderString = "Type a command..."
+        placeholder.isHidden = !query.string.isEmpty
         selected = Int(palette.selected)
         rebuildRows(count: Int(palette.row_count))
         setAccessibilityValue("\(palette.row_count)")
@@ -122,27 +207,22 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         paint()
     }
 
-    // MARK: NSTextFieldDelegate
+    // MARK: NSTextViewDelegate
 
-    func controlTextDidChange(_ notification: Notification) {
-        dispatch(kind: UInt16(SEYAL_APP_ACTION_SET_PALETTE_QUERY.rawValue), payload: query.stringValue)
+    func textDidChange(_ notification: Notification) {
+        placeholder.isHidden = !query.string.isEmpty
+        dispatch(kind: UInt16(SEYAL_APP_ACTION_SET_PALETTE_QUERY.rawValue), payload: query.string)
     }
 
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        switch selector {
-        case #selector(NSResponder.moveUp(_:)):
-            move(by: -1)
-        case #selector(NSResponder.moveDown(_:)):
-            move(by: 1)
-        case #selector(NSResponder.insertNewline(_:)):
-            run()
-        case #selector(NSResponder.cancelOperation(_:)), #selector(NSStandardKeyBindingResponding.complete(_:)):
-            // NSTextField's field editor reports Escape as either selector.
-            close()
-        default:
-            return false
-        }
-        return true
+    /// Rust owns the match. Swift forwards the normalized stroke and does not
+    /// choose the WorkspaceCommand. Palette row motion runs only after a miss.
+    private func routePaletteKeystroke(_ event: NSEvent) -> KeybindingStrokeNormalizer.RouteResult {
+        KeybindingStrokeNormalizer.route(
+            appHandle: appHandle,
+            event: event,
+            composerFocused: false,
+            compositionActive: query.hasMarkedText()
+        )
     }
 
     // MARK: Actions
@@ -177,7 +257,15 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         run()
     }
 
-    private func dispatch(kind: UInt16, payload: String? = nil, reserved: UInt32 = 0) {
+    private func dispatch(kind: UInt16, reserved: UInt32 = 0) {
+        dispatch(kind: kind, payloadBytes: nil, reserved: reserved)
+    }
+
+    private func dispatch(kind: UInt16, payload: String, reserved: UInt32 = 0) {
+        dispatch(kind: kind, payloadBytes: Data(payload.utf8), reserved: reserved)
+    }
+
+    private func dispatch(kind: UInt16, payloadBytes: Data?, reserved: UInt32 = 0) {
         let snapshot = seyal_app_snapshot(appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -185,10 +273,15 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         action.kind = kind
         action.applySnapshotFence(snapshot)
         action.reserved = reserved
-        let utf8 = Array((payload ?? "").utf8)
-        utf8.withUnsafeBufferPointer { buffer in
-            action.payload = payload == nil ? nil : buffer.baseAddress
-            action.payload_len = payload == nil ? 0 : UInt32(buffer.count)
+        if let payloadBytes {
+            payloadBytes.withUnsafeBytes { buffer in
+                action.payload = buffer.bindMemory(to: UInt8.self).baseAddress
+                action.payload_len = UInt32(payloadBytes.count)
+                _ = seyal_app_apply(appHandle, &action)
+            }
+        } else {
+            action.payload = nil
+            action.payload_len = 0
             _ = seyal_app_apply(appHandle, &action)
         }
         onChanged?()

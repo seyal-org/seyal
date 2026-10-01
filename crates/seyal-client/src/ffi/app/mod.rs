@@ -5,15 +5,18 @@
 
 mod decode;
 mod encode;
+mod error_code;
 mod pane_region;
 mod visual;
+
+use error_code::error_number;
 
 #[cfg(test)]
 mod tests;
 
 use std::{cell::RefCell, collections::HashMap, ptr};
 
-use crate::app::{AppError, ApplicationRoot, APP_ABI_VERSION};
+use crate::app::{ApplicationRoot, APP_ABI_VERSION};
 use crate::chrome::{InspectorMode, LeftPanelMode};
 use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
@@ -312,6 +315,61 @@ pub extern "C" fn seyal_app_option_as_alt(handle: u64) -> u8 {
             u8::from(process_input_policy().option_as_alt)
         } else {
             0
+        }
+    })
+}
+
+/// SPEC-024 §6.2 route result codes for `seyal_app_route_keystroke`.
+pub const SEYAL_APP_ROUTE_FALLTHROUGH: i32 = 0;
+pub const SEYAL_APP_ROUTE_CONSUMED: i32 = 1;
+pub const SEYAL_APP_ROUTE_NATIVE_COMMAND: i32 = 2;
+/// Route one already-normalized keystroke (ADR-015). Rust owns the match and
+/// dispatches matched WorkspaceCommands; ApplicationCommand paths write zero
+/// PTY bytes. Swift must not reinterpret product shortcuts.
+/// `modifier_bits`: CMD=1, CTRL=2, SHIFT=4, OPT=8.
+/// `named_key` non-zero means `base` is a NamedKey discriminant (Enter=0…).
+/// `shift_applied` is 0 when absent.
+/// `composer_focused` / `composition_active`: 0 or 1.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_route_keystroke(
+    handle: u64,
+    modifier_bits: u8,
+    named_key: u8,
+    base: u32,
+    shift_applied: u32,
+    composer_focused: u8,
+    composition_active: u8,
+) -> i32 {
+    use crate::keybinding::{NormalizedStroke, RouteOutcome};
+
+    let Some(stroke) =
+        NormalizedStroke::from_ffi(modifier_bits, named_key != 0, base, shift_applied)
+    else {
+        return -4;
+    };
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        match state.root.route_normalized_keystroke(
+            &stroke,
+            composer_focused != 0,
+            composition_active != 0,
+        ) {
+            Ok(RouteOutcome::Matched { .. }) => SEYAL_APP_ROUTE_CONSUMED,
+            Ok(RouteOutcome::ReservedCommand) | Ok(RouteOutcome::UnmatchedCommand) => {
+                SEYAL_APP_ROUTE_NATIVE_COMMAND
+            }
+            Ok(RouteOutcome::CompositionConsumes) | Ok(RouteOutcome::Fallthrough) => {
+                SEYAL_APP_ROUTE_FALLTHROUGH
+            }
+            Err(error) => {
+                // Matched binding whose invoke failed: still consumed — never
+                // fall through to the PTY (SPEC-024 R10.2 / R10.3 / §14 item 11).
+                let _ = state.root.fail(error);
+                SEYAL_APP_ROUTE_CONSUMED
+            }
         }
     })
 }
@@ -877,43 +935,5 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(Some(id16(lo, hi)?))
     } else {
         Ok(None)
-    }
-}
-
-fn error_number(error: AppError) -> i32 {
-    match error {
-        AppError::UnknownPane => 1,
-        AppError::StalePane => 2,
-        AppError::StaleExecution => 3,
-        AppError::StaleAttachment => 4,
-        AppError::StaleController => 5,
-        AppError::StalePresentationEpoch => 6,
-        AppError::UnboundUnauthorized => 7,
-        AppError::AlreadyBound => 8,
-        AppError::NotController => 9,
-        AppError::DirectInputUnauthorized => 10,
-        AppError::ZeroPtyGeneration => 11,
-        AppError::Frozen => 12,
-        AppError::NoLiveClient => 13,
-        AppError::InvalidPayload => 14,
-        AppError::StaleRecoveryGeneration => 15,
-        AppError::ComposerSubmitDisabled => 16,
-        AppError::StaleComposerRequest => 17,
-        AppError::StaleComposerEpoch => 18,
-        AppError::UnknownAgent => 19,
-        AppError::UnknownAttention => 20,
-        AppError::UnknownChromeWorkspace => 21,
-        AppError::UnknownChromeTab => 22,
-        AppError::ComposerHistoryUnavailable => 23,
-        AppError::ComposerHistoryClosed => 24,
-        AppError::ComposerHistoryNoSelection => 25,
-        AppError::PaletteNotOpen => 26,
-        AppError::PaletteNoSelection => 27,
-        AppError::TabCreationUnavailable => 28,
-        AppError::PaneSplitUnavailable => 29,
-        AppError::UnknownBlock => 30,
-        AppError::CannotCloseLastTab => 31,
-        AppError::CannotCloseLastPane => 32,
-        AppError::CannotCloseBoundPane => 33,
     }
 }
