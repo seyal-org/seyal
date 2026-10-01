@@ -5,7 +5,9 @@ use std::path::Path;
 
 use crate::theme::{parse_toml, ui_config_path, TomlError, TomlValue};
 
+use super::builtins::{compile_builtin_entries, PendingEntry};
 use super::keys::{parse_keys, KeysError};
+use super::reserved::is_reserved_sequence;
 use super::types::{
     BindingContext, BindingSequence, BindingSource, CompiledBinding, DiagnosticCategory,
     KeybindingDiagnostic, KeybindingTable, Ordinal1To9, WorkspaceCommand, WorkspaceCommandId,
@@ -23,24 +25,26 @@ pub fn load_keybinding_table_from_path(path: Option<&Path>) -> KeybindingTable {
     load_keybinding_table(text.as_deref())
 }
 
-/// Parse and validate `[[keybindings]]` from TOML text. Missing/unreadable /
-/// whole-file parse failure → empty table (defaults deferred to K2). Invalid
-/// entries fail closed: they contribute no binding and never a partial row.
+/// Parse and validate `[[keybindings]]` from TOML text, merge SPEC-024 §4.1
+/// builtins, apply §4.2 reserved rejection and §7.1 / §7.3 resolution.
+/// Missing/unreadable / whole-file parse failure → builtins only.
 pub fn load_keybinding_table(toml_text: Option<&str>) -> KeybindingTable {
     let Some(text) = toml_text else {
-        return KeybindingTable::empty();
+        return finalize(compile_builtin_entries(), Vec::new());
     };
     let root = match parse_toml(text) {
         Ok(root) => root,
-        Err(TomlError(_)) => return KeybindingTable::empty(),
+        Err(TomlError(_)) => return finalize(compile_builtin_entries(), Vec::new()),
     };
     compile_keybindings_from_root(&root)
 }
 
 fn compile_keybindings_from_root(root: &BTreeMap<String, TomlValue>) -> KeybindingTable {
     let mut diagnostics = Vec::new();
+    let mut pending = compile_builtin_entries();
+
     let Some(value) = root.get("keybindings") else {
-        return KeybindingTable::empty();
+        return finalize(pending, diagnostics);
     };
     let Some(entries) = value.as_array_of_tables() else {
         diagnostics.push(KeybindingDiagnostic {
@@ -50,26 +54,26 @@ fn compile_keybindings_from_root(root: &BTreeMap<String, TomlValue>) -> Keybindi
             source: BindingSource::User { index: 0 },
             message: "keybindings ignored; expected array of tables".into(),
         });
-        return KeybindingTable {
-            bindings: Vec::new(),
-            chord_prefix_index: Vec::new(),
-            diagnostics,
-        };
+        return finalize(pending, diagnostics);
     };
 
-    let mut bindings = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let source = BindingSource::User {
             index: index as u32,
         };
-        match compile_entry(entry, source, &mut diagnostics) {
-            Some(binding) => bindings.push(binding),
-            None => {
-                // Fail closed for this row: no partial CompiledBinding.
-            }
+        if let Some(row) = compile_entry(entry, source, &mut diagnostics) {
+            pending.push(row);
         }
     }
 
+    finalize(pending, diagnostics)
+}
+
+fn finalize(
+    pending: Vec<PendingEntry>,
+    mut diagnostics: Vec<KeybindingDiagnostic>,
+) -> KeybindingTable {
+    let bindings = resolve_conflicts(pending, &mut diagnostics);
     let chord_prefix_index = build_chord_prefix_index(&bindings);
     KeybindingTable {
         bindings,
@@ -78,11 +82,93 @@ fn compile_keybindings_from_root(root: &BTreeMap<String, TomlValue>) -> Keybindi
     }
 }
 
+/// SPEC-024 §7.1 steps 3–6 and §7.3 unbind tombstones.
+fn resolve_conflicts(
+    pending: Vec<PendingEntry>,
+    diagnostics: &mut Vec<KeybindingDiagnostic>,
+) -> Vec<CompiledBinding> {
+    let mut live: Vec<Option<PendingEntry>> = Vec::new();
+
+    for entry in pending {
+        let mut taken = BindingContext::EMPTY;
+
+        for slot in &mut live {
+            let Some(prev) = slot.as_mut() else {
+                continue;
+            };
+            if prev.sequence != entry.sequence {
+                continue;
+            }
+            let overlap = prev.context.intersection(entry.context);
+            if overlap.is_empty() {
+                continue;
+            }
+            diagnostics.push(duplicate_sequence_diag(prev, &entry, overlap));
+            prev.context.remove(overlap);
+            taken = taken.union(overlap);
+            if prev.context.is_empty() {
+                *slot = None;
+            }
+        }
+
+        if entry.action.is_none() {
+            if taken.is_empty() {
+                diagnostics.push(diag(
+                    DiagnosticCategory::UnbindNoEffect,
+                    &entry.keys_notation,
+                    &entry.action_label,
+                    entry.source,
+                    "unbind took no context bits from earlier bindings",
+                ));
+            }
+            continue;
+        }
+
+        live.push(Some(entry));
+    }
+
+    live.into_iter()
+        .flatten()
+        .map(|entry| CompiledBinding {
+            sequence: entry.sequence,
+            action: entry.action.expect("bind entries retain WorkspaceCommand"),
+            context: entry.context,
+            source: entry.source,
+        })
+        .collect()
+}
+
+fn duplicate_sequence_diag(
+    earlier: &PendingEntry,
+    later: &PendingEntry,
+    transferred: BindingContext,
+) -> KeybindingDiagnostic {
+    let bits: Vec<&str> = transferred
+        .iter_bits()
+        .filter_map(BindingContext::bit_name)
+        .collect();
+    let message = format!(
+        "duplicate sequence: later {} ({:?}) replaces earlier {} ({:?}) for [{}]",
+        later.action_label,
+        later.source,
+        earlier.action_label,
+        earlier.source,
+        bits.join(", ")
+    );
+    KeybindingDiagnostic {
+        category: DiagnosticCategory::DuplicateSequence,
+        keys_notation: later.keys_notation.clone(),
+        action: later.action_label.clone(),
+        source: later.source,
+        message,
+    }
+}
+
 fn compile_entry(
     entry: &BTreeMap<String, TomlValue>,
     source: BindingSource,
     diagnostics: &mut Vec<KeybindingDiagnostic>,
-) -> Option<CompiledBinding> {
+) -> Option<PendingEntry> {
     for key in entry.keys() {
         if !KNOWN_FIELDS.contains(&key.as_str()) {
             diagnostics.push(KeybindingDiagnostic {
@@ -148,6 +234,17 @@ fn compile_entry(
 
     let context = parse_context(entry, &keys_notation, &action_raw, source, diagnostics)?;
 
+    if is_reserved_sequence(&sequence) {
+        diagnostics.push(diag(
+            DiagnosticCategory::ReservedCommandCollision,
+            &keys_notation,
+            &action_raw,
+            source,
+            "sequence is reserved and cannot be rebound",
+        ));
+        return None;
+    }
+
     if action_raw == "none" {
         if entry.contains_key("ordinal") {
             diagnostics.push(diag(
@@ -157,9 +254,16 @@ fn compile_entry(
                 source,
                 "ordinal forbidden on action none",
             ));
+            return None;
         }
-        // Unbind tombstones are validated but contribute no binding in K1.
-        return None;
+        return Some(PendingEntry {
+            sequence,
+            keys_notation,
+            action: None,
+            action_label: "none".into(),
+            context,
+            source,
+        });
     }
 
     if looks_like_disallowed_payload(&action_raw) {
@@ -190,9 +294,11 @@ fn compile_entry(
         Err(()) => return None,
     };
 
-    Some(CompiledBinding {
+    Some(PendingEntry {
         sequence,
-        action: WorkspaceCommand { id, ordinal },
+        keys_notation,
+        action: Some(WorkspaceCommand { id, ordinal }),
+        action_label: action_raw,
         context,
         source,
     })

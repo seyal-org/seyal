@@ -120,12 +120,46 @@ impl BindingContext {
         self.0 |= other.0;
     }
 
+    pub const fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     pub const fn bits(self) -> u8 {
         self.0
+    }
+
+    /// Individual context bits set on this value, in SPEC-024 token order.
+    pub fn iter_bits(self) -> impl Iterator<Item = Self> {
+        [
+            Self::APP,
+            Self::FLOW,
+            Self::RAW,
+            Self::TUI,
+            Self::COMPOSER,
+            Self::PALETTE,
+        ]
+        .into_iter()
+        .filter(move |bit| self.contains(*bit))
+    }
+
+    pub fn bit_name(self) -> Option<&'static str> {
+        match self {
+            Self::APP => Some("app"),
+            Self::FLOW => Some("flow"),
+            Self::RAW => Some("raw"),
+            Self::TUI => Some("tui"),
+            Self::COMPOSER => Some("composer"),
+            Self::PALETTE => Some("palette"),
+            _ => None,
+        }
     }
 }
 

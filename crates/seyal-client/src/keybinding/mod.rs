@@ -1,11 +1,15 @@
-//! SPEC-024 K1: cold `[[keybindings]]` schema → immutable [`KeybindingTable`].
+//! SPEC-024 K1/K2: cold `[[keybindings]]` schema → immutable [`KeybindingTable`].
 //!
+//! K2 adds §4.1 builtins (gated exclusions deferred), §4.2 reserved Command,
+//! §7.1 last-wins resolution, and §7.3 `action = "none"` unbind.
 //! Distinct from [`crate::input_policy::InputPolicy`] and theme
 //! [`crate::theme::UserUiSettings`]. No event routing, menu wiring, or chord
 //! runtime state.
 
+mod builtins;
 mod keys;
 mod load;
+mod reserved;
 mod types;
 
 #[cfg(test)]
