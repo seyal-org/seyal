@@ -31,7 +31,6 @@ mod runtime;
 #[allow(unsafe_code)]
 mod shell_integration_policy;
 mod singleton;
-mod startup;
 #[cfg(all(target_os = "macos", feature = "test-fault-injection"))]
 #[doc(hidden)]
 pub mod test_fault;
@@ -46,4 +45,3 @@ pub use input::InputIngress;
 pub use runtime::BenchmarkRuntimeDiagnostics;
 pub use runtime::{ExecutionLifecycle, ExecutionSummary, LocalIpcMode, Runtime, RuntimeConfig};
 pub use shell_integration_policy::{ShellIntegrationPolicy, NONCE_FD_ENV, USER_ZDOTDIR_ENV};
-pub use startup::explicit_startup_command;
