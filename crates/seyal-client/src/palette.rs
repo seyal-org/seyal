@@ -493,6 +493,7 @@ mod tests {
             workspace,
             true,
             true,
+            false,
         )
         .expect("seed shell")
     }

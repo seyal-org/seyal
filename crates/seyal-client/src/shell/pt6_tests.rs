@@ -74,6 +74,7 @@ fn seed_splittable() -> ShellState {
         first,
         true,
         true,
+        false,
     )
     .expect("fixture")
 }

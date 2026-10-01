@@ -2,7 +2,7 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use seyal_protocol::framing::{CommandBlock, CommandBlockState};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
@@ -276,8 +276,53 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             })
         }
         57 => Ok(AppAction::DisconnectReconstruction),
+        /*
+         * W4a window actions / native presentation events (ADR-018 §2.2 / §2.3).
+         * SELECT_WINDOW: target_execution_lo/hi = WindowId.
+         * CREATE_WINDOW: target-free (Workspace resolved in Rust).
+         * CYCLE_WINDOW: reserved = 0 next, 1 previous.
+         * REPORT_WINDOW_EVENT: target_execution = WindowId; reserved = event kind.
+         */
+        58 => Ok(AppAction::SelectWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        59 => Ok(AppAction::CycleWindow {
+            direction: if action.reserved == 1 {
+                crate::shell::CycleDirection::Previous
+            } else {
+                crate::shell::CycleDirection::Next
+            },
+        }),
+        60 => Ok(AppAction::CreateWindow),
+        61 => Ok(AppAction::ReportWindowEvent {
+            window: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            event: window_native_event(action.reserved)?,
+        }),
         _ => Err(-6),
     }
+}
+
+fn window_native_event(code: u32) -> Result<crate::app::WindowNativeEvent, i32> {
+    use crate::app::WindowNativeEvent;
+    Ok(match code {
+        0 => WindowNativeEvent::BecameKey,
+        1 => WindowNativeEvent::ResignedKey,
+        2 => WindowNativeEvent::BecameMain,
+        3 => WindowNativeEvent::ResignedMain,
+        4 => WindowNativeEvent::OcclusionChanged,
+        5 => WindowNativeEvent::Miniaturized,
+        6 => WindowNativeEvent::Deminiaturized,
+        7 => WindowNativeEvent::EnteredFullscreen,
+        8 => WindowNativeEvent::ExitedFullscreen,
+        9 => WindowNativeEvent::ScreenOrScaleChanged,
+        _ => return Err(-6),
+    })
 }
 
 fn continuity_of_bytes(bytes: [u8; 16]) -> ContinuityIdentity {

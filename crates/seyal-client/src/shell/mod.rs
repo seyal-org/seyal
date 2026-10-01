@@ -20,6 +20,8 @@ mod pt2_tests;
 mod pt6_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod window_admission_tests;
 
 use std::fmt;
 
@@ -49,6 +51,7 @@ pub enum ShellError {
     UnknownTab,
     UnknownPane,
     TabCreationUnavailable,
+    WindowCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
@@ -73,6 +76,9 @@ impl ShellError {
             Self::UnknownPane => "Unknown Pane.",
             Self::TabCreationUnavailable => {
                 "Creating tabs is unavailable until a distinct execution route is available."
+            }
+            Self::WindowCreationUnavailable => {
+                "Creating another Window is unavailable until window close exists."
             }
             Self::PaneSplitUnavailable => {
                 "Splitting panes is unavailable until a distinct execution route is available."
@@ -217,6 +223,9 @@ pub struct ShellSnapshot {
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
+    /// Whether `CreateWindow` would add a Window to a Workspace that already
+    /// has one. Zero-window re-entry stays allowed when this is false.
+    pub allows_window_creation: bool,
     pub allows_pane_splitting: bool,
     /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
     /// Pane would currently be accepted (the last Tab/Pane cannot close, and
@@ -262,6 +271,7 @@ pub struct ShellState {
     containment_generation: u64,
     allows_pane_splitting: bool,
     allows_tab_creation: bool,
+    allows_window_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
@@ -300,6 +310,7 @@ impl ShellState {
             workspaces: vec![workspace],
             allows_pane_splitting: false,
             allows_tab_creation: false,
+            allows_window_creation: false,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -312,6 +323,7 @@ impl ShellState {
         active_workspace: WorkspaceId,
         allows_pane_splitting: bool,
         allows_tab_creation: bool,
+        allows_window_creation: bool,
     ) -> Result<Self, ShellError> {
         if workspaces.is_empty() {
             return Err(ShellError::EmptyShell);
@@ -358,6 +370,7 @@ impl ShellState {
             containment_generation: 0,
             allows_pane_splitting,
             allows_tab_creation,
+            allows_window_creation,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -387,6 +400,17 @@ impl ShellState {
 
     pub fn allows_tab_creation(&self) -> bool {
         self.allows_tab_creation
+    }
+
+    pub fn allows_window_creation(&self) -> bool {
+        self.allows_window_creation
+    }
+
+    /// Test-only admission override. Production constructors keep this false
+    /// until window close exists.
+    #[cfg(test)]
+    pub(crate) fn set_allows_window_creation(&mut self, allows: bool) {
+        self.allows_window_creation = allows;
     }
 
     pub fn focused_pane_allows_implicit_bootstrap(&self) -> bool {

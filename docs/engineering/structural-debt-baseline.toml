@@ -34,33 +34,33 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 747
-issue = 923
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs."
+acknowledged_loc = 805
+issue = 1123
+reason = "ApplicationRoot stays the product-state façade. #1123 adds multi-window host actions and the quit-deadline field beside the existing apply path; window identity and the action that targets it stay in this façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 848
-issue = 1108
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1108 adds multi-window OrderFrontMakeKey emission and bounded-queue proofs beside the existing ApplicationRoot suite. Ceiling matches post-W3 LOC."
+acknowledged_loc = 910
+issue = 1123
+reason = "ApplicationRoot tests stay one module. #1123 adds the three-window quit detach proof beside the #1108 OrderFrontMakeKey and bounded-queue coverage; ceiling matches post-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
-acknowledged_loc = 894
-issue = 1122
-reason = "Shell reducer suite stays one module. #1122 adds tab-scoped zoom and containment_generation Split/Close fence proofs beside the multi-window snapshot coverage from #1108; further extraction would split one containment contract table."
+acknowledged_loc = 898
+issue = 1123
+reason = "Shell reducer suite stays one module. #1122 zoom and containment-fence proofs sit beside #1108 multi-window coverage; #1123 adds the window-creation flag on those fixtures."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 900
-issue = 1108
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/, ratcheting this façade down from the prior 919 LOC #923 ceiling."
+acknowledged_loc = 947
+issue = 1123
+reason = "The C ABI façade stays one encode/decode surface after the window extraction. #1123 adds the quit-fixture seed exports beside the existing window exports."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
 acknowledged_loc = 779
-issue = 1122
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1122 only updates the published SeyalAppTab size assertion after the trailing zoom overlay fields grew the W3 tab record."
+issue = 1123
+reason = "ABI contract tests stay one module. #1123 adds the multi-window snapshot proofs beside the existing handle tests."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -104,7 +104,7 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 744
-issue = 1092
-reason = "Command palette query, rows, and run dispatch stay one reducer. #1092 adds the window and tab actions that the palette runs; splitting the file would separate the row model from those actions."
+acknowledged_loc = 745
+issue = 1123
+reason = "Command palette query, rows, and run dispatch stay one reducer. #1123 adds the window-creation admission flag to the existing fixture call; splitting the file would separate the row model from those actions."
 

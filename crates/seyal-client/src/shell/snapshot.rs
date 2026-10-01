@@ -101,6 +101,7 @@ impl ShellState {
             layout: tab.root.layout_description(),
             last_error: self.last_error,
             allows_tab_creation: self.allows_tab_creation,
+            allows_window_creation: self.allows_window_creation,
             allows_pane_splitting: self.allows_pane_splitting,
             allows_tab_close: workspace.allows_tab_close(),
             allows_pane_close: tab.allows_focused_pane_close(),
@@ -226,6 +227,7 @@ impl ShellError {
             Self::CrossWorkspaceMove => 16,
             Self::NotZoomed => 17,
             Self::InvalidMoveTarget => 18,
+            Self::WindowCreationUnavailable => 19,
         }
     }
 }
