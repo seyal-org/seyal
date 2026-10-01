@@ -8,6 +8,11 @@ import XCTest
 /// the relaunch-reconnect case stays on one fixture Runtime.
 enum IsolatedHostedRuntime {
   static let flag = "--runtime-dir"
+  /// Must match `BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey`
+  /// (Debug-only in Seyal.app). Release builds ignore this variable.
+  /// Xcode leaves `XCTestConfigurationFilePath` on the test runner, so the
+  /// app under test only sees a variable this launch sets.
+  static let forwardCommandEnvironmentKey = "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
 
   static func makeDirectory() -> String {
     let url = URL(fileURLWithPath: "/tmp").appendingPathComponent(
@@ -22,7 +27,10 @@ enum IsolatedHostedRuntime {
     return url.path
   }
 
-  static func makeLaunchArguments() -> [String] { [flag, makeDirectory()] }
+  /// `/bin/zsh` is the helper command so Flow tests run with trusted
+  /// integration. The account `pw_shell` on hosted runners is bash, which
+  /// SPEC-008 presents as full-pane Raw.
+  static func makeLaunchArguments() -> [String] { [flag, makeDirectory(), "/bin/zsh"] }
 }
 
 extension XCUIApplication {
@@ -35,6 +43,7 @@ extension XCUIApplication {
     for (key, value) in environment {
       launchEnvironment[key] = value
     }
+    launchEnvironment[IsolatedHostedRuntime.forwardCommandEnvironmentKey] = "1"
     launch()
     return self
   }

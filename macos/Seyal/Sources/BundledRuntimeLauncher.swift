@@ -39,6 +39,34 @@ final class BundledRuntimeLauncher {
   static let helperRelativePath = "Contents/Helpers/seyal-runtime"
   static let systemPath = "/usr/bin:/bin:/usr/sbin:/sbin"
 
+  #if DEBUG
+    /// Set by `IsolatedHostedRuntime` on `XCUIApplication.launchEnvironment`.
+    /// Compiled only into Debug; Release never reads this variable or forwards
+    /// trailing helper-command argv from the app launch path.
+    static let uiTestForwardRuntimeCommandEnvironmentKey =
+      "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+
+    /// Debug/XCUI only. Pass `allowUiTestOverride: false` to assert Release
+    /// semantics from Debug component tests.
+    static func uiTestRequestsHelperCommand(
+      environment: [String: String] = ProcessInfo.processInfo.environment,
+      allowUiTestOverride: Bool = true
+    ) -> Bool {
+      guard allowUiTestOverride else { return false }
+      return environment[uiTestForwardRuntimeCommandEnvironmentKey] == "1"
+    }
+  #else
+    /// Release builds never honor a UI-test helper-command override.
+    static func uiTestRequestsHelperCommand(
+      environment: [String: String] = ProcessInfo.processInfo.environment,
+      allowUiTestOverride: Bool = false
+    ) -> Bool {
+      _ = environment
+      _ = allowUiTestOverride
+      return false
+    }
+  #endif
+
   /// The launch is synchronous and currently invoked by the recovery
   /// coordinator on one executor. Retain its typed outcome only until that
   /// caller consumes it; this is an execution-local result relay, not Runtime
@@ -256,13 +284,15 @@ final class BundledRuntimeLauncher {
     static func helperArgv(
       executable: String,
       processArguments: [String] = ProcessInfo.processInfo.arguments,
-      testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil
+      testHostLoaded: Bool = NSClassFromString("XCTestCase") != nil,
+      forwardHelperCommand: Bool = false
     ) -> [String] {
       var argv = [executable]
       argv.append(
         contentsOf: IsolatedRuntimeDirectory.helperArguments(
           from: processArguments,
-          testHostLoaded: testHostLoaded
+          testHostLoaded: testHostLoaded,
+          forwardHelperCommand: forwardHelperCommand
         )
       )
       return argv
@@ -300,7 +330,17 @@ final class BundledRuntimeLauncher {
     else { throw BundledRuntimeLaunchError.launchDenied }
 
     let executable = helperURL.path
-    var arguments: [UnsafeMutablePointer<CChar>?] = helperArgv(executable: executable)
+    // Helper-command forwarding after `--runtime-dir` is Debug/XCUI only.
+    // Release always passes `false` so the env var and trailing argv are ignored.
+    #if DEBUG
+      let forwardHelperCommand = uiTestRequestsHelperCommand()
+    #else
+      let forwardHelperCommand = false
+    #endif
+    var arguments: [UnsafeMutablePointer<CChar>?] = helperArgv(
+      executable: executable,
+      forwardHelperCommand: forwardHelperCommand
+    )
       .map { strdup($0) as UnsafeMutablePointer<CChar>? }
     arguments.append(nil)
     var environmentPointers = environment
