@@ -4,15 +4,15 @@ import Foundation
 ///
 /// Swift never invents failure or warning text. It only borrows the UTF-8 that
 /// `seyal_launch_policy_*_copy` already chose.
-enum LaunchPolicyProductCopy {
+public enum LaunchPolicyProductCopy {
     /// Bounded failure string for create-result `result_code` / `detail_code`.
-    static func failureMessage(resultCode: UInt16, detailCode: UInt32) -> String {
+    public static func failureMessage(resultCode: UInt16, detailCode: UInt32) -> String {
         let borrowed = seyal_launch_policy_failure_copy(resultCode, detailCode)
         return utf8String(borrowed)
     }
 
     /// Bounded warning strings for a `Created.detail_code` bitfield.
-    static func warningMessages(detailCode: UInt32) -> [String] {
+    public static func warningMessages(detailCode: UInt32) -> [String] {
         (0..<2).compactMap { bit in
             guard detailCode & (1 << bit) != 0 else { return nil }
             let borrowed = seyal_launch_policy_warning_copy(UInt32(bit))
@@ -22,7 +22,7 @@ enum LaunchPolicyProductCopy {
     }
 
     /// Surface already-decided Rust copy through the host log (non-secret only).
-    static func surface(resultCode: UInt16, detailCode: UInt32) {
+    public static func surface(resultCode: UInt16, detailCode: UInt32) {
         if resultCode == 17 {
             NSLog("Seyal launch policy: %@", failureMessage(resultCode: resultCode, detailCode: detailCode))
             return
