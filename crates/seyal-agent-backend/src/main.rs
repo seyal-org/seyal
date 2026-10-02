@@ -2,8 +2,18 @@
 //!
 //! Serves the per-user local endpoint from a private directory. Clients attach
 //! over the versioned protocol; this process never owns a PTY or TerminalState.
+//! Multiple authorized peers may be live concurrently (AB-1.3); domain writes
+//! stay serialized through the shared IntegrationService.
 
-use std::{env, process, thread, time::Duration};
+use std::{
+    env, process,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 
 use seyal_agent_backend::{AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep};
 
@@ -46,27 +56,47 @@ fn main() {
         }
     };
 
-    let mut completed = 0_u64;
+    let accepted = Arc::new(AtomicU64::new(0));
+    let completed = Arc::new(AtomicU64::new(0));
     loop {
-        match daemon.serve_one() {
-            Ok(()) => {
-                completed = completed.saturating_add(1);
-                if options
-                    .max_connections
-                    .is_some_and(|limit| completed >= limit)
-                {
-                    process::exit(0);
-                }
+        if let Some(limit) = options.max_connections
+            && accepted.load(Ordering::Relaxed) >= limit
+        {
+            // Stop accepting once the budget is spent; wait for workers, then exit 0.
+            // Must not block in accept_and_spawn for connection N+1 while N finishes.
+            while completed.load(Ordering::Relaxed) < limit {
+                thread::sleep(Duration::from_millis(5));
+            }
+            process::exit(0);
+        }
+        match daemon.accept_and_spawn() {
+            Ok(handle) => {
+                accepted.fetch_add(1, Ordering::Relaxed);
+                let completed = Arc::clone(&completed);
+                thread::spawn(move || match handle.join() {
+                    Ok(Ok(())) => {
+                        completed.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(Err(error)) if error.is_recoverable_client_fault() => {
+                        eprintln!("seyal-agent-backend: client serve ended: {error:?}");
+                        completed.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(Err(error)) => {
+                        eprintln!("seyal-agent-backend: serve failed: {error:?}");
+                        process::exit(1);
+                    }
+                    Err(_) => {
+                        eprintln!("seyal-agent-backend: worker panicked");
+                        process::exit(1);
+                    }
+                });
+            }
+            Err(error) if error.is_recoverable_client_fault() => {
+                eprintln!("seyal-agent-backend: accept ended: {error:?}");
             }
             Err(error) => {
-                if error.is_recoverable_client_fault() {
-                    // Per-client faults must not take down the process; the next
-                    // accept turn serves an unrelated connection (AB-0/AB-1 tests).
-                    eprintln!("seyal-agent-backend: client serve ended: {error:?}");
-                } else {
-                    eprintln!("seyal-agent-backend: serve failed: {error:?}");
-                    process::exit(1);
-                }
+                eprintln!("seyal-agent-backend: accept failed: {error:?}");
+                process::exit(1);
             }
         }
     }
@@ -76,7 +106,8 @@ struct Options {
     directory: std::path::PathBuf,
     output_bytes: usize,
     deadline_secs: Option<u64>,
-    /// When set, exit 0 after this many successful `serve_one` completions.
+    /// When set, exit 0 after this many connection turn completions
+    /// (success or recoverable client fault).
     max_connections: Option<u64>,
 }
 
@@ -190,7 +221,6 @@ mod tests {
         assert!(DaemonError::Io.is_recoverable_client_fault());
         assert!(DaemonError::Handshake(HandshakeError::Malformed).is_recoverable_client_fault());
         assert!(!DaemonError::Unavailable.is_recoverable_client_fault());
-        assert!(!DaemonError::AcceptIo.is_recoverable_client_fault());
         assert!(!DaemonError::InsecureDirectory.is_recoverable_client_fault());
         assert!(!DaemonError::StartupContended.is_recoverable_client_fault());
     }

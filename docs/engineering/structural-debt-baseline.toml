@@ -96,13 +96,9 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
-# #1183 AB-1 foundation: recoverable per-client serve faults stay with the
-# Unix daemon accept/negotiate/serve façade (peer/endpoint already split).
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 757
-issue = 1183
-reason = "Unix daemon bind/reclaim/serve, Hello evidence→principal binding, and recoverable client-fault classification stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-AcceptIo LOC with recoverable-fault tests in daemon/tests.rs."
+# #1179 AB-1.3: per-connection handshake and session serve moved to
+# daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
+# [[cohesion_acknowledgement]] remains for it.
 
 # #1182 AB-1.6 observation/replay hardening: per-run next-ordinal cursor and
 # recovery terminal-evidence helpers stay with ObservationAuthority apply/undo.
@@ -130,9 +126,9 @@ acknowledged_loc = 712
 issue = 1178
 reason = "Principal/session authorization, Hello evidence mapping, and durable principal snapshots stay one repository; splitting evidence index from OpenSession would duplicate Active/Revoked checks across modules."
 
-# #1178 AB-1.2 principal seed/load on IntegrationService::open stays with session catalog.
+# #1179 connection-scoped principal threading through IntegrationService handle.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 750
-issue = 1178
-reason = "V1 command catalog, store-backed principal seed/load, and observation dispatch stay one session façade; extracting only principal bootstrap would separate OpenSession authority from the store it consumes."
+acknowledged_loc = 756
+issue = 1179
+reason = "V1 command catalog and observation dispatch stay one session façade; #1179 passes connection-scoped ClientPrincipalId into handle/dispatch so concurrent peers cannot share a singular principal slot."
