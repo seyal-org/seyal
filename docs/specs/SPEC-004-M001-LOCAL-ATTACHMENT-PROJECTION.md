@@ -6,7 +6,7 @@
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
-- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
+- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative** (ADR-017 Accepted). Create/terminate production path ships with Issue #1105 / PR #1112.
 - **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
 
 ## 1. Purpose
@@ -167,7 +167,7 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
 - bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, proposed under #1083;
-- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance;
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18 (ADR-017 Accepted; implemented under #1105);
 - bit 11: unallocated on this tip (reserved for a separate #1162 delivery-control amendment; not part of this PR);
 - bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only.
 
@@ -516,7 +516,7 @@ M001 defines:
 
 These numeric meanings are reused by `ResizeResult.result_code` values 1–14. `ResizeResult.result_code = 0` uniquely means `Applied`.
 
-§18 additionally defines, normative only on ADR-017 acceptance:
+§18 additionally defines (ADR-017 Accepted; implemented under #1105):
 
 ```text
 15 InvalidWorkspace
@@ -622,7 +622,7 @@ Comparator/reference shared-projection code may remain only if isolated from pro
 
 ## 18. M003 execution provisioning and disposition extension
 
-- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance**.
+- **Status:** accepted amendment (ADR-017 Accepted); create/terminate implemented under Issue #1105 / PR #1112.
 - **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
 - **Nature:** additive, capability-gated. Framing version remains `1.0`. Nothing in §1–§17 changes.
 
