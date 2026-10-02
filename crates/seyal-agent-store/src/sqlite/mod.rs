@@ -88,6 +88,10 @@ pub enum StoreError {
 pub struct AgentStore {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) writes_before_fault: AtomicU64,
+    /// Bytes loaded by `replay_after` / `replay_page` on this store instance.
+    /// Test-fault instrumentation only; production builds keep a cheap zeroed cell.
+    #[cfg(feature = "test-fault-injection")]
+    replay_payload_bytes_loaded: AtomicU64,
 }
 
 impl AgentStore {
@@ -113,6 +117,8 @@ impl AgentStore {
         Ok(Self {
             conn: Mutex::new(conn),
             writes_before_fault: AtomicU64::new(u64::MAX),
+            #[cfg(feature = "test-fault-injection")]
+            replay_payload_bytes_loaded: AtomicU64::new(0),
         })
     }
 
@@ -369,6 +375,11 @@ impl AgentStore {
         let mut events = Vec::new();
         for row in rows {
             let (sequence, event_id, kind, payload) = row.map_err(|_| StoreError::Corrupt)?;
+            #[cfg(feature = "test-fault-injection")]
+            {
+                self.replay_payload_bytes_loaded
+                    .fetch_add(payload.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            }
             events.push(AggregateEventEnvelopeV1 {
                 aggregate_id,
                 sequence: AggregateSequence::from_raw(sequence as u64)
@@ -379,6 +390,60 @@ impl AgentStore {
             });
         }
         Ok(events)
+    }
+
+    /// Aggregate-local high-water sequence (event count when sequences are dense from 1).
+    ///
+    /// Does not load event payloads. Used by start_agent_run for event_count.
+    pub fn high_water(&self, aggregate_id: AggregateId) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let (kind, id) = aggregate_key(aggregate_id);
+        let hwm: i64 = conn
+            .query_row(
+                "SELECT COALESCE(high_water, 0) FROM aggregate_sequence_hwm
+                 WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
+                params![kind, id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?
+            .unwrap_or(0);
+        if hwm < 0 {
+            return Err(StoreError::Corrupt);
+        }
+        Ok(hwm as u64)
+    }
+
+    /// True when a committed observation payload records KnownSuccess (3) or
+    /// KnownFailure (4). Recovery-only; not a hot-path scan of full history into
+    /// memory — SQLite stops at the first match.
+    pub fn has_committed_terminal_observation(
+        &self,
+        run_id: crate::AgentRunId,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let id = run_id.to_bytes().to_vec();
+        // aggregate_kind 4 = AgentRun; event kind 2 = observation payload.
+        // Observation wire: 8-byte ordinal + kind byte (substr is 1-based).
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM aggregate_event
+                 WHERE aggregate_kind = 4 AND aggregate_id = ?1 AND kind = 2
+                   AND length(payload) >= 9
+                   AND substr(payload, 9, 1) IN (x'03', x'04')
+                 LIMIT 1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?;
+        Ok(found.is_some())
+    }
+
+    #[cfg(feature = "test-fault-injection")]
+    pub fn take_replay_payload_bytes_loaded(&self) -> u64 {
+        self.replay_payload_bytes_loaded
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn drop_events_before(

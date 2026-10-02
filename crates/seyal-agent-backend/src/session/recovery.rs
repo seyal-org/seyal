@@ -3,13 +3,14 @@
 use seyal_agent_core::{BindingGeneration, ControlGeneration, DomainError, WorkScopeKind};
 use seyal_agent_store::{AgentStore, AggregateId};
 
-use crate::{AuthorizationRepository, ObservationAuthority};
+use crate::{AuthorizationRepository, ObservationAuthority, RunLiveness};
 
-use super::wire::snapshot_payload;
+use super::wire::{liveness_code, snapshot_payload};
 use super::ServiceError;
 
 /// Outbox marker appended when a recovered run fences generations and
-/// rewrites its snapshot so GetSnapshot cannot report pre-crash liveness.
+/// rewrites its snapshot so GetSnapshot cannot report pre-crash *live*
+/// liveness. Committed terminal observations remain KnownTerminated.
 const EVENT_RECOVERY_FENCE: u16 = 3;
 
 pub(super) fn restore_identities(
@@ -50,9 +51,36 @@ pub(super) fn restore_identities(
             }
             Err(_) => return Err(ServiceError::Failed),
         }
+        restore_committed_terminal_liveness(store, authority, id)?;
         authority.mark_recovered(id);
         fence_recovered_run(store, authority, id)?;
         auth.allow_run_for_observers(id);
+    }
+    Ok(())
+}
+
+/// Honor durable terminal observations before classifying recovery liveness.
+///
+/// Snapshot code 2 (KnownTerminated) is a fast path; the store also proves
+/// terminal observation payloads when the snapshot is missing or stale.
+fn restore_committed_terminal_liveness(
+    store: &AgentStore,
+    authority: &mut ObservationAuthority,
+    run_id: seyal_agent_core::AgentRunId,
+) -> Result<(), ServiceError> {
+    if let Some((_, payload)) = store
+        .get_snapshot(AggregateId::AgentRun(run_id))
+        .map_err(|_| ServiceError::Failed)?
+        && payload.first().copied() == Some(liveness_code(RunLiveness::KnownTerminated))
+    {
+        authority.note_committed_terminal(run_id);
+        return Ok(());
+    }
+    if store
+        .has_committed_terminal_observation(run_id)
+        .map_err(|_| ServiceError::Failed)?
+    {
+        authority.note_committed_terminal(run_id);
     }
     Ok(())
 }

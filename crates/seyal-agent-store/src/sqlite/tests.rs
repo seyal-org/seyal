@@ -303,6 +303,38 @@ fn refused_write_publishes_no_event() {
 }
 
 #[test]
+fn high_water_counts_without_loading_payloads_and_terminal_observation_is_detectable() {
+    let file = path("hwm-terminal.db");
+    let store = AgentStore::open(&file).unwrap();
+    let run = crate::AgentRunId::new();
+    let aggregate = AggregateId::AgentRun(run);
+    assert_eq!(store.high_water(aggregate).unwrap(), 0);
+    assert!(!store.has_committed_terminal_observation(run).unwrap());
+
+    let large = vec![0xCD; 4 * 1024];
+    for _ in 0..64 {
+        store.append_event(aggregate, 2, &large).unwrap();
+    }
+    assert_eq!(store.high_water(aggregate).unwrap(), 64);
+
+    let mut terminal = 7_u64.to_le_bytes().to_vec();
+    terminal.push(3); // KnownSuccess observation kind
+    store.append_event(aggregate, 2, &terminal).unwrap();
+    assert_eq!(store.high_water(aggregate).unwrap(), 65);
+    assert!(store.has_committed_terminal_observation(run).unwrap());
+
+    let mut failure = 8_u64.to_le_bytes().to_vec();
+    failure.push(4); // KnownFailure
+    let other = crate::AgentRunId::new();
+    store
+        .append_event(AggregateId::AgentRun(other), 2, &failure)
+        .unwrap();
+    assert!(store.has_committed_terminal_observation(other).unwrap());
+    // Cross-run terminal evidence must not leak.
+    assert!(store.has_committed_terminal_observation(run).unwrap());
+}
+
+#[test]
 fn records_append_throughput_snapshot_latency_db_growth_and_recovery() {
     let file = path("measure.db");
     let opened = Instant::now();
