@@ -1,7 +1,8 @@
 //! Stable Seyal identity/value types shared across authority and protocol layers.
 //!
 //! This crate owns no PTY, VT, Runtime registry, renderer, transport, or UI
-//! reducer. Headed composition IDs (`TabId`, `PaneId`) are value types only.
+//! reducer. Headed composition IDs (`WindowId`, `TabId`, `PaneId`) are value
+//! types only.
 
 use std::{
     fmt,
@@ -50,6 +51,11 @@ pub struct TabId(u128);
 /// move PTY/VT ownership into the product shell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PaneId(u128);
+
+/// Headed composition identity for one Window. Opaque and process-unique.
+/// It is not an `NSWindow` number, index, screen, or Space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WindowId(u128);
 
 // Fresh authority identities intentionally have no `Default`: default
 // construction would hide a stateful identity-generation side effect.
@@ -112,6 +118,13 @@ impl PaneId {
     }
 }
 
+#[allow(clippy::new_without_default)]
+impl WindowId {
+    pub fn new() -> Self {
+        Self(unique_id(0x5749_4e44_4f57_0001))
+    }
+}
+
 macro_rules! impl_id_wire_bytes {
     ($type:ty) => {
         impl $type {
@@ -134,6 +147,7 @@ impl_id_wire_bytes!(ProjectionId);
 impl_id_wire_bytes!(BlockId);
 impl_id_wire_bytes!(TabId);
 impl_id_wire_bytes!(PaneId);
+impl_id_wire_bytes!(WindowId);
 
 fn unique_id(domain: u64) -> u128 {
     let sequence = NEXT_ID
@@ -189,6 +203,7 @@ impl_id_display!(ProjectionId);
 impl_id_display!(BlockId);
 impl_id_display!(TabId);
 impl_id_display!(PaneId);
+impl_id_display!(WindowId);
 
 #[cfg(test)]
 mod tests {
@@ -216,6 +231,14 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(first as u64, 1);
         assert_eq!(second as u64, 2);
+    }
+
+    #[test]
+    fn window_ids_are_unique_across_a_batch() {
+        let mut seen = HashSet::with_capacity(64);
+        for _ in 0..64 {
+            assert!(seen.insert(WindowId::new()));
+        }
     }
 
     #[test]
@@ -271,8 +294,11 @@ mod tests {
         assert_eq!(BlockId::from_bytes(block.to_bytes()), block);
         let tab = TabId::new();
         let pane = PaneId::new();
+        let window = WindowId::new();
         assert_eq!(TabId::from_bytes(tab.to_bytes()), tab);
         assert_eq!(PaneId::from_bytes(pane.to_bytes()), pane);
+        assert_eq!(WindowId::from_bytes(window.to_bytes()), window);
+        assert_ne!(window.to_string(), tab.to_string());
         assert_ne!(tab.to_string(), pane.to_string());
         assert_ne!(tab.to_string(), block.to_string());
     }

@@ -9,6 +9,7 @@ use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
+use crate::navigation::{decode_resource_address, ResourceAddress};
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
@@ -226,7 +227,10 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             fence,
             delta: action.reserved as i32,
         }),
-        50 => Ok(AppAction::RunPalette { fence }),
+        50 => Ok(AppAction::RunPalette {
+            fence,
+            address: decode_optional_address(action.payload, action.payload_len)?,
+        }),
         51 => Ok(AppAction::ClosePalette { fence }),
         52 => Ok(AppAction::ApplyRuntimeComposerStatus {
             fence,
@@ -279,8 +283,57 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         // Explicit Controller terminate (ADR-017 §6.2 / P4). Distinct from
         // CloseTab/ClosePane chrome removal. Requires a matching fence.
         58 => Ok(AppAction::TerminateExecution { fence }),
+        // Atomic Navigate(address) (SPEC-022 §4 / N2). Payload is the
+        // versioned/size-tagged address record (see decode_required_address).
+        59 => Ok(AppAction::Navigate {
+            fence,
+            address: decode_required_address(action.payload, action.payload_len)?,
+        }),
+        // Goto / quick-switcher (SPEC-022 §7 / N4). reserved = GotoScope
+        // discriminant (0–3), or 0xFF to cycle to the next scope in Rust.
+        60 => Ok(AppAction::OpenGoto {
+            fence,
+            scope: decode_goto_scope(action.reserved)?,
+        }),
+        61 => {
+            if action.reserved == 0xff {
+                Ok(AppAction::CycleGotoScope { fence })
+            } else {
+                Ok(AppAction::SetGotoScope {
+                    fence,
+                    scope: decode_goto_scope(action.reserved)?,
+                })
+            }
+        }
         _ => Err(-6),
     }
+}
+
+fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
+    crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
+}
+
+/// Payload layout for an optional address: empty → None; otherwise
+/// `version(u16 LE) + kind(u16 LE) + address bytes`.
+fn decode_optional_address(
+    payload: *const u8,
+    payload_len: u32,
+) -> Result<Option<ResourceAddress>, i32> {
+    if payload_len == 0 {
+        return Ok(None);
+    }
+    Ok(Some(decode_required_address(payload, payload_len)?))
+}
+
+fn decode_required_address(payload: *const u8, payload_len: u32) -> Result<ResourceAddress, i32> {
+    if payload_len < 4 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — when payload_len != 0, payload addresses that many bytes.
+    let bytes = unsafe { slice::from_raw_parts(payload, payload_len as usize) };
+    let version = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let kind = u16::from_le_bytes([bytes[2], bytes[3]]);
+    decode_resource_address(version, kind, &bytes[4..]).map_err(|_| -6)
 }
 
 fn continuity_of_bytes(bytes: [u8; 16]) -> ContinuityIdentity {

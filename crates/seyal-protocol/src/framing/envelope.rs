@@ -46,6 +46,8 @@ pub enum ErrorCode {
     InvalidWorkspace = 15,
     /// SPEC-004 §18: launch_profile is reserved/unimplemented.
     UnsupportedLaunchProfile = 16,
+    /// ADR-020 / SPEC-004 L0: launch-policy create rejection.
+    LaunchPolicyRejected = 17,
 }
 
 impl ErrorCode {
@@ -67,6 +69,7 @@ impl ErrorCode {
             14 => Self::InternalFailure,
             15 => Self::InvalidWorkspace,
             16 => Self::UnsupportedLaunchProfile,
+            17 => Self::LaunchPolicyRejected,
             _ => return None,
         })
     }

@@ -42,7 +42,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 64)
-        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 56)
+        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
         let live = seyal_app_create()
         // Core Terminal chrome is visible by default (#922).
         let chrome = seyal_app_chrome(live)
@@ -1466,6 +1466,25 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertGreaterThan(fallback.warning_count, 0)
     }
 
+    /// #1119: Swift only renders Rust-owned launch-policy copy (ADR-015).
+    func testLaunchPolicyProductCopyRendersRustOwnedStrings() {
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 2),
+            "Shell unavailable"
+        )
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 3),
+            "Working directory unavailable"
+        )
+        XCTAssertFalse(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 1).contains("/")
+        )
+        let warnings = LaunchPolicyProductCopy.warningMessages(detailCode: 0b11)
+        XCTAssertEqual(warnings.count, 2)
+        XCTAssertTrue(warnings[0].contains("default shell"))
+        XCTAssertTrue(warnings[1].contains("home directory"))
+    }
+
     @MainActor
     func testColdConfigMaterialPreferenceRealizesOnVisualEffectView() throws {
         let dir = FileManager.default.temporaryDirectory
@@ -1650,6 +1669,24 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(unbound.end_line, 0)
         XCTAssertEqual(unbound.reserved0, 0)
         XCTAssertEqual(unbound.reserved1, 0)
+    }
+
+    @MainActor
+    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
+        var empty = SeyalAppRow()
+        XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
+        var row = SeyalAppRow()
+        row.address_version = 1
+        row.address_kind = 2
+        row.address_len = 1
+        let payload = try XCTUnwrap(CommandPaletteOverlayView.addressPayload(for: row))
+        XCTAssertEqual(Array(payload.prefix(4)), [1, 0, 2, 0])
+        XCTAssertEqual(payload.count, 5)
+    }
+
+    @MainActor
+    func testGotoOpenSelectorIsWiredOnTheChromeHost() {
+        XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
     }
 
 }

@@ -83,6 +83,27 @@ impl CommandSpec {
         &self.program
     }
 
+    pub fn args_slice(&self) -> &[OsString] {
+        &self.args
+    }
+
+    pub fn clears_environment(&self) -> bool {
+        self.clear_environment
+    }
+
+    /// Environment override pairs after `env_clear` (when requested).
+    ///
+    /// Hidden from routine docs so production diagnostics keep using redacted
+    /// `Debug`; Runtime launch-policy tests need key/value inspection.
+    #[doc(hidden)]
+    pub fn environment_overrides(&self) -> &[(OsString, OsString)] {
+        &self.environment
+    }
+
+    pub fn inherited_fd_count(&self) -> usize {
+        self.inherited_fds.len()
+    }
+
     pub(crate) fn inherited_raw_fds(&self) -> Vec<RawFd> {
         self.inherited_fds.iter().map(|fd| fd.as_raw_fd()).collect()
     }

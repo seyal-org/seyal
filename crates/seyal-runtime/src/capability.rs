@@ -74,6 +74,21 @@ impl CapabilityPolicy {
         &self.terminfo_dir
     }
 
+    /// True when the M001 terminfo entry is present for CapabilityPolicy apply.
+    pub fn is_available(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.terminfo_dir
+                .join(BUNDLED_BUCKET)
+                .join(TERM_NAME)
+                .is_file()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
     pub fn apply(&self, command: CommandSpec) -> CommandSpec {
         command
             .env("TERM", TERM_NAME)

@@ -2,6 +2,8 @@ use std::{fmt, io};
 
 use seyal_exec::{ChildExit, ExecError};
 
+use crate::launch_policy::{encode_launch_policy_failure, CreateResultWire, LaunchPolicyFailure};
+
 #[derive(Debug)]
 pub enum RuntimeError {
     UnsupportedPlatform(&'static str),
@@ -20,6 +22,8 @@ pub enum RuntimeError {
     Io(io::Error),
     Terminfo(String),
     ShellIntegration(&'static str),
+    /// Pre-spawn launch-policy failure (SPEC-023 §9). Carries no path/env bytes.
+    LaunchPolicy(LaunchPolicyFailure),
 }
 
 impl fmt::Display for RuntimeError {
@@ -48,11 +52,30 @@ impl fmt::Display for RuntimeError {
             Self::Io(error) => write!(f, "Runtime I/O error: {error}"),
             Self::Terminfo(message) => write!(f, "terminfo error: {message}"),
             Self::ShellIntegration(message) => write!(f, "shell integration error: {message}"),
+            Self::LaunchPolicy(failure) => f.write_str(failure.as_str()),
         }
     }
 }
 
 impl std::error::Error for RuntimeError {}
+
+impl From<LaunchPolicyFailure> for RuntimeError {
+    fn from(value: LaunchPolicyFailure) -> Self {
+        Self::LaunchPolicy(value)
+    }
+}
+
+impl RuntimeError {
+    /// Post-L0 create-result encoding when this error is a launch-policy failure.
+    ///
+    /// Always `17 LaunchPolicyRejected` with §9 detail codes; never code 14.
+    pub fn create_result_wire(&self) -> Option<CreateResultWire> {
+        match self {
+            Self::LaunchPolicy(failure) => Some(encode_launch_policy_failure(*failure)),
+            _ => None,
+        }
+    }
+}
 
 impl From<ExecError> for RuntimeError {
     fn from(value: ExecError) -> Self {

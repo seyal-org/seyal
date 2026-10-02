@@ -1,4 +1,5 @@
 use super::*;
+use seyal_core::WindowId;
 
 fn other_workspace() -> WorkspaceId {
     WorkspaceId::from_bytes([0x11; 16])
@@ -11,6 +12,8 @@ fn seed_two_workspaces() -> ShellState {
     let second_pane = PaneId::new();
     let first = WorkspaceId::m001_default();
     let second = other_workspace();
+    let first_window = WindowId::new();
+    let second_window = WindowId::new();
     ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -18,16 +21,20 @@ fn seed_two_workspaces() -> ShellState {
                 name: "Seyal OSS".to_owned(),
                 detail: Some("~/Projects/seyal".to_owned()),
                 attention: false,
-                active_tab: first_tab,
-                tabs: vec![ShellTabSeed {
-                    id: first_tab,
-                    title: "Core Terminal".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: first_pane,
-                        title: "Pane 1".to_owned(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                active_window: first_window,
+                windows: vec![ShellWindowSeed {
+                    id: first_window,
+                    active_tab: first_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: first_tab,
+                        title: "Core Terminal".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: first_pane,
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             },
             ShellWorkspaceSeed {
@@ -35,16 +42,20 @@ fn seed_two_workspaces() -> ShellState {
                 name: "Payments".to_owned(),
                 detail: Some("~/Projects/payments".to_owned()),
                 attention: true,
-                active_tab: second_tab,
-                tabs: vec![ShellTabSeed {
-                    id: second_tab,
-                    title: "API".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: second_pane,
-                        title: "Pane 1".to_owned(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: second_window,
+                windows: vec![ShellWindowSeed {
+                    id: second_window,
+                    active_tab: second_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: second_tab,
+                        title: "API".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: second_pane,
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],

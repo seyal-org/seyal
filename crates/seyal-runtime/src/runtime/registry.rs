@@ -17,7 +17,7 @@ use super::entry::{Entry, ExecutionSummary};
 use super::integration_state::IntegrationState;
 use super::lifecycle::{BlockCompletion, Lifecycle};
 #[cfg(target_os = "macos")]
-use super::shell_integration::{shell_integration_mode, ShellIntegrationMode};
+use super::shell_integration::ShellIntegrationMode;
 use super::Runtime;
 #[cfg(target_os = "macos")]
 use crate::command_block_timeline::CommandBlockTimeline;
@@ -126,6 +126,52 @@ impl Runtime {
         self.entries.get(&id).map(|entry| &entry.execution)
     }
 
+    /// Profile-0 interactive create: resolve `EffectiveLaunchPolicy`, refuse when
+    /// CapabilityPolicy is unavailable, then publish through the SPEC-003 create
+    /// transaction (CapabilityPolicy + ShellIntegrationPolicy apply inside).
+    ///
+    /// A launch-policy failure returns before spawn: zero published executions
+    /// and no inherited descriptors. Failures map through
+    /// [`RuntimeError::create_result_wire`] / [`crate::encode_launch_policy_failure`]
+    /// to SPEC-004 `17 LaunchPolicyRejected`. Success-after-fallback warning bits
+    /// on `Created.detail_code` require negotiated `CAP_LAUNCH_POLICY_DETAIL`.
+    pub fn create_interactive_execution(
+        &mut self,
+        size: WindowSize,
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        self.create_interactive_execution_with_detail_cap(size, false)
+    }
+
+    /// Same as [`Self::create_interactive_execution`], with an explicit
+    /// `CAP_LAUNCH_POLICY_DETAIL` negotiation flag (ADR-020 §3.10).
+    pub fn create_interactive_execution_with_detail_cap(
+        &mut self,
+        size: WindowSize,
+        launch_policy_detail_negotiated: bool,
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        let resolution = match crate::launch_policy::resolve_default_interactive() {
+            Ok(resolution) => resolution,
+            Err(failure) => return Err(RuntimeError::LaunchPolicy(failure)),
+        };
+        if !self.config.capability_policy.is_available() {
+            return Err(RuntimeError::LaunchPolicy(
+                crate::LaunchPolicyFailure::CapabilityUnavailable,
+            ));
+        }
+        let warnings = crate::encode_created_warnings(&resolution.warnings);
+        let command = crate::launch_policy::command_spec_from_policy(&resolution);
+        let execution_id = self.create_execution(command, size)?;
+        let detail_code = if launch_policy_detail_negotiated {
+            warnings.detail_code
+        } else {
+            0
+        };
+        Ok(crate::InteractiveCreateOutcome {
+            execution_id,
+            detail_code,
+        })
+    }
+
     pub fn create_execution(
         &mut self,
         command: CommandSpec,
@@ -138,18 +184,20 @@ impl Runtime {
             return Err(RuntimeError::CapacityExceeded);
         }
 
-        let command = self.config.capability_policy.apply(command);
+        let composed = crate::launch_policy::compose_child_command(
+            command,
+            &self.config.capability_policy,
+            self.config.shell_integration_policy.as_ref(),
+        )?;
+        let command = composed.command;
         #[cfg(target_os = "macos")]
-        let (command, shell_integration_mode, shell_nonce) = {
-            let mode = shell_integration_mode(&command);
-            match (&self.config.shell_integration_policy, mode) {
-                (Some(policy), ShellIntegrationMode::ZshHook) => {
-                    let (command, nonce) = policy.apply(command)?;
-                    (command, ShellIntegrationMode::ZshHook, Some(nonce))
-                }
-                _ => (command, ShellIntegrationMode::Unsupported, None),
-            }
+        let (shell_integration_mode, shell_nonce) = if composed.shell_integration_applied {
+            (ShellIntegrationMode::ZshHook, composed.shell_nonce)
+        } else {
+            (ShellIntegrationMode::Unsupported, None)
         };
+        #[cfg(not(target_os = "macos"))]
+        let _ = composed;
         #[cfg(all(target_os = "macos", feature = "test-fault-injection"))]
         if crate::test_fault::take(crate::test_fault::FaultPoint::ProvisioningSpawn) {
             return Err(RuntimeError::Io(std::io::Error::other(
