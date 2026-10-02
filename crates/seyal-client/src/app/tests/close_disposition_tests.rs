@@ -1,9 +1,7 @@
 //! Disposition close must clear presentation identity so a surviving pane can rebind.
 
 use super::super::*;
-use crate::shell::{
-    ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
-};
+use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis};
 use seyal_core::WindowId;
 
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
