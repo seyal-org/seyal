@@ -1400,6 +1400,47 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    /// R11.2 / R6.4.1: Go to… is a projected WorkspaceCommand (title, enablement, invoke).
+    @MainActor
+    func testGotoMenuItemUsesProjectionInvokeAndRouteEnablement() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let item = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        item.target = view
+        KeybindingShortcutRealization.realize(item, commandId: KeybindingShortcutRealization.gotoOpen)
+        XCTAssertEqual(item.representedObject as? UInt16, KeybindingShortcutRealization.gotoOpen)
+        XCTAssertEqual(item.title, "Go to…")
+        XCTAssertTrue(
+            view.validateMenuItem(item),
+            "goto.open is app-route permitted while the palette is closed"
+        )
+
+        view.openCommandPalette()
+        XCTAssertFalse(
+            view.validateMenuItem(item),
+            "non-palette menu commands must disable while the palette owns the route"
+        )
+
+        // Fresh host: menu-invoke goto through the projected WorkspaceCommand path.
+        let invokeView = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let invokeItem = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        invokeItem.target = invokeView
+        KeybindingShortcutRealization.realize(
+            invokeItem,
+            commandId: KeybindingShortcutRealization.gotoOpen
+        )
+        invokeView.invokeProjectedWorkspaceCommand(invokeItem)
+        let palette = seyal_app_palette(invokeView.pane.appHandle)
+        XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
+    }
+
 }
 
 @discardableResult

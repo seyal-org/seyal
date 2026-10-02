@@ -12,6 +12,7 @@ enum KeybindingShortcutRealization {
     static let paneSplitDown: UInt16 = 8
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
+    static let gotoOpen: UInt16 = 21
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
@@ -63,6 +64,7 @@ enum KeybindingShortcutRealization {
         case paneSplitDown: return "Split Down"
         case presentationToggleRaw: return "Toggle Raw"
         case presentationToggleTui: return "Toggle TUI"
+        case gotoOpen: return "Go to…"
         default: return "Command"
         }
     }
