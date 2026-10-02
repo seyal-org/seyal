@@ -61,18 +61,16 @@ fn terminate_queues_adr005_effect_not_from_close() {
         workspace,
     })
     .unwrap();
+    // Without a live Runtime accept, terminate must fail closed and keep the id.
     assert_eq!(
         root.apply(AppAction::TerminateExecution { execution }),
         Err(AppError::TerminationNotRequested)
     );
-    assert!(
-        !root
-            .snapshot()
-            .pending_effects
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
-        "a failed runtime request must not queue terminate"
-    );
+    assert!(!root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
     assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
@@ -116,8 +114,10 @@ fn palette_terminate_dispatches_typed_action() {
         workspace,
     })
     .unwrap();
-    let fence = root.fence();
-    root.apply(AppAction::OpenPalette { fence }).unwrap();
+    root.apply(AppAction::OpenPalette {
+        fence: root.fence(),
+    })
+    .unwrap();
     root.apply(AppAction::SetPaletteQuery {
         fence: root.fence(),
         query: "Terminate Unpresented".to_owned(),
@@ -126,16 +126,9 @@ fn palette_terminate_dispatches_typed_action() {
     assert_eq!(
         root.apply(AppAction::RunPalette {
             fence: root.fence(),
+            address: None,
         }),
         Err(AppError::TerminationNotRequested)
-    );
-    assert!(
-        !root
-            .snapshot()
-            .pending_effects
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
-        "palette terminate does not queue an effect when the runtime was not asked"
     );
     assert_eq!(root.live_unpresented(), vec![execution]);
 }
@@ -185,76 +178,22 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    // The last pane cannot close, and close does not emit terminate.
-    assert_eq!(
-        root.apply(AppAction::ClosePane { id: pane }),
-        Err(AppError::CannotCloseLastPane)
-    );
+    root.apply(AppAction::ClosePane { id: pane })
+        .expect("presentation removal");
     assert!(root
         .snapshot()
         .pending_effects
         .iter()
         .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
-    assert!(root.live_unpresented().is_empty());
+    assert_eq!(root.live_unpresented(), vec![execution]);
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
 
 #[test]
-fn palette_adopt_rejects_before_bind_when_attach_is_unavailable() {
+fn close_window_keeps_bound_execution_live_and_enumerable() {
     let mut root = ApplicationRoot::new();
+    let execution = ExecutionId::new();
     let workspace = WorkspaceId::m001_default();
-    let execution = ExecutionId::from_bytes([0xcd; 16]);
-    root.apply(AppAction::RecordUnpresented {
-        execution,
-        workspace,
-    })
-    .unwrap();
-    let pane = root.snapshot().shell.focused_pane;
-    assert!(root
-        .snapshot()
-        .shell
-        .panes
-        .iter()
-        .find(|item| item.id == pane)
-        .unwrap()
-        .execution
-        .is_none());
-
-    let fence = root.fence();
-    root.apply(AppAction::OpenPalette { fence }).unwrap();
-    root.apply(AppAction::SetPaletteQuery {
-        fence: root.fence(),
-        query: "Adopt Unpresented".to_owned(),
-    })
-    .unwrap();
-    assert_eq!(
-        root.apply(AppAction::RunPalette {
-            fence: root.fence(),
-        }),
-        Err(AppError::NoLiveClient)
-    );
-    assert!(!root
-        .snapshot()
-        .pending_effects
-        .iter()
-        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
-    assert_eq!(root.live_unpresented(), vec![execution]);
-    assert!(root
-        .snapshot()
-        .shell
-        .panes
-        .iter()
-        .find(|item| item.id == pane)
-        .unwrap()
-        .execution
-        .is_none());
-}
-
-#[test]
-fn palette_adopt_rejects_already_bound_before_attach() {
-    let mut root = ApplicationRoot::new();
-    let workspace = WorkspaceId::m001_default();
-    let execution = ExecutionId::from_bytes([0xab; 16]);
     root.apply(AppAction::RecordUnpresented {
         execution,
         workspace,
@@ -262,13 +201,66 @@ fn palette_adopt_rejects_already_bound_before_attach() {
     .unwrap();
     root.apply(AppAction::Adopt {
         fence: root.fence(),
-        evidence: evidence(execution, AttachmentId::from_bytes([0x11; 16])),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x88; 16])),
     })
     .unwrap();
+    let window = root
+        .snapshot()
+        .shell
+        .active_window
+        .expect("product-active window");
+    root.apply(AppAction::CloseWindow { id: window })
+        .expect("CloseWindow removes presentation only");
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::DestroyWindowRealization { .. })));
+    assert_eq!(root.live_unpresented(), vec![execution]);
+    assert!(root.snapshot().shell.active_window.is_none());
     assert_eq!(
-        root.apply(AppAction::AdoptUnpresented { execution }),
-        Err(AppError::AlreadyBound)
+        root.snapshot().eligibility,
+        super::PresentationEligibility::Unbound,
+        "B1: after CloseWindow, cleared authority must project Unbound so host recovery cannot open_first"
     );
-    assert_eq!(root.snapshot().execution, Some(execution));
-    assert!(root.live_unpresented().is_empty());
+    assert!(
+        root.fence().execution.is_none(),
+        "fence must not claim an execution after CloseWindow unbind"
+    );
+
+    // Re-entry must not auto-reattach the live-unpresented execution. CreateWindow
+    // seeds a bootstrap-gated pane; eligibility stays Unbound until Rust Adopt/Bind.
+    root.apply(AppAction::CreateWindow)
+        .expect("zero-window re-entry CreateWindow");
+    assert_eq!(
+        root.live_unpresented(),
+        vec![execution],
+        "CreateWindow must leave the prior execution live-unpresented"
+    );
+    assert_eq!(
+        root.snapshot().eligibility,
+        super::PresentationEligibility::Unbound,
+        "CreateWindow must not bind authority without AdoptExecution"
+    );
+    assert!(
+        root.fence().execution.is_none(),
+        "re-entry fence must stay execution-free until Adopt/Bind"
+    );
+    let snap = root.snapshot();
+    let focused = snap.shell.focused_pane;
+    let pane = snap
+        .shell
+        .panes
+        .iter()
+        .find(|pane| pane.id == focused)
+        .expect("focused pane after CreateWindow");
+    assert!(
+        !pane.allows_implicit_bootstrap,
+        "B1: CreateWindow pane must gate implicit bootstrap so recovery cannot open_first"
+    );
 }

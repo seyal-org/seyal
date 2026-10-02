@@ -35,7 +35,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 112)
-        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 56)
+        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
         let live = seyal_app_create()
         // Core Terminal chrome is visible by default (#922).
         let chrome = seyal_app_chrome(live)
@@ -149,21 +149,24 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testShellCompositionControlsAreOmittedWhenRustPolicyDisallowsThem() throws {
+    func testShellCompositionControlsFollowRustPolicyFlags() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // Close stays gated with creation/splitting until W4b re-entry lands.
+        // W4b: tab creation + hierarchical close admitted; pane splitting off.
         let shell = seyal_app_shell(view.pane.appHandle)
-        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
         XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
-        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
-        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
-        for identifier in [
-            "seyal-new-tab", "seyal-split-right", "seyal-split-down",
-            "seyal-close-tab", "seyal-close-pane",
-        ] {
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
+        let newTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-new-tab"))
+        XCTAssertFalse(newTab.isHidden, "New Tab is shown when Rust admits tab creation")
+        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        XCTAssertFalse(closeTab.isHidden)
+        let closePane = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-pane"))
+        XCTAssertFalse(closePane.isHidden)
+        for identifier in ["seyal-split-right", "seyal-split-down"] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
-            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
+            XCTAssertTrue(control.isHidden, "\(identifier) stays omitted while splitting is off")
         }
     }
 
@@ -1137,9 +1140,9 @@ final class SeyalHostComponentTests: XCTestCase {
             let row = seyal_app_palette_row(handle, UInt32(index))
             if utf8(row) == "New Tab" { sawNewTab = true }
         }
-        XCTAssertFalse(
+        XCTAssertTrue(
             sawNewTab,
-            "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+            "W4b admits tab creation; New Tab is listed in the palette"
         )
     }
 
@@ -1311,6 +1314,20 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
+
+    @MainActor
+    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
+        var empty = SeyalAppRow()
+        XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
+        var row = SeyalAppRow()
+        row.address_version = 1
+        row.address_kind = 2
+        row.address_len = 1
+        let payload = try XCTUnwrap(CommandPaletteOverlayView.addressPayload(for: row))
+        XCTAssertEqual(Array(payload.prefix(4)), [1, 0, 2, 0])
+        XCTAssertEqual(payload.count, 5)
+    }
+
     func testKeybindingRouteFallthroughStaysDistinct() {
         let routed: [KeybindingStrokeNormalizer.RouteResult] = [
             .consumed,
@@ -1349,4 +1366,5 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
+
 }

@@ -34,45 +34,57 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 863
-issue = 1145
-reason = "ApplicationRoot stays the product-state façade. #1123/#1143 multi-window and unpresented adopt/terminate remain here; #1145 adds ActionUnavailable and NoDirectionalNeighbor for K7 keybinding verbs. Match/dispatch stay in keybinding_apply.rs."
+acknowledged_loc = 969
+issue = 1158
+reason = "ApplicationRoot keeps W4b close/unpresented dispatch (#1158) with N4/N5/N3, restored PT/W6 adopt/terminate, quit_deadline/live_attachments (#1108/#1158), and K7 ActionUnavailable/NoDirectionalNeighbor (#1145). Close apply stays in chrome_apply.rs; history in focus_history_apply.rs; keybinding match in keybinding_apply.rs. Ceiling matches post-K7-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 810
-issue = 1143
-reason = "Global command-palette reducer stays one cohesive open/filter/resolve module. #1143 adds AdoptUnpresented and TerminateUnpresented; #1123 only threads the window-creation admission flag through the existing fixture."
+acknowledged_loc = 866
+issue = 1158
+reason = "Frozen address-carrying palette rows (#1144/#1156) stay one reducer, and #1143/#1158 adopt/terminate commands are included in that frozen rebuild. Goto stays a sibling module. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 910
-issue = 1123
-reason = "ApplicationRoot tests stay one module. #1123 adds the three-window quit detach proof beside the #1108 OrderFrontMakeKey and bounded-queue coverage; ceiling matches post-merge LOC."
+acknowledged_loc = 908
+issue = 1158
+reason = "W4b CreateTab admission and zero-window proofs (#1158) stay beside N5 navigate coverage moved to navigate_tests.rs and absorbed #1123/#1108 multi-window ApplicationRoot proofs (#1144/#1156), including restored quit multi-attachment detach fixture from issue/1108. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/tests.rs"
 acknowledged_loc = 898
-issue = 1123
-reason = "Shell reducer suite stays one module. #1122 zoom and containment-fence proofs sit beside #1108 multi-window coverage; #1123 adds the window-creation flag on those fixtures."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 764
-issue = 1145
-reason = "ShellState stays the composition reducer. #1123/#1143 window-creation and unpresented adopt/terminate remain; #1145 keeps FocusDirection dispatch and NoDirectionalNeighbor for K7 neighbor verbs."
+issue = 1158
+reason = "Shell reducer suite stays one module. #1108 multi-window snapshot/native-effect proofs sit beside #1122 zoom/containment-fence and #1123 window-creation fixtures; further extraction would split one containment contract table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 963
-issue = 1145
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade. #1143/#1123 quit-fixture and AppError numbering in encode.rs remain; #1145 keeps seyal_app_route_keystroke and adds ActionUnavailable/NoDirectionalNeighbor codes in encode.rs."
+acknowledged_loc = 993
+issue = 1158
+reason = "C ABI façade keeps W3 window extraction, N4/N3 error numbers 35-49 (#1156), W6 adopt 50-51 (#1158), quit-fixture ABIs (#1108), and K7 seyal_app_route_keystroke plus ActionUnavailable/NoDirectionalNeighbor (#1145). AppError mapping stays in encode.rs; history decode in decode.rs. Ceiling matches merged LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/tests.rs"
+acknowledged_loc = 984
+issue = 1158
+reason = "N1/N2 resolver and Navigate commit tests stay in the cohesion band after N6 (#1156), W4b close (#1158), and restored base stack content from issue/1108. Cross-window coverage lives in activation_tests.rs. Ceiling matches merged LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/shell/mod.rs"
+acknowledged_loc = 948
+issue = 1158
+reason = "ShellState keeps W3/N4/N5 plus W4b zero-window product-active Window (#1158), restored PT/W6 pane_ops/unpresented helpers, and K7 FocusDirection/NoDirectionalNeighbor (#1145). Inventory stays in inventory.rs; close in close.rs; focus_direction in focus_direction.rs. Ceiling matches merged LOC."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/decode.rs"
+acknowledged_loc = 724
+issue = 1158
+reason = "Action decode stays one FFI sibling. HistoryBack/Forward 65/66, CloseWindow 67 (#1158), and restored base ADOPT_UNPRESENTED 68 from issue/1108 remain here. Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 779
-issue = 1123
-reason = "ABI contract tests stay one module. #1123 adds the multi-window snapshot proofs beside the existing handle tests."
+acknowledged_loc = 875
+issue = 1158
+reason = "W4b CLOSE_WINDOW ABI coverage and zero-window ActivateWorkspace re-entry (#1158) stay beside W3/W4a window-effect ABI coverage and N4 error-number shifts (#1144/#1156). Ceiling matches merged LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -113,4 +125,5 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
 

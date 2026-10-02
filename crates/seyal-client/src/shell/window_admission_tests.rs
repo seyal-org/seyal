@@ -3,8 +3,8 @@
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{
-    ShellAction, ShellError, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed,
+    ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
+    ShellWorkspaceSeed,
 };
 
 fn occupied_and_empty() -> (ShellState, WorkspaceId) {
@@ -47,48 +47,31 @@ fn occupied_and_empty() -> (ShellState, WorkspaceId) {
         occupied,
         false,
         false,
-        false,
     )
     .expect("fixture");
     (shell, empty)
 }
 
 #[test]
-fn production_default_rejects_extra_window_without_mutation() {
+fn production_default_admits_extra_window_under_w4b() {
     let mut shell = ShellState::m001_local("local");
-    assert!(!shell.allows_window_creation());
+    assert!(shell.allows_window_creation(), "W4b admits CreateWindow");
     let before = shell.containment_fingerprint();
     let generation = shell.containment_generation();
     let windows = shell.snapshot().windows.len();
     assert_eq!(windows, 1);
-    assert_eq!(
-        shell.apply(ShellAction::CreateWindow {
+    assert!(shell
+        .apply(ShellAction::CreateWindow {
             workspace: WorkspaceId::m001_default(),
             containment_generation: generation,
-        }),
-        Err(ShellError::WindowCreationUnavailable)
-    );
-    assert_eq!(
-        shell.last_error(),
-        Some(ShellError::WindowCreationUnavailable)
-    );
-    assert_eq!(
-        shell.last_error().expect("error").error_number(),
-        19,
-        "shell snapshot error number"
-    );
-    assert_eq!(shell.snapshot().windows.len(), windows);
-    assert_eq!(shell.containment_generation(), generation);
-    assert!(shell.take_effects().is_empty());
-    assert_eq!(shell.containment_fingerprint(), before);
-    let snap = shell.snapshot();
-    assert_eq!(
-        shell.apply(ShellAction::CreateTab {
-            window: snap.active_window,
-            containment_generation: snap.containment_generation,
-        }),
-        Err(ShellError::TabCreationUnavailable)
-    );
+        })
+        .is_ok());
+    assert_eq!(shell.snapshot().windows.len(), windows + 1);
+    assert!(shell.containment_generation() > generation);
+    let _ = shell.take_effects();
+    assert_ne!(shell.containment_fingerprint(), before);
+    // Tab creation is separately admitted under W4b.
+    assert!(shell.allows_tab_creation());
 }
 
 #[test]

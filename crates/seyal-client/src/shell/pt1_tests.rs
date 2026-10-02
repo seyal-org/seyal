@@ -66,7 +66,6 @@ fn seed_two_workspaces() -> ShellState {
         first,
         true,
         true,
-        false,
     )
     .expect("fixture")
 }
@@ -184,16 +183,17 @@ fn spec025_3_close_focused_uses_sibling_first_successor() {
 }
 
 #[test]
-fn spec025_4_close_last_pane_rejects() {
+fn spec025_4_close_last_pane_peels_under_w2b() {
+    // W2b/W4b hierarchical peel: last Pane closes the Tab/Window rather than
+    // rejecting with CannotCloseLastPane (PT1-alone policy on the W4a tip).
     let mut shell = seed_two_workspaces();
     let only = shell.snapshot().focused_pane;
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane {
+    assert!(shell
+        .apply(ShellAction::ClosePane {
             id: only,
             containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::CannotCloseLastPane)
-    );
+        })
+        .is_ok());
 }
 
 #[test]

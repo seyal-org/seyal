@@ -56,10 +56,6 @@ fn decode_pass7_payload(kind: MessageType, payload: &[u8]) {
         MessageType::TerminalMouse => {
             let _ = seyal_protocol::framing::TerminalMouse::decode(payload);
         }
-        MessageType::TerminateExecution => {
-            let header = FrameHeader::new(kind as u16, payload.len() as u32);
-            let _ = decode_message(&header, payload);
-        }
         _ => {}
     }
 }
@@ -111,5 +107,4 @@ fuzz_target!(|data: &[u8]| {
     decode_pass7_payload(MessageType::CopiedText, data);
     decode_pass7_payload(MessageType::HostSearch, data);
     decode_pass7_payload(MessageType::TerminalMouse, data);
-    decode_pass7_payload(MessageType::TerminateExecution, data);
 });

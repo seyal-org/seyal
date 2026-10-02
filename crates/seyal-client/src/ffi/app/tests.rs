@@ -57,11 +57,13 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(size_of::<SeyalAppShell>(), 112);
     assert_eq!(offset_of!(SeyalAppShell, containment_generation), 72);
     assert_eq!(size_of::<super::SeyalAppWindow>(), 72);
-    assert_eq!(size_of::<super::SeyalAppTab>(), 80);
+    assert_eq!(size_of::<super::SeyalAppTab>(), 64);
     assert_eq!(size_of::<super::SeyalAppPaneLeaf>(), 56);
     assert_eq!(size_of::<super::SeyalAppPaneTreeNode>(), 32);
     assert_eq!(size_of::<super::SeyalAppNativeEffect>(), 24);
-    assert_eq!(size_of::<SeyalAppRow>(), 56);
+    assert_eq!(size_of::<SeyalAppRow>(), 112);
+    assert_eq!(offset_of!(SeyalAppRow, address_version), 56);
+    assert_eq!(offset_of!(SeyalAppRow, address_bytes), 64);
     assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
     assert_eq!(size_of::<SeyalAppTheme>(), 16);
     assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);
@@ -334,37 +336,121 @@ fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
     let tab_row = seyal_app_shell_row(handle, 1, 0);
     let pane_row = seyal_app_shell_row(handle, 2, 0);
 
-    // CreateTab (23) and SplitFocused (25) reach the M001 default policy
-    // that disallows composition growth until a distinct execution
-    // route exists; they fail closed rather than no-op silently.
+    // W4b admits CreateTab; SplitFocused stays fail-closed.
     assert_eq!(
         unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
-        -4
+        0
     );
-    assert_eq!(seyal_app_last_error(handle), 28, "TabCreationUnavailable");
+    assert_eq!(seyal_app_shell(handle).tab_count, 2);
     let mut split = identity_fence(25, &snap);
     split.reserved = 1; // SplitAxis::Down
     assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
     assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
 
-    // CloseTab (24) / ClosePane (26) on the sole Tab/Pane reach
-    // ShellState's last-of-one guard, whether the id is real or not.
-    let mut close_tab = identity_fence(24, &snap);
-    close_tab.target_execution_lo = tab_row.id_lo;
-    close_tab.target_execution_hi = tab_row.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 31, "CannotCloseLastTab");
+    // ClosePane (26) on a multi-tab Window peels one Tab; unknown CloseTab
+    // id still rejects without retarget.
+    let mut close_unknown = identity_fence(24, &snap);
+    close_unknown.target_execution_lo = 0x1111;
+    close_unknown.target_execution_hi = 0x2222;
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_unknown) }, -4);
 
     let mut close_pane = identity_fence(26, &snap);
     close_pane.target_execution_lo = pane_row.id_lo;
     close_pane.target_execution_hi = pane_row.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 32, "CannotCloseLastPane");
-
-    // Shell composition is unchanged by every rejected action above.
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, 0);
     let shell = seyal_app_shell(handle);
+    // Sole remaining Tab's Window stays; hierarchical peel removed the
+    // created Tab (or the original if focus moved). Window count stays 1.
+    assert_eq!(shell.window_count, 1);
     assert_eq!(shell.tab_count, 1);
-    assert_eq!(shell.pane_count, 1);
+    let _ = tab_row;
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn close_window_action_removes_window_without_terminate_effect() {
+    let handle = seyal_app_create();
+    // Drain bootstrap RealizeWindow / OrderFrontMakeKey.
+    while seyal_app_native_effect(handle, 0).size != 0 {
+        let ack = SeyalAppAction {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppAction>() as u16,
+            kind: 5, // AckEffect
+            flags: 0,
+            fence_pane_lo: 0,
+            fence_pane_hi: 0,
+            fence_execution_lo: 0,
+            fence_execution_hi: 0,
+            fence_attachment_lo: 0,
+            fence_attachment_hi: 0,
+            fence_epoch: 0,
+            target_execution_lo: 0,
+            target_execution_hi: 0,
+            target_attachment_lo: 0,
+            target_attachment_hi: 0,
+            target_pty_generation: 0,
+            payload: ptr::null(),
+            payload_len: 0,
+            reserved: 0,
+        };
+        assert_eq!(unsafe { seyal_app_apply(handle, &ack) }, 0);
+    }
+    let window = seyal_app_window(handle, 0);
+    assert_ne!(window.size, 0);
+    let close = SeyalAppAction {
+        version: APP_ABI_VERSION,
+        size: size_of::<SeyalAppAction>() as u16,
+        kind: 67, // CLOSE_WINDOW
+        flags: 0,
+        fence_pane_lo: 0,
+        fence_pane_hi: 0,
+        fence_execution_lo: 0,
+        fence_execution_hi: 0,
+        fence_attachment_lo: 0,
+        fence_attachment_hi: 0,
+        fence_epoch: 0,
+        target_execution_lo: window.window_lo,
+        target_execution_hi: window.window_hi,
+        target_attachment_lo: 0,
+        target_attachment_hi: 0,
+        target_pty_generation: 0,
+        payload: ptr::null(),
+        payload_len: 0,
+        reserved: 0,
+    };
+    assert_eq!(unsafe { seyal_app_apply(handle, &close) }, 0);
+    let shell = seyal_app_shell(handle);
+    assert_eq!(shell.window_count, 0);
+    let effect = seyal_app_native_effect(handle, 0);
+    assert_eq!(effect.kind, 3, "DestroyWindowRealization");
+    assert_ne!(
+        effect.kind, 6,
+        "CloseWindow must not emit TerminateExecution"
+    );
+    // Zero-window re-entry via ActivateWorkspace (SELECT_WORKSPACE = 19).
+    let activate = SeyalAppAction {
+        version: APP_ABI_VERSION,
+        size: size_of::<SeyalAppAction>() as u16,
+        kind: 19,
+        flags: 0,
+        fence_pane_lo: 0,
+        fence_pane_hi: 0,
+        fence_execution_lo: 0,
+        fence_execution_hi: 0,
+        fence_attachment_lo: 0,
+        fence_attachment_hi: 0,
+        fence_epoch: 0,
+        target_execution_lo: shell.last_active_workspace_lo,
+        target_execution_hi: shell.last_active_workspace_hi,
+        target_attachment_lo: 0,
+        target_attachment_hi: 0,
+        target_pty_generation: 0,
+        payload: ptr::null(),
+        payload_len: 0,
+        reserved: 0,
+    };
+    assert_eq!(unsafe { seyal_app_apply(handle, &activate) }, 0);
+    assert_eq!(seyal_app_shell(handle).window_count, 1);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -376,9 +462,19 @@ fn shell_projection_is_one_local_workspace() {
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
     assert_eq!(
-        shell.flags, 0,
-        "M001 default shell policy disallows tab creation/pane splitting, \
-         and the sole Tab/Pane cannot be closed"
+        shell.flags & 1,
+        1,
+        "W4b admits tab creation on the production shell"
+    );
+    assert_eq!(
+        shell.flags & 2,
+        0,
+        "pane splitting stays fail-closed on the production shell"
+    );
+    assert_ne!(
+        shell.flags & 12,
+        0,
+        "hierarchical close is admitted while a Window exists"
     );
     let workspace = seyal_app_shell_row(handle, 0, 0);
     assert_eq!(workspace.flags & 1, 1);

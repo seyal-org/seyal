@@ -159,6 +159,7 @@ fn palette_adopt_attaches_same_execution_then_binds() {
     .unwrap();
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .expect("palette adopt");
 
@@ -207,6 +208,7 @@ fn palette_terminate_forgets_only_after_runtime_accepts_and_reaps() {
     .unwrap();
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .expect("palette terminate");
     assert!(root.live_unpresented().is_empty());

@@ -6,14 +6,20 @@
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
 mod actions;
+mod close;
 mod effects;
 mod focus_direction;
+mod inventory;
 mod pane_ops;
 mod snapshot;
 mod tree;
 mod unpresented;
 mod workspace;
 
+pub use pane_ops::MoveSide;
+
+#[cfg(test)]
+mod close_tests;
 #[cfg(test)]
 mod pt1_tests;
 #[cfg(test)]
@@ -37,7 +43,9 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 pub use effects::ShellNativeEffect;
 pub(crate) use focus_direction::directional_neighbor;
 pub use focus_direction::FocusDirection;
-pub use pane_ops::MoveSide;
+pub use inventory::{
+    NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
+};
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use unpresented::unpresented_palette_label;
@@ -90,11 +98,11 @@ impl ShellError {
             Self::UnknownWorkspace => "Unknown Workspace.",
             Self::UnknownTab => "Unknown Tab.",
             Self::UnknownPane => "Unknown Pane.",
+            Self::WindowCreationUnavailable => {
+                "Window creation is not available under the current policy."
+            }
             Self::TabCreationUnavailable => {
                 "Creating tabs is unavailable until a distinct execution route is available."
-            }
-            Self::WindowCreationUnavailable => {
-                "Creating another Window is unavailable until window close exists."
             }
             Self::PaneSplitUnavailable => {
                 "Splitting panes is unavailable until a distinct execution route is available."
@@ -117,11 +125,11 @@ impl ShellError {
             Self::CrossWorkspaceAdopt => {
                 "An execution cannot be adopted across Workspaces."
             }
+            Self::NotZoomed => "The Tab is not zoomed.",
+            Self::InvalidMoveTarget => "Invalid pane move or swap target.",
             Self::ExecutionNotUnpresented => {
                 "This execution is not a live-unpresented execution in this Workspace."
             }
-            Self::NotZoomed => "The Tab is not zoomed.",
-            Self::InvalidMoveTarget => "Invalid pane move or swap target.",
             Self::NoDirectionalNeighbor => "No directional neighbor pane in that direction.",
         }
     }
@@ -138,6 +146,16 @@ impl fmt::Display for ShellError {
 pub enum CycleDirection {
     Next,
     Previous,
+}
+
+/// Portable focus triple used by atomic navigation commit checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusCheckpoint {
+    pub active_workspace: WorkspaceId,
+    pub active_tab: TabId,
+    pub focused_pane: PaneId,
+    /// Active-Tab zoom overlay (`None` when not zoomed).
+    pub zoomed: Option<PaneId>,
 }
 
 /// Typed host → Rust command. One action is one coarse transition.
@@ -182,8 +200,28 @@ pub enum ShellAction {
         tab: TabId,
         containment_generation: u64,
     },
+    ZoomPane {
+        id: PaneId,
+    },
+    Unzoom,
+    SwapPanes {
+        a: PaneId,
+        b: PaneId,
+        containment_generation: u64,
+    },
+    MovePaneBeside {
+        pane: PaneId,
+        neighbor: PaneId,
+        side: MoveSide,
+        containment_generation: u64,
+    },
+    CloseWindow {
+        id: WindowId,
+        containment_generation: u64,
+    },
     CloseTab {
         id: TabId,
+        containment_generation: u64,
     },
     SplitFocused {
         axis: SplitAxis,
@@ -200,21 +238,6 @@ pub enum ShellAction {
     },
     FocusPane {
         id: PaneId,
-    },
-    ZoomPane {
-        id: PaneId,
-    },
-    Unzoom,
-    SwapPanes {
-        a: PaneId,
-        b: PaneId,
-        containment_generation: u64,
-    },
-    MovePaneBeside {
-        pane: PaneId,
-        neighbor: PaneId,
-        side: MoveSide,
-        containment_generation: u64,
     },
     FocusDirection {
         direction: FocusDirection,
@@ -239,9 +262,8 @@ pub enum ShellAction {
         pane: PaneId,
         execution: ExecutionId,
     },
-    /// Explicit disposition. Queues [`ShellNativeEffect::TerminateExecution`]
-    /// and leaves the catalog entry until the runtime request is made.
-    /// Never produced by presentation close (W2b/W4b).
+    /// Explicit disposition. Queues [`ShellNativeEffect::TerminateExecution`];
+    /// never produced by presentation close (W2b/W4b).
     TerminateExecution {
         execution: ExecutionId,
     },
@@ -255,11 +277,15 @@ pub struct ShellSnapshot {
     pub windows: Vec<WindowSnapshot>,
     pub active_workspace: WorkspaceId,
     pub last_active_workspace: WorkspaceId,
-    pub active_window: WindowId,
+    /// `None` in the zero-Window state (ADR-018 §3.3a).
+    pub active_window: Option<WindowId>,
     pub containment_generation: u64,
     /// Active-Window Tab projection (compatible with pre-W3 hosts).
+    /// Empty when there is no product-active Window.
     pub tabs: Vec<TabSnapshot>,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub active_tab: TabId,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub focused_pane: PaneId,
     /// Active-Tab zoom overlay (`None` when not zoomed).
     pub zoomed: Option<PaneId>,
@@ -271,14 +297,12 @@ pub struct ShellSnapshot {
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
-    /// Whether `CreateWindow` would add a Window to a Workspace that already
-    /// has one. Zero-window re-entry stays allowed when this is false.
     pub allows_window_creation: bool,
     pub allows_pane_splitting: bool,
-    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close, and
-    /// neither can an execution-bound Pane).
-    /// Hosts read these instead of re-deriving the rule from counts.
+    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused Pane
+    /// would currently be accepted. Hierarchical close always admits the active
+    /// Tab / focused Pane while a Window exists (last Tab → Window, last Pane →
+    /// Tab). Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
 }
@@ -331,8 +355,7 @@ pub struct ShellState {
 
 impl ShellState {
     /// M001 production composition: one Runtime default workspace, one Tab,
-    /// one Pane. Extra tabs/splits stay fail-closed until a distinct execution
-    /// route exists.
+    /// one Pane. W4b admits tab creation; pane splitting stays fail-closed.
     pub fn m001_local(detail: impl Into<String>) -> Self {
         let pane = Pane {
             id: PaneId::new(),
@@ -360,8 +383,9 @@ impl ShellState {
             containment_generation: 0,
             workspaces: vec![workspace],
             allows_pane_splitting: false,
-            allows_tab_creation: false,
-            allows_window_creation: false,
+            // W4b: headed tab creation admitted; pane splitting stays off.
+            allows_tab_creation: true,
+            allows_window_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -375,7 +399,6 @@ impl ShellState {
         active_workspace: WorkspaceId,
         allows_pane_splitting: bool,
         allows_tab_creation: bool,
-        allows_window_creation: bool,
     ) -> Result<Self, ShellError> {
         if workspaces.is_empty() {
             return Err(ShellError::EmptyShell);
@@ -422,7 +445,9 @@ impl ShellState {
             containment_generation: 0,
             allows_pane_splitting,
             allows_tab_creation,
-            allows_window_creation,
+            // W4b: window creation tracks tab-creation admission for seeded shells.
+            // Split policy in tests via set_allows_window_creation.
+            allows_window_creation: allows_tab_creation,
             last_error: None,
             next_tab_ordinal: 2,
             pending_effects: Vec::new(),
@@ -459,8 +484,6 @@ impl ShellState {
         self.allows_window_creation
     }
 
-    /// Test-only admission override. Production constructors keep this false
-    /// until window close exists.
     #[cfg(test)]
     pub(crate) fn set_allows_window_creation(&mut self, allows: bool) {
         self.allows_window_creation = allows;
@@ -480,6 +503,196 @@ impl ShellState {
         let mut clone = self.clone();
         clone.last_error = None;
         clone
+    }
+
+    /// Whether `id` is a current Workspace in this shell.
+    pub fn contains_workspace(&self, id: WorkspaceId) -> bool {
+        self.workspaces.iter().any(|workspace| workspace.id == id)
+    }
+
+    /// Owning Workspace of a current Tab, if any.
+    pub fn workspace_of_tab(&self, id: TabId) -> Option<WorkspaceId> {
+        self.workspaces
+            .iter()
+            .find_map(|workspace| workspace.tab(id).map(|_| workspace.id))
+    }
+
+    /// Owning Window of a current Tab (Tab → Window placement map; SPEC-022 §5).
+    pub fn window_of_tab(&self, id: TabId) -> Option<WindowId> {
+        self.find_tab_location(id).map(|(_, window, _)| window)
+    }
+
+    /// Product-active WindowId (never a host-chosen substitute).
+    ///
+    /// `None` in the zero-Window state (ADR-018 §3.3a). Cross-window activation
+    /// compares this with the target Window and emits when they differ.
+    pub fn active_window_id(&self) -> Option<WindowId> {
+        self.product_active_window_id()
+    }
+
+    /// Owning Workspace and Tab of a current Pane, if any.
+    pub fn location_of_pane(&self, id: PaneId) -> Option<(WorkspaceId, TabId)> {
+        for workspace in &self.workspaces {
+            for tab in workspace.tabs() {
+                if tab.panes.contains_key(&id) {
+                    return Some((workspace.id, tab.id));
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether `pane` is currently a leaf of `tab` inside `workspace`.
+    pub fn tab_contains_leaf(&self, workspace: WorkspaceId, tab: TabId, pane: PaneId) -> bool {
+        self.workspaces
+            .iter()
+            .find(|item| item.id == workspace)
+            .and_then(|item| item.tab(tab))
+            .is_some_and(|item| item.root.contains_leaf(pane))
+    }
+
+    /// Every current Pane bound to `execution`, across all Workspaces and Tabs.
+    pub fn panes_bound_to(&self, execution: ExecutionId) -> Vec<(WorkspaceId, TabId, PaneId)> {
+        let mut bound = Vec::new();
+        for workspace in &self.workspaces {
+            for tab in workspace.tabs() {
+                for pane in tab.panes.values() {
+                    if pane.execution == Some(execution) {
+                        bound.push((workspace.id, tab.id, pane.id));
+                    }
+                }
+            }
+        }
+        bound
+    }
+
+    /// Stable-order inventory for goto enumeration (SPEC-022 §7.6 / N4).
+    pub fn navigation_inventory(&self) -> NavigationInventory {
+        inventory::build(&self.workspaces, self.active_workspace)
+    }
+
+    /// Test helper: rename a Workspace's display name without changing identity.
+    #[cfg(test)]
+    pub fn rename_workspace_for_test(
+        &mut self,
+        id: WorkspaceId,
+        name: impl Into<String>,
+    ) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(id)?;
+        workspace.name = name.into();
+        Ok(())
+    }
+
+    /// Test helper: rename a Tab's display title without changing identity.
+    #[cfg(test)]
+    pub fn rename_tab_for_test(
+        &mut self,
+        id: TabId,
+        title: impl Into<String>,
+    ) -> Result<(), ShellError> {
+        let workspace_id = self.workspace_of_tab(id).ok_or(ShellError::UnknownTab)?;
+        let workspace = self.workspace_mut(workspace_id)?;
+        let tab = workspace
+            .windows
+            .iter_mut()
+            .flat_map(|window| window.tabs.iter_mut())
+            .find(|tab| tab.id == id)
+            .ok_or(ShellError::UnknownTab)?;
+        tab.title = title.into();
+        Ok(())
+    }
+
+    /// Test helper: rename a Pane's display title without changing identity.
+    #[cfg(test)]
+    pub fn rename_pane_for_test(
+        &mut self,
+        id: PaneId,
+        title: impl Into<String>,
+    ) -> Result<(), ShellError> {
+        let (workspace_id, tab_id) = self.location_of_pane(id).ok_or(ShellError::UnknownPane)?;
+        let workspace = self.workspace_mut(workspace_id)?;
+        let tab = workspace
+            .windows
+            .iter_mut()
+            .flat_map(|window| window.tabs.iter_mut())
+            .find(|tab| tab.id == tab_id)
+            .ok_or(ShellError::UnknownTab)?;
+        let pane = tab.panes.get_mut(&id).ok_or(ShellError::UnknownPane)?;
+        pane.title = title.into();
+        Ok(())
+    }
+
+    /// Current focus triple for equality / no-op checks (SPEC-022 R4.4).
+    pub fn focus_checkpoint(&self) -> FocusCheckpoint {
+        let snap = self.snapshot();
+        FocusCheckpoint {
+            active_workspace: snap.active_workspace,
+            active_tab: snap.active_tab,
+            focused_pane: snap.focused_pane,
+            zoomed: snap.zoomed,
+        }
+    }
+
+    /// Active Tab and focused Pane currently recorded for `workspace`.
+    pub fn workspace_focus(&self, workspace: WorkspaceId) -> Option<FocusCheckpoint> {
+        let workspace = self.workspace(workspace).ok()?;
+        let tab_id = workspace.active_tab_id().ok()?;
+        let tab = workspace.tab(tab_id)?;
+        Some(FocusCheckpoint {
+            active_workspace: workspace.id,
+            active_tab: tab.id,
+            focused_pane: tab.focused,
+            zoomed: tab.zoomed,
+        })
+    }
+
+    /// Focused Pane of `tab` inside `workspace`, if that composition exists.
+    pub fn tab_focused_pane(&self, workspace: WorkspaceId, tab: TabId) -> Option<PaneId> {
+        self.workspace(workspace)
+            .ok()
+            .and_then(|item| item.tab(tab))
+            .map(|item| item.focused)
+    }
+
+    /// Atomically set Workspace + Tab + Pane focus. Validates composition
+    /// before any write so a failure leaves prior focus unchanged.
+    /// Also activates the Window that owns `tab`.
+    pub fn commit_focus(
+        &mut self,
+        workspace: WorkspaceId,
+        tab: TabId,
+        pane: PaneId,
+    ) -> Result<(), ShellError> {
+        if !self.contains_workspace(workspace) {
+            return Err(ShellError::UnknownWorkspace);
+        }
+        let Some(owner) = self.workspace_of_tab(tab) else {
+            return Err(ShellError::UnknownTab);
+        };
+        if owner != workspace {
+            return Err(ShellError::UnknownTab);
+        }
+        let Some((pane_workspace, pane_tab)) = self.location_of_pane(pane) else {
+            return Err(ShellError::UnknownPane);
+        };
+        if pane_workspace != workspace
+            || pane_tab != tab
+            || !self.tab_contains_leaf(workspace, tab, pane)
+        {
+            return Err(ShellError::UnknownPane);
+        }
+        self.active_workspace = workspace;
+        let workspace_mut = self.workspace_mut(workspace)?;
+        workspace_mut.select_tab(tab)?;
+        let tab_mut = workspace_mut
+            .windows
+            .iter_mut()
+            .flat_map(|window| window.tabs.iter_mut())
+            .find(|item| item.id == tab)
+            .ok_or(ShellError::UnknownTab)?;
+        tab_mut.focused = pane;
+        self.last_error = None;
+        Ok(())
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
@@ -504,157 +717,6 @@ impl ShellState {
         }
     }
 
-    fn apply_inner(&mut self, action: ShellAction) -> Result<(), ShellError> {
-        match action {
-            ShellAction::ActivateWorkspace { .. }
-            | ShellAction::SelectWindow { .. }
-            | ShellAction::SelectTab { .. }
-            | ShellAction::CycleWindow { .. }
-            | ShellAction::CycleTab { .. }
-            | ShellAction::CreateWindow { .. }
-            | ShellAction::CreateTab { .. }
-            | ShellAction::MoveTabBefore { .. }
-            | ShellAction::MoveTabToWindow { .. }
-            | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
-            ShellAction::CloseTab { id } => self.close_tab(id),
-            ShellAction::SplitFocused {
-                axis,
-                containment_generation,
-            } => {
-                self.require_containment_generation(containment_generation)?;
-                let focused = self.focused_pane_id()?;
-                self.split_pane(focused, axis).map(|_| ())
-            }
-            ShellAction::SplitPane {
-                id,
-                axis,
-                containment_generation,
-            } => {
-                self.require_containment_generation(containment_generation)?;
-                self.split_pane(id, axis).map(|_| ())
-            }
-            ShellAction::ClosePane {
-                id,
-                containment_generation,
-            } => {
-                self.require_containment_generation(containment_generation)?;
-                self.close_pane(id)
-            }
-            ShellAction::FocusPane { id } => self.focus_pane(id),
-            ShellAction::ZoomPane { id } => self.zoom_pane(id),
-            ShellAction::Unzoom => self.unzoom(),
-            ShellAction::SwapPanes {
-                a,
-                b,
-                containment_generation,
-            } => {
-                self.require_containment_generation(containment_generation)?;
-                self.swap_panes(a, b)
-            }
-            ShellAction::MovePaneBeside {
-                pane,
-                neighbor,
-                side,
-                containment_generation,
-            } => {
-                self.require_containment_generation(containment_generation)?;
-                self.move_pane_beside(pane, neighbor, side)
-            }
-            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
-            ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
-            ShellAction::RecordUnpresented { .. }
-            | ShellAction::ForgetUnpresented { .. }
-            | ShellAction::AdoptExecution { .. }
-            | ShellAction::TerminateExecution { .. } => self.dispatch_unpresented(action),
-        }
-    }
-
-    fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        workspace.close_tab(id)?;
-        self.bump_containment_generation();
-        Ok(())
-    }
-
-    fn split_pane(&mut self, pane_id: PaneId, axis: SplitAxis) -> Result<PaneId, ShellError> {
-        if !self.allows_pane_splitting {
-            return Err(ShellError::PaneSplitUnavailable);
-        }
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.panes.contains_key(&pane_id) {
-            return Err(ShellError::UnknownPane);
-        }
-        let pane_count = tab.panes.len();
-        let pane = Pane {
-            id: PaneId::new(),
-            title: format!("Pane {}", pane_count + 1),
-            execution: None,
-            allows_implicit_execution_bootstrap: false,
-        };
-        let id = pane.id;
-        // ADR-021 §3: successful structural mutation clears zoom.
-        tab.zoomed = None;
-        tab.panes.insert(id, pane);
-        tab.root = tab.root.replacing(
-            pane_id,
-            PaneTree::Split {
-                axis,
-                first: Box::new(PaneTree::Leaf(pane_id)),
-                second: Box::new(PaneTree::Leaf(id)),
-            },
-        );
-        tab.focused = id;
-        self.bump_containment_generation();
-        Ok(id)
-    }
-
-    fn close_pane(&mut self, pane_id: PaneId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.allows_pane_close() {
-            return Err(ShellError::CannotCloseLastPane);
-        }
-        let Some(pane) = tab.panes.get(&pane_id) else {
-            return Err(ShellError::UnknownPane);
-        };
-        // Closing would orphan the bound execution's authority; what happens
-        // to that execution is the unaccepted provisioning/disposition
-        // contract (#994), so fail closed instead of inventing it here.
-        if pane.execution.is_some() {
-            return Err(ShellError::CannotCloseBoundPane);
-        }
-        let sibling_successor = tab.root.sibling_first_leaf(pane_id);
-        let Some(root) = tab.root.removing(pane_id) else {
-            return Err(ShellError::CannotCloseLastPane);
-        };
-        tab.root = root;
-        tab.panes.remove(&pane_id);
-        if tab.zoomed == Some(pane_id) {
-            tab.zoomed = None;
-        }
-        if tab.focused == pane_id || !tab.panes.contains_key(&tab.focused) {
-            tab.focused = sibling_successor
-                .or_else(|| tab.root.first_pane())
-                .expect("remaining Pane tree must contain a Pane");
-        }
-        self.bump_containment_generation();
-        Ok(())
-    }
-
-    fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        if !tab.panes.contains_key(&id) {
-            return Err(ShellError::UnknownPane);
-        }
-        if tab.zoomed.is_some_and(|zoomed| zoomed != id) {
-            tab.zoomed = None;
-        }
-        tab.focused = id;
-        Ok(())
-    }
-
     fn zoom_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;
         let tab = workspace.active_tab_mut()?;
@@ -676,6 +738,111 @@ impl ShellState {
         Ok(())
     }
 
+    fn apply_inner(&mut self, action: ShellAction) -> Result<(), ShellError> {
+        match action {
+            ShellAction::ActivateWorkspace { .. }
+            | ShellAction::SelectWindow { .. }
+            | ShellAction::SelectTab { .. }
+            | ShellAction::CycleWindow { .. }
+            | ShellAction::CycleTab { .. }
+            | ShellAction::CreateWindow { .. }
+            | ShellAction::CreateTab { .. }
+            | ShellAction::MoveTabBefore { .. }
+            | ShellAction::MoveTabToWindow { .. }
+            | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
+            ShellAction::CloseWindow { .. }
+            | ShellAction::CloseTab { .. }
+            | ShellAction::ClosePane { .. } => self.dispatch_close(action),
+            ShellAction::ZoomPane { id } => self.zoom_pane(id),
+            ShellAction::Unzoom => self.unzoom(),
+            ShellAction::SwapPanes {
+                a,
+                b,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.swap_panes(a, b)
+            }
+            ShellAction::MovePaneBeside {
+                pane,
+                neighbor,
+                side,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.move_pane_beside(pane, neighbor, side)
+            }
+            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
+            ShellAction::SplitFocused {
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                let focused = self.focused_pane_id()?;
+                self.split_pane(focused, axis).map(|_| ())
+            }
+            ShellAction::SplitPane {
+                id,
+                axis,
+                containment_generation,
+            } => {
+                self.require_containment_generation(containment_generation)?;
+                self.split_pane(id, axis).map(|_| ())
+            }
+            ShellAction::FocusPane { id } => self.focus_pane(id),
+            ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
+            ShellAction::RecordUnpresented { .. }
+            | ShellAction::ForgetUnpresented { .. }
+            | ShellAction::AdoptExecution { .. }
+            | ShellAction::TerminateExecution { .. } => self.dispatch_unpresented(action),
+        }
+    }
+
+    fn split_pane(&mut self, pane_id: PaneId, axis: SplitAxis) -> Result<PaneId, ShellError> {
+        if !self.allows_pane_splitting {
+            return Err(ShellError::PaneSplitUnavailable);
+        }
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if !tab.panes.contains_key(&pane_id) {
+            return Err(ShellError::UnknownPane);
+        }
+        let pane_count = tab.panes.len();
+        let pane = Pane {
+            id: PaneId::new(),
+            title: format!("Pane {}", pane_count + 1),
+            execution: None,
+            allows_implicit_execution_bootstrap: false,
+        };
+        let id = pane.id;
+        tab.panes.insert(id, pane);
+        tab.zoomed = None;
+        tab.root = tab.root.replacing(
+            pane_id,
+            PaneTree::Split {
+                axis,
+                first: Box::new(PaneTree::Leaf(pane_id)),
+                second: Box::new(PaneTree::Leaf(id)),
+            },
+        );
+        tab.focused = id;
+        self.bump_containment_generation();
+        Ok(id)
+    }
+
+    fn focus_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if !tab.panes.contains_key(&id) {
+            return Err(ShellError::UnknownPane);
+        }
+        if tab.zoomed.is_some_and(|zoomed| zoomed != id) {
+            tab.zoomed = None;
+        }
+        tab.focused = id;
+        Ok(())
+    }
+
     fn bind_execution(
         &mut self,
         pane_id: PaneId,
@@ -690,6 +857,23 @@ impl ShellState {
         }
         pane.execution = Some(execution);
         self.unpresented.remove(&execution);
+        Ok(())
+    }
+
+    /// Test-only: bind without Execution→Pane uniqueness so AmbiguousTarget
+    /// fixtures remain constructible (ADR-019 / SPEC-022). Production
+    /// [`ShellAction::BindExecution`] stays fail-closed.
+    #[cfg(test)]
+    pub fn force_bind_execution_for_ambiguity_fixture(
+        &mut self,
+        pane_id: PaneId,
+        execution: ExecutionId,
+    ) -> Result<(), ShellError> {
+        let pane = self.pane_mut(pane_id)?;
+        if pane.execution.is_some() {
+            return Err(ShellError::ExecutionAlreadyBound);
+        }
+        pane.execution = Some(execution);
         Ok(())
     }
 

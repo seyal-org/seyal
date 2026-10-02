@@ -68,7 +68,6 @@ fn seed_two_workspaces() -> ShellState {
         first,
         true,
         true,
-        false,
     )
     .expect("fixture")
 }

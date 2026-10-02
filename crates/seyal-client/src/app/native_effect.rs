@@ -31,7 +31,6 @@ pub enum NativeEffect {
     /// Rust finished quit bookkeeping after the host acked BoundedDetachThenTerminate.
     QuitCleanupComplete,
     /// Explicit ADR-005 terminate for one live-unpresented execution (§3.3).
-    /// Queued only after `request_termination` has accepted the id.
     TerminateExecution {
         execution: ExecutionId,
     },
@@ -76,18 +75,18 @@ impl NativeEffect {
         }
     }
 
-    pub fn execution(self) -> Option<ExecutionId> {
-        match self {
-            Self::TerminateExecution { execution } => Some(execution),
-            _ => None,
-        }
-    }
-
     /// Relative deadline for kind 1; otherwise 0. Encoded in `window_lo` on the ABI row.
     pub fn deadline_ms(self) -> u64 {
         match self {
             Self::BoundedDetachThenTerminate { deadline_ms } => deadline_ms,
             _ => 0,
+        }
+    }
+
+    pub fn execution(self) -> Option<ExecutionId> {
+        match self {
+            Self::TerminateExecution { execution } => Some(execution),
+            _ => None,
         }
     }
 }

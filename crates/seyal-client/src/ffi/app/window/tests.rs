@@ -11,9 +11,9 @@ use crate::shell::{
 };
 
 use super::super::{
-    seyal_app_apply, seyal_app_create, seyal_app_destroy, seyal_app_last_error,
-    seyal_app_native_effect, seyal_app_pane_leaf, seyal_app_record_compatible, seyal_app_shell,
-    seyal_app_tab, seyal_app_tab_tree_node, seyal_app_window, SeyalAppAction, SeyalAppShell, APPS,
+    seyal_app_create, seyal_app_destroy, seyal_app_native_effect, seyal_app_pane_leaf,
+    seyal_app_record_compatible, seyal_app_shell, seyal_app_tab, seyal_app_tab_tree_node,
+    seyal_app_window, SeyalAppShell, APPS,
 };
 use super::{
     SeyalAppNativeEffect, SeyalAppPaneLeaf, SeyalAppPaneTreeNode, SeyalAppTab, SeyalAppWindow,
@@ -58,7 +58,6 @@ fn seed_n_windows(n: usize) -> ShellState {
         }],
         workspace,
         false,
-        true,
         true,
     )
     .expect("seeded shell")
@@ -128,7 +127,7 @@ fn round_trip_windows(n: usize) {
         );
         if window.flags & 1 != 0 {
             seen_active = true;
-            assert_eq!(expected_window.id, expected.active_window);
+            assert_eq!(Some(expected_window.id), expected.active_window);
         }
         if wi == 1 {
             assert_ne!(window.flags & 2, 0, "attention flag");
@@ -163,6 +162,19 @@ fn round_trip_windows(n: usize) {
             PresentationTier::Unpresented => 3,
         };
         assert_eq!(pane.presentation_tier, tier);
+        if expected_pane.allows_implicit_bootstrap {
+            assert_ne!(
+                pane.flags & 4,
+                0,
+                "pane leaf must project allows_implicit_bootstrap"
+            );
+        } else {
+            assert_eq!(
+                pane.flags & 4,
+                0,
+                "re-entry / non-bootstrap panes clear allows_implicit"
+            );
+        }
 
         let node = seyal_app_tab_tree_node(handle, wi, 0, 0);
         assert_eq!(node.version, APP_ABI_VERSION);
@@ -206,6 +218,64 @@ fn ffi_round_trip_two_windows() {
 #[test]
 fn ffi_round_trip_eight_windows() {
     round_trip_windows(8);
+}
+
+/// B1 host gate: after CloseWindow→CreateWindow the focused Pane must clear
+/// `SEYAL_APP_SHELL_ALLOWS_IMPLICIT_BOOTSTRAP` so Swift recovery cannot open_first.
+#[test]
+fn close_window_create_window_clears_implicit_bootstrap_shell_flag() {
+    let handle = seyal_app_create();
+    let cold = seyal_app_shell(handle);
+    assert_ne!(
+        cold.flags & 16,
+        0,
+        "cold-start focused pane admits implicit bootstrap"
+    );
+    let pane = seyal_app_pane_leaf(handle, 0, 0, 0);
+    assert_ne!(
+        pane.flags & 4,
+        0,
+        "cold-start pane leaf admits implicit bootstrap"
+    );
+
+    let window = seyal_app_window(handle, 0);
+    assert_ne!(window.size, 0);
+    let mut id_bytes = [0u8; 16];
+    id_bytes[..8].copy_from_slice(&window.window_lo.to_le_bytes());
+    id_bytes[8..].copy_from_slice(&window.window_hi.to_le_bytes());
+    let id = WindowId::from_bytes(id_bytes);
+    let generation = seyal_app_shell(handle).containment_generation;
+    apply_on_handle(
+        handle,
+        ShellAction::CloseWindow {
+            id,
+            containment_generation: generation,
+        },
+    );
+    assert_eq!(seyal_app_shell(handle).window_count, 0);
+
+    let generation = seyal_app_shell(handle).containment_generation;
+    apply_on_handle(
+        handle,
+        ShellAction::CreateWindow {
+            workspace: WorkspaceId::m001_default(),
+            containment_generation: generation,
+        },
+    );
+    let reentry = seyal_app_shell(handle);
+    assert_eq!(reentry.window_count, 1);
+    assert_eq!(
+        reentry.flags & 16,
+        0,
+        "B1: CreateWindow after CloseWindow must clear focused allows_implicit so recovery cannot open_first"
+    );
+    let reentry_pane = seyal_app_pane_leaf(handle, 0, 0, 0);
+    assert_eq!(
+        reentry_pane.flags & 4,
+        0,
+        "B1: re-entry pane leaf must clear allows_implicit_bootstrap"
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
 }
 
 #[test]
@@ -340,23 +410,5 @@ fn bindings_and_focused_tier_round_trip() {
         (pane_row.execution_lo, pane_row.execution_hi),
         split(execution.to_bytes())
     );
-    assert_eq!(seyal_app_destroy(handle), 0);
-}
-
-#[test]
-fn production_create_window_apply_is_rejected() {
-    let handle = seyal_app_create();
-    let before = seyal_app_shell(handle).window_count;
-    let mut action: SeyalAppAction = unsafe { std::mem::zeroed() };
-    action.version = APP_ABI_VERSION;
-    action.size = size_of::<SeyalAppAction>() as u16;
-    action.kind = 60;
-    assert_eq!(unsafe { seyal_app_apply(handle, &action) }, -4);
-    assert_eq!(
-        seyal_app_last_error(handle),
-        35,
-        "WindowCreationUnavailable"
-    );
-    assert_eq!(seyal_app_shell(handle).window_count, before);
     assert_eq!(seyal_app_destroy(handle), 0);
 }

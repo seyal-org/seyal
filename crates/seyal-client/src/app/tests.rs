@@ -11,7 +11,8 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     }
 }
 
-/// Runtime `Available` for the bound attachment is what makes the composer submittable.
+/// Runtime published `Available` for the bound attachment: the only way
+/// the composer becomes submittable.
 fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
@@ -93,17 +94,13 @@ fn new_root_is_one_unbound_pane() {
 }
 
 #[test]
-fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
-    // AppAction::CreateTab/SplitFocused (#922) route straight to the same
-    // ShellState that already disallows composition growth until a
-    // distinct execution route exists; the direct action must fail the
-    // same way the palette-mediated path already does, not silently
-    // no-op.
+fn create_tab_admitted_and_split_focused_fail_closed_under_m001_policy() {
+    // W4b admits CreateTab on the production shell; pane splitting stays
+    // fail-closed. Split must not silently no-op.
     let mut root = ApplicationRoot::new();
-    assert_eq!(
-        root.apply(AppAction::CreateTab),
-        Err(AppError::TabCreationUnavailable)
-    );
+    root.apply(AppAction::CreateTab)
+        .expect("W4b admits CreateTab");
+    assert_eq!(root.snapshot().shell.tabs.len(), 2);
     assert_eq!(
         root.apply(AppAction::SplitFocused {
             axis: SplitAxis::Right,
@@ -113,13 +110,10 @@ fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
 }
 
 #[test]
-fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
-    // The M001 production shell starts with exactly one Tab and one
-    // Pane, so ShellState's "cannot close last" guard rejects CloseTab/
-    // ClosePane before an id is even looked up (shell.rs close_tab/
-    // close_pane), whether the id is real or not. This exercises the
-    // new close_tab_error/close_pane_error mapping surfaces that
-    // distinct cause rather than collapsing it to an unknown-id error.
+fn close_unknown_ids_reject_and_sole_tab_removes_window() {
+    // Unknown identities reject without retarget. The sole Tab of the
+    // production Window removes that Window (ADR-018 §3.2), replacing the
+    // older last-tab refusal.
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
     let only_tab = snap.shell.tabs[0].id;
@@ -127,26 +121,21 @@ fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
 
     assert_eq!(
         root.apply(AppAction::CloseTab { id: TabId::new() }),
-        Err(AppError::CannotCloseLastTab)
+        Err(AppError::UnknownChromeTab)
     );
     assert_eq!(
         root.apply(AppAction::ClosePane { id: PaneId::new() }),
-        Err(AppError::CannotCloseLastPane)
+        Err(AppError::UnknownPane)
     );
-    assert_eq!(
-        root.apply(AppAction::CloseTab { id: only_tab }),
-        Err(AppError::CannotCloseLastTab)
-    );
-    assert_eq!(
-        root.apply(AppAction::ClosePane { id: only_pane }),
-        Err(AppError::CannotCloseLastPane)
-    );
-    // A rejected mutation does not remove the only Tab/Pane.
-    let after = root.snapshot();
-    assert_eq!(after.shell.tabs.len(), 1);
-    assert_eq!(after.shell.panes.len(), 1);
-    assert_eq!(after.shell.tabs[0].id, only_tab);
-    assert_eq!(after.shell.panes[0].id, only_pane);
+    assert_eq!(root.snapshot().shell.tabs.len(), 1);
+    assert_eq!(root.snapshot().shell.panes.len(), 1);
+    assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
+    assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
+
+    root.apply(AppAction::CloseTab { id: only_tab })
+        .expect("sole tab removes window");
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert_eq!(root.snapshot().shell.active_window, None);
 }
 
 #[test]
@@ -574,8 +563,16 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     let opened = root.snapshot();
     assert!(opened.palette.open);
     assert!(
-        !opened.palette.rows.iter().any(|row| row.label == "New Tab"),
-        "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+        opened.palette.rows.iter().any(|row| row.label == "New Tab"),
+        "W4b admits tab creation; New Tab is listed"
+    );
+    assert!(
+        !opened
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label == "Split Pane Right"),
+        "pane splitting stays omitted while policy disallows it"
     );
     assert!(!opened.palette.rows.is_empty());
 
@@ -601,7 +598,8 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     assert!(root.snapshot().palette.rows.is_empty());
     assert_eq!(
         root.apply(AppAction::RunPalette {
-            fence: root.fence()
+            fence: root.fence(),
+            address: None,
         }),
         Err(AppError::PaletteNoSelection)
     );
@@ -625,6 +623,7 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     assert!(root.snapshot().chrome.inspector_visible);
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .unwrap();
     let after = root.snapshot();
@@ -895,7 +894,6 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
 #[test]
 fn create_window_is_target_free_and_uses_active_workspace() {
     let mut root = ApplicationRoot::new();
-    root.shell.set_allows_window_creation(true);
     let before = root.snapshot().shell.clone();
     let workspace = before.active_workspace;
     let window_count = before.windows.len();

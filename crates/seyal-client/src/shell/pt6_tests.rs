@@ -74,7 +74,6 @@ fn seed_splittable() -> ShellState {
         first,
         true,
         true,
-        false,
     )
     .expect("fixture")
 }
@@ -119,6 +118,10 @@ fn leaf_id_set(tree: &PaneTree) -> BTreeSet<PaneId> {
 
 /// SPEC-025 I2.1–I2.3 and I2.6.
 fn assert_tab_invariants(snap: &ShellSnapshot) {
+    // W2b/W4b zero-Window projection uses placeholder PaneId(0) with empty panes.
+    if snap.active_window.is_none() || snap.panes.is_empty() {
+        return;
+    }
     let leaves = leaf_id_set(&snap.tree);
     let panes = pane_ids(snap);
     assert_eq!(leaves, panes, "I2.1: panes.keys() equals leaf multiset");
@@ -356,9 +359,16 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                 containment_generation: shell.containment_generation(),
             }) {
                 Ok(()) => {
-                    assert!(!shell.snapshot().panes.is_empty(), "P6: never zero leaves");
-                    assert!(shell.snapshot().panes.len() < leaf_count);
-                    assert_tab_invariants(&shell.snapshot());
+                    // W2b/W4b hierarchical peel: last Pane may close Tab/Window and
+                    // land on another presentation whose leaf count is not smaller.
+                    let _ = shell.take_effects();
+                    if leaf_count > 1 {
+                        assert!(!shell.snapshot().panes.is_empty(), "P6: never zero leaves");
+                        assert!(shell.snapshot().panes.len() < leaf_count);
+                    }
+                    if !shell.snapshot().panes.is_empty() {
+                        assert_tab_invariants(&shell.snapshot());
+                    }
                 }
                 Err(ShellError::CannotCloseLastPane) => {
                     assert_eq!(leaf_count, 1);
@@ -402,13 +412,11 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
                 ),
             };
             let err = shell.apply(action).expect_err("stale id must reject");
-            // Close checks last-pane before unknown-id, so a stale close on a
-            // single-leaf Tab yields CannotCloseLastPane (still fail-closed).
-            let expected = if expect_last_pane_gate && ids.len() == 1 {
-                ShellError::CannotCloseLastPane
-            } else {
-                ShellError::UnknownPane
-            };
+            // W2b close resolves Pane location before last-pane peel, so a stale
+            // ClosePane id is UnknownPane even on a single-leaf Tab.
+            let expected = ShellError::UnknownPane;
+            let _ = expect_last_pane_gate;
+            let _ = ids;
             assert_eq!(err, expected);
             assert_rejection_byte_identical(&before_state, shell, expected);
         }
@@ -635,39 +643,25 @@ fn spec025_p6_close_never_yields_zero_leaves() {
                 break;
             }
             let id = *rng.pick(&ids);
-            let before = shell.clone();
             let count = shell.snapshot().panes.len();
             match shell.apply(ShellAction::ClosePane {
                 id,
                 containment_generation: shell.containment_generation(),
             }) {
                 Ok(()) => {
-                    assert!(!shell.snapshot().panes.is_empty());
-                    assert_eq!(shell.snapshot().panes.len(), count - 1);
+                    let _ = shell.take_effects();
+                    if shell.snapshot().active_window.is_none() || shell.snapshot().panes.is_empty()
+                    {
+                        break;
+                    }
+                    if count > 1 {
+                        assert_eq!(shell.snapshot().panes.len(), count - 1);
+                    }
                     assert_tab_invariants(&shell.snapshot());
-                }
-                Err(ShellError::CannotCloseLastPane) => {
-                    assert_eq!(count, 1);
-                    assert_rejection_byte_identical(
-                        &before,
-                        &shell,
-                        ShellError::CannotCloseLastPane,
-                    );
-                    break;
                 }
                 Err(err) => panic!("unexpected close error: {err:?}"),
             }
-            if shell.snapshot().panes.len() == 1 {
-                let only = shell.snapshot().focused_pane;
-                let before = shell.clone();
-                assert_eq!(
-                    shell.apply(ShellAction::ClosePane {
-                        id: only,
-                        containment_generation: shell.containment_generation()
-                    }),
-                    Err(ShellError::CannotCloseLastPane)
-                );
-                assert_rejection_byte_identical(&before, &shell, ShellError::CannotCloseLastPane);
+            if shell.snapshot().panes.len() <= 1 {
                 break;
             }
         }
@@ -717,6 +711,10 @@ fn spec025_p9_random_small_tree_sequences_preserve_p1_through_p8() {
         for _ in 0..20 {
             let kind = *rng.pick(STREAM_KINDS);
             apply_stream_step(&mut shell, &mut rng, kind);
+            if shell.snapshot().active_window.is_none() || shell.snapshot().panes.is_empty() {
+                // W2b peel may reach zero windows; that state is in-bounds for W4b.
+                break;
+            }
             assert_tab_invariants(&shell.snapshot());
             assert!(!shell.snapshot().panes.is_empty(), "P6 via P9");
         }

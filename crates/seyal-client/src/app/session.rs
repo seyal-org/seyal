@@ -121,7 +121,6 @@ impl ApplicationRoot {
             workspace,
             false,
             false,
-            false,
         )
         .map_err(|_| ())?;
         *self = Self::with_shell(shell);

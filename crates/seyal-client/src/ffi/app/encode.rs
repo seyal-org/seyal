@@ -47,12 +47,30 @@ pub(crate) fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
         AppError::UnknownWindow => 34,
-        AppError::WindowCreationUnavailable => 35,
-        AppError::CrossWorkspaceAdopt => 36,
-        AppError::ExecutionNotUnpresented => 37,
-        AppError::TerminationNotRequested => 38,
-        AppError::ActionUnavailable => 39,
-        AppError::NoDirectionalNeighbor => 40,
+        // W4a window-creation policy (nav errors keep 35–49 on this stack).
+        AppError::WindowCreationUnavailable => 52,
+        AppError::NavigationUnsupportedKind => 35,
+        AppError::NavigationDenied => 36,
+        AppError::NavigationUnknownWorkspace => 37,
+        AppError::NavigationUnknownTab => 38,
+        AppError::NavigationUnknownPane => 39,
+        AppError::NavigationUnknownExecution => 40,
+        AppError::NavigationNotComposed => 41,
+        AppError::NavigationTargetTerminated => 42,
+        AppError::NavigationTargetUnbound => 43,
+        AppError::NavigationAmbiguousTarget => 44,
+        AppError::GotoNotOpen => 45,
+        AppError::GotoNoSelection => 46,
+        AppError::GotoUnsupportedScope => 47,
+        AppError::NavigationStaleHistoryCursor => 48,
+        AppError::NavigationHistoryUnavailable => 49,
+        // W6 adopt errors follow the landed navigation range 35–49.
+        AppError::CrossWorkspaceAdopt => 50,
+        AppError::ExecutionNotUnpresented => 51,
+        AppError::TerminationNotRequested => 53,
+        // K7 keybinding / directional focus (after W4b/W6 codes).
+        AppError::ActionUnavailable => 54,
+        AppError::NoDirectionalNeighbor => 55,
     }
 }
 
@@ -171,12 +189,20 @@ struct RowDraft<'a> {
     flags: u16,
     title: &'a str,
     detail: &'a str,
+    address: Option<crate::navigation::ResourceAddress>,
 }
 
 fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>) {
     let title_off = push_text(text, draft.title);
     let detail_off = push_text(text, draft.detail);
     let (id_lo, id_hi) = split_id(draft.id);
+    let (address_version, address_kind, address_bytes, address_len) = match draft.address {
+        Some(address) => {
+            let (version, kind, bytes, len) = crate::navigation::encode_resource_address(address);
+            (version, kind, bytes, len)
+        }
+        None => (0, 0, [0; 48], 0),
+    };
     rows.push(SeyalAppRow {
         kind: draft.kind,
         flags: draft.flags,
@@ -189,6 +215,11 @@ fn push_row(rows: &mut Vec<SeyalAppRow>, text: &mut Vec<u8>, draft: RowDraft<'_>
         detail: detail_off.0 as *const u8,
         detail_len: detail_off.1,
         reserved2: 0,
+        address_version,
+        address_kind,
+        address_len,
+        address_pad: 0,
+        address_bytes,
     });
 }
 
@@ -208,6 +239,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 flags: u16::from(selected),
                 title: &workspace.name,
                 detail: workspace.detail.as_deref().unwrap_or(""),
+                address: None,
             },
         );
     }
@@ -224,6 +256,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 flags: u16::from(selected) | (u16::from(tab.attention) << 1),
                 title: &tab.title,
                 detail: &pane_count,
+                address: None,
             },
         );
     }
@@ -239,6 +272,7 @@ pub(super) fn encode_shell_rows(state: &mut AppHandle) {
                 flags: u16::from(selected),
                 title: &pane.title,
                 detail: "",
+                address: None,
             },
         );
     }
@@ -275,6 +309,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 flags: 0,
                 title: &title,
                 detail: &row.value,
+                address: None,
             },
         );
     }
@@ -293,6 +328,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 flags: u16::from(selected),
                 title: agent.id.as_str(),
                 detail: &agent.name,
+                address: None,
             },
         );
     }
@@ -307,6 +343,7 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
                 flags: 0,
                 title: item.id.as_str(),
                 detail: &item.title,
+                address: None,
             },
         );
     }
@@ -342,6 +379,7 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
                 flags,
                 title: &block.command,
                 detail: block.state.transcript_status(),
+                address: None,
             },
         );
     }
@@ -375,6 +413,7 @@ pub(super) fn encode_history_rows(state: &mut AppHandle) {
                 flags,
                 title: command,
                 detail: "",
+                address: None,
             },
         );
     }
@@ -396,6 +435,7 @@ pub(super) fn encode_palette_rows(state: &mut AppHandle) {
                 flags: 0,
                 title: &row.label,
                 detail: row.category,
+                address: row.address,
             },
         );
     }
