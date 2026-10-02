@@ -1,5 +1,9 @@
 use super::*;
 use crate::AggregateId;
+use seyal_agent_core::{
+    decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, OutputRefError,
+    RetentionPolicyRef, StreamKind, OUTPUT_REF_KIND, OUTPUT_REF_KIND_LEGACY,
+};
 use std::{
     fs,
     sync::{
@@ -241,7 +245,22 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].sequence, first.sequence);
     let decoded = decode_output_ref(&events[0].payload).expect("output ref");
-    assert_eq!(decoded, (0, 3, bytes.len() as u64, 1, 3));
+    assert_eq!(decoded.first_segment_index, 0);
+    assert_eq!(decoded.segment_count, 3);
+    assert_eq!(decoded.byte_offset, 0);
+    assert_eq!(decoded.byte_length, bytes.len() as u64);
+    assert_eq!(decoded.first_ordinal, 1);
+    assert_eq!(decoded.last_ordinal, 3);
+    assert_eq!(decoded.stream_kind, StreamKind::Stdout);
+    assert_eq!(
+        decoded.fingerprint_ref,
+        FingerprintRef::public_content_digest(&bytes)
+    );
+    assert_eq!(
+        decoded.retention_policy_ref,
+        RetentionPolicyRef::retained_stream()
+    );
+    assert_eq!(store.materialize_output_ref(run, &decoded).unwrap(), bytes);
 
     store.fail_after_writes(0);
     assert_eq!(
@@ -261,17 +280,20 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
     let second = store
         .append_output_event(run, 2, &vec![8; OUTPUT_SEGMENT_LEN + 1], 5, 6)
         .unwrap();
+    // Continues the open 10-byte tail of segment 2, then one new segment.
+    assert_eq!(second.first_segment_index, 2);
+    assert_eq!(second.byte_offset, 10);
     assert_eq!(second.segment_count, 2);
-    assert_eq!(second.first_segment_index, 3);
-    assert_eq!(store.output_segment_count(run).unwrap(), 5);
+    assert_eq!(store.output_segment_count(run).unwrap(), 4);
 
     drop(store);
     let reopened = AgentStore::open(&file).unwrap();
-    assert_eq!(reopened.output_segment_count(run).unwrap(), 5);
+    assert_eq!(reopened.output_segment_count(run).unwrap(), 4);
     let third = reopened.append_output_event(run, 2, &[1], 7, 7).unwrap();
-    assert_eq!(third.first_segment_index, 5);
+    assert_eq!(third.first_segment_index, 3);
+    assert_eq!(third.byte_offset, 11);
     assert_eq!(third.segment_count, 1);
-    assert_eq!(reopened.output_segment_count(run).unwrap(), 6);
+    assert_eq!(reopened.output_segment_count(run).unwrap(), 4);
 
     let aggregate = AggregateId::AgentRun(run);
     let before_confine = reopened.replay_after(aggregate, None).unwrap().len();
@@ -374,6 +396,160 @@ fn records_append_throughput_snapshot_latency_db_growth_and_recovery() {
         bytes,
         rss
     );
+}
+
+#[test]
+fn segment_metadata_round_trips_without_byte_materialization() {
+    let file = path("meta-roundtrip.db");
+    let store = AgentStore::open(&file).unwrap();
+    let run = crate::AgentRunId::new();
+    let secret = b"raw-secret-must-not-appear-in-ref";
+    let appended = store
+        .append_output_event_with_refs(
+            run,
+            2,
+            secret,
+            1,
+            1,
+            StreamKind::Stdout,
+            FingerprintRef::opaque_from_ordinals(1, 1),
+            RetentionPolicyRef::retained_stream(),
+        )
+        .unwrap();
+    let events = store
+        .replay_after(AggregateId::AgentRun(run), None)
+        .unwrap();
+    let decoded = decode_output_ref(&events[0].payload).unwrap();
+    assert_eq!(decoded, appended.output_ref);
+    assert_eq!(
+        decoded.fingerprint_ref,
+        FingerprintRef::opaque_from_ordinals(1, 1)
+    );
+    assert_eq!(
+        decoded.retention_policy_ref,
+        RetentionPolicyRef::retained_stream()
+    );
+    // Clients honor refs without loading segment bytes when refs suffice.
+    assert!(!events[0].payload.windows(secret.len()).any(|w| w == secret));
+    assert!(!format!("{:?}", decoded.fingerprint_ref).contains("raw-secret"));
+}
+
+#[test]
+fn partial_segments_merge_across_batches_and_reconnect_replay() {
+    let file = path("partial-merge.db");
+    let store = AgentStore::open(&file).unwrap();
+    let run = crate::AgentRunId::new();
+    let batch_a = vec![b'a'; 100];
+    let batch_b = vec![b'b'; 50];
+    let batch_c = vec![b'c'; OUTPUT_SEGMENT_LEN];
+
+    let a = store.append_output_event(run, 2, &batch_a, 1, 1).unwrap();
+    assert_eq!(a.segment_count, 1);
+    assert_eq!(a.byte_offset, 0);
+    assert_eq!(store.output_segment_count(run).unwrap(), 1);
+
+    let b = store.append_output_event(run, 2, &batch_b, 2, 2).unwrap();
+    assert_eq!(b.first_segment_index, 0);
+    assert_eq!(b.byte_offset, 100);
+    assert_eq!(b.segment_count, 1);
+    assert_eq!(store.output_segment_count(run).unwrap(), 1);
+
+    drop(store);
+    let store = AgentStore::open(&file).unwrap();
+    let events = store
+        .replay_after(AggregateId::AgentRun(run), None)
+        .unwrap();
+    assert_eq!(events.len(), 2);
+    let ref_a = decode_output_ref(&events[0].payload).unwrap();
+    let ref_b = decode_output_ref(&events[1].payload).unwrap();
+    assert_eq!(store.materialize_output_ref(run, &ref_a).unwrap(), batch_a);
+    assert_eq!(store.materialize_output_ref(run, &ref_b).unwrap(), batch_b);
+
+    let c = store.append_output_event(run, 2, &batch_c, 3, 3).unwrap();
+    // 150 bytes already in segment 0 → fill remainder then one full new segment.
+    assert_eq!(c.first_segment_index, 0);
+    assert_eq!(c.byte_offset, 150);
+    assert!(c.segment_count >= 2);
+    let mut expected = batch_a.clone();
+    expected.extend_from_slice(&batch_b);
+    expected.extend_from_slice(&batch_c);
+    let mut merged = store.materialize_output_ref(run, &ref_a).unwrap();
+    merged.extend(store.materialize_output_ref(run, &ref_b).unwrap());
+    let ref_c = decode_output_ref(
+        &store
+            .replay_after(AggregateId::AgentRun(run), None)
+            .unwrap()
+            .last()
+            .unwrap()
+            .payload,
+    )
+    .unwrap();
+    merged.extend(store.materialize_output_ref(run, &ref_c).unwrap());
+    assert_eq!(merged, expected);
+    // Still segment-bounded: far fewer rows than total bytes.
+    assert!(store.output_segment_count(run).unwrap() < expected.len() as u64);
+}
+
+#[test]
+fn missing_and_corrupt_fingerprint_ref_are_explicit() {
+    assert_eq!(
+        decode_output_ref(&[OUTPUT_REF_KIND_LEGACY, 0, 0, 0]),
+        Err(OutputRefError::MissingFingerprint)
+    );
+    let mut corrupt = encode_output_ref(&OutputRef {
+        first_segment_index: 0,
+        segment_count: 1,
+        byte_offset: 0,
+        byte_length: 1,
+        first_ordinal: 1,
+        last_ordinal: 1,
+        stream_kind: StreamKind::Stdout,
+        fingerprint_ref: FingerprintRef::public_content_digest(b"x"),
+        retention_policy_ref: RetentionPolicyRef::retained_stream(),
+    });
+    corrupt[0] = OUTPUT_REF_KIND;
+    corrupt[38] = 0xFF; // invalid fingerprint kind
+    assert_eq!(decode_output_ref(&corrupt), Err(OutputRefError::Corrupt));
+    assert_eq!(
+        decode_output_ref(&[OUTPUT_REF_KIND]),
+        Err(OutputRefError::Corrupt)
+    );
+}
+
+#[test]
+fn high_volume_append_stays_segment_bounded() {
+    let file = path("high-volume.db");
+    let store = AgentStore::open(&file).unwrap();
+    let run = crate::AgentRunId::new();
+    const TOTAL: usize = 256 * 1024;
+    let bytes = vec![9_u8; TOTAL];
+    // Simulate streaming batches smaller than a segment.
+    let mut offset = 0_usize;
+    let mut ordinal = 1_u64;
+    while offset < TOTAL {
+        let end = (offset + 512).min(TOTAL);
+        store
+            .append_output_event(run, 2, &bytes[offset..end], ordinal, ordinal)
+            .unwrap();
+        offset = end;
+        ordinal += 1;
+    }
+    let segments = store.output_segment_count(run).unwrap();
+    let expected_segments = (TOTAL / OUTPUT_SEGMENT_LEN) as u64;
+    assert_eq!(segments, expected_segments);
+    assert!(
+        segments < (TOTAL as u64) / 8,
+        "no one-row-per-token regression"
+    );
+    let events = store
+        .replay_after(AggregateId::AgentRun(run), None)
+        .unwrap();
+    let mut rebuilt = Vec::with_capacity(TOTAL);
+    for event in &events {
+        let output = decode_output_ref(&event.payload).unwrap();
+        rebuilt.extend(store.materialize_output_ref(run, &output).unwrap());
+    }
+    assert_eq!(rebuilt, bytes);
 }
 
 fn resident_kib() -> Option<u64> {
