@@ -56,12 +56,14 @@ fn main() {
         }
     };
 
+    let accepted = Arc::new(AtomicU64::new(0));
     let completed = Arc::new(AtomicU64::new(0));
     loop {
         if let Some(limit) = options.max_connections
-            && completed.load(Ordering::Relaxed) >= limit
+            && accepted.load(Ordering::Relaxed) >= limit
         {
-            // Wait for in-flight workers before exit 0.
+            // Stop accepting once the budget is spent; wait for workers, then exit 0.
+            // Must not block in accept_and_spawn for connection N+1 while N finishes.
             while completed.load(Ordering::Relaxed) < limit {
                 thread::sleep(Duration::from_millis(5));
             }
@@ -69,6 +71,7 @@ fn main() {
         }
         match daemon.accept_and_spawn() {
             Ok(handle) => {
+                accepted.fetch_add(1, Ordering::Relaxed);
                 let completed = Arc::clone(&completed);
                 thread::spawn(move || match handle.join() {
                     Ok(Ok(())) => {
