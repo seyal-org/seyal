@@ -319,6 +319,34 @@ fn best_effort_terminate_on_existing_attachment(
     }
 }
 
+/// After Controller Attached on a Created never-bound orphan, every failure must
+/// attempt terminate on that attachment and report `terminated_on_attachment`
+/// so callers never open a second dispose attach (ADR-017 §6.3 row 2), even when
+/// the terminate send itself fails (connection already dropped).
+fn fail_after_attached_maybe_terminate_orphan(
+    stream: &mut UnixStream,
+    may_dispose_orphan: bool,
+    attachment_id: AttachmentId,
+    execution_id: ExecutionId,
+    dispose_request_id: u64,
+    deadline: Instant,
+    error: ClientError,
+) -> FinishAttachError {
+    let terminated = if may_dispose_orphan {
+        best_effort_terminate_on_existing_attachment(
+            stream,
+            attachment_id,
+            execution_id,
+            dispose_request_id,
+            deadline,
+        );
+        true
+    } else {
+        false
+    };
+    FinishAttachError::after_attached(error, terminated)
+}
+
 impl LocalDisplayClient {
     /// Attach to one explicitly selected execution. Native panes must use
     /// this entry point so two panes cannot accidentally share the first
@@ -616,21 +644,14 @@ impl LocalDisplayClient {
             .map_err(|_| ClientError::Protocol)
             .map_err(FinishAttachError::before_attached)?;
         if attached.execution_id != execution_id || attached.granted_role != role {
-            let terminated = if may_dispose_orphan {
-                best_effort_terminate_on_existing_attachment(
-                    &mut stream,
-                    attached.attachment_id,
-                    execution_id,
-                    dispose_request_id,
-                    deadline,
-                );
-                true
-            } else {
-                false
-            };
-            return Err(FinishAttachError::after_attached(
+            return Err(fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
                 ClientError::InvalidAttachment,
-                terminated,
             ));
         }
 
@@ -693,9 +714,17 @@ impl LocalDisplayClient {
                         .encode(),
                         deadline,
                     )
-                    .map_err(|error| FinishAttachError::after_attached(error, false))?;
-                    // Resync send failure is after Attached but did not dispose.
-                    // Map below treats snapshot Err the same.
+                    .map_err(|error| {
+                        fail_after_attached_maybe_terminate_orphan(
+                            &mut stream,
+                            may_dispose_orphan,
+                            attached.attachment_id,
+                            execution_id,
+                            dispose_request_id,
+                            deadline,
+                            error,
+                        )
+                    })?;
                     resync_available = false;
                     quarantined_remainder = Some(stale_remainder_hint);
                 }
@@ -709,38 +738,27 @@ impl LocalDisplayClient {
                 // bound → terminate on this attachment. No second attach.
                 // Adopt/reconnect (dispose_never_bound_orphan=false) must not
                 // kill a live survivor on transient snapshot failure.
-                let terminated = if may_dispose_orphan {
-                    best_effort_terminate_on_existing_attachment(
-                        &mut stream,
-                        attached.attachment_id,
-                        execution_id,
-                        dispose_request_id,
-                        deadline,
-                    );
-                    true
-                } else {
-                    false
-                };
-                return Err(FinishAttachError::after_attached(error, terminated));
-            }
-        };
-        if cache.generation != attached.current_generation || cache.rows == 0 || cache.columns == 0
-        {
-            let terminated = if may_dispose_orphan {
-                best_effort_terminate_on_existing_attachment(
+                return Err(fail_after_attached_maybe_terminate_orphan(
                     &mut stream,
+                    may_dispose_orphan,
                     attached.attachment_id,
                     execution_id,
                     dispose_request_id,
                     deadline,
-                );
-                true
-            } else {
-                false
-            };
-            return Err(FinishAttachError::after_attached(
+                    error,
+                ));
+            }
+        };
+        if cache.generation != attached.current_generation || cache.rows == 0 || cache.columns == 0
+        {
+            return Err(fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
                 ClientError::Protocol,
-                terminated,
             ));
         }
 
@@ -761,12 +779,28 @@ impl LocalDisplayClient {
             full_rebuild: false,
         };
 
-        stream
-            .set_read_timeout(None)
-            .map_err(|_| FinishAttachError::after_attached(ClientError::Io, false))?;
-        stream
-            .set_nonblocking(true)
-            .map_err(|_| FinishAttachError::after_attached(ClientError::Io, false))?;
+        stream.set_read_timeout(None).map_err(|_| {
+            fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
+                ClientError::Io,
+            )
+        })?;
+        stream.set_nonblocking(true).map_err(|_| {
+            fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
+                ClientError::Io,
+            )
+        })?;
 
         batch.clear();
         Ok(Self {
