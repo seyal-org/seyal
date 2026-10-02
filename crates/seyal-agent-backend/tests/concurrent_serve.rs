@@ -21,6 +21,7 @@ use seyal_agent_backend::{
 };
 use seyal_agent_core::WorkScopeKind;
 use seyal_agent_protocol::{AggregateRef, Command, CommandError, CommandResult};
+use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence};
 
 use support::{temp_dir, TestClient};
 
@@ -261,5 +262,99 @@ fn repeated_peer_fault_does_not_stall_unrelated_connection() {
                 .is_some_and(|e| e.is_recoverable_client_fault()),
         "fault peer must not take down the daemon: {fault_result:?}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// AC3: two concurrent slow (bounded-window) subscribers both see explicit
+/// HistoryGap after retention truncation under `accept_and_spawn`.
+#[test]
+fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
+    let dir = temp_dir("concurrent-dual-gap");
+    let mut daemon = AgentDaemon::bind_integration(
+        &dir,
+        IntegrationConfig {
+            store_path: dir.join("agent.db"),
+            script: vec![
+                ScriptStep::Emit(HostObservationKind::Started),
+                ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+                ScriptStep::Emit(HostObservationKind::KnownSuccess),
+            ],
+        },
+    )
+    .unwrap();
+    let socket = daemon.socket_path();
+
+    let owner = thread::spawn({
+        let socket = socket.clone();
+        move || {
+            thread::sleep(Duration::from_millis(20));
+            let mut client = TestClient::connect_window(&socket, 1);
+            let scope = client.create_work_scope(WorkScopeKind::Project);
+            let item = client.create_work_item(scope);
+            let attempt = client.create_attempt(item);
+            let started = client.start_agent_run(attempt);
+            // Bounded window: first page is a single event, proving pull is capped.
+            let first = client.subscribe(AggregateRef::AgentRun(started.run_id), None);
+            match first {
+                CommandResult::Replay { ref events } => assert_eq!(events.len(), 1),
+                other => panic!("bounded first page: {other:?}"),
+            }
+            started.run_id
+        }
+    });
+    assert!(daemon.accept_and_spawn().unwrap().join().unwrap().is_ok());
+    let run_id = owner.join().unwrap();
+
+    AgentStore::open(dir.join("agent.db"))
+        .unwrap()
+        .drop_events_before(
+            AggregateId::AgentRun(run_id),
+            AggregateSequence::from_raw(4).unwrap(),
+        )
+        .unwrap();
+
+    let expected_gap = CommandResult::Gap {
+        requested_after: 1,
+        earliest_available: 4,
+        current_snapshot_sequence: Some(4),
+    };
+
+    let sub_a = thread::spawn({
+        let socket = socket.clone();
+        move || {
+            thread::sleep(Duration::from_millis(20));
+            let mut client = TestClient::connect_window(&socket, 1);
+            let gap = client.subscribe(AggregateRef::AgentRun(run_id), None);
+            let tail = client.subscribe(AggregateRef::AgentRun(run_id), Some(3));
+            (gap, tail)
+        }
+    });
+    let sub_b = thread::spawn({
+        let socket = socket.clone();
+        move || {
+            thread::sleep(Duration::from_millis(40));
+            let mut client = TestClient::connect_observer(&socket);
+            let gap = client.subscribe(AggregateRef::AgentRun(run_id), None);
+            let tail = client.subscribe(AggregateRef::AgentRun(run_id), Some(3));
+            (gap, tail)
+        }
+    });
+
+    let h1 = daemon.accept_and_spawn().unwrap();
+    let h2 = daemon.accept_and_spawn().unwrap();
+    let (gap_a, tail_a) = sub_a.join().unwrap();
+    let (gap_b, tail_b) = sub_b.join().unwrap();
+    assert!(h1.join().unwrap().is_ok());
+    assert!(h2.join().unwrap().is_ok());
+
+    assert_eq!(gap_a, expected_gap, "slow owner-window peer must Gap");
+    assert_eq!(gap_b, expected_gap, "concurrent observer peer must Gap");
+    match (&tail_a, &tail_b) {
+        (CommandResult::Replay { events: a }, CommandResult::Replay { events: b }) => {
+            assert_eq!(a.iter().map(|e| e.sequence).collect::<Vec<_>>(), vec![4]);
+            assert_eq!(b.iter().map(|e| e.sequence).collect::<Vec<_>>(), vec![4]);
+        }
+        other => panic!("both peers must read the retained tail: {other:?}"),
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
