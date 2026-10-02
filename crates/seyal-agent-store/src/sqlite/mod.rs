@@ -513,22 +513,23 @@ impl AgentStore {
         let mut segments = 0_u32;
         let mut next_index = last_row.as_ref().map(|(index, _)| *index + 1).unwrap_or(0);
 
-        if let Some((index, mut payload)) = last_row {
-            if !remaining.is_empty() && payload.len() < OUTPUT_SEGMENT_LEN {
-                let room = OUTPUT_SEGMENT_LEN - payload.len();
-                let take = remaining.len().min(room);
-                first_segment_index = index as u32;
-                byte_offset = payload.len() as u32;
-                payload.extend_from_slice(&remaining[..take]);
-                tx.execute(
-                    "UPDATE output_segment SET payload = ?1
-                     WHERE agent_run_id = ?2 AND segment_index = ?3",
-                    params![payload, run_bytes.clone(), index],
-                )
-                .map_err(|_| StoreError::WriteFailed)?;
-                remaining = &remaining[take..];
-                segments = 1;
-            }
+        if let Some((index, mut payload)) = last_row
+            && !remaining.is_empty()
+            && payload.len() < OUTPUT_SEGMENT_LEN
+        {
+            let room = OUTPUT_SEGMENT_LEN - payload.len();
+            let take = remaining.len().min(room);
+            first_segment_index = index as u32;
+            byte_offset = payload.len() as u32;
+            payload.extend_from_slice(&remaining[..take]);
+            tx.execute(
+                "UPDATE output_segment SET payload = ?1
+                 WHERE agent_run_id = ?2 AND segment_index = ?3",
+                params![payload, run_bytes.clone(), index],
+            )
+            .map_err(|_| StoreError::WriteFailed)?;
+            remaining = &remaining[take..];
+            segments = 1;
         }
 
         if segments == 0 && !remaining.is_empty() {
