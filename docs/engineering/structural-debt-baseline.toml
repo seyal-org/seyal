@@ -100,9 +100,9 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 # Unix daemon accept/negotiate/serve façade (peer/endpoint already split).
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 774
+acknowledged_loc = 757
 issue = 1183
-reason = "Unix daemon bind/reclaim/serve, Hello evidence→principal binding, and recoverable client-fault classification stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-recoverable-fault LOC."
+reason = "Unix daemon bind/reclaim/serve, Hello evidence→principal binding, and recoverable client-fault classification stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-AcceptIo LOC with recoverable-fault tests in daemon/tests.rs."
 
 # #1182 AB-1.6 observation/replay hardening: per-run next-ordinal cursor and
 # recovery terminal-evidence helpers stay with ObservationAuthority apply/undo.
