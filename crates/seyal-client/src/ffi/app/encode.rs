@@ -89,6 +89,7 @@ pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnap
             RecoveryStage::Usable => 6,
             RecoveryStage::Exhausted => 7,
             RecoveryStage::Blocked => 8,
+            RecoveryStage::ExecutionEnded => 9,
         },
         recovery_attempts: snap.recovery_attempts.min(u32::from(u16::MAX)) as u16,
         recovery_effect: match snap.recovery_effect {

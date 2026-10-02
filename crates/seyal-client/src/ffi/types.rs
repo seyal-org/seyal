@@ -106,6 +106,14 @@ mod recovery_result_tests {
     }
 
     #[test]
+    fn missing_pinned_execution_has_a_distinct_terminal_recovery_class() {
+        set_recovery_failure(ClientError::NoRunningExecution);
+        let result = crate::ffi::LAST_RECOVERY_RESULT.with(std::cell::Cell::get);
+        assert_eq!(result.failure_class, 7);
+        assert_eq!(result.retryable, 0);
+    }
+
+    #[test]
     fn zero_budget_and_insecure_leaf_classification_fail_closed() {
         assert_eq!(
             recovery_deadline(0),

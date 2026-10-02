@@ -190,6 +190,10 @@ pub enum ComposerAction {
         mode: PresentationMode,
         input_route: InputRoute,
     },
+    SetExecutionEnded {
+        pane: PaneId,
+        ended: bool,
+    },
     ApplyRuntimeBlocks {
         pane: PaneId,
         records: Vec<RuntimeBlockRecord>,
@@ -252,6 +256,7 @@ struct PaneComposer {
     next_request_id: u64,
     epoch: u64,
     busy_process: Option<String>,
+    execution_ended: bool,
     /// Latest accepted Runtime eligibility and its revision; `None` until
     /// Runtime publishes one for the current attachment.
     runtime_eligibility: Option<(RuntimeComposerEligibility, u64)>,
@@ -270,6 +275,7 @@ impl PaneComposer {
             next_request_id: 1,
             epoch: 1,
             busy_process: None,
+            execution_ended: false,
             runtime_eligibility: None,
             presentation_mode: PresentationMode::Flow,
             input_route: InputRoute::Composer,
@@ -316,6 +322,9 @@ impl PaneComposer {
     }
 
     fn mode(&self) -> ComposerMode {
+        if self.execution_ended {
+            return ComposerMode::Hidden;
+        }
         if self.input_route != InputRoute::Composer
             || self.presentation_mode != PresentationMode::Flow
         {
@@ -459,6 +468,15 @@ impl ComposerState {
                 if composer.presentation_mode != mode || composer.input_route != input_route {
                     composer.presentation_mode = mode;
                     composer.input_route = input_route;
+                    composer.bump_epoch();
+                    composer.close_overlay_if_unavailable();
+                }
+                Ok(None)
+            }
+            ComposerAction::SetExecutionEnded { pane, ended } => {
+                let composer = self.pane_mut(pane);
+                if composer.execution_ended != ended {
+                    composer.execution_ended = ended;
                     composer.bump_epoch();
                     composer.close_overlay_if_unavailable();
                 }

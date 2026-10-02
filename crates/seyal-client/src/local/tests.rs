@@ -1,5 +1,8 @@
 use super::*;
-use seyal_runtime::local_ipc::framing::{ErrorCode, ErrorMessage, MessageType};
+use seyal_runtime::local_ipc::framing::{
+    ErrorCode, ErrorMessage, ExecutionList, ExecutionListEntry, Lifecycle, LifecycleMessage,
+    MessageType,
+};
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
 
@@ -125,6 +128,66 @@ fn malformed_v2_display_requests_resync_before_valid_snapshot_converges() {
     let header = FrameHeader::decode(&outbound[..count]).expect("resync header");
     assert_eq!(header.message_type, MessageType::Resync as u16);
     assert!(!client.resync_needed);
+}
+
+#[test]
+fn finalized_execution_ends_client_after_consuming_lifecycle_marker() {
+    let (client_stream, mut server_stream) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let execution_id = ExecutionId::from_bytes([1; 16]);
+    let finalized = encode_frame(
+        MessageType::Lifecycle,
+        &LifecycleMessage {
+            execution_id,
+            lifecycle: Lifecycle::Finalized,
+        }
+        .encode(),
+    );
+    server_stream
+        .write_all(&finalized)
+        .expect("write finalized lifecycle");
+
+    let mut client = test_client(client_stream);
+    assert!(matches!(
+        client.poll_prepare(),
+        Err(ClientError::NoRunningExecution)
+    ));
+}
+
+#[test]
+fn pinned_execution_must_still_be_running_before_reconnect() {
+    let execution_id = ExecutionId::from_bytes([1; 16]);
+    let other_id = ExecutionId::from_bytes([2; 16]);
+    let running = ExecutionList {
+        entries: vec![ExecutionListEntry {
+            execution_id,
+            lifecycle: Lifecycle::Running,
+            has_controller: false,
+            attachment_count: 0,
+        }],
+    };
+    let finalized = ExecutionList {
+        entries: vec![ExecutionListEntry {
+            execution_id,
+            lifecycle: Lifecycle::Finalized,
+            has_controller: false,
+            attachment_count: 0,
+        }],
+    };
+    let different_execution = ExecutionList {
+        entries: vec![ExecutionListEntry {
+            execution_id: other_id,
+            lifecycle: Lifecycle::Running,
+            has_controller: false,
+            attachment_count: 0,
+        }],
+    };
+
+    assert!(execution_is_running(&running, execution_id));
+    assert!(!execution_is_running(&finalized, execution_id));
+    assert!(!execution_is_running(&different_execution, execution_id));
 }
 
 #[test]

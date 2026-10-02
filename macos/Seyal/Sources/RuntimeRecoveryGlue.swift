@@ -61,6 +61,8 @@ func openRuntimeRecoveryHandle(
       return .endpointMissing
     case UInt32(SEYAL_APP_RECOVERY_CONTROLLER_BUSY.rawValue):
       return .controllerBusy
+    case UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue):
+      return .executionEnded
     case UInt32(SEYAL_APP_RECOVERY_RETRYABLE.rawValue):
       return .retryable
     default:
@@ -141,5 +143,6 @@ enum RuntimeRecoveryAttemptOutcome: Equatable, Sendable {
   case endpointMissing
   case retryable
   case controllerBusy
+  case executionEnded
   case blocked
 }

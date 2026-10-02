@@ -329,6 +329,33 @@ fn classify_open_result_maps_bridge_failure_classes() {
 }
 
 #[test]
+fn missing_pinned_execution_is_terminal_not_a_blocked_recovery_episode() {
+    let mut coordinator = RecoveryCoordinator::default();
+    let effects = coordinator.begin_episode(Duration::ZERO);
+    let generation = match effects[0] {
+        RecoveryEffect::PerformAttempt { generation, .. } => generation,
+        other => panic!("unexpected recovery effect: {other:?}"),
+    };
+
+    assert_eq!(
+        classify_open_result(7, false),
+        AttemptOutcome::ExecutionEnded
+    );
+    assert!(coordinator
+        .complete_attempt(
+            generation,
+            AttemptOutcome::ExecutionEnded,
+            Duration::from_millis(1),
+            None,
+        )
+        .is_empty());
+    assert_eq!(coordinator.state().stage, RecoveryStage::ExecutionEnded);
+    assert!(coordinator
+        .scheduled_fire(generation, Duration::from_millis(20))
+        .is_empty());
+}
+
+#[test]
 fn advance_presentation_stage_rejects_unconnected_and_terminal_stages() {
     let mut c = RecoveryCoordinator::default();
     assert!(!c.advance_presentation_stage(RecoveryStage::Usable));

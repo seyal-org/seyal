@@ -32,7 +32,7 @@ fn implicit_resolution_fails_closed_when_multiple_executions_are_running() {
 }
 
 #[test]
-fn attach_error_wire_codes_preserve_controller_busy_and_capacity_semantics() {
+fn attach_error_wire_codes_preserve_busy_capacity_and_ended_execution_semantics() {
     for (code, expected) in [
         (
             ErrorCode::ControllerBusy,
@@ -42,6 +42,7 @@ fn attach_error_wire_codes_preserve_controller_busy_and_capacity_semantics() {
             ErrorCode::CapacityExceeded,
             ClientError::Server(ErrorCode::CapacityExceeded),
         ),
+        (ErrorCode::InvalidExecution, ClientError::NoRunningExecution),
     ] {
         let (client, mut server) = UnixStream::pair().expect("unix stream pair");
         let execution_id = ExecutionId::from_bytes([3; 16]);
@@ -101,10 +102,7 @@ fn read_only_attach_requests_observer_authority() {
         9,
         false,
     );
-    assert_eq!(
-        result.err(),
-        Some(ClientError::Server(ErrorCode::InvalidExecution))
-    );
+    assert_eq!(result.err(), Some(ClientError::NoRunningExecution));
     server_thread.join().expect("server thread");
 }
 

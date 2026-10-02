@@ -15,6 +15,8 @@ extension ProductChromeHostView {
             stage = "recovery exhausted"
         case UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue):
             stage = "blocked"
+        case UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue):
+            stage = "shell exited"
         case UInt16(SEYAL_APP_RECOVERY_RECONSTRUCTING.rawValue),
             UInt16(SEYAL_APP_RECOVERY_RESTORING.rawValue):
             stage = "restoring"
@@ -23,7 +25,9 @@ extension ProductChromeHostView {
         default:
             stage = "connecting"
         }
-        if snapshot.recovery_stage == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue) {
+        if snapshot.recovery_stage == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
+            || snapshot.recovery_stage == UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
+        {
             return stage
         }
         return "\(stage) · attempts \(snapshot.recovery_attempts)"
@@ -95,7 +99,7 @@ extension ProductChromeHostView {
         // reconcile → driveRecovery cannot start a second open.
         ackRecovery()
         let issuedAt = ProcessInfo.processInfo.systemUptime
-        let executionIdentity = pane.inputSurface.requestedExecutionIdentity
+        let executionIdentity = pane.inputSurface.recoveryExecutionIdentity
         let allowsImplicit = pane.inputSurface.allowsImplicitExecutionBootstrap
         recoveryLifecycleQueue.async { [weak self] in
             // Queue delay consumes the Rust-issued budget rather than resetting it.
@@ -153,6 +157,11 @@ extension ProductChromeHostView {
             result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_RETRYABLE)
         case .controllerBusy:
             result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_CONTROLLER_BUSY)
+        case .executionEnded:
+            result = completeRecovery(
+                generation: generation,
+                outcome: SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME
+            )
         case .blocked:
             result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_BLOCKED_OUTCOME)
         }
