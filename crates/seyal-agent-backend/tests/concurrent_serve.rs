@@ -11,7 +11,7 @@ use std::{
     os::unix::net::UnixStream,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
+        mpsc, Arc,
     },
     thread,
     time::{Duration, Instant},
@@ -222,11 +222,15 @@ fn repeated_peer_fault_does_not_stall_unrelated_connection() {
     let socket = daemon.socket_path();
     let progress = Arc::new(AtomicU64::new(0));
 
+    // Handles are labelled by accept order, so the fault peer connects only
+    // after the owner's session is open; sleeps cannot order connects on a
+    // loaded runner.
+    let (owner_connected, owner_ready) = mpsc::channel();
     let owner_progress = Arc::clone(&progress);
     let owner_socket = socket.clone();
     let owner = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(20));
         let mut client = TestClient::connect(&owner_socket);
+        owner_connected.send(()).unwrap();
         for i in 0..8 {
             let _ = client.create_work_scope(WorkScopeKind::AdHoc);
             owner_progress.store(i + 1, Ordering::SeqCst);
@@ -238,7 +242,7 @@ fn repeated_peer_fault_does_not_stall_unrelated_connection() {
     let fault_socket = socket.clone();
     let fault = thread::spawn(move || {
         use std::io::Write;
-        thread::sleep(Duration::from_millis(40));
+        owner_ready.recv().unwrap();
         // One live peer that repeatedly sends malformed post-handshake frames.
         let mut client = TestClient::connect_observer(&fault_socket);
         for _ in 0..5 {
@@ -253,7 +257,11 @@ fn repeated_peer_fault_does_not_stall_unrelated_connection() {
     let seen = owner.join().unwrap();
     let _ = fault.join();
     assert_eq!(seen, 8, "owner must keep making progress under peer faults");
-    assert!(h_owner.join().unwrap().is_ok());
+    let owner_result = h_owner.join().unwrap();
+    assert!(
+        owner_result.is_ok(),
+        "owner disconnect is normal: {owner_result:?}"
+    );
     let fault_result = h_fault.join().unwrap();
     assert!(
         fault_result.is_ok()
@@ -305,7 +313,7 @@ fn stalled_pre_hello_peers_do_not_block_next_peer_admission() {
     let owner_worker = daemon.accept_and_spawn().expect("admit owner");
     let owner_elapsed = owner.join().unwrap();
     assert!(
-        owner_elapsed < Duration::from_secs(2),
+        owner_elapsed < handshake_timeout,
         "owner admission waited on stalled Hello reads: {owner_elapsed:?}"
     );
     assert!(owner_worker.join().unwrap().is_ok());
