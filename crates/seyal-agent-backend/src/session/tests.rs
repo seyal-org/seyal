@@ -397,7 +397,7 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
         other => panic!("{other:?}"),
     };
     service
-        .set_principal_status_durable(owner, PrincipalStatus::Revoked)
+        .set_principal_status(owner, PrincipalStatus::Revoked)
         .unwrap();
     drop(service);
 
