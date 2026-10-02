@@ -1,5 +1,5 @@
 use super::*;
-use seyal_agent_protocol::{ProtocolVersion, MAX_EVENT_WINDOW};
+use seyal_agent_protocol::{HandshakeError, ProtocolVersion, MAX_EVENT_WINDOW};
 use std::time::Instant;
 use std::{
     os::unix::net::UnixListener,
@@ -7,6 +7,17 @@ use std::{
     thread,
     time::Duration,
 };
+
+#[test]
+fn wrong_owner_peer_is_recoverable_other_endpoint_faults_are_not() {
+    assert!(DaemonError::Endpoint(EndpointFault::WrongOwner).is_recoverable_client_fault());
+    assert!(!DaemonError::Endpoint(EndpointFault::Symlink).is_recoverable_client_fault());
+    assert!(!DaemonError::Endpoint(EndpointFault::InsecureMode).is_recoverable_client_fault());
+    assert!(DaemonError::Handshake(HandshakeError::Malformed).is_recoverable_client_fault());
+    assert!(DaemonError::Io.is_recoverable_client_fault());
+    assert!(!DaemonError::AcceptIo.is_recoverable_client_fault());
+    assert!(!DaemonError::Unavailable.is_recoverable_client_fault());
+}
 
 static NEXT_DIR: AtomicU64 = AtomicU64::new(1);
 
