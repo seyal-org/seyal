@@ -365,12 +365,11 @@ fn replay_identity(dir: &Path) -> Vec<ReplayIdentityRow> {
         }
         let mut highest_exclusive = 0_u64;
         for event in &events {
-            if let Ok(output) = seyal_agent_store::decode_output_ref(&event.payload) {
-                if output.segment_count > 0 {
-                    let end =
-                        u64::from(output.first_segment_index) + u64::from(output.segment_count);
-                    highest_exclusive = highest_exclusive.max(end);
-                }
+            if let Ok(output) = seyal_agent_store::decode_output_ref(&event.payload)
+                && output.segment_count > 0
+            {
+                let end = u64::from(output.first_segment_index) + u64::from(output.segment_count);
+                highest_exclusive = highest_exclusive.max(end);
             }
         }
         let stored_segments = store.output_segment_count(id).unwrap();
