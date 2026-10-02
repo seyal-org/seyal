@@ -41,6 +41,9 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        // Bind ran before the handle was installed, so re-seed now that the
+        // live client is visible (bootstrap create may already have used id 1).
+        self.seed_provisioning_request_floor_from_wire();
         Ok(())
     }
 
@@ -77,6 +80,9 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(registered);
+        // Bind ran before the handle was installed, so re-seed now that the
+        // live client is visible (bootstrap create may already have used id 1).
+        self.seed_provisioning_request_floor_from_wire();
         Ok(())
     }
 

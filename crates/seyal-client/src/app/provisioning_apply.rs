@@ -173,6 +173,9 @@ impl ApplicationRoot {
         if bound.pane != fence.pane {
             return Err(AppError::StalePane);
         }
+        // Defense in depth: raise the session floor from the live wire client
+        // even if attach forgot to seed (bootstrap create used connection id 1).
+        self.seed_provisioning_request_floor_from_wire();
         let effects = self
             .provisioning
             .begin_explicit_terminate(bound.pane, bound.attachment)
@@ -451,7 +454,7 @@ impl ApplicationRoot {
 
     /// Raise the portable session request_id floor to the live wire client's
     /// next id so CreateTab cannot reuse bootstrap's connection-local id 1.
-    fn seed_provisioning_request_floor_from_wire(&mut self) {
+    pub(super) fn seed_provisioning_request_floor_from_wire(&mut self) {
         #[cfg(target_os = "macos")]
         {
             if let Some(client) = self.wire_client.as_ref() {

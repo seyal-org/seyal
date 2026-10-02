@@ -397,16 +397,44 @@ fn explicit_terminate_is_distinct_from_removing_chrome() {
 }
 
 #[test]
+fn terminate_after_attach_seeds_request_id_past_bootstrap_without_manual_seed() {
+    // Production attach installs client_handle after Bind. Session must seed
+    // from the live client's next id so terminate cannot reuse bootstrap id 1.
+    let mut root = ApplicationRoot::new();
+    let mut client = negotiated_provisioning_client();
+    client.next_provisioning_request_id = 2;
+    root.attach_client(root.fence(), client)
+        .expect("attach registers Controller and seeds request floor");
+    assert!(root.wire_client().is_none());
+    assert!(root.live_client_handle_for_test().is_some());
+
+    root.apply(AppAction::TerminateExecution {
+        fence: root.fence(),
+    })
+    .expect("terminate must admit past bootstrap floor");
+    let request_id = (1..=16u64)
+        .find_map(|id| {
+            root.provisioning()
+                .pending_terminate_by_request_id(id)
+                .map(|intent| intent.request_id)
+        })
+        .expect("pending terminate");
+    assert!(
+        request_id >= 2,
+        "terminate must not reuse bootstrap create id 1 after attach_client; got {request_id}"
+    );
+}
+
+#[test]
 fn terminate_after_bootstrap_floor_admits_request_id_at_least_two() {
-    // After headed bootstrap, create used request_id 1 and the live client
-    // advances to next=2. Session must seed from that floor so terminate is
-    // not rejected by Runtime as a non-increasing id.
+    // Wire-client install path (tests / alternate host): create_tab seeds from
+    // wire_client; terminate must still stay past bootstrap id 1.
     let mut root = ApplicationRoot::new();
     root.enable_tab_creation_for_test();
     let mut client = negotiated_provisioning_client();
     client.next_provisioning_request_id = 2;
     root.install_wire_client(client).unwrap();
-    root.provisioning_mut().seed_next_request_id(2);
+    // No manual seed: create_tab / terminate must raise the floor from wire.
 
     drive_create_tab_to_bound(&mut root, exec(0x91));
     let pane = root.snapshot().shell.focused_pane;
