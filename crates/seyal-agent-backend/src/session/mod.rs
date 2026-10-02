@@ -363,26 +363,24 @@ impl IntegrationService {
             return CommandResult::Error(error);
         }
         let aggregate = AggregateId::AgentRun(run_id);
-        let events = match self.store.replay_after(aggregate, None) {
-            Ok(events) => events,
-            Err(_) => return CommandResult::Error(CommandError::Failed),
+        // Event count is the aggregate high-water mark. Do not load full replay
+        // payloads solely to count events (AB-1.6 / AB-0 shortcut removal).
+        let event_count = match self.store.high_water(aggregate) {
+            Ok(count) if count > 0 => count,
+            _ => return CommandResult::Error(CommandError::Failed),
         };
-        let Some(last) = events.last() else {
+        let Some(last) = AggregateSequence::from_raw(event_count) else {
             return CommandResult::Error(CommandError::Failed);
         };
         let payload = snapshot_payload(&self.authority, run_id);
-        if self
-            .store
-            .snapshot(aggregate, last.sequence, &payload)
-            .is_err()
-        {
+        if self.store.snapshot(aggregate, last, &payload).is_err() {
             return CommandResult::Error(CommandError::Failed);
         }
         CommandResult::Started {
             run_id,
             binding_generation: binding.get(),
             control_generation: control.get(),
-            event_count: events.len() as u64,
+            event_count,
         }
     }
 

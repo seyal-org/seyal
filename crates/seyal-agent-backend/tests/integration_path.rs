@@ -150,10 +150,13 @@ fn standalone_path_survives_disconnect_and_restart() {
     ) = recovered.join().unwrap();
     assert_eq!(run.0, 2, "recovery fences binding generation");
     assert_eq!(run.1, 2, "recovery fences control generation");
-    assert_eq!(run.2, 3, "restart classifies liveness as unknown");
+    assert_eq!(
+        run.2, 2,
+        "restart must honor committed terminal observations"
+    );
     assert_eq!(
         snapshot.payload.first().copied(),
-        Some(3),
+        Some(2),
         "GetSnapshot liveness must match ReadRun after restart"
     );
     assert_eq!(
@@ -185,6 +188,51 @@ fn standalone_path_survives_disconnect_and_restart() {
     for forbidden in ["seyal-runtime", "seyal-terminal", "seyal-render"] {
         assert!(!manifest.contains(forbidden), "{forbidden}");
     }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn recovery_without_terminal_observation_stays_unknown_not_fabricated_termination() {
+    let dir = temp_dir("live-recover");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::ObservationDisconnected),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config.clone()).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let before = client.read_run(started.run_id);
+        (started.run_id, before)
+    });
+    daemon.serve_one().unwrap();
+    let (run_id, before) = client.join().unwrap();
+    assert_eq!(before.2, 4, "pre-crash observation-lost");
+    daemon.abandon_as_crash();
+
+    let mut restarted = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = restarted.socket_path();
+    let recovered = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let run = client.read_run(run_id);
+        let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
+        (run, snapshot.payload)
+    });
+    restarted.serve_one().unwrap();
+    let (run, snapshot_payload) = recovered.join().unwrap();
+    assert_eq!(
+        run.2, 3,
+        "non-terminal recovery must stay UnknownAfterCrash"
+    );
+    assert_eq!(snapshot_payload.first().copied(), Some(3));
+    assert_ne!(run.2, 2, "must not fabricate KnownTerminated");
     let _ = fs::remove_dir_all(dir);
 }
 

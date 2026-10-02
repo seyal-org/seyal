@@ -103,3 +103,19 @@ path = "crates/seyal-agent-backend/src/daemon/mod.rs"
 acknowledged_loc = 728
 issue = 1029
 reason = "Unix daemon bind/reclaim/serve and Hello evidence→principal binding stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-B3 LOC."
+
+# #1182 AB-1.6 observation/replay hardening: per-run next-ordinal cursor and
+# recovery terminal-evidence helpers stay with ObservationAuthority apply/undo.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/observation.rs"
+acknowledged_loc = 769
+issue = 1182
+reason = "ObservationAuthority apply/undo, next-ordinal cursor, and liveness stickiness stay one authority module; #1182 removes the linear key scan and adds scale/recovery regression tests in the same file. Extracting only the cursor would split the apply invariant from its index."
+
+# #1182 AB-1.6 store high_water / terminal-observation probes for start_agent_run
+# and recovery stay with the SQLite aggregate event path.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-store/src/sqlite/mod.rs"
+acknowledged_loc = 755
+issue = 1182
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1182 adds high_water and terminal-observation existence probes used by start_agent_run/recovery without loading full payloads. Further split would separate HWM authority from the insert path that maintains it."
