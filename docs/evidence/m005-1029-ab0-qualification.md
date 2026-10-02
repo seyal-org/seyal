@@ -213,7 +213,9 @@ These answer the six questions on #1029. They do not amend
 1. One per-user daemon stayed the authority across `SIGKILL` and restart.
    Identities and replay sequences matched. The old session was rejected. Run
    liveness came back Unknown (code 3), not as a fabricated terminal result.
-   Serving remains one connection at a time.
+   Serving remains one connection at a time. Hello `client_principal_evidence`
+   selects owner vs observe-only principals; same-UID admission is not
+   authorization.
 2. The five crate boundaries held. No terminal crate is linked, and no crate
    merge was required to finish the path. The qualifying client is
    protocol-level `TestClient`. `SessionClient` does not depend on the backend

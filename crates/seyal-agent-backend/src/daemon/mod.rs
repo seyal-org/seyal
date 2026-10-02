@@ -189,7 +189,8 @@ impl AgentDaemon {
     }
 
     pub fn accept_hello(&self) -> Result<HelloAck, DaemonError> {
-        let (stream, ack) = self.accept_stream()?;
+        let (mut stream, _hello, ack) = self.accept_negotiated()?;
+        self.write_hello_ack(&mut stream, &ack)?;
         drop(stream);
         Ok(ack)
     }
@@ -209,31 +210,8 @@ impl AgentDaemon {
         }
         let idle = self.config.session_idle_timeout;
         let write_timeout = self.config.session_write_timeout;
-        let (mut stream, ack) = {
-            // Split borrow: accept_stream needs &self; begin_connection needs
-            // &mut integration. Validate evidence before HelloAck.
-            let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
-            let (mut stream, hello) = Self::accept_peer(
-                listener,
-                &self.socket_path(),
-                self.our_uid,
-                self.config.max_frame_size,
-                self.config.read_timeout,
-            )?;
-            let ack = match negotiate_hello(
-                &hello,
-                self.instance_id,
-                self.config.max_frame_size,
-                self.config.event_window,
-            ) {
-                Ok(ack) => ack,
-                Err(error) => {
-                    let bytes = encode_handshake_error(error, self.config.max_frame_size)
-                        .map_err(|_| DaemonError::Malformed)?;
-                    let _ = stream.write_all(&bytes);
-                    return Err(DaemonError::Handshake(error));
-                }
-            };
+        let (mut stream, hello, ack) = self.accept_negotiated()?;
+        {
             let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
             if service
                 .begin_connection(&hello.client_principal_evidence)
@@ -245,11 +223,8 @@ impl AgentDaemon {
                 let _ = stream.write_all(&bytes);
                 return Err(DaemonError::Handshake(HandshakeError::Malformed));
             }
-            let bytes =
-                encode_ack(&ack, self.config.max_frame_size).map_err(|_| DaemonError::Malformed)?;
-            stream.write_all(&bytes).map_err(map_io)?;
-            (stream, ack)
-        };
+        }
+        self.write_hello_ack(&mut stream, &ack)?;
         stream
             .set_read_timeout(Some(idle))
             .map_err(|_| DaemonError::Io)?;
@@ -303,7 +278,9 @@ impl AgentDaemon {
         }
     }
 
-    fn accept_stream(&self) -> Result<(UnixStream, HelloAck), DaemonError> {
+    /// Accept a same-UID peer, validate Hello evidence, and negotiate limits.
+    /// Does not write HelloAck so callers can bind a principal first.
+    fn accept_negotiated(&self) -> Result<(UnixStream, Hello, HelloAck), DaemonError> {
         let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
         let (mut stream, hello) = Self::accept_peer(
             listener,
@@ -329,12 +306,7 @@ impl AgentDaemon {
             self.config.max_frame_size,
             self.config.event_window,
         ) {
-            Ok(ack) => {
-                let bytes = encode_ack(&ack, self.config.max_frame_size)
-                    .map_err(|_| DaemonError::Malformed)?;
-                stream.write_all(&bytes).map_err(map_io)?;
-                Ok((stream, ack))
-            }
+            Ok(ack) => Ok((stream, hello, ack)),
             Err(error) => {
                 let bytes = encode_handshake_error(error, self.config.max_frame_size)
                     .map_err(|_| DaemonError::Malformed)?;
@@ -342,6 +314,12 @@ impl AgentDaemon {
                 Err(DaemonError::Handshake(error))
             }
         }
+    }
+
+    fn write_hello_ack(&self, stream: &mut UnixStream, ack: &HelloAck) -> Result<(), DaemonError> {
+        let bytes =
+            encode_ack(ack, self.config.max_frame_size).map_err(|_| DaemonError::Malformed)?;
+        stream.write_all(&bytes).map_err(map_io)
     }
 
     fn accept_peer(

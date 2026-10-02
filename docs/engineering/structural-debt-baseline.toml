@@ -95,3 +95,11 @@ path = "crates/seyal-protocol/src/display/mod.rs"
 acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
+
+# #1029 AB-0 Hello evidence binds a principal before HelloAck; accept/negotiate
+# and one-connection serve stay one daemon façade (peer/endpoint already split).
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/daemon/mod.rs"
+acknowledged_loc = 728
+issue = 1029
+reason = "Unix daemon bind/reclaim/serve and Hello evidence→principal binding stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-B3 LOC."
