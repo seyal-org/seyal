@@ -223,10 +223,15 @@ pub(crate) fn requested_capabilities(
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
     request_viewport_line_ids: bool,
+    request_execution_provisioning: bool,
 ) -> u32 {
     CAP_COMMAND_BLOCKS
         | CAP_GRAPHEME_DISPLAY
-        | CAP_EXECUTION_PROVISIONING
+        | if request_execution_provisioning {
+            CAP_EXECUTION_PROVISIONING
+        } else {
+            0
+        }
         | if request_viewport_line_ids {
             CAP_VIEWPORT_LINE_IDS
         } else {
@@ -254,12 +259,14 @@ pub(crate) fn hello_until(
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
     request_viewport_line_ids: bool,
+    request_execution_provisioning: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
     let client_capabilities = requested_capabilities(
         request_block_metadata,
         request_extended_terminal_key,
         request_viewport_line_ids,
+        request_execution_provisioning,
     );
     send_control_until(
         stream,
@@ -302,9 +309,9 @@ pub(crate) fn hello_until(
 /// ClientHello bits as `MalformedPayload` instead of ignoring them.
 ///
 /// Ordered reconnect fallback (bounded; each step at most once):
-/// 1. Full advertise (viewport LineIds + extended key).
-/// 2. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime allowlist).
-/// 3. Also drop `CAP_EXTENDED_TERMINAL_KEY` (SPEC-006 §21.5 / pre-V2).
+/// 1. Full advertise (viewport LineIds + extended key + execution provisioning).
+/// 2. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime; still advertises provisioning).
+/// 3. Drop extended key + provisioning (SPEC-006 §21.5 / pre-V2 M001 allowlist).
 pub(crate) fn hello_until_with_legacy_key_fallback(
     stream: &mut UnixStream,
     mut reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
@@ -318,6 +325,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
         request_block_metadata,
         true,
         true,
+        true,
         deadline,
     ) {
         Ok(hello) => Ok(hello),
@@ -329,6 +337,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
                 request_block_metadata,
                 true,
                 false,
+                true,
                 deadline,
             ) {
                 Ok(hello) => Ok(hello),
@@ -338,6 +347,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
                         stream,
                         interactive,
                         request_block_metadata,
+                        false,
                         false,
                         false,
                         deadline,
@@ -420,6 +430,7 @@ mod connect_error_tests {
             true,
             true,
             true,
+            true,
             Instant::now() + Duration::from_secs(1),
         )
         .expect("old server hello remains usable");
@@ -437,7 +448,7 @@ mod connect_error_tests {
             .expect("client hello payload");
         let hello = ClientHello::decode(&payload).expect("client hello");
         // Pre-V2 allowlist: reject any bit outside the M001 known set, including
-        // both CAP_EXTENDED_TERMINAL_KEY and CAP_VIEWPORT_LINE_IDS.
+        // CAP_EXTENDED_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS, and CAP_EXECUTION_PROVISIONING.
         let unknown = hello.client_capabilities
             & !(CAP_COMMAND_BLOCKS
                 | seyal_runtime::pass8::CAP_BLOCK_METADATA
@@ -458,10 +469,11 @@ mod connect_error_tests {
         }
         assert!(
             accept_without_v2,
-            "legacy fallback must omit CAP_EXTENDED_TERMINAL_KEY and CAP_VIEWPORT_LINE_IDS"
+            "legacy fallback must omit CAP_EXTENDED_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS, and CAP_EXECUTION_PROVISIONING"
         );
         assert_eq!(hello.client_capabilities & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_eq!(hello.client_capabilities & CAP_VIEWPORT_LINE_IDS, 0);
+        assert_eq!(hello.client_capabilities & CAP_EXECUTION_PROVISIONING, 0);
         let hello = ServerHello {
             runtime_id: 1,
             server_capabilities: CAP_BINARY_DISPLAY
@@ -489,7 +501,8 @@ mod connect_error_tests {
             & !(CAP_COMMAND_BLOCKS
                 | seyal_runtime::pass8::CAP_BLOCK_METADATA
                 | CAP_GRAPHEME_DISPLAY
-                | CAP_EXTENDED_TERMINAL_KEY);
+                | CAP_EXTENDED_TERMINAL_KEY
+                | CAP_EXECUTION_PROVISIONING);
         if unknown != 0 {
             let error = ErrorMessage {
                 error_code: ErrorCode::MalformedPayload as u16,
@@ -524,8 +537,8 @@ mod connect_error_tests {
 
     #[test]
     fn requested_capabilities_can_omit_extended_key_for_old_runtimes() {
-        let with_v2 = requested_capabilities(true, true, true);
-        let without_v2 = requested_capabilities(true, false, true);
+        let with_v2 = requested_capabilities(true, true, true, true);
+        let without_v2 = requested_capabilities(true, false, true, true);
         assert_ne!(with_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_eq!(without_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
         assert_ne!(without_v2 & CAP_COMMAND_BLOCKS, 0);
@@ -534,15 +547,20 @@ mod connect_error_tests {
         assert_ne!(with_v2 & CAP_EXECUTION_PROVISIONING, 0);
         assert_ne!(without_v2 & CAP_VIEWPORT_LINE_IDS, 0);
         assert_ne!(without_v2 & seyal_runtime::pass8::CAP_BLOCK_METADATA, 0);
+        let m001 = requested_capabilities(true, false, false, false);
+        assert_eq!(m001 & CAP_EXECUTION_PROVISIONING, 0);
+        assert_eq!(m001 & CAP_EXTENDED_TERMINAL_KEY, 0);
+        assert_eq!(m001 & CAP_VIEWPORT_LINE_IDS, 0);
     }
 
     #[test]
     fn requested_capabilities_can_omit_viewport_line_ids() {
-        let with = requested_capabilities(true, true, true);
-        let without = requested_capabilities(true, true, false);
+        let with = requested_capabilities(true, true, true, true);
+        let without = requested_capabilities(true, true, false, true);
         assert_ne!(with & CAP_VIEWPORT_LINE_IDS, 0);
         assert_eq!(without & CAP_VIEWPORT_LINE_IDS, 0);
         assert_ne!(without & CAP_EXTENDED_TERMINAL_KEY, 0);
+        assert_ne!(without & CAP_EXECUTION_PROVISIONING, 0);
     }
 
     #[test]
@@ -551,6 +569,7 @@ mod connect_error_tests {
         let rejector = std::thread::spawn(move || pre_v2_runtime_hello(rejected_server, false));
         let error = hello_until(
             &mut rejected_client,
+            true,
             true,
             true,
             true,
@@ -567,6 +586,7 @@ mod connect_error_tests {
             &mut fallback_client,
             true,
             true,
+            false,
             false,
             false,
             Instant::now() + Duration::from_secs(1),

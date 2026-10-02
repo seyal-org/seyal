@@ -1,7 +1,10 @@
 //! Disposition close must clear presentation identity so a surviving pane can rebind.
 
 use super::super::*;
-use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed, SplitAxis};
+use crate::shell::{
+    ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
+};
+use seyal_core::WindowId;
 
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
@@ -17,6 +20,7 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
 fn closing_bound_authority_pane_clears_presentation_for_rebind() {
     let tab = TabId::new();
     let pane = PaneId::new();
+    let window = WindowId::new();
     let workspace = WorkspaceId::m001_default();
     let shell = ShellState::from_workspaces(
         vec![ShellWorkspaceSeed {
@@ -24,16 +28,20 @@ fn closing_bound_authority_pane_clears_presentation_for_rebind() {
             name: "Local".to_owned(),
             detail: Some("local".to_owned()),
             attention: false,
-            active_tab: tab,
-            tabs: vec![ShellTabSeed {
-                id: tab,
-                title: "Terminal".to_owned(),
-                attention: false,
-                pane: ShellPaneSeed {
-                    id: pane,
-                    title: "Pane 1".to_owned(),
-                    allows_implicit_execution_bootstrap: true,
-                },
+            active_window: window,
+            windows: vec![ShellWindowSeed {
+                id: window,
+                active_tab: tab,
+                tabs: vec![ShellTabSeed {
+                    id: tab,
+                    title: "Terminal".to_owned(),
+                    attention: false,
+                    pane: ShellPaneSeed {
+                        id: pane,
+                        title: "Pane 1".to_owned(),
+                        allows_implicit_execution_bootstrap: true,
+                    },
+                }],
             }],
         }],
         workspace,
