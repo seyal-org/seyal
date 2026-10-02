@@ -100,7 +100,7 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 # Unix daemon accept/negotiate/serve façade (peer/endpoint already split).
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 761
+acknowledged_loc = 774
 issue = 1183
 reason = "Unix daemon bind/reclaim/serve, Hello evidence→principal binding, and recoverable client-fault classification stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-recoverable-fault LOC."
 

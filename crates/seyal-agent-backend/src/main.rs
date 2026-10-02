@@ -5,9 +5,7 @@
 
 use std::{env, process, thread, time::Duration};
 
-use seyal_agent_backend::{
-    AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep,
-};
+use seyal_agent_backend::{AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep};
 
 fn main() {
     let options = match parse_args(env::args().skip(1)) {
@@ -192,6 +190,7 @@ mod tests {
         assert!(DaemonError::Io.is_recoverable_client_fault());
         assert!(DaemonError::Handshake(HandshakeError::Malformed).is_recoverable_client_fault());
         assert!(!DaemonError::Unavailable.is_recoverable_client_fault());
+        assert!(!DaemonError::AcceptIo.is_recoverable_client_fault());
         assert!(!DaemonError::InsecureDirectory.is_recoverable_client_fault());
         assert!(!DaemonError::StartupContended.is_recoverable_client_fault());
     }

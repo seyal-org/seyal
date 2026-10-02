@@ -58,7 +58,10 @@ pub enum DaemonError {
     Malformed,
     Oversized,
     TimedOut,
+    /// Per-session stream I/O after accept (recoverable for the accept loop).
     Io,
+    /// Listener `accept` failure — not a client fault; must not hot-loop.
+    AcceptIo,
 }
 
 impl DaemonError {
@@ -66,6 +69,7 @@ impl DaemonError {
     ///
     /// `Endpoint(WrongOwner)` is a same-UID peer reject; other `Endpoint`
     /// faults mean the bound path itself is compromised and stay fatal.
+    /// `AcceptIo` stays fatal so persistent accept failures cannot spin.
     pub fn is_recoverable_client_fault(self) -> bool {
         matches!(
             self,
@@ -76,21 +80,6 @@ impl DaemonError {
                 | Self::Io
                 | Self::Endpoint(EndpointFault::WrongOwner)
         )
-    }
-}
-
-#[cfg(test)]
-mod recoverable_fault_tests {
-    use super::{DaemonError, EndpointFault};
-    use seyal_agent_protocol::HandshakeError;
-
-    #[test]
-    fn wrong_owner_peer_is_recoverable_other_endpoint_faults_are_not() {
-        assert!(DaemonError::Endpoint(EndpointFault::WrongOwner).is_recoverable_client_fault());
-        assert!(!DaemonError::Endpoint(EndpointFault::Symlink).is_recoverable_client_fault());
-        assert!(!DaemonError::Endpoint(EndpointFault::InsecureMode).is_recoverable_client_fault());
-        assert!(DaemonError::Handshake(HandshakeError::Malformed).is_recoverable_client_fault());
-        assert!(!DaemonError::Unavailable.is_recoverable_client_fault());
     }
 }
 
@@ -314,7 +303,7 @@ impl AgentDaemon {
     /// Accept a same-UID peer, validate Hello evidence, and negotiate limits.
     /// Does not write HelloAck so callers can bind a principal first.
     fn accept_negotiated(&self) -> Result<(UnixStream, Hello, HelloAck), DaemonError> {
-        let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
+        let listener = self.listener.as_ref().ok_or(DaemonError::AcceptIo)?;
         let (mut stream, hello) = Self::accept_peer(
             listener,
             &self.socket_path(),
@@ -362,7 +351,14 @@ impl AgentDaemon {
         max_frame_size: u32,
         read_timeout: Duration,
     ) -> Result<(UnixStream, Hello), DaemonError> {
-        let (mut stream, _) = listener.accept().map_err(map_io)?;
+        let (mut stream, _) = listener.accept().map_err(|error| {
+            if error.kind() == io::ErrorKind::TimedOut || error.kind() == io::ErrorKind::WouldBlock
+            {
+                DaemonError::TimedOut
+            } else {
+                DaemonError::AcceptIo
+            }
+        })?;
         stream
             .set_read_timeout(Some(read_timeout))
             .map_err(|_| DaemonError::Io)?;
