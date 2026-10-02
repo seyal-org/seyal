@@ -131,21 +131,45 @@ impl Runtime {
     /// transaction (CapabilityPolicy + ShellIntegrationPolicy apply inside).
     ///
     /// A launch-policy failure returns before spawn: zero published executions
-    /// and no inherited descriptors.
+    /// and no inherited descriptors. Failures map through
+    /// [`RuntimeError::create_result_wire`] / [`crate::encode_launch_policy_failure`]
+    /// to SPEC-004 `17 LaunchPolicyRejected`. Success-after-fallback warning bits
+    /// on `Created.detail_code` require negotiated `CAP_LAUNCH_POLICY_DETAIL`.
     pub fn create_interactive_execution(
         &mut self,
         size: WindowSize,
-    ) -> Result<ExecutionId, RuntimeError> {
-        let resolution = crate::launch_policy::resolve_default_interactive()?;
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        self.create_interactive_execution_with_detail_cap(size, false)
+    }
+
+    /// Same as [`Self::create_interactive_execution`], with an explicit
+    /// `CAP_LAUNCH_POLICY_DETAIL` negotiation flag (ADR-020 §3.10).
+    pub fn create_interactive_execution_with_detail_cap(
+        &mut self,
+        size: WindowSize,
+        launch_policy_detail_negotiated: bool,
+    ) -> Result<crate::InteractiveCreateOutcome, RuntimeError> {
+        let resolution = match crate::launch_policy::resolve_default_interactive() {
+            Ok(resolution) => resolution,
+            Err(failure) => return Err(RuntimeError::LaunchPolicy(failure)),
+        };
         if !self.config.capability_policy.is_available() {
             return Err(RuntimeError::LaunchPolicy(
                 crate::LaunchPolicyFailure::CapabilityUnavailable,
             ));
         }
-        // Warnings are count-only until L3; never carry rejected paths.
-        let _warning_count = resolution.warnings.len();
+        let warnings = crate::encode_created_warnings(&resolution.warnings);
         let command = crate::launch_policy::command_spec_from_policy(&resolution);
-        self.create_execution(command, size)
+        let execution_id = self.create_execution(command, size)?;
+        let detail_code = if launch_policy_detail_negotiated {
+            warnings.detail_code
+        } else {
+            0
+        };
+        Ok(crate::InteractiveCreateOutcome {
+            execution_id,
+            detail_code,
+        })
     }
 
     pub fn create_execution(

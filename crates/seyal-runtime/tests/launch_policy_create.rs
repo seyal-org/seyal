@@ -1,11 +1,13 @@
-//! L2 Runtime interactive create: SPEC-023 §12 items 11–12 plus SPEC-003 rollback.
+//! L2/L3 Runtime interactive create: SPEC-023 §12 items 11–12, 15–17 plus SPEC-003 rollback.
 #![cfg(target_os = "macos")]
 
 use std::time::{Duration, Instant};
 
 use seyal_exec::{CommandSpec, WindowSize};
+use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::{
-    CapabilityPolicy, LaunchPolicyFailure, LocalIpcMode, Runtime, RuntimeConfig, RuntimeError,
+    encode_created_warnings, encode_launch_policy_failure, CapabilityPolicy, LaunchPolicyFailure,
+    LaunchPolicyWarning, LocalIpcMode, Runtime, RuntimeConfig, RuntimeError,
 };
 
 fn config(test: &str) -> RuntimeConfig {
@@ -58,6 +60,10 @@ fn capability_unavailable_publishes_zero_executions() {
         err,
         RuntimeError::LaunchPolicy(LaunchPolicyFailure::CapabilityUnavailable)
     ));
+    let wire = err.create_result_wire().expect("launch-policy wire");
+    assert_eq!(wire.result_code, ErrorCode::LaunchPolicyRejected as u16);
+    assert_eq!(wire.detail_code, 4);
+    assert_ne!(wire.result_code, ErrorCode::InternalFailure as u16);
     assert_eq!(runtime.execution_count(), 0);
     assert!(runtime.list().is_empty());
     std::fs::remove_dir_all(&missing).unwrap();
@@ -83,9 +89,55 @@ fn developer_explicit_argv_still_creates_one_execution() {
 #[test]
 fn interactive_create_publishes_one_execution() {
     let mut runtime = Runtime::new(config("interactive")).unwrap();
-    let id = runtime.create_interactive_execution(size()).unwrap();
+    let outcome = runtime.create_interactive_execution(size()).unwrap();
     assert_eq!(runtime.execution_count(), 1);
-    assert_eq!(runtime.lookup(id).unwrap().id, id);
+    assert_eq!(
+        runtime.lookup(outcome.execution_id).unwrap().id,
+        outcome.execution_id
+    );
+    // Reserved warning bits stay clear on an ordinary account-shell success.
+    assert_eq!(outcome.detail_code & !0b11, 0);
+    shutdown(&mut runtime);
+}
+
+/// §12 item 17 + one assertion per failure class: sole encoding is code 17.
+#[test]
+fn launch_policy_failure_classes_encode_as_code_17_not_14() {
+    for (failure, detail) in [
+        (LaunchPolicyFailure::AccountRecordUnavailable, 1u32),
+        (LaunchPolicyFailure::ShellFallbackExhausted, 2),
+        (LaunchPolicyFailure::CwdInvalid, 3),
+        (LaunchPolicyFailure::CapabilityUnavailable, 4),
+    ] {
+        let wire = encode_launch_policy_failure(failure);
+        assert_eq!(wire.result_code, ErrorCode::LaunchPolicyRejected as u16);
+        assert_eq!(wire.detail_code, detail);
+        assert_ne!(wire.result_code, ErrorCode::InternalFailure as u16);
+        let err = RuntimeError::LaunchPolicy(failure);
+        assert_eq!(err.create_result_wire(), Some(wire));
+    }
+}
+
+/// §12 item 15 / 17: empty/invalid pw_shell warning is Created bit 0, never a failure.
+#[test]
+fn configured_shell_invalid_warning_is_created_bit_not_failure() {
+    let wire = encode_created_warnings(&[LaunchPolicyWarning::ConfiguredShellInvalid]);
+    assert_eq!(wire.result_code, 0);
+    assert_eq!(wire.detail_code, 1 << 0);
+    assert_ne!(wire.result_code, ErrorCode::LaunchPolicyRejected as u16);
+}
+
+/// §12 item 17: without CAP_LAUNCH_POLICY_DETAIL, Created.detail_code stays 0.
+#[test]
+fn created_detail_code_is_zero_when_launch_policy_detail_not_negotiated() {
+    let mut runtime = Runtime::new(config("detail-cap-off")).unwrap();
+    let outcome = runtime
+        .create_interactive_execution_with_detail_cap(size(), false)
+        .unwrap();
+    assert_eq!(
+        outcome.detail_code, 0,
+        "ADR-020 §3.10: non-negotiating peer must not see Created warning bits"
+    );
     shutdown(&mut runtime);
 }
 

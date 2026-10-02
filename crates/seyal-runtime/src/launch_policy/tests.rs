@@ -275,6 +275,10 @@ fn empty_account_shell_warns_configured_shell_invalid_on_safe_default() {
         out.warnings,
         vec![LaunchPolicyWarning::ConfiguredShellInvalid]
     );
+    // SPEC-023 §12 item 15: warning accompanies success; encode as Created bit 0.
+    let wire = crate::launch_policy::encode_created_warnings(&out.warnings);
+    assert_eq!(wire.result_code, crate::launch_policy::CREATED_RESULT_CODE);
+    assert_eq!(wire.detail_code, 1 << 0);
 }
 
 #[test]

@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Production default: EffectiveLaunchPolicy → CapabilityPolicy /
         // ShellIntegrationPolicy (ADR-020 §3.6 / SPEC-023 §4). Never spawn an
         // unvalidated bare `$SHELL`.
-        runtime.create_interactive_execution(size)?;
+        let _outcome = runtime.create_interactive_execution(size)?;
     } else {
         // Documented developer/test bypass (ADR-020 §3.11). Explicit argv is
         // not the headed profile-0 route; create_execution still applies

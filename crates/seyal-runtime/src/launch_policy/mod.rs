@@ -13,6 +13,7 @@ mod resolve;
 mod tmpdir;
 mod types;
 mod validate;
+mod wire;
 
 #[cfg(all(test, target_os = "macos"))]
 mod compose_tests;
@@ -48,4 +49,8 @@ pub use types::{
 pub use validate::{
     account_record_usable, is_valid_cwd, is_valid_shell_program, path_has_forbidden_chars,
     PathProbe, RealPathProbe,
+};
+pub use wire::{
+    encode_created_warnings, encode_launch_policy_failure, CreateResultWire,
+    InteractiveCreateOutcome, CREATED_RESULT_CODE,
 };

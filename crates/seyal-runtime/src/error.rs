@@ -2,7 +2,7 @@ use std::{fmt, io};
 
 use seyal_exec::{ChildExit, ExecError};
 
-use crate::launch_policy::LaunchPolicyFailure;
+use crate::launch_policy::{encode_launch_policy_failure, CreateResultWire, LaunchPolicyFailure};
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -62,6 +62,18 @@ impl std::error::Error for RuntimeError {}
 impl From<LaunchPolicyFailure> for RuntimeError {
     fn from(value: LaunchPolicyFailure) -> Self {
         Self::LaunchPolicy(value)
+    }
+}
+
+impl RuntimeError {
+    /// Post-L0 create-result encoding when this error is a launch-policy failure.
+    ///
+    /// Always `17 LaunchPolicyRejected` with §9 detail codes; never code 14.
+    pub fn create_result_wire(&self) -> Option<CreateResultWire> {
+        match self {
+            Self::LaunchPolicy(failure) => Some(encode_launch_policy_failure(*failure)),
+            _ => None,
+        }
     }
 }
 

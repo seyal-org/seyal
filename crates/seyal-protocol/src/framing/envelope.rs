@@ -38,6 +38,9 @@ pub enum ErrorCode {
     DisplayUnavailable = 12,
     MalformedPayload = 13,
     InternalFailure = 14,
+    /// ADR-020 / SPEC-004 L0: launch-policy create rejection. Codes 15 and 16
+    /// are owned by the ADR-017 provisioning stack and stay unknown here.
+    LaunchPolicyRejected = 17,
 }
 
 impl ErrorCode {
@@ -57,6 +60,7 @@ impl ErrorCode {
             12 => Self::DisplayUnavailable,
             13 => Self::MalformedPayload,
             14 => Self::InternalFailure,
+            17 => Self::LaunchPolicyRejected,
             _ => return None,
         })
     }
