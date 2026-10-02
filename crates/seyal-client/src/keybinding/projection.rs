@@ -1,6 +1,7 @@
 //! SPEC-024 §11: read-only `KeybindingShortcutProjection` for menus and AX.
 
 use super::route::menu_command_permitted;
+use super::stroke::{stroke_matches, NormalizedStroke};
 use super::types::{
     BindingContext, BindingSequence, KeyStroke, KeySym, KeybindingTable, NamedKey,
     WorkspaceCommand, WorkspaceCommandId,
@@ -192,6 +193,26 @@ pub fn projected_item_for(
     command: WorkspaceCommand,
 ) -> Option<&ProjectedShortcut> {
     projection.items.iter().find(|item| item.command == command)
+}
+
+/// R6.2.1 cross-context guard for unmatched Command strokes.
+///
+/// True when `stroke` equals a projected single-stroke menu key equivalent for
+/// a menu-visible command that is **not** permitted in `route`. AppKit would
+/// otherwise fire that inactive `NSMenuItem` equivalent; ordinary unbound
+/// Command text editing (⌘←/⌘→/⌘⌫) must not take this path (§6.2 step 2c).
+pub fn projected_menu_steals_unmatched_command(
+    table: &KeybindingTable,
+    stroke: &NormalizedStroke,
+    route: BindingContext,
+) -> bool {
+    project_shortcuts(table, route).items.iter().any(|item| {
+        !item.enabled
+            && item
+                .key_equivalent
+                .as_ref()
+                .is_some_and(|equiv| stroke_matches(equiv, stroke))
+    })
 }
 
 /// Stable FFI discriminant for [`WorkspaceCommandId`] (K5 menu surface).

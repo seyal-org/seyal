@@ -46,9 +46,9 @@ reason = "ApplicationRoot unit suite keeps N2/N4 palette address coverage and R6
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 981
+acknowledged_loc = 989
 issue = 1125
-reason = "Published C ABI façade keeps #1125 shortcut re-exports, #1132 history error_code split, #1124/#1138 PrefixWait→CONSUMED mapping, and #1110/#1127 goto routing. Projection lives in shortcut.rs; history/goto/keybinding error numbers live in error_code.rs; chord state and match stay in keybinding and app/keybinding_apply."
+reason = "Published C ABI façade keeps #1125 shortcut re-exports, #1132 history error_code split, #1124/#1138 PrefixWait→CONSUMED mapping, #1110/#1127 goto routing, and unmatched-Command native vs projected-menu-steal split. Projection lives in shortcut.rs; history/goto/keybinding error numbers live in error_code.rs; chord state and match stay in keybinding and app/keybinding_apply."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"

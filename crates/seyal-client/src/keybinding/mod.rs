@@ -33,8 +33,8 @@ pub use load::{
 };
 pub use projection::{
     command_title, encode_menu_key_equivalent, project_shortcuts, projected_item_for,
-    workspace_command_ffi_id, workspace_command_from_ffi_id, KeybindingShortcutProjection,
-    ProjectedShortcut, ShortcutHint,
+    projected_menu_steals_unmatched_command, workspace_command_ffi_id,
+    workspace_command_from_ffi_id, KeybindingShortcutProjection, ProjectedShortcut, ShortcutHint,
 };
 pub use route::{
     fallthrough_is_flow, fallthrough_is_terminal, menu_command_permitted, resolve_tab_ordinal,

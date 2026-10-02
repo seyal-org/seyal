@@ -1400,6 +1400,39 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    /// §6.2 step 2c: unbound Cmd+Left is native — must not be swallowed as consumed.
+    @MainActor
+    func testPerformKeyEquivalentLeavesUnboundCmdLeftNative() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command, .numericPad, .function],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{F702}",
+            charactersIgnoringModifiers: "\u{F702}",
+            isARepeat: false,
+            keyCode: 123
+        ))
+        let routed = KeybindingStrokeNormalizer.route(
+            appHandle: view.pane.appHandle,
+            event: event,
+            composerFocused: true,
+            compositionActive: false
+        )
+        guard case .nativeCommand = routed else {
+            XCTFail("unbound Cmd+Left must report native for composer text editing, got \(routed)")
+            return
+        }
+        // No window/menu ownership here: native path calls super and returns false.
+        XCTAssertFalse(
+            view.performKeyEquivalent(with: event),
+            "unbound Cmd+Left must not be consumed by the host"
+        )
+    }
+
     /// R8.4 via R6.2.1: `performKeyEquivalent` must forward marked-text from the
     /// focused metal surface (not hardcode `compositionActive: false`).
     @MainActor

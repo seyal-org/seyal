@@ -234,4 +234,60 @@ context = ["raw"]
         ),
         "Raw specificity must beat app tab.create before any menu path: {matched:?}"
     );
+
+    // Flow still sees the app New Tab binding (Matched), so the menu path never
+    // runs — but the projected ⌘T equivalent remains the steal surface when the
+    // route drops `app` (palette). That case is covered below.
+    let flow = route_context_set(false, PresentationMode::Flow, false);
+    let mut chord = ChordPrefixState::new();
+    let flow_match = route_keystroke(&table, &event, flow, false, &mut chord, Instant::now());
+    assert!(
+        matches!(
+            flow_match,
+            RouteOutcome::Matched {
+                command: WorkspaceCommand {
+                    id: WorkspaceCommandId::TabCreate,
+                    ..
+                }
+            }
+        ),
+        "Flow keeps app tab.create; menu must not be the authority: {flow_match:?}"
+    );
+}
+
+/// R6.2.1 / §6.2 step 2c: consume unmatched Command only when a projected
+/// menu equivalent would steal across an inactive context.
+#[test]
+fn unmatched_command_menu_steal_only_for_inactive_projected_equivalent() {
+    use super::projection::projected_menu_steals_unmatched_command;
+    use super::stroke::normalized_from_notation;
+
+    let table = load_keybinding_table(None);
+    let cmd_t = normalized_from_notation("cmd+t").expect("cmd+t");
+    let cmd_left = normalized_from_notation("cmd+left").expect("cmd+left");
+    let cmd_u = normalized_from_notation("cmd+u").expect("cmd+u");
+
+    let palette = route_context_set(true, PresentationMode::Flow, false);
+    assert!(
+        projected_menu_steals_unmatched_command(&table, &cmd_t, palette),
+        "palette-open cmd+t equals inactive New Tab projected equivalent"
+    );
+    assert!(
+        !projected_menu_steals_unmatched_command(&table, &cmd_left, palette),
+        "Cmd+Left is not a projected menu equivalent"
+    );
+    assert!(
+        !projected_menu_steals_unmatched_command(&table, &cmd_u, palette),
+        "ordinary unbound cmd+u must stay native"
+    );
+
+    let flow = route_context_set(false, PresentationMode::Flow, true);
+    assert!(
+        !projected_menu_steals_unmatched_command(&table, &cmd_t, flow),
+        "Flow permits New Tab — route would Match, not steal-via-unmatched"
+    );
+    assert!(
+        !projected_menu_steals_unmatched_command(&table, &cmd_left, flow),
+        "composer Cmd+Left must remain native text editing"
+    );
 }

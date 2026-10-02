@@ -480,9 +480,9 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    /// R6.2.1: route Command keys through Rust before AppKit's main-menu
-    /// key-equivalent pass. Matched/unmatched ApplicationCommand strokes never
-    /// reach projected `NSMenuItem` equivalents; reserved §4.2 still do.
+    /// R6.2.1: route Command through Rust before AppKit menu key-equivalents.
+    /// Matched / cross-context projected steals consume; §6.2 step 2c miss and
+    /// reserved §4.2 stay native (composer/palette ⌘←/⌘⌫ editing).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.command) else {

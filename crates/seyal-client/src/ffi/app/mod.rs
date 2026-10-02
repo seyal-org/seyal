@@ -361,7 +361,10 @@ pub extern "C" fn seyal_app_route_keystroke(
     composer_focused: u8,
     composition_active: u8,
 ) -> i32 {
-    use crate::keybinding::{NormalizedStroke, RouteOutcome};
+    use crate::keybinding::{
+        process_keybinding_table, projected_menu_steals_unmatched_command, NormalizedStroke,
+        RouteOutcome,
+    };
 
     let Some(stroke) =
         NormalizedStroke::from_ffi(modifier_bits, named_key != 0, base, shift_applied)
@@ -378,13 +381,18 @@ pub extern "C" fn seyal_app_route_keystroke(
             composer_focused != 0,
             composition_active != 0,
         ) {
-            Ok(RouteOutcome::Matched { .. })
-            | Ok(RouteOutcome::PrefixWait)
-            | Ok(RouteOutcome::UnmatchedCommand) => {
-                // Unmatched Command is ApplicationCommand miss: zero PTY and do
-                // not fall through to AppKit menu key-equivalent dispatch (R6.2.1).
-                // ReservedCommand still returns NATIVE_COMMAND so Edit/AppKit run.
+            Ok(RouteOutcome::Matched { .. }) | Ok(RouteOutcome::PrefixWait) => {
                 SEYAL_APP_ROUTE_CONSUMED
+            }
+            Ok(RouteOutcome::UnmatchedCommand) => {
+                // §6.2 step 2c: miss → native. Consume only cross-context menu steal.
+                let table = process_keybinding_table();
+                let route = state.root.keybinding_route_context(composer_focused != 0);
+                if projected_menu_steals_unmatched_command(table, &stroke, route) {
+                    SEYAL_APP_ROUTE_CONSUMED
+                } else {
+                    SEYAL_APP_ROUTE_NATIVE_COMMAND
+                }
             }
             Ok(RouteOutcome::ReservedCommand) => SEYAL_APP_ROUTE_NATIVE_COMMAND,
             Ok(RouteOutcome::CompositionConsumes) | Ok(RouteOutcome::Fallthrough) => {

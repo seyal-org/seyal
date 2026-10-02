@@ -92,8 +92,9 @@ final class KeybindingEvidenceTests: XCTestCase {
         )
     }
 
-    /// §14.4: unmatched Command is ApplicationCommand-consumed (zero PTY, no
-    /// menu key-equivalent steal); reserved stays on the native-Command path.
+    /// §14.4 / §6.2 step 2c: ordinary unmatched Command is native (composer
+    /// editing); reserved stays native; inactive projected menu equivalents
+    /// still consume so AppKit cannot steal across contexts (R6.2.1).
     func testUnmatchedAndReservedCommandAreNativeCommandNotFallthrough() {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -101,12 +102,35 @@ final class KeybindingEvidenceTests: XCTestCase {
         let unmatched = seyal_app_route_keystroke(
             handle, 1, 0, keyU, 0, 0, 0
         )
-        XCTAssertEqual(unmatched, 1, "unmatched Command → consumed (R6.2.1, no menu steal)")
+        XCTAssertEqual(unmatched, 2, "ordinary unmatched Command → native (§6.2 step 2c)")
+
+        let cmdLeft = seyal_app_route_keystroke(
+            handle, 1, 1, 7, 0, 0, 0 // named Left
+        )
+        XCTAssertEqual(cmdLeft, 2, "unbound Cmd+Left → native text editing")
 
         let reserved = seyal_app_route_keystroke(
             handle, 1, 0, keyQ, 0, 0, 0
         )
         XCTAssertEqual(reserved, 2, "reserved cmd+q → native Command handling")
+
+        // Palette owns the route: cmd+t misses, but New Tab's projected ⌘T
+        // would still fire if we returned native — consume that cross-context
+        // steal only.
+        XCTAssertEqual(
+            seyal_app_route_keystroke(handle, 1, 0, keyK, 0, 0, 0),
+            1,
+            "cmd+k opens palette"
+        )
+        let menuSteal = seyal_app_route_keystroke(handle, 1, 0, keyT, 0, 0, 0)
+        XCTAssertEqual(
+            menuSteal, 1,
+            "palette-open cmd+t → consumed (inactive New Tab menu equivalent)"
+        )
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count, 1,
+            "menu-steal consume must not create a tab"
+        )
     }
 
     /// §14.5 / Raw-TUI forwarding: Control-C and arrows fall through to the terminal path.
