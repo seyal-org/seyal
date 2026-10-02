@@ -586,6 +586,21 @@ SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
 
+/*
+ * Launch-policy product copy (ADR-015 / SPEC-023 §9). Rust owns the fixed
+ * non-secret UTF-8; native hosts only render it. Pointers are to static
+ * storage. result_code 17 + detail 1–4 are failures; Created.detail_code bit
+ * index 0/1 are success-after-fallback warnings.
+ */
+typedef struct SeyalLaunchPolicyCopy {
+    const uint8_t *text;
+    uint32_t text_len;
+    uint32_t reserved;
+} SeyalLaunchPolicyCopy;
+
+SeyalLaunchPolicyCopy seyal_launch_policy_failure_copy(uint16_t result_code, uint32_t detail_code);
+SeyalLaunchPolicyCopy seyal_launch_policy_warning_copy(uint32_t bit_index);
+
 int32_t seyal_app_last_error(uint64_t handle);
 
 #ifdef __cplusplus

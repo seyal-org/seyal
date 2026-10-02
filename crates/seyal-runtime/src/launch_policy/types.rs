@@ -226,7 +226,7 @@ impl LaunchPolicyFailure {
         }
     }
 
-    /// Post-L0 `detail_code` values (SPEC-023 §9). Not placed on the wire by L1.
+    /// Post-L0 `detail_code` values on `17 LaunchPolicyRejected` (SPEC-023 §9).
     pub const fn detail_code(self) -> u32 {
         match self {
             Self::AccountRecordUnavailable => 1,
@@ -262,6 +262,14 @@ impl LaunchPolicyWarning {
         match self {
             Self::ConfiguredShellInvalid => "ConfiguredShellInvalid",
             Self::CwdOverrideInvalid => "CwdOverrideInvalid",
+        }
+    }
+
+    /// `Created.detail_code` bit for this warning (SPEC-004 §18.3 / ADR-020 §3.10).
+    pub const fn created_detail_bit(self) -> u32 {
+        match self {
+            Self::ConfiguredShellInvalid => 1 << 0,
+            Self::CwdOverrideInvalid => 1 << 1,
         }
     }
 }
