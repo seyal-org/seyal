@@ -33,7 +33,7 @@ pub use observation::{
     parse_script, ObservationAuthority, ObserveError, RunLiveness, WorkItemOutcome,
 };
 #[cfg(unix)]
-pub use session::IntegrationConfig;
+pub use session::{IntegrationConfig, IntegrationService};
 pub use seyal_agent_core::{AgentDomain, DomainError, ExecutionHost, ExecutionHostKind};
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
