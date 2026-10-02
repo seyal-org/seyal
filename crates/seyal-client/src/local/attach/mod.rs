@@ -17,6 +17,33 @@ use seyal_runtime::{
     AttachmentId, ExecutionId,
 };
 
+/// Failure from [`LocalDisplayClient::finish_attach_with_deadline`].
+///
+/// `terminated_on_attachment` is set when ADR-017 §6.3 row 2 already issued
+/// TerminateExecutionRequest on the existing Controller attachment. Callers
+/// must not open a second dispose attach in that case.
+#[derive(Debug)]
+pub(crate) struct FinishAttachError {
+    pub error: ClientError,
+    pub terminated_on_attachment: bool,
+}
+
+impl FinishAttachError {
+    fn before_attached(error: ClientError) -> Self {
+        Self {
+            error,
+            terminated_on_attachment: false,
+        }
+    }
+
+    fn after_attached(error: ClientError, terminated_on_attachment: bool) -> Self {
+        Self {
+            error,
+            terminated_on_attachment,
+        }
+    }
+}
+
 use super::provisioning_wire::provisioning_negotiated;
 
 use crate::block_cache::{is_epoch_quarantined, BlockCache};
@@ -397,17 +424,22 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
+            // §6.3 dispose only for Created never-bound bootstrap orphans — not
+            // adopt/reconnect of a live survivor (connect_first with existing id).
+            created_bootstrap,
             dispose_request_id,
             deadline,
         ) {
             Ok(client) => client,
-            Err(error) if created_bootstrap => {
-                // ADR-017 §6.3: Created but attach/snapshot failed → dispose
-                // the never-bound orphan. Preserve the original attach error.
-                best_effort_dispose_never_bound_execution(&socket_path, execution_id, deadline);
-                return Err(error);
+            Err(failure) if created_bootstrap => {
+                // Row 1: never Attached → dispose attach. Row 2: already
+                // terminated on the existing attachment → never open a second.
+                if !failure.terminated_on_attachment {
+                    best_effort_dispose_never_bound_execution(&socket_path, execution_id, deadline);
+                }
+                return Err(failure.error);
             }
-            Err(error) => return Err(error),
+            Err(failure) => return Err(failure.error),
         };
         // Bootstrap CreateExecution used request_id 1 on this stream; the
         // client's allocator must not reuse it (Runtime rejects <= last).
@@ -467,9 +499,11 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             block_metadata_negotiated,
             provisioning_negotiated(server_hello.server_capabilities),
+            false,
             1,
             deadline,
         )
+        .map_err(|failure| failure.error)
     }
 
     /// Benchmark-only control connection that preserves the exact Pass 7
@@ -500,9 +534,11 @@ impl LocalDisplayClient {
             server_hello.runtime_id,
             false,
             provisioning_negotiated(server_hello.server_capabilities),
+            false,
             1,
             deadline,
         )
+        .map_err(|failure| failure.error)
     }
 
     #[cfg(test)]
@@ -524,9 +560,11 @@ impl LocalDisplayClient {
             runtime_id,
             block_metadata_negotiated,
             false,
+            false,
             1,
             Instant::now() + STARTUP_TIMEOUT,
         )
+        .map_err(|failure| failure.error)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -539,9 +577,17 @@ impl LocalDisplayClient {
         runtime_id: u128,
         block_metadata_negotiated: bool,
         execution_provisioning_negotiated: bool,
+        // When true, this attach is disposing a Created never-bound orphan
+        // (bootstrap intent). Snapshot/identity failure then applies ADR-017
+        // §6.3 row 2. Adopt/reconnect of a live survivor must pass false so a
+        // transient attach failure cannot kill the execution.
+        dispose_never_bound_orphan: bool,
         dispose_request_id: u64,
         deadline: Instant,
-    ) -> Result<Self, ClientError> {
+    ) -> Result<Self, FinishAttachError> {
+        let may_dispose_orphan = dispose_never_bound_orphan
+            && execution_provisioning_negotiated
+            && role == Role::Controller;
         send_control_until(
             &mut stream,
             MessageType::Attach,
@@ -551,18 +597,26 @@ impl LocalDisplayClient {
             }
             .encode(),
             deadline,
-        )?;
-        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
+        )
+        .map_err(FinishAttachError::before_attached)?;
+        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)
+            .map_err(FinishAttachError::before_attached)?;
         if kind == MessageType::Error {
-            let error = ErrorMessage::decode(&payload).map_err(|_| ClientError::Protocol)?;
-            return Err(server_error(error.error_code));
+            let error = ErrorMessage::decode(&payload)
+                .map_err(|_| ClientError::Protocol)
+                .map_err(FinishAttachError::before_attached)?;
+            return Err(FinishAttachError::before_attached(server_error(
+                error.error_code,
+            )));
         }
         if kind != MessageType::Attached {
-            return Err(ClientError::Protocol);
+            return Err(FinishAttachError::before_attached(ClientError::Protocol));
         }
-        let attached = Attached::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        let attached = Attached::decode(&payload)
+            .map_err(|_| ClientError::Protocol)
+            .map_err(FinishAttachError::before_attached)?;
         if attached.execution_id != execution_id || attached.granted_role != role {
-            if execution_provisioning_negotiated && attached.granted_role == Role::Controller {
+            let terminated = if may_dispose_orphan {
                 best_effort_terminate_on_existing_attachment(
                     &mut stream,
                     attached.attachment_id,
@@ -570,8 +624,14 @@ impl LocalDisplayClient {
                     dispose_request_id,
                     deadline,
                 );
-            }
-            return Err(ClientError::InvalidAttachment);
+                true
+            } else {
+                false
+            };
+            return Err(FinishAttachError::after_attached(
+                ClientError::InvalidAttachment,
+                terminated,
+            ));
         }
 
         // The attachment already exists when its first display snapshot is
@@ -632,7 +692,10 @@ impl LocalDisplayClient {
                         }
                         .encode(),
                         deadline,
-                    )?;
+                    )
+                    .map_err(|error| FinishAttachError::after_attached(error, false))?;
+                    // Resync send failure is after Attached but did not dispose.
+                    // Map below treats snapshot Err the same.
                     resync_available = false;
                     quarantined_remainder = Some(stale_remainder_hint);
                 }
@@ -642,9 +705,11 @@ impl LocalDisplayClient {
         let (cache, mut batch) = match snapshot {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                // ADR-017 §6.3 row 2: already Attached, never bound → terminate
-                // on this attachment before detach (drop stream). No second attach.
-                if execution_provisioning_negotiated && role == Role::Controller {
+                // ADR-017 §6.3 row 2: Created orphan already Attached, never
+                // bound → terminate on this attachment. No second attach.
+                // Adopt/reconnect (dispose_never_bound_orphan=false) must not
+                // kill a live survivor on transient snapshot failure.
+                let terminated = if may_dispose_orphan {
                     best_effort_terminate_on_existing_attachment(
                         &mut stream,
                         attached.attachment_id,
@@ -652,13 +717,16 @@ impl LocalDisplayClient {
                         dispose_request_id,
                         deadline,
                     );
-                }
-                return Err(error);
+                    true
+                } else {
+                    false
+                };
+                return Err(FinishAttachError::after_attached(error, terminated));
             }
         };
         if cache.generation != attached.current_generation || cache.rows == 0 || cache.columns == 0
         {
-            if execution_provisioning_negotiated && role == Role::Controller {
+            let terminated = if may_dispose_orphan {
                 best_effort_terminate_on_existing_attachment(
                     &mut stream,
                     attached.attachment_id,
@@ -666,8 +734,14 @@ impl LocalDisplayClient {
                     dispose_request_id,
                     deadline,
                 );
-            }
-            return Err(ClientError::Protocol);
+                true
+            } else {
+                false
+            };
+            return Err(FinishAttachError::after_attached(
+                ClientError::Protocol,
+                terminated,
+            ));
         }
 
         let committed_geometry = GridGeometry {
@@ -687,8 +761,12 @@ impl LocalDisplayClient {
             full_rebuild: false,
         };
 
-        stream.set_read_timeout(None).map_err(|_| ClientError::Io)?;
-        stream.set_nonblocking(true).map_err(|_| ClientError::Io)?;
+        stream
+            .set_read_timeout(None)
+            .map_err(|_| FinishAttachError::after_attached(ClientError::Io, false))?;
+        stream
+            .set_nonblocking(true)
+            .map_err(|_| FinishAttachError::after_attached(ClientError::Io, false))?;
 
         batch.clear();
         Ok(Self {
