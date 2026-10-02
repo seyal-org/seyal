@@ -6,7 +6,7 @@
 use std::{env, process, thread, time::Duration};
 
 use seyal_agent_backend::{
-    AgentDaemon, DaemonError, HostObservationKind, IntegrationConfig, ScriptStep,
+    AgentDaemon, HostObservationKind, IntegrationConfig, ScriptStep,
 };
 
 fn main() {
