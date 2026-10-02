@@ -53,8 +53,6 @@ pub struct IntegrationService {
     owner_principal_id: seyal_agent_core::ClientPrincipalId,
     /// Distinct observe-only principal. Hello evidence `observer`.
     observer_principal_id: seyal_agent_core::ClientPrincipalId,
-    /// Principal selected for the current accepted connection from Hello evidence.
-    connection_principal_id: Option<seyal_agent_core::ClientPrincipalId>,
     auth: AuthorizationRepository,
     authority: ObservationAuthority,
     store: AgentStore,
@@ -86,7 +84,6 @@ impl IntegrationService {
             instance_id,
             owner_principal_id,
             observer_principal_id,
-            connection_principal_id: None,
             auth,
             authority,
             store,
@@ -114,23 +111,28 @@ impl IntegrationService {
         self.owner_principal_id
     }
 
-    /// Bind this connection to a principal from Hello evidence.
+    /// Resolve Hello evidence to a principal for this connection.
     /// Socket UID admission alone never selects a privileged principal.
-    pub fn begin_connection(&mut self, evidence: &[u8]) -> Result<(), ServiceError> {
-        let principal = self
-            .auth
+    /// The returned id is connection-scoped and must be passed to every `handle`.
+    pub fn resolve_connection_principal(
+        &self,
+        evidence: &[u8],
+    ) -> Result<seyal_agent_core::ClientPrincipalId, ServiceError> {
+        self.auth
             .principal_for_evidence(
                 evidence,
                 self.owner_principal_id,
                 self.observer_principal_id,
             )
-            .map_err(|_| ServiceError::Failed)?;
-        self.connection_principal_id = Some(principal);
-        Ok(())
+            .map_err(|_| ServiceError::Failed)
     }
 
-    pub fn end_connection(&mut self) {
-        self.connection_principal_id = None;
+    #[cfg(test)]
+    pub fn begin_connection(
+        &mut self,
+        evidence: &[u8],
+    ) -> Result<seyal_agent_core::ClientPrincipalId, ServiceError> {
+        self.resolve_connection_principal(evidence)
     }
 
     #[cfg(feature = "test-fault-injection")]
@@ -140,6 +142,7 @@ impl IntegrationService {
 
     pub fn handle(
         &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
         frame: Frame,
         max_frame_size: u32,
         event_window: u32,
@@ -148,7 +151,7 @@ impl IntegrationService {
             CommandResult::Error(CommandError::Malformed)
         } else {
             match decode_command(&frame.body) {
-                Ok(command) => self.dispatch(command, event_window, max_frame_size),
+                Ok(command) => self.dispatch(principal_id, command, event_window, max_frame_size),
                 Err(_) => CommandResult::Error(CommandError::Malformed),
             }
         };
@@ -157,13 +160,14 @@ impl IntegrationService {
 
     fn dispatch(
         &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
         command: Command,
         event_window: u32,
         max_frame_size: u32,
     ) -> CommandResult {
         match command {
-            Command::OpenSession { scopes } => self.open_session(scopes),
-            Command::ResumeSession { session_id } => self.resume_session(session_id),
+            Command::OpenSession { scopes } => self.open_session(principal_id, scopes),
+            Command::ResumeSession { session_id } => self.resume_session(principal_id, session_id),
             Command::CreateWorkScope { session_id, kind } => {
                 self.create_work_scope(session_id, kind)
             }
@@ -198,7 +202,11 @@ impl IntegrationService {
         }
     }
 
-    fn open_session(&mut self, scopes: Vec<u8>) -> CommandResult {
+    fn open_session(
+        &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
+        scopes: Vec<u8>,
+    ) -> CommandResult {
         let mut decoded = Vec::with_capacity(scopes.len());
         for scope in scopes {
             match ClientScope::decode(scope) {
@@ -206,9 +214,6 @@ impl IntegrationService {
                 Err(_) => return CommandResult::Error(CommandError::Malformed),
             }
         }
-        let Some(principal_id) = self.connection_principal_id else {
-            return CommandResult::Error(CommandError::Denied);
-        };
         match self
             .auth
             .open_session(principal_id, self.instance_id, decoded)
@@ -218,10 +223,11 @@ impl IntegrationService {
         }
     }
 
-    fn resume_session(&mut self, session_id: seyal_agent_core::ClientSessionId) -> CommandResult {
-        let Some(principal_id) = self.connection_principal_id else {
-            return CommandResult::Error(CommandError::Denied);
-        };
+    fn resume_session(
+        &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
+        session_id: seyal_agent_core::ClientSessionId,
+    ) -> CommandResult {
         match self.auth.session_principal(session_id, self.instance_id) {
             Ok(session_principal) if session_principal == principal_id => {
                 match self.auth.resume_session(session_id, self.instance_id) {

@@ -120,9 +120,10 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
     };
     let mut service =
         IntegrationService::open(BackendInstanceId::new(), &config).expect("open service");
-    service.begin_connection(b"cli").expect("hello principal");
+    let principal = service.begin_connection(b"cli").expect("hello principal");
 
     let opened = service.dispatch(
+        principal,
         Command::OpenSession {
             scopes: vec![1, 2, 4],
         },
@@ -133,6 +134,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
         panic!("open session: {opened:?}");
     };
     let CommandResult::WorkScope { id: scope } = service.dispatch(
+        principal,
         Command::CreateWorkScope {
             session_id,
             kind: WorkScopeKind::Repository,
@@ -143,6 +145,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
         panic!("scope");
     };
     let CommandResult::WorkItem { id: item } = service.dispatch(
+        principal,
         Command::CreateWorkItem {
             session_id,
             work_scope_id: scope,
@@ -153,6 +156,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
         panic!("item");
     };
     let CommandResult::Attempt { id: attempt } = service.dispatch(
+        principal,
         Command::CreateAttempt {
             session_id,
             work_item_id: item,
@@ -165,6 +169,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
 
     let _ = service.store.take_replay_payload_bytes_loaded();
     let started = service.dispatch(
+        principal,
         Command::StartAgentRun {
             session_id,
             attempt_id: attempt,
@@ -233,8 +238,9 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
     };
     let mut terminal =
         IntegrationService::open(BackendInstanceId::new(), &terminal_config).unwrap();
-    terminal.begin_connection(b"cli").unwrap();
+    let principal = terminal.begin_connection(b"cli").unwrap();
     let session = match terminal.dispatch(
+        principal,
         Command::OpenSession {
             scopes: vec![1, 2, 4],
         },
@@ -245,6 +251,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let scope = match terminal.dispatch(
+        principal,
         Command::CreateWorkScope {
             session_id: session,
             kind: WorkScopeKind::AdHoc,
@@ -256,6 +263,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let item = match terminal.dispatch(
+        principal,
         Command::CreateWorkItem {
             session_id: session,
             work_scope_id: scope,
@@ -267,6 +275,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let attempt = match terminal.dispatch(
+        principal,
         Command::CreateAttempt {
             session_id: session,
             work_item_id: item,
@@ -278,6 +287,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let run_id = match terminal.dispatch(
+        principal,
         Command::StartAgentRun {
             session_id: session,
             attempt_id: attempt,
@@ -307,8 +317,9 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         script: vec![ScriptStep::Emit(HostObservationKind::Started)],
     };
     let mut live = IntegrationService::open(BackendInstanceId::new(), &live_config).unwrap();
-    live.begin_connection(b"cli").unwrap();
+    let principal = live.begin_connection(b"cli").unwrap();
     let session = match live.dispatch(
+        principal,
         Command::OpenSession {
             scopes: vec![1, 2, 4],
         },
@@ -319,6 +330,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let scope = match live.dispatch(
+        principal,
         Command::CreateWorkScope {
             session_id: session,
             kind: WorkScopeKind::AdHoc,
@@ -330,6 +342,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let item = match live.dispatch(
+        principal,
         Command::CreateWorkItem {
             session_id: session,
             work_scope_id: scope,
@@ -341,6 +354,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let attempt = match live.dispatch(
+        principal,
         Command::CreateAttempt {
             session_id: session,
             work_item_id: item,
@@ -352,6 +366,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     let live_run = match live.dispatch(
+        principal,
         Command::StartAgentRun {
             session_id: session,
             attempt_id: attempt,
@@ -385,8 +400,9 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
     let first_instance = BackendInstanceId::new();
     let mut service = IntegrationService::open(first_instance, &config).expect("open");
     let owner = service.owner_principal_id();
-    service.begin_connection(b"cli").unwrap();
+    let principal = service.begin_connection(b"cli").unwrap();
     let session = match service.dispatch(
+        principal,
         Command::OpenSession {
             scopes: vec![1, 2, 4],
         },
@@ -404,9 +420,10 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
     let second_instance = BackendInstanceId::new();
     let mut restarted = IntegrationService::open(second_instance, &config).expect("reopen");
     // Prior process session cannot resume under a new BackendInstanceId.
-    restarted.begin_connection(b"cli").unwrap();
+    let principal = restarted.begin_connection(b"cli").unwrap();
     assert_eq!(
         restarted.dispatch(
+            principal,
             Command::ResumeSession {
                 session_id: session
             },
@@ -418,6 +435,7 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
     // Revoked principal cannot open a fresh privileged session.
     assert_eq!(
         restarted.dispatch(
+            principal,
             Command::OpenSession {
                 scopes: vec![1, 2, 4],
             },
