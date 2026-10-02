@@ -110,6 +110,6 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 752
+acknowledged_loc = 763
 issue = 1125
-reason = "Thin AppKit chrome host stays one cold-path façade; #1125 adds R6.2.1 performKeyEquivalent routing, Go to… projection invoke, and compositionActiveForKeyRouting so Command chord prefixes cannot activate during IME marked text (R8.4)."
+reason = "Thin AppKit chrome host stays one cold-path façade; #1125 adds R6.2.1 performKeyEquivalent routing, Go to… projection invoke, and compositionActiveForKeyRouting covering composer, metal, and palette/goto NSTextView field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."

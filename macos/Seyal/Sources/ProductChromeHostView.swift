@@ -514,8 +514,9 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    /// Shared probe for R6.2.1 / R8.4: marked text on the focused metal
-    /// surface or composer editor. Package-visible for host tests.
+    /// Shared probe for R6.2.1 / R8.4: marked text on the focused input
+    /// surface — composer, metal terminal, or palette/goto/history field
+    /// editors (`NSTextView`). Package-visible for host tests.
     static func compositionActiveForKeyRouting(
         responder: NSView?,
         composer: ComposerBridgeView,
@@ -530,6 +531,16 @@ final class ProductChromeHostView: NSView {
         }
         if let metal = responder as? InteractiveMetalSurfaceView {
             return metal.hasMarkedText()
+        }
+        // Palette / Go to… / composer-history queries use NSTextField; AppKit
+        // makes the field editor (NSTextView) first responder during IME.
+        if let textView = responder as? NSTextView {
+            return textView.hasMarkedText()
+        }
+        if let field = responder as? NSTextField,
+           let editor = field.currentEditor() as? NSTextView
+        {
+            return editor.hasMarkedText()
         }
         return false
     }
