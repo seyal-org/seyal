@@ -431,10 +431,7 @@ fn segment_metadata_round_trips_without_byte_materialization() {
     );
     // Clients honor refs without loading segment bytes when refs suffice.
     assert!(!events[0].payload.windows(secret.len()).any(|w| w == secret));
-    assert_eq!(
-        format!("{:?}", decoded.fingerprint_ref).contains("raw-secret"),
-        false
-    );
+    assert!(!format!("{:?}", decoded.fingerprint_ref).contains("raw-secret"));
 }
 
 #[test]
