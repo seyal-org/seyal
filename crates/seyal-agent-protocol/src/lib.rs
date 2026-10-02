@@ -24,8 +24,11 @@ pub use handshake::{
 };
 pub use seyal_agent_core::{
     AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ControlGeneration, WorkItemId, WorkScopeId,
+    ClientSessionId, ControlGeneration, FingerprintRef, OutputRef, OutputRefError,
+    RetentionPolicyRef, StreamKind, WorkItemId, WorkScopeId, OUTPUT_REF_KIND, OUTPUT_REF_LEN,
+    RETENTION_POLICY_RETAINED_STREAM,
 };
+pub use seyal_agent_core::{decode_output_ref, encode_output_ref};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProtocolVersion(u16);

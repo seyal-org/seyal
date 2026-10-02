@@ -746,7 +746,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         .unwrap();
     assert!(events
         .iter()
-        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_none()));
+        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_err()));
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::remove_dir_all(refused);
     let _ = fs::remove_dir_all(segment_fault);
@@ -871,29 +871,36 @@ fn high_volume_output_uses_segments_end_to_end() {
     assert_eq!(events.len(), 4);
     let output = events
         .iter()
-        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_ok())
         .expect("one output-ref event");
-    let (first_index, segments, byte_length, first_ordinal, last_ordinal) =
-        seyal_agent_store::decode_output_ref(&output.payload).unwrap();
-    assert_eq!(first_index, 0);
+    let decoded = seyal_agent_store::decode_output_ref(&output.payload).unwrap();
+    assert_eq!(decoded.first_segment_index, 0);
     assert_eq!(
-        segments as usize,
+        decoded.segment_count as usize,
         OUTPUT_BYTES / seyal_agent_store::OUTPUT_SEGMENT_LEN
     );
-    assert_eq!(byte_length as usize, OUTPUT_BYTES);
-    assert!(first_ordinal >= 1);
-    assert!(last_ordinal >= first_ordinal);
+    assert_eq!(decoded.byte_length as usize, OUTPUT_BYTES);
+    assert!(decoded.first_ordinal >= 1);
+    assert!(decoded.last_ordinal >= decoded.first_ordinal);
+    assert_eq!(
+        decoded.retention_policy_ref,
+        seyal_agent_store::RetentionPolicyRef::retained_stream()
+    );
+    assert!(matches!(
+        decoded.fingerprint_ref,
+        seyal_agent_store::FingerprintRef::PublicContentDigest(_)
+    ));
     assert!(
         events
             .iter()
-            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_ok())
             .count()
             == 1
     );
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         store.output_segment_count(started.run_id).unwrap(),
-        segments as u64
+        decoded.segment_count as u64
     );
     drop(daemon);
     drop(store);
@@ -901,7 +908,7 @@ fn high_volume_output_uses_segments_end_to_end() {
     let reopened = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         reopened.output_segment_count(started.run_id).unwrap(),
-        segments as u64
+        decoded.segment_count as u64
     );
     let again = reopened
         .replay_after(AggregateId::AgentRun(started.run_id), None)
@@ -936,10 +943,10 @@ fn high_volume_output_uses_segments_end_to_end() {
     assert_eq!(started.event_count, 4);
     let output = events
         .iter()
-        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload))
+        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload).ok())
         .expect("coalesced one-byte outputs");
-    assert_eq!(output.1, 1);
-    assert_eq!(output.2, 1000);
+    assert_eq!(output.segment_count, 1);
+    assert_eq!(output.byte_length, 1000);
     assert_eq!(
         AgentStore::open(tiny.join("agent.db"))
             .unwrap()

@@ -363,17 +363,20 @@ fn replay_identity(dir: &Path) -> Vec<ReplayIdentityRow> {
         if let Some(first) = sequences.first() {
             assert_eq!(*first, 1);
         }
-        let mut referenced_segments = 0_u64;
+        let mut highest_exclusive = 0_u64;
         for event in &events {
-            if let Some((_, count, _, _, _)) = seyal_agent_store::decode_output_ref(&event.payload)
-            {
-                referenced_segments += u64::from(count);
+            if let Ok(output) = seyal_agent_store::decode_output_ref(&event.payload) {
+                if output.segment_count > 0 {
+                    let end = u64::from(output.first_segment_index)
+                        + u64::from(output.segment_count);
+                    highest_exclusive = highest_exclusive.max(end);
+                }
             }
         }
         let stored_segments = store.output_segment_count(id).unwrap();
         assert_eq!(
-            referenced_segments, stored_segments,
-            "segment refs must match stored segment rows after reopen"
+            highest_exclusive, stored_segments,
+            "segment refs must cover exactly the stored segment rows after reopen"
         );
         let through = store
             .get_snapshot(AggregateId::AgentRun(id))
@@ -386,7 +389,7 @@ fn replay_identity(dir: &Path) -> Vec<ReplayIdentityRow> {
             u128::from_le_bytes(id.to_bytes()),
             sequences,
             through,
-            referenced_segments,
+            highest_exclusive,
             stored_segments,
         ));
     }

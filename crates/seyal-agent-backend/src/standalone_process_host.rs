@@ -420,4 +420,73 @@ mod tests {
         let err = authority.apply(observations[0].clone()).unwrap_err();
         assert_eq!(err, crate::ObserveError::StaleGeneration);
     }
+
+    #[test]
+    fn standalone_host_high_volume_output_is_segment_bounded_with_refs() {
+        use seyal_agent_store::{
+            decode_output_ref, AgentStore, AggregateId, FingerprintRef, RetentionPolicyRef,
+            OUTPUT_SEGMENT_LEN,
+        };
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let dir = std::env::temp_dir().join(format!(
+            "seyal-ab15-host-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("agent.db");
+        let store = AgentStore::open(&db).unwrap();
+
+        let mut domain = AgentDomain::new();
+        let scope = domain.create_work_scope(WorkScopeKind::Repository);
+        let item = domain.create_work_item(scope).unwrap();
+        let attempt = domain.create_attempt(item).unwrap();
+        let run = domain.create_agent_run(attempt).unwrap();
+        let generation = domain.agent_run(run).unwrap().binding_generation();
+
+        // ~48 KiB of stdout in small host chunks → multiple append batches.
+        let config = StandaloneProcessConfig::new(
+            "/usr/bin/python3",
+            ["-c", "import sys; sys.stdout.write('x' * (48 * 1024))"],
+            700,
+        )
+        .unwrap();
+        let mut host = StandaloneProcessHost::new(config);
+        let observations = host.collect_observations(run, generation).unwrap();
+        let mut output_batches = 0_u64;
+        for observation in &observations {
+            if let HostObservationKind::Output(bytes) = &observation.kind {
+                store
+                    .append_output_event(run, 2, bytes, observation.ordinal, observation.ordinal)
+                    .unwrap();
+                output_batches += 1;
+            }
+        }
+        assert!(output_batches > 1, "cross-batch streaming required");
+        let segments = store.output_segment_count(run).unwrap();
+        assert_eq!(segments, (48 * 1024) / OUTPUT_SEGMENT_LEN as u64);
+        assert!(segments < output_batches, "no one-row-per-token regression");
+
+        let events = store
+            .replay_after(AggregateId::AgentRun(run), None)
+            .unwrap();
+        let mut rebuilt = Vec::new();
+        for event in &events {
+            let output = decode_output_ref(&event.payload).unwrap();
+            assert_eq!(
+                output.retention_policy_ref,
+                RetentionPolicyRef::retained_stream()
+            );
+            assert!(matches!(
+                output.fingerprint_ref,
+                FingerprintRef::PublicContentDigest(_)
+            ));
+            rebuilt.extend(store.materialize_output_ref(run, &output).unwrap());
+        }
+        assert_eq!(rebuilt.len(), 48 * 1024);
+        assert!(rebuilt.iter().all(|b| *b == b'x'));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

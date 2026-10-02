@@ -9,10 +9,13 @@ use std::num::NonZeroU64;
 mod identity;
 mod sqlite;
 
-pub use seyal_agent_core::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
+pub use seyal_agent_core::{
+    decode_output_ref, encode_output_ref, AgentRunId, AttemptId, FingerprintRef, OutputRef,
+    OutputRefError, RetentionPolicyRef, StreamKind, WorkItemId, WorkScopeId, OUTPUT_REF_KIND,
+    OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN, RETENTION_POLICY_RETAINED_STREAM,
+};
 pub use sqlite::{
-    decode_output_ref, encode_output_ref, AgentStore, OutputAppend, PersistedAgentRun,
-    PersistedLiveness, PersistedPrincipal, StoreError, OUTPUT_REF_KIND, OUTPUT_REF_LEN,
+    AgentStore, OutputAppend, PersistedAgentRun, PersistedLiveness, PersistedPrincipal, StoreError,
     OUTPUT_SEGMENT_LEN,
 };
 
