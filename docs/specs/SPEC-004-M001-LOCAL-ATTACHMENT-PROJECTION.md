@@ -7,7 +7,6 @@
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`; ADR-018 §5.1 for the §19 delivery-suspend / capacity amendment
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
 - **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
-- **Accepted M003 extension:** §19 per-attachment delivery suspend/resume and revised §5 maxima (types 40–41, capability bit 11) under Issue #1162; satisfies ADR-018 §5.1; Runtime/client implementation is W5 and is **not** part of this amendment.
 - **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
 
 ## 1. Purpose
@@ -234,10 +233,10 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
 - bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, proposed under #1083;
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance;
-- bit 11: per-attachment delivery suspend/resume (`CAP_ATTACHMENT_DELIVERY_CONTROL`) — §19 / Issue #1162;
+- bit 11: claimed by open PR #1163 (#1162, `CAP_ATTACHMENT_DELIVERY_CONTROL`);
 - bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are proposed for `ViewportLineIds` (§8.1, under #1083). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**. §19 deliberately skips type 35 and bits 8–10 (already claimed/proposed) and assigns the next free types **40–41** and capability bit **11**. L0 takes the next free bit, **bit 12**, for `CAP_LAUNCH_POLICY_DETAIL` (ADR-020 §3.10). If §8.1 does not accept, 35 and bit 9 stay unassigned rather than being reused by §18 or §19; later allocations must re-check live `MessageType` and open PRs before claiming a number.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are proposed for `ViewportLineIds` (§8.1, under #1083). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**. Open PR #1163 claims bit 11 for §19 delivery control; L0 therefore takes the next free bit, **bit 12**, for `CAP_LAUNCH_POLICY_DETAIL` (ADR-020 §3.10).
 
 ### 8.1 Viewport LineIds (proposed, #1083)
 

@@ -2,35 +2,35 @@ import Foundation
 
 /// Thin native rendering of Rust-owned launch-policy product copy (ADR-015 / #1119).
 ///
-/// Swift never invents failure or warning text and never decides which
-/// result/detail codes are failures vs warnings. It only borrows the UTF-8 that
-/// `seyal_launch_policy_copies` already selected.
+/// Swift never invents failure or warning text. It only borrows the UTF-8 that
+/// `seyal_launch_policy_*_copy` already chose.
 enum LaunchPolicyProductCopy {
-    /// Capacity for the FFI fill buffer; Rust owns the real selection count.
-    private static let copyCapacity: UInt32 = 8
-
     /// Bounded failure string for create-result `result_code` / `detail_code`.
     static func failureMessage(resultCode: UInt16, detailCode: UInt32) -> String {
-        messages(resultCode: resultCode, detailCode: detailCode).first ?? ""
+        let borrowed = seyal_launch_policy_failure_copy(resultCode, detailCode)
+        return utf8String(borrowed)
     }
 
-    /// Bounded warning strings for a successful create (`result_code == 0`) bitfield.
+    /// Bounded warning strings for a `Created.detail_code` bitfield.
     static func warningMessages(detailCode: UInt32) -> [String] {
-        messages(resultCode: 0, detailCode: detailCode)
+        (0..<2).compactMap { bit in
+            guard detailCode & (1 << bit) != 0 else { return nil }
+            let borrowed = seyal_launch_policy_warning_copy(UInt32(bit))
+            let text = utf8String(borrowed)
+            return text.isEmpty ? nil : text
+        }
     }
 
-    /// All Rust-selected copies for a create-result pair.
-    static func messages(resultCode: UInt16, detailCode: UInt32) -> [String] {
-        var buffer = Array(
-            repeating: SeyalLaunchPolicyCopy(text: nil, text_len: 0, reserved: 0),
-            count: Int(copyCapacity)
-        )
-        let count = buffer.withUnsafeMutableBufferPointer { ptr in
-            seyal_launch_policy_copies(resultCode, detailCode, ptr.baseAddress, copyCapacity)
+    /// Surface already-decided Rust copy through the host log (non-secret only).
+    static func surface(resultCode: UInt16, detailCode: UInt32) {
+        if resultCode == 17 {
+            NSLog("Seyal launch policy: %@", failureMessage(resultCode: resultCode, detailCode: detailCode))
+            return
         }
-        return (0..<Int(count)).compactMap { index in
-            let text = utf8String(buffer[index])
-            return text.isEmpty ? nil : text
+        if resultCode == 0 {
+            for line in warningMessages(detailCode: detailCode) {
+                NSLog("Seyal launch policy: %@", line)
+            }
         }
     }
 
