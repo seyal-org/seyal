@@ -253,6 +253,7 @@ enum RendererValidation {
             // proofs cover finite atlas pressure/reclamation, repeated surface
             // lifecycle cleanup, and the production CAMetalLayer path itself.
             guard atlasPressureSelfTest(device: device),
+                  retainedDefaultColorsFollowThemeOffscreenSelfTest(),
                   try repeatedLifecycleSelfTest(device: device),
                   try productionLayerPresentSelfTest(device: device),
                   historyPrepareDefersWhileFrameInFlightSelfTest(),

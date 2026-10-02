@@ -261,8 +261,8 @@ extension MetalTerminalRenderer {
                             origin: origin,
                             size: size,
                             uvRect: SIMD4<Float>(repeating: 0),
-                            foreground: resolveTerminalColor(source.foreground, defaultRGBA: 0xffe9_e1d8),
-                            background: resolveTerminalColor(source.background, defaultRGBA: 0xff10_0d0b),
+                            foreground: resolveTerminalColor(source.foreground, defaultRGBA: 0),
+                            background: resolveTerminalColor(source.background, defaultRGBA: 0),
                             flags: 0,
                             atlasSlice: 0
                         )

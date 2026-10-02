@@ -32,6 +32,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     var currentMetrics: TerminalFontMetrics?
     var currentScale: CGFloat = 0
     var currentAlternateScreen = false
+    var defaultTerminalColors: SIMD2<UInt32>
     var framesInFlight = 0
     var deferredDamage = DamageMask()
     var deferredNeedsFullRebuild = false
@@ -46,7 +47,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     let gpuCompletionMailbox = GPUCompletionMailbox()
     /// Coalesces main-queue drain wakeups from GPU completion handlers.
     let gpuCompletionWakeScheduled = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
-
     var stats = MetalRendererStats()
     var persistentDisplayFailure: MetalTerminalRendererError?
     var onNeedsCurrentFrame: (() -> Void)?
@@ -54,6 +54,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
 
     init(device: MTLDevice, terminalFont: SeyalResolvedFontSpec = .canonicalTerminal) throws {
         gpuCompletionWakeScheduled.initialize(to: 0)
+        self.defaultTerminalColors = Self.themeSeededDefaultColors()
         self.device = device
         guard MemoryLayout<TerminalInstance>.stride == 48 else {
             throw MetalTerminalRendererError.invalidInstanceLayout
@@ -483,8 +484,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                     origin: origin,
                     size: size,
                     uvRect: uvRect,
-                    foreground: resolveTerminalColor(cell.foreground, defaultRGBA: 0xffe9_e1d8),
-                    background: resolveTerminalColor(cell.background, defaultRGBA: 0xff10_0d0b),
+                    foreground: resolveTerminalColor(cell.foreground, defaultRGBA: 0),
+                    background: resolveTerminalColor(cell.background, defaultRGBA: 0),
                     flags: flags,
                     atlasSlice: atlasSlice
                 )

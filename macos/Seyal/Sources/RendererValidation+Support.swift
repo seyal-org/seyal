@@ -156,6 +156,36 @@ extension RendererValidation {
         return false
     }
 
+    static func textureRegionContainsDarkGlyph(
+        _ texture: MTLTexture,
+        xStart: Int,
+        xEnd: Int
+    ) -> Bool {
+        let bytesPerRow = texture.width * 4
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
+        texture.getBytes(
+            &bytes,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+        let clampedStart = max(0, xStart)
+        let clampedEnd = min(texture.width, xEnd)
+        guard clampedStart < clampedEnd else { return false }
+        for y in 0..<texture.height {
+            for x in clampedStart..<clampedEnd {
+                let offset = y * bytesPerRow + x * 4
+                let blue = bytes[offset]
+                let green = bytes[offset + 1]
+                let red = bytes[offset + 2]
+                if max(red, max(green, blue)) < 128 {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     static func textureRegionsMatch(
         _ texture: MTLTexture,
         firstX: Int,
