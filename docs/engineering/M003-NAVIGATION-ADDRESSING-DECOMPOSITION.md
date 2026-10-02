@@ -91,7 +91,7 @@ its entries here).
 **Tests:** SPEC-022 §12 items 15–20, 20a, 21–23, 23b, with 15 and 16 as property tests over
 generated navigation/destruction sequences.
 
-**Coordination:** #1001 (Proposed ADR-021 / SPEC-025 on `master`, PR #1053)
+**Coordination:** #1001 (ADR-021 / SPEC-025, accepted on merge of PR #1086)
 owns which Pane receives focus after split/close/move (SPEC-025 §5.2) and
 declares those successors user-initiated commits (SPEC-025 §6). This slice
 consumes those committed transitions in the R6.7a order. If #1001 lands first, N3

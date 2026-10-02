@@ -186,6 +186,18 @@ fn login_argv_shapes_match_spec_tables() {
         interactive_login_argv(Path::new("/bin/sh")),
         vec![OsString::from("-i")]
     );
+    assert_eq!(
+        interactive_login_argv(Path::new("/bin/tcsh")),
+        vec![OsString::from("-l")]
+    );
+    assert_eq!(
+        interactive_login_argv(Path::new("/bin/csh")),
+        vec![OsString::from("-l")]
+    );
+    assert_eq!(
+        interactive_login_argv(Path::new("/usr/local/bin/unknownshell")),
+        vec![OsString::from("-i")]
+    );
 
     let account = account("/bad");
     let probe = MapProbe::default()
