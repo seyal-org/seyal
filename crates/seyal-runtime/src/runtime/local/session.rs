@@ -46,6 +46,11 @@ impl Runtime {
             self.handle_terminate_execution_request(token, payload);
             return;
         }
+        if kind == MessageType::ViewportLineIds {
+            // Type 35 is Runtime→client only.
+            self.send_error(token, ErrorCode::UnknownMessage, message_type);
+            return;
+        };
         let pass7_attached = current_state == LocalIpcConnState::Attached
             && matches!(
                 kind,
@@ -107,7 +112,8 @@ impl Runtime {
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
                 | framing::CAP_EXTENDED_TERMINAL_KEY
-                | CAP_EXECUTION_PROVISIONING)
+                | CAP_EXECUTION_PROVISIONING
+                | framing::CAP_VIEWPORT_LINE_IDS)
             != 0
         {
             self.send_error(
@@ -127,7 +133,8 @@ impl Runtime {
                 | CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
-                | CAP_EXECUTION_PROVISIONING,
+                | CAP_EXECUTION_PROVISIONING
+                | framing::CAP_VIEWPORT_LINE_IDS,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };
@@ -270,6 +277,12 @@ impl Runtime {
             self.close_local_connection(token);
             return;
         }
+        self.maybe_send_viewport_line_ids(
+            token,
+            attach.execution_id,
+            snapshot.source_damage_generation,
+            snapshot.rows,
+        );
         if !self.sync_local_writable(token) {
             return;
         }

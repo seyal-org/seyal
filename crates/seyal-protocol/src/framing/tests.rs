@@ -72,6 +72,10 @@ fn display_message_ids_replace_candidate_b_projection_messages() {
     assert_eq!(MessageType::from_u16(32), Some(MessageType::CopiedText));
     assert_eq!(MessageType::from_u16(33), Some(MessageType::HostSearch));
     assert_eq!(MessageType::from_u16(34), Some(MessageType::TerminalMouse));
+    assert_eq!(
+        MessageType::from_u16(35),
+        Some(MessageType::ViewportLineIds)
+    );
 }
 
 #[test]

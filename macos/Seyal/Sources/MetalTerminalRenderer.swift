@@ -25,12 +25,14 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     /// transcript frame replaces the order and membership atomically.
     var historyRegions: [UInt64: HistoryRenderRegion] = [:]
     var historyRegionOrder: [UInt64] = []
+    var liveTail = LiveTailRenderState()
     var presentationPlan = RendererPresentationPlan.fullPane(.raw)
     var currentRows = 0
     var currentColumns = 0
     var currentMetrics: TerminalFontMetrics?
     var currentScale: CGFloat = 0
     var currentAlternateScreen = false
+    var defaultTerminalColors: SIMD2<UInt32>
     var framesInFlight = 0
     var deferredDamage = DamageMask()
     var deferredNeedsFullRebuild = false
@@ -45,7 +47,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
     let gpuCompletionMailbox = GPUCompletionMailbox()
     /// Coalesces main-queue drain wakeups from GPU completion handlers.
     let gpuCompletionWakeScheduled = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
-
     var stats = MetalRendererStats()
     var persistentDisplayFailure: MetalTerminalRendererError?
     var onNeedsCurrentFrame: (() -> Void)?
@@ -53,6 +54,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
 
     init(device: MTLDevice, terminalFont: SeyalResolvedFontSpec = .canonicalTerminal) throws {
         gpuCompletionWakeScheduled.initialize(to: 0)
+        self.defaultTerminalColors = Self.themeSeededDefaultColors()
         self.device = device
         guard MemoryLayout<TerminalInstance>.stride == 48 else {
             throw MetalTerminalRendererError.invalidInstanceLayout
@@ -125,7 +127,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                     && instanceBuffer != nil
                     && instanceCount > 0
                     && glyphAtlas.texture != nil)
-                    || !historyRegionOrder.isEmpty && glyphAtlas.texture != nil
+                    || (!historyRegionOrder.isEmpty || !liveTail.order.isEmpty) && glyphAtlas.texture != nil
                     || !presentationPlan.drawsLiveGrid
             )
     }
@@ -298,6 +300,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             needsCurrentFrameWhenIdle = false
             needsPresent = true
             preparationSucceeded = true
+            refreshLiveTailAfterPrepare(frame: frame, damage: damage, scale: scale)
             return .updated
         }
 
@@ -352,6 +355,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             stats.rebuiltCells &+= UInt64(frame.columns)
         }
         preparationSucceeded = true
+        refreshLiveTailAfterPrepare(frame: frame, damage: damage, scale: scale)
         return .updated
     }
 
@@ -480,8 +484,8 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                     origin: origin,
                     size: size,
                     uvRect: uvRect,
-                    foreground: resolveTerminalColor(cell.foreground, defaultRGBA: 0xffe9_e1d8),
-                    background: resolveTerminalColor(cell.background, defaultRGBA: 0xff10_0d0b),
+                    foreground: resolveTerminalColor(cell.foreground, defaultRGBA: 0),
+                    background: resolveTerminalColor(cell.background, defaultRGBA: 0),
                     flags: flags,
                     atlasSlice: atlasSlice
                 )
@@ -534,7 +538,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         // Flow must be allowed to submit a clear-only frame so a prior live
         // grid cannot remain on the drawable after the mode fence.
         needsPresent = instanceBuffer != nil
-            || !historyRegionOrder.isEmpty
+            || !historyRegionOrder.isEmpty || !liveTail.order.isEmpty
             || !plan.drawsLiveGrid
     }
 
@@ -544,19 +548,19 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             drawsFullGridBackground: presentationPlan.drawsFullGridBackground,
             drawsLiveGrid: presentationPlan.drawsLiveGrid,
             drawsCursorOutsideBlockRegions: presentationPlan.drawsCursorOutsideBlockRegions,
-            blockRegionIDs: historyRegionOrder
+            blockRegionIDs: historyRegionOrder + liveTail.order
         )
     }
 
     func inspectFlowPaint(from texture: MTLTexture? = nil) -> FlowPaintInspection {
         var instancesOutsideClips = 0
         var historyInstanceCount = 0
-        for region in orderedHistoryRegions {
+        for region in orderedBlockRegions {
             let pointer = region.buffer.contents().bindMemory(
                 to: TerminalInstance.self,
                 capacity: region.instanceCount
             )
-            for index in 0..<region.instanceCount {
+            for index in 0..<region.instanceCount where pointer[index].size.x > 0 && pointer[index].size.y > 0 {
                 historyInstanceCount += 1
                 let origin = pointer[index].origin
                 let size = pointer[index].size
@@ -574,7 +578,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         var opaqueOutside = 0
         var opaqueInside = 0
         if let texture {
-            let sampled = countOpaquePixels(in: texture, clips: orderedHistoryRegions.map(\.clip))
+            let sampled = countOpaquePixels(in: texture, clips: orderedBlockRegions.map(\.clip))
             opaqueOutside = sampled.outside
             opaqueInside = sampled.inside
         }
@@ -603,10 +607,6 @@ final class MetalTerminalRenderer: @unchecked Sendable {
         needsPresent = instanceBuffer != nil
     }
 
-    private var orderedHistoryRegions: [HistoryRenderRegion] {
-        historyRegionOrder.compactMap { historyRegions[$0] }
-    }
-
     /// Submit a frame to a drawable supplied by the platform frame scheduler.
     /// Production presentation must not call `CAMetalLayer.nextDrawable()`
     /// here because that API can wait while all drawables are in use.
@@ -632,7 +632,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             target: drawable.texture,
             instanceBuffer: instanceBuffer,
             atlasTexture: glyphAtlas.texture,
-            historyRegions: orderedHistoryRegions
+            historyRegions: orderedBlockRegions
         ) else {
             deferredNeedsFullRebuild = true
             needsCurrentFrameWhenIdle = true
@@ -690,7 +690,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
               persistentDisplayFailure == nil,
               needsPresent,
               framesInFlight == 0,
-              instanceBuffer != nil || !presentationPlan.drawsLiveGrid || !orderedHistoryRegions.isEmpty
+              instanceBuffer != nil || !presentationPlan.drawsLiveGrid || !orderedBlockRegions.isEmpty
         else {
             return false
         }
@@ -717,7 +717,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
             guard instanceBuffer != nil, instanceCount > 0, glyphAtlas.texture != nil else {
                 return nil
             }
-        } else if !orderedHistoryRegions.isEmpty {
+        } else if !orderedBlockRegions.isEmpty {
             guard glyphAtlas.texture != nil else { return nil }
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -733,7 +733,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                   target: texture,
                   instanceBuffer: instanceBuffer,
                   atlasTexture: glyphAtlas.texture,
-                  historyRegions: orderedHistoryRegions
+                  historyRegions: orderedBlockRegions
               )
         else {
             return nil
@@ -771,7 +771,7 @@ final class MetalTerminalRenderer: @unchecked Sendable {
                   target: texture,
                   instanceBuffer: instanceBuffer,
                   atlasTexture: atlasTexture,
-                  historyRegions: orderedHistoryRegions
+                  historyRegions: orderedBlockRegions
               )
         else {
             return nil

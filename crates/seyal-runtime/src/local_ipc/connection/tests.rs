@@ -3,10 +3,15 @@
 use super::*;
 use crate::display::MAX_DISPLAY_BATCH_BYTES;
 use crate::display::{encode_delta, encode_snapshot, DisplayKind, EncodedDisplayBatch};
+use crate::local_ipc::framing::{encode_frame, FrameHeader, MessageType, ViewportLineIds};
 use seyal_exec::{
     ProjectionAttributes, ProjectionCell, ProjectionDamage, TerminalProjectionSnapshot,
     TerminalProjectionUpdate,
 };
+use seyal_protocol::pass8::{
+    encode_block_state_frame, BlockKind, BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE,
+};
+use seyal_protocol::{BlockId, ExecutionId};
 use std::{collections::VecDeque, io::Read, os::unix::net::UnixStream, sync::Arc};
 
 fn sample_cells(count: usize) -> Vec<ProjectionCell> {
@@ -251,4 +256,93 @@ fn partial_after_display_frame_finishes_before_mandatory_and_display_work() {
 
     outbound::flush_outbound(&mut connection).unwrap();
     assert_eq!(connection.queued_control_bytes, 0);
+}
+
+fn viewport_line_ids_frame(generation: u64, line_id: u64) -> Vec<u8> {
+    encode_frame(
+        MessageType::ViewportLineIds,
+        &ViewportLineIds {
+            generation,
+            line_ids: vec![line_id],
+        }
+        .encode(),
+    )
+}
+
+fn composer_status_frame(marker: u8) -> Vec<u8> {
+    // Minimal well-framed ComposerStatus-typed bytes; coalesce only peeks the
+    // message type, so the payload need not decode as ComposerStatus.
+    let mut frame = FrameHeader::new(MessageType::ComposerStatus as u16, 1)
+        .encode()
+        .to_vec();
+    frame.push(marker);
+    frame
+}
+
+#[test]
+fn viewport_line_ids_coalesce_preserves_block_state_and_composer_status() {
+    let path = std::env::temp_dir().join(format!(
+        "seyal-after-display-coalesce-{}.sock",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut server = LocalIpcServer::bind(&path, 4).expect("bind");
+    let _ = std::fs::remove_file(&path);
+
+    let token = 7u64;
+    let (stream, _peer) = UnixStream::pair().unwrap();
+    server.connections.insert(
+        token,
+        Connection {
+            stream,
+            state: ConnectionState::Attached,
+            read_buf: Vec::new(),
+            mandatory: VecDeque::new(),
+            after_display: VecDeque::new(),
+            queued_control_bytes: 0,
+            display_inflight: None,
+            pending_display: None,
+            display_generation: 1,
+        },
+    );
+
+    let block = encode_block_state_frame(&BlockState {
+        execution_id: ExecutionId::from_bytes([1; 16]),
+        block_id: BlockId::from_bytes([2; 16]),
+        revision: 1,
+        start_line_id: 3,
+        kind: BlockKind::TerminalActivity,
+        state: BlockLifecycle::Current,
+    })
+    .expect("BlockState frame");
+    let stale_line_ids = viewport_line_ids_frame(1, 10);
+    let status = composer_status_frame(0xAB);
+    let fresh_line_ids = viewport_line_ids_frame(2, 20);
+
+    server
+        .enqueue_after_display(token, block.clone())
+        .expect("BlockState");
+    server
+        .enqueue_after_display(token, stale_line_ids)
+        .expect("stale ViewportLineIds");
+    server
+        .enqueue_after_display(token, status.clone())
+        .expect("ComposerStatus");
+    server
+        .enqueue_after_display(token, fresh_line_ids.clone())
+        .expect("fresh ViewportLineIds");
+
+    let queued = &server.connections.get(&token).unwrap().after_display;
+    assert_eq!(queued.len(), 3, "stale type 35 must drop; others stay");
+    assert_eq!(
+        FrameHeader::decode(&queued[0].bytes).unwrap().message_type,
+        BLOCK_STATE_MESSAGE_TYPE
+    );
+    assert_eq!(queued[0].bytes, block);
+    assert_eq!(
+        FrameHeader::decode(&queued[1].bytes).unwrap().message_type,
+        MessageType::ComposerStatus as u16
+    );
+    assert_eq!(queued[1].bytes, status);
+    assert_eq!(queued[2].bytes, fresh_line_ids);
 }

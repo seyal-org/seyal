@@ -74,7 +74,8 @@ fragment float4 seyal_terminal_fragment(
     TerminalVertexOut in [[stage_in]],
     texture2d_array<float> glyph_atlas [[texture(0)]],
     sampler glyph_sampler [[sampler(0)]],
-    constant uint &render_mode [[buffer(2)]])
+    constant uint &render_mode [[buffer(2)]],
+    constant uint2 &default_colors [[buffer(3)]])
 {
     constexpr uint glyph_flag = 1u << 0;
     constexpr uint underline_flag = 1u << 1;
@@ -86,8 +87,8 @@ fragment float4 seyal_terminal_fragment(
         discard_fragment();
     }
 
-    float4 foreground = unpack_rgba8(in.foreground);
-    float4 background = unpack_rgba8(in.background);
+    float4 foreground = unpack_rgba8(in.foreground == 0u ? default_colors.x : in.foreground);
+    float4 background = unpack_rgba8(in.background == 0u ? default_colors.y : in.background);
     if ((in.flags & cursor_flag) != 0u) {
         const float4 temporary = foreground;
         foreground = background;

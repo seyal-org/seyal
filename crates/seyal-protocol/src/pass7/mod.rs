@@ -7,6 +7,7 @@ mod composer;
 mod history;
 mod resize;
 mod terminal_key;
+mod viewport_line_ids;
 
 #[cfg(test)]
 mod tests;
@@ -30,6 +31,7 @@ pub use terminal_key::{
     TerminalKeyV2Kind, TerminalKeyV2Modifiers, CAP_EXTENDED_TERMINAL_KEY,
     CAP_SEMANTIC_TERMINAL_KEY,
 };
+pub use viewport_line_ids::ViewportLineIds;
 
 pub(in crate::pass7) fn exact_len(bytes: &[u8], expected: usize) -> Result<(), FramingError> {
     if bytes.len() != expected {

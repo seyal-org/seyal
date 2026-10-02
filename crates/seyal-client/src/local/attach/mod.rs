@@ -146,9 +146,10 @@ fn classify_resync_scan_frame(frame: &[u8]) -> Result<ResyncScanFrame, ClientErr
         MessageType::DisplayDelta | MessageType::DisplayDeltaV2 => {
             Ok(ResyncScanFrame::DisplayRemainder)
         }
-        MessageType::BlockTimeline | MessageType::Lifecycle | MessageType::CopiedText => {
-            Ok(ResyncScanFrame::DeferredControl)
-        }
+        MessageType::BlockTimeline
+        | MessageType::Lifecycle
+        | MessageType::CopiedText
+        | MessageType::ViewportLineIds => Ok(ResyncScanFrame::DeferredControl),
         _ => Err(ClientError::Protocol),
     }
 }
@@ -877,6 +878,8 @@ impl LocalDisplayClient {
             pending_terminate_requests: std::collections::HashSet::new(),
             last_create_result: VecDeque::new(),
             last_terminate_result: None,
+            viewport_line_ids: Vec::new(),
+            viewport_line_ids_generation: 0,
         })
     }
 }

@@ -3,6 +3,7 @@
 //! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
+mod block_projection;
 mod decode;
 mod encode;
 mod pane_region;
@@ -31,6 +32,7 @@ use encode::{
     encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
+pub use block_projection::seyal_app_block_projection;
 pub use pane_region::seyal_app_pane_region;
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,

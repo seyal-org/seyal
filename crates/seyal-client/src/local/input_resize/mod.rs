@@ -311,6 +311,7 @@ impl LocalDisplayClient {
             }
             crate::v2_error::V2IncomingDisposition::LostController => {
                 self.role = Role::Observer;
+                self.clear_viewport_line_ids();
                 Ok(Some(InputAdmissionFailure::LostController))
             }
             crate::v2_error::V2IncomingDisposition::Protocol => Err(ClientError::Protocol),
@@ -550,6 +551,7 @@ impl LocalDisplayClient {
                         | ErrorCode::MalformedPayload
                 ) {
                     self.role = Role::Observer;
+                    self.clear_viewport_line_ids();
                     self.input_failure = Some(InputAdmissionFailure::LostController);
                 }
             }
@@ -665,6 +667,7 @@ impl LocalDisplayClient {
 
     pub(crate) fn request_resync(&mut self) -> Result<(), ClientError> {
         self.resync_needed = true;
+        self.clear_viewport_line_ids();
         self.try_queue_resync()
     }
 

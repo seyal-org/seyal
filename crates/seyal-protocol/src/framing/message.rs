@@ -11,7 +11,7 @@ use super::payload::{
 };
 use super::{
     BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, HistoryRangeRequest,
-    HistoryRangeSnapshot, ResizeRequest, ResizeResult, TerminalKey, TerminalKeyV2,
+    HistoryRangeSnapshot, ResizeRequest, ResizeResult, TerminalKey, TerminalKeyV2, ViewportLineIds,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +57,9 @@ pub enum MessageType {
     HostSearch = 33,
     /// Native mouse event. Runtime encodes SGR/X10 from canonical modes.
     TerminalMouse = 34,
+    /// Runtime→client primary viewport LineIds for one display generation.
+    /// Gated on `CAP_VIEWPORT_LINE_IDS`.
+    ViewportLineIds = 35,
     /// SPEC-004 §18: create a new TerminalExecution (capability bit 10).
     CreateExecutionRequest = 36,
     /// SPEC-004 §18: create-execution result.
@@ -102,6 +105,7 @@ impl MessageType {
             32 => Self::CopiedText,
             33 => Self::HostSearch,
             34 => Self::TerminalMouse,
+            35 => Self::ViewportLineIds,
             36 => Self::CreateExecutionRequest,
             37 => Self::CreateExecutionResult,
             38 => Self::TerminateExecutionRequest,
@@ -146,6 +150,7 @@ pub enum Message<'a> {
     CopiedText(InputRef<'a>),
     HostSearch(HostSearch<'a>),
     TerminalMouse(TerminalMouse),
+    ViewportLineIds(ViewportLineIds),
     CreateExecutionRequest(CreateExecutionRequest),
     CreateExecutionResult(CreateExecutionResult),
     TerminateExecutionRequest(TerminateExecutionRequest),
@@ -211,6 +216,7 @@ pub fn decode_message<'a>(
         MessageType::CopiedText => Message::CopiedText(InputRef::decode(payload)?),
         MessageType::HostSearch => Message::HostSearch(HostSearch::decode(payload)?),
         MessageType::TerminalMouse => Message::TerminalMouse(TerminalMouse::decode(payload)?),
+        MessageType::ViewportLineIds => Message::ViewportLineIds(ViewportLineIds::decode(payload)?),
         MessageType::CreateExecutionRequest => {
             Message::CreateExecutionRequest(CreateExecutionRequest::decode(payload)?)
         }

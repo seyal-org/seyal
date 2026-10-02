@@ -112,6 +112,13 @@ final class CommandBlockView: NSView {
         bodyHeight.constant = max(cellHeight, 1) * CGFloat(max(lines, 1))
     }
 
+    override func accessibilityChildren() -> [Any]? {
+        // The card is itself an accessibility element, so XCUI cannot see the
+        // body (the live-tail target) without an explicit child list. Header
+        // labels stay in the tree so VoiceOver still hears prompt, command, and status.
+        [prompt, command, status, body]
+    }
+
     /// Flow's Metal surface returns `nil` from `hitTest`, so Block chrome must
     /// own the click. XCUI (and a user) hit the card center, which is the body
     /// once output exists — a header-only gesture never sees that click.
