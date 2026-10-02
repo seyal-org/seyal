@@ -88,13 +88,17 @@ pub(super) fn handshake_and_serve(
             handshake.max_frame_size,
         ));
     };
-    write_ack(stream, &ack, handshake.max_frame_size)?;
+    // Session timeouts must be applied before HelloAck: once the peer has the
+    // ack it may send a frame and close, and macOS rejects setsockopt on a
+    // socket whose peer has disconnected (EINVAL), even with bytes still
+    // buffered for read.
     stream
         .set_read_timeout(Some(handshake.session_idle_timeout))
         .map_err(|_| DaemonError::Io)?;
     stream
         .set_write_timeout(Some(handshake.session_write_timeout))
         .map_err(|_| DaemonError::Io)?;
+    write_ack(stream, &ack, handshake.max_frame_size)?;
     serve_session_locked(
         service,
         stream,
