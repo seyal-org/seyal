@@ -511,10 +511,7 @@ impl AgentStore {
         let mut first_segment_index = 0_u32;
         let mut byte_offset = 0_u32;
         let mut segments = 0_u32;
-        let mut next_index = last_row
-            .as_ref()
-            .map(|(index, _)| *index + 1)
-            .unwrap_or(0);
+        let mut next_index = last_row.as_ref().map(|(index, _)| *index + 1).unwrap_or(0);
 
         if let Some((index, mut payload)) = last_row {
             if !remaining.is_empty() && payload.len() < OUTPUT_SEGMENT_LEN {

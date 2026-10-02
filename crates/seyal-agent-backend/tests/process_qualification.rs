@@ -367,8 +367,8 @@ fn replay_identity(dir: &Path) -> Vec<ReplayIdentityRow> {
         for event in &events {
             if let Ok(output) = seyal_agent_store::decode_output_ref(&event.payload) {
                 if output.segment_count > 0 {
-                    let end = u64::from(output.first_segment_index)
-                        + u64::from(output.segment_count);
+                    let end =
+                        u64::from(output.first_segment_index) + u64::from(output.segment_count);
                     highest_exclusive = highest_exclusive.max(end);
                 }
             }

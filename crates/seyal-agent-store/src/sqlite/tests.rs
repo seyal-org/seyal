@@ -260,10 +260,7 @@ fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
         decoded.retention_policy_ref,
         RetentionPolicyRef::retained_stream()
     );
-    assert_eq!(
-        store.materialize_output_ref(run, &decoded).unwrap(),
-        bytes
-    );
+    assert_eq!(store.materialize_output_ref(run, &decoded).unwrap(), bytes);
 
     store.fail_after_writes(0);
     assert_eq!(
@@ -543,7 +540,10 @@ fn high_volume_append_stays_segment_bounded() {
     let segments = store.output_segment_count(run).unwrap();
     let expected_segments = (TOTAL / OUTPUT_SEGMENT_LEN) as u64;
     assert_eq!(segments, expected_segments);
-    assert!(segments < (TOTAL as u64) / 8, "no one-row-per-token regression");
+    assert!(
+        segments < (TOTAL as u64) / 8,
+        "no one-row-per-token regression"
+    );
     let events = store
         .replay_after(AggregateId::AgentRun(run), None)
         .unwrap();

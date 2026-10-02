@@ -207,8 +207,7 @@ pub fn decode_output_ref(payload: &[u8]) -> Result<OutputRef, OutputRefError> {
     let byte_length = u64::from_le_bytes(payload[13..21].try_into().unwrap());
     let first_ordinal = u64::from_le_bytes(payload[21..29].try_into().unwrap());
     let last_ordinal = u64::from_le_bytes(payload[29..37].try_into().unwrap());
-    let stream_kind =
-        StreamKind::from_u8(payload[37]).ok_or(OutputRefError::Corrupt)?;
+    let stream_kind = StreamKind::from_u8(payload[37]).ok_or(OutputRefError::Corrupt)?;
     let mut fingerprint_bytes = [0_u8; 37];
     fingerprint_bytes.copy_from_slice(&payload[38..75]);
     let fingerprint_ref =
