@@ -8,8 +8,9 @@
 //! a general fuzzy-ranking engine (explicitly out of scope). This module
 //! owns no Workspace/Tab/Pane/Agent/Attention identity of its own and
 //! invents no product action; it only enumerates ones that already exist on
-//! [`crate::shell::ShellState`] and [`crate::chrome::ChromeState`]. Hosts
-//! dispatch [`PaletteAction`] and render [`PaletteSnapshot`].
+//! [`crate::shell::ShellState`], [`crate::chrome::ChromeState`], and the
+//! bound Pane's explicit Raw choice. Hosts dispatch [`PaletteAction`] and
+//! render [`PaletteSnapshot`].
 
 use seyal_core::{PaneId, TabId, WorkspaceId};
 
@@ -37,6 +38,10 @@ pub enum PaletteCommand {
     SetInspectorMode(InspectorMode),
     OpenAttention(AttentionId),
     FocusAgent(AgentId),
+    /// Explicit non-TUI presentation (#867). `raw` latches Raw across TUI.
+    SelectResting {
+        raw: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -182,6 +187,25 @@ impl PaletteState {
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
     ) -> PaletteSnapshot {
+        self.snapshot_with_resting(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            None,
+        )
+    }
+
+    /// `explicit_raw` is `Some` only for a bound Pane. `Some(true)` offers
+    /// return to Flow; `Some(false)` offers explicit Raw. `None` omits both.
+    pub fn snapshot_with_resting(
+        &self,
+        shell: &ShellSnapshot,
+        chrome: &ChromeSnapshot,
+        allows_tab_creation: bool,
+        allows_pane_splitting: bool,
+        explicit_raw: Option<bool>,
+    ) -> PaletteSnapshot {
         if !self.open {
             return PaletteSnapshot {
                 open: false,
@@ -191,7 +215,13 @@ impl PaletteState {
                 last_error: self.last_error,
             };
         }
-        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
+        let commands = build_commands(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            explicit_raw,
+        );
         let filtered = filter(&commands, &self.query);
         let selected = clamp(self.selected, filtered.len());
         let rows = filtered
@@ -219,10 +249,33 @@ impl PaletteState {
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
     ) -> Option<PaletteCommand> {
+        self.resolve_with_resting(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            None,
+        )
+    }
+
+    pub fn resolve_with_resting(
+        &self,
+        shell: &ShellSnapshot,
+        chrome: &ChromeSnapshot,
+        allows_tab_creation: bool,
+        allows_pane_splitting: bool,
+        explicit_raw: Option<bool>,
+    ) -> Option<PaletteCommand> {
         if !self.open {
             return None;
         }
-        let commands = build_commands(shell, chrome, allows_tab_creation, allows_pane_splitting);
+        let commands = build_commands(
+            shell,
+            chrome,
+            allows_tab_creation,
+            allows_pane_splitting,
+            explicit_raw,
+        );
         let filtered = filter(&commands, &self.query);
         filtered
             .get(clamp(self.selected, filtered.len()))
@@ -269,8 +322,23 @@ fn build_commands(
     chrome: &ChromeSnapshot,
     allows_tab_creation: bool,
     allows_pane_splitting: bool,
+    explicit_raw: Option<bool>,
 ) -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
+
+    match explicit_raw {
+        Some(false) => entries.push(PaletteEntry {
+            label: "Use Raw Terminal".to_owned(),
+            category: "Terminal",
+            command: PaletteCommand::SelectResting { raw: true },
+        }),
+        Some(true) => entries.push(PaletteEntry {
+            label: "Return to Flow".to_owned(),
+            category: "Terminal",
+            command: PaletteCommand::SelectResting { raw: false },
+        }),
+        None => {}
+    }
 
     if allows_tab_creation {
         entries.push(PaletteEntry {

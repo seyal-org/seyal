@@ -10,11 +10,14 @@ mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod palette_apply;
+mod presentation_apply;
 mod recovery_apply;
 mod session;
 
 use accessibility::accessibility_nodes;
 
+#[cfg(test)]
+mod presentation_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
@@ -195,6 +198,13 @@ pub enum AppAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
+    /// User choice of the non-TUI presentation (#867).
+    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
+    /// structured eligibility again.
+    SelectRestingPresentation {
+        fence: AppFence,
+        raw: bool,
+    },
     SetLeftPanel {
         mode: LeftPanelMode,
     },
@@ -363,6 +373,15 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    /// Last canonical alternate-screen evidence. TUI while this is set.
+    alternate_screen: bool,
+    /// Flow or Raw used while alternate screen is off.
+    resting: PresentationMode,
+    /// User asked for Raw until they ask to re-evaluate.
+    explicit_raw: bool,
+    /// Runtime reported unsupported shell integration. SPEC-008 requires
+    /// full-Pane Raw until a later status says otherwise.
+    integration_unsupported: bool,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -402,6 +421,10 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            alternate_screen: false,
+            resting: PresentationMode::Flow,
+            explicit_raw: false,
+            integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
@@ -445,11 +468,12 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
+        let palette = self.palette.snapshot_with_resting(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
+            self.resting_palette_choice(),
         );
         let eligibility = self.eligibility();
         let composer_eligible = self.composer_eligible_for(eligibility);
@@ -559,6 +583,9 @@ impl ApplicationRoot {
                 eligibility,
                 revision,
             } => self.apply_runtime_composer_status(fence, eligibility, revision),
+            AppAction::SelectRestingPresentation { fence, raw } => {
+                self.select_resting_presentation(fence, raw)
+            }
             AppAction::OpenComposerHistory { fence } => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
@@ -660,35 +687,6 @@ impl ApplicationRoot {
         if fence.presentation_epoch != current.presentation_epoch {
             return Err(AppError::StalePresentationEpoch);
         }
-        Ok(())
-    }
-
-    fn derive_presentation(&mut self, alternate_screen: bool) -> Result<(), AppError> {
-        let Some(bound) = self.authority else {
-            self.sync_composer_presentation();
-            return Ok(());
-        };
-        let desired = if alternate_screen {
-            PresentationMode::Tui
-        } else {
-            PresentationMode::Flow
-        };
-        let current = self.presentation.snapshot();
-        if current.mode == desired {
-            self.sync_composer_presentation();
-            return Ok(());
-        }
-        let identity = PresentationIdentity::new(bound.execution, bound.pty_generation)
-            .ok_or(AppError::ZeroPtyGeneration)?;
-        self.presentation
-            .apply(PresentationAction::Transition {
-                mode: desired,
-                identity,
-                explicit: false,
-                epoch: current.epoch,
-            })
-            .map_err(|_| AppError::StalePresentationEpoch)?;
-        self.sync_composer_presentation();
         Ok(())
     }
 
