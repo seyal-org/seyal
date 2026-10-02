@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 3;
+pub(super) const SCHEMA_VERSION: i32 = 4;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS work_item (
 CREATE TABLE IF NOT EXISTS attempt (
     id BLOB PRIMARY KEY,
     work_item_id BLOB NOT NULL
+);";
+pub(super) const CLIENT_PRINCIPAL_TABLE: &str = "
+CREATE TABLE IF NOT EXISTS client_principal (
+    id BLOB PRIMARY KEY,
+    kind INTEGER NOT NULL,
+    status INTEGER NOT NULL,
+    scopes BLOB NOT NULL,
+    evidence_key BLOB NOT NULL UNIQUE
 );";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
@@ -50,6 +58,10 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
     }
     if from < 3 {
         tx.execute_batch(IDENTITY_TABLES)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 4 {
+        tx.execute_batch(CLIENT_PRINCIPAL_TABLE)
             .map_err(|_| StoreError::WriteFailed)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -106,6 +118,13 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         CREATE TABLE attempt (
             id BLOB PRIMARY KEY,
             work_item_id BLOB NOT NULL
+        );
+        CREATE TABLE client_principal (
+            id BLOB PRIMARY KEY,
+            kind INTEGER NOT NULL,
+            status INTEGER NOT NULL,
+            scopes BLOB NOT NULL,
+            evidence_key BLOB NOT NULL UNIQUE
         );",
     )
     .map_err(|_| StoreError::WriteFailed)?;

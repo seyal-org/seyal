@@ -12,7 +12,8 @@ mod sqlite;
 pub use seyal_agent_core::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
 pub use sqlite::{
     decode_output_ref, encode_output_ref, AgentStore, OutputAppend, PersistedAgentRun,
-    PersistedLiveness, StoreError, OUTPUT_REF_KIND, OUTPUT_REF_LEN, OUTPUT_SEGMENT_LEN,
+    PersistedLiveness, PersistedPrincipal, StoreError, OUTPUT_REF_KIND, OUTPUT_REF_LEN,
+    OUTPUT_SEGMENT_LEN,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

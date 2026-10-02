@@ -66,6 +66,59 @@ struct Principal {
     status: PrincipalStatus,
     scopes: BTreeSet<ClientScope>,
     allowed_runs: BTreeSet<AgentRunId>,
+    /// Hello evidence token that selects this principal (`cli`, `observer`, …).
+    evidence_key: Vec<u8>,
+}
+
+impl PrincipalKind {
+    pub fn code(self) -> u8 {
+        match self {
+            Self::FirstPartyCli => 1,
+            Self::FirstPartySeyal => 2,
+            Self::UserApprovedLocalClient => 3,
+            Self::ManagedClient => 4,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::FirstPartyCli),
+            2 => Some(Self::FirstPartySeyal),
+            3 => Some(Self::UserApprovedLocalClient),
+            4 => Some(Self::ManagedClient),
+            _ => None,
+        }
+    }
+}
+
+impl PrincipalStatus {
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Active => 1,
+            Self::Suspended => 2,
+            Self::Revoked => 3,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::Active),
+            2 => Some(Self::Suspended),
+            3 => Some(Self::Revoked),
+            _ => None,
+        }
+    }
+}
+
+impl ClientScope {
+    pub fn code(self) -> u8 {
+        match self {
+            Self::RunsCreate => 1,
+            Self::RunsObserve => 2,
+            Self::RunsInteract => 3,
+            Self::RunsControl => 4,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +148,17 @@ pub enum AuthorizationError {
 pub struct AuthorizationRepository {
     principals: HashMap<ClientPrincipalId, Principal>,
     sessions: HashMap<ClientSessionId, Session>,
+    evidence_index: HashMap<Vec<u8>, ClientPrincipalId>,
+}
+
+/// Durable principal snapshot for store upsert (no pairing secrets).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurablePrincipal {
+    pub id: ClientPrincipalId,
+    pub kind: PrincipalKind,
+    pub status: PrincipalStatus,
+    pub scopes: BTreeSet<ClientScope>,
+    pub evidence_key: Vec<u8>,
 }
 
 impl AuthorizationRepository {
@@ -104,6 +168,38 @@ impl AuthorizationRepository {
         scopes: impl IntoIterator<Item = ClientScope>,
     ) -> ClientPrincipalId {
         let id = ClientPrincipalId::new();
+        let evidence_key = match kind {
+            PrincipalKind::FirstPartyCli => b"cli".to_vec(),
+            PrincipalKind::FirstPartySeyal => b"seyal".to_vec(),
+            PrincipalKind::ManagedClient => b"observer".to_vec(),
+            PrincipalKind::UserApprovedLocalClient => {
+                let mut key = b"approved:".to_vec();
+                key.extend_from_slice(&id.to_bytes());
+                key
+            }
+        };
+        self.insert_principal(id, kind, scopes, evidence_key);
+        id
+    }
+
+    pub fn register_principal_with_evidence(
+        &mut self,
+        kind: PrincipalKind,
+        scopes: impl IntoIterator<Item = ClientScope>,
+        evidence_key: Vec<u8>,
+    ) -> ClientPrincipalId {
+        let id = ClientPrincipalId::new();
+        self.insert_principal(id, kind, scopes, evidence_key);
+        id
+    }
+
+    fn insert_principal(
+        &mut self,
+        id: ClientPrincipalId,
+        kind: PrincipalKind,
+        scopes: impl IntoIterator<Item = ClientScope>,
+        evidence_key: Vec<u8>,
+    ) {
         self.principals.insert(
             id,
             Principal {
@@ -111,9 +207,59 @@ impl AuthorizationRepository {
                 status: PrincipalStatus::Active,
                 scopes: scopes.into_iter().collect(),
                 allowed_runs: BTreeSet::new(),
+                evidence_key: evidence_key.clone(),
             },
         );
-        id
+        self.evidence_index.insert(evidence_key, id);
+    }
+
+    pub fn load_durable_principal(
+        &mut self,
+        row: DurablePrincipal,
+    ) -> Result<(), AuthorizationError> {
+        if self.principals.contains_key(&row.id) {
+            return Err(AuthorizationError::Malformed);
+        }
+        self.principals.insert(
+            row.id,
+            Principal {
+                kind: row.kind,
+                status: row.status,
+                scopes: row.scopes,
+                allowed_runs: BTreeSet::new(),
+                evidence_key: row.evidence_key.clone(),
+            },
+        );
+        self.evidence_index.insert(row.evidence_key, row.id);
+        Ok(())
+    }
+
+    pub fn durable_principal(
+        &self,
+        id: ClientPrincipalId,
+    ) -> Result<DurablePrincipal, AuthorizationError> {
+        let principal = self
+            .principals
+            .get(&id)
+            .ok_or(AuthorizationError::UnknownPrincipal)?;
+        Ok(DurablePrincipal {
+            id,
+            kind: principal.kind,
+            status: principal.status,
+            scopes: principal.scopes.clone(),
+            evidence_key: principal.evidence_key.clone(),
+        })
+    }
+
+    pub fn principal_by_evidence_key(&self, evidence: &[u8]) -> Option<ClientPrincipalId> {
+        let key = normalize_evidence_key(evidence);
+        self.evidence_index.get(key).copied().or_else(|| {
+            if key == b"cli" {
+                self.evidence_index.get(b"cli".as_slice()).copied()
+            } else {
+                None
+            }
+        })
     }
 
     pub fn principal_kind(&self, id: ClientPrincipalId) -> Option<PrincipalKind> {
@@ -157,16 +303,21 @@ impl AuthorizationRepository {
         }
     }
 
-    /// Recognized Hello principal evidence tokens for this AB-0 daemon.
+    /// Recognized Hello principal evidence tokens.
     /// Same-UID admission is never enough: unknown evidence fails closed.
     pub fn recognize_principal_evidence(evidence: &[u8]) -> Result<(), AuthorizationError> {
-        match evidence {
-            [] | b"cli" | b"observer" => Ok(()),
+        let key = normalize_evidence_key(evidence);
+        match key {
+            b"cli" | b"observer" | b"seyal" => Ok(()),
+            other if other.starts_with(b"approved") => Ok(()),
             _ => Err(AuthorizationError::TransportAdmissionIsNotAuthorization),
         }
     }
 
     /// Map Hello principal evidence to a registered principal.
+    ///
+    /// When `owner`/`observer` are provided they remain the AB-0 fallback for
+    /// empty/`cli`/`observer` tokens. Durable loads prefer the evidence index.
     pub fn principal_for_evidence(
         &self,
         evidence: &[u8],
@@ -174,8 +325,11 @@ impl AuthorizationRepository {
         observer: ClientPrincipalId,
     ) -> Result<ClientPrincipalId, AuthorizationError> {
         Self::recognize_principal_evidence(evidence)?;
-        match evidence {
-            [] | b"cli" => Ok(owner),
+        if let Some(id) = self.principal_by_evidence_key(evidence) {
+            return Ok(id);
+        }
+        match normalize_evidence_key(evidence) {
+            b"cli" => Ok(owner),
             b"observer" => Ok(observer),
             _ => Err(AuthorizationError::TransportAdmissionIsNotAuthorization),
         }
@@ -311,7 +465,16 @@ impl AuthorizationRepository {
 
         Ok(())
     }
+}
 
+fn normalize_evidence_key(evidence: &[u8]) -> &[u8] {
+    match evidence {
+        [] => b"cli",
+        other => other,
+    }
+}
+
+impl AuthorizationRepository {
     pub fn authorize_control(
         &mut self,
         session_id: ClientSessionId,

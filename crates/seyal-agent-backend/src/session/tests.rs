@@ -1,6 +1,6 @@
 use super::*;
 use seyal_agent_core::{AttemptId, WorkItemId, WorkScopeId};
-use seyal_agent_protocol::{BackendInstanceId, Command, CommandResult};
+use seyal_agent_protocol::{BackendInstanceId, Command, CommandError, CommandResult};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_store() -> PathBuf {
@@ -371,4 +371,69 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
     );
 
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
+    let dir = temp_store();
+    std::fs::create_dir_all(&dir).unwrap();
+    let store_path = dir.join("agent.db");
+    let config = IntegrationConfig {
+        store_path: store_path.clone(),
+        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
+    };
+    let first_instance = BackendInstanceId::new();
+    let mut service = IntegrationService::open(first_instance, &config).expect("open");
+    let owner = service.owner_principal_id();
+    service.begin_connection(b"cli").unwrap();
+    let session = match service.dispatch(
+        Command::OpenSession {
+            scopes: vec![1, 2, 4],
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) {
+        CommandResult::Opened { session_id } => session_id,
+        other => panic!("{other:?}"),
+    };
+    service
+        .set_principal_status_durable(owner, PrincipalStatus::Revoked)
+        .unwrap();
+    drop(service);
+
+    let second_instance = BackendInstanceId::new();
+    let mut restarted = IntegrationService::open(second_instance, &config).expect("reopen");
+    // Prior process session cannot resume under a new BackendInstanceId.
+    restarted.begin_connection(b"cli").unwrap();
+    assert_eq!(
+        restarted.dispatch(
+            Command::ResumeSession {
+                session_id: session
+            },
+            32,
+            ABSOLUTE_MAX_FRAME_SIZE,
+        ),
+        CommandResult::Error(CommandError::RejectedSession)
+    );
+    // Revoked principal cannot open a fresh privileged session.
+    assert_eq!(
+        restarted.dispatch(
+            Command::OpenSession {
+                scopes: vec![1, 2, 4],
+            },
+            32,
+            ABSOLUTE_MAX_FRAME_SIZE,
+        ),
+        CommandResult::Error(CommandError::Denied)
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn pairing_secret_never_enters_event_payload() {
+    let secret = crate::PairingCredential::new("super-secret-pairing-material");
+    assert_eq!(secret.event_payload(), b"");
+    let rendered = format!("{secret:?}");
+    assert!(!rendered.contains("super-secret"));
+    assert!(rendered.contains("redacted"));
 }
