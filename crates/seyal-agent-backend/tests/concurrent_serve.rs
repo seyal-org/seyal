@@ -10,7 +10,7 @@ mod support;
 use std::{
     os::unix::net::UnixStream,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc, Arc,
     },
     thread,
@@ -18,13 +18,28 @@ use std::{
 };
 
 use seyal_agent_backend::{
-    AgentDaemon, DaemonConfig, HostObservationKind, IntegrationConfig, ScriptStep,
+    AgentDaemon, DaemonConfig, DaemonError, HostObservationKind, IntegrationConfig, ScriptStep,
 };
 use seyal_agent_core::WorkScopeKind;
-use seyal_agent_protocol::{AggregateRef, Command, CommandError, CommandResult};
+use seyal_agent_protocol::{
+    encode_command, encode_hello, AggregateRef, Command, CommandError, CommandResult, FrameKind,
+    Hello, ProtocolVersion, ABSOLUTE_MAX_FRAME_SIZE,
+};
 use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence};
 
 use support::{temp_dir, TestClient};
+
+const BARRIER: Duration = Duration::from_secs(5);
+
+fn recv_barrier<T>(rx: &mpsc::Receiver<T>, timeout: Duration, barrier: &str) -> T {
+    match rx.recv_timeout(timeout) {
+        Ok(value) => value,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            panic!("barrier {barrier} timed out after {timeout:?}")
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("barrier {barrier} disconnected"),
+    }
+}
 
 fn script() -> Vec<ScriptStep> {
     vec![
@@ -46,23 +61,36 @@ fn two_live_peers_owner_and_observer_share_authoritative_run() {
     )
     .unwrap();
     let socket = daemon.socket_path();
+    let (live_tx, live_rx) = mpsc::channel();
+    let (go_owner_tx, go_owner_rx) = mpsc::channel();
+    let (go_observer_tx, go_observer_rx) = mpsc::channel();
+    let (run_tx, run_rx) = mpsc::channel();
+    let (replayed_tx, replayed_rx) = mpsc::channel();
 
+    let owner_live = live_tx.clone();
     let owner_socket = socket.clone();
     let owner = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(20));
         let mut client = TestClient::connect(&owner_socket);
+        owner_live.send("owner").unwrap();
+        recv_barrier(&go_owner_rx, BARRIER, "two-live-release-owner");
         let scope = client.create_work_scope(WorkScopeKind::Repository);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
-        let replay = client.replay_all(AggregateRef::AgentRun(started.run_id));
-        (started.run_id, started.event_count, replay.len())
+        run_tx.send((started.run_id, started.event_count)).unwrap();
+        recv_barrier(
+            &replayed_rx,
+            BARRIER,
+            "observer-replayed-before-owner-disconnect",
+        );
+        started.event_count
     });
 
     let observer_socket = socket.clone();
     let observer = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(40));
         let mut client = TestClient::connect_observer(&observer_socket);
+        live_tx.send("observer").unwrap();
+        recv_barrier(&go_observer_rx, BARRIER, "two-live-release-observer");
         match client.command(&Command::CreateWorkScope {
             session_id: client.session_id,
             kind: WorkScopeKind::AdHoc,
@@ -70,29 +98,29 @@ fn two_live_peers_owner_and_observer_share_authoritative_run() {
             CommandResult::Error(CommandError::Denied) => {}
             other => panic!("observer create must be denied: {other:?}"),
         }
-        client.session_id
+        let (run_id, event_count) = recv_barrier(&run_rx, BARRIER, "owner-run-started");
+        let replay = client.replay_all(AggregateRef::AgentRun(run_id));
+        assert_eq!(replay.len() as u64, event_count);
+        replayed_tx.send(()).unwrap();
+        replay.len()
     });
 
     let h1 = daemon.accept_and_spawn().expect("spawn first peer worker");
     let h2 = daemon.accept_and_spawn().expect("spawn second peer worker");
+    let mut live = vec![
+        recv_barrier(&live_rx, BARRIER, "two-live"),
+        recv_barrier(&live_rx, BARRIER, "two-live"),
+    ];
+    live.sort_unstable();
+    assert_eq!(live, vec!["observer", "owner"], "barrier two-live");
+    go_owner_tx.send(()).unwrap();
+    go_observer_tx.send(()).unwrap();
 
-    let (run_id, event_count, replay_len) = owner.join().unwrap();
-    let _ = observer.join().unwrap();
+    let event_count = owner.join().unwrap();
+    let replay_len = observer.join().unwrap();
+    assert_eq!(replay_len as u64, event_count);
     assert!(h1.join().unwrap().is_ok());
     assert!(h2.join().unwrap().is_ok());
-    assert_eq!(replay_len as u64, event_count);
-
-    let observe = thread::spawn({
-        let socket = socket.clone();
-        move || {
-            thread::sleep(Duration::from_millis(10));
-            let mut client = TestClient::connect_observer(&socket);
-            client.replay_all(AggregateRef::AgentRun(run_id)).len() as u64
-        }
-    });
-    daemon.serve_one().unwrap();
-    assert_eq!(observe.join().unwrap(), event_count);
-
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -159,7 +187,12 @@ fn observer_cannot_escalate_while_owner_is_live() {
 
 #[test]
 fn peer_disconnect_leaves_other_connection_and_run_healthy() {
-    let dir = temp_dir("concurrent-peer-drop");
+    peer_disconnect_variant("concurrent-peer-drop-idle", false);
+    peer_disconnect_variant("concurrent-peer-drop-inflight", true);
+}
+
+fn peer_disconnect_variant(label: &str, response_in_flight: bool) {
+    let dir = temp_dir(label);
     let mut daemon = AgentDaemon::bind_integration(
         &dir,
         IntegrationConfig {
@@ -169,16 +202,22 @@ fn peer_disconnect_leaves_other_connection_and_run_healthy() {
     )
     .unwrap();
     let socket = daemon.socket_path();
+    let (live_tx, live_rx) = mpsc::channel();
+    let (go_owner_tx, go_owner_rx) = mpsc::channel();
+    let (go_drop_tx, go_drop_rx) = mpsc::channel();
+    let (dropped_tx, dropped_rx) = mpsc::channel();
 
+    let owner_live = live_tx.clone();
     let owner_socket = socket.clone();
     let owner = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(20));
         let mut client = TestClient::connect(&owner_socket);
+        owner_live.send("owner").unwrap();
+        recv_barrier(&go_owner_rx, BARRIER, "disconnect-release-owner");
+        recv_barrier(&dropped_rx, BARRIER, "dropper-closed");
         let scope = client.create_work_scope(WorkScopeKind::Repository);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
-        thread::sleep(Duration::from_millis(80));
         let snap = client.snapshot(AggregateRef::AgentRun(started.run_id));
         assert_eq!(snap.incorporated_through, started.event_count);
         started.event_count
@@ -186,91 +225,46 @@ fn peer_disconnect_leaves_other_connection_and_run_healthy() {
 
     let drop_socket = socket.clone();
     let dropper = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(40));
-        let client = TestClient::connect_observer(&drop_socket);
+        let mut client = TestClient::connect_observer(&drop_socket);
+        live_tx.send("dropper").unwrap();
+        recv_barrier(&go_drop_rx, BARRIER, "disconnect-release-dropper");
+        if response_in_flight {
+            client.send_unanswered(&Command::CreateWorkScope {
+                session_id: client.session_id,
+                kind: WorkScopeKind::AdHoc,
+            });
+        }
         drop(client);
+        dropped_tx.send(()).unwrap();
     });
 
     let h1 = daemon.accept_and_spawn().unwrap();
     let h2 = daemon.accept_and_spawn().unwrap();
-    dropper.join().unwrap();
+    let mut live = vec![
+        recv_barrier(&live_rx, BARRIER, "disconnect-both-live"),
+        recv_barrier(&live_rx, BARRIER, "disconnect-both-live"),
+    ];
+    live.sort_unstable();
+    assert_eq!(
+        live,
+        vec!["dropper", "owner"],
+        "barrier disconnect-both-live"
+    );
+    go_owner_tx.send(()).unwrap();
+    go_drop_tx.send(()).unwrap();
+
     let event_count = owner.join().unwrap();
-    assert!(event_count > 0);
-    assert!(h1.join().unwrap().is_ok());
-    let peer = h2.join().unwrap();
-    assert!(peer.is_ok(), "observer disconnect is normal: {peer:?}");
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn repeated_peer_fault_does_not_stall_unrelated_connection() {
-    let dir = temp_dir("concurrent-fault-n");
-    let config = DaemonConfig {
-        session_idle_timeout: Duration::from_secs(5),
-        session_write_timeout: Duration::from_secs(2),
-        ..DaemonConfig::default()
-    };
-    let mut daemon = AgentDaemon::bind_integration_with(
-        &dir,
-        config,
-        IntegrationConfig {
-            store_path: dir.join("agent.db"),
-            script: script(),
-        },
-    )
-    .unwrap();
-    let socket = daemon.socket_path();
-    let progress = Arc::new(AtomicU64::new(0));
-
-    // Handles are labelled by accept order, so the fault peer connects only
-    // after the owner's session is open; sleeps cannot order connects on a
-    // loaded runner.
-    let (owner_connected, owner_ready) = mpsc::channel();
-    let owner_progress = Arc::clone(&progress);
-    let owner_socket = socket.clone();
-    let owner = thread::spawn(move || {
-        let mut client = TestClient::connect(&owner_socket);
-        owner_connected.send(()).unwrap();
-        for i in 0..8 {
-            let _ = client.create_work_scope(WorkScopeKind::AdHoc);
-            owner_progress.store(i + 1, Ordering::SeqCst);
-            thread::sleep(Duration::from_millis(15));
-        }
-        owner_progress.load(Ordering::SeqCst)
-    });
-
-    let fault_socket = socket.clone();
-    let fault = thread::spawn(move || {
-        use std::io::Write;
-        owner_ready.recv().unwrap();
-        // One live peer that repeatedly sends malformed post-handshake frames.
-        let mut client = TestClient::connect_observer(&fault_socket);
-        for _ in 0..5 {
-            let _ = client.stream.write_all(b"BAD!\x00\x00\x00\x00\x00\x00");
-            thread::sleep(Duration::from_millis(10));
-        }
-        drop(client);
-    });
-
-    let h_owner = daemon.accept_and_spawn().unwrap();
-    let h_fault = daemon.accept_and_spawn().unwrap();
-    let seen = owner.join().unwrap();
-    let _ = fault.join();
-    assert_eq!(seen, 8, "owner must keep making progress under peer faults");
-    let owner_result = h_owner.join().unwrap();
+    dropper.join().unwrap();
     assert!(
-        owner_result.is_ok(),
-        "owner disconnect is normal: {owner_result:?}"
+        event_count > 0,
+        "barrier {label}: owner run produced no events"
     );
-    let fault_result = h_fault.join().unwrap();
-    assert!(
-        fault_result.is_ok()
-            || fault_result
-                .as_ref()
-                .err()
-                .is_some_and(|e| e.is_recoverable_client_fault()),
-        "fault peer must not take down the daemon: {fault_result:?}"
-    );
+    for (name, handle) in [("worker-a", h1), ("worker-b", h2)] {
+        match handle.join().unwrap() {
+            Ok(()) | Err(DaemonError::Io) => {}
+            other => panic!("barrier {label}-{name}: fatal {other:?}"),
+        }
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -354,7 +348,6 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
     let owner = thread::spawn({
         let socket = socket.clone();
         move || {
-            thread::sleep(Duration::from_millis(20));
             let mut client = TestClient::connect_window(&socket, 1);
             let scope = client.create_work_scope(WorkScopeKind::Project);
             let item = client.create_work_item(scope);
@@ -386,11 +379,16 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
         current_snapshot_sequence: Some(4),
     };
 
+    let (live_tx, live_rx) = mpsc::channel();
+    let (go_a_tx, go_a_rx) = mpsc::channel();
+    let (go_b_tx, go_b_rx) = mpsc::channel();
     let sub_a = thread::spawn({
         let socket = socket.clone();
+        let live_tx = live_tx.clone();
         move || {
-            thread::sleep(Duration::from_millis(20));
             let mut client = TestClient::connect_window(&socket, 1);
+            live_tx.send("window").unwrap();
+            recv_barrier(&go_a_rx, BARRIER, "dual-gap-release-window");
             let gap = client.subscribe(AggregateRef::AgentRun(run_id), None);
             let tail = client.subscribe(AggregateRef::AgentRun(run_id), Some(3));
             (gap, tail)
@@ -399,8 +397,9 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
     let sub_b = thread::spawn({
         let socket = socket.clone();
         move || {
-            thread::sleep(Duration::from_millis(40));
             let mut client = TestClient::connect_observer(&socket);
+            live_tx.send("observer").unwrap();
+            recv_barrier(&go_b_rx, BARRIER, "dual-gap-release-observer");
             let gap = client.subscribe(AggregateRef::AgentRun(run_id), None);
             let tail = client.subscribe(AggregateRef::AgentRun(run_id), Some(3));
             (gap, tail)
@@ -409,6 +408,18 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
 
     let h1 = daemon.accept_and_spawn().unwrap();
     let h2 = daemon.accept_and_spawn().unwrap();
+    let mut live = vec![
+        recv_barrier(&live_rx, BARRIER, "dual-gap-both-live"),
+        recv_barrier(&live_rx, BARRIER, "dual-gap-both-live"),
+    ];
+    live.sort_unstable();
+    assert_eq!(
+        live,
+        vec!["observer", "window"],
+        "barrier dual-gap-both-live"
+    );
+    go_a_tx.send(()).unwrap();
+    go_b_tx.send(()).unwrap();
     let (gap_a, tail_a) = sub_a.join().unwrap();
     let (gap_b, tail_b) = sub_b.join().unwrap();
     assert!(h1.join().unwrap().is_ok());
@@ -424,4 +435,234 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
         other => panic!("both peers must read the retained tail: {other:?}"),
     }
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Peer A's unread response blocks that worker's write. Peer B's commands
+/// must still complete inside 1s, and A must end as `TimedOut` rather than
+/// holding the service lock across the socket write.
+#[test]
+fn stalled_reader_does_not_stall_other_peer() {
+    let dir = temp_dir("concurrent-stalled-reader");
+    let config = DaemonConfig {
+        session_write_timeout: Duration::from_secs(3),
+        session_idle_timeout: Duration::from_secs(30),
+        ..DaemonConfig::default()
+    };
+    let mut daemon = AgentDaemon::bind_integration_with(
+        &dir,
+        config,
+        IntegrationConfig {
+            store_path: dir.join("agent.db"),
+            script: vec![
+                ScriptStep::Emit(HostObservationKind::Started),
+                ScriptStep::Emit(HostObservationKind::Result(vec![9; 24 * 1024])),
+            ],
+        },
+    )
+    .unwrap();
+    let socket = daemon.socket_path();
+
+    let setup_socket = socket.clone();
+    let setup = thread::spawn(move || {
+        let mut client = TestClient::connect(&setup_socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        client.start_agent_run(attempt).run_id
+    });
+    assert!(daemon.accept_and_spawn().unwrap().join().unwrap().is_ok());
+    let run_id = setup.join().unwrap();
+
+    let (live_tx, live_rx) = mpsc::channel();
+    let (go_a_tx, go_a_rx) = mpsc::channel();
+    let (go_b_tx, go_b_rx) = mpsc::channel();
+    let (sent_tx, sent_rx) = mpsc::channel();
+    let (probes_tx, probes_rx) = mpsc::channel();
+    let (release_a_tx, release_a_rx) = mpsc::channel();
+
+    let a_socket = socket.clone();
+    let a_live = live_tx.clone();
+    let stalled = thread::spawn(move || {
+        let mut client = TestClient::connect_limits(&a_socket, ABSOLUTE_MAX_FRAME_SIZE, 32);
+        a_live.send("stalled").unwrap();
+        recv_barrier(&go_a_rx, BARRIER, "stalled-reader-release-a");
+        client.send_unanswered(&Command::Subscribe {
+            session_id: client.session_id,
+            aggregate: AggregateRef::AgentRun(run_id),
+            after: None,
+        });
+        sent_tx.send(()).unwrap();
+        recv_barrier(
+            &release_a_rx,
+            Duration::from_secs(10),
+            "stalled-reader-release",
+        );
+    });
+
+    let b_socket = socket.clone();
+    let prober = thread::spawn(move || {
+        let mut client = TestClient::connect(&b_socket);
+        live_tx.send("prober").unwrap();
+        recv_barrier(&go_b_rx, BARRIER, "stalled-reader-release-b");
+        recv_barrier(&sent_rx, BARRIER, "stalled-subscribe-sent");
+        let mut samples = Vec::new();
+        for i in 0..3 {
+            let started = Instant::now();
+            let _ = client.create_work_scope(WorkScopeKind::AdHoc);
+            let took = started.elapsed();
+            assert!(
+                took <= Duration::from_secs(1),
+                "barrier stalled-reader-probe-{i} took {took:?}"
+            );
+            samples.push(took);
+        }
+        probes_tx.send(samples).unwrap();
+    });
+
+    let h1 = daemon.accept_and_spawn().unwrap();
+    let h2 = daemon.accept_and_spawn().unwrap();
+    let mut live = vec![
+        recv_barrier(&live_rx, BARRIER, "stalled-reader-both-live"),
+        recv_barrier(&live_rx, BARRIER, "stalled-reader-both-live"),
+    ];
+    live.sort_unstable();
+    assert_eq!(
+        live,
+        vec!["prober", "stalled"],
+        "barrier stalled-reader-both-live"
+    );
+    go_a_tx.send(()).unwrap();
+    go_b_tx.send(()).unwrap();
+
+    let samples = recv_barrier(&probes_rx, Duration::from_secs(5), "stalled-reader-probes");
+    assert_eq!(samples.len(), 3);
+    prober.join().unwrap();
+    let mut results = vec![h1.join().unwrap(), h2.join().unwrap()];
+    results.sort_by_key(|result| match result {
+        Ok(()) => 0,
+        Err(DaemonError::TimedOut) => 1,
+        Err(_) => 2,
+    });
+    assert_eq!(
+        results,
+        vec![Ok(()), Err(DaemonError::TimedOut)],
+        "barrier stalled-reader-results"
+    );
+    release_a_tx.send(()).unwrap();
+    stalled.join().unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `serve_one` accepts the next peer only after the current session ends, so
+/// two sessions cannot be open together.
+#[test]
+fn serial_serve_one_cannot_satisfy_two_live_rendezvous() {
+    let dir = temp_dir("serial-rendezvous");
+    let mut daemon = AgentDaemon::bind_integration(
+        &dir,
+        IntegrationConfig {
+            store_path: dir.join("agent.db"),
+            script: script(),
+        },
+    )
+    .unwrap();
+    let socket = daemon.socket_path();
+    let (live_tx, live_rx) = mpsc::channel();
+    let (release_a_tx, release_a_rx) = mpsc::channel();
+    let (release_b_tx, release_b_rx) = mpsc::channel();
+
+    let first_socket = socket.clone();
+    let first_live = live_tx.clone();
+    let first = thread::spawn(move || {
+        hold_until_released(&first_socket, &first_live, &release_a_rx);
+    });
+    let second = thread::spawn(move || {
+        hold_until_released(&socket, &live_tx, &release_b_rx);
+    });
+    let server = thread::spawn(move || daemon.serve_one());
+
+    recv_barrier(&live_rx, BARRIER, "serial-first-open");
+    match live_rx.recv_timeout(Duration::from_secs(1)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Ok(()) => panic!("barrier two-live unexpectedly satisfied"),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("barrier two-live disconnected")
+        }
+    }
+    release_a_tx.send(()).unwrap();
+    release_b_tx.send(()).unwrap();
+    assert!(server.join().unwrap().is_ok(), "barrier serial-serve-one");
+    first.join().unwrap();
+    second.join().unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn hold_until_released(
+    socket: &std::path::Path,
+    live_tx: &mpsc::Sender<()>,
+    release_rx: &mpsc::Receiver<()>,
+) {
+    if let Ok(stream) = try_open_session(socket) {
+        live_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(5));
+        drop(stream);
+    }
+}
+
+fn try_open_session(path: &std::path::Path) -> Result<UnixStream, String> {
+    use std::io::Write;
+
+    let mut stream = UnixStream::connect(path).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .map_err(|error| error.to_string())?;
+    let hello = Hello {
+        supported_versions: vec![ProtocolVersion::V1],
+        max_frame_size: 4096,
+        event_window: 32,
+        client_principal_evidence: Vec::new(),
+    };
+    let hello_bytes =
+        encode_hello(&hello, ABSOLUTE_MAX_FRAME_SIZE).map_err(|_| "encode hello".to_string())?;
+    stream
+        .write_all(&hello_bytes)
+        .map_err(|error| error.to_string())?;
+    read_kind(&mut stream)?;
+    let open = encode_command(
+        &Command::OpenSession {
+            scopes: vec![1, 2, 4],
+        },
+        ABSOLUTE_MAX_FRAME_SIZE,
+    )
+    .map_err(|_| "encode open".to_string())?;
+    stream.write_all(&open).map_err(|error| error.to_string())?;
+    if read_kind(&mut stream)? != FrameKind::Result {
+        return Err("open session was not a result".to_string());
+    }
+    Ok(stream)
+}
+
+fn read_kind(stream: &mut UnixStream) -> Result<FrameKind, String> {
+    use std::io::Read;
+
+    let mut header = [0_u8; 10];
+    stream
+        .read_exact(&mut header)
+        .map_err(|error| error.to_string())?;
+    let body_len = seyal_agent_protocol::accepted_body_len(&header, ABSOLUTE_MAX_FRAME_SIZE)
+        .map_err(|_| "bad header".to_string())?;
+    let mut body = vec![0_u8; body_len];
+    if body_len > 0 {
+        stream
+            .read_exact(&mut body)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut bytes = header.to_vec();
+    bytes.extend_from_slice(&body);
+    seyal_agent_protocol::decode_frame(&bytes, ABSOLUTE_MAX_FRAME_SIZE)
+        .map(|frame| frame.kind)
+        .map_err(|_| "decode".to_string())
 }

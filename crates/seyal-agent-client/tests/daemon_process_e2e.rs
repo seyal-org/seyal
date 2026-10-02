@@ -9,6 +9,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -45,12 +46,18 @@ fn backend_bin() -> PathBuf {
 }
 
 fn temp_dir(label: &str) -> PathBuf {
-    let dir = env::temp_dir().join(format!(
+    let name = format!(
         "seyal-agent-client-e2e-{}-{}-{}",
         label,
         std::process::id(),
         Instant::now().elapsed().as_nanos()
-    ));
+    );
+    let mut dir = env::temp_dir().join(&name);
+    // macOS `sun_path` is 104 bytes including the trailing NUL. `agent.sock`
+    // needs ten more bytes, so a long `TMPDIR` cannot host the socket.
+    if dir.join("agent.sock").as_os_str().len() >= 104 {
+        dir = PathBuf::from("/tmp").join(name);
+    }
     fs::create_dir_all(&dir).unwrap();
     #[cfg(unix)]
     {
@@ -63,6 +70,16 @@ fn temp_dir(label: &str) -> PathBuf {
 }
 
 fn spawn_daemon(dir: &Path, output_bytes: usize, max_connections: Option<u64>) -> ChildDaemon {
+    spawn_daemon_opts(dir, output_bytes, Some(60), max_connections, false)
+}
+
+fn spawn_daemon_opts(
+    dir: &Path,
+    output_bytes: usize,
+    deadline_secs: Option<u64>,
+    max_connections: Option<u64>,
+    capture_stderr: bool,
+) -> ChildDaemon {
     let bin = backend_bin();
     assert!(
         bin.is_file(),
@@ -76,14 +93,42 @@ fn spawn_daemon(dir: &Path, output_bytes: usize, max_connections: Option<u64>) -
             dir.to_str().expect("utf-8 daemon directory"),
             "--output-bytes",
             &output_bytes.to_string(),
-            "--deadline-secs",
-            "60",
         ])
         .stdin(Stdio::null());
+    if let Some(deadline) = deadline_secs {
+        command.args(["--deadline-secs", &deadline.to_string()]);
+    }
     if let Some(limit) = max_connections {
         command.args(["--max-connections", &limit.to_string()]);
     }
+    if capture_stderr {
+        command.stderr(Stdio::piped()).stdout(Stdio::null());
+    }
     ChildDaemon(command.spawn().expect("spawn seyal-agent-backend"))
+}
+
+fn connect_ready(socket: &Path) -> SessionClient {
+    let started = Instant::now();
+    loop {
+        match SessionClient::connect(socket) {
+            Ok(client) => return client,
+            Err(_) if started.elapsed() > Duration::from_secs(10) => {
+                panic!(
+                    "barrier daemon-ready: SessionClient never connected at {}",
+                    socket.display()
+                );
+            }
+            Err(_) => thread::park_timeout(Duration::from_millis(5)),
+        }
+    }
+}
+
+fn recv_barrier<T>(rx: &mpsc::Receiver<T>, timeout: Duration, barrier: &str) -> T {
+    match rx.recv_timeout(timeout) {
+        Ok(value) => value,
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!("barrier {barrier} timed out"),
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("barrier {barrier} disconnected"),
+    }
 }
 
 fn probe_hello() -> Hello {
@@ -99,8 +144,8 @@ fn wait_ready(socket: &Path) {
     let hello = probe_hello();
     let started = Instant::now();
     loop {
-        // Hello-only probe; dropping the stream ends one serve_one turn so the
-        // daemon loops back for the real SessionClient connection.
+        // Hello-only probe on its own worker. Dropping the stream ends that
+        // worker; the accept loop keeps admitting the SessionClient connection.
         if handshake(socket, &hello).is_ok() {
             return;
         }
@@ -209,8 +254,8 @@ fn daemon_binary_survives_malformed_client_and_serves_next() {
 fn daemon_binary_exits_cleanly_after_bounded_connections() {
     let dir = temp_dir("shutdown");
     let socket = dir.join("agent.sock");
-    // One successful serve_one (the SessionClient connection) then exit 0.
-    // Do not Hello-probe first; that would consume the single allowed turn.
+    // One admitted connection (the SessionClient) then exit 0.
+    // Do not Hello-probe first; that would consume the single admission.
     let mut child = spawn_daemon(&dir, 1024, Some(1));
     let started = Instant::now();
     let mut client = loop {
@@ -228,6 +273,142 @@ fn daemon_binary_exits_cleanly_after_bounded_connections() {
     assert!(
         status.success(),
         "controlled shutdown must exit 0, got {status}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn bounded_daemon_exits_zero_after_two_concurrent_sessions() {
+    let dir = temp_dir("two-bounded");
+    let socket = dir.join("agent.sock");
+    let mut child = spawn_daemon(&dir, 1024, Some(2));
+    let (live_tx, live_rx) = mpsc::channel();
+    let (go_a_tx, go_a_rx) = mpsc::channel();
+    let (go_b_tx, go_b_rx) = mpsc::channel();
+
+    let socket_a = socket.clone();
+    let live_a = live_tx.clone();
+    let peer_a = thread::spawn(move || {
+        let mut client = connect_ready(&socket_a);
+        live_a.send("a").unwrap();
+        recv_barrier(&go_a_rx, Duration::from_secs(5), "two-sessions-release-a");
+        client.create_work_scope(WorkScopeKind::AdHoc).unwrap();
+    });
+    let peer_b = thread::spawn(move || {
+        let mut client = connect_ready(&socket);
+        live_tx.send("b").unwrap();
+        recv_barrier(&go_b_rx, Duration::from_secs(5), "two-sessions-release-b");
+        client.create_work_scope(WorkScopeKind::Repository).unwrap();
+    });
+    let mut live = vec![
+        recv_barrier(&live_rx, Duration::from_secs(10), "two-sessions-live"),
+        recv_barrier(&live_rx, Duration::from_secs(10), "two-sessions-live"),
+    ];
+    live.sort_unstable();
+    assert_eq!(live, vec!["a", "b"], "barrier two-sessions-live");
+    go_a_tx.send(()).unwrap();
+    go_b_tx.send(()).unwrap();
+    peer_a.join().unwrap();
+    peer_b.join().unwrap();
+    let ended = Instant::now();
+    let status = child.0.wait().expect("daemon wait");
+    assert!(status.success(), "barrier bounded-exit: {status}");
+    assert!(
+        ended.elapsed() <= Duration::from_secs(2),
+        "barrier bounded-exit took {:?}",
+        ended.elapsed()
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn bounded_daemon_with_held_session_is_ended_by_deadline() {
+    use std::io::Read;
+
+    let dir = temp_dir("held-deadline");
+    let socket = dir.join("agent.sock");
+    let mut child = spawn_daemon_opts(&dir, 1024, Some(2), Some(1), true);
+    let (held_tx, held_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let holder = thread::spawn(move || {
+        let client = connect_ready(&socket);
+        held_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(10));
+        drop(client);
+    });
+    recv_barrier(&held_rx, Duration::from_secs(10), "held-session-open");
+    assert!(
+        child.0.try_wait().unwrap().is_none(),
+        "barrier held-session: daemon exited before the deadline"
+    );
+    let status = child.0.wait().expect("daemon wait");
+    assert_eq!(
+        status.code(),
+        Some(2),
+        "barrier child_deadline_exceeded: {status}"
+    );
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(
+        stderr.contains("child_deadline_exceeded"),
+        "barrier child_deadline_exceeded: stderr={stderr}"
+    );
+    release_tx.send(()).unwrap();
+    holder.join().unwrap();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn bounded_daemon_requires_deadline() {
+    use std::io::Read;
+
+    let dir = temp_dir("needs-deadline");
+    let socket = dir.join("agent.sock");
+    let mut child = spawn_daemon_opts(&dir, 1024, None, Some(1), true);
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(2) {
+            let socket_exists = socket.exists();
+            panic!(
+                "barrier deadline-required: daemon still running after 2s (socket_exists={socket_exists})"
+            );
+        }
+        thread::park_timeout(Duration::from_millis(20));
+    };
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "barrier deadline-required: exit took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        status.code(),
+        Some(2),
+        "barrier deadline-required: {status}"
+    );
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(
+        stderr.contains("--max-connections requires --deadline-secs"),
+        "barrier deadline-required: stderr={stderr}"
+    );
+    assert!(
+        !socket.exists(),
+        "barrier deadline-required: socket was created"
     );
     let _ = fs::remove_dir_all(dir);
 }
