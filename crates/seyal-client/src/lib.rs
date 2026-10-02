@@ -15,6 +15,7 @@ pub mod input_policy;
 pub mod palette;
 pub mod pane_layout;
 pub mod presentation;
+pub mod provisioning;
 pub mod recovery;
 pub mod shell;
 pub mod theme;
@@ -43,8 +44,8 @@ pub mod pass8_benchmark;
 
 #[cfg(target_os = "macos")]
 pub use local::{
-    cell_from_point, derive_grid_geometry, ClientError, DiscoveryFailure, GridGeometry,
-    InputAdmissionFailure, LocalDisplayClient, ResizeFailure,
+    cell_from_point, derive_grid_geometry, force_bootstrap_attach_failure_for_test, ClientError,
+    DiscoveryFailure, GridGeometry, InputAdmissionFailure, LocalDisplayClient, ResizeFailure,
 };
 
 #[cfg(target_os = "macos")]

@@ -30,6 +30,8 @@ pub enum ShellError {
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
+    /// Retained for ABI/FFI stability; bound Pane close is now detach-only
+    /// disposition (ADR-017 §6.1) and no longer produced by [`ShellState`].
     CannotCloseBoundPane,
     ExecutionAlreadyBound,
     EmptyShell,
@@ -49,9 +51,7 @@ impl ShellError {
             }
             Self::CannotCloseLastTab => "The last Tab cannot be closed.",
             Self::CannotCloseLastPane => "The last Pane cannot be closed.",
-            Self::CannotCloseBoundPane => {
-                "A Pane bound to an execution cannot be closed until execution disposition is available."
-            }
+            Self::CannotCloseBoundPane => "A Pane bound to an execution cannot be closed.",
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
         }
@@ -114,8 +114,9 @@ pub struct ShellSnapshot {
     pub allows_tab_creation: bool,
     pub allows_pane_splitting: bool,
     /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close, and
-    /// neither can an execution-bound Pane).
+    /// Pane would currently be accepted (the last Tab/Pane cannot close).
+    /// Closing a bound Pane releases the binding; disposition is portable
+    /// provisioning authority (ADR-017 §6.1 detach-only).
     /// Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
@@ -155,6 +156,9 @@ pub struct ShellState {
     allows_tab_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
+    /// Execution released by the most recent successful `ClosePane`, if any.
+    /// Portable provisioning records it as unreferenced (ADR-017 §6.1).
+    last_released_execution: Option<(PaneId, ExecutionId)>,
 }
 
 impl ShellState {
@@ -184,6 +188,7 @@ impl ShellState {
             allows_tab_creation: false,
             last_error: None,
             next_tab_ordinal: 2,
+            last_released_execution: None,
         }
     }
 
@@ -208,6 +213,7 @@ impl ShellState {
             allows_tab_creation,
             last_error: None,
             next_tab_ordinal: 2,
+            last_released_execution: None,
         })
     }
 
@@ -230,6 +236,11 @@ impl ShellState {
 
     pub fn pane_execution(&self, pane: PaneId) -> Result<Option<ExecutionId>, ShellError> {
         Ok(self.pane(pane)?.execution)
+    }
+
+    /// Take the execution released by the last successful `ClosePane`, if any.
+    pub fn take_released_execution(&mut self) -> Option<(PaneId, ExecutionId)> {
+        self.last_released_execution.take()
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
@@ -406,12 +417,9 @@ impl ShellState {
         let Some(pane) = tab.panes.get(&pane_id) else {
             return Err(ShellError::UnknownPane);
         };
-        // Closing would orphan the bound execution's authority; what happens
-        // to that execution is the unaccepted provisioning/disposition
-        // contract (#994), so fail closed instead of inventing it here.
-        if pane.execution.is_some() {
-            return Err(ShellError::CannotCloseBoundPane);
-        }
+        // Bound close releases presentation only (ADR-017 §6.1). Disposition
+        // (detach-only / unreferenced record) is portable provisioning authority.
+        let released = pane.execution.map(|execution| (pane_id, execution));
         let Some(root) = tab.root.removing(pane_id) else {
             return Err(ShellError::CannotCloseLastPane);
         };
@@ -423,6 +431,7 @@ impl ShellState {
                 .first_pane()
                 .expect("remaining Pane tree must contain a Pane");
         }
+        self.last_released_execution = released;
         Ok(())
     }
 

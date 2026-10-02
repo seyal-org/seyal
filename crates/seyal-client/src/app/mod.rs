@@ -10,6 +10,7 @@ mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod palette_apply;
+mod provisioning_apply;
 mod recovery_apply;
 mod session;
 
@@ -37,6 +38,7 @@ use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
+use crate::provisioning::ProvisioningSession;
 use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
@@ -346,6 +348,8 @@ pub struct ApplicationRoot {
     shell: ShellState,
     presentation: PresentationSession,
     authority: Option<PaneAuthority>,
+    /// Portable provisioning/disposition authority (ADR-017 C1).
+    provisioning: ProvisioningSession,
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
@@ -385,6 +389,7 @@ impl ApplicationRoot {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
             authority: None,
+            provisioning: ProvisioningSession::new(),
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
@@ -399,6 +404,16 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
+    }
+
+    /// Portable provisioning session (ADR-017 C1). Hosts/wire adapters drive
+    /// effects; they cannot invent an [`ExecutionId`] or retry a rejection.
+    pub fn provisioning(&self) -> &ProvisioningSession {
+        &self.provisioning
+    }
+
+    pub fn provisioning_mut(&mut self) -> &mut ProvisioningSession {
+        &mut self.provisioning
     }
 
     /// Active Tab's Pane regions (#923). The one live surface belongs to the

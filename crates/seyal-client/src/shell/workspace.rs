@@ -125,13 +125,9 @@ impl Tab {
         self.panes.len() > 1
     }
 
-    /// `ClosePane` of the focused Pane would be accepted: not the last Pane
-    /// and not bound to an execution.
+    /// `ClosePane` of the focused Pane would be accepted: not the last Pane.
+    /// A bound Pane may close; provisioning records detach-only disposition.
     pub(super) fn allows_focused_pane_close(&self) -> bool {
         self.allows_pane_close()
-            && self
-                .panes
-                .get(&self.focused)
-                .is_some_and(|pane| pane.execution.is_none())
     }
 }

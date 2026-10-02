@@ -2,12 +2,17 @@
 
 use std::{
     path::PathBuf,
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
 
-use seyal_client::{ClientError, DiscoveryFailure, LocalDisplayClient};
+use seyal_client::{
+    force_bootstrap_attach_failure_for_test, ClientError, DiscoveryFailure, LocalDisplayClient,
+};
 use seyal_exec::{CommandSpec, WindowSize};
 use seyal_protocol::runtime_dir::{
     control_socket_leaf, override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
@@ -114,4 +119,113 @@ fn isolated_client_connects_only_to_its_fixture_and_rejects_the_wrong_socket() {
     drop(client);
     assert_eq!(socket_path, control_socket_leaf(&runtime_dir));
     runtime.join().expect("Runtime thread");
+}
+
+fn start_empty_isolated_runtime() -> (PathBuf, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let runtime_dir = PathBuf::from(format!(
+        "/tmp/s1136e{}{:x}",
+        std::process::id() % 100_000,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            % 0xFFFF
+    ));
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = Arc::clone(&stop);
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let join = thread::spawn(move || {
+        let mut runtime = Runtime::new(
+            RuntimeConfig::m001()
+                .expect("M001 Runtime config")
+                .isolated_to(runtime_dir),
+        )
+        .expect("isolated Runtime");
+        let socket_path = runtime
+            .local_ipc_socket_path()
+            .expect("local IPC socket")
+            .to_path_buf();
+        ready_tx.send(socket_path).expect("test receiver");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !stop_thread.load(Ordering::Relaxed) && Instant::now() < deadline {
+            runtime
+                .poll_once(Some(Duration::from_millis(5)))
+                .expect("Runtime poll");
+        }
+        runtime.begin_shutdown().expect("begin shutdown");
+        runtime
+            .run_until_empty(Instant::now() + Duration::from_secs(3))
+            .expect("shutdown");
+    });
+    let socket_path = ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("Runtime ready");
+    (socket_path, stop, join)
+}
+
+#[test]
+fn empty_runtime_controller_creates_profile_zero_then_attaches() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let client =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("Controller creates profile 0 when the resident Runtime has no execution");
+    drop(client);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn bootstrap_attach_failure_after_created_disposes_never_bound_execution() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    force_bootstrap_attach_failure_for_test(true);
+    let attach_error =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5));
+    force_bootstrap_attach_failure_for_test(false);
+    assert!(
+        attach_error.is_err(),
+        "forced bootstrap attach failure must surface the attach error"
+    );
+
+    // Observer must not bootstrap-create; it fail-closes on an empty Runtime.
+    let settle = Instant::now() + Duration::from_secs(3);
+    let mut emptied = false;
+    while Instant::now() < settle {
+        thread::sleep(Duration::from_millis(20));
+        match LocalDisplayClient::connect_first_running_as_until(
+            Role::Observer,
+            Instant::now() + Duration::from_secs(1),
+        ) {
+            Err(ClientError::NoRunningExecution) => {
+                emptied = true;
+                break;
+            }
+            Ok(client) => {
+                drop(client);
+                emptied = false;
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        emptied,
+        "Created orphan must be disposed; Observer must see NoRunningExecution"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+    let _ = socket_path;
 }

@@ -9,12 +9,42 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{decode_chunk, empty_cache, DisplayKind},
     local_ipc::framing::{
-        Attach, Attached, BlockTimeline, ErrorMessage, ExecutionList, FrameHeader, MessageType,
-        Resync, Role, CAP_COMMAND_BLOCKS, HEADER_LEN,
+        Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
+        CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
+        Role, TerminateExecutionRequest, TerminateExecutionResult, CAP_COMMAND_BLOCKS, HEADER_LEN,
     },
     pass8::BLOCK_STATE_MESSAGE_TYPE,
-    ExecutionId,
+    AttachmentId, ExecutionId,
 };
+
+/// Failure from [`LocalDisplayClient::finish_attach_with_deadline`].
+///
+/// `terminated_on_attachment` is set when ADR-017 §6.3 row 2 already issued
+/// TerminateExecutionRequest on the existing Controller attachment. Callers
+/// must not open a second dispose attach in that case.
+#[derive(Debug)]
+pub(crate) struct FinishAttachError {
+    pub error: ClientError,
+    pub terminated_on_attachment: bool,
+}
+
+impl FinishAttachError {
+    fn before_attached(error: ClientError) -> Self {
+        Self {
+            error,
+            terminated_on_attachment: false,
+        }
+    }
+
+    fn after_attached(error: ClientError, terminated_on_attachment: bool) -> Self {
+        Self {
+            error,
+            terminated_on_attachment,
+        }
+    }
+}
+
+use super::provisioning_wire::provisioning_negotiated;
 
 use crate::block_cache::{is_epoch_quarantined, BlockCache};
 
@@ -31,6 +61,17 @@ use super::{
 const DISPLAY_CHUNK_INDEX_OFFSET: usize = 32;
 const DISPLAY_CHUNK_COUNT_OFFSET: usize = 34;
 const DISPLAY_CHUNK_SEQUENCE_END: usize = 36;
+
+thread_local! {
+    static FORCE_BOOTSTRAP_ATTACH_FAILURE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Test hook: after bootstrap CreateExecution succeeds, force the attach stream
+/// closed so `connect_first_running` exercises ADR-017 §6.3 dispose.
+pub fn force_bootstrap_attach_failure_for_test(force: bool) {
+    FORCE_BOOTSTRAP_ATTACH_FAILURE.with(|flag| flag.set(force));
+}
 
 fn display_chunk_remainder_hint(frame: &[u8]) -> Option<usize> {
     let header = FrameHeader::decode(frame).ok()?;
@@ -172,6 +213,140 @@ pub(crate) fn resolve_single_running_execution(
     Ok(first)
 }
 
+/// SPEC-004 §18.2: CreateExecution is legal in Ready, before Attach.
+/// Profile 0, workspace 0, 80×24 matches the previous process-start shell.
+fn create_profile_zero_execution(
+    stream: &mut UnixStream,
+    deadline: Instant,
+) -> Result<ExecutionId, ClientError> {
+    let payload = CreateExecutionRequest {
+        workspace_id: 0,
+        request_id: 1,
+        launch_profile: 0,
+        rows: 24,
+        columns: 80,
+    }
+    .encode();
+    send_control_until(
+        stream,
+        MessageType::CreateExecutionRequest,
+        &payload,
+        deadline,
+    )?;
+    let (kind, payload) = read_blocking_frame_until(stream, deadline)?;
+    if kind == MessageType::Error {
+        let error = ErrorMessage::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        return Err(server_error(error.error_code));
+    }
+    if kind != MessageType::CreateExecutionResult {
+        return Err(ClientError::Protocol);
+    }
+    let result = CreateExecutionResult::decode(&payload).map_err(|_| ClientError::Protocol)?;
+    if result.request_id != 1 {
+        return Err(ClientError::Protocol);
+    }
+    match result.result_code {
+        CreateExecutionResultCode::Created => Ok(result.execution_id),
+        CreateExecutionResultCode::Error(_) => Err(server_error(result.result_code.wire_value())),
+    }
+}
+
+/// ADR-017 §6.3 row 1: never-bound Created execution → Controller attach solely
+/// to dispose, then exactly one TerminateExecutionRequest. Best-effort only:
+/// attach/terminate failures do not retry. Used when bootstrap create succeeded
+/// but the subsequent attach/snapshot path failed before a live product bind.
+pub(crate) fn best_effort_dispose_never_bound_execution(
+    socket_path: &Path,
+    execution_id: ExecutionId,
+    deadline: Instant,
+) {
+    let mut client = match LocalDisplayClient::connect_execution_until(
+        socket_path,
+        execution_id,
+        Role::Controller,
+        deadline,
+    ) {
+        Ok(client) => client,
+        Err(_) => return, // dispose attach failed — no second attempt (§6.3)
+    };
+    if client.submit_terminate_execution(execution_id).is_err() {
+        return;
+    }
+    while Instant::now() < deadline {
+        let _ = client.poll_prepare();
+        if client.take_terminate_result().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// ADR-017 §6.3 row 2: Attached as Controller, never bound → exactly one
+/// TerminateExecutionRequest on that existing attachment; detach only after the
+/// result (dropping the stream). Never opens a second attach.
+///
+/// `request_id` must be strictly greater than any provisioning id already used
+/// on this connection (bootstrap CreateExecution uses 1 → pass 2).
+fn best_effort_terminate_on_existing_attachment(
+    stream: &mut UnixStream,
+    attachment_id: AttachmentId,
+    execution_id: ExecutionId,
+    request_id: u64,
+    deadline: Instant,
+) {
+    let _ = send_control_until(
+        stream,
+        MessageType::TerminateExecutionRequest,
+        &TerminateExecutionRequest {
+            attachment_id,
+            execution_id,
+            request_id,
+        }
+        .encode(),
+        deadline,
+    );
+    while Instant::now() < deadline {
+        match read_blocking_frame_until(stream, deadline) {
+            Ok((kind, payload)) => {
+                if kind == MessageType::TerminateExecutionResult {
+                    let _ = TerminateExecutionResult::decode(&payload);
+                    return;
+                }
+                // Drain display/control until terminate result.
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+/// After Controller Attached on a Created never-bound orphan, every failure must
+/// attempt terminate on that attachment and report `terminated_on_attachment`
+/// so callers never open a second dispose attach (ADR-017 §6.3 row 2), even when
+/// the terminate send itself fails (connection already dropped).
+fn fail_after_attached_maybe_terminate_orphan(
+    stream: &mut UnixStream,
+    may_dispose_orphan: bool,
+    attachment_id: AttachmentId,
+    execution_id: ExecutionId,
+    dispose_request_id: u64,
+    deadline: Instant,
+    error: ClientError,
+) -> FinishAttachError {
+    let terminated = if may_dispose_orphan {
+        best_effort_terminate_on_existing_attachment(
+            stream,
+            attachment_id,
+            execution_id,
+            dispose_request_id,
+            deadline,
+        );
+        true
+    } else {
+        false
+    };
+    FinishAttachError::after_attached(error, terminated)
+}
+
 impl LocalDisplayClient {
     /// Attach to one explicitly selected execution. Native panes must use
     /// this entry point so two panes cannot accidentally share the first
@@ -208,7 +383,7 @@ impl LocalDisplayClient {
     /// role to its single running execution. Controller remains the permanent
     /// native-pane default; read-only native qualification may use Observer
     /// without borrowing controller authority from the app it will launch.
-    pub(crate) fn connect_first_running_as_until(
+    pub fn connect_first_running_as_until(
         role: Role,
         deadline: Instant,
     ) -> Result<Self, ClientError> {
@@ -228,7 +403,30 @@ impl LocalDisplayClient {
             return Err(ClientError::Protocol);
         }
         let list = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
-        let execution_id = resolve_single_running_execution(&list)?;
+        // P1 leaves the production Runtime resident with zero executions.
+        // A Controller opening the implicit bootstrap (headed recovery) creates
+        // profile 0 on this Ready connection, then attaches. Observer stays
+        // fail-closed so a read-only probe cannot spawn a shell.
+        // SPEC-009 §8.2.1: >1 survivors also provision new (leave survivors).
+        let mut created_bootstrap = false;
+        let execution_id = match resolve_single_running_execution(&list) {
+            Ok(execution_id) => execution_id,
+            Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
+                if role == Role::Controller
+                    && provisioning_negotiated(server_hello.server_capabilities) =>
+            {
+                created_bootstrap = true;
+                create_profile_zero_execution(&mut stream, deadline)?
+            }
+            Err(error) => return Err(error),
+        };
+
+        #[cfg(target_os = "macos")]
+        if created_bootstrap && FORCE_BOOTSTRAP_ATTACH_FAILURE.with(|flag| flag.get()) {
+            // Close the Ready stream so finish_attach fails after Created; the
+            // production Err branch must still dispose the orphan.
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
 
         if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
             drop(stream);
@@ -244,7 +442,8 @@ impl LocalDisplayClient {
         let block_metadata_negotiated =
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
-        Self::finish_attach_with_deadline(
+        let dispose_request_id = if created_bootstrap { 2 } else { 1 };
+        let mut client = match Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
@@ -252,8 +451,30 @@ impl LocalDisplayClient {
             extended_terminal_key_supported(server_hello.server_capabilities),
             server_hello.runtime_id,
             block_metadata_negotiated,
+            provisioning_negotiated(server_hello.server_capabilities),
+            // §6.3 dispose only for Created never-bound bootstrap orphans — not
+            // adopt/reconnect of a live survivor (connect_first with existing id).
+            created_bootstrap,
+            dispose_request_id,
             deadline,
-        )
+        ) {
+            Ok(client) => client,
+            Err(failure) if created_bootstrap => {
+                // Row 1: never Attached → dispose attach. Row 2: already
+                // terminated on the existing attachment → never open a second.
+                if !failure.terminated_on_attachment {
+                    best_effort_dispose_never_bound_execution(&socket_path, execution_id, deadline);
+                }
+                return Err(failure.error);
+            }
+            Err(failure) => return Err(failure.error),
+        };
+        // Bootstrap CreateExecution used request_id 1 on this stream; the
+        // client's allocator must not reuse it (Runtime rejects <= last).
+        if created_bootstrap {
+            client.next_provisioning_request_id = 2;
+        }
+        Ok(client)
     }
 
     pub fn connect_execution(
@@ -305,8 +526,12 @@ impl LocalDisplayClient {
             extended_terminal_key_supported(server_hello.server_capabilities),
             server_hello.runtime_id,
             block_metadata_negotiated,
+            provisioning_negotiated(server_hello.server_capabilities),
+            false,
+            1,
             deadline,
         )
+        .map_err(|failure| failure.error)
     }
 
     /// Benchmark-only control connection that preserves the exact Pass 7
@@ -336,8 +561,12 @@ impl LocalDisplayClient {
             extended_terminal_key_supported(server_hello.server_capabilities),
             server_hello.runtime_id,
             false,
+            provisioning_negotiated(server_hello.server_capabilities),
+            false,
+            1,
             deadline,
         )
+        .map_err(|failure| failure.error)
     }
 
     #[cfg(test)]
@@ -358,8 +587,12 @@ impl LocalDisplayClient {
             extended_terminal_key_supported,
             runtime_id,
             block_metadata_negotiated,
+            false,
+            false,
+            1,
             Instant::now() + STARTUP_TIMEOUT,
         )
+        .map_err(|failure| failure.error)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -371,8 +604,18 @@ impl LocalDisplayClient {
         extended_terminal_key_supported: bool,
         runtime_id: u128,
         block_metadata_negotiated: bool,
+        execution_provisioning_negotiated: bool,
+        // When true, this attach is disposing a Created never-bound orphan
+        // (bootstrap intent). Snapshot/identity failure then applies ADR-017
+        // §6.3 row 2. Adopt/reconnect of a live survivor must pass false so a
+        // transient attach failure cannot kill the execution.
+        dispose_never_bound_orphan: bool,
+        dispose_request_id: u64,
         deadline: Instant,
-    ) -> Result<Self, ClientError> {
+    ) -> Result<Self, FinishAttachError> {
+        let may_dispose_orphan = dispose_never_bound_orphan
+            && execution_provisioning_negotiated
+            && role == Role::Controller;
         send_control_until(
             &mut stream,
             MessageType::Attach,
@@ -382,18 +625,34 @@ impl LocalDisplayClient {
             }
             .encode(),
             deadline,
-        )?;
-        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
+        )
+        .map_err(FinishAttachError::before_attached)?;
+        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)
+            .map_err(FinishAttachError::before_attached)?;
         if kind == MessageType::Error {
-            let error = ErrorMessage::decode(&payload).map_err(|_| ClientError::Protocol)?;
-            return Err(server_error(error.error_code));
+            let error = ErrorMessage::decode(&payload)
+                .map_err(|_| ClientError::Protocol)
+                .map_err(FinishAttachError::before_attached)?;
+            return Err(FinishAttachError::before_attached(server_error(
+                error.error_code,
+            )));
         }
         if kind != MessageType::Attached {
-            return Err(ClientError::Protocol);
+            return Err(FinishAttachError::before_attached(ClientError::Protocol));
         }
-        let attached = Attached::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        let attached = Attached::decode(&payload)
+            .map_err(|_| ClientError::Protocol)
+            .map_err(FinishAttachError::before_attached)?;
         if attached.execution_id != execution_id || attached.granted_role != role {
-            return Err(ClientError::InvalidAttachment);
+            return Err(fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
+                ClientError::InvalidAttachment,
+            ));
         }
 
         // The attachment already exists when its first display snapshot is
@@ -404,7 +663,7 @@ impl LocalDisplayClient {
         let mut resync_available = true;
         let mut quarantined_remainder = None;
         let mut deferred_control = Vec::new();
-        let (cache, mut batch) = loop {
+        let snapshot = loop {
             let mut stale_remainder_hint = None;
             let attempt = (|| {
                 let first_frame = match quarantined_remainder.take() {
@@ -442,7 +701,7 @@ impl LocalDisplayClient {
             })();
 
             match attempt {
-                Ok(snapshot) => break snapshot,
+                Ok(snapshot) => break Ok(snapshot),
                 Err(ClientError::Display | ClientError::Protocol | ClientError::Capacity)
                     if resync_available =>
                 {
@@ -454,16 +713,53 @@ impl LocalDisplayClient {
                         }
                         .encode(),
                         deadline,
-                    )?;
+                    )
+                    .map_err(|error| {
+                        fail_after_attached_maybe_terminate_orphan(
+                            &mut stream,
+                            may_dispose_orphan,
+                            attached.attachment_id,
+                            execution_id,
+                            dispose_request_id,
+                            deadline,
+                            error,
+                        )
+                    })?;
                     resync_available = false;
                     quarantined_remainder = Some(stale_remainder_hint);
                 }
-                Err(error) => return Err(error),
+                Err(error) => break Err(error),
+            }
+        };
+        let (cache, mut batch) = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                // ADR-017 §6.3 row 2: Created orphan already Attached, never
+                // bound → terminate on this attachment. No second attach.
+                // Adopt/reconnect (dispose_never_bound_orphan=false) must not
+                // kill a live survivor on transient snapshot failure.
+                return Err(fail_after_attached_maybe_terminate_orphan(
+                    &mut stream,
+                    may_dispose_orphan,
+                    attached.attachment_id,
+                    execution_id,
+                    dispose_request_id,
+                    deadline,
+                    error,
+                ));
             }
         };
         if cache.generation != attached.current_generation || cache.rows == 0 || cache.columns == 0
         {
-            return Err(ClientError::Protocol);
+            return Err(fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
+                ClientError::Protocol,
+            ));
         }
 
         let committed_geometry = GridGeometry {
@@ -483,8 +779,28 @@ impl LocalDisplayClient {
             full_rebuild: false,
         };
 
-        stream.set_read_timeout(None).map_err(|_| ClientError::Io)?;
-        stream.set_nonblocking(true).map_err(|_| ClientError::Io)?;
+        stream.set_read_timeout(None).map_err(|_| {
+            fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
+                ClientError::Io,
+            )
+        })?;
+        stream.set_nonblocking(true).map_err(|_| {
+            fail_after_attached_maybe_terminate_orphan(
+                &mut stream,
+                may_dispose_orphan,
+                attached.attachment_id,
+                execution_id,
+                dispose_request_id,
+                deadline,
+                ClientError::Io,
+            )
+        })?;
 
         batch.clear();
         Ok(Self {
@@ -535,6 +851,12 @@ impl LocalDisplayClient {
             last_sent_v2_action_id: 0,
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
+            execution_provisioning_negotiated,
+            next_provisioning_request_id: 1,
+            pending_create_requests: std::collections::HashSet::new(),
+            pending_terminate_requests: std::collections::HashSet::new(),
+            last_create_result: None,
+            last_terminate_result: None,
         })
     }
 }

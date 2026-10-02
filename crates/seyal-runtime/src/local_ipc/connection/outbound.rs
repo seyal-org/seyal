@@ -24,6 +24,13 @@ impl Connection {
         &mut self,
         snapshot: EncodedDisplayBatch,
     ) {
+        // Attach advertises current_generation on Attached before the snapshot
+        // bytes leave the host. Superseding that snapshot leaves the peer with
+        // Attached gen N and DisplaySnapshot gen M (local_ipc_protocol flake).
+        if self.attach_snapshot_pin {
+            self.deferred_after_attach = Some(snapshot);
+            return;
+        }
         self.display_generation = snapshot.generation;
         #[cfg(feature = "benchmark-instrumentation")]
         {
@@ -35,6 +42,19 @@ impl Connection {
         self.pending_display = Some(snapshot.into_transport_batches().into());
         #[cfg(feature = "benchmark-instrumentation")]
         update_display_queue_high_water(self.display_queue_bytes());
+    }
+
+    /// Clear the attach pin once the attach snapshot has entered inflight (first
+    /// byte delivery started). Fanout may then fill `pending_display`; the peer
+    /// still observes Attached gen N with the in-flight snapshot gen N first.
+    pub(in crate::local_ipc::connection) fn clear_attach_pin_starting_inflight(&mut self) {
+        if !self.attach_snapshot_pin {
+            return;
+        }
+        self.attach_snapshot_pin = false;
+        if let Some(deferred) = self.deferred_after_attach.take() {
+            self.queue_snapshot(deferred);
+        }
     }
 
     pub(in crate::local_ipc::connection) fn try_queue_delta(
@@ -120,7 +140,10 @@ impl LocalIpcServer {
         }
         connection.queued_control_bytes = new_total;
         connection.mandatory.push_back(OutboundItem::new(attached));
+        connection.deferred_after_attach = None;
         connection.queue_snapshot(snapshot);
+        // Pin after queueing so the attach snapshot itself is not deferred.
+        connection.attach_snapshot_pin = true;
         Ok(())
     }
 
@@ -214,6 +237,9 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
                 continue;
             }
             connection.display_inflight = Some(DisplayItem::new(batches));
+            // Attach snapshot is now ordered after Attached on the wire; further
+            // fanout may supersede pending without violating Attached.generation.
+            connection.clear_attach_pin_starting_inflight();
         }
         let Some(item) = connection.display_inflight.as_mut() else {
             break;
