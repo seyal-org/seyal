@@ -8,12 +8,13 @@
 mod support;
 
 use std::{
+    os::unix::net::UnixStream,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use seyal_agent_backend::{
@@ -262,6 +263,64 @@ fn repeated_peer_fault_does_not_stall_unrelated_connection() {
                 .is_some_and(|e| e.is_recoverable_client_fault()),
         "fault peer must not take down the daemon: {fault_result:?}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Peers that connect but never send Hello are accepted ahead of the owner.
+/// Admission must not wait on their handshake reads (`read_timeout`), so the
+/// owner is served promptly and each stalled worker ends as a client fault.
+#[test]
+fn stalled_pre_hello_peers_do_not_block_next_peer_admission() {
+    let dir = temp_dir("concurrent-stalled-hello");
+    let handshake_timeout = Duration::from_secs(5);
+    let config = DaemonConfig {
+        read_timeout: handshake_timeout,
+        ..DaemonConfig::default()
+    };
+    let mut daemon = AgentDaemon::bind_integration_with(
+        &dir,
+        config,
+        IntegrationConfig {
+            store_path: dir.join("agent.db"),
+            script: script(),
+        },
+    )
+    .unwrap();
+    let socket = daemon.socket_path();
+
+    let stalled: Vec<UnixStream> = (0..3)
+        .map(|_| UnixStream::connect(&socket).expect("stalled peer connects"))
+        .collect();
+    let owner_socket = socket.clone();
+    let owner = thread::spawn(move || {
+        let started = Instant::now();
+        let mut client = TestClient::connect(&owner_socket);
+        let _ = client.create_work_scope(WorkScopeKind::AdHoc);
+        started.elapsed()
+    });
+
+    let stalled_workers: Vec<_> = (0..stalled.len())
+        .map(|_| daemon.accept_and_spawn().expect("admit stalled peer"))
+        .collect();
+    let owner_worker = daemon.accept_and_spawn().expect("admit owner");
+    let owner_elapsed = owner.join().unwrap();
+    assert!(
+        owner_elapsed < Duration::from_secs(2),
+        "owner admission waited on stalled Hello reads: {owner_elapsed:?}"
+    );
+    assert!(owner_worker.join().unwrap().is_ok());
+
+    drop(stalled);
+    for worker in stalled_workers {
+        let result = worker.join().unwrap();
+        assert!(
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.is_recoverable_client_fault()),
+            "stalled peer must end as a client fault: {result:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -11,6 +11,7 @@ Evidence for Issue #1179 on branch `mahboobmonnamd/issue/1179`.
 | Observer cannot escalate while owner is live | `observer_cannot_escalate_while_owner_is_live` |
 | Peer disconnect leaves run/other peer healthy | `peer_disconnect_leaves_other_connection_and_run_healthy` |
 | Repeated peer fault does not stall owner | `repeated_peer_fault_does_not_stall_unrelated_connection` |
+| Peers stalled before Hello do not delay admission of the next peer (handshake runs on the worker; accept thread never reads peer bytes) | `stalled_pre_hello_peers_do_not_block_next_peer_admission` |
 | Dual slow subscribers + explicit HistoryGap under concurrent serve | `dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn` |
 | Production path is concurrent accept | `AgentDaemon::accept_and_spawn` + binary `main.rs` worker join |
 | No second event clock | Shared `Arc<Mutex<IntegrationService>>`; pull Subscribe; dual Gap above |

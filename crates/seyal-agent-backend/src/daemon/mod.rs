@@ -16,9 +16,8 @@ use std::{
 
 use seyal_agent_core::BackendInstanceId;
 use seyal_agent_protocol::{
-    accepted_body_len, decode_frame, decode_handshake_error, decode_hello, encode_ack,
-    encode_handshake_error, negotiate_hello, FrameError, FrameKind, HandshakeError, Hello,
-    HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
+    accepted_body_len, decode_frame, decode_handshake_error, FrameError, FrameKind, HandshakeError,
+    Hello, HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
 };
 
 use crate::endpoint::{decide, EndpointDecision, EndpointFacts, EndpointFault};
@@ -218,8 +217,9 @@ impl AgentDaemon {
     }
 
     pub fn accept_hello(&self) -> Result<HelloAck, DaemonError> {
-        let (mut stream, _hello, ack) = self.accept_negotiated()?;
-        self.write_hello_ack(&mut stream, &ack)?;
+        let mut stream = self.accept_admitted()?;
+        let (_hello, ack) = serve::negotiate(&mut stream, self.handshake())?;
+        serve::write_ack(&mut stream, &ack, self.config.max_frame_size)?;
         drop(stream);
         Ok(ack)
     }
@@ -234,152 +234,52 @@ impl AgentDaemon {
     /// that fails to encode still returns `CommandError::Failed` without
     /// dropping the `ClientSession`.
     pub fn serve_one(&mut self) -> Result<(), DaemonError> {
-        let service = self
-            .integration
-            .as_ref()
-            .ok_or(DaemonError::Unavailable)?
-            .clone();
-        let idle = self.config.session_idle_timeout;
-        let write_timeout = self.config.session_write_timeout;
-        let (mut stream, hello, ack) = self.accept_negotiated()?;
-        let principal = {
-            let guard = service
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            match guard.resolve_connection_principal(&hello.client_principal_evidence) {
-                Ok(principal) => principal,
-                Err(_) => {
-                    drop(guard);
-                    let bytes = encode_handshake_error(
-                        HandshakeError::Malformed,
-                        self.config.max_frame_size,
-                    )
-                    .map_err(|_| DaemonError::Malformed)?;
-                    let _ = stream.write_all(&bytes);
-                    return Err(DaemonError::Handshake(HandshakeError::Malformed));
-                }
-            }
-        };
-        self.write_hello_ack(&mut stream, &ack)?;
-        stream
-            .set_read_timeout(Some(idle))
-            .map_err(|_| DaemonError::Io)?;
-        stream
-            .set_write_timeout(Some(write_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        serve::serve_session_locked(
-            &service,
-            &mut stream,
-            principal,
-            ack.max_frame_size,
-            ack.event_window,
-        )
+        let service = self.shared_service()?;
+        let mut stream = self.accept_admitted()?;
+        serve::handshake_and_serve(&service, &mut stream, self.handshake())
     }
 
-    /// Accept one peer and serve it on a worker thread so other peers can
-    /// connect concurrently against the same daemon incarnation (AB-1.3).
+    /// Accept one peer and run its handshake and session on a worker thread
+    /// so other peers can connect concurrently against the same daemon
+    /// incarnation (AB-1.3).
     ///
-    /// Returns immediately after spawning. Domain mutations stay serialized
-    /// through the shared service mutex; there is no second event clock.
+    /// The calling thread only accepts and checks same-UID admission; it
+    /// never waits on peer bytes, so a peer that stalls before or during
+    /// Hello cannot delay admission of other peers. Domain mutations stay
+    /// serialized through the shared service mutex; there is no second
+    /// event clock.
     pub fn accept_and_spawn(
         &mut self,
     ) -> Result<thread::JoinHandle<Result<(), DaemonError>>, DaemonError> {
-        let service = self
-            .integration
-            .as_ref()
-            .ok_or(DaemonError::Unavailable)?
-            .clone();
-        let idle = self.config.session_idle_timeout;
-        let write_timeout = self.config.session_write_timeout;
-        let max_frame_cfg = self.config.max_frame_size;
-        let (mut stream, hello, ack) = self.accept_negotiated()?;
-        let principal = {
-            let guard = service
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            match guard.resolve_connection_principal(&hello.client_principal_evidence) {
-                Ok(principal) => principal,
-                Err(_) => {
-                    drop(guard);
-                    let bytes = encode_handshake_error(HandshakeError::Malformed, max_frame_cfg)
-                        .map_err(|_| DaemonError::Malformed)?;
-                    let _ = stream.write_all(&bytes);
-                    return Err(DaemonError::Handshake(HandshakeError::Malformed));
-                }
-            }
-        };
-        self.write_hello_ack(&mut stream, &ack)?;
-        stream
-            .set_read_timeout(Some(idle))
-            .map_err(|_| DaemonError::Io)?;
-        stream
-            .set_write_timeout(Some(write_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        let max_frame_size = ack.max_frame_size;
-        let event_window = ack.event_window;
+        let service = self.shared_service()?;
+        let handshake = self.handshake();
+        let mut stream = self.accept_admitted()?;
         Ok(thread::spawn(move || {
-            serve::serve_session_locked(
-                &service,
-                &mut stream,
-                principal,
-                max_frame_size,
-                event_window,
-            )
+            serve::handshake_and_serve(&service, &mut stream, handshake)
         }))
     }
 
-    /// Accept a same-UID peer, validate Hello evidence, and negotiate limits.
-    /// Does not write HelloAck so callers can bind a principal first.
-    fn accept_negotiated(&self) -> Result<(UnixStream, Hello, HelloAck), DaemonError> {
+    fn shared_service(
+        &self,
+    ) -> Result<Arc<Mutex<crate::session::IntegrationService>>, DaemonError> {
+        self.integration.clone().ok_or(DaemonError::Unavailable)
+    }
+
+    fn handshake(&self) -> serve::Handshake {
+        serve::Handshake {
+            instance_id: self.instance_id,
+            max_frame_size: self.config.max_frame_size,
+            event_window: self.config.event_window,
+            session_idle_timeout: self.config.session_idle_timeout,
+            session_write_timeout: self.config.session_write_timeout,
+        }
+    }
+
+    /// Accept a peer and admit it by same-UID credentials. Reads nothing from
+    /// the peer; Hello is read by whichever thread serves the connection.
+    fn accept_admitted(&self) -> Result<UnixStream, DaemonError> {
         let listener = self.listener.as_ref().ok_or(DaemonError::AcceptIo)?;
-        let (mut stream, hello) = Self::accept_peer(
-            listener,
-            &self.socket_path(),
-            self.our_uid,
-            self.config.max_frame_size,
-            self.config.read_timeout,
-        )?;
-        if crate::AuthorizationRepository::recognize_principal_evidence(
-            &hello.client_principal_evidence,
-        )
-        .is_err()
-        {
-            let bytes =
-                encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
-                    .map_err(|_| DaemonError::Malformed)?;
-            let _ = stream.write_all(&bytes);
-            return Err(DaemonError::Handshake(HandshakeError::Malformed));
-        }
-        match negotiate_hello(
-            &hello,
-            self.instance_id,
-            self.config.max_frame_size,
-            self.config.event_window,
-        ) {
-            Ok(ack) => Ok((stream, hello, ack)),
-            Err(error) => {
-                let bytes = encode_handshake_error(error, self.config.max_frame_size)
-                    .map_err(|_| DaemonError::Malformed)?;
-                let _ = stream.write_all(&bytes);
-                Err(DaemonError::Handshake(error))
-            }
-        }
-    }
-
-    fn write_hello_ack(&self, stream: &mut UnixStream, ack: &HelloAck) -> Result<(), DaemonError> {
-        let bytes =
-            encode_ack(ack, self.config.max_frame_size).map_err(|_| DaemonError::Malformed)?;
-        stream.write_all(&bytes).map_err(map_io)
-    }
-
-    fn accept_peer(
-        listener: &UnixListener,
-        socket_path: &Path,
-        our_uid: u32,
-        max_frame_size: u32,
-        read_timeout: Duration,
-    ) -> Result<(UnixStream, Hello), DaemonError> {
-        let (mut stream, _) = listener.accept().map_err(|error| {
+        let (stream, _) = listener.accept().map_err(|error| {
             if error.kind() == io::ErrorKind::TimedOut || error.kind() == io::ErrorKind::WouldBlock
             {
                 DaemonError::TimedOut
@@ -388,23 +288,17 @@ impl AgentDaemon {
             }
         })?;
         stream
-            .set_read_timeout(Some(read_timeout))
+            .set_read_timeout(Some(self.config.read_timeout))
             .map_err(|_| DaemonError::Io)?;
         stream
-            .set_write_timeout(Some(read_timeout))
+            .set_write_timeout(Some(self.config.read_timeout))
             .map_err(|_| DaemonError::Io)?;
-        if !endpoint_still_owned(socket_path, our_uid) {
+        if !endpoint_still_owned(&self.socket_path(), self.our_uid) {
             return Err(DaemonError::Endpoint(EndpointFault::Symlink));
         }
         peer::verify_same_user_peer(stream.as_raw_fd())
             .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
-
-        let frame = read_one_frame(&mut stream as &mut dyn Read, max_frame_size)?;
-        if frame.kind != FrameKind::Hello {
-            return Err(DaemonError::Malformed);
-        }
-        let hello = decode_hello(&frame.body).map_err(|_| DaemonError::Malformed)?;
-        Ok((stream, hello))
+        Ok(stream)
     }
 
     /// Leave the socket pathname in place and record a dead owner, as a
