@@ -17,8 +17,8 @@ production throughput or idle-cost claim.
   before this qualification's new tests.
 - **N** means coverage added on `mahboobmonnamd/issue/1029` after `409c65bc`.
 
-A row can be both. Exact-head CI links are filled after the tip lands green
-(Foundation Quality + M001 Production Fuzz on this SHA).
+A row can be both. Exact-head CI for tip `3f0f3c1b` is linked in Fuzz /
+Recommended exit below (Foundation Quality + M001 Production Fuzz).
 
 The campaign test stays `#[ignore]`, so CI does not run it.
 
@@ -76,9 +76,9 @@ find crates/seyal-agent-core/src \
   -print0 | xargs -0 wc -l
 ```
 
-On this head the total is 6896 lines. The largest file is
-`crates/seyal-agent-backend/src/daemon/mod.rs` at 669. Every enumerated file is
-under 700 lines (`session/mod.rs` is 615).
+On this head the total is 7141 lines. The largest file is
+`crates/seyal-agent-backend/src/daemon/mod.rs` at 728 (cohesion-acknowledged on
+this tip). Next are `sqlite/mod.rs` at 690 and `session/mod.rs` at 658.
 
 ## Measurements
 
@@ -124,12 +124,13 @@ count (3), not output bytes; it is not a throughput claim.
 Grade `developer-local-campaign`. Nightly `nightly-2026-08-20`. Flags
 `-max_total_time=600 -timeout=10 -rss_limit_mb=1024 -print_final_stats=1`.
 Writable corpus stayed in `/tmp` and was not committed. Prior M001 Production
-Fuzz on `a037b2cd`
-([36809402719](https://github.com/seyal-org/seyal/actions/runs/36809402719))
+Fuzz on tip `3f0f3c1b`
+([36950381507](https://github.com/seyal-org/seyal/actions/runs/36950381507))
 completed green, including `agent_protocol_decode` and
 `agent_harness_observation`. That run is grade `ci-smoke`. It is not the
-600 second campaign below. Re-confirm ci-smoke on the exact final head after
-push.
+600 second campaign below. Foundation Quality on the same tip
+([36950381493](https://github.com/seyal-org/seyal/actions/runs/36950381493))
+is also green (repository-policy, rust-and-harness-quality, native-macos-smoke).
 
 | Target | Committed seeds | Execs | Duration | Coverage | Features | Crashes | Peak RSS |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -265,7 +266,7 @@ Pending independent human review: **PASS for the AB-0 claims labeled E/N**.
 Distinct Hello principals close matrix rows 16/17 for sequential connections.
 True concurrent two-client connections remain AB-1 (serial accept loop).
 
-This recommendation is not the exit. Exact-head CI links and the final tip SHA
-are recorded after green Foundation Quality + M001 Production Fuzz on this
-branch tip. Independent review and the owner's update to #1023 are still open.
+This recommendation is not the exit. Exact-head CI on tip `3f0f3c1b` is linked
+above (Foundation Quality `36950381493`, M001 Production Fuzz `36950381507`).
+Independent review and the owner's update to #1023 are still open.
 Do not treat this document as that update.
