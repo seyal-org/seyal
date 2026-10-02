@@ -17,7 +17,7 @@ pub use crate::pass7::{
     ComposerResult, ComposerResultCode, ComposerStatus, HistoryCell, HistoryRangeRequest,
     HistoryRangeSnapshot, HistoryRangeStatus, HistoryRow, HistorySourceCell, ResizeRequest,
     ResizeResult, ResizeResultCode, TerminalKey, TerminalKeyKind, TerminalKeyModifiers,
-    TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers,
+    TerminalKeyV2, TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers, ViewportLineIds,
     CAP_CORRELATED_RESIZE, CAP_EXTENDED_TERMINAL_KEY, CAP_SEMANTIC_TERMINAL_KEY,
     HISTORY_CELL_CONTINUATION_FLAG, HISTORY_CELL_SIDECAR_FLAG, HISTORY_CELL_WIDTH_MASK,
     HISTORY_CELL_WIDTH_SHIFT, MAX_HISTORY_GRAPHEME_BYTES, MAX_HISTORY_RANGE_BYTES,
@@ -26,8 +26,8 @@ pub use crate::pass7::{
 
 pub use envelope::{
     ErrorCode, FrameHeader, FramingError, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
-    CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, HEADER_LEN, MAGIC, MAJOR, MAX_EXECUTION_LIST_ENTRIES,
-    MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
+    CAP_GRAPHEME_DISPLAY, CAP_OBSERVER, CAP_VIEWPORT_LINE_IDS, HEADER_LEN, MAGIC, MAJOR,
+    MAX_EXECUTION_LIST_ENTRIES, MAX_FRAME_PAYLOAD, MAX_INPUT_BYTES, MINOR,
 };
 
 pub use execution::{

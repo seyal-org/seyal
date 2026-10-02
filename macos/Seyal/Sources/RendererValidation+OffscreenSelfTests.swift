@@ -6,6 +6,55 @@ import Metal
 
 @MainActor
 extension RendererValidation {
+    static func retainedDefaultColorsFollowThemeOffscreenSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            var damage = DamageMask()
+            damage.mark(row: 0)
+            let cells = [preparedCell(scalar: UInt32(ascii: "A"))]
+            guard try cells.withUnsafeBufferPointer({ buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        fullRebuild: true,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                ) == .updated
+            }) else { return false }
+            let size = renderer.cellPixelSize(backingScale: 1)
+            renderer.setDefaultTerminalColors(
+                foreground: packRGBA(red: 30, green: 35, blue: 40),
+                background: packRGBA(red: 252, green: 252, blue: 250)
+            )
+            guard let light = renderer.renderOffscreenAndWait(width: size.width, height: size.height) else {
+                return false
+            }
+            let lightBackgroundMatches = pixelMatches(
+                light, x: size.width - 1, y: size.height - 1, red: 252, green: 252, blue: 250
+            )
+            let darkGlyphMatches = textureRegionContainsDarkGlyph(light, xStart: 0, xEnd: size.width)
+            guard lightBackgroundMatches && darkGlyphMatches else { return false }
+
+            renderer.setDefaultTerminalColors(
+                foreground: packRGBA(red: 230, green: 225, blue: 216),
+                background: packRGBA(red: 16, green: 13, blue: 11)
+            )
+            guard let dark = renderer.renderOffscreenAndWait(width: size.width, height: size.height) else {
+                return false
+            }
+            let backgroundMatches = pixelMatches(dark, x: size.width - 1, y: size.height - 1, red: 16, green: 13, blue: 11)
+            let brightGlyphMatches = textureRegionContainsBrightGlyph(dark, xStart: 0, xEnd: size.width)
+            return backgroundMatches && brightGlyphMatches
+        } catch {
+            return false
+        }
+    }
+
     static func wideGraphemeOffscreenSelfTest() -> Bool {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
         do {
@@ -196,4 +245,67 @@ extension RendererValidation {
         }
     }
 
+    /// #865: Flow running live-tail clips only the mapped primary-frame row
+    /// slice into the Block region without enabling Pane-wide live grid drawing.
+    static func liveTailPrimaryClipSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            renderer.setPresentationPlan(.flow())
+            let liveCells = ["A", "B", "H", "i", "!", "!"].map {
+                preparedCell(scalar: UInt32(Character($0).asciiValue!))
+            }
+            var damage = DamageMask()
+            damage.markAll(rows: 3)
+            guard try liveCells.withUnsafeBufferPointer({ buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 865,
+                        rows: 3,
+                        columns: 2,
+                        fullRebuild: true,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                ) == .updated
+            }) else { return false }
+
+            let cellSize = renderer.cellPixelSize(backingScale: 1)
+            let region = NativeTranscriptRegion(
+                id: 865,
+                origin: .zero,
+                clip: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: CGFloat(cellSize.width * 2),
+                    height: CGFloat(cellSize.height * 2)
+                )
+            )
+            renderer.setTranscriptRegions([region])
+            renderer.setLiveTailBlocks([
+                865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+            ])
+            guard renderer.liveTailRegionCount == 1,
+                  renderer.liveTailInstanceCount(for: 865) == 4
+            else { return false }
+
+            let inspection = renderer.inspectPresentation()
+            guard inspection.mode == .flow,
+                  !inspection.drawsLiveGrid,
+                  !inspection.drawsFullGridBackground,
+                  !inspection.drawsCursorOutsideBlockRegions,
+                  inspection.blockRegionIDs == [865]
+            else {
+                return false
+            }
+
+            let paint = renderer.inspectFlowPaint()
+            return paint.isClean
+                && paint.historyInstanceCount == 4
+                && paint.instancesOutsideClips == 0
+        } catch {
+            return false
+        }
+    }
 }

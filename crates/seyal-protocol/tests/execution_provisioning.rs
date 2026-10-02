@@ -39,7 +39,11 @@ fn framing_version_stays_1_0_and_capability_bit_is_stable() {
         MessageType::from_u16(39),
         Some(MessageType::TerminateExecutionResult)
     );
-    assert_eq!(MessageType::from_u16(35), None);
+    // Type 35 is ViewportLineIds (§8.1 / #865); §18 starts at 36.
+    assert_eq!(
+        MessageType::from_u16(35),
+        Some(MessageType::ViewportLineIds)
+    );
     assert_eq!(MessageType::from_u16(40), None);
 }
 

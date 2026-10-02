@@ -3,6 +3,21 @@ import Metal
 import QuartzCore
 
 extension MetalTerminalRenderer {
+
+    /// Nonisolated seed from Rust theme via AppleInterfaceStyle (avoid dark flash).
+    static func themeSeededDefaultColors() -> SIMD2<UInt32> {
+        let light = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") != "Dark"
+        let packed = seyal_app_visual(light ? 1 : 0)
+        return SIMD2(packed.text.byteSwapped, packed.canvas.byteSwapped)
+    }
+
+    func setDefaultTerminalColors(foreground: UInt32, background: UInt32) {
+        guard defaultTerminalColors.x != foreground || defaultTerminalColors.y != background else { return }
+        defaultTerminalColors = SIMD2<UInt32>(foreground, background)
+        needsPresent = true
+        requestPresent()
+    }
+
     func allocateInstanceBuffer(rows: Int, columns: Int) throws {
         let count = rows * columns
         let byteCount = count * MemoryLayout<TerminalInstance>.stride
@@ -150,11 +165,11 @@ extension MetalTerminalRenderer {
                     uvRect: uvRect,
                     foreground: resolveTerminalColor(
                         cell.foreground,
-                        defaultRGBA: 0xffe9_e1d8
+                        defaultRGBA: 0
                     ),
                     background: resolveTerminalColor(
                         cell.background,
-                        defaultRGBA: 0xff10_0d0b
+                        defaultRGBA: 0
                     ),
                     flags: flags,
                     atlasSlice: atlasSlice
@@ -211,6 +226,12 @@ extension MetalTerminalRenderer {
             &renderMode,
             length: MemoryLayout<UInt32>.stride,
             index: 2
+        )
+        var defaultColors = defaultTerminalColors
+        encoder.setFragmentBytes(
+            &defaultColors,
+            length: MemoryLayout<SIMD2<UInt32>>.stride,
+            index: 3
         )
         if let atlasTexture {
             encoder.setFragmentTexture(atlasTexture, index: 0)
@@ -336,6 +357,7 @@ extension MetalTerminalRenderer {
 
         flushDeferredHistoryPrepares()
         guard persistentDisplayFailure == nil else { return }
+        flushDeferredLiveTailRefresh()
 
         if !deferredDamage.isEmpty || deferredNeedsFullRebuild || needsCurrentFrameWhenIdle {
             requestCurrentFrameIfNeeded()
@@ -395,6 +417,7 @@ extension MetalTerminalRenderer {
         instanceCount = 0
         historyRegions.removeAll()
         historyRegionOrder.removeAll()
+        liveTail = LiveTailRenderState()
         deferredHistoryPrepares.removeAll()
         currentRows = 0
         currentColumns = 0

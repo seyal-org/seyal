@@ -2,6 +2,7 @@ mod attach;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod viewport_line_ids;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -141,6 +142,10 @@ pub struct LocalDisplayClient {
     pub(crate) last_sent_v2_action_id: u32,
     pub(crate) highest_v2_error_id: u32,
     pub(crate) last_admitted_mouse_action_id: u32,
+    /// Primary viewport LineIds for the latest accepted `ViewportLineIds`
+    /// generation. Cleared on disconnect/resync; empty until Runtime publishes.
+    pub(crate) viewport_line_ids: Vec<u64>,
+    pub(crate) viewport_line_ids_generation: u64,
 }
 
 impl LocalDisplayClient {
@@ -476,6 +481,11 @@ impl LocalDisplayClient {
                         }
                         self.copied_text = copied.bytes.to_vec();
                     }
+                    MessageType::ViewportLineIds => {
+                        // Copy off the read buffer before mutating attachment state.
+                        let payload = frame[HEADER_LEN..].to_vec();
+                        metadata_changed |= self.apply_viewport_line_ids(&payload)?;
+                    }
                     _ => return Err(ClientError::Protocol),
                 }
                 self.read_offset = frame_end;
@@ -492,6 +502,7 @@ impl LocalDisplayClient {
             let mut chunk = [0u8; READ_CHUNK_BYTES];
             match self.stream.read(&mut chunk) {
                 Ok(0) => {
+                    self.clear_viewport_line_ids();
                     self.input_failure = Some(InputAdmissionFailure::Disconnected);
                     self.resize_failure = Some(ResizeFailure::Disconnected);
                     return Err(ClientError::Disconnected);
@@ -516,6 +527,7 @@ impl LocalDisplayClient {
         }
 
         self.compact_buffer();
+        metadata_changed |= self.drop_unpaired_viewport_line_ids();
         if !committed_any && !metadata_changed {
             return Ok(None);
         }
@@ -645,6 +657,8 @@ pub(crate) fn reconstruction_probe_client(
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        viewport_line_ids: Vec::new(),
+        viewport_line_ids_generation: 0,
     }
 }
 

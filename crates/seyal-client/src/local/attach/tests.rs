@@ -344,6 +344,7 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
     let execution_id = ExecutionId::from_bytes([11; 16]);
     let attachment_id = AttachmentId::from_bytes([12; 16]);
     let (release_server, hold_server) = std::sync::mpsc::sync_channel(0);
+    let (timeline_written, wait_timeline) = std::sync::mpsc::sync_channel(0);
     let server_thread = std::thread::spawn(move || {
         let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
         assert_eq!(kind, MessageType::Attach);
@@ -375,6 +376,9 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
             server
                 .write_all(&block_timeline(7))
                 .expect("queued block timeline");
+            timeline_written
+                .send(())
+                .expect("signal timeline write completed");
         }
         hold_server.recv().expect("client release");
     });
@@ -392,9 +396,29 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
     .expect("valid control frame must not poison bounded resync");
     assert_eq!(attached.cache().generation, 5);
     assert_eq!(attached.cache().cells[0].scalar, 'V');
-    attached
-        .poll_prepare()
-        .expect("retained timeline should reach normal consumer");
+    // When the timeline is written after the snapshot, wait for the server
+    // write barrier before draining so the poll loop is not racing the
+    // producer (avoids a fixed-deadline flake under CI load).
+    if !timeline_before_snapshot {
+        wait_timeline
+            .recv()
+            .expect("server must signal timeline write completion");
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(250);
+    loop {
+        attached
+            .poll_prepare()
+            .expect("retained timeline should reach normal consumer");
+        if attached.block_timeline().revision == 7 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "block timeline revision stayed {}; expected 7",
+            attached.block_timeline().revision
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert_eq!(attached.block_timeline().revision, 7);
     release_server.send(()).expect("release server");
     server_thread.join().expect("server thread");

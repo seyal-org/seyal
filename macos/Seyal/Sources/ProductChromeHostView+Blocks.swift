@@ -36,6 +36,7 @@ extension ProductChromeHostView {
             let mode: TerminalPresentationMode =
                 snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
             pane.inputSurface.applyRendererPresentation(.fullPane(mode))
+            pane.inputSurface.setLiveTailBlocks([:])
             pane.inputSurface.removeTranscriptRegions(except: [])
             layoutSubtreeIfNeeded()
         } else {
@@ -56,13 +57,13 @@ extension ProductChromeHostView {
         var retained = Set<UInt64>()
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
-            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
+            let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
             let title = productChromeCopyUTF8(row.title, row.title_len) ?? "command"
             let detail = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
             let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
             let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
             let blockID = row.id_lo
-            let lines = outputLineCount(span)
+            let lines = outputLineCount(projection: projection)
             let card = CommandBlockView(
                 prompt: prompt,
                 title: title,
@@ -83,24 +84,32 @@ extension ProductChromeHostView {
             if blockID != 0 {
                 blockCards[blockID] = card
                 retained.insert(blockID)
-                requestBlockOutput(blockID: blockID, span: span)
+                applyBlockOutputProjection(blockID: blockID, projection: projection)
             }
         }
         pane.inputSurface.discardHistoryRequests(except: retained)
         layoutSubtreeIfNeeded()
         publishBlockOutputFrame()
+        publishLiveTailBlocks()
         if count > lastBlockCount, followingLiveEnd {
             scrollTranscriptToLiveEnd()
         }
         lastBlockCount = count
     }
 
-    func outputLineCount(_ span: SeyalAppBlockSpan) -> Int {
-        guard span.start_line > 0 else { return 1 }
-        if span.end_line >= span.start_line {
-            return Int(min(span.end_line - span.start_line + 1, 512))
+    func outputLineCount(projection: SeyalAppBlockProjection) -> Int {
+        switch projection.kind {
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY):
+            guard projection.start_line > 0, projection.end_line >= projection.start_line else {
+                return 1
+            }
+            return Int(min(projection.end_line - projection.start_line + 1, 512))
+        case UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP):
+            // Rust-owned row slice height (not the full prepared viewport).
+            return max(Int(projection.reserved1), 1)
+        default:
+            return 1
         }
-        return 8
     }
 
     func refreshRunningBlockOutput() {
@@ -110,25 +119,63 @@ extension ProductChromeHostView {
         {
             return
         }
+        publishLiveTailBlocks()
+        // Damage-driven primary clips refresh from Candidate-D frame updates.
+        // Re-publish geometry so Block body height tracks the prepared rows.
         let composer = seyal_app_composer(pane.appHandle)
+        let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
         for index in 0..<Int(composer.block_count) {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
-            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
-            guard row.id_lo != 0, span.start_line > 0, span.end_line == 0 else { continue }
-            requestBlockOutput(blockID: row.id_lo, span: span)
+            let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
+            guard row.id_lo != 0,
+                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
+                  let card = blockCards[row.id_lo]
+            else { continue }
+            card.setOutputLines(outputLineCount(projection: projection), cellHeight: cellHeight)
         }
+        layoutSubtreeIfNeeded()
+        publishBlockOutputFrame()
     }
 
-    func requestBlockOutput(blockID: UInt64, span: SeyalAppBlockSpan) {
-        guard span.start_line > 0 else { return }
-        let end = span.end_line >= span.start_line
-            ? span.end_line
-            : span.start_line &+ 511
+    /// Completed Blocks request their trusted history span. Running Blocks
+    /// draw the prepared primary frame; the host never invents a history end.
+    func applyBlockOutputProjection(blockID: UInt64, projection: SeyalAppBlockProjection) {
+        guard projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY),
+              projection.start_line > 0,
+              projection.end_line >= projection.start_line
+        else { return }
         _ = pane.inputSurface.requestHistoryRange(
-            startLine: span.start_line,
-            endLine: max(end, span.start_line),
+            startLine: projection.start_line,
+            endLine: projection.end_line,
             blockID: blockID
         )
+    }
+
+    func publishLiveTailBlocks() {
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
+            || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        {
+            pane.inputSurface.setLiveTailBlocks([:])
+            return
+        }
+        let composer = seyal_app_composer(pane.appHandle)
+        var live: [UInt64: LiveTailClip] = [:]
+        for index in 0..<Int(composer.block_count) {
+            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
+            let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
+            guard row.id_lo != 0,
+                  projection.kind == UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP),
+                  projection.start_line > 0,
+                  projection.reserved1 > 0
+            else { continue }
+            live[row.id_lo] = LiveTailClip(
+                startLine: projection.start_line,
+                firstRow: projection.reserved0,
+                rowCount: UInt16(min(projection.reserved1, UInt32(UInt16.max)))
+            )
+        }
+        pane.inputSurface.setLiveTailBlocks(live)
     }
 
     func applyHistoryRange(_ range: NativeHistoryRange) {
