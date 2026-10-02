@@ -75,6 +75,8 @@ An earlier run under heavy parallel load hit the 10.01 s budget in `seyal-runtim
 
 Required CI checks are recorded on the PR for its exact head.
 
+`session::tests` gives each store directory a process-local sequence so parallel tests cannot share `agent.db`. `cargo test -p seyal-agent-backend --locked --all-features --lib session::tests` passed 40/40 with default threads and 20/20 while 30 `yes` spinners ran.
+
 ## Documentation impact
 
 User Guide and Developer Guide: N/A. No user surface and no doc describes session semantics. Authoritative ADR/SPEC text is unchanged.

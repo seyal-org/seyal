@@ -4,12 +4,17 @@ use seyal_agent_protocol::{
     decode_frame, decode_result, encode_command, BackendInstanceId, ClientSessionId, Command,
     CommandError, CommandResult, ABSOLUTE_MAX_FRAME_SIZE,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// Wall-clock nanos are not unique across parallel tests in one process.
+static NEXT_STORE: AtomicU64 = AtomicU64::new(1);
 
 fn temp_store() -> PathBuf {
     std::env::temp_dir().join(format!(
-        "seyal-session-undo-{}-{}",
+        "seyal-session-undo-{}-{}-{}",
         std::process::id(),
+        NEXT_STORE.fetch_add(1, Ordering::Relaxed),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

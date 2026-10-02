@@ -179,7 +179,7 @@ reason = "V1 command catalog and observation dispatch stay one session façade; 
 # #1194 nine-command byte-identity regression lives with the other session façade tests.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/tests.rs"
-acknowledged_loc = 762
+acknowledged_loc = 767
 issue = 1194
 reason = "Session façade regressions stay beside IntegrationService; #1194 adds the nine-command foreign-session frame comparison, which crosses review_loc without a second session test authority."
 
