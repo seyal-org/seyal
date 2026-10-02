@@ -271,16 +271,10 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
             .collect::<Vec<_>>();
         let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
         let pre_crash = client.check_generation(run_id, binding, control);
-        let stale_binding = client.check_generation(
-            run_id,
-            liveness.0.saturating_add(1),
-            liveness.1,
-        );
-        let stale_control = client.check_generation(
-            run_id,
-            liveness.0,
-            liveness.1.saturating_add(1),
-        );
+        let stale_binding =
+            client.check_generation(run_id, liveness.0.saturating_add(1), liveness.1);
+        let stale_control =
+            client.check_generation(run_id, liveness.0, liveness.1.saturating_add(1));
         let current = client.check_generation(run_id, liveness.0, liveness.1);
         (
             old,
