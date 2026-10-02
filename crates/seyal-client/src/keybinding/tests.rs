@@ -1,5 +1,3 @@
-//! SPEC-024 §14 items 1, 2–3, 8, 14, 15, and 22 (K1 + K2).
-
 use std::path::Path;
 
 use crate::input_policy::load_input_policy;
@@ -25,7 +23,6 @@ fn binding_for<'a>(
         .iter()
         .find(|b| b.sequence == sequence && b.action.id == id)
 }
-
 fn contexts_for(table: &KeybindingTable, keys: &str) -> Vec<(WorkspaceCommandId, BindingContext)> {
     let sequence = parse_keys(keys).expect("test keys");
     table
@@ -35,7 +32,6 @@ fn contexts_for(table: &KeybindingTable, keys: &str) -> Vec<(WorkspaceCommandId,
         .map(|b| (b.action.id, b.context))
         .collect()
 }
-
 fn diag_categories(table: &KeybindingTable) -> Vec<DiagnosticCategory> {
     table.diagnostics.iter().map(|d| d.category).collect()
 }
@@ -219,7 +215,7 @@ action = "pane.focus_left"
 
 [[keybindings]]
 keys = "cmd+["
-action = "focus_history.back"
+action = "goto.fly"
 "#;
     let table = load_keybinding_table(Some(toml));
     assert!(
@@ -390,15 +386,24 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     .expect("ctrl+r composer history-search");
     assert_eq!(history.context, BindingContext::COMPOSER);
 
-    // Exclusions: ADR-021 pane focus/zoom, SPEC-022 navigation, ADR-018 window
+    // §5.5 / K8: goto.open and focus-history Back/Forward
+    let goto = binding_for(&table, "cmd+shift+o", WorkspaceCommandId::GotoOpen)
+        .expect("cmd+shift+o goto.open");
+    assert_eq!(goto.context, BindingContext::APP);
+    let back = binding_for(&table, "cmd+[", WorkspaceCommandId::FocusHistoryBack)
+        .expect("cmd+[ focus_history.back");
+    assert_eq!(back.context, BindingContext::APP);
+    assert_eq!(back.source, BindingSource::Builtin);
+    let forward = binding_for(&table, "cmd+]", WorkspaceCommandId::FocusHistoryForward)
+        .expect("cmd+] focus_history.forward");
+    assert_eq!(forward.context, BindingContext::APP);
+    assert_eq!(forward.source, BindingSource::Builtin);
+    // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
-    assert!(contexts_for(&table, "cmd+[").is_empty());
-    assert!(contexts_for(&table, "cmd+]").is_empty());
-    assert!(contexts_for(&table, "cmd+shift+o").is_empty());
+
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
-    // Until K9, cmd+w has no builtin (accepted §4.1 / §5.0; not tab.close_focused).
     assert!(contexts_for(&table, "cmd+w").is_empty());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
 }

@@ -1,24 +1,17 @@
-//! SPEC-024 K3: dispatch matched WorkspaceCommands from the routing gate.
-
-use std::sync::OnceLock;
+//! SPEC-024 K3–K5: dispatch matched commands, own chord prefix wait, and read the projected table.
 
 use crate::composer::ComposerAction;
+use crate::goto::GotoScope;
 use crate::keybinding::{
-    load_keybinding_table_from_path, resolve_tab_ordinal, route_context_set, route_keystroke,
-    validate_workspace_command, BindingContext, InvokeError, KeybindingTable, NormalizedStroke,
-    RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
+    process_keybinding_table, resolve_tab_ordinal, route_context_set, route_keystroke,
+    validate_workspace_command, BindingContext, InvokeError, NormalizedStroke, RouteOutcome,
+    WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
 use crate::shell::SplitAxis;
+use std::time::Instant;
 
 use super::{AppError, ApplicationRoot};
-
-fn process_keybinding_table() -> &'static KeybindingTable {
-    static TABLE: OnceLock<KeybindingTable> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        load_keybinding_table_from_path(crate::keybinding::keybinding_config_path().as_deref())
-    })
-}
 
 impl ApplicationRoot {
     /// Current §6.1 route context set from palette / presentation / composer focus.
@@ -30,17 +23,27 @@ impl ApplicationRoot {
         )
     }
 
-    /// Route one already-normalized stroke (§6.2). Matched commands are applied
-    /// here so ApplicationCommand paths write zero PTY bytes.
+    /// Route one already-normalized stroke (§6.2 / §8). Matched commands are
+    /// applied here so ApplicationCommand / prefix-wait paths write zero PTY bytes.
     pub fn route_normalized_keystroke(
         &mut self,
         stroke: &NormalizedStroke,
         composer_first_responder: bool,
         composition_active: bool,
     ) -> Result<RouteOutcome, AppError> {
+        if composition_active {
+            self.clear_chord_prefix();
+        }
         let table = process_keybinding_table();
         let route = self.keybinding_route_context(composer_first_responder);
-        let outcome = route_keystroke(table, stroke, route, composition_active);
+        let outcome = route_keystroke(
+            table,
+            stroke,
+            route,
+            composition_active,
+            &mut self.chord_prefix,
+            Instant::now(),
+        );
         match outcome {
             RouteOutcome::Matched { command } => {
                 self.invoke_workspace_command(command, route)?;
@@ -58,9 +61,24 @@ impl ApplicationRoot {
         command: WorkspaceCommand,
         composer_first_responder: bool,
     ) -> Result<(), AppError> {
+        self.clear_chord_prefix();
         let table = process_keybinding_table();
         let route = self.keybinding_route_context(composer_first_responder);
         validate_workspace_command(table, command, route).map_err(invoke_error)
+    }
+
+    /// Menu / key-equivalent path: validate against `route`, then dispatch.
+    /// R8.4: menu entry clears any active chord prefix before dispatch.
+    pub fn invoke_workspace_command_for_menu(
+        &mut self,
+        command: WorkspaceCommand,
+        route: BindingContext,
+    ) -> Result<(), AppError> {
+        self.clear_chord_prefix();
+        self.invoke_workspace_command(command, route)?;
+        self.last_error = None;
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+        Ok(())
     }
 
     pub(super) fn invoke_workspace_command(
@@ -129,6 +147,23 @@ impl ApplicationRoot {
             WorkspaceCommandId::ComposerHistorySearchOpen => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
+            // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
+            WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
+            WorkspaceCommandId::FocusHistoryBack => {
+                // R5.5 / R6.8: FocusSeq from the same snapshot history committed.
+                let observed = self
+                    .snapshot()
+                    .focus_history_seq
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.history_back(observed)
+            }
+            WorkspaceCommandId::FocusHistoryForward => {
+                let observed = self
+                    .snapshot()
+                    .focus_history_seq
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.history_forward(observed)
+            }
             WorkspaceCommandId::AppQuit => self.quit(),
         }
     }
@@ -177,6 +212,7 @@ impl ApplicationRoot {
                 epoch: snap.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.clear_chord_prefix();
         Ok(())
     }
 

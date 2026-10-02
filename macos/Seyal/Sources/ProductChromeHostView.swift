@@ -469,6 +469,88 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpen()
     }
 
+    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
+    /// WorkspaceCommand. Rust re-validates against the current route context.
+    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
+        guard let commandId = sender.representedObject as? UInt16 else { return }
+        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, 0, 0)
+        if code == 0 {
+            reconcileChrome()
+            routeFocus()
+        }
+    }
+
+    /// R6.2.1: route Command through Rust before AppKit menu key-equivalents.
+    /// Matched / cross-context projected steals consume; §6.2 step 2c miss and
+    /// reserved §4.2 stay native (composer/palette ⌘←/⌘⌫ editing).
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let responder = window?.firstResponder as? NSView
+        let composerFocused = responder.map { $0 === composer || $0.isDescendant(of: composer) } ?? false
+        // R8.4: report IME/marked-text the same way keyDown paths do so a
+        // Command chord prefix cannot activate during composition.
+        let compositionActive = Self.compositionActiveForKeyRouting(
+            responder: responder,
+            composer: composer,
+            inputSurface: inputSurface
+        )
+        switch KeybindingStrokeNormalizer.route(
+            appHandle: pane.appHandle,
+            event: event,
+            composerFocused: composerFocused,
+            compositionActive: compositionActive
+        ) {
+        case .consumed:
+            reconcileChrome()
+            routeFocus()
+            return true
+        case .nativeCommand:
+            return super.performKeyEquivalent(with: event)
+        case .fallsThrough:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+
+    /// Shared probe for R6.2.1 / R8.4: marked text on the focused input
+    /// surface — composer, metal terminal, or palette/goto/history field
+    /// editors (`NSTextView`). Package-visible for host tests.
+    static func compositionActiveForKeyRouting(
+        responder: NSView?,
+        composer: ComposerBridgeView,
+        inputSurface: InteractiveMetalSurfaceView
+    ) -> Bool {
+        guard let responder else { return false }
+        if responder === composer || responder.isDescendant(of: composer) {
+            return composer.hasMarkedComposition
+        }
+        if responder === inputSurface || responder.isDescendant(of: inputSurface) {
+            return inputSurface.hasMarkedText()
+        }
+        if let metal = responder as? InteractiveMetalSurfaceView {
+            return metal.hasMarkedText()
+        }
+        // Palette / Go to… / composer-history queries use NSTextField; AppKit
+        // makes the field editor (NSTextView) first responder during IME.
+        if let textView = responder as? NSTextView {
+            return textView.hasMarkedText()
+        }
+        if let field = responder as? NSTextField,
+           let editor = field.currentEditor() as? NSTextView
+        {
+            return editor.hasMarkedText()
+        }
+        return false
+    }
+
+    /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the
+    /// command-palette overlay; default scope is Panes.
+    @objc func openGoto() {
+        commandPalette.requestOpenGoto()
+    }
+
     func routeFocus() {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
@@ -662,6 +744,20 @@ final class ProductChromeHostView: NSView {
         )
         coldVisualProbe.setAccessibilityLabel(
             "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
+        )
+    }
+}
+
+extension ProductChromeHostView: NSMenuItemValidation {
+    /// R6.4.2: enabled state comes only from the Rust shortcut projection.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let commandId = menuItem.representedObject as? UInt16 else {
+            return true
+        }
+        return KeybindingShortcutRealization.isEnabled(
+            appHandle: pane.appHandle,
+            commandId: commandId,
+            composerFocused: false
         )
     }
 }

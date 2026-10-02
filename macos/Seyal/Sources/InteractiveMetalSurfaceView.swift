@@ -135,25 +135,6 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         submitNativeMouse(event, kind: 4, buttonOverride: button)
     }
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.contains(.command) else {
-            return super.performKeyEquivalent(with: event)
-        }
-        switch KeybindingStrokeNormalizer.route(
-            appHandle: appHandle,
-            event: event,
-            composerFocused: false,
-            compositionActive: hasMarkedText()
-        ) {
-        case .consumed:
-            onCommandConsumed?()
-            return true
-        case .nativeCommand, .fallsThrough:
-            return super.performKeyEquivalent(with: event)
-        }
-    }
-
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let compositionActive = hasMarkedText()

@@ -7,6 +7,7 @@ mod decode;
 mod encode;
 mod error_code;
 mod pane_region;
+mod shortcut;
 mod visual;
 
 use error_code::error_number;
@@ -33,6 +34,10 @@ use encode::{
 };
 
 pub use pane_region::seyal_app_pane_region;
+pub use shortcut::{
+    seyal_app_invoke_workspace_command, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
+    seyal_app_shortcut_item,
+};
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
@@ -208,7 +213,13 @@ impl SeyalAppPalette {
 }
 
 const PALETTE_OPEN: u16 = 1;
+/// Overlay is projecting the navigation-only goto surface (N4).
+const PALETTE_GOTO: u16 = 2;
+/// Goto enumeration was truncated past GOTO_ENUMERATION_BOUND (SPEC-022 R7.6).
+const PALETTE_TRUNCATED: u16 = 4;
 
+/// One projected row. Optional `ResourceAddress` fields are set for palette
+/// navigation rows (SPEC-022 R7.2); `address_len == 0` means no address.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SeyalAppRow {
@@ -223,6 +234,11 @@ pub struct SeyalAppRow {
     pub detail: *const u8,
     pub detail_len: u32,
     pub reserved2: u32,
+    pub address_version: u16,
+    pub address_kind: u16,
+    pub address_len: u16,
+    pub address_pad: u16,
+    pub address_bytes: [u8; 48],
 }
 
 impl SeyalAppRow {
@@ -239,12 +255,17 @@ impl SeyalAppRow {
             detail: ptr::null(),
             detail_len: 0,
             reserved2: 0,
+            address_version: 0,
+            address_kind: 0,
+            address_len: 0,
+            address_pad: 0,
+            address_bytes: [0; 48],
         }
     }
 }
 
-struct AppHandle {
-    root: ApplicationRoot,
+pub(super) struct AppHandle {
+    pub(super) root: ApplicationRoot,
     output: Vec<u8>,
     composer_draft: Vec<u8>,
     ax_nodes: Vec<SeyalAppAxNode>,
@@ -264,7 +285,7 @@ struct AppHandle {
 }
 
 thread_local! {
-    static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
+    pub(super) static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
 impl SeyalAppSnapshot {
@@ -340,7 +361,10 @@ pub extern "C" fn seyal_app_route_keystroke(
     composer_focused: u8,
     composition_active: u8,
 ) -> i32 {
-    use crate::keybinding::{NormalizedStroke, RouteOutcome};
+    use crate::keybinding::{
+        process_keybinding_table, projected_menu_steals_unmatched_command, NormalizedStroke,
+        RouteOutcome,
+    };
 
     let Some(stroke) =
         NormalizedStroke::from_ffi(modifier_bits, named_key != 0, base, shift_applied)
@@ -357,10 +381,20 @@ pub extern "C" fn seyal_app_route_keystroke(
             composer_focused != 0,
             composition_active != 0,
         ) {
-            Ok(RouteOutcome::Matched { .. }) => SEYAL_APP_ROUTE_CONSUMED,
-            Ok(RouteOutcome::ReservedCommand) | Ok(RouteOutcome::UnmatchedCommand) => {
-                SEYAL_APP_ROUTE_NATIVE_COMMAND
+            Ok(RouteOutcome::Matched { .. }) | Ok(RouteOutcome::PrefixWait) => {
+                SEYAL_APP_ROUTE_CONSUMED
             }
+            Ok(RouteOutcome::UnmatchedCommand) => {
+                // §6.2 step 2c: miss → native. Consume only cross-context menu steal.
+                let table = process_keybinding_table();
+                let route = state.root.keybinding_route_context(composer_focused != 0);
+                if projected_menu_steals_unmatched_command(table, &stroke, route) {
+                    SEYAL_APP_ROUTE_CONSUMED
+                } else {
+                    SEYAL_APP_ROUTE_NATIVE_COMMAND
+                }
+            }
+            Ok(RouteOutcome::ReservedCommand) => SEYAL_APP_ROUTE_NATIVE_COMMAND,
             Ok(RouteOutcome::CompositionConsumes) | Ok(RouteOutcome::Fallthrough) => {
                 SEYAL_APP_ROUTE_FALLTHROUGH
             }
@@ -795,6 +829,12 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
         if snap.palette.open {
             flags |= PALETTE_OPEN;
         }
+        if snap.goto.open {
+            flags |= PALETTE_GOTO;
+            if snap.goto.truncated {
+                flags |= PALETTE_TRUNCATED;
+            }
+        }
         SeyalAppPalette {
             version: APP_ABI_VERSION,
             size: size_of::<SeyalAppPalette>() as u16,
@@ -807,7 +847,12 @@ pub extern "C" fn seyal_app_palette(handle: u64) -> SeyalAppPalette {
                 state.palette_query.as_ptr()
             },
             query_utf8_len: state.palette_query.len() as u32,
-            reserved: 0,
+            // Low byte: GotoScope discriminant while goto is open; else 0.
+            reserved: if snap.goto.open {
+                snap.goto.scope as u8 as u32
+            } else {
+                0
+            },
         }
     })
 }
@@ -859,6 +904,11 @@ pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
         detail: ptr::null(),
         detail_len: 0,
         reserved2: 0,
+        address_version: 0,
+        address_kind: 0,
+        address_len: 0,
+        address_pad: 0,
+        address_bytes: [0; 48],
     }
 }
 

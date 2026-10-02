@@ -11,14 +11,19 @@
 pub mod app;
 pub mod chrome;
 pub mod composer;
+pub mod goto;
 pub mod input_policy;
 pub mod keybinding;
+pub mod navigation;
 pub mod palette;
 pub mod pane_layout;
 pub mod presentation;
 pub mod recovery;
 pub mod shell;
 pub mod theme;
+
+#[cfg(test)]
+mod goto_tests;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod block_cache;
@@ -57,10 +62,11 @@ mod ffi;
 pub use ffi::{
     seyal_app_accessibility, seyal_app_apply, seyal_app_block_row, seyal_app_block_span,
     seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette,
-    seyal_app_palette_row, seyal_app_pane_region, seyal_app_recovery_param,
-    seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row, seyal_app_snapshot,
-    seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
+    seyal_app_destroy, seyal_app_invoke_workspace_command, seyal_app_last_error,
+    seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row, seyal_app_pane_region,
+    seyal_app_recovery_param, seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row,
+    seyal_app_shortcut_count, seyal_app_shortcut_enabled, seyal_app_shortcut_item,
+    seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning, seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle,
     seyal_bridge_ensure_prepared, seyal_bridge_frame, seyal_bridge_poll, seyal_bridge_select,
     seyal_bridge_set_runtime_dir, test_register_pending_client,

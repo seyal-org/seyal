@@ -7,14 +7,6 @@ private final class ComposerTextView: NSTextView {
     /// Returns true when the key event was consumed by Rust routing.
     var onRouteKeystroke: ((NSEvent) -> Bool)?
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags.contains(.command), onRouteKeystroke?(event) == true {
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
     override func keyDown(with event: NSEvent) {
         if onRouteKeystroke?(event) == true {
             return
@@ -251,7 +243,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             }
             return true
         case .nativeCommand:
-            // Unmatched / reserved Command — ordinary native text commands
+            // Reserved Command — ordinary native text commands
             // (⌘←/⌘⌫/…); never PTY (this is the composer NSTextView).
             return false
         case .fallsThrough:
@@ -262,6 +254,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private func hasMarkedText() -> Bool {
         textView.hasMarkedText()
     }
+
+    /// R6.2.1 / R8.4: host `performKeyEquivalent` must see the same marked-text
+    /// state as `routeComposerKeystroke`.
+    var hasMarkedComposition: Bool { hasMarkedText() }
 
     /// Rust decides whether recall is available (mode, entries); a rejected
     /// open leaves the composer untouched.
