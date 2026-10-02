@@ -104,6 +104,6 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 882
+acknowledged_loc = 916
 issue = 1136
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1136 adds ADR-017 §6.3 row-1/row-2 dispose, FinishAttachError.terminated_on_attachment so row-2 skips a second dispose attach, and dispose_never_bound_orphan so adopt/reconnect cannot kill a live survivor on snapshot failure. Further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
+reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1136 adds ADR-017 §6.3 row-1/row-2 dispose, FinishAttachError.terminated_on_attachment (including Resync-send and post-snapshot socket-mode failures after Attached) so callers never open a second dispose attach, and dispose_never_bound_orphan so adopt/reconnect cannot kill a live survivor. Further split would separate create, attach, and dispose that share one Ready-stream lifecycle."

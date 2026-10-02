@@ -514,6 +514,52 @@ fn orphan_attached_snapshot_failure_terminates_once_on_existing_attachment() {
     server_thread.join().expect("server thread");
 }
 
+/// After Attached, a Resync send failure (peer already gone) must still mark
+/// `terminated_on_attachment` so the outer bootstrap path never opens a second
+/// dispose attach (ADR-017 §6.3 row 2 / connection-drop).
+#[test]
+fn orphan_attached_resync_send_failure_marks_terminated_on_attachment() {
+    let (client, mut server) = UnixStream::pair().expect("unix stream pair");
+    let execution_id = ExecutionId::from_bytes([0xC1; 16]);
+    let attachment_id = AttachmentId::from_bytes([0xC2; 16]);
+    let server_thread = std::thread::spawn(move || {
+        let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
+        assert_eq!(kind, MessageType::Attach);
+        server
+            .write_all(&attached(execution_id, attachment_id, 1))
+            .expect("attached");
+        server
+            .write_all(&malformed_snapshot(1))
+            .expect("first malformed");
+        // Close the peer before the client can deliver Resync. Terminate may
+        // also fail to send; the flag must still be true.
+        drop(server);
+    });
+
+    let result = LocalDisplayClient::finish_attach_with_deadline(
+        client,
+        execution_id,
+        Role::Controller,
+        false,
+        false,
+        9,
+        false,
+        true, // provisioning negotiated
+        true, // Created never-bound orphan
+        2,
+        std::time::Instant::now() + Duration::from_millis(500),
+    );
+    let failure = match result {
+        Err(failure) => failure,
+        Ok(_) => panic!("resync send failure must err"),
+    };
+    assert!(
+        failure.terminated_on_attachment,
+        "row 2 connection-drop after Attached must mark terminated_on_attachment"
+    );
+    server_thread.join().expect("server thread");
+}
+
 /// Adopt/reconnect must not kill a live survivor on transient snapshot failure.
 #[test]
 fn adopt_attached_snapshot_failure_does_not_terminate_execution() {
