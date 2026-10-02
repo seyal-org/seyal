@@ -58,14 +58,14 @@ fn main() {
 
     let completed = Arc::new(AtomicU64::new(0));
     loop {
-        if let Some(limit) = options.max_connections {
-            if completed.load(Ordering::Relaxed) >= limit {
-                // Wait for in-flight workers before exit 0.
-                while completed.load(Ordering::Relaxed) < limit {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                process::exit(0);
+        if let Some(limit) = options.max_connections
+            && completed.load(Ordering::Relaxed) >= limit
+        {
+            // Wait for in-flight workers before exit 0.
+            while completed.load(Ordering::Relaxed) < limit {
+                thread::sleep(Duration::from_millis(5));
             }
+            process::exit(0);
         }
         match daemon.accept_and_spawn() {
             Ok(handle) => {
