@@ -114,8 +114,23 @@ reason = "ObservationAuthority apply/undo, next-ordinal cursor, and liveness sti
 
 # #1182 AB-1.6 store high_water / terminal-observation probes for start_agent_run
 # and recovery stay with the SQLite aggregate event path.
+# #1178 adds PersistedPrincipal type collocated with other store row types.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 755
-issue = 1182
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1182 adds high_water and terminal-observation existence probes used by start_agent_run/recovery without loading full payloads. Further split would separate HWM authority from the insert path that maintains it."
+acknowledged_loc = 765
+issue = 1178
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1182 HWM/terminal probes and #1178 PersistedPrincipal row type remain with the store façade. Further split would separate HWM authority from the insert path that maintains it."
+
+# #1178 AB-1.2 durable principal load/evidence index stays with AuthorizationRepository.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/auth.rs"
+acknowledged_loc = 712
+issue = 1178
+reason = "Principal/session authorization, Hello evidence mapping, and durable principal snapshots stay one repository; splitting evidence index from OpenSession would duplicate Active/Revoked checks across modules."
+
+# #1178 AB-1.2 principal seed/load on IntegrationService::open stays with session catalog.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/session/mod.rs"
+acknowledged_loc = 750
+issue = 1178
+reason = "V1 command catalog, store-backed principal seed/load, and observation dispatch stay one session façade; extracting only principal bootstrap would separate OpenSession authority from the store it consumes."
