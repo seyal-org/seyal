@@ -1,11 +1,8 @@
 //! SPEC-004 §18.2 / SPEC-003 §5.2+§7 client-requested execution provisioning (P3).
 
-use std::{
-    collections::VecDeque,
-    path::{Path, PathBuf},
-};
+use std::collections::VecDeque;
 
-use seyal_exec::{CommandSpec, WindowSize};
+use seyal_exec::WindowSize;
 
 use crate::{
     display::{MAX_DISPLAY_COLUMNS, MAX_DISPLAY_ROWS},
@@ -20,6 +17,9 @@ use crate::{
 };
 
 use super::super::Runtime;
+
+/// SPEC-004 §5 bit 12: nonzero `Created.detail_code` warning bits only.
+const CAP_LAUNCH_POLICY_DETAIL: u32 = 1 << 12;
 
 pub(super) const MAX_OUTSTANDING_CREATES_PER_CONNECTION: usize = 4;
 pub(super) const MAX_OUTSTANDING_CREATES_RUNTIME: usize = 8;
@@ -99,6 +99,7 @@ impl Runtime {
                 request.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::MalformedPayload),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -117,6 +118,7 @@ impl Runtime {
                 request.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::Backpressure),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -128,6 +130,7 @@ impl Runtime {
                 request.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::InvalidWorkspace),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -139,6 +142,7 @@ impl Runtime {
                 request.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::UnsupportedLaunchProfile),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -155,6 +159,7 @@ impl Runtime {
                 request.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::InvalidGeometry),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -227,6 +232,7 @@ impl Runtime {
                 pending.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::InvalidState),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -236,6 +242,7 @@ impl Runtime {
                 pending.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::CapacityExceeded),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         }
@@ -246,25 +253,22 @@ impl Runtime {
                 pending.request_id,
                 CreateExecutionResultCode::Error(ErrorCode::InvalidGeometry),
                 ExecutionId::from_bytes([0; 16]),
+                0,
             );
             return;
         };
 
-        let command = match profile_zero_command() {
-            Ok(command) => command,
-            Err(_) => {
-                self.finish_create_result(
-                    pending.connection_token,
-                    pending.request_id,
-                    CreateExecutionResultCode::Error(ErrorCode::InternalFailure),
-                    ExecutionId::from_bytes([0; 16]),
-                );
-                return;
-            }
-        };
+        let detail_cap = self.local_ipc.as_ref().is_some_and(|state| {
+            state
+                .connections
+                .get(&pending.connection_token)
+                .is_some_and(|meta| meta.client_capabilities & CAP_LAUNCH_POLICY_DETAIL != 0)
+        });
 
-        match self.create_execution(command, size) {
-            Ok(execution_id) => {
+        // Profile 0: EffectiveLaunchPolicy via create_interactive_execution (ADR-020 / L2).
+        // Never invent argv from process $SHELL on this wire path.
+        match self.create_interactive_execution_with_detail_cap(size, detail_cap) {
+            Ok(outcome) => {
                 // Confirm the connection still exists before publishing a result;
                 // a disconnect during create leaves the live enumerable execution.
                 if !self.local_connection_exists(pending.connection_token) {
@@ -275,32 +279,44 @@ impl Runtime {
                     pending.connection_token,
                     pending.request_id,
                     CreateExecutionResultCode::Created,
-                    execution_id,
+                    outcome.execution_id,
+                    outcome.detail_code,
                 );
             }
-            Err(RuntimeError::CapacityExceeded) => {
-                self.finish_create_result(
-                    pending.connection_token,
-                    pending.request_id,
-                    CreateExecutionResultCode::Error(ErrorCode::CapacityExceeded),
-                    ExecutionId::from_bytes([0; 16]),
-                );
-            }
-            Err(RuntimeError::ExecutionNotRunning) => {
-                self.finish_create_result(
-                    pending.connection_token,
-                    pending.request_id,
-                    CreateExecutionResultCode::Error(ErrorCode::InvalidState),
-                    ExecutionId::from_bytes([0; 16]),
-                );
-            }
-            Err(_) => {
-                self.finish_create_result(
-                    pending.connection_token,
-                    pending.request_id,
-                    CreateExecutionResultCode::Error(ErrorCode::InternalFailure),
-                    ExecutionId::from_bytes([0; 16]),
-                );
+            Err(error) => {
+                if let Some(wire) = error.create_result_wire() {
+                    self.finish_create_result(
+                        pending.connection_token,
+                        pending.request_id,
+                        CreateExecutionResultCode::Error(ErrorCode::LaunchPolicyRejected),
+                        ExecutionId::from_bytes([0; 16]),
+                        wire.detail_code,
+                    );
+                    return;
+                }
+                match error {
+                    RuntimeError::CapacityExceeded => self.finish_create_result(
+                        pending.connection_token,
+                        pending.request_id,
+                        CreateExecutionResultCode::Error(ErrorCode::CapacityExceeded),
+                        ExecutionId::from_bytes([0; 16]),
+                        0,
+                    ),
+                    RuntimeError::ExecutionNotRunning => self.finish_create_result(
+                        pending.connection_token,
+                        pending.request_id,
+                        CreateExecutionResultCode::Error(ErrorCode::InvalidState),
+                        ExecutionId::from_bytes([0; 16]),
+                        0,
+                    ),
+                    _ => self.finish_create_result(
+                        pending.connection_token,
+                        pending.request_id,
+                        CreateExecutionResultCode::Error(ErrorCode::InternalFailure),
+                        ExecutionId::from_bytes([0; 16]),
+                        0,
+                    ),
+                }
             }
         }
     }
@@ -311,10 +327,17 @@ impl Runtime {
         request_id: u64,
         result_code: CreateExecutionResultCode,
         execution_id: ExecutionId,
+        detail_code: u32,
     ) {
         self.release_outstanding_create(token);
         if self.local_connection_exists(token) {
-            self.send_create_execution_result(token, request_id, result_code, execution_id);
+            self.send_create_execution_result(
+                token,
+                request_id,
+                result_code,
+                execution_id,
+                detail_code,
+            );
         }
     }
 
@@ -333,12 +356,13 @@ impl Runtime {
         request_id: u64,
         result_code: CreateExecutionResultCode,
         execution_id: ExecutionId,
+        detail_code: u32,
     ) {
         let message = CreateExecutionResult {
             execution_id,
             request_id,
             result_code,
-            detail_code: 0,
+            detail_code,
         };
         let _ = self.send_mandatory_frame(
             token,
@@ -347,44 +371,28 @@ impl Runtime {
     }
 }
 
-/// Profile `0`: Runtime default interactive shell (ADR-020 source order, cold path).
-/// Named profiles and CWD inheritance are out of scope for P3.
-fn profile_zero_command() -> Result<CommandSpec, RuntimeError> {
-    let program = resolve_default_shell_program()?;
-    let basename = Path::new(&program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    let command = match basename {
-        "zsh" | "bash" => CommandSpec::new(program).args(["-l", "-i"]),
-        "fish" => CommandSpec::new(program).arg("-l"),
-        _ => CommandSpec::new(program).arg("-i"),
-    };
-    Ok(command)
-}
+#[cfg(test)]
+mod tests {
+    use super::CAP_LAUNCH_POLICY_DETAIL;
+    use crate::launch_policy::{command_spec_from_policy, resolve_default_interactive};
 
-fn resolve_default_shell_program() -> Result<PathBuf, RuntimeError> {
-    if let Some(shell) = std::env::var_os("SHELL") {
-        let path = PathBuf::from(shell);
-        if path.is_absolute() && is_executable_file(&path) {
-            return Ok(path);
-        }
-    }
-    for candidate in ["/bin/zsh", "/bin/bash", "/bin/sh"] {
-        let path = PathBuf::from(candidate);
-        if is_executable_file(&path) {
-            return Ok(path);
-        }
-    }
-    Err(RuntimeError::Io(std::io::Error::other(
-        "no validated default interactive shell for profile 0",
-    )))
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    match std::fs::metadata(path) {
-        Ok(meta) if meta.is_file() => meta.permissions().mode() & 0o111 != 0,
-        _ => false,
+    /// Profile-0 create must resolve through EffectiveLaunchPolicy (ADR-020),
+    /// not invent a CommandSpec from process `$SHELL` alone.
+    #[test]
+    fn profile_zero_create_uses_effective_launch_policy() {
+        let resolution =
+            resolve_default_interactive().expect("account/fallback shell must resolve in tests");
+        let from_policy = command_spec_from_policy(&resolution);
+        assert!(
+            !from_policy.program().is_empty(),
+            "EffectiveLaunchPolicy must supply a validated program"
+        );
+        // Login argv comes from interactive_login_argv, not a bare `$SHELL` invent.
+        assert!(
+            !from_policy.args_slice().is_empty(),
+            "policy argv must include login/interactive flags"
+        );
+        // CAP bit is reserved for Created warning detail only (SPEC-004 §5).
+        assert_eq!(CAP_LAUNCH_POLICY_DETAIL, 1 << 12);
     }
 }

@@ -303,6 +303,8 @@ fn viewport_line_ids_coalesce_preserves_block_state_and_composer_status() {
             display_inflight: None,
             pending_display: None,
             display_generation: 1,
+            attach_snapshot_pin: false,
+            deferred_after_attach: None,
         },
     );
 
