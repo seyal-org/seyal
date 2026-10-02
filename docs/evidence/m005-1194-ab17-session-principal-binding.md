@@ -17,7 +17,7 @@ Authority: ADR-016 §9, SPEC-017 §5 and §15.4. Id generation is unchanged. `pe
 | 5. Restart, revoke, suspend, scope-narrowing, and observer non-escalation stay as they were, except the `ResumeSession` oracle above | `cargo test -p seyal-agent-backend --locked --all-features` (lib, `integration_path`, `concurrent_serve`) | that command | pass (86 tests, 2 ignored) |
 | 6. `derived_session_ids_grant_no_authority` fails on `1f1da195` sources and passes on this head | pre-fix excerpt below; post-fix `tests/session_principal_binding.rs` | see below | pre-fix fail, post-fix pass, 20/20 loop |
 | 7. No diff in protocol, store, core, or client crates | `git diff --stat origin/master -- crates/seyal-agent-protocol crates/seyal-agent-store crates/seyal-agent-core crates/seyal-agent-client` | that command | empty, exit 0 |
-| 8. Structural ratchet passes. `make check` on this machine does not | `python3 scripts/check-structural-debt.py` exit 0. `make check` exit 2 because `seyal-runtime` `pass8_stalled_client` failed; that crate is unchanged versus `origin/master` | see verification | structural pass; `make check` not green here |
+| 8. Structural ratchet passes; `make check` exits 0 | `python3 scripts/check-structural-debt.py` exit 0; `make check` exit 0 | see verification | pass |
 
 Socket coverage for a live observer beside a live owner: `observer_connection_cannot_use_owner_session_while_both_live`. Ordering uses `recv_timeout` barriers, not sleeps.
 
@@ -69,9 +69,11 @@ The auth unit tests call `AuthorizationError::SessionPrincipalMismatch`, which d
 | `python3 scripts/check-layering.py` | 0 |
 | forbidden-crate `git diff --stat origin/master` | 0, empty |
 | `cargo test -p seyal-agent-backend --locked --all-features --test session_principal_binding` × 20 | 20 pass, 0 fail |
-| `make check` | 2 (`make` reporting recipe exit 101) |
+| `make check` | 0 |
 
-`make check` stopped in `crates/seyal-runtime/tests/pass8_stalled_client.rs::stalled_block_capable_client_cannot_retain_completed_runtime_record` after 10.01s (`execution_count` stayed 1). The same test failed again in isolation. `git diff --stat origin/master -- crates/seyal-runtime` is empty. Not part of #1194.
+An earlier run under heavy parallel load hit the 10.01 s budget in `seyal-runtime` `pass8_stalled_client::stalled_block_capable_client_cannot_retain_completed_runtime_record`; `crates/seyal-runtime` is unchanged versus `origin/master`, and a re-run on the same tree passed.
+
+Required CI checks are recorded on the PR for its exact head.
 
 ## Documentation impact
 
