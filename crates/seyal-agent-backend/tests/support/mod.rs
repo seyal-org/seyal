@@ -77,7 +77,7 @@ pub fn sequences(result: CommandResult) -> Vec<u64> {
 }
 
 pub struct TestClient {
-    stream: UnixStream,
+    pub stream: UnixStream,
     pub session_id: ClientSessionId,
 }
 

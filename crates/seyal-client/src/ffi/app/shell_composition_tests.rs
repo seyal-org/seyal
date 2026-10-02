@@ -140,12 +140,12 @@ fn shell_projection_is_one_local_workspace() {
 }
 
 #[test]
-fn terminate_execution_action_decodes_as_kind_58() {
+fn terminate_execution_action_decodes_as_kind_59() {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);
     // Unbound: TerminateExecution fails closed (not a silent no-op).
     assert_eq!(
-        unsafe { seyal_app_apply(handle, &identity_fence(58, &snap)) },
+        unsafe { seyal_app_apply(handle, &identity_fence(59, &snap)) },
         -4
     );
     assert_eq!(seyal_app_last_error(handle), 7, "UnboundUnauthorized");

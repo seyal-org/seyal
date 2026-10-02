@@ -33,7 +33,7 @@ use encode::{
 };
 
 pub use block_projection::seyal_app_block_projection;
-pub use pane_region::seyal_app_pane_region;
+pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
@@ -972,20 +972,21 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
-        AppError::ProvisioningRejected => 34,
-        AppError::ProvisioningCapacityExceeded => 35,
-        AppError::NavigationUnsupportedKind => 36,
-        AppError::NavigationDenied => 37,
-        AppError::NavigationUnknownWorkspace => 38,
-        AppError::NavigationUnknownTab => 39,
-        AppError::NavigationUnknownPane => 40,
-        AppError::NavigationUnknownExecution => 41,
-        AppError::NavigationNotComposed => 42,
-        AppError::NavigationTargetTerminated => 43,
-        AppError::NavigationTargetUnbound => 44,
-        AppError::NavigationAmbiguousTarget => 45,
-        AppError::GotoNotOpen => 46,
-        AppError::GotoNoSelection => 47,
-        AppError::GotoUnsupportedScope => 48,
+        AppError::NoSplitDivider => 34,
+        AppError::ProvisioningRejected => 35,
+        AppError::ProvisioningCapacityExceeded => 36,
+        AppError::NavigationUnsupportedKind => 37,
+        AppError::NavigationDenied => 38,
+        AppError::NavigationUnknownWorkspace => 39,
+        AppError::NavigationUnknownTab => 40,
+        AppError::NavigationUnknownPane => 41,
+        AppError::NavigationUnknownExecution => 42,
+        AppError::NavigationNotComposed => 43,
+        AppError::NavigationTargetTerminated => 44,
+        AppError::NavigationTargetUnbound => 45,
+        AppError::NavigationAmbiguousTarget => 46,
+        AppError::GotoNotOpen => 47,
+        AppError::GotoNoSelection => 48,
+        AppError::GotoUnsupportedScope => 49,
     }
 }

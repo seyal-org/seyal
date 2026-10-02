@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 852
+acknowledged_loc = 861
 issue = 1105
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate alongside P3 provisioning terminate/create paths; goto_apply.rs and provisioning_apply.rs own the reducers. Ceiling matches post-merge LOC."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate, #928 MoveSplitDivider/NoSplitDivider, and P3 provisioning terminate/create paths; goto_apply.rs, chrome_apply.rs, and provisioning_apply.rs own the reducers. Ceiling matches post-master-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,9 +77,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 991
+acknowledged_loc = 992
 issue = 1105
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual extraction; merge absorbs goto overlay flags/error numbers and P3 provisioning error numbers 34/35 plus shell_composition_tests declaration. Product decode for OpenGoto/SetGotoScope/CycleScope/TerminateExecution lives in decode.rs. Ceiling matches post-merge LOC."
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual extraction; merge absorbs #928 NoSplitDivider=34, P3 provisioning errors 35/36, navigation 37-46, goto 47-49, and shell_composition_tests declaration. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs. Ceiling matches post-master-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -140,24 +140,48 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
-
-
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
 acknowledged_loc = 939
 issue = 1105
 reason = "Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. Ceiling matches post-master-merge LOC."
 
-# #1029 AB-0 Hello evidence binds a principal before HelloAck; accept/negotiate
-# and one-connection serve stay one daemon façade (peer/endpoint already split).
+# #1179 AB-1.3: per-connection handshake and session serve moved to
+# daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
+# [[cohesion_acknowledgement]] remains for it.
 
-# #1029 AB-0 Hello evidence binds a principal before HelloAck; accept/negotiate
-# and one-connection serve stay one daemon façade (peer/endpoint already split).
+# #1182 AB-1.6 observation/replay hardening: per-run next-ordinal cursor and
+# recovery terminal-evidence helpers stay with ObservationAuthority apply/undo.
 [[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 728
-issue = 1029
-reason = "Unix daemon bind/reclaim/serve and Hello evidence→principal binding stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-B3 LOC."
+path = "crates/seyal-agent-backend/src/observation.rs"
+acknowledged_loc = 769
+issue = 1182
+reason = "ObservationAuthority apply/undo, next-ordinal cursor, and liveness stickiness stay one authority module; #1182 removes the linear key scan and adds scale/recovery regression tests in the same file. Extracting only the cursor would split the apply invariant from its index."
+
+# #1182 AB-1.6 store high_water / terminal-observation probes for start_agent_run
+# and recovery stay with the SQLite aggregate event path.
+# #1178 adds PersistedPrincipal type collocated with other store row types.
+# #1181 adds §10 output-ref encode consumers, partial-segment merge, and
+# materialize_output_ref beside append_output_event.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-store/src/sqlite/mod.rs"
+acknowledged_loc = 866
+issue = 1181
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1181 partial-segment merge and OutputRef materialization must share the append transaction/lock with insert_event. Extracting only segment merge would split the commit boundary that proves fault isolation."
+
+# #1178 AB-1.2 durable principal load/evidence index stays with AuthorizationRepository.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/auth.rs"
+acknowledged_loc = 712
+issue = 1178
+reason = "Principal/session authorization, Hello evidence mapping, and durable principal snapshots stay one repository; splitting evidence index from OpenSession would duplicate Active/Revoked checks across modules."
+
+# #1179 connection-scoped principal threading through IntegrationService handle.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/session/mod.rs"
+acknowledged_loc = 756
+issue = 1179
+reason = "V1 command catalog and observation dispatch stay one session façade; #1179 passes connection-scoped ClientPrincipalId into handle/dispatch so concurrent peers cannot share a singular principal slot."
 
 # #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc as one cohesive navigation
 # test module (resolver rejections beside the Navigate commits they feed).
@@ -175,6 +199,6 @@ reason = "Command palette query, rows, and run dispatch stay one reducer. #1101 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 704
+acknowledged_loc = 728
 issue = 1105
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after absorbing L2 navigation inventory/commit_focus helpers alongside P3 release_execution/take_removed_tab_panes detach-only dispose. Tree/window details stay in tree.rs and workspace.rs. Ceiling matches post-merge LOC."
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after absorbing L2 navigation inventory/commit_focus helpers, #928 MoveSplitDivider/NoSplitDivider, and P3 release_execution/take_removed_tab_panes detach-only dispose. Tree/window details stay in tree.rs and workspace.rs. Ceiling matches post-master-merge LOC."

@@ -10,6 +10,7 @@ use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
 use crate::navigation::{decode_resource_address, ResourceAddress};
+use crate::pane_layout::SplitPosition;
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
@@ -280,22 +281,29 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             })
         }
         57 => Ok(AppAction::DisconnectReconstruction),
+        58 => Ok(AppAction::MoveSplitDivider {
+            pane: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            position: SplitPosition::from_unit(f32::from_bits(action.reserved)).ok_or(-6)?,
+        }),
         // Explicit Controller terminate (ADR-017 §6.2 / P4). Distinct from
         // CloseTab/ClosePane chrome removal. Requires a matching fence.
-        58 => Ok(AppAction::TerminateExecution { fence }),
+        59 => Ok(AppAction::TerminateExecution { fence }),
         // Atomic Navigate(address) (SPEC-022 §4 / N2). Payload is the
         // versioned/size-tagged address record (see decode_required_address).
-        59 => Ok(AppAction::Navigate {
+        60 => Ok(AppAction::Navigate {
             fence,
             address: decode_required_address(action.payload, action.payload_len)?,
         }),
         // Goto / quick-switcher (SPEC-022 §7 / N4). reserved = GotoScope
         // discriminant (0–3), or 0xFF to cycle to the next scope in Rust.
-        60 => Ok(AppAction::OpenGoto {
+        61 => Ok(AppAction::OpenGoto {
             fence,
             scope: decode_goto_scope(action.reserved)?,
         }),
-        61 => {
+        62 => {
             if action.reserved == 0xff {
                 Ok(AppAction::CycleGotoScope { fence })
             } else {

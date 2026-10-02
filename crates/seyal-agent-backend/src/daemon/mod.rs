@@ -9,14 +9,15 @@ use std::{
         },
     },
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    thread,
     time::Duration,
 };
 
 use seyal_agent_core::BackendInstanceId;
 use seyal_agent_protocol::{
-    accepted_body_len, decode_frame, decode_handshake_error, decode_hello, encode_ack,
-    encode_handshake_error, negotiate_hello, FrameError, FrameKind, HandshakeError, Hello,
-    HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
+    accepted_body_len, decode_frame, decode_handshake_error, FrameError, FrameKind, HandshakeError,
+    Hello, HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
 };
 
 use crate::endpoint::{decide, EndpointDecision, EndpointFacts, EndpointFault};
@@ -58,7 +59,29 @@ pub enum DaemonError {
     Malformed,
     Oversized,
     TimedOut,
+    /// Per-session stream I/O after accept (recoverable for the accept loop).
     Io,
+    /// Listener `accept` failure — not a client fault; must not hot-loop.
+    AcceptIo,
+}
+
+impl DaemonError {
+    /// Per-client / handshake faults that leave a bound listener usable.
+    ///
+    /// `Endpoint(WrongOwner)` is a same-UID peer reject; other `Endpoint`
+    /// faults mean the bound path itself is compromised and stay fatal.
+    /// `AcceptIo` stays fatal so persistent accept failures cannot spin.
+    pub fn is_recoverable_client_fault(self) -> bool {
+        matches!(
+            self,
+            Self::TimedOut
+                | Self::Malformed
+                | Self::Oversized
+                | Self::Handshake(_)
+                | Self::Io
+                | Self::Endpoint(EndpointFault::WrongOwner)
+        )
+    }
 }
 
 pub struct AgentDaemon {
@@ -69,7 +92,9 @@ pub struct AgentDaemon {
     config: DaemonConfig,
     cleanup: bool,
     our_uid: u32,
-    integration: Option<crate::session::IntegrationService>,
+    /// Shared domain service. Mutex serializes AgentRun/store writes while
+    /// multiple peer connections may be live (AB-1.3).
+    integration: Option<Arc<Mutex<crate::session::IntegrationService>>>,
 }
 
 pub struct DaemonSample {
@@ -167,7 +192,7 @@ impl AgentDaemon {
         let mut daemon = Self::bind_with(directory, config)?;
         let service = crate::session::IntegrationService::open(daemon.instance_id, &integration)
             .map_err(|_| DaemonError::Unavailable)?;
-        daemon.integration = Some(service);
+        daemon.integration = Some(Arc::new(Mutex::new(service)));
         Ok(daemon)
     }
 
@@ -179,8 +204,11 @@ impl AgentDaemon {
     /// the following commit fails before its transaction starts.
     #[cfg(feature = "test-fault-injection")]
     pub fn fail_after_writes(&mut self, allowed: u64) {
-        if let Some(service) = self.integration.as_mut() {
-            service.fail_after_writes(allowed);
+        if let Some(service) = self.integration.as_ref() {
+            service
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .fail_after_writes(allowed);
         }
     }
 
@@ -189,8 +217,9 @@ impl AgentDaemon {
     }
 
     pub fn accept_hello(&self) -> Result<HelloAck, DaemonError> {
-        let (mut stream, _hello, ack) = self.accept_negotiated()?;
-        self.write_hello_ack(&mut stream, &ack)?;
+        let mut stream = self.accept_admitted()?;
+        let (_hello, ack) = serve::negotiate(&mut stream, self.handshake())?;
+        serve::write_ack(&mut stream, &ack, self.config.max_frame_size)?;
         drop(stream);
         Ok(ack)
     }
@@ -205,149 +234,71 @@ impl AgentDaemon {
     /// that fails to encode still returns `CommandError::Failed` without
     /// dropping the `ClientSession`.
     pub fn serve_one(&mut self) -> Result<(), DaemonError> {
-        if self.integration.is_none() {
-            return Err(DaemonError::Unavailable);
-        }
-        let idle = self.config.session_idle_timeout;
-        let write_timeout = self.config.session_write_timeout;
-        let (mut stream, hello, ack) = self.accept_negotiated()?;
-        {
-            let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
-            if service
-                .begin_connection(&hello.client_principal_evidence)
-                .is_err()
-            {
-                let bytes =
-                    encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
-                        .map_err(|_| DaemonError::Malformed)?;
-                let _ = stream.write_all(&bytes);
-                return Err(DaemonError::Handshake(HandshakeError::Malformed));
-            }
-        }
-        self.write_hello_ack(&mut stream, &ack)?;
-        stream
-            .set_read_timeout(Some(idle))
-            .map_err(|_| DaemonError::Io)?;
-        stream
-            .set_write_timeout(Some(write_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        let max_frame_size = ack.max_frame_size;
-        let event_window = ack.event_window;
-        let result = self.serve_session(&mut stream, max_frame_size, event_window);
-        if let Some(service) = self.integration.as_mut() {
-            service.end_connection();
-        }
-        result
+        let service = self.shared_service()?;
+        let mut stream = self.accept_admitted()?;
+        serve::handshake_and_serve(&service, &mut stream, self.handshake())
     }
 
-    fn serve_session(
+    /// Accept one peer and run its handshake and session on a worker thread
+    /// so other peers can connect concurrently against the same daemon
+    /// incarnation (AB-1.3).
+    ///
+    /// The calling thread only accepts and checks same-UID admission; it
+    /// never waits on peer bytes, so a peer that stalls before or during
+    /// Hello cannot delay admission of other peers. Domain mutations stay
+    /// serialized through the shared service mutex; there is no second
+    /// event clock.
+    pub fn accept_and_spawn(
         &mut self,
-        stream: &mut UnixStream,
-        max_frame_size: u32,
-        event_window: u32,
-    ) -> Result<(), DaemonError> {
-        let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
-        loop {
-            let frame = match crate::session::read_session_frame(stream, max_frame_size) {
-                crate::session::SessionRead::Frame(frame) => frame,
-                crate::session::SessionRead::Disconnected => return Ok(()),
-                crate::session::SessionRead::Oversized => return Err(DaemonError::Oversized),
-                crate::session::SessionRead::Malformed => return Err(DaemonError::Malformed),
-                crate::session::SessionRead::TimedOut => return Ok(()),
-                crate::session::SessionRead::Io => return Err(DaemonError::Io),
-            };
-            let response = match service.handle(frame, max_frame_size, event_window) {
-                Ok(response) => response,
-                Err(_) => seyal_agent_protocol::encode_result(
-                    &seyal_agent_protocol::CommandResult::Error(
-                        seyal_agent_protocol::CommandError::Failed,
-                    ),
-                    max_frame_size,
-                )
-                .map_err(|_| DaemonError::Unavailable)?,
-            };
-            stream.write_all(&response).map_err(|error| {
-                if error.kind() == io::ErrorKind::TimedOut
-                    || error.kind() == io::ErrorKind::WouldBlock
-                {
-                    DaemonError::TimedOut
-                } else {
-                    map_io(error)
-                }
-            })?;
+    ) -> Result<thread::JoinHandle<Result<(), DaemonError>>, DaemonError> {
+        let service = self.shared_service()?;
+        let handshake = self.handshake();
+        let mut stream = self.accept_admitted()?;
+        Ok(thread::spawn(move || {
+            serve::handshake_and_serve(&service, &mut stream, handshake)
+        }))
+    }
+
+    fn shared_service(
+        &self,
+    ) -> Result<Arc<Mutex<crate::session::IntegrationService>>, DaemonError> {
+        self.integration.clone().ok_or(DaemonError::Unavailable)
+    }
+
+    fn handshake(&self) -> serve::Handshake {
+        serve::Handshake {
+            instance_id: self.instance_id,
+            max_frame_size: self.config.max_frame_size,
+            event_window: self.config.event_window,
+            session_idle_timeout: self.config.session_idle_timeout,
+            session_write_timeout: self.config.session_write_timeout,
         }
     }
 
-    /// Accept a same-UID peer, validate Hello evidence, and negotiate limits.
-    /// Does not write HelloAck so callers can bind a principal first.
-    fn accept_negotiated(&self) -> Result<(UnixStream, Hello, HelloAck), DaemonError> {
-        let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
-        let (mut stream, hello) = Self::accept_peer(
-            listener,
-            &self.socket_path(),
-            self.our_uid,
-            self.config.max_frame_size,
-            self.config.read_timeout,
-        )?;
-        if crate::AuthorizationRepository::recognize_principal_evidence(
-            &hello.client_principal_evidence,
-        )
-        .is_err()
-        {
-            let bytes =
-                encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
-                    .map_err(|_| DaemonError::Malformed)?;
-            let _ = stream.write_all(&bytes);
-            return Err(DaemonError::Handshake(HandshakeError::Malformed));
-        }
-        match negotiate_hello(
-            &hello,
-            self.instance_id,
-            self.config.max_frame_size,
-            self.config.event_window,
-        ) {
-            Ok(ack) => Ok((stream, hello, ack)),
-            Err(error) => {
-                let bytes = encode_handshake_error(error, self.config.max_frame_size)
-                    .map_err(|_| DaemonError::Malformed)?;
-                let _ = stream.write_all(&bytes);
-                Err(DaemonError::Handshake(error))
+    /// Accept a peer and admit it by same-UID credentials. Reads nothing from
+    /// the peer; Hello is read by whichever thread serves the connection.
+    fn accept_admitted(&self) -> Result<UnixStream, DaemonError> {
+        let listener = self.listener.as_ref().ok_or(DaemonError::AcceptIo)?;
+        let (stream, _) = listener.accept().map_err(|error| {
+            if error.kind() == io::ErrorKind::TimedOut || error.kind() == io::ErrorKind::WouldBlock
+            {
+                DaemonError::TimedOut
+            } else {
+                DaemonError::AcceptIo
             }
-        }
-    }
-
-    fn write_hello_ack(&self, stream: &mut UnixStream, ack: &HelloAck) -> Result<(), DaemonError> {
-        let bytes =
-            encode_ack(ack, self.config.max_frame_size).map_err(|_| DaemonError::Malformed)?;
-        stream.write_all(&bytes).map_err(map_io)
-    }
-
-    fn accept_peer(
-        listener: &UnixListener,
-        socket_path: &Path,
-        our_uid: u32,
-        max_frame_size: u32,
-        read_timeout: Duration,
-    ) -> Result<(UnixStream, Hello), DaemonError> {
-        let (mut stream, _) = listener.accept().map_err(map_io)?;
+        })?;
         stream
-            .set_read_timeout(Some(read_timeout))
+            .set_read_timeout(Some(self.config.read_timeout))
             .map_err(|_| DaemonError::Io)?;
         stream
-            .set_write_timeout(Some(read_timeout))
+            .set_write_timeout(Some(self.config.read_timeout))
             .map_err(|_| DaemonError::Io)?;
-        if !endpoint_still_owned(socket_path, our_uid) {
+        if !endpoint_still_owned(&self.socket_path(), self.our_uid) {
             return Err(DaemonError::Endpoint(EndpointFault::Symlink));
         }
         peer::verify_same_user_peer(stream.as_raw_fd())
             .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
-
-        let frame = read_one_frame(&mut stream as &mut dyn Read, max_frame_size)?;
-        if frame.kind != FrameKind::Hello {
-            return Err(DaemonError::Malformed);
-        }
-        let hello = decode_hello(&frame.body).map_err(|_| DaemonError::Malformed)?;
-        Ok((stream, hello))
+        Ok(stream)
     }
 
     /// Leave the socket pathname in place and record a dead owner, as a
@@ -716,7 +667,7 @@ fn current_uid() -> io::Result<u32> {
     }
 }
 
-fn map_io(error: io::Error) -> DaemonError {
+pub(super) fn map_io(error: io::Error) -> DaemonError {
     if error.kind() == io::ErrorKind::TimedOut || error.kind() == io::ErrorKind::WouldBlock {
         DaemonError::TimedOut
     } else {
@@ -724,5 +675,6 @@ fn map_io(error: io::Error) -> DaemonError {
     }
 }
 
+mod serve;
 #[cfg(test)]
 mod tests;

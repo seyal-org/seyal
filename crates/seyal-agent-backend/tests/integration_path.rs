@@ -150,10 +150,13 @@ fn standalone_path_survives_disconnect_and_restart() {
     ) = recovered.join().unwrap();
     assert_eq!(run.0, 2, "recovery fences binding generation");
     assert_eq!(run.1, 2, "recovery fences control generation");
-    assert_eq!(run.2, 3, "restart classifies liveness as unknown");
+    assert_eq!(
+        run.2, 2,
+        "restart must honor committed terminal observations"
+    );
     assert_eq!(
         snapshot.payload.first().copied(),
-        Some(3),
+        Some(2),
         "GetSnapshot liveness must match ReadRun after restart"
     );
     assert_eq!(
@@ -185,6 +188,51 @@ fn standalone_path_survives_disconnect_and_restart() {
     for forbidden in ["seyal-runtime", "seyal-terminal", "seyal-render"] {
         assert!(!manifest.contains(forbidden), "{forbidden}");
     }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn recovery_without_terminal_observation_stays_unknown_not_fabricated_termination() {
+    let dir = temp_dir("live-recover");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::ObservationDisconnected),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config.clone()).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let before = client.read_run(started.run_id);
+        (started.run_id, before)
+    });
+    daemon.serve_one().unwrap();
+    let (run_id, before) = client.join().unwrap();
+    assert_eq!(before.2, 4, "pre-crash observation-lost");
+    daemon.abandon_as_crash();
+
+    let mut restarted = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = restarted.socket_path();
+    let recovered = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let run = client.read_run(run_id);
+        let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
+        (run, snapshot.payload)
+    });
+    restarted.serve_one().unwrap();
+    let (run, snapshot_payload) = recovered.join().unwrap();
+    assert_eq!(
+        run.2, 3,
+        "non-terminal recovery must stay UnknownAfterCrash"
+    );
+    assert_eq!(snapshot_payload.first().copied(), Some(3));
+    assert_ne!(run.2, 2, "must not fabricate KnownTerminated");
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -698,7 +746,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         .unwrap();
     assert!(events
         .iter()
-        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_none()));
+        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_err()));
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::remove_dir_all(refused);
     let _ = fs::remove_dir_all(segment_fault);
@@ -823,29 +871,36 @@ fn high_volume_output_uses_segments_end_to_end() {
     assert_eq!(events.len(), 4);
     let output = events
         .iter()
-        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_ok())
         .expect("one output-ref event");
-    let (first_index, segments, byte_length, first_ordinal, last_ordinal) =
-        seyal_agent_store::decode_output_ref(&output.payload).unwrap();
-    assert_eq!(first_index, 0);
+    let decoded = seyal_agent_store::decode_output_ref(&output.payload).unwrap();
+    assert_eq!(decoded.first_segment_index, 0);
     assert_eq!(
-        segments as usize,
+        decoded.segment_count as usize,
         OUTPUT_BYTES / seyal_agent_store::OUTPUT_SEGMENT_LEN
     );
-    assert_eq!(byte_length as usize, OUTPUT_BYTES);
-    assert!(first_ordinal >= 1);
-    assert!(last_ordinal >= first_ordinal);
+    assert_eq!(decoded.byte_length as usize, OUTPUT_BYTES);
+    assert!(decoded.first_ordinal >= 1);
+    assert!(decoded.last_ordinal >= decoded.first_ordinal);
+    assert_eq!(
+        decoded.retention_policy_ref,
+        seyal_agent_store::RetentionPolicyRef::retained_stream()
+    );
+    assert!(matches!(
+        decoded.fingerprint_ref,
+        seyal_agent_store::FingerprintRef::PublicContentDigest(_)
+    ));
     assert!(
         events
             .iter()
-            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_ok())
             .count()
             == 1
     );
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         store.output_segment_count(started.run_id).unwrap(),
-        segments as u64
+        decoded.segment_count as u64
     );
     drop(daemon);
     drop(store);
@@ -853,7 +908,7 @@ fn high_volume_output_uses_segments_end_to_end() {
     let reopened = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         reopened.output_segment_count(started.run_id).unwrap(),
-        segments as u64
+        decoded.segment_count as u64
     );
     let again = reopened
         .replay_after(AggregateId::AgentRun(started.run_id), None)
@@ -888,10 +943,10 @@ fn high_volume_output_uses_segments_end_to_end() {
     assert_eq!(started.event_count, 4);
     let output = events
         .iter()
-        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload))
+        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload).ok())
         .expect("coalesced one-byte outputs");
-    assert_eq!(output.1, 1);
-    assert_eq!(output.2, 1000);
+    assert_eq!(output.segment_count, 1);
+    assert_eq!(output.byte_length, 1000);
     assert_eq!(
         AgentStore::open(tiny.join("agent.db"))
             .unwrap()

@@ -39,7 +39,7 @@ use crate::composer::{
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion};
+use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
@@ -94,6 +94,7 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    NoSplitDivider,
     ProvisioningRejected,
     ProvisioningCapacityExceeded,
     NavigationUnsupportedKind,
@@ -256,6 +257,11 @@ pub enum AppAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    /// Drag the divider that `pane` leads to a pointer position (#928).
+    MoveSplitDivider {
+        pane: PaneId,
+        position: SplitPosition,
     },
     SetShellVisibility {
         left: bool,
@@ -702,6 +708,9 @@ impl ApplicationRoot {
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
+            AppAction::MoveSplitDivider { pane, position } => {
+                self.move_split_divider(pane, position)
+            }
             AppAction::SetShellVisibility {
                 left,
                 inspector,

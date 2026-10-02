@@ -4,7 +4,8 @@ use rusqlite::params;
 
 use crate::{
     sqlite::{insert_event, AgentStore},
-    AggregateId, AggregateSequence, PersistedAgentRun, PersistedLiveness, StoreError,
+    AggregateId, AggregateSequence, PersistedAgentRun, PersistedLiveness, PersistedPrincipal,
+    StoreError,
 };
 
 impl AgentStore {
@@ -104,6 +105,88 @@ impl AgentStore {
                 crate::AttemptId::from_bytes(bytes16(id)?),
                 crate::WorkItemId::from_bytes(bytes16(item)?),
             ));
+        }
+        Ok(records)
+    }
+
+    pub fn upsert_principal(&self, principal: &PersistedPrincipal) -> Result<(), StoreError> {
+        self.gate_write()?;
+        let conn = self.conn.lock().expect("agent store lock");
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|_| StoreError::WriteFailed)?;
+        tx.execute(
+            "INSERT INTO client_principal (id, kind, status, scopes, evidence_key)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (id) DO UPDATE SET
+               kind = excluded.kind,
+               status = excluded.status,
+               scopes = excluded.scopes,
+               evidence_key = excluded.evidence_key",
+            params![
+                principal.id.to_bytes().to_vec(),
+                principal.kind as i64,
+                principal.status as i64,
+                principal.scopes,
+                principal.evidence_key
+            ],
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+        tx.commit().map_err(|_| StoreError::WriteFailed)?;
+        Ok(())
+    }
+
+    pub fn set_principal_status(
+        &self,
+        id: seyal_agent_core::ClientPrincipalId,
+        status: u8,
+    ) -> Result<(), StoreError> {
+        self.gate_write()?;
+        let conn = self.conn.lock().expect("agent store lock");
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|_| StoreError::WriteFailed)?;
+        let changed = tx
+            .execute(
+                "UPDATE client_principal SET status = ?1 WHERE id = ?2",
+                params![status as i64, id.to_bytes().to_vec()],
+            )
+            .map_err(|_| StoreError::WriteFailed)?;
+        if changed != 1 {
+            return Err(StoreError::Corrupt);
+        }
+        tx.commit().map_err(|_| StoreError::WriteFailed)?;
+        Ok(())
+    }
+
+    pub fn client_principals(&self) -> Result<Vec<PersistedPrincipal>, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let mut statement = conn
+            .prepare("SELECT id, kind, status, scopes, evidence_key FROM client_principal")
+            .map_err(|_| StoreError::Corrupt)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
+                ))
+            })
+            .map_err(|_| StoreError::Corrupt)?;
+        let mut records = Vec::new();
+        for row in rows {
+            let (id, kind, status, scopes, evidence_key) = row.map_err(|_| StoreError::Corrupt)?;
+            let kind = u8::try_from(kind).map_err(|_| StoreError::Corrupt)?;
+            let status = u8::try_from(status).map_err(|_| StoreError::Corrupt)?;
+            records.push(PersistedPrincipal {
+                id: seyal_agent_core::ClientPrincipalId::from_bytes(bytes16(id)?),
+                kind,
+                status,
+                scopes,
+                evidence_key,
+            });
         }
         Ok(records)
     }
@@ -217,6 +300,54 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.join(name)
+    }
+
+    #[test]
+    fn client_principals_survive_reopen_and_status_update() {
+        let file = path("principals.db");
+        let store = AgentStore::open(&file).unwrap();
+        let id = seyal_agent_core::ClientPrincipalId::new();
+        store
+            .upsert_principal(&PersistedPrincipal {
+                id,
+                kind: 1,
+                status: 1,
+                scopes: vec![1, 2, 4],
+                evidence_key: b"cli".to_vec(),
+            })
+            .unwrap();
+        drop(store);
+        let reopened = AgentStore::open(&file).unwrap();
+        let rows = reopened.client_principals().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, id);
+        assert_eq!(rows[0].status, 1);
+        reopened.set_principal_status(id, 3).unwrap();
+        drop(reopened);
+        let again = AgentStore::open(&file).unwrap();
+        assert_eq!(again.client_principals().unwrap()[0].status, 3);
+        let _ = fs::remove_file(&file);
+    }
+
+    #[test]
+    fn principal_write_fault_before_commit_publishes_nothing() {
+        let file = path("principal-fault.db");
+        let store = AgentStore::open(&file).unwrap();
+        store.fail_after_writes(0);
+        let id = seyal_agent_core::ClientPrincipalId::new();
+        assert_eq!(
+            store.upsert_principal(&PersistedPrincipal {
+                id,
+                kind: 1,
+                status: 1,
+                scopes: vec![1],
+                evidence_key: b"cli".to_vec(),
+            }),
+            Err(StoreError::WriteFailed)
+        );
+        store.fail_after_writes(u64::MAX);
+        assert!(store.client_principals().unwrap().is_empty());
+        let _ = fs::remove_file(&file);
     }
 
     #[test]
@@ -343,6 +474,6 @@ mod tests {
         let version: i32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 }

@@ -1,4 +1,4 @@
-use seyal_agent_core::{AgentRunId, BindingGeneration};
+use seyal_agent_core::{AgentRunId, BindingGeneration, ExecutionHost, ExecutionHostKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostObservationKind {
@@ -46,8 +46,14 @@ pub enum ScriptError {
     ScriptTooLarge,
 }
 
+/// Deterministic provider-free ExecutionHost fixture (AB-0 / AB-1).
+///
+/// `execute` remains the scripted API used by the session path. When a script
+/// is installed via [`FakeExecutionHost::set_script`], [`ExecutionHost::collect_observations`]
+/// dispatches through the typed seam.
 pub struct FakeExecutionHost {
     max_output_chunk: usize,
+    script: Vec<ScriptStep>,
 }
 
 impl FakeExecutionHost {
@@ -55,7 +61,18 @@ impl FakeExecutionHost {
         if max_output_chunk == 0 {
             return Err(ScriptError::ZeroOutputChunk);
         }
-        Ok(Self { max_output_chunk })
+        Ok(Self {
+            max_output_chunk,
+            script: Vec::new(),
+        })
+    }
+
+    pub fn set_script(&mut self, script: Vec<ScriptStep>) {
+        self.script = script;
+    }
+
+    pub fn script(&self) -> &[ScriptStep] {
+        &self.script
     }
 
     pub fn execute(
@@ -128,6 +145,26 @@ impl FakeExecutionHost {
     }
 }
 
+impl ExecutionHost for FakeExecutionHost {
+    type Observation = HostObservation;
+    type Error = ScriptError;
+
+    fn kind(&self) -> ExecutionHostKind {
+        ExecutionHostKind::Fake
+    }
+
+    fn collect_observations(
+        &mut self,
+        run_id: AgentRunId,
+        binding_generation: BindingGeneration,
+    ) -> Result<Vec<HostObservation>, ScriptError> {
+        if self.script.is_empty() {
+            return Err(ScriptError::EmptyScript);
+        }
+        self.execute(run_id, binding_generation, &self.script)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +177,14 @@ mod tests {
         let attempt = domain.create_attempt(item).unwrap();
         let run = domain.create_agent_run(attempt).unwrap();
         (run, domain.agent_run(run).unwrap().binding_generation())
+    }
+
+    fn collect_via_trait<H: ExecutionHost>(
+        host: &mut H,
+        run_id: AgentRunId,
+        binding_generation: BindingGeneration,
+    ) -> Result<Vec<H::Observation>, H::Error> {
+        host.collect_observations(run_id, binding_generation)
     }
 
     #[test]
@@ -216,5 +261,30 @@ mod tests {
                 HostObservationKind::Output(bytes) => bytes.len() <= 4,
                 _ => false,
             }));
+    }
+
+    #[test]
+    fn fake_implements_execution_host_trait_deterministically() {
+        let (run, generation) = run_with_generation();
+        let mut host = FakeExecutionHost::new(1024).unwrap();
+        assert_eq!(host.kind(), ExecutionHostKind::Fake);
+        host.set_script(vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ]);
+
+        let first = collect_via_trait(&mut host, run, generation).unwrap();
+        let second = collect_via_trait(&mut host, run, generation).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 2);
+    }
+
+    #[test]
+    fn trait_dispatch_smoke_covers_fake_kind() {
+        let host = FakeExecutionHost::new(8).unwrap();
+        assert_eq!(
+            <FakeExecutionHost as ExecutionHost>::kind(&host),
+            ExecutionHostKind::Fake
+        );
     }
 }

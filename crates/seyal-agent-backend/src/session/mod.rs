@@ -27,8 +27,9 @@ use seyal_agent_protocol::{
 use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN};
 
 use crate::{
-    AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, HostObservationKind,
-    ObservationAuthority, ObserveError, PrincipalKind, RunLiveness, ScriptStep,
+    AuthorizationRepository, ClientScope, DurablePrincipal, FakeExecutionHost, HostObservation,
+    HostObservationKind, ObservationAuthority, ObserveError, PrincipalKind, PrincipalStatus,
+    RunLiveness, ScriptStep,
 };
 
 use recovery::restore_identities;
@@ -52,8 +53,6 @@ pub struct IntegrationService {
     owner_principal_id: seyal_agent_core::ClientPrincipalId,
     /// Distinct observe-only principal. Hello evidence `observer`.
     observer_principal_id: seyal_agent_core::ClientPrincipalId,
-    /// Principal selected for the current accepted connection from Hello evidence.
-    connection_principal_id: Option<seyal_agent_core::ClientPrincipalId>,
     auth: AuthorizationRepository,
     authority: ObservationAuthority,
     store: AgentStore,
@@ -77,23 +76,14 @@ impl IntegrationService {
         let host = FakeExecutionHost::new(OUTPUT_CHUNK).map_err(|_| ServiceError::Failed)?;
         let store = AgentStore::open(&config.store_path).map_err(|_| ServiceError::Failed)?;
         let mut auth = AuthorizationRepository::default();
-        let owner_principal_id = auth.register_principal(
-            PrincipalKind::FirstPartyCli,
-            [
-                ClientScope::RunsCreate,
-                ClientScope::RunsObserve,
-                ClientScope::RunsControl,
-            ],
-        );
-        let observer_principal_id =
-            auth.register_principal(PrincipalKind::ManagedClient, [ClientScope::RunsObserve]);
+        let (owner_principal_id, observer_principal_id) =
+            load_or_seed_principals(&store, &mut auth)?;
         let mut authority = ObservationAuthority::new(seyal_agent_core::AgentDomain::new());
         restore_identities(&store, &mut authority, &mut auth)?;
         Ok(Self {
             instance_id,
             owner_principal_id,
             observer_principal_id,
-            connection_principal_id: None,
             auth,
             authority,
             store,
@@ -102,23 +92,47 @@ impl IntegrationService {
         })
     }
 
-    /// Bind this connection to a principal from Hello evidence.
+    /// Persist revoke/suspend across restart: dual-write auth + durable store (#1178 AC3).
+    pub fn set_principal_status(
+        &mut self,
+        id: seyal_agent_core::ClientPrincipalId,
+        status: PrincipalStatus,
+    ) -> Result<(), ServiceError> {
+        self.auth
+            .set_principal_status(id, status)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .set_principal_status(id, status.code())
+            .map_err(|_| ServiceError::Failed)?;
+        Ok(())
+    }
+
+    pub fn owner_principal_id(&self) -> seyal_agent_core::ClientPrincipalId {
+        self.owner_principal_id
+    }
+
+    /// Resolve Hello evidence to a principal for this connection.
     /// Socket UID admission alone never selects a privileged principal.
-    pub fn begin_connection(&mut self, evidence: &[u8]) -> Result<(), ServiceError> {
-        let principal = self
-            .auth
+    /// The returned id is connection-scoped and must be passed to every `handle`.
+    pub fn resolve_connection_principal(
+        &self,
+        evidence: &[u8],
+    ) -> Result<seyal_agent_core::ClientPrincipalId, ServiceError> {
+        self.auth
             .principal_for_evidence(
                 evidence,
                 self.owner_principal_id,
                 self.observer_principal_id,
             )
-            .map_err(|_| ServiceError::Failed)?;
-        self.connection_principal_id = Some(principal);
-        Ok(())
+            .map_err(|_| ServiceError::Failed)
     }
 
-    pub fn end_connection(&mut self) {
-        self.connection_principal_id = None;
+    #[cfg(test)]
+    pub fn begin_connection(
+        &mut self,
+        evidence: &[u8],
+    ) -> Result<seyal_agent_core::ClientPrincipalId, ServiceError> {
+        self.resolve_connection_principal(evidence)
     }
 
     #[cfg(feature = "test-fault-injection")]
@@ -128,6 +142,7 @@ impl IntegrationService {
 
     pub fn handle(
         &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
         frame: Frame,
         max_frame_size: u32,
         event_window: u32,
@@ -136,7 +151,7 @@ impl IntegrationService {
             CommandResult::Error(CommandError::Malformed)
         } else {
             match decode_command(&frame.body) {
-                Ok(command) => self.dispatch(command, event_window, max_frame_size),
+                Ok(command) => self.dispatch(principal_id, command, event_window, max_frame_size),
                 Err(_) => CommandResult::Error(CommandError::Malformed),
             }
         };
@@ -145,13 +160,14 @@ impl IntegrationService {
 
     fn dispatch(
         &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
         command: Command,
         event_window: u32,
         max_frame_size: u32,
     ) -> CommandResult {
         match command {
-            Command::OpenSession { scopes } => self.open_session(scopes),
-            Command::ResumeSession { session_id } => self.resume_session(session_id),
+            Command::OpenSession { scopes } => self.open_session(principal_id, scopes),
+            Command::ResumeSession { session_id } => self.resume_session(principal_id, session_id),
             Command::CreateWorkScope { session_id, kind } => {
                 self.create_work_scope(session_id, kind)
             }
@@ -186,7 +202,11 @@ impl IntegrationService {
         }
     }
 
-    fn open_session(&mut self, scopes: Vec<u8>) -> CommandResult {
+    fn open_session(
+        &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
+        scopes: Vec<u8>,
+    ) -> CommandResult {
         let mut decoded = Vec::with_capacity(scopes.len());
         for scope in scopes {
             match ClientScope::decode(scope) {
@@ -194,9 +214,6 @@ impl IntegrationService {
                 Err(_) => return CommandResult::Error(CommandError::Malformed),
             }
         }
-        let Some(principal_id) = self.connection_principal_id else {
-            return CommandResult::Error(CommandError::Denied);
-        };
         match self
             .auth
             .open_session(principal_id, self.instance_id, decoded)
@@ -206,10 +223,11 @@ impl IntegrationService {
         }
     }
 
-    fn resume_session(&mut self, session_id: seyal_agent_core::ClientSessionId) -> CommandResult {
-        let Some(principal_id) = self.connection_principal_id else {
-            return CommandResult::Error(CommandError::Denied);
-        };
+    fn resume_session(
+        &mut self,
+        principal_id: seyal_agent_core::ClientPrincipalId,
+        session_id: seyal_agent_core::ClientSessionId,
+    ) -> CommandResult {
         match self.auth.session_principal(session_id, self.instance_id) {
             Ok(session_principal) if session_principal == principal_id => {
                 match self.auth.resume_session(session_id, self.instance_id) {
@@ -363,26 +381,24 @@ impl IntegrationService {
             return CommandResult::Error(error);
         }
         let aggregate = AggregateId::AgentRun(run_id);
-        let events = match self.store.replay_after(aggregate, None) {
-            Ok(events) => events,
-            Err(_) => return CommandResult::Error(CommandError::Failed),
+        // Event count is the aggregate high-water mark. Do not load full replay
+        // payloads solely to count events (AB-1.6 / AB-0 shortcut removal).
+        let event_count = match self.store.high_water(aggregate) {
+            Ok(count) if count > 0 => count,
+            _ => return CommandResult::Error(CommandError::Failed),
         };
-        let Some(last) = events.last() else {
+        let Some(last) = AggregateSequence::from_raw(event_count) else {
             return CommandResult::Error(CommandError::Failed);
         };
         let payload = snapshot_payload(&self.authority, run_id);
-        if self
-            .store
-            .snapshot(aggregate, last.sequence, &payload)
-            .is_err()
-        {
+        if self.store.snapshot(aggregate, last, &payload).is_err() {
             return CommandResult::Error(CommandError::Failed);
         }
         CommandResult::Started {
             run_id,
             binding_generation: binding.get(),
             control_generation: control.get(),
-            event_count: events.len() as u64,
+            event_count,
         }
     }
 
@@ -644,6 +660,86 @@ impl IntegrationService {
         };
         decision.map_err(map_auth)
     }
+}
+
+fn load_or_seed_principals(
+    store: &AgentStore,
+    auth: &mut AuthorizationRepository,
+) -> Result<
+    (
+        seyal_agent_core::ClientPrincipalId,
+        seyal_agent_core::ClientPrincipalId,
+    ),
+    ServiceError,
+> {
+    let rows = store
+        .client_principals()
+        .map_err(|_| ServiceError::Failed)?;
+    if rows.is_empty() {
+        let owner = auth.register_principal_with_evidence(
+            PrincipalKind::FirstPartyCli,
+            [
+                ClientScope::RunsCreate,
+                ClientScope::RunsObserve,
+                ClientScope::RunsControl,
+            ],
+            b"cli".to_vec(),
+        );
+        let observer = auth.register_principal_with_evidence(
+            PrincipalKind::ManagedClient,
+            [ClientScope::RunsObserve],
+            b"observer".to_vec(),
+        );
+        persist_principal(store, auth, owner)?;
+        persist_principal(store, auth, observer)?;
+        return Ok((owner, observer));
+    }
+    for row in rows {
+        let kind = PrincipalKind::from_code(row.kind).ok_or(ServiceError::Failed)?;
+        let status = PrincipalStatus::from_code(row.status).ok_or(ServiceError::Failed)?;
+        let mut scopes = std::collections::BTreeSet::new();
+        for byte in row.scopes {
+            scopes.insert(ClientScope::decode(byte).map_err(|_| ServiceError::Failed)?);
+        }
+        auth.load_durable_principal(DurablePrincipal {
+            id: row.id,
+            kind,
+            status,
+            scopes,
+            evidence_key: row.evidence_key,
+        })
+        .map_err(|_| ServiceError::Failed)?;
+    }
+    let owner = auth
+        .principal_by_evidence_key(b"cli")
+        .ok_or(ServiceError::Failed)?;
+    let observer = auth
+        .principal_by_evidence_key(b"observer")
+        .ok_or(ServiceError::Failed)?;
+    Ok((owner, observer))
+}
+
+fn persist_principal(
+    store: &AgentStore,
+    auth: &AuthorizationRepository,
+    id: seyal_agent_core::ClientPrincipalId,
+) -> Result<(), ServiceError> {
+    let durable = auth
+        .durable_principal(id)
+        .map_err(|_| ServiceError::Failed)?;
+    let mut scopes: Vec<u8> = durable.scopes.iter().map(|scope| scope.code()).collect();
+    scopes.sort_unstable();
+    scopes.dedup();
+    store
+        .upsert_principal(&seyal_agent_store::PersistedPrincipal {
+            id: durable.id,
+            kind: durable.kind.code(),
+            status: durable.status.code(),
+            scopes,
+            evidence_key: durable.evidence_key,
+        })
+        .map_err(|_| ServiceError::Failed)?;
+    Ok(())
 }
 
 fn map_observe(error: ObserveError) -> CommandError {

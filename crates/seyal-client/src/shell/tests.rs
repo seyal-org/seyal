@@ -331,6 +331,7 @@ fn pane_tree_walk_is_preorder() {
             axis: SplitAxis::Right,
             first: Box::new(PaneTree::Leaf(a)),
             second: Box::new(PaneTree::Leaf(b)),
+            ratio: SplitRatio::HALF,
         },
     );
     assert_eq!(tree.pane_ids(), vec![a, b]);
