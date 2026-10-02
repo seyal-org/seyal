@@ -8,6 +8,9 @@ mod frame_io;
 mod recovery;
 mod wire;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use frame_io::{read_session_frame, SessionRead};
 
 use std::path::PathBuf;
@@ -25,7 +28,7 @@ use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError, 
 
 use crate::{
     AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, HostObservationKind,
-    ObservationAuthority, PrincipalKind, ScriptStep,
+    ObservationAuthority, ObserveError, PrincipalKind, RunLiveness, ScriptStep,
 };
 
 use recovery::restore_identities;
@@ -376,17 +379,12 @@ impl IntegrationService {
             let previous_liveness = self.authority.recorded_liveness(observation.run_id);
             let previous_effects = self.authority.effects_performed();
             let before = self.authority.applied_count();
-            self.authority.apply(observation.clone()).map_err(|error| {
-                use crate::ObserveError;
-                match error {
-                    ObserveError::StaleGeneration => CommandError::StaleBinding,
-                    ObserveError::Domain(DomainError::StaleControlGeneration { .. }) => {
-                        CommandError::StaleControl
-                    }
-                    ObserveError::Domain(DomainError::UnknownAgentRun(_)) => CommandError::NotFound,
-                    _ => CommandError::Failed,
-                }
-            })?;
+            if let Err(error) = self.authority.apply(observation.clone()) {
+                // Mid-group apply failure must not leave earlier Outputs sticky
+                // in memory (same class as the append-fault undo path).
+                Self::undo_applied_group(&mut self.authority, applied);
+                return Err(map_observe(error));
+            }
             if self.authority.applied_count() == before {
                 continue;
             }
@@ -410,10 +408,7 @@ impl IntegrationService {
                 .saturating_sub(REPLAY_RESULT_OVERHEAD)
                 .saturating_sub(REPLAY_EVENT_OVERHEAD)
         {
-            for (observation, previous_liveness, previous_effects) in applied.into_iter().rev() {
-                self.authority
-                    .undo_apply(&observation, previous_liveness, previous_effects);
-            }
+            Self::undo_applied_group(&mut self.authority, applied);
             return Err(CommandError::Failed);
         }
         if self
@@ -421,13 +416,19 @@ impl IntegrationService {
             .append_output_event(run_id, EVENT_OBSERVATION, &joined, first, last)
             .is_err()
         {
-            for (observation, previous_liveness, previous_effects) in applied.into_iter().rev() {
-                self.authority
-                    .undo_apply(&observation, previous_liveness, previous_effects);
-            }
+            Self::undo_applied_group(&mut self.authority, applied);
             return Err(CommandError::Failed);
         }
         Ok(())
+    }
+
+    fn undo_applied_group(
+        authority: &mut ObservationAuthority,
+        applied: Vec<(HostObservation, Option<RunLiveness>, u64)>,
+    ) {
+        for (observation, previous_liveness, previous_effects) in applied.into_iter().rev() {
+            authority.undo_apply(&observation, previous_liveness, previous_effects);
+        }
     }
 
     fn commit_observation(&mut self, observation: HostObservation) -> Result<(), CommandError> {
@@ -441,17 +442,9 @@ impl IntegrationService {
         let before = self.authority.applied_count();
         let previous_liveness = self.authority.recorded_liveness(observation.run_id);
         let previous_effects = self.authority.effects_performed();
-        self.authority.apply(observation.clone()).map_err(|error| {
-            use crate::ObserveError;
-            match error {
-                ObserveError::StaleGeneration => CommandError::StaleBinding,
-                ObserveError::Domain(DomainError::StaleControlGeneration { .. }) => {
-                    CommandError::StaleControl
-                }
-                ObserveError::Domain(DomainError::UnknownAgentRun(_)) => CommandError::NotFound,
-                _ => CommandError::Failed,
-            }
-        })?;
+        self.authority
+            .apply(observation.clone())
+            .map_err(map_observe)?;
         if self.authority.applied_count() == before {
             return Ok(());
         }
@@ -609,5 +602,16 @@ impl IntegrationService {
                 .map(|_| ())
         };
         decision.map_err(map_auth)
+    }
+}
+
+fn map_observe(error: ObserveError) -> CommandError {
+    match error {
+        ObserveError::StaleGeneration => CommandError::StaleBinding,
+        ObserveError::Domain(DomainError::StaleControlGeneration { .. }) => {
+            CommandError::StaleControl
+        }
+        ObserveError::Domain(DomainError::UnknownAgentRun(_)) => CommandError::NotFound,
+        _ => CommandError::Failed,
     }
 }
