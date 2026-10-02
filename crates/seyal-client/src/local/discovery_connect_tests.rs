@@ -1,4 +1,3 @@
-
 use super::{
     canonical_control_socket_path, classify_connect_error, classify_discovery_error,
     extended_terminal_key_supported, hello_until, hello_until_with_legacy_key_fallback,
