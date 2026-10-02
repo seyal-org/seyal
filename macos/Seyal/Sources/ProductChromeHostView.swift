@@ -490,11 +490,18 @@ final class ProductChromeHostView: NSView {
         }
         let responder = window?.firstResponder as? NSView
         let composerFocused = responder.map { $0 === composer || $0.isDescendant(of: composer) } ?? false
+        // R8.4: report IME/marked-text the same way keyDown paths do so a
+        // Command chord prefix cannot activate during composition.
+        let compositionActive = Self.compositionActiveForKeyRouting(
+            responder: responder,
+            composer: composer,
+            inputSurface: inputSurface
+        )
         switch KeybindingStrokeNormalizer.route(
             appHandle: pane.appHandle,
             event: event,
             composerFocused: composerFocused,
-            compositionActive: false
+            compositionActive: compositionActive
         ) {
         case .consumed:
             reconcileChrome()
@@ -505,6 +512,26 @@ final class ProductChromeHostView: NSView {
         case .fallsThrough:
             return super.performKeyEquivalent(with: event)
         }
+    }
+
+    /// Shared probe for R6.2.1 / R8.4: marked text on the focused metal
+    /// surface or composer editor. Package-visible for host tests.
+    static func compositionActiveForKeyRouting(
+        responder: NSView?,
+        composer: ComposerBridgeView,
+        inputSurface: InteractiveMetalSurfaceView
+    ) -> Bool {
+        guard let responder else { return false }
+        if responder === composer || responder.isDescendant(of: composer) {
+            return composer.hasMarkedComposition
+        }
+        if responder === inputSurface || responder.isDescendant(of: inputSurface) {
+            return inputSurface.hasMarkedText()
+        }
+        if let metal = responder as? InteractiveMetalSurfaceView {
+            return metal.hasMarkedText()
+        }
+        return false
     }
 
     /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the

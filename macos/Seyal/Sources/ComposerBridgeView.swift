@@ -255,6 +255,10 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         textView.hasMarkedText()
     }
 
+    /// R6.2.1 / R8.4: host `performKeyEquivalent` must see the same marked-text
+    /// state as `routeComposerKeystroke`.
+    var hasMarkedComposition: Bool { hasMarkedText() }
+
     /// Rust decides whether recall is available (mode, entries); a rejected
     /// open leaves the composer untouched.
     private func openHistory() {

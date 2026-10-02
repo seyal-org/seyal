@@ -1400,6 +1400,78 @@ final class SeyalHostComponentTests: XCTestCase {
         )
     }
 
+    /// R8.4 via R6.2.1: `performKeyEquivalent` must forward marked-text from the
+    /// focused metal surface (not hardcode `compositionActive: false`).
+    @MainActor
+    func testPerformKeyEquivalentSeesCompositionOnFocusedSurface() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        XCTAssertTrue(window.makeFirstResponder(view.inputSurface))
+        XCTAssertFalse(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            ),
+            "no marked text yet"
+        )
+
+        view.inputSurface.setMarkedText(
+            "ni",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        XCTAssertTrue(view.inputSurface.hasMarkedText())
+        XCTAssertTrue(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            ),
+            "focused metal surface with marked text must report composition"
+        )
+
+        // Wiring check: performKeyEquivalent must use the live probe. A matched
+        // single-stroke (⌘K) still consumes during composition (match precedes
+        // the R8.4 gate); the probe must still be true at the call site.
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        XCTAssertTrue(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            )
+        )
+        _ = view.performKeyEquivalent(with: event)
+        XCTAssertTrue(
+            view.inputSurface.hasMarkedText(),
+            "routing must not clear marked text as a side effect"
+        )
+    }
+
     /// R11.2 / R6.4.1: Go to… is a projected WorkspaceCommand (title, enablement, invoke).
     @MainActor
     func testGotoMenuItemUsesProjectionInvokeAndRouteEnablement() {
