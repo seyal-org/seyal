@@ -30,6 +30,10 @@ pub struct DaemonConfig {
     pub read_timeout: Duration,
     pub max_frame_size: u32,
     pub event_window: u32,
+    /// Idle wait after HelloAck. Expiry ends `serve_one` as a normal disconnect.
+    pub session_idle_timeout: Duration,
+    /// Write budget for one result frame. A stalled subscriber is dropped.
+    pub session_write_timeout: Duration,
 }
 
 impl Default for DaemonConfig {
@@ -38,6 +42,8 @@ impl Default for DaemonConfig {
             read_timeout: Duration::from_secs(2),
             max_frame_size: ABSOLUTE_MAX_FRAME_SIZE,
             event_window: 256,
+            session_idle_timeout: Duration::from_secs(30),
+            session_write_timeout: Duration::from_secs(2),
         }
     }
 }
@@ -48,6 +54,7 @@ pub enum DaemonError {
     Endpoint(EndpointFault),
     StartupContended,
     Handshake(HandshakeError),
+    Unavailable,
     Malformed,
     Oversized,
     TimedOut,
@@ -62,6 +69,7 @@ pub struct AgentDaemon {
     config: DaemonConfig,
     cleanup: bool,
     our_uid: u32,
+    integration: Option<crate::session::IntegrationService>,
 }
 
 pub struct DaemonSample {
@@ -85,6 +93,8 @@ impl AgentDaemon {
         if config.max_frame_size == 0
             || config.max_frame_size > ABSOLUTE_MAX_FRAME_SIZE
             || config.event_window == 0
+            || config.session_idle_timeout.is_zero()
+            || config.session_write_timeout.is_zero()
         {
             return Err(DaemonError::Handshake(HandshakeError::InvalidLimit));
         }
@@ -138,11 +148,40 @@ impl AgentDaemon {
             config,
             cleanup: true,
             our_uid,
+            integration: None,
         })
+    }
+
+    pub fn bind_integration(
+        directory: impl Into<PathBuf>,
+        integration: crate::session::IntegrationConfig,
+    ) -> Result<Self, DaemonError> {
+        Self::bind_integration_with(directory, DaemonConfig::default(), integration)
+    }
+
+    pub fn bind_integration_with(
+        directory: impl Into<PathBuf>,
+        config: DaemonConfig,
+        integration: crate::session::IntegrationConfig,
+    ) -> Result<Self, DaemonError> {
+        let mut daemon = Self::bind_with(directory, config)?;
+        let service = crate::session::IntegrationService::open(daemon.instance_id, &integration)
+            .map_err(|_| DaemonError::Unavailable)?;
+        daemon.integration = Some(service);
+        Ok(daemon)
     }
 
     pub fn instance_id(&self) -> BackendInstanceId {
         self.instance_id
+    }
+
+    /// Qualification fault: the next `allowed` store commits succeed, then
+    /// the following commit fails before its transaction starts.
+    #[cfg(feature = "test-fault-injection")]
+    pub fn fail_after_writes(&mut self, allowed: u64) {
+        if let Some(service) = self.integration.as_mut() {
+            service.fail_after_writes(allowed);
+        }
     }
 
     pub fn socket_path(&self) -> PathBuf {
@@ -150,37 +189,124 @@ impl AgentDaemon {
     }
 
     pub fn accept_hello(&self) -> Result<HelloAck, DaemonError> {
-        let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
-        let (mut stream, _) = listener.accept().map_err(map_io)?;
-        stream
-            .set_read_timeout(Some(self.config.read_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        stream
-            .set_write_timeout(Some(self.config.read_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        if !endpoint_still_owned(&self.socket_path(), self.our_uid) {
-            return Err(DaemonError::Endpoint(EndpointFault::Symlink));
-        }
-        peer::verify_same_user_peer(stream.as_raw_fd())
-            .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
+        let (mut stream, _hello, ack) = self.accept_negotiated()?;
+        self.write_hello_ack(&mut stream, &ack)?;
+        drop(stream);
+        Ok(ack)
+    }
 
-        let frame = read_one_frame(&mut stream as &mut dyn Read, self.config.max_frame_size)?;
-        if frame.kind != FrameKind::Hello {
-            return Err(DaemonError::Malformed);
+    /// Serve one authenticated client until it disconnects.
+    ///
+    /// Disconnect does not drop backend authority. The domain, store, and
+    /// open `ClientSession` remain for a later connection to this process.
+    /// An idle authenticated client ends this call as a normal disconnect.
+    /// A subscriber that does not read within `session_write_timeout` is
+    /// dropped with `TimedOut` and must resync from its cursor. A command
+    /// that fails to encode still returns `CommandError::Failed` without
+    /// dropping the `ClientSession`.
+    pub fn serve_one(&mut self) -> Result<(), DaemonError> {
+        if self.integration.is_none() {
+            return Err(DaemonError::Unavailable);
         }
-        let hello = decode_hello(&frame.body).map_err(|_| DaemonError::Malformed)?;
+        let idle = self.config.session_idle_timeout;
+        let write_timeout = self.config.session_write_timeout;
+        let (mut stream, hello, ack) = self.accept_negotiated()?;
+        {
+            let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
+            if service
+                .begin_connection(&hello.client_principal_evidence)
+                .is_err()
+            {
+                let bytes =
+                    encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
+                        .map_err(|_| DaemonError::Malformed)?;
+                let _ = stream.write_all(&bytes);
+                return Err(DaemonError::Handshake(HandshakeError::Malformed));
+            }
+        }
+        self.write_hello_ack(&mut stream, &ack)?;
+        stream
+            .set_read_timeout(Some(idle))
+            .map_err(|_| DaemonError::Io)?;
+        stream
+            .set_write_timeout(Some(write_timeout))
+            .map_err(|_| DaemonError::Io)?;
+        let max_frame_size = ack.max_frame_size;
+        let event_window = ack.event_window;
+        let result = self.serve_session(&mut stream, max_frame_size, event_window);
+        if let Some(service) = self.integration.as_mut() {
+            service.end_connection();
+        }
+        result
+    }
+
+    fn serve_session(
+        &mut self,
+        stream: &mut UnixStream,
+        max_frame_size: u32,
+        event_window: u32,
+    ) -> Result<(), DaemonError> {
+        let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
+        loop {
+            let frame = match crate::session::read_session_frame(stream, max_frame_size) {
+                crate::session::SessionRead::Frame(frame) => frame,
+                crate::session::SessionRead::Disconnected => return Ok(()),
+                crate::session::SessionRead::Oversized => return Err(DaemonError::Oversized),
+                crate::session::SessionRead::Malformed => return Err(DaemonError::Malformed),
+                crate::session::SessionRead::TimedOut => return Ok(()),
+                crate::session::SessionRead::Io => return Err(DaemonError::Io),
+            };
+            let response = match service.handle(frame, max_frame_size, event_window) {
+                Ok(response) => response,
+                Err(_) => seyal_agent_protocol::encode_result(
+                    &seyal_agent_protocol::CommandResult::Error(
+                        seyal_agent_protocol::CommandError::Failed,
+                    ),
+                    max_frame_size,
+                )
+                .map_err(|_| DaemonError::Unavailable)?,
+            };
+            stream.write_all(&response).map_err(|error| {
+                if error.kind() == io::ErrorKind::TimedOut
+                    || error.kind() == io::ErrorKind::WouldBlock
+                {
+                    DaemonError::TimedOut
+                } else {
+                    map_io(error)
+                }
+            })?;
+        }
+    }
+
+    /// Accept a same-UID peer, validate Hello evidence, and negotiate limits.
+    /// Does not write HelloAck so callers can bind a principal first.
+    fn accept_negotiated(&self) -> Result<(UnixStream, Hello, HelloAck), DaemonError> {
+        let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
+        let (mut stream, hello) = Self::accept_peer(
+            listener,
+            &self.socket_path(),
+            self.our_uid,
+            self.config.max_frame_size,
+            self.config.read_timeout,
+        )?;
+        if crate::AuthorizationRepository::recognize_principal_evidence(
+            &hello.client_principal_evidence,
+        )
+        .is_err()
+        {
+            let bytes =
+                encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
+                    .map_err(|_| DaemonError::Malformed)?;
+            let _ = stream.write_all(&bytes);
+            return Err(DaemonError::Handshake(HandshakeError::Malformed));
+        }
         match negotiate_hello(
             &hello,
             self.instance_id,
             self.config.max_frame_size,
             self.config.event_window,
         ) {
-            Ok(ack) => {
-                let bytes = encode_ack(&ack, self.config.max_frame_size)
-                    .map_err(|_| DaemonError::Malformed)?;
-                stream.write_all(&bytes).map_err(map_io)?;
-                Ok(ack)
-            }
+            Ok(ack) => Ok((stream, hello, ack)),
             Err(error) => {
                 let bytes = encode_handshake_error(error, self.config.max_frame_size)
                     .map_err(|_| DaemonError::Malformed)?;
@@ -188,6 +314,40 @@ impl AgentDaemon {
                 Err(DaemonError::Handshake(error))
             }
         }
+    }
+
+    fn write_hello_ack(&self, stream: &mut UnixStream, ack: &HelloAck) -> Result<(), DaemonError> {
+        let bytes =
+            encode_ack(ack, self.config.max_frame_size).map_err(|_| DaemonError::Malformed)?;
+        stream.write_all(&bytes).map_err(map_io)
+    }
+
+    fn accept_peer(
+        listener: &UnixListener,
+        socket_path: &Path,
+        our_uid: u32,
+        max_frame_size: u32,
+        read_timeout: Duration,
+    ) -> Result<(UnixStream, Hello), DaemonError> {
+        let (mut stream, _) = listener.accept().map_err(map_io)?;
+        stream
+            .set_read_timeout(Some(read_timeout))
+            .map_err(|_| DaemonError::Io)?;
+        stream
+            .set_write_timeout(Some(read_timeout))
+            .map_err(|_| DaemonError::Io)?;
+        if !endpoint_still_owned(socket_path, our_uid) {
+            return Err(DaemonError::Endpoint(EndpointFault::Symlink));
+        }
+        peer::verify_same_user_peer(stream.as_raw_fd())
+            .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
+
+        let frame = read_one_frame(&mut stream as &mut dyn Read, max_frame_size)?;
+        if frame.kind != FrameKind::Hello {
+            return Err(DaemonError::Malformed);
+        }
+        let hello = decode_hello(&frame.body).map_err(|_| DaemonError::Malformed)?;
+        Ok((stream, hello))
     }
 
     /// Leave the socket pathname in place and record a dead owner, as a
@@ -258,7 +418,7 @@ fn complete_client_handshake(
             let error = decode_handshake_error(&frame.body).map_err(|_| DaemonError::Malformed)?;
             Err(DaemonError::Handshake(error))
         }
-        FrameKind::Hello => Err(DaemonError::Malformed),
+        FrameKind::Hello | FrameKind::Command | FrameKind::Result => Err(DaemonError::Malformed),
     }
 }
 
@@ -565,377 +725,4 @@ fn map_io(error: io::Error) -> DaemonError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use seyal_agent_protocol::{ProtocolVersion, MAX_EVENT_WINDOW};
-    use std::time::Instant;
-    use std::{
-        os::unix::net::UnixListener,
-        sync::atomic::{AtomicU64, Ordering},
-        thread,
-        time::Duration,
-    };
-
-    static NEXT_DIR: AtomicU64 = AtomicU64::new(1);
-
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "seyal-agent-{}-{}-{}",
-                std::process::id(),
-                NEXT_DIR.fetch_add(1, Ordering::Relaxed),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
-            Self(path)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn hello() -> Hello {
-        Hello {
-            supported_versions: vec![ProtocolVersion::V1],
-            max_frame_size: 4096,
-            event_window: 32,
-            client_principal_evidence: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn simultaneous_startup_keeps_one_owner_and_restart_changes_instance_id() {
-        let dir = TempDir::new();
-        let path = dir.path().to_path_buf();
-        let results = thread::scope(|scope| {
-            let mut joins = Vec::new();
-            for _ in 0..8 {
-                let path = path.clone();
-                joins.push(scope.spawn(move || AgentDaemon::bind(path)));
-            }
-            joins
-                .into_iter()
-                .map(|join| join.join().expect("startup thread"))
-                .collect::<Vec<_>>()
-        });
-        let owners = results.iter().filter(|result| result.is_ok()).count();
-        assert_eq!(owners, 1);
-        let daemon = results.into_iter().find_map(Result::ok).unwrap();
-        let first_id = daemon.instance_id();
-        let directory = dir.path().to_path_buf();
-        let client_path = daemon.socket_path();
-        let client = thread::spawn(move || connect_hello(&client_path, &hello(), 4096));
-        let ack = daemon.accept_hello().unwrap();
-        assert_eq!(
-            client.join().unwrap().unwrap().backend_instance_id,
-            first_id
-        );
-        assert_eq!(ack.backend_instance_id, first_id);
-        assert!(daemon.socket_path().exists());
-        drop(daemon);
-
-        let restarted = AgentDaemon::bind(&directory).unwrap();
-        assert_ne!(restarted.instance_id(), first_id);
-    }
-
-    #[test]
-    fn stale_socket_is_reclaimed_and_unsafe_endpoints_stay_in_place() {
-        let dir = TempDir::new();
-        let daemon = AgentDaemon::bind(dir.path()).unwrap();
-        daemon.abandon_as_crash();
-        let reclaimed = AgentDaemon::bind(dir.path()).unwrap();
-        let path = reclaimed.socket_path();
-        let client = thread::spawn(move || connect_hello(&path, &hello(), 4096));
-        assert!(reclaimed.accept_hello().is_ok());
-        assert!(client.join().unwrap().is_ok());
-        drop(reclaimed);
-
-        std::os::unix::fs::symlink(
-            dir.path().join("missing-target"),
-            dir.path().join(SOCKET_NAME),
-        )
-        .unwrap();
-        assert_eq!(
-            AgentDaemon::bind(dir.path()).map(|_| ()),
-            Err(DaemonError::Endpoint(EndpointFault::Symlink))
-        );
-        assert!(dir
-            .path()
-            .join(SOCKET_NAME)
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        fs::remove_file(dir.path().join(SOCKET_NAME)).unwrap();
-
-        fs::write(dir.path().join(SOCKET_NAME), b"not-a-socket").unwrap();
-        fs::write(dir.path().join(LOCK_NAME), b"v1\n0\n").unwrap();
-        assert_eq!(
-            AgentDaemon::bind(dir.path()).map(|_| ()),
-            Err(DaemonError::Endpoint(EndpointFault::NotSocket))
-        );
-        assert_eq!(
-            fs::read(dir.path().join(SOCKET_NAME)).unwrap(),
-            b"not-a-socket"
-        );
-    }
-
-    #[test]
-    fn active_owned_socket_is_never_unlinked_as_stale() {
-        let dir = TempDir::new();
-        fs::create_dir(dir.path()).unwrap();
-        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(dir.path(), permissions).unwrap();
-
-        let socket = dir.path().join(SOCKET_NAME);
-        let listener = UnixListener::bind(&socket).unwrap();
-        let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
-        socket_permissions.set_mode(0o600);
-        fs::set_permissions(&socket, socket_permissions).unwrap();
-        // Dead lock owner + still-connectable leaf: reclaim must refuse unlink
-        // and must not rewrite the foreign/dead lock body.
-        fs::write(dir.path().join(LOCK_NAME), b"v1\n0\n").unwrap();
-
-        assert_eq!(
-            AgentDaemon::bind(dir.path()).map(|_| ()),
-            Err(DaemonError::StartupContended)
-        );
-        assert!(socket.exists());
-        assert_eq!(fs::read(dir.path().join(LOCK_NAME)).unwrap(), b"v1\n0\n");
-        drop(listener);
-    }
-
-    #[test]
-    fn corrupt_lock_is_rejected_and_left_in_place() {
-        let dir = TempDir::new();
-        fs::create_dir(dir.path()).unwrap();
-        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(dir.path(), permissions).unwrap();
-
-        let lock_path = dir.path().join(LOCK_NAME);
-        fs::write(&lock_path, b"v1\nnot-a-pid\n").unwrap();
-        // Optional dead socket leaf must not change the CorruptLock outcome.
-        let socket = dir.path().join(SOCKET_NAME);
-        let listener = UnixListener::bind(&socket).unwrap();
-        let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
-        socket_permissions.set_mode(0o600);
-        fs::set_permissions(&socket, socket_permissions).unwrap();
-        drop(listener);
-        wait_until_not_connectable(&socket);
-
-        assert_eq!(
-            AgentDaemon::bind(dir.path()).map(|_| ()),
-            Err(DaemonError::Endpoint(EndpointFault::CorruptLock))
-        );
-        assert_eq!(fs::read(&lock_path).unwrap(), b"v1\nnot-a-pid\n");
-        assert!(socket.exists());
-    }
-
-    #[test]
-    fn connect_hello_rejects_insecure_parent_directory() {
-        let dir = TempDir::new();
-        fs::create_dir(dir.path()).unwrap();
-        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(dir.path(), permissions).unwrap();
-
-        let socket = dir.path().join(SOCKET_NAME);
-        let listener = UnixListener::bind(&socket).unwrap();
-        let mut socket_permissions = fs::metadata(&socket).unwrap().permissions();
-        socket_permissions.set_mode(0o600);
-        fs::set_permissions(&socket, socket_permissions).unwrap();
-        drop(listener);
-
-        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
-        permissions.set_mode(0o777);
-        fs::set_permissions(dir.path(), permissions).unwrap();
-
-        assert_eq!(
-            connect_hello(&socket, &hello(), 4096).map(|_| ()),
-            Err(DaemonError::InsecureDirectory)
-        );
-        assert!(socket.exists());
-    }
-
-    #[test]
-    fn malformed_and_incompatible_clients_do_not_stick_the_daemon() {
-        let dir = TempDir::new();
-        let daemon = AgentDaemon::bind_with(
-            dir.path(),
-            DaemonConfig {
-                read_timeout: Duration::from_millis(200),
-                max_frame_size: 1024,
-                event_window: 32,
-            },
-        )
-        .unwrap();
-        let path = daemon.socket_path();
-        let lock_path = dir.path().join(LOCK_NAME);
-
-        let mut bad = UnixStream::connect(&path).unwrap();
-        bad.write_all(b"nopeNOPE!!").unwrap();
-        assert_eq!(daemon.accept_hello(), Err(DaemonError::Malformed));
-        drop(bad);
-        assert!(path.exists());
-        assert!(lock_path.exists());
-
-        let mut huge = UnixStream::connect(&path).unwrap();
-        let mut header = [0; 10];
-        header[..4].copy_from_slice(b"AGB1");
-        header[4..6].copy_from_slice(&1_u16.to_le_bytes());
-        header[6..10].copy_from_slice(&u32::MAX.to_le_bytes());
-        huge.write_all(&header).unwrap();
-        assert_eq!(daemon.accept_hello(), Err(DaemonError::Oversized));
-        assert!(path.exists());
-        assert!(lock_path.exists());
-
-        let incompatible = Hello {
-            supported_versions: vec![ProtocolVersion::new(99)],
-            max_frame_size: 1024,
-            event_window: 32,
-            client_principal_evidence: Vec::new(),
-        };
-        let client = thread::spawn(move || connect_hello(&path, &incompatible, 1024));
-        assert_eq!(
-            daemon.accept_hello(),
-            Err(DaemonError::Handshake(HandshakeError::NoCompatibleVersion))
-        );
-        assert_eq!(
-            client.join().unwrap(),
-            Err(DaemonError::Handshake(HandshakeError::NoCompatibleVersion))
-        );
-        assert!(daemon.socket_path().exists());
-        assert!(lock_path.exists());
-
-        let stalled_path = daemon.socket_path();
-        let stalled = thread::spawn(move || {
-            let _stream = UnixStream::connect(stalled_path).unwrap();
-            thread::sleep(Duration::from_millis(500));
-        });
-        assert_eq!(daemon.accept_hello(), Err(DaemonError::TimedOut));
-        stalled.join().unwrap();
-        assert!(daemon.socket_path().exists());
-        assert!(lock_path.exists());
-
-        let path = daemon.socket_path();
-        let good = thread::spawn(move || connect_hello(&path, &hello(), 1024));
-        let ack = daemon.accept_hello().unwrap();
-        assert_eq!(
-            good.join().unwrap().unwrap().backend_instance_id,
-            ack.backend_instance_id
-        );
-        assert!(hello().event_window <= MAX_EVENT_WINDOW);
-        assert!(daemon.socket_path().exists());
-        assert!(lock_path.exists());
-    }
-
-    #[test]
-    fn connection_churn_returns_to_zero_retained_clients() {
-        let dir = TempDir::new();
-        let started = Instant::now();
-        let daemon = AgentDaemon::bind(dir.path()).unwrap();
-        let cold_start = started.elapsed();
-        let path = daemon.socket_path();
-
-        fn resident_kib() -> Option<u64> {
-            let output = std::process::Command::new("ps")
-                .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-                .output()
-                .ok()?;
-            String::from_utf8(output.stdout).ok()?.trim().parse().ok()
-        }
-        fn cpu_percent() -> Option<f64> {
-            let output = std::process::Command::new("ps")
-                .args(["-o", "pcpu=", "-p", &std::process::id().to_string()])
-                .output()
-                .ok()?;
-            String::from_utf8(output.stdout).ok()?.trim().parse().ok()
-        }
-
-        let idle_rss_kib = resident_kib();
-        let idle_cpu_percent = cpu_percent();
-
-        let handshake_started = Instant::now();
-        let handshake_path = path.clone();
-        let handshake_client = thread::spawn(move || {
-            connect_hello(&handshake_path, &hello(), ABSOLUTE_MAX_FRAME_SIZE)
-        });
-        daemon.accept_hello().unwrap();
-        handshake_client.join().unwrap().unwrap();
-        let handshake = handshake_started.elapsed();
-
-        for _ in 0..20 {
-            let path = path.clone();
-            let client =
-                thread::spawn(move || connect_hello(&path, &hello(), ABSOLUTE_MAX_FRAME_SIZE));
-            daemon.accept_hello().unwrap();
-            client.join().unwrap().unwrap();
-        }
-        assert!(!path.symlink_metadata().unwrap().file_type().is_symlink());
-        let post_churn_rss_kib = resident_kib();
-        let sample = DaemonSample {
-            cold_start,
-            handshake,
-            churn_handshakes: 20,
-            retained_connections: 0,
-            rss_kib: post_churn_rss_kib,
-            cpu_percent: idle_cpu_percent,
-        };
-        assert_eq!(sample.retained_connections, 0);
-        assert!(sample.churn_handshakes == 20);
-        assert!(sample.handshake > Duration::ZERO);
-        if let Some(rss) = sample.rss_kib {
-            assert!(rss < 512 * 1024, "spike RSS ceiling exceeded: {rss} KiB");
-        }
-        eprintln!(
-            "ab-0.2 measurement cold_start_us={} handshake_us={} idle_rss_kib={:?} idle_cpu={:?} post_churn_rss_kib={:?}",
-            sample.cold_start.as_micros(),
-            sample.handshake.as_micros(),
-            idle_rss_kib,
-            idle_cpu_percent,
-            post_churn_rss_kib
-        );
-    }
-
-    #[test]
-    fn insecure_directory_and_world_socket_are_rejected() {
-        let dir = TempDir::new();
-        fs::create_dir(dir.path()).unwrap();
-        let mut permissions = fs::metadata(dir.path()).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(dir.path(), permissions.clone()).unwrap();
-        assert_eq!(
-            AgentDaemon::bind(dir.path()).map(|_| ()),
-            Err(DaemonError::InsecureDirectory)
-        );
-
-        permissions.set_mode(0o700);
-        fs::set_permissions(dir.path(), permissions).unwrap();
-        let listener = UnixListener::bind(dir.path().join(SOCKET_NAME)).unwrap();
-        let mut socket_permissions = fs::metadata(dir.path().join(SOCKET_NAME))
-            .unwrap()
-            .permissions();
-        socket_permissions.set_mode(0o666);
-        fs::set_permissions(dir.path().join(SOCKET_NAME), socket_permissions).unwrap();
-        drop(listener);
-        fs::write(dir.path().join(LOCK_NAME), b"v1\n0\n").unwrap();
-        assert_eq!(
-            AgentDaemon::bind(dir.path()).map(|_| ()),
-            Err(DaemonError::Endpoint(EndpointFault::InsecureMode))
-        );
-        assert!(dir.path().join(SOCKET_NAME).exists());
-    }
-}
+mod tests;

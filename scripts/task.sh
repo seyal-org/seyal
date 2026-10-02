@@ -22,6 +22,11 @@ runtime_failure_matrix() {
     --test macos_pty
 }
 
+agent_failure_matrix() {
+  cargo_pinned test -p seyal-agent-backend --locked --features test-fault-injection \
+    --test integration_path --test session_bounds --test process_qualification -- --show-output
+}
+
 case "$cmd" in
   bootstrap)
     bash scripts/bootstrap-toolchain.sh
@@ -43,6 +48,7 @@ case "$cmd" in
     bash scripts/check-toolchain.sh
     cargo_pinned test --workspace --locked
     runtime_failure_matrix
+    agent_failure_matrix
     bash scripts/test-macos-ui.sh
     ;;
   ui-test)
@@ -80,6 +86,7 @@ case "$cmd" in
     cargo_pinned clippy --workspace --all-targets --all-features -- -D warnings
     cargo_pinned test --workspace --locked
     runtime_failure_matrix
+    agent_failure_matrix
     ;;
   bench)
     bash scripts/check-toolchain.sh

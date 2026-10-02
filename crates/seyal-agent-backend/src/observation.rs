@@ -47,11 +47,104 @@ impl ObservationAuthority {
         &self.domain
     }
 
+    pub fn restore_work_scope(
+        &mut self,
+        id: seyal_agent_core::WorkScopeId,
+        kind: seyal_agent_core::WorkScopeKind,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_work_scope(id, kind)
+    }
+
+    pub fn restore_work_item(
+        &mut self,
+        id: seyal_agent_core::WorkItemId,
+        work_scope_id: seyal_agent_core::WorkScopeId,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_work_item(id, work_scope_id)
+    }
+
+    pub fn restore_attempt(
+        &mut self,
+        id: seyal_agent_core::AttemptId,
+        work_item_id: seyal_agent_core::WorkItemId,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_attempt(id, work_item_id)
+    }
+
+    pub fn restore_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+    ) -> Result<(), DomainError> {
+        self.domain
+            .restore_agent_run(id, attempt_id, binding_generation, control_generation)
+    }
+
+    pub fn restore_orphaned_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_orphaned_agent_run(
+            id,
+            attempt_id,
+            binding_generation,
+            control_generation,
+        )
+    }
+
+    pub fn mark_recovered(&mut self, run_id: AgentRunId) {
+        self.set_liveness(run_id, RunLiveness::UnknownAfterCrash);
+    }
+
+    /// Fence a recovered run so pre-crash binding/control presentations fail.
+    pub fn advance_binding_generation(
+        &mut self,
+        run_id: AgentRunId,
+        presented: seyal_agent_core::BindingGeneration,
+    ) -> Result<seyal_agent_core::BindingGeneration, DomainError> {
+        self.domain.advance_binding_generation(run_id, presented)
+    }
+
+    pub fn advance_control_generation(
+        &mut self,
+        run_id: AgentRunId,
+        presented: seyal_agent_core::ControlGeneration,
+    ) -> Result<seyal_agent_core::ControlGeneration, DomainError> {
+        self.domain.advance_control_generation(run_id, presented)
+    }
+
     pub fn liveness(&self, run_id: AgentRunId) -> RunLiveness {
-        self.liveness
-            .get(&run_id)
-            .copied()
+        self.recorded_liveness(run_id)
             .unwrap_or(RunLiveness::ScriptedLive)
+    }
+
+    pub fn recorded_liveness(&self, run_id: AgentRunId) -> Option<RunLiveness> {
+        self.liveness.get(&run_id).copied()
+    }
+
+    /// Drop one accepted observation when its event did not commit.
+    pub fn undo_apply(
+        &mut self,
+        observation: &HostObservation,
+        previous_liveness: Option<RunLiveness>,
+        previous_effects: u64,
+    ) {
+        self.applied
+            .remove(&(observation.run_id, observation.ordinal));
+        match previous_liveness {
+            Some(liveness) => {
+                self.liveness.insert(observation.run_id, liveness);
+            }
+            None => {
+                self.liveness.remove(&observation.run_id);
+            }
+        }
+        self.effects_performed = previous_effects;
     }
 
     pub fn work_item_outcome(&self, _run_id: AgentRunId) -> WorkItemOutcome {
@@ -225,7 +318,9 @@ fn parse_line(line: &str) -> Result<crate::ScriptStep, crate::ScriptError> {
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, crate::ScriptError> {
-    if !text.len().is_multiple_of(2) || text.len() > 8192 {
+    // Byte length can be even while a window still splits a multibyte scalar.
+    // Reject that before slicing so malformed harness text stays an error.
+    if !text.is_ascii() || !text.len().is_multiple_of(2) || text.len() > 8192 {
         return Err(crate::ScriptError::MalformedScript);
     }
     (0..text.len())
@@ -517,6 +612,9 @@ mod tests {
     fn malformed_scripts_are_bounded() {
         assert!(parse_script("emit nope").is_err());
         assert!(parse_script("").is_err());
+        // Minimized libFuzzer crash: even byte length, odd char boundary.
+        assert!(parse_script("emit result e\u{00c2}e").is_err());
+        assert!(parse_script("emit output e\u{00c2}e").is_err());
         let huge = "x".repeat(70_000);
         assert!(parse_script(&huge).is_err());
         let mut state = 9_u64;
