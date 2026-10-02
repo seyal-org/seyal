@@ -649,8 +649,7 @@ fn exit_guard_reports_panicked_on_unwind() {
         .exit_report
         .clone()
         .expect("barrier exit-report installed");
-    let worker = thread::spawn(move || {
-        let _guard = super::supervision::ExitGuard::arm(tx);
+    let worker = super::supervision::spawn_supervised(Some(tx), || -> Result<(), DaemonError> {
         panic!("worker unwind");
     });
     let started = Instant::now();

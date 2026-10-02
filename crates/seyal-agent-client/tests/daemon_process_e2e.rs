@@ -412,3 +412,64 @@ fn bounded_daemon_requires_deadline() {
     );
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn bounded_daemon_counts_recoverable_fault_toward_budget() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    let dir = temp_dir("recoverable-budget");
+    let socket = dir.join("agent.sock");
+    let mut child = spawn_daemon_opts(&dir, 1024, Some(60), Some(1), true);
+    let started = Instant::now();
+    let mut stream = loop {
+        match UnixStream::connect(&socket) {
+            Ok(stream) => break stream,
+            Err(_) if started.elapsed() > Duration::from_secs(10) => {
+                panic!("barrier recoverable-budget: daemon never accepted");
+            }
+            Err(_) => thread::park_timeout(Duration::from_millis(5)),
+        }
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    // Hold the socket until the worker has the bytes. Closing before accept
+    // can drop the connection from the listen queue, so the budget is never spent.
+    stream.write_all(b"BAD!\x00\x00\x00\x00\x00\x00").unwrap();
+    stream.flush().unwrap();
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let ended = Instant::now();
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        if ended.elapsed() >= Duration::from_secs(2) {
+            panic!("barrier recoverable-budget: daemon still running after 2s");
+        }
+        thread::park_timeout(Duration::from_millis(20));
+    };
+    drop(stream);
+    assert!(status.success(), "barrier recoverable-budget: {status}");
+    assert!(
+        ended.elapsed() <= Duration::from_secs(2),
+        "barrier recoverable-budget took {:?}",
+        ended.elapsed()
+    );
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(
+        stderr.contains("client serve ended: Malformed"),
+        "barrier recoverable-budget: stderr={stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}

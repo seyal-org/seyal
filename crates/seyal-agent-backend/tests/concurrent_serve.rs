@@ -437,9 +437,11 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Peer A's unread response blocks that worker's write. Peer B's commands
-/// must still complete inside 1s, and A must end as `TimedOut` rather than
-/// holding the service lock across the socket write.
+/// Peer A writes Subscribe frames until its own write blocks. That happens
+/// only after the daemon stops reading because it is blocked writing A's
+/// response, independent of the platform socket-buffer size. Peer B's
+/// commands must each finish within 1s during that block, and A's worker
+/// must end `Err(TimedOut)`.
 #[test]
 fn stalled_reader_does_not_stall_other_peer() {
     let dir = temp_dir("concurrent-stalled-reader");
@@ -486,11 +488,36 @@ fn stalled_reader_does_not_stall_other_peer() {
         let mut client = TestClient::connect_limits(&a_socket, ABSOLUTE_MAX_FRAME_SIZE, 32);
         a_live.send("stalled").unwrap();
         recv_barrier(&go_a_rx, BARRIER, "stalled-reader-release-a");
-        client.send_unanswered(&Command::Subscribe {
-            session_id: client.session_id,
-            aggregate: AggregateRef::AgentRun(run_id),
-            after: None,
-        });
+        let subscribe = encode_command(
+            &Command::Subscribe {
+                session_id: client.session_id,
+                aggregate: AggregateRef::AgentRun(run_id),
+                after: None,
+            },
+            ABSOLUTE_MAX_FRAME_SIZE,
+        )
+        .unwrap();
+        client
+            .stream
+            .set_write_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let mut blocked = false;
+        for _ in 0..100_000 {
+            match std::io::Write::write_all(&mut client.stream, &subscribe) {
+                Ok(()) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    blocked = true;
+                    break;
+                }
+                Err(error) => panic!("barrier stalled-reader-fill: {error}"),
+            }
+        }
+        assert!(blocked, "barrier stalled-reader-fill: daemon kept reading");
         sent_tx.send(()).unwrap();
         recv_barrier(
             &release_a_rx,
@@ -502,6 +529,10 @@ fn stalled_reader_does_not_stall_other_peer() {
     let b_socket = socket.clone();
     let prober = thread::spawn(move || {
         let mut client = TestClient::connect(&b_socket);
+        client
+            .stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         live_tx.send("prober").unwrap();
         recv_barrier(&go_b_rx, BARRIER, "stalled-reader-release-b");
         recv_barrier(&sent_rx, BARRIER, "stalled-subscribe-sent");
