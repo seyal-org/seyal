@@ -1,6 +1,9 @@
 use super::*;
 use seyal_agent_core::{AttemptId, WorkItemId, WorkScopeId};
-use seyal_agent_protocol::{BackendInstanceId, Command, CommandError, CommandResult};
+use seyal_agent_protocol::{
+    decode_frame, decode_result, encode_command, BackendInstanceId, ClientSessionId, Command,
+    CommandError, CommandResult, ABSOLUTE_MAX_FRAME_SIZE,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_store() -> PathBuf {
@@ -445,6 +448,308 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
         CommandResult::Error(CommandError::Denied)
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn foreign_connection_session_bearing_commands_are_rejected_identically() {
+    let dir = temp_store();
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
+    };
+    let mut service =
+        IntegrationService::open(BackendInstanceId::new(), &config).expect("open service");
+    let owner = service.begin_connection(b"cli").expect("owner principal");
+    let observer = service
+        .begin_connection(b"observer")
+        .expect("observer principal");
+    let session = expect_open(&mut service, owner);
+    let scope = expect_scope(&mut service, owner, session);
+    let item = expect_item(&mut service, owner, session, scope);
+    let attempt = expect_attempt(&mut service, owner, session, item);
+    let run = expect_run(&mut service, owner, session, attempt);
+    let high_water = service
+        .store
+        .high_water(AggregateId::AgentRun(run))
+        .unwrap();
+    let before = (
+        service.store.work_scopes().unwrap(),
+        service.store.work_items().unwrap(),
+        service.store.attempts().unwrap(),
+        service.store.agent_runs().unwrap(),
+    );
+    let unknown = never_issued_session(session);
+    let run_ref = AggregateRef::AgentRun(run);
+    let cases = [
+        (
+            "ResumeSession",
+            Command::ResumeSession {
+                session_id: session,
+            },
+            Command::ResumeSession {
+                session_id: unknown,
+            },
+        ),
+        (
+            "CreateWorkScope",
+            Command::CreateWorkScope {
+                session_id: session,
+                kind: WorkScopeKind::AdHoc,
+            },
+            Command::CreateWorkScope {
+                session_id: unknown,
+                kind: WorkScopeKind::AdHoc,
+            },
+        ),
+        (
+            "CreateWorkItem",
+            Command::CreateWorkItem {
+                session_id: session,
+                work_scope_id: scope,
+            },
+            Command::CreateWorkItem {
+                session_id: unknown,
+                work_scope_id: scope,
+            },
+        ),
+        (
+            "CreateAttempt",
+            Command::CreateAttempt {
+                session_id: session,
+                work_item_id: item,
+            },
+            Command::CreateAttempt {
+                session_id: unknown,
+                work_item_id: item,
+            },
+        ),
+        (
+            "StartAgentRun",
+            Command::StartAgentRun {
+                session_id: session,
+                attempt_id: attempt,
+            },
+            Command::StartAgentRun {
+                session_id: unknown,
+                attempt_id: attempt,
+            },
+        ),
+        (
+            "GetSnapshot",
+            Command::GetSnapshot {
+                session_id: session,
+                aggregate: run_ref,
+            },
+            Command::GetSnapshot {
+                session_id: unknown,
+                aggregate: run_ref,
+            },
+        ),
+        (
+            "Subscribe",
+            Command::Subscribe {
+                session_id: session,
+                aggregate: run_ref,
+                after: None,
+            },
+            Command::Subscribe {
+                session_id: unknown,
+                aggregate: run_ref,
+                after: None,
+            },
+        ),
+        (
+            "CheckGeneration",
+            Command::CheckGeneration {
+                session_id: session,
+                run_id: run,
+                binding_generation: 1,
+                control_generation: 1,
+            },
+            Command::CheckGeneration {
+                session_id: unknown,
+                run_id: run,
+                binding_generation: 1,
+                control_generation: 1,
+            },
+        ),
+        (
+            "ReadRun",
+            Command::ReadRun {
+                session_id: session,
+                run_id: run,
+            },
+            Command::ReadRun {
+                session_id: unknown,
+                run_id: run,
+            },
+        ),
+    ];
+    for (label, owned, missing) in cases {
+        let foreign = handle_bytes(&mut service, observer, &owned);
+        let absent = handle_bytes(&mut service, observer, &missing);
+        assert_eq!(foreign, absent, "{label}");
+        let frame = decode_frame(&foreign, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+        assert_eq!(
+            decode_result(&frame.body).unwrap(),
+            CommandResult::Error(CommandError::RejectedSession),
+            "{label}"
+        );
+    }
+    assert_eq!(
+        (
+            service.store.work_scopes().unwrap(),
+            service.store.work_items().unwrap(),
+            service.store.attempts().unwrap(),
+            service.store.agent_runs().unwrap(),
+        ),
+        before
+    );
+    assert_eq!(
+        service
+            .store
+            .high_water(AggregateId::AgentRun(run))
+            .unwrap(),
+        high_water
+    );
+    assert_eq!(
+        service.dispatch(
+            owner,
+            Command::CheckGeneration {
+                session_id: session,
+                run_id: run,
+                binding_generation: 1,
+                control_generation: 1,
+            },
+            32,
+            ABSOLUTE_MAX_FRAME_SIZE,
+        ),
+        CommandResult::GenerationOk
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn never_issued_session(session: ClientSessionId) -> ClientSessionId {
+    let mut bytes = session.to_bytes();
+    bytes[..8].copy_from_slice(&u64::MAX.to_le_bytes());
+    ClientSessionId::from_bytes(bytes)
+}
+
+fn handle_bytes(
+    service: &mut IntegrationService,
+    principal: seyal_agent_core::ClientPrincipalId,
+    command: &Command,
+) -> Vec<u8> {
+    let encoded = encode_command(command, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+    let frame = decode_frame(&encoded, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+    service
+        .handle(principal, frame, ABSOLUTE_MAX_FRAME_SIZE, 32)
+        .unwrap()
+}
+
+fn expect_open(
+    service: &mut IntegrationService,
+    principal: seyal_agent_core::ClientPrincipalId,
+) -> ClientSessionId {
+    match service.dispatch(
+        principal,
+        Command::OpenSession {
+            scopes: vec![1, 2, 4],
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) {
+        CommandResult::Opened { session_id } => session_id,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn expect_scope(
+    service: &mut IntegrationService,
+    principal: seyal_agent_core::ClientPrincipalId,
+    session_id: ClientSessionId,
+) -> WorkScopeId {
+    match service.dispatch(
+        principal,
+        Command::CreateWorkScope {
+            session_id,
+            kind: WorkScopeKind::Repository,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) {
+        CommandResult::WorkScope { id } => id,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn expect_item(
+    service: &mut IntegrationService,
+    principal: seyal_agent_core::ClientPrincipalId,
+    session_id: ClientSessionId,
+    work_scope_id: WorkScopeId,
+) -> WorkItemId {
+    match service.dispatch(
+        principal,
+        Command::CreateWorkItem {
+            session_id,
+            work_scope_id,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) {
+        CommandResult::WorkItem { id } => id,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn expect_attempt(
+    service: &mut IntegrationService,
+    principal: seyal_agent_core::ClientPrincipalId,
+    session_id: ClientSessionId,
+    work_item_id: WorkItemId,
+) -> AttemptId {
+    match service.dispatch(
+        principal,
+        Command::CreateAttempt {
+            session_id,
+            work_item_id,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) {
+        CommandResult::Attempt { id } => id,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn expect_run(
+    service: &mut IntegrationService,
+    principal: seyal_agent_core::ClientPrincipalId,
+    session_id: ClientSessionId,
+    attempt_id: AttemptId,
+) -> AgentRunId {
+    match service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) {
+        CommandResult::Started { run_id, .. } => run_id,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn session_principal_mismatch_maps_to_rejected_session() {
+    assert_eq!(
+        super::wire::map_auth(crate::AuthorizationError::SessionPrincipalMismatch),
+        CommandError::RejectedSession
+    );
 }
 
 #[test]

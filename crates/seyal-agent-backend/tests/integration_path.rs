@@ -515,7 +515,7 @@ fn observer_principal_cannot_escalate_or_resume_owner_session() {
         }
     });
     daemon.serve_one().unwrap();
-    assert_eq!(cross.join().unwrap(), CommandError::Denied);
+    assert_eq!(cross.join().unwrap(), CommandError::RejectedSession);
     let _ = fs::remove_dir_all(dir);
 }
 

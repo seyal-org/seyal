@@ -166,19 +166,22 @@ acknowledged_loc = 866
 issue = 1181
 reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1181 partial-segment merge and OutputRef materialization must share the append transaction/lock with insert_event. Extracting only segment merge would split the commit boundary that proves fault isolation."
 
-# #1178 AB-1.2 durable principal load/evidence index stays with AuthorizationRepository.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/auth.rs"
-acknowledged_loc = 712
-issue = 1178
-reason = "Principal/session authorization, Hello evidence mapping, and durable principal snapshots stay one repository; splitting evidence index from OpenSession would duplicate Active/Revoked checks across modules."
-
 # #1179 connection-scoped principal threading through IntegrationService handle.
+# #1194 threads that caller into every session-bearing command. Authorization
+# decisions stay in auth/mod.rs, which is below review_loc after its unit tests
+# moved to auth/tests.rs.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 756
-issue = 1179
-reason = "V1 command catalog and observation dispatch stay one session façade; #1179 passes connection-scoped ClientPrincipalId into handle/dispatch so concurrent peers cannot share a singular principal slot."
+acknowledged_loc = 766
+issue = 1194
+reason = "V1 command catalog and observation dispatch stay one session façade; #1194 passes the connection principal into every session-bearing command through two private gates so foreign-session rejection cannot diverge from the auth lookup."
+
+# #1194 nine-command byte-identity regression lives with the other session façade tests.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/session/tests.rs"
+acknowledged_loc = 762
+issue = 1194
+reason = "Session façade regressions stay beside IntegrationService; #1194 adds the nine-command foreign-session frame comparison, which crosses review_loc without a second session test authority."
 
 # #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc as one cohesive navigation
 # test module (resolver rejections beside the Navigate commits they feed).
