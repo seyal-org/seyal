@@ -2,9 +2,9 @@
 //!
 //! The `seyal-agent-backend` binary is the production daemon entry. Library
 //! code owns the per-user Unix-domain daemon, Hello/HelloAck handshake,
-//! principal/session authorization fencing, and the deterministic
-//! provider-free ExecutionHost fixture. `AgentDomain` remains the only
-//! lifecycle transition authority.
+//! principal/session authorization fencing, the deterministic provider-free
+//! FakeExecutionHost fixture, and StandaloneProcessHost (SPEC-018 §2).
+//! `AgentDomain` remains the only lifecycle transition authority.
 
 mod auth;
 #[cfg(unix)]
@@ -18,6 +18,7 @@ mod observation;
 mod peer;
 #[cfg(unix)]
 mod session;
+mod standalone_process_host;
 
 pub use auth::{
     AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
@@ -33,6 +34,7 @@ pub use observation::{
 };
 #[cfg(unix)]
 pub use session::IntegrationConfig;
-pub use seyal_agent_core::{AgentDomain, DomainError};
+pub use seyal_agent_core::{AgentDomain, DomainError, ExecutionHost, ExecutionHostKind};
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
+pub use standalone_process_host::{HostError, StandaloneProcessConfig, StandaloneProcessHost};
