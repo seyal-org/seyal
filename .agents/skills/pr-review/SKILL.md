@@ -7,7 +7,7 @@ description: Seyal facade for generic AI-SDLC PR merge-readiness review, adding 
 
 Follow the canonical generic merge-readiness procedure in `.sdlc/framework/skills/pr-review/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
-This is Seyal's user-facing final PR review entrypoint. A caller asking whether a PR is ready to merge should use this skill; the generic orchestrator will run or consume focused `code-review`, `verification`, and only the specialist reviews required by risk and project policy.
+This is Seyal's single user-facing PR review and re-review entrypoint. The generic procedure reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
 
 ## Mandatory cross-platform UI ownership gate
 
@@ -41,7 +41,5 @@ Apply only these Seyal-specific rules on top of the generic procedure:
 11. Core/high-risk work must retain the independent-review requirement in `docs/engineering/ISSUE-PROTOCOL.md`; implementers do not self-approve.
 12. OSS must remain independent of commercial code. Inspect `seyal-commercial` only when needed to validate the edition boundary; never make it an OSS authority.
 13. Prove that every claimed production capability has a reviewable permanent implementation in the changed or explicitly depended-on production path. Trace mandatory acceptance criteria to concrete production entrypoints and behavior tests; specifications, ADRs, interfaces, mocks, benchmarks, calibration harnesses, documentation, or POC/spike code alone do not satisfy the implementation gate. If the required production path is absent or cannot be inspected, return `CHANGES_REQUIRED` or `INCONCLUSIVE` rather than accepting the PR.
-
-For a narrower request that asks only for implementation/diff defects or regressions and does not ask for merge readiness, use the separate `code-review` skill.
 
 If a reusable PR-review rule defect is found, fix it in `ai-sdlc` rather than duplicating generic orchestration here.

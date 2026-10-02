@@ -6,6 +6,7 @@
 
 #[allow(unsafe_code)]
 mod peer;
+mod session;
 
 use std::{
     fs,
@@ -26,6 +27,8 @@ use seyal_agent_protocol::{
     Hello, HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
 };
 
+pub use session::SessionClient;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientError {
     UnsafeEndpoint,
@@ -34,9 +37,22 @@ pub enum ClientError {
     Oversized,
     TimedOut,
     Io,
+    RejectedSession,
+    StaleGeneration,
+    Denied,
+    Failed,
 }
 
 pub fn handshake(socket_path: &Path, hello: &Hello) -> Result<HelloAck, ClientError> {
+    let (stream, ack) = open_stream(socket_path, hello)?;
+    drop(stream);
+    Ok(ack)
+}
+
+pub(crate) fn open_stream(
+    socket_path: &Path,
+    hello: &Hello,
+) -> Result<(UnixStream, HelloAck), ClientError> {
     let our_uid = current_uid().map_err(|_| ClientError::Io)?;
     verify_parent_directory(socket_path, our_uid)?;
     let meta = fs::symlink_metadata(socket_path).map_err(map_io)?;
@@ -52,18 +68,22 @@ pub fn handshake(socket_path: &Path, hello: &Hello) -> Result<HelloAck, ClientEr
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|_| ClientError::Io)?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|_| ClientError::Io)?;
     peer::verify_same_user_peer(stream.as_raw_fd()).map_err(|_| ClientError::UnsafeEndpoint)?;
     let frame = encode_hello(hello, ABSOLUTE_MAX_FRAME_SIZE).map_err(|_| ClientError::Malformed)?;
     stream.write_all(&frame).map_err(map_io)?;
     let response = read_frame(&mut stream)?;
-    match response.kind {
+    let ack = match response.kind {
         FrameKind::HelloAck => decode_ack(&response.body).map_err(|_| ClientError::Malformed),
         FrameKind::HandshakeError => {
             let _ = decode_handshake_error(&response.body);
             Err(ClientError::HandshakeRejected)
         }
-        FrameKind::Hello => Err(ClientError::Malformed),
-    }
+        FrameKind::Hello | FrameKind::Command | FrameKind::Result => Err(ClientError::Malformed),
+    }?;
+    Ok((stream, ack))
 }
 
 fn verify_parent_directory(socket_path: &Path, our_uid: u32) -> Result<(), ClientError> {
@@ -81,7 +101,9 @@ fn verify_parent_directory(socket_path: &Path, our_uid: u32) -> Result<(), Clien
     Ok(())
 }
 
-fn read_frame(stream: &mut UnixStream) -> Result<seyal_agent_protocol::Frame, ClientError> {
+pub(crate) fn read_frame(
+    stream: &mut UnixStream,
+) -> Result<seyal_agent_protocol::Frame, ClientError> {
     let mut header = [0; 10];
     stream.read_exact(&mut header).map_err(map_io)?;
     let body_len =

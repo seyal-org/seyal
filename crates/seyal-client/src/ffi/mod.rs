@@ -27,13 +27,42 @@ mod types;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex, OnceLock,
     },
 };
 
+use seyal_core::ExecutionId;
+
 use crate::LocalDisplayClient;
+
+/// Thread-local `CLIENTS` registry handle. `!Send`/`!Sync` so an owning
+/// `ApplicationRoot` cannot cross executor threads while still naming a TLS entry.
+///
+/// Handle values share the process-wide `NEXT_HANDLE` space with bridge pane
+/// handles: `seyal_bridge_select` / `seyal_bridge_disconnect_handle` can activate
+/// or remove a root-held client. After an external disconnect the root must
+/// treat the handle as stale (`NoLiveClient`) and clear it.
+#[derive(Debug)]
+pub(crate) struct ClientRegistryHandle {
+    raw: u64,
+    _not_send_sync: PhantomData<*const ()>,
+}
+
+impl ClientRegistryHandle {
+    pub(crate) fn new(raw: u64) -> Self {
+        Self {
+            raw,
+            _not_send_sync: PhantomData,
+        }
+    }
+
+    pub(crate) fn raw(&self) -> u64 {
+        self.raw
+    }
+}
 
 pub(crate) use types::{
     SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus, SeyalCopiedText,
@@ -43,12 +72,12 @@ pub(crate) use types::{
 
 #[allow(unused_imports)]
 pub use app::{
-    seyal_app_accessibility, seyal_app_apply, seyal_app_block_row, seyal_app_block_span,
-    seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette,
-    seyal_app_palette_row, seyal_app_pane_divider, seyal_app_pane_region, seyal_app_recovery_param,
-    seyal_app_shell, seyal_app_shell_row, seyal_app_snapshot,
-    seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
+    seyal_app_accessibility, seyal_app_apply, seyal_app_block_projection, seyal_app_block_row,
+    seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer,
+    seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_last_error,
+    seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row, seyal_app_pane_divider,
+    seyal_app_pane_region, seyal_app_recovery_param, seyal_app_shell, seyal_app_shell_row,
+    seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
 };
 #[allow(unused_imports)]
@@ -64,8 +93,9 @@ pub use display::{
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]
 pub use errors::{
-    seyal_bridge_input_failure, seyal_bridge_last_recovery_result,
-    seyal_bridge_pass9_diag_snapshot, seyal_bridge_resize_failure,
+    seyal_bridge_classify_open_result, seyal_bridge_input_failure,
+    seyal_bridge_last_recovery_result, seyal_bridge_pass9_diag_snapshot,
+    seyal_bridge_resize_failure,
 };
 #[allow(unused_imports)]
 pub use input::{
@@ -145,12 +175,99 @@ pub(crate) fn with_active_client_mut<R>(
     operation: impl FnOnce(&mut LocalDisplayClient) -> R,
 ) -> Option<R> {
     let handle = active_handle();
+    with_client_mut(handle, operation)
+}
+
+/// Borrow a live client from the sole attach registry by handle.
+pub(crate) fn with_client<R>(
+    handle: u64,
+    operation: impl FnOnce(&LocalDisplayClient) -> R,
+) -> Option<R> {
+    if handle == 0 {
+        return None;
+    }
+    CLIENTS.with(|clients| {
+        clients
+            .borrow()
+            .get(&handle)
+            .map(|client| operation(client))
+    })
+}
+
+/// Mutably borrow a live client from the sole attach registry by handle.
+pub(crate) fn with_client_mut<R>(
+    handle: u64,
+    operation: impl FnOnce(&mut LocalDisplayClient) -> R,
+) -> Option<R> {
+    if handle == 0 {
+        return None;
+    }
     CLIENTS.with(|clients| {
         clients
             .borrow_mut()
             .get_mut(&handle)
             .map(|client| operation(client))
     })
+}
+
+/// Insert an ApplicationRoot-owned live client into the sole attach registry.
+///
+/// Rejects a second live registration for the same [`ExecutionId`] so this path
+/// cannot bypass `PENDING_CLIENTS` / adopt bookkeeping by stacking another
+/// attach beside an already-adopted bridge client (#1066 locked design §3).
+pub(crate) fn register_app_client(client: LocalDisplayClient) -> Result<ClientRegistryHandle, ()> {
+    let execution = client.execution_id();
+    let handle = allocate_handle();
+    CLIENTS.with(|clients| {
+        let mut clients = clients.borrow_mut();
+        if clients
+            .values()
+            .any(|existing| existing.execution_id() == execution)
+        {
+            return Err(());
+        }
+        clients.insert(handle, Box::new(client));
+        ACTIVE_HANDLE.with(|active| active.set(handle));
+        Ok(ClientRegistryHandle::new(handle))
+    })
+}
+
+/// Remove a live client from the sole attach registry (ApplicationRoot detach/drop).
+///
+/// Uses `try_with` so TLS teardown at thread exit cannot abort under
+/// `panic = "abort"` when a root inside `APPS` is dropped after `CLIENTS`.
+pub(crate) fn unregister_client(handle: u64) -> Option<Box<LocalDisplayClient>> {
+    if handle == 0 {
+        return None;
+    }
+    CLIENTS
+        .try_with(|clients| clients.borrow_mut().remove(&handle))
+        .ok()
+        .flatten()
+}
+
+/// Test/diagnostic: whether `handle` is present in the sole attach registry.
+#[doc(hidden)]
+pub fn client_registry_contains(handle: u64) -> bool {
+    if handle == 0 {
+        return false;
+    }
+    CLIENTS
+        .try_with(|clients| clients.borrow().contains_key(&handle))
+        .unwrap_or(false)
+}
+
+/// Test/diagnostic: whether any live registry entry owns `execution`.
+#[doc(hidden)]
+pub fn client_registry_has_execution(execution: ExecutionId) -> bool {
+    CLIENTS
+        .try_with(|clients| {
+            clients
+                .borrow()
+                .values()
+                .any(|client| client.execution_id() == execution)
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

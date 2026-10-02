@@ -11,7 +11,7 @@
 - **Pass 8 authority:** reviewed head `54b3a1748effc7c47c409d1f7cfdcbd547e8d1cc`, merged by PR #721 as `d9d21187e8429bbd3dbeb3e1c7cc4d05c1d147e6`
 - **Pass 9 authority:** #719 closed Done; PR #743 / PR #745; review candidate `1005bc42397aac485b1aeff08cafd0f67790d969`
 - **Numbering note:** SPEC-008 is already the active M003 command-Blocks/composer specification and is intentionally not a Pass 9 dependency historically. SPEC-008 governs presentation selection/routing when this reconnect contract is used by Flow/Raw/TUI.
-- **Proposed M003 amendment:** §8.2.1 multi-execution resolution under Issue #994; **normative only on ADR-017 acceptance** and not implemented.
+- **Accepted M003 amendment:** §8.2.1 multi-execution resolution under Issue #994; **normative on ADR-017 acceptance** and not implemented.
 
 ## 0. Presentation-mode applicability of the accepted ADR-009 amendment
 
@@ -344,9 +344,9 @@ For the user-visible Pass 9 proof, exactly one eligible surviving interactive ex
 
 If no eligible execution survives, continuity is not claimed. Creating a new execution is a separate path with a new `ExecutionId`.
 
-#### 8.2.1 Multi-execution resolution (proposed M003 amendment)
+#### 8.2.1 Multi-execution resolution (accepted M003 amendment)
 
-- **Status:** proposed amendment; **normative only on ADR-017 acceptance** (Issue #994, ADR-017). It narrows resolution; it does not weaken any Pass 9 continuity requirement.
+- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance** (Issue #994, ADR-017). It narrows resolution; it does not weaken any Pass 9 continuity requirement.
 
 Once client-requested provisioning exists, several live executions are ordinary
 rather than exceptional. Resolution therefore becomes:
@@ -354,6 +354,9 @@ rather than exceptional. Resolution therefore becomes:
 - within one live client session, a Pane reconnects by the exact `ExecutionId`
   recorded in portable Rust product state. "First/only running execution"
   resolution must not be the headed production path;
+- a fresh client process with zero eligible surviving executions provisions
+  exactly one new execution for its initial Pane through SPEC-004 §18;
+  continuity is not claimed (§8.2);
 - a fresh client process with exactly one eligible surviving execution still
   adopts it for its initial Pane, preserving the §8.2 proof above;
 - a fresh client process with more than one eligible surviving execution must not

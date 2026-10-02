@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import Metal
 import XCTest
 
 @testable import Seyal
@@ -25,9 +26,15 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(snapshot.version, UInt16(SEYAL_APP_ABI_VERSION))
         XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue))
         XCTAssertEqual(MemoryLayout<SeyalAppBlockSpan>.size, 16)
+        XCTAssertEqual(MemoryLayout<SeyalAppBlockProjection>.size, 24)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED), 0)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY), 1)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP), 2)
         let emptySpan = seyal_app_block_span(handle, 0)
         XCTAssertEqual(emptySpan.start_line, 0)
         XCTAssertEqual(emptySpan.end_line, 0)
+        let emptyProjection = seyal_app_block_projection(handle, 0)
+        XCTAssertEqual(emptyProjection.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
         XCTAssertEqual(seyal_app_destroy(handle), 0)
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
@@ -197,8 +204,8 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testSinglePaneProjectsNoSplitDividerAndRatioActionFailsClosed() throws {
-        XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 48)
+    func testSinglePaneProjectsNoSplitDividerAndDividerDragFailsClosed() throws {
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 56)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
@@ -209,13 +216,13 @@ final class SeyalHostComponentTests: XCTestCase {
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_SET_SPLIT_RATIO.rawValue)
+        action.kind = UInt16(SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER.rawValue)
         action.target_execution_lo = row.id_lo
         action.target_execution_hi = row.id_hi
         action.reserved = Float(0.3).bitPattern
         XCTAssertNotEqual(seyal_app_apply(handle, &action), 0)
         XCTAssertEqual(seyal_app_last_error(handle), 34, "NoSplitDivider")
-        XCTAssertEqual(seyal_app_pane_region(handle, 0).width, 1.0, "rejected resize leaves the region full")
+        XCTAssertEqual(seyal_app_pane_region(handle, 0).width, 1.0, "rejected drag leaves the region full")
     }
 
     @MainActor
@@ -258,6 +265,54 @@ final class SeyalHostComponentTests: XCTestCase {
             UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         )
         XCTAssertTrue(composer.isHidden, "nested TUI refresh must hide composer")
+    }
+
+    @MainActor
+    func testShellExitRecoveryKeepsFlowAndHidesComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        view.reconcileChrome()
+        let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertFalse(composer.isHidden, "a live Flow execution shows its composer")
+
+        var begin = SeyalAppAction()
+        begin.version = bind.version
+        begin.size = bind.size
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        begin.target_pty_generation = 0
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+
+        var ended = SeyalAppAction()
+        ended.version = bind.version
+        ended.size = bind.size
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.target_pty_generation = 1
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+
+        let snapshot = seyal_app_snapshot(handle)
+        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
+        XCTAssertEqual(view.recoveryText(snapshot), "shell exited")
+        view.reconcileChrome()
+        XCTAssertTrue(composer.isHidden, "an ended shell cannot accept Flow commands")
+        XCTAssertEqual(seyal_app_composer(handle).mode, UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
     }
 
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
@@ -487,7 +542,8 @@ final class SeyalHostComponentTests: XCTestCase {
             // retry boundary available to the host once; do not poll a terminal
             // recovery state for the full 30-second test timeout.
             if !connectedOnce, !didRetryExhaustedRecovery,
-                view.runtimeRecoveryState.stage == .exhausted
+                seyal_app_snapshot(pane.appHandle).recovery_stage
+                    == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
             {
                 didRetryExhaustedRecovery = true
                 _ = view.retryRuntimeConnection()
@@ -621,6 +677,23 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(RustDisplayBridge.pasteAdmissionSelfTest())
     }
 
+    /// E7 / #1020: ComposerRequestCorrelation was a dead Swift product-shaped
+    /// remnant. Composer acceptance stays correlated by the Runtime request ID
+    /// on the Rust side; the thin host must not reintroduce this type.
+    @MainActor
+    func testRustDisplayBridgeDoesNotOwnComposerRequestCorrelation() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let bridge = sourceRoot.appendingPathComponent("RustDisplayBridge.swift")
+        let text = (try? String(contentsOf: bridge, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "RustDisplayBridge.swift must be readable from the test bundle")
+        XCTAssertFalse(text.contains("struct ComposerRequestCorrelation"))
+        XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
+    }
+
     @MainActor
     func testXtermButtonMapDropsButtonsBeyondRight() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
@@ -655,9 +728,59 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
     }
 
+    /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
+    /// once recovery presentation is no longer pending (#1065).
+    ///
+    /// The production library does not export a snapshot-call counter. This
+    /// test checks the same structure as `scripts/check-hot-path.py`: the
+    /// pending guard returns before any snapshot FFI. A pending=false call
+    /// still returns without entering that work.
+    @MainActor
+    func testAdvanceRecoveryPresentationMakesNoSnapshotCallsWhenNotPending() {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let recovery = sourceRoot.appendingPathComponent("MetalSurfaceView+Recovery.swift")
+        let text = (try? String(contentsOf: recovery, encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.isEmpty, "MetalSurfaceView+Recovery.swift must be readable")
+        guard let functionStart = text.range(of: "func advanceRecoveryPresentationIfReady()") else {
+            return XCTFail("missing advanceRecoveryPresentationIfReady()")
+        }
+        let body = text[functionStart.lowerBound...]
+        guard let pendingGuard = body.range(of: "guard recoveryPresentationPending") else {
+            return XCTFail("advanceRecoveryPresentationIfReady must gate on recoveryPresentationPending")
+        }
+        if let snapshot = body.range(of: "seyal_app_snapshot") {
+            XCTAssertGreaterThan(
+                snapshot.lowerBound,
+                pendingGuard.lowerBound,
+                "seyal_app_snapshot must follow the recoveryPresentationPending guard"
+            )
+        }
+
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        view.recoveryPresentationPending = false
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertFalse(view.recoveryPresentationPending)
+    }
+
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.
+    @MainActor
+    func testTerminalDefaultCellColorsFollowThemeWithoutRebuildingPreparedFrames() {
+        XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
+    }
+
     @MainActor
     func testM002RendererPrepareSubmissionContractWritesCohort() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath)
@@ -665,10 +788,12 @@ final class SeyalHostComponentTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("Sources", isDirectory: true)
-        let validation = try String(
-            contentsOf: sourceRoot.appendingPathComponent("RendererValidation.swift"),
-            encoding: .utf8
-        )
+        let validationFiles = try FileManager.default.contentsOfDirectory(
+            at: sourceRoot,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("RendererValidation") && $0.pathExtension == "swift" }
+        let validation = try validationFiles.map { try String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
         XCTAssertTrue(validation.contains("SEYAL_M002_CONTRACT_GATE"))
         XCTAssertTrue(validation.contains("renderer_prepare_submission"))
         XCTAssertTrue(validation.contains("runM002ContractCohort"))
@@ -694,6 +819,35 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(body.contains("cohort = 1"))
         XCTAssertTrue(body.contains("samples = ["))
         XCTAssertEqual(body.split(separator: ",").count, 2)
+    }
+
+    /// #1020: Swift cohesion split keeps public self-test / teardown entrypoints
+    /// on the production types while moving harness/helpers into sibling files.
+    @MainActor
+    func testCohesionSplitKeepsPublicSelfTestEntrypoints() {
+        XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
+        XCTAssertTrue(RustDisplayBridge.pasteAdmissionSelfTest())
+        XCTAssertTrue(RustDisplayBridge.teardownReconnectStateSelfTest())
+        XCTAssertTrue(MetalTerminalRenderer.gpuCompletionFailureRecoverySelfTest())
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        for required in [
+            "InteractiveMetalSurfaceView+InputSelfTests.swift",
+            "MetalTerminalRenderer+Encode.swift",
+            "RustDisplayBridge+Input.swift",
+            "ProductChromeBlockViews.swift",
+            "MetalSurfaceRecoveryState.swift",
+            "RendererValidation+Benchmark.swift",
+        ] {
+            let path = sourceRoot.appendingPathComponent(required)
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: path.path),
+                "missing cohesion sibling \(required)"
+            )
+        }
     }
 
     func testTranscriptFrameRejectsZeroBlockIdentity() {
@@ -1175,6 +1329,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let theme = NativeThemeRealization.theme(from: visual)
         XCTAssertEqual(theme.appearance.name, NSAppearance.Name.aqua)
+        XCTAssertEqual(theme.terminalDefaultForeground, visual.text.byteSwapped)
+        XCTAssertEqual(theme.terminalDefaultBackground, visual.canvas.byteSwapped)
         XCTAssertEqual(theme.uiFontSize, 16, accuracy: 0.01)
         XCTAssertEqual(theme.terminalFontSize, 18, accuracy: 0.01)
         XCTAssertEqual(theme.windowPadding, 12, accuracy: 0.01)
@@ -1241,6 +1397,139 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(material.isHidden, "reduced-material must hide the frost effect")
         XCTAssertTrue(window.isOpaque)
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
+    }
+
+    // MARK: - Flow live-tail primary clip (#865)
+
+    /// Running Flow Blocks must clip only the Rust-mapped primary-frame row
+    /// slice into the Block region (skip preceding viewport rows) without
+    /// enabling Pane-wide live-grid drawing or inventing `start+511` history.
+    @MainActor
+    func testFlowLiveTailPrimaryClipStaysInsideBlockRegion() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        renderer.setPresentationPlan(.flow())
+
+        // Three prepared rows: preceding Block output on row 0, running
+        // Block on rows 1..2. Clip must exclude row 0.
+        func cell(_ ch: Character) -> SeyalPreparedCell {
+            var c = SeyalPreparedCell()
+            c.scalar = UInt32(ch.unicodeScalars.first!.value)
+            c.foreground = 0xffe9_e1d8
+            c.background = 0xff10_0d0b
+            return c
+        }
+        var cells = [
+            cell("A"), cell("B"),
+            cell("H"), cell("i"),
+            cell("!"), cell("!")
+        ]
+        func update(generation: UInt64, fullRebuild: Bool, damage: DamageMask) throws -> RendererUpdateResult {
+            try cells.withUnsafeBufferPointer { buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: generation,
+                        rows: 3,
+                        columns: 2,
+                        fullRebuild: fullRebuild,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                )
+            }
+        }
+        var damage = DamageMask()
+        damage.markAll(rows: 3)
+        XCTAssertEqual(try update(generation: 865, fullRebuild: true, damage: damage), .updated)
+
+        let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let region = NativeTranscriptRegion(
+            id: 865,
+            origin: .zero,
+            clip: NSRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(cellSize.width * 2),
+                height: CGFloat(cellSize.height * 2)
+            )
+        )
+        renderer.setTranscriptRegions([region])
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        // Dense layout: 2 rows × 2 cols (including any zero-size placeholders).
+        XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        // Block-local row 0 comes from prepared viewport row 1 ("H"), not
+        // preceding viewport row 0 ("A").
+        XCTAssertEqual(
+            renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1,
+            0,
+            "first painted live-tail row must be Block-local Y 0"
+        )
+        let allocationsAfterClip = renderer.stats.instanceBufferAllocations
+        let rewrittenAfterClip = renderer.stats.liveTailCellsRewritten
+        let inspection = renderer.inspectPresentation()
+        XCTAssertEqual(inspection.mode, .flow)
+        XCTAssertFalse(inspection.drawsLiveGrid)
+        XCTAssertFalse(inspection.drawsFullGridBackground)
+        XCTAssertFalse(inspection.drawsCursorOutsideBlockRegions)
+        XCTAssertEqual(inspection.blockRegionIDs, [865])
+
+        let paint = renderer.inspectFlowPaint()
+        XCTAssertTrue(paint.isClean, "Flow must not submit Pane-wide live grid")
+        XCTAssertEqual(paint.historyInstanceCount, 4)
+        XCTAssertEqual(paint.instancesOutsideClips, 0)
+
+        // Damage-free update must reuse the live-tail clip without allocating
+        // another live-tail buffer or rewriting cells.
+        XCTAssertEqual(try update(generation: 866, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        XCTAssertEqual(
+            renderer.stats.instanceBufferAllocations,
+            allocationsAfterClip,
+            "damage-free live-tail refresh must not allocate"
+        )
+        XCTAssertEqual(
+            renderer.stats.liveTailCellsRewritten,
+            rewrittenAfterClip,
+            "damage-free live-tail refresh must not rewrite cells"
+        )
+
+        // Partial damage on prepared row 2 (clip-local rowOffset 1) rewrites
+        // only that row's two cells, not the full 4-cell clip.
+        var partial = DamageMask()
+        partial.mark(row: 2)
+        cells[4] = cell("X")
+        cells[5] = cell("Y")
+        XCTAssertEqual(try update(generation: 867, fullRebuild: false, damage: partial), .updated)
+        XCTAssertEqual(
+            renderer.stats.liveTailCellsRewritten,
+            rewrittenAfterClip &+ 2,
+            "partial damage must rewrite only the damaged clip row"
+        )
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1, 0, accuracy: 0.01)
+
+        // Clearing live-tail must not re-enable Pane-wide live grid.
+        renderer.setLiveTailBlocks([:])
+        XCTAssertEqual(renderer.liveTailRegionCount, 0)
+        XCTAssertFalse(renderer.inspectPresentation().drawsLiveGrid)
+    }
+
+    func testBlockProjectionABIRejectsInventedRunningHistoryEnd() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let unbound = seyal_app_block_projection(handle, 0)
+        XCTAssertEqual(unbound.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
+        XCTAssertEqual(unbound.end_line, 0)
+        XCTAssertEqual(unbound.reserved0, 0)
+        XCTAssertEqual(unbound.reserved1, 0)
     }
 
 }

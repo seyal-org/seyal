@@ -5,8 +5,9 @@
 //! never derive geometry, focus, or live-surface placement themselves
 //! (ADR-015). Rects are unit fractions of the Tab's center area with a
 //! top-left origin; each Split divides its area by its stored [`SplitRatio`]
-//! (#928, SPEC-025 `ratio`). Chrome path only: never call this from the
-//! PTY→VT→damage path.
+//! (#928, SPEC-025 `ratio`). A divider drag reaches Rust as a raw
+//! [`SplitPosition`] and Rust derives the ratio, so a host never inverts the
+//! layout. Chrome path only: never call this from the PTY→VT→damage path.
 
 use seyal_core::PaneId;
 
@@ -36,6 +37,31 @@ impl SplitRatio {
 
     pub fn fraction(self) -> f32 {
         f32::from(self.0) / 10_000.0
+    }
+}
+
+/// A pointer coordinate along one divider's axis, in Tab unit space (x for a
+/// side-by-side Split, y for a stacked one), as ten-thousandths so actions
+/// compare exactly. It may lie outside the Split's area; Rust clamps when it
+/// derives the ratio.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplitPosition(i32);
+
+impl SplitPosition {
+    /// Positions beyond ±`LIMIT` Tab extents saturate; NaN/infinity fail
+    /// closed.
+    const LIMIT: f32 = 100.0;
+
+    pub fn from_unit(value: f32) -> Option<Self> {
+        if !value.is_finite() {
+            return None;
+        }
+        let scaled = (value.clamp(-Self::LIMIT, Self::LIMIT) * 10_000.0).round();
+        Some(Self(scaled as i32))
+    }
+
+    fn unit(self) -> f32 {
+        self.0 as f32 / 10_000.0
     }
 }
 
@@ -97,14 +123,33 @@ pub struct PaneRegion {
 }
 
 /// One Split's divider. `leading` names it for `SetSplitRatio`: the last leaf
-/// of the Split's `first` child. `area` is the whole rect the Split divides,
-/// so a host maps a drag position to a ratio without owning layout math.
+/// of the Split's `first` child. `line` is the zero-thickness boundary between
+/// the two children (zero width for a side-by-side Split, zero height for a
+/// stacked one); a host only centres its hit zone on it. `area` is the whole
+/// rect the Split divides.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneDivider {
     pub leading: PaneId,
     pub axis: SplitAxis,
     pub area: PaneRect,
+    pub line: PaneRect,
     pub ratio: SplitRatio,
+}
+
+impl PaneDivider {
+    /// The ratio a drag to `position` asks for: the pointer's share of this
+    /// Split's area along its axis, clamped like every stored ratio. `None`
+    /// for a degenerate (zero-extent) area.
+    pub fn ratio_at(&self, position: SplitPosition) -> Option<SplitRatio> {
+        let (origin, extent) = match self.axis {
+            SplitAxis::Right => (self.area.x, self.area.width),
+            SplitAxis::Down => (self.area.y, self.area.height),
+        };
+        if extent <= 0.0 {
+            return None;
+        }
+        SplitRatio::from_fraction((position.unit() - origin) / extent)
+    }
 }
 
 /// Regions in tree (depth-first, first-before-second) order, matching
@@ -146,13 +191,18 @@ fn collect(
             second,
             ratio,
         } => {
+            let (a, b) = rect.divided(*axis, *ratio);
+            let line = match axis {
+                SplitAxis::Right => PaneRect { width: 0.0, ..b },
+                SplitAxis::Down => PaneRect { height: 0.0, ..b },
+            };
             dividers.push(PaneDivider {
                 leading: first.last_pane(),
                 axis: *axis,
                 area: rect,
+                line,
                 ratio: *ratio,
             });
-            let (a, b) = rect.divided(*axis, *ratio);
             collect(first, a, regions, dividers);
             collect(second, b, regions, dividers);
         }
@@ -271,6 +321,7 @@ mod tests {
                 leading: a,
                 axis: SplitAxis::Right,
                 area: PaneRect::FULL,
+                line: rect(0.25, 0.0, 0.0, 1.0),
                 ratio,
             }]
         );
@@ -299,6 +350,7 @@ mod tests {
         );
         assert_eq!(found[1].area, rect(0.5, 0.0, 0.5, 1.0));
         assert_eq!(found[1].axis, SplitAxis::Down);
+        assert_eq!(found[1].line, rect(0.5, 0.5, 0.5, 0.0));
 
         // Nested in the first child: Down(Right(A, B), C).
         let first_nested = PaneTree::Split {
@@ -318,6 +370,45 @@ mod tests {
             vec![b, a]
         );
         assert_eq!(found[1].area, rect(0.0, 0.0, 1.0, 0.5));
+    }
+
+    #[test]
+    fn pointer_position_maps_to_a_clamped_ratio_within_the_split_area() {
+        let (a, b, c) = (PaneId::new(), PaneId::new(), PaneId::new());
+        // Right(A, Down(B, C)): the inner divider spans x 0.5..1, y 0..1.
+        let tree = PaneTree::Split {
+            axis: SplitAxis::Right,
+            first: leaf(a),
+            second: Box::new(PaneTree::Split {
+                axis: SplitAxis::Down,
+                first: leaf(b),
+                second: leaf(c),
+                ratio: SplitRatio::HALF,
+            }),
+            ratio: SplitRatio::HALF,
+        };
+        let found = dividers(&tree);
+        let at = |divider: &PaneDivider, unit: f32| {
+            divider.ratio_at(SplitPosition::from_unit(unit).unwrap())
+        };
+        // Outer, side by side: x maps straight onto the full width.
+        assert_eq!(at(&found[0], 0.3), SplitRatio::from_fraction(0.3));
+        // Inner, stacked: y is measured within the Split's own area.
+        assert_eq!(at(&found[1], 0.25), SplitRatio::from_fraction(0.25));
+        // Pointer outside the area (or the Tab) clamps instead of collapsing a
+        // side.
+        assert_eq!(at(&found[0], -0.4), Some(SplitRatio::MIN));
+        assert_eq!(at(&found[0], 1.7), Some(SplitRatio::MAX));
+        assert_eq!(at(&found[0], 1e9), Some(SplitRatio::MAX));
+        // Non-finite input never reaches the ratio.
+        assert_eq!(SplitPosition::from_unit(f32::NAN), None);
+        assert_eq!(SplitPosition::from_unit(f32::NEG_INFINITY), None);
+        // A degenerate area has no meaningful share.
+        let degenerate = PaneDivider {
+            area: rect(0.5, 0.0, 0.0, 1.0),
+            ..found[0]
+        };
+        assert_eq!(at(&degenerate, 0.5), None);
     }
 
     #[test]
@@ -346,7 +437,7 @@ mod tests {
 mod root_tests {
     use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId, WorkspaceId};
 
-    use super::{PaneRect, SplitRatio};
+    use super::{PaneRect, SplitPosition, SplitRatio};
     use crate::app::{AppAction, AppError, ApplicationRoot, BindingEvidence};
     use crate::shell::{ShellState, SplitAxis};
 
@@ -392,15 +483,19 @@ mod root_tests {
         ApplicationRoot::with_shell(shell)
     }
 
+    fn drag(pane: PaneId, unit: f32) -> AppAction {
+        AppAction::MoveSplitDivider {
+            pane,
+            position: SplitPosition::from_unit(unit).unwrap(),
+        }
+    }
+
     #[test]
-    fn set_split_ratio_resizes_clamps_and_fails_closed() {
+    fn dragging_a_divider_resizes_clamps_and_fails_closed() {
         let mut root = split_enabled_root();
         let a = root.snapshot().shell.focused_pane;
         assert_eq!(
-            root.apply(AppAction::SetSplitRatio {
-                pane: a,
-                ratio: SplitRatio::HALF,
-            }),
+            root.apply(drag(a, 0.5)),
             Err(AppError::NoSplitDivider),
             "a single Pane has no divider"
         );
@@ -415,23 +510,18 @@ mod root_tests {
         .unwrap();
         let c = root.snapshot().shell.focused_pane;
 
+        // Outer divider: x = 0.25 of the Tab. Inner (stacked) divider: the
+        // pointer at y = 0.95 is past its clamp, so Rust stops at 0.9.
         let quarter = SplitRatio::from_fraction(0.25).unwrap();
-        root.apply(AppAction::SetSplitRatio {
-            pane: a,
-            ratio: quarter,
-        })
-        .unwrap();
-        root.apply(AppAction::SetSplitRatio {
-            pane: b,
-            ratio: SplitRatio::from_fraction(0.95).unwrap(),
-        })
-        .unwrap();
+        root.apply(drag(a, 0.25)).unwrap();
+        root.apply(drag(b, 0.95)).unwrap();
         let dividers = root.pane_dividers();
         assert_eq!((dividers[0].leading, dividers[0].ratio), (a, quarter));
         assert_eq!(
             (dividers[1].leading, dividers[1].ratio),
             (b, SplitRatio::MAX)
         );
+        assert_eq!(dividers[1].line.y, 0.9);
         let regions = root.pane_regions();
         assert_eq!(regions[0].rect.width, 0.25);
         assert_eq!(regions[1].rect.height, 0.9);
@@ -439,18 +529,9 @@ mod root_tests {
         // The last leaf leads no divider; stale ids fail closed. Neither
         // rejection changes the projection.
         let before = (root.pane_regions(), root.pane_dividers());
+        assert_eq!(root.apply(drag(c, 0.5)), Err(AppError::NoSplitDivider));
         assert_eq!(
-            root.apply(AppAction::SetSplitRatio {
-                pane: c,
-                ratio: SplitRatio::HALF,
-            }),
-            Err(AppError::NoSplitDivider)
-        );
-        assert_eq!(
-            root.apply(AppAction::SetSplitRatio {
-                pane: PaneId::new(),
-                ratio: SplitRatio::HALF,
-            }),
+            root.apply(drag(PaneId::new(), 0.5)),
             Err(AppError::UnknownPane)
         );
         assert_eq!((root.pane_regions(), root.pane_dividers()), before);

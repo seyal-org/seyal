@@ -178,6 +178,16 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(terminal.exists)
     }
 
+    /// #1020: after Swift cohesion splits, headed chrome/Metal surfaces stay mounted.
+    func testCohesionSplitKeepsProductChromeAndMetalSurfacesMounted() throws {
+        let app = hostedApp()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-product-chrome"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["terminal-input"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-thin-pane"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     func testFlowSurfaceIsComposerAndBlocksAlongsideCoreTerminalChrome() throws {
         let app = hostedApp()
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer"].waitForExistence(timeout: 10))
@@ -204,17 +214,17 @@ final class SeyalHostUITests: XCTestCase {
             app.descendants(matching: .any)["seyal-pane-region-1"].exists,
             "M001 policy projects exactly one Pane region"
         )
+        // #928: a single-leaf tree has no Split, so no divider is projected.
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-divider-0"].exists,
+            "no split divider without a Split"
+        )
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         XCTAssertTrue(composer.isHittable, "live composer stays interactive inside the region")
         XCTAssertTrue(region.frame.contains(composer.frame), "composer sits in the live region")
         XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
-        // #928: a single-leaf tree has no Split, so no divider is projected.
-        XCTAssertFalse(
-            app.descendants(matching: .any)["seyal-pane-divider-0"].exists,
-            "no split divider without a Split"
-        )
     }
 
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {
@@ -514,6 +524,20 @@ final class SeyalHostUITests: XCTestCase {
             result,
             .completed,
             "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")"
+        )
+        // #1065: Rust RecoveryCoordinator owns reconnect policy; the host only
+        // executes effects (driveRecovery PerformAttempt/adopt) and projects
+        // `seyal_app_snapshot.recovery_stage` onto seyal-recovery. Usable PTY
+        // after launch (including any exhausted→explicit-retry path) must land
+        // on Connected ("connected"), not a Swift-owned recovery ladder.
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 5), "seyal-recovery AX missing")
+        let connected = NSPredicate(format: "value == %@", "connected")
+        let recoveryArrived = expectation(for: connected, evaluatedWith: recovery, handler: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [recoveryArrived], timeout: min(timeout, 10)),
+            .completed,
+            "Rust recovery stage never reached Connected; seyal-recovery AX=\(recovery.value ?? "nil")"
         )
         assertFlowBlocksOrFail(in: app)
     }

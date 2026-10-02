@@ -1,12 +1,12 @@
 # ADR-017 — Pane/Tab TerminalExecution provisioning and disposition
 
-- **Status:** Proposed (refinement output of Issue #994; no production code in this decision)
+- **Status:** Accepted on merge of PR #1088 under #994. An author or agent comment is not that acceptance. The resident-Runtime decision in §14 is part of the same merge. Profile `0` contents are ADR-020; this ADR owns the selector only.
 - **Date:** 2026-09-24
 - **Issue:** #994 (parent #674, epic #665; consumed by #923 / #936; related #676, #686, #929)
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-008, ADR-009, ADR-015, SPEC-003, SPEC-004, SPEC-006, SPEC-008, SPEC-009
 - **Scope:** how a new Tab or split Pane obtains one distinct Runtime-owned `TerminalExecution`, and how that execution is disposed of
 - **Classification:** new architecture decision plus tightly scoped SPEC-003 / SPEC-004 / SPEC-009 amendments (§12)
-- **Numbering:** ADR-017 (vacant on `master`). Sibling proposals: #1000 → ADR-018 (PR #1055), #1004 → ADR-019 (PR #1057), #1003 → ADR-020 (PR #1050).
+- **Numbering:** ADR-017. Sibling documents stay on their own pull requests and are not accepted here: #1000 → ADR-018, #1004 → ADR-019, #1003 → ADR-020.
 - **Coordinates with:** #1000, #1003, and #1004; see §2.1.
 
 ## 1. Context
@@ -96,8 +96,7 @@ PRs (earlier PRs #1038 / #1039 are closed and superseded by #1057 / #1055):
   define profile contents and must not compete as a second launch-policy
   authority.
 
-This document is **ADR-017**. Numbers remain provisional until merge order is
-settled.
+This document is **ADR-017**. Sibling numbers are not accepted in this pull request.
 
 Boundary: those documents own **presentation structure, lifecycle and
 navigation**; this document owns the **provisioning/disposition seam** — who may
@@ -220,6 +219,10 @@ authority under ADR-015, keeps the wire free of paths and strings, and keeps the
 shell-integration nonce contract intact. Profile **contents** (env, CWD, shell,
 integration keys) are owned by #1003 / proposed ADR-020 (PR #1050); this ADR
 validates the selector fail-closed and never inlines policy payloads on the wire.
+Resolving profile `0` requires ADR-020 to be Accepted; this ADR defines no
+interim profile contents. Children that do not resolve a launch profile
+(M003-674 P1, P2) may become Ready on ADR-017 acceptance. P3 and every child
+that depends on it may become Ready only after ADR-020 is Accepted.
 It is not a privilege claim: a same-UID client can already execute programs itself,
 and SPEC-004 §4's same-UID threat boundary is unchanged.
 
@@ -423,8 +426,22 @@ ever became user-visible presentation:
 | State when the intent died | Required disposition |
 |---|---|
 | never bound, never attached, no input admitted | the client attaches as Controller solely to dispose and issues exactly one `TerminateExecutionRequest` |
+| attached as Controller, never bound, no input admitted (attach succeeded; bind failed or the intent died before bind) | issue exactly one `TerminateExecutionRequest` on that existing attachment; detach only after `TerminateExecutionResult`; never open a second attach |
 | bound at any time (user could see or drive it) | detach only; it becomes an unreferenced live execution (§6.1) |
 | provisioning result never arrives (client died) | the Runtime completes or rolls back its own transaction; a surviving execution is unreferenced and discoverable by the next client |
+
+If the disposal attach fails (`ControllerBusy`, `InvalidExecution`,
+`CapacityExceeded`, or the child already exited), or the disposal
+`TerminateExecutionResult` is a failure code, the client records the execution
+as an unreferenced live execution (§6.1) only when `ListExecutions` still
+reports it and its primary child is live. An execution listed only while
+`DrainingAfterPrimaryExit` is not live; SPEC-003 §11 finalizes it. The client
+never retries automatically and never opens a second attach.
+
+If the connection drops after that attach and before `TerminateExecutionResult`,
+the disposition is the same failure row: no second attach. Detach or connection
+loss after `TerminationRequested` does not cancel the SPEC-003 §11 state
+machine.
 
 The first row is not "detach kills a session": nothing was ever presented, no
 user work can exist, and the disposal is an explicit terminate request under
@@ -438,6 +455,9 @@ A fresh GUI process has no presentation persistence (ADR-007 class P4 remains
 deferred), so it cannot rebuild Pane→execution bindings. Resolution stays
 deterministic:
 
+- zero eligible surviving executions → provision exactly one new execution for
+  the initial Pane through §5; this is the first-launch path once the Runtime no
+  longer creates a startup execution (SPEC-003 §4.1);
 - exactly one eligible surviving execution → adopt it for the initial Pane, as
   SPEC-009 §8.2 already requires, preserving the Pass 9 continuity proof;
 - more than one eligible surviving execution → never guess by list order, never
@@ -635,7 +655,7 @@ protocol detail. §2 records why the existing protocol does not already cover it
 |---|---|---|
 | ADR-017 (this document) | **new decision** | ownership, lifecycle, disposition, bounds, rejected alternatives |
 | SPEC-004 | **amendment (normative on acceptance)** | capability bit 10; message types 36–39 with exact fixed-width layouts and validation order; outstanding-request bounds; two additive result codes; mandatory-control classification |
-| SPEC-003 | **amendment (normative on acceptance)** | client-requested provisioning/disposition as bounded control work; one create per dispatch; zero live executions as a valid steady state; production Runtime creates no execution from its own startup on the client-launched path; required tests |
+| SPEC-003 | **amendment (normative on acceptance)** | client-requested provisioning/disposition as bounded control work; one create per dispatch; after the C1 change, zero live executions is a valid steady state and the production client-launched Runtime creates no execution from its own startup; until C1, empty argv keeps one startup execution and may exit at zero; required tests |
 | SPEC-009 | **amendment (normative on acceptance)** | multi-execution resolution: bind by explicit `ExecutionId`; single-survivor adoption retained; more-than-one survivor never guessed or terminated |
 | SPEC-006 / SPEC-008 | **no change** | native command classification and Flow/Raw/TUI presentation are unchanged; a newly bound Pane enters the existing presentation-selection fence |
 | ADR-004 / ADR-005 / ADR-006 / ADR-007 / ADR-008 / ADR-009 / ADR-015 | **no change** | all remain authority; this ADR composes them |
@@ -686,27 +706,42 @@ Costs and honest limits:
   GUI process with more than one survivor will not adopt them. Until a truthful
   inventory/adoption surface exists (#929, and #1000's reachability requirement
   for its `Unpresented` tier), the reachable remedies are the shell's own
-  `exit` or the explicit terminate action. **Runtime shutdown is not a
-  production-path remedy in M003:** under SPEC-003 §4.1 the client-launched
-  Runtime is resident for the user scope until an accepted §16 control path
-  (follow-on under #674 / M004) or an OS signal ends it. GUI quit never invokes
-  §16. This accumulation gap is a product schedule item, not a defect to hide;
+  `exit` or the explicit terminate action. **After the C1 change, Runtime
+  shutdown is not a production-path remedy in M003:** under SPEC-003 §4.1 the
+  client-launched Runtime is resident for the user scope until an accepted §16
+  control path (follow-on under #674 / M004) or an OS signal ends it. GUI quit
+  never invokes §16. Until C1, empty argv may still exit at zero. This
+  accumulation gap is a product schedule item, not a defect to hide;
 - at most 16 simultaneously attached Panes under the current SPEC-004 maxima
   (§8);
 - CWD inheritance — the behavior users will expect from "split pane" — is
   deliberately absent until #686's trusted boundary is accepted;
-- disposing a never-bound execution costs one attach plus one bounded snapshot;
-  if that disposal attach fails (`ControllerBusy`, `InvalidExecution`, or the
-  child already exited), the client treats the execution as already disposed /
-  unreferenced and must not retry in a loop;
+- disposing a never-bound execution costs one attach plus one bounded snapshot.
+  If that disposal attach fails (`ControllerBusy`, `InvalidExecution`,
+  `CapacityExceeded`, or the child already exited), or `TerminateExecutionResult`
+  fails, or the connection drops before that result: do not retry and do not
+  open a second attach. Record an unreferenced live execution only when
+  `ListExecutions` still reports a live primary child. A listing that is only
+  `DrainingAfterPrimaryExit` is not that case;
 - when #1000's quit deadline races an in-flight never-bound disposal attach, the
   quit deadline wins and the execution falls through to the unreferenced case
   above rather than unbounded quit wait;
-- the production Runtime must stop creating an execution from its own startup
-  and must stop exiting when the live-execution count reaches zero; both are
-  behavior changes that the owning child Issue must cover with tests, and both
-  imply a resident per-user Runtime daemon for the login scope until a §16
-  control path is accepted.
+- the production Runtime stops creating an execution from its own startup and
+  stops exiting when the live-execution count reaches zero only in the same
+  change as headed initial-Pane provisioning (SPEC-003 §4.1, child C1). Until
+  then, empty argv keeps one startup execution and may exit at zero. After that
+  change the client-launched Runtime is a resident per-user process until a §16
+  control path is accepted. That resident decision is accepted on merge of PR
+  #1088 by a non-author maintainer, not by an author or agent comment:
+  1. after C1, the client-launched Runtime does not create an execution at
+     startup and does not exit at zero live executions;
+  2. M003 has no production shutdown path. GUI quit never invokes §16. The ends
+     are a later accepted §16 control path (follow-on under #674 / M004) or an
+     OS signal;
+  3. survivors can accumulate. A fresh GUI with two or more surviving executions
+     adopts none of them and adds one execution per launch until #929 and
+     #1000's unpresented reachability exist. The remedies until then are the
+     shell's own `exit` or an explicit terminate.
 
 ## 15. Production decomposition
 

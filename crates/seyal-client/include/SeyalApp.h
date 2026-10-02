@@ -55,7 +55,7 @@ enum SeyalAppActionKind {
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
      * bound to an execution; disposition is not yet available),
-     * 34 = NoSplitDivider (SET_SPLIT_RATIO).
+     * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER).
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -99,14 +99,37 @@ enum SeyalAppActionKind {
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
     SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
-    /*
-     * Resize one Split (#928). target_execution_lo/hi = the divider's
-     * leading PaneId (SeyalAppPaneDivider.leading_pane_*); reserved = the new
-     * first-child share as IEEE-754 f32 bits. Rust clamps it to 0.1...0.9;
-     * NaN/infinity return -6. Unknown PaneId = UnknownPane; a Pane that leads
-     * no divider = 34 (NoSplitDivider).
+    /** Cancel the active recovery episode (generation bump → Disconnected). */
+    SEYAL_APP_ACTION_CANCEL_RECOVERY = 53,
+    /**
+     * Advance presentation stage after connect.
+     * reserved = SEYAL_APP_RECOVERY_RESTORING (5) or SEYAL_APP_RECOVERY_USABLE (6).
      */
-    SEYAL_APP_ACTION_SET_SPLIT_RATIO = 53
+    SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE = 54,
+    /** Begin a continuity-identity commit attempt. */
+    SEYAL_APP_ACTION_BEGIN_RECONSTRUCTION = 55,
+    /**
+     * Commit Runtime/execution continuity and a fresh attachment (Rust-owned).
+     * fence_execution_* = Runtime pin; target_execution_* = execution pin;
+     * target_attachment_* = attachment pin. `reserved` is ignored.
+     * Controller authority and authoritative-snapshot commitment are derived
+     * from the live CLIENTS entry whose identities match those pins. A missing,
+     * non-controller, or snapshot-less client fails closed. SeyalAppAction
+     * layout is unchanged.
+     */
+    SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
+    /** Mark reconstruction disconnected after the host drops the live client. */
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /*
+     * Drag one Split divider (#928). target_execution_lo/hi = the divider's
+     * leading PaneId (SeyalAppPaneDivider.leading_pane_*); reserved = the raw
+     * pointer coordinate along the divider's axis in Tab unit space (x for
+     * axis 0, y for axis 1) as IEEE-754 f32 bits. It may lie outside the
+     * Split; Rust derives the ratio from the Split's area and clamps it to
+     * 0.1...0.9. NaN/infinity return -6. Unknown PaneId = UnknownPane; a Pane
+     * that leads no divider = 34 (NoSplitDivider).
+     */
+    SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER = 58
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -150,7 +173,8 @@ enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_RESTORING = 5,
     SEYAL_APP_RECOVERY_USABLE = 6,
     SEYAL_APP_RECOVERY_EXHAUSTED = 7,
-    SEYAL_APP_RECOVERY_BLOCKED = 8
+    SEYAL_APP_RECOVERY_BLOCKED = 8,
+    SEYAL_APP_RECOVERY_EXECUTION_ENDED = 9
 };
 
 enum SeyalAppRecoveryOutcome {
@@ -160,7 +184,8 @@ enum SeyalAppRecoveryOutcome {
     SEYAL_APP_RECOVERY_ENDPOINT_MISSING = 3,
     SEYAL_APP_RECOVERY_RETRYABLE = 4,
     SEYAL_APP_RECOVERY_CONTROLLER_BUSY = 5,
-    SEYAL_APP_RECOVERY_BLOCKED_OUTCOME = 6
+    SEYAL_APP_RECOVERY_BLOCKED_OUTCOME = 6,
+    SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME = 7
 };
 
 enum SeyalAppRecoveryLaunch {
@@ -423,11 +448,12 @@ typedef struct SeyalAppPaneRegion {
 /*
  * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
  * (outer Split first). x/y/width/height is the unit rect of the whole area
- * the Split divides; the divider sits at ratio along `axis` (0 = side by
- * side / vertical divider, 1 = stacked / horizontal divider). Hosts map a
- * drag position to a ratio within that area and dispatch
- * SEYAL_APP_ACTION_SET_SPLIT_RATIO; Rust clamps and re-projects. Out-of-range
- * indices return size == 0.
+ * the Split divides. line_x/line_y is where the divider sits: for axis 0
+ * (side by side) it is a vertical line at line_x spanning the area's height;
+ * for axis 1 (stacked) a horizontal line at line_y spanning its width. Hosts
+ * centre a hit zone on that line and forward raw pointer positions through
+ * SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER; Rust derives, clamps and re-projects.
+ * Out-of-range indices return size == 0.
  */
 typedef struct SeyalAppPaneDivider {
     uint16_t version;
@@ -440,6 +466,8 @@ typedef struct SeyalAppPaneDivider {
     float y;
     float width;
     float height;
+    float line_x;
+    float line_y;
     float ratio;
     uint32_t reserved1;
 } SeyalAppPaneDivider;
@@ -509,6 +537,23 @@ typedef struct SeyalAppBlockSpan {
 } SeyalAppBlockSpan;
 
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
+
+/* #865 Flow output projection. Hosts must not invent start+511 ranges.
+ * PRIMARY_CLIP: reserved0 = first prepared-frame row; reserved1 = row count.
+ * HISTORY: start_line/end_line inclusive; reserved0/reserved1 unused (0). */
+#define SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED 0u
+#define SEYAL_APP_BLOCK_PROJECTION_HISTORY 1u
+#define SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP 2u
+
+typedef struct SeyalAppBlockProjection {
+    uint16_t kind;
+    uint16_t reserved0;
+    uint32_t reserved1;
+    uint64_t start_line;
+    uint64_t end_line;
+} SeyalAppBlockProjection;
+
+SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);

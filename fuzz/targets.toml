@@ -88,6 +88,33 @@ corpus = "fuzz/corpus/block-state-decode"
 adapter = "fuzz/targets/block-state-decode"
 libfuzzer = "pass8_block_state_decode"
 
+[[target]]
+name = "execution-provisioning-decode"
+owner_pass = 3
+status = "active"
+corpus = "fuzz/corpus/execution-provisioning-decode"
+adapter = "fuzz/targets/execution-provisioning-decode"
+libfuzzer = "execution_provisioning_decode"
+
+# Agent Backend trust boundaries: V1 frame/command/result bytes, and the
+# scripted observation applicator. owner_issue records the qualification
+# issue; these rows are not an M001 pass surface.
+[[target]]
+name = "agent-protocol-decode"
+owner_issue = 1029
+status = "active"
+corpus = "fuzz/corpus/agent-protocol-decode"
+adapter = "fuzz/targets/agent-protocol-decode"
+libfuzzer = "agent_protocol_decode"
+
+[[target]]
+name = "agent-harness-observation"
+owner_issue = 1029
+status = "active"
+corpus = "fuzz/corpus/agent-harness-observation"
+adapter = "fuzz/targets/agent-harness-observation"
+libfuzzer = "agent_harness_observation"
+
 # Legacy Candidate-B shared-projection comparator. Not production Candidate-D
 # coverage. Retained only for isolated comparator evidence behind
 # `benchmark-shared-projection`; never cite as §6.9 production fuzz.

@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT = Path(os.environ.get("SEYAL_VALIDATION_ROOT", Path(__file__).resolve().parents[1])).resolve()
 
 HOT_FUNCTIONS = {
-    "crates/seyal-terminal/src/terminal.rs": ["feed", "finish_input"],
+    # TerminalState feed/finish after #1020 responsibility split (was terminal.rs).
+    "crates/seyal-terminal/src/terminal/state.rs": ["feed", "finish_input"],
     # Runtime dispatch ownership after #799: poll_once remains in the facade,
     # while control/read/write service loops live in reactor_io.
     "crates/seyal-runtime/src/runtime/mod.rs": ["poll_once"],
@@ -18,11 +19,13 @@ HOT_FUNCTIONS = {
         "service_writes",
     ],
     "crates/seyal-runtime/src/input.rs": ["try_submit"],
-    # Candidate-D display encode/publish (Runtime → UDS presentation).
-    "crates/seyal-runtime/src/display.rs": [
+    # Candidate-D display encode/publish after #1020 split (was display.rs).
+    "crates/seyal-runtime/src/display/encode_v1.rs": [
         "encode_snapshot",
         "encode_delta",
         "encode_rows",
+    ],
+    "crates/seyal-runtime/src/display/encode_v2.rs": [
         "encode_snapshot_v2",
         "encode_delta_v2",
         "encode_cells_v2",
@@ -80,30 +83,39 @@ def native_host_present() -> bool:
 def validate_native_recovery_ownership(errors: list[str]) -> None:
     if not native_host_present():
         return
-    surface_relpath = "macos/Seyal/Sources/MetalSurfaceView.swift"
-    surface_path = ROOT / surface_relpath
-    if not surface_path.exists():
-        errors.append(f"missing guarded native lifecycle file: {surface_relpath}")
-        return
-    surface = surface_path.read_text(encoding="utf-8")
-
-    # Pass 9 gives the lifecycle coordinator sole production ownership of the
-    # startup/recovery connect sequence. A direct bridge.start() from AppKit
-    # creates an extra connection attempt and a fresh timeout outside the
-    # exact seven-attempt/one-second episode, and may block the main actor.
-    if re.search(r"\bbridge\??\.start\s*\(", surface):
-        errors.append(
-            f"{surface_relpath} performs a direct bridge.start(); production startup/recovery must be coordinator-owned"
-        )
-    for required in (
-        "bridgeRecoveryCoordinator.beginEpisode()",
-        "bridgeRecoveryCoordinator.retry()",
-        "startAutomaticBridgeRecoveryIfNeeded()",
-    ):
-        if required not in surface:
+    # Pass 9 recovery policy is owned by the Rust RecoveryCoordinator (#1065).
+    # The surface only requests/cancels episodes and reports presentation
+    # stages; the chrome effect executor opens/adopts and reports outcomes.
+    guarded: dict[str, tuple[str, ...]] = {
+        "macos/Seyal/Sources/MetalSurfaceView.swift": (),
+        "macos/Seyal/Sources/MetalSurfaceView+Recovery.swift": (
+            "SEYAL_APP_ACTION_BEGIN_RECOVERY",
+            "SEYAL_APP_ACTION_CANCEL_RECOVERY",
+            "SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE",
+            "func startAutomaticBridgeRecoveryIfNeeded()",
+        ),
+        "macos/Seyal/Sources/ProductChromeHostView+Recovery.swift": (
+            "SEYAL_APP_ACTION_COMPLETE_RECOVERY",
+            "openRuntimeRecoveryHandle(",
+            "adoptRecoveredHandle(",
+        ),
+    }
+    for relpath, required_tokens in guarded.items():
+        path = ROOT / relpath
+        if not path.exists():
+            errors.append(f"missing guarded native lifecycle file: {relpath}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        # A direct bridge.start() from AppKit creates an extra connection
+        # attempt and a fresh timeout outside the exact seven-attempt/
+        # one-second episode, and may block the main actor.
+        if re.search(r"\bbridge\??\.start\s*\(", text):
             errors.append(
-                f"{surface_relpath} is missing coordinator recovery boundary {required!r}"
+                f"{relpath} performs a direct bridge.start(); production startup/recovery must be RecoveryCoordinator-owned"
             )
+        for required in required_tokens:
+            if required not in text:
+                errors.append(f"{relpath} is missing Rust recovery boundary {required!r}")
 
     bridge_relpath = "macos/Seyal/Sources/RustDisplayBridge.swift"
     bridge_path = ROOT / bridge_relpath
@@ -114,10 +126,10 @@ def validate_native_recovery_ownership(errors: list[str]) -> None:
 
     # RustDisplayBridge owns one disposable client/socket only. It must never
     # remember or execute a self-reconnect request after teardown; otherwise a
-    # dead live socket can bypass the coordinator and receive a fresh timeout.
+    # dead live socket can bypass the RecoveryCoordinator and receive a fresh timeout.
     if "reconnectRequested" in bridge:
         errors.append(
-            f"{bridge_relpath} retains bridge-owned reconnect state; lifecycle recovery must be coordinator-owned"
+            f"{bridge_relpath} retains bridge-owned reconnect state; lifecycle recovery must be Rust RecoveryCoordinator-owned"
         )
     teardown_match = re.search(
         r"private\s+func\s+teardownCompleted\s*\(\s*\)\s*\{(?P<body>.*?)\n\s*\}",
@@ -130,6 +142,68 @@ def validate_native_recovery_ownership(errors: list[str]) -> None:
         errors.append(
             f"{bridge_relpath}::teardownCompleted reopens a client; it may only publish teardown completion"
         )
+
+    # Steady-state Candidate-D frames must not call seyal_app_snapshot. The
+    # presentation advance path gates on recoveryPresentationPending alone
+    # before any snapshot FFI (#1065 review).
+    recovery_relpath = "macos/Seyal/Sources/MetalSurfaceView+Recovery.swift"
+    recovery_path = ROOT / recovery_relpath
+    if not recovery_path.exists():
+        errors.append(f"missing guarded native recovery file: {recovery_relpath}")
+        return
+    recovery_source = recovery_path.read_text(encoding="utf-8")
+    advance_body = extract_function(recovery_source, "advanceRecoveryPresentationIfReady")
+    if advance_body is None:
+        errors.append(
+            f"{recovery_relpath} is missing advanceRecoveryPresentationIfReady()"
+        )
+    else:
+        pending_guard = re.search(
+            r"guard\s+recoveryPresentationPending\b",
+            advance_body,
+        )
+        first_snapshot = advance_body.find("seyal_app_snapshot")
+        if pending_guard is None:
+            errors.append(
+                f"{recovery_relpath}::advanceRecoveryPresentationIfReady must gate on "
+                "recoveryPresentationPending before any work"
+            )
+        elif first_snapshot != -1 and pending_guard.start() > first_snapshot:
+            errors.append(
+                f"{recovery_relpath}::advanceRecoveryPresentationIfReady calls "
+                "seyal_app_snapshot before the recoveryPresentationPending guard"
+            )
+
+
+def validate_snapshot_call_accounting(errors: list[str]) -> None:
+    """`seyal_app_snapshot` is on the keyDown/scrollWheel path.
+
+    Test accounting must not take a lock or add C exports to the production
+    library. The file is absent only in synthetic validator fixtures.
+    """
+    relpath = "crates/seyal-client/src/ffi/app/visual.rs"
+    path = ROOT / relpath
+    if not path.exists():
+        return
+    source = path.read_text(encoding="utf-8")
+    note_body = extract_function(source, "note_snapshot_call")
+    if note_body is None:
+        errors.append(f"{relpath} is missing note_snapshot_call()")
+    else:
+        for pattern in (".lock()", "Mutex", "RwLock", "SNAPSHOT_COUNT_LOCK"):
+            if pattern in note_body:
+                errors.append(
+                    f"{relpath}::note_snapshot_call contains forbidden "
+                    f"hot-path primitive {pattern!r}"
+                )
+    for symbol in (
+        "seyal_app_test_snapshot_call_count",
+        "seyal_app_test_reset_snapshot_call_count",
+        "seyal_app_test_lock_snapshot_call_count",
+        "seyal_app_test_unlock_snapshot_call_count",
+    ):
+        if symbol in source:
+            errors.append(f"{relpath} exports test snapshot-counter symbol {symbol}")
 
 
 def main() -> None:
@@ -156,6 +230,7 @@ def main() -> None:
                         )
 
     validate_native_recovery_ownership(errors)
+    validate_snapshot_call_accounting(errors)
 
     if errors:
         print("Hot-path performance guardrail violations:")

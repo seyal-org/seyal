@@ -8,10 +8,11 @@ import AppKit
 /// positions frames. The one live terminal/Metal/composer container
 /// (`liveContent`) sits in the LIVE region and is hidden when no region is
 /// LIVE. Every leaf is a focusable region bound to its real PaneId; focusing
-/// dispatches Rust `FOCUS_PANE` through `onFocusPane`. Dragging a divider maps
-/// the pointer to a ratio within the Rust-given Split area and dispatches
-/// `SET_SPLIT_RATIO`; Rust clamps and this view re-reads only the Pane
-/// projection, so a drag never rebuilds Blocks on every mouse move.
+/// dispatches Rust `FOCUS_PANE` through `onFocusPane`. Dividers sit on the
+/// Rust-projected line; dragging one forwards the raw pointer position in Tab
+/// unit space as `MOVE_SPLIT_DIVIDER`, and Rust derives and clamps the ratio.
+/// This view re-reads only the Pane projection, so a drag never rebuilds
+/// Blocks on every mouse move.
 @MainActor
 final class PaneLayoutView: NSView {
     struct Region: Equatable {
@@ -36,10 +37,15 @@ final class PaneLayoutView: NSView {
         let vertical: Bool
         /// Unit rect of the whole area the Split divides.
         let area: CGRect
+        /// Unit position of the divider line (Rust-projected).
+        let line: CGPoint
         let ratio: CGFloat
 
         var identity: Divider {
-            Divider(leadingLo: leadingLo, leadingHi: leadingHi, vertical: vertical, area: .zero, ratio: 0)
+            Divider(
+                leadingLo: leadingLo, leadingHi: leadingHi, vertical: vertical,
+                area: .zero, line: .zero, ratio: 0
+            )
         }
     }
 
@@ -80,14 +86,18 @@ final class PaneLayoutView: NSView {
         )
     }
 
-    private func setSplitRatio(_ divider: Divider, ratio: CGFloat) {
+    /// Forward a drag to Rust as the raw pointer coordinate along the
+    /// divider's axis, normalised to Tab unit space. Rust owns the ratio.
+    private func moveDivider(_ divider: Divider, to point: CGPoint) {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let position = divider.vertical ? point.x / bounds.width : point.y / bounds.height
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_SET_SPLIT_RATIO.rawValue)
+        action.kind = UInt16(SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER.rawValue)
         action.target_execution_lo = divider.leadingLo
         action.target_execution_hi = divider.leadingHi
-        action.reserved = Float(ratio).bitPattern
+        action.reserved = Float(position).bitPattern
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
         reconcile(paneCount: Int(seyal_app_shell(appHandle).pane_count))
     }
@@ -108,6 +118,7 @@ final class PaneLayoutView: NSView {
                         width: CGFloat(raw.width),
                         height: CGFloat(raw.height)
                     ),
+                    line: CGPoint(x: CGFloat(raw.line_x), y: CGFloat(raw.line_y)),
                     ratio: CGFloat(raw.ratio)
                 )
             )
@@ -172,8 +183,8 @@ final class PaneLayoutView: NSView {
         dividerViews.forEach { $0.removeFromSuperview() }
         dividerViews = nextDividers.enumerated().map { index, divider in
             let view = PaneDividerView(index: index, vertical: divider.vertical)
-            view.onDrag = { [weak self] ratio in
-                self?.setSplitRatio(divider, ratio: ratio)
+            view.onDrag = { [weak self] point in
+                self?.moveDivider(divider, to: point)
             }
             if let theme { view.apply(theme: theme) }
             // Dividers sit above the live container so its edge stays draggable.
@@ -199,14 +210,14 @@ final class PaneLayoutView: NSView {
         let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
         liveContent.frame = scaled(live).insetBy(dx: inset, dy: inset)
         for (view, divider) in zip(dividerViews, dividers) {
+            // Centre a fixed-thickness hit zone on the Rust-projected line.
             let area = scaled(divider.area)
             let half = PaneDividerView.thickness / 2
-            view.area = area
             view.ratio = divider.ratio
             view.frame = divider.vertical
-                ? CGRect(x: area.minX + area.width * divider.ratio - half, y: area.minY,
+                ? CGRect(x: (divider.line.x * bounds.width).rounded() - half, y: area.minY,
                          width: PaneDividerView.thickness, height: area.height)
-                : CGRect(x: area.minX, y: area.minY + area.height * divider.ratio - half,
+                : CGRect(x: area.minX, y: (divider.line.y * bounds.height).rounded() - half,
                          width: area.width, height: PaneDividerView.thickness)
         }
     }
@@ -279,15 +290,13 @@ private final class PaneRegionView: NSView {
     }
 }
 
-/// One Split divider hit zone. Dragging reports the pointer's position within
-/// the Split's area as a first-child share; Rust owns clamping and layout.
+/// One Split divider hit zone. Dragging reports the raw pointer position in
+/// the parent's (flipped) coordinates; Rust owns the ratio and layout.
 @MainActor
 private final class PaneDividerView: NSView {
     static let thickness: CGFloat = 6
 
-    var onDrag: ((CGFloat) -> Void)?
-    /// The Split's whole area in the parent's (flipped) coordinates.
-    var area: CGRect = .zero
+    var onDrag: ((CGPoint) -> Void)?
     var ratio: CGFloat = 0.5 {
         didSet { setAccessibilityValue(String(format: "%.2f", ratio)) }
     }
@@ -321,11 +330,7 @@ private final class PaneDividerView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let parent = superview, area.width > 0, area.height > 0 else { return }
-        let point = parent.convert(event.locationInWindow, from: nil)
-        let share = vertical
-            ? (point.x - area.minX) / area.width
-            : (point.y - area.minY) / area.height
-        onDrag?(share)
+        guard let parent = superview else { return }
+        onDrag?(parent.convert(event.locationInWindow, from: nil))
     }
 }
