@@ -16,9 +16,9 @@ use seyal_runtime::{
     display::{decode_chunk, DisplayCache},
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
-        CreateExecutionResult, ErrorCode, FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot,
-        InputRef, Lifecycle, MessageType, ResizeResult, Role, TerminateExecutionResult, HEADER_LEN,
-        MAX_FRAME_PAYLOAD,
+        CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader, HistoryRangeRequest,
+        HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult, Role,
+        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
@@ -81,6 +81,12 @@ pub(crate) fn server_error(code: u16) -> ClientError {
     ErrorCode::from_u16(code)
         .map(ClientError::Server)
         .unwrap_or(ClientError::Protocol)
+}
+
+pub(crate) fn execution_is_running(list: &ExecutionList, execution_id: ExecutionId) -> bool {
+    list.entries
+        .iter()
+        .any(|entry| entry.execution_id == execution_id && entry.lifecycle == Lifecycle::Running)
 }
 
 pub struct LocalDisplayClient {
@@ -452,14 +458,25 @@ impl LocalDisplayClient {
                         if lifecycle.execution_id != self.execution_id {
                             return Err(ClientError::Protocol);
                         }
-                        if lifecycle.lifecycle == Lifecycle::Finalized
-                            && self.block_metadata_negotiated
-                            && self
-                                .block_cache
-                                .visible()
-                                .is_some_and(|block| block.state == BlockLifecycle::Current)
-                        {
-                            return Err(self.quarantine_block_metadata());
+                        if lifecycle.lifecycle == Lifecycle::Finalized {
+                            // The Runtime orders the final display state (and
+                            // completed Block metadata, when negotiated) before
+                            // this lifecycle marker. The lifecycle event is the
+                            // terminal authority even if the disposable Block
+                            // cache is stale; keep final display/history and
+                            // end this client instead of waiting for a prompt.
+                            if self.block_metadata_negotiated
+                                && self
+                                    .block_cache
+                                    .visible()
+                                    .is_some_and(|block| block.state == BlockLifecycle::Current)
+                            {
+                                // Preserve SPEC-007's fail-closed rule for a
+                                // contradictory Block projection while still
+                                // reporting the stronger execution-ended fact.
+                                let _ = self.quarantine_block_metadata();
+                            }
+                            return Err(ClientError::NoRunningExecution);
                         }
                     }
                     MessageType::CopiedText => {

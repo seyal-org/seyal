@@ -15,6 +15,8 @@ mod observation;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 mod peer;
+#[cfg(unix)]
+mod session;
 
 pub use auth::{
     AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
@@ -28,6 +30,8 @@ pub use execution_host::{
 pub use observation::{
     parse_script, ObservationAuthority, ObserveError, RunLiveness, WorkItemOutcome,
 };
+#[cfg(unix)]
+pub use session::IntegrationConfig;
 pub use seyal_agent_core::{AgentDomain, DomainError};
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};

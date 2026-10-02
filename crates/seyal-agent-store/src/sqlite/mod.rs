@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use std::{num::NonZeroU64, path::Path, sync::Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -7,13 +8,64 @@ use crate::{
     SnapshotPosition,
 };
 
-const SCHEMA_VERSION: i32 = 2;
+mod schema;
+use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
+
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
+/// Discriminant for a RunEvent payload that references `output_segment` rows.
+pub const OUTPUT_REF_KIND: u8 = 8;
+/// Fixed size of [`encode_output_ref`] (kind + indices + lengths + ordinals).
+pub const OUTPUT_REF_LEN: usize = 1 + 4 + 4 + 8 + 8 + 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputAppend {
+    pub sequence: AggregateSequence,
+    pub first_segment_index: u32,
+    pub segment_count: u32,
+    pub byte_length: u64,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PersistedLiveness {
     Unknown,
+}
+
+/// Encode a SPEC-017 §10 output reference. Raw output bytes never appear here.
+pub fn encode_output_ref(
+    first_segment_index: u32,
+    segment_count: u32,
+    byte_length: u64,
+    first_ordinal: u64,
+    last_ordinal: u64,
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(OUTPUT_REF_LEN);
+    payload.push(OUTPUT_REF_KIND);
+    payload.extend_from_slice(&first_segment_index.to_le_bytes());
+    payload.extend_from_slice(&segment_count.to_le_bytes());
+    payload.extend_from_slice(&byte_length.to_le_bytes());
+    payload.extend_from_slice(&first_ordinal.to_le_bytes());
+    payload.extend_from_slice(&last_ordinal.to_le_bytes());
+    payload
+}
+
+/// Decode a segment reference payload. Returns `None` when the shape is wrong.
+pub fn decode_output_ref(payload: &[u8]) -> Option<(u32, u32, u64, u64, u64)> {
+    if payload.len() != OUTPUT_REF_LEN || payload[0] != OUTPUT_REF_KIND {
+        return None;
+    }
+    let first_segment_index = u32::from_le_bytes(payload[1..5].try_into().ok()?);
+    let segment_count = u32::from_le_bytes(payload[5..9].try_into().ok()?);
+    let byte_length = u64::from_le_bytes(payload[9..17].try_into().ok()?);
+    let first_ordinal = u64::from_le_bytes(payload[17..25].try_into().ok()?);
+    let last_ordinal = u64::from_le_bytes(payload[25..33].try_into().ok()?);
+    Some((
+        first_segment_index,
+        segment_count,
+        byte_length,
+        first_ordinal,
+        last_ordinal,
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +86,8 @@ pub enum StoreError {
 }
 
 pub struct AgentStore {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
+    pub(crate) writes_before_fault: AtomicU64,
 }
 
 impl AgentStore {
@@ -59,6 +112,7 @@ impl AgentStore {
         }
         Ok(Self {
             conn: Mutex::new(conn),
+            writes_before_fault: AtomicU64::new(u64::MAX),
         })
     }
 
@@ -71,6 +125,7 @@ impl AgentStore {
         if payload.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
+        self.gate_write()?;
         self.commit_insert(aggregate_id, kind, payload, true)
     }
 
@@ -87,6 +142,7 @@ impl AgentStore {
         if event_payload.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()
@@ -122,6 +178,7 @@ impl AgentStore {
         if payload.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()
@@ -191,6 +248,26 @@ impl AgentStore {
         &self,
         aggregate_id: AggregateId,
         requested_after: Option<AggregateSequence>,
+    ) -> Result<Vec<AggregateEventEnvelopeV1>, StoreError> {
+        self.replay_after_limited(aggregate_id, requested_after, i64::MAX)
+    }
+
+    /// Replay at most `limit` events after the cursor. History gaps are unchanged.
+    pub fn replay_page(
+        &self,
+        aggregate_id: AggregateId,
+        requested_after: Option<AggregateSequence>,
+        limit: usize,
+    ) -> Result<Vec<AggregateEventEnvelopeV1>, StoreError> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        self.replay_after_limited(aggregate_id, requested_after, limit)
+    }
+
+    fn replay_after_limited(
+        &self,
+        aggregate_id: AggregateId,
+        requested_after: Option<AggregateSequence>,
+        limit: i64,
     ) -> Result<Vec<AggregateEventEnvelopeV1>, StoreError> {
         let conn = self.conn.lock().expect("agent store lock");
         let (kind, id) = aggregate_key(aggregate_id);
@@ -275,11 +352,12 @@ impl AgentStore {
             .prepare(
                 "SELECT sequence, event_id, kind, payload FROM aggregate_event
                  WHERE aggregate_kind = ?1 AND aggregate_id = ?2 AND sequence > ?3
-                 ORDER BY sequence",
+                 ORDER BY sequence
+                 LIMIT ?4",
             )
             .map_err(|_| StoreError::Corrupt)?;
         let rows = statement
-            .query_map(params![kind, id, after], |row| {
+            .query_map(params![kind, id, after, limit], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
@@ -319,11 +397,25 @@ impl AgentStore {
         Ok(())
     }
 
-    pub fn append_output(
+    /// Persist high-volume output as bounded segments plus exactly one RunEvent
+    /// whose payload is a fixed-size segment reference (SPEC-017 §10).
+    ///
+    /// Segments and the referencing event share one transaction: a fault before
+    /// commit leaves neither behind.
+    pub fn append_output_event(
         &self,
         run_id: crate::AgentRunId,
+        event_kind: u16,
         bytes: &[u8],
-    ) -> Result<u64, StoreError> {
+        first_ordinal: u64,
+        last_ordinal: u64,
+    ) -> Result<OutputAppend, StoreError> {
+        let payload_probe =
+            encode_output_ref(0, 0, bytes.len() as u64, first_ordinal, last_ordinal);
+        if payload_probe.len() > MAX_EVENT_PAYLOAD {
+            return Err(StoreError::PayloadTooLarge);
+        }
+        self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()
@@ -335,7 +427,12 @@ impl AgentStore {
                 |row| row.get(0),
             )
             .map_err(|_| StoreError::Corrupt)?;
-        let mut segments = 0_u64;
+        let first_segment_index = if bytes.is_empty() {
+            0
+        } else {
+            (index + 1) as u32
+        };
+        let mut segments = 0_u32;
         for chunk in bytes.chunks(OUTPUT_SEGMENT_LEN) {
             index += 1;
             segments += 1;
@@ -345,8 +442,21 @@ impl AgentStore {
             )
             .map_err(|_| StoreError::WriteFailed)?;
         }
+        let payload = encode_output_ref(
+            first_segment_index,
+            segments,
+            bytes.len() as u64,
+            first_ordinal,
+            last_ordinal,
+        );
+        let sequence = insert_event(&tx, AggregateId::AgentRun(run_id), event_kind, &payload)?;
         tx.commit().map_err(|_| StoreError::WriteFailed)?;
-        Ok(segments)
+        Ok(OutputAppend {
+            sequence,
+            first_segment_index,
+            segment_count: segments,
+            byte_length: bytes.len() as u64,
+        })
     }
 
     pub fn output_segment_count(&self, run_id: crate::AgentRunId) -> Result<u64, StoreError> {
@@ -525,7 +635,7 @@ impl AgentStore {
     }
 }
 
-fn insert_event(
+pub(crate) fn insert_event(
     tx: &rusqlite::Transaction<'_>,
     aggregate_id: AggregateId,
     event_kind: u16,
@@ -561,78 +671,6 @@ fn insert_event(
     AggregateSequence::from_raw(next as u64).ok_or(StoreError::Corrupt)
 }
 
-fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
-    if from >= SCHEMA_VERSION {
-        return Ok(());
-    }
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS aggregate_sequence_hwm (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            high_water INTEGER NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id)
-        );",
-    )
-    .map_err(|_| StoreError::WriteFailed)?;
-    // Backfill from the max of retained events and snapshot frontiers.
-    conn.execute_batch(
-        "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
-         SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
-           SELECT aggregate_kind, aggregate_id, sequence AS seq FROM aggregate_event
-           UNION ALL
-           SELECT aggregate_kind, aggregate_id, incorporated_through AS seq FROM aggregate_snapshot
-         ) GROUP BY aggregate_kind, aggregate_id;",
-    )
-    .map_err(|_| StoreError::WriteFailed)?;
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(|_| StoreError::WriteFailed)?;
-    Ok(())
-}
-
-fn initialize(conn: &Connection) -> Result<(), StoreError> {
-    conn.execute_batch(
-        "CREATE TABLE aggregate_event (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            sequence INTEGER NOT NULL,
-            event_id INTEGER NOT NULL,
-            kind INTEGER NOT NULL,
-            payload BLOB NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id, sequence)
-        );
-        CREATE TABLE aggregate_snapshot (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            incorporated_through INTEGER NOT NULL,
-            payload BLOB NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id)
-        );
-        CREATE TABLE aggregate_sequence_hwm (
-            aggregate_kind INTEGER NOT NULL,
-            aggregate_id BLOB NOT NULL,
-            high_water INTEGER NOT NULL,
-            PRIMARY KEY (aggregate_kind, aggregate_id)
-        );
-        CREATE TABLE output_segment (
-            agent_run_id BLOB NOT NULL,
-            segment_index INTEGER NOT NULL,
-            payload BLOB NOT NULL,
-            PRIMARY KEY (agent_run_id, segment_index)
-        );
-        CREATE TABLE agent_run (
-            id BLOB PRIMARY KEY,
-            attempt_id BLOB NOT NULL,
-            binding_generation INTEGER NOT NULL,
-            control_generation INTEGER NOT NULL,
-            liveness TEXT NOT NULL CHECK (liveness = 'unknown')
-        );",
-    )
-    .map_err(|_| StoreError::WriteFailed)?;
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(|_| StoreError::WriteFailed)?;
-    Ok(())
-}
-
 fn aggregate_key(id: AggregateId) -> (i64, Vec<u8>) {
     match id {
         AggregateId::WorkScope(value) => (1, value.to_bytes().to_vec()),
@@ -643,309 +681,10 @@ fn aggregate_key(id: AggregateId) -> (i64, Vec<u8>) {
 }
 
 impl AggregateSequence {
-    fn from_raw(value: u64) -> Option<Self> {
+    pub fn from_raw(value: u64) -> Option<Self> {
         NonZeroU64::new(value).map(Self)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::AggregateId;
-    use std::{
-        fs,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            Arc,
-        },
-        thread,
-        time::{Duration, Instant},
-    };
-
-    static NEXT_DIR: AtomicU64 = AtomicU64::new(1);
-
-    fn path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "seyal-agent-store-{}-{}",
-            std::process::id(),
-            NEXT_DIR.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
-    }
-
-    #[test]
-    fn uncommitted_insert_is_invisible_and_commit_survives_reopen() {
-        let file = path("events.db");
-        let aggregate = AggregateId::WorkItem(crate::WorkItemId::new());
-        let store = AgentStore::open(&file).unwrap();
-        store.abandon_uncommitted(aggregate, b"nope").unwrap();
-        drop(store);
-        let store = AgentStore::open(&file).unwrap();
-        assert!(store.replay_after(aggregate, None).unwrap().is_empty());
-        let sequence = store.append_event(aggregate, 7, b"kept").unwrap();
-        drop(store);
-        let store = AgentStore::open(&file).unwrap();
-        let events = store.replay_after(aggregate, None).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].sequence, sequence);
-        assert_eq!(events[0].kind, 7);
-        assert_eq!(events[0].event_id, 1);
-        assert_eq!(events[0].payload, b"kept");
-    }
-
-    #[test]
-    fn sequences_are_per_aggregate_and_concurrent_appends_do_not_duplicate() {
-        let file = path("concurrent.db");
-        let store = Arc::new(AgentStore::open(&file).unwrap());
-        let first = AggregateId::WorkScope(crate::WorkScopeId::new());
-        let second = AggregateId::AgentRun(crate::AgentRunId::new());
-        assert_eq!(store.append_event(first, 1, b"a").unwrap().get(), 1);
-        assert_eq!(store.append_event(second, 1, b"b").unwrap().get(), 1);
-
-        let mut joins = Vec::new();
-        for _ in 0..8 {
-            let store = Arc::clone(&store);
-            joins.push(thread::spawn(move || {
-                store.append_event(first, 1, b"x").unwrap().get()
-            }));
-        }
-        let mut sequences = joins
-            .into_iter()
-            .map(|join| join.join().unwrap())
-            .collect::<Vec<_>>();
-        sequences.sort_unstable();
-        sequences.dedup();
-        assert_eq!(sequences.len(), 8);
-    }
-
-    #[test]
-    fn snapshot_plus_replay_converges_and_retention_returns_history_gap() {
-        let file = path("replay.db");
-        let store = AgentStore::open(&file).unwrap();
-        let aggregate = AggregateId::Attempt(crate::AttemptId::new());
-        let first = store.append_event(aggregate, 1, b"one").unwrap();
-        let second = store.append_event(aggregate, 1, b"two").unwrap();
-        let third = store.append_event(aggregate, 1, b"three").unwrap();
-        store.snapshot(aggregate, second, b"onetwo").unwrap();
-        let (position, payload) = store.get_snapshot(aggregate).unwrap().unwrap();
-        assert_eq!(position.incorporated_through, second);
-        assert_eq!(payload, b"onetwo");
-        let replay = store.replay_after(aggregate, Some(second)).unwrap();
-        assert_eq!(replay.len(), 1);
-        assert_eq!(replay[0].payload, b"three");
-        store.drop_events_before(aggregate, third).unwrap();
-        match store.replay_after(aggregate, Some(first)) {
-            Err(StoreError::History(gap)) => {
-                assert_eq!(gap.requested_after, first);
-                assert_eq!(gap.earliest_available, third);
-                assert_eq!(gap.current_snapshot_sequence, Some(second));
-                assert_eq!(gap.reason, HistoryGapReason::RetentionTruncation);
-            }
-            other => panic!("expected history gap, got {other:?}"),
-        }
-
-        // Full truncation: cursor behind snapshot → gap; at snapshot → Ok([]);
-        // None (from start) → gap; append must continue past HWM (not renumber).
-        let past_all = AggregateSequence::from_raw(third.get() + 1).unwrap();
-        store.drop_events_before(aggregate, past_all).unwrap();
-        match store.replay_after(aggregate, Some(first)) {
-            Err(StoreError::History(gap)) => {
-                assert_eq!(gap.requested_after, first);
-                assert_eq!(gap.current_snapshot_sequence, Some(second));
-                assert_eq!(gap.reason, HistoryGapReason::RetentionTruncation);
-            }
-            other => panic!("expected full-truncation history gap, got {other:?}"),
-        }
-        assert!(matches!(
-            store.replay_after(aggregate, None),
-            Err(StoreError::History(_))
-        ));
-        let (position, payload) = store.get_snapshot(aggregate).unwrap().unwrap();
-        assert_eq!(position.incorporated_through, second);
-        assert_eq!(payload, b"onetwo");
-        assert_eq!(
-            store.replay_after(aggregate, Some(second)).unwrap(),
-            Vec::new()
-        );
-        let resumed = store.append_event(aggregate, 1, b"after-wipe").unwrap();
-        assert_eq!(resumed.get(), third.get() + 1);
-
-        // Wipe with no snapshot: HWM still prevents renumbering and fabrications.
-        let wiped = AggregateId::WorkScope(crate::WorkScopeId::new());
-        let a = store.append_event(wiped, 1, b"a").unwrap();
-        let b = store.append_event(wiped, 1, b"b").unwrap();
-        let past_b = AggregateSequence::from_raw(b.get() + 1).unwrap();
-        store.drop_events_before(wiped, past_b).unwrap();
-        assert!(matches!(
-            store.replay_after(wiped, None),
-            Err(StoreError::History(_))
-        ));
-        assert!(matches!(
-            store.replay_after(wiped, Some(a)),
-            Err(StoreError::History(_))
-        ));
-        assert_eq!(store.replay_after(wiped, Some(b)).unwrap(), Vec::new());
-        let next = store.append_event(wiped, 1, b"again").unwrap();
-        assert_eq!(next.get(), b.get() + 1);
-
-        // Virgin aggregate: Some cursor with no HWM is empty, not a gap.
-        let virgin = AggregateId::WorkItem(crate::WorkItemId::new());
-        assert_eq!(
-            store
-                .replay_after(virgin, Some(AggregateSequence::FIRST))
-                .unwrap(),
-            Vec::new()
-        );
-
-        // Snapshot must name an exact existing sequence.
-        assert_eq!(
-            store.snapshot(aggregate, AggregateSequence::from_raw(999).unwrap(), b"lie"),
-            Err(StoreError::Corrupt)
-        );
-    }
-
-    #[test]
-    fn mutate_and_append_share_one_commit_boundary() {
-        let file = path("atomic.db");
-        let store = AgentStore::open(&file).unwrap();
-        let run = crate::AgentRunId::new();
-        let attempt = crate::AttemptId::new();
-        store
-            .abandon_mutate_agent_run_and_append(run, attempt, 2, 3, 9, b"started")
-            .unwrap();
-        drop(store);
-        let store = AgentStore::open(&file).unwrap();
-        assert!(store.agent_run(run).is_err());
-        assert!(store
-            .replay_after(AggregateId::AgentRun(run), None)
-            .unwrap()
-            .is_empty());
-
-        let sequence = store
-            .mutate_agent_run_and_append(run, attempt, 2, 3, 9, b"started")
-            .unwrap();
-        let loaded = store.agent_run(run).unwrap();
-        assert_eq!(loaded.attempt_id, attempt);
-        assert_eq!(loaded.binding_generation, 2);
-        assert_eq!(loaded.control_generation, 3);
-        assert_eq!(loaded.liveness, PersistedLiveness::Unknown);
-        let events = store
-            .replay_after(AggregateId::AgentRun(run), None)
-            .unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].sequence, sequence);
-        assert_eq!(events[0].kind, 9);
-        assert_eq!(events[0].payload, b"started");
-        drop(store);
-        let reopened = AgentStore::open(&file).unwrap();
-        assert_eq!(
-            reopened.agent_run(run).unwrap().liveness,
-            PersistedLiveness::Unknown
-        );
-        assert_eq!(
-            reopened
-                .replay_after(AggregateId::AgentRun(run), None)
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn newer_schema_is_quarantined_and_live_liveness_cannot_be_read() {
-        let file = path("schema.db");
-        let conn = Connection::open(&file).unwrap();
-        conn.pragma_update(None, "user_version", 99).unwrap();
-        drop(conn);
-        assert_eq!(
-            AgentStore::open(&file).err(),
-            Some(StoreError::UnsupportedSchema)
-        );
-
-        let runs = path("runs.db");
-        let store = AgentStore::open(&runs).unwrap();
-        let run = crate::AgentRunId::new();
-        let attempt = crate::AttemptId::new();
-        store.put_agent_run(run, attempt, 1, 1).unwrap();
-        let loaded = store.agent_run(run).unwrap();
-        assert_eq!(loaded.liveness, PersistedLiveness::Unknown);
-        assert_eq!(loaded.attempt_id, attempt);
-        drop(store);
-        let conn = Connection::open(&runs).unwrap();
-        conn.execute("UPDATE agent_run SET liveness = 'live'", [])
-            .unwrap_err();
-    }
-
-    #[test]
-    fn output_is_segmented_and_page_exhaustion_does_not_publish_a_new_event() {
-        let file = path("output.db");
-        let store = AgentStore::open(&file).unwrap();
-        let run = crate::AgentRunId::new();
-        let segments = store
-            .append_output(run, &vec![7; OUTPUT_SEGMENT_LEN * 2 + 10])
-            .unwrap();
-        assert_eq!(segments, 3);
-        assert_eq!(store.output_segment_count(run).unwrap(), 3);
-        let aggregate = AggregateId::AgentRun(run);
-        let committed = store.append_event(aggregate, 1, b"before").unwrap();
-        store.confine_database().unwrap();
-        assert_eq!(
-            store.append_event(aggregate, 1, &vec![1; 8192]),
-            Err(StoreError::WriteFailed)
-        );
-        let events = store.replay_after(aggregate, None).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].sequence, committed);
-    }
-
-    #[test]
-    fn records_append_throughput_snapshot_latency_db_growth_and_recovery() {
-        let file = path("measure.db");
-        let opened = Instant::now();
-        let store = AgentStore::open(&file).unwrap();
-        let cold_open = opened.elapsed();
-        let aggregate = AggregateId::WorkItem(crate::WorkItemId::new());
-        let append_started = Instant::now();
-        for index in 0..256_u16 {
-            store
-                .append_event(aggregate, index, &index.to_le_bytes())
-                .unwrap();
-        }
-        let append = append_started.elapsed();
-        let snapshot_started = Instant::now();
-        let through = AggregateSequence::from_raw(256).unwrap();
-        store.snapshot(aggregate, through, b"snap").unwrap();
-        let snapshot = snapshot_started.elapsed();
-        let bytes = store.database_bytes().unwrap();
-        drop(store);
-        let reopen_started = Instant::now();
-        let store = AgentStore::open(&file).unwrap();
-        let recovery = reopen_started.elapsed();
-        assert_eq!(store.replay_after(aggregate, None).unwrap().len(), 256);
-        let rss = resident_kib();
-        assert!(append < Duration::from_secs(2));
-        assert!(snapshot < Duration::from_secs(1));
-        assert!(recovery < Duration::from_secs(1));
-        assert!(bytes > 0);
-        let rss = rss.expect("RSS sample required for AB-0.3 measurement budget");
-        assert!(rss < 512 * 1024, "RSS ceiling exceeded: {rss} KiB");
-        eprintln!(
-            "ab-0.3 measurement cold_open_us={} append_256_us={} snapshot_us={} recovery_us={} db_bytes={} rss_kib={}",
-            cold_open.as_micros(),
-            append.as_micros(),
-            snapshot.as_micros(),
-            recovery.as_micros(),
-            bytes,
-            rss
-        );
-    }
-
-    fn resident_kib() -> Option<u64> {
-        let output = std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-            .output()
-            .ok()?;
-        String::from_utf8(output.stdout).ok()?.trim().parse().ok()
-    }
-}
+mod tests;

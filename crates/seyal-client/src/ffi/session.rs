@@ -41,7 +41,9 @@ pub(crate) fn set_recovery_failure(error: ClientError) {
         // specified wall-clock bound.
         ClientError::StartupDeadlineExceeded => (4, 0),
         ClientError::Io | ClientError::Disconnected => (2, 1),
-        ClientError::NoRunningExecution => (2, 0),
+        // The requested execution identity is authoritative. A Runtime that
+        // no longer has it cannot be recovered by launching another shell.
+        ClientError::NoRunningExecution => (7, 0),
         ClientError::AmbiguousExecutions => (6, 0),
         ClientError::Server(ErrorCode::ControllerBusy) => (3, 1),
         ClientError::UnsupportedDisplayCapability

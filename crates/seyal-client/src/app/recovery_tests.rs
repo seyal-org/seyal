@@ -83,6 +83,43 @@ fn recovery_retry_ladder_and_stale_generation_fail_closed() {
 }
 
 #[test]
+fn ended_execution_keeps_flow_transcript_and_hides_the_composer() {
+    let mut root = ApplicationRoot::new();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([4; 16]),
+            attachment: AttachmentId::from_bytes([5; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::ExecutionEnded,
+        now: Duration::from_millis(1),
+        launch: None,
+    })
+    .unwrap();
+
+    let snapshot = root.snapshot();
+    assert_eq!(snapshot.recovery_stage, RecoveryStage::ExecutionEnded);
+    assert_eq!(snapshot.eligibility, PresentationEligibility::Flow);
+    assert!(!snapshot.composer_eligible);
+    assert_eq!(
+        snapshot.composer.unwrap().mode,
+        crate::composer::ComposerMode::Hidden
+    );
+}
+
+#[test]
 fn recovery_cancel_and_presentation_advance_through_app_root() {
     let mut root = ApplicationRoot::new();
     root.apply(AppAction::BeginRecovery {

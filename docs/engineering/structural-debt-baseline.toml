@@ -110,6 +110,14 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 916
-issue = 1149
-reason = "Connect/attach/bootstrap create stay one cold-path attach module after #1136 ADR-017 §6.3 dispose (row-1/row-2, FinishAttachError.terminated_on_attachment including Resync-send and post-snapshot socket-mode failures, dispose_never_bound_orphan) and #1149 queued create-result initializer; further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
+acknowledged_loc = 936
+issue = 1105
+reason = "Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. Ceiling matches post-master-merge LOC."
+
+# #1029 AB-0 Hello evidence binds a principal before HelloAck; accept/negotiate
+# and one-connection serve stay one daemon façade (peer/endpoint already split).
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/daemon/mod.rs"
+acknowledged_loc = 728
+issue = 1029
+reason = "Unix daemon bind/reclaim/serve and Hello evidence→principal binding stay one façade after peer/endpoint extraction; further splitting would separate accept negotiation from the single-connection serve loop that owns begin/end_connection. Ceiling matches post-B3 LOC."

@@ -9,6 +9,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+seyal-agent-backend = { path = "../crates/seyal-agent-backend" }
+seyal-agent-core = { path = "../crates/seyal-agent-core" }
+seyal-agent-protocol = { path = "../crates/seyal-agent-protocol" }
 seyal-exec = { path = "../crates/seyal-exec" }
 seyal-protocol = { path = "../crates/seyal-protocol" }
 seyal-runtime = { path = "../crates/seyal-runtime" }
@@ -87,6 +90,20 @@ bench = false
 [[bin]]
 name = "history_resize_eviction"
 path = "fuzz_targets/history_resize_eviction.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "agent_protocol_decode"
+path = "fuzz_targets/agent_protocol_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "agent_harness_observation"
+path = "fuzz_targets/agent_harness_observation.rs"
 test = false
 doc = false
 bench = false

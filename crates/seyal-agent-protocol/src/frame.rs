@@ -1,3 +1,4 @@
+/// Whole frame, including the 10-byte header. The largest body is this value minus the header.
 pub const ABSOLUTE_MAX_FRAME_SIZE: u32 = 64 * 1024;
 const HEADER_LEN: usize = 10;
 const MAGIC: &[u8; 4] = b"AGB1";
@@ -7,6 +8,8 @@ pub enum FrameKind {
     Hello,
     HelloAck,
     HandshakeError,
+    Command,
+    Result,
 }
 
 impl FrameKind {
@@ -15,6 +18,8 @@ impl FrameKind {
             Self::Hello => 1,
             Self::HelloAck => 2,
             Self::HandshakeError => 3,
+            Self::Command => 4,
+            Self::Result => 5,
         }
     }
 
@@ -23,6 +28,8 @@ impl FrameKind {
             1 => Ok(Self::Hello),
             2 => Ok(Self::HelloAck),
             3 => Ok(Self::HandshakeError),
+            4 => Ok(Self::Command),
+            5 => Ok(Self::Result),
             _ => Err(FrameError::Malformed),
         }
     }

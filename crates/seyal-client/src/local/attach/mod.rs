@@ -54,9 +54,20 @@ use super::{
         hello_until_with_legacy_key_fallback, read_exact_until, send_control_until,
     },
     display_apply::PendingDisplayBatch,
+    execution_is_running,
     input_resize::GridGeometry,
     server_error, ClientError, LocalDisplayClient, MAX_BUFFERED_BYTES, MAX_FRAMES_PER_POLL,
 };
+
+fn attach_server_error(code: u16) -> ClientError {
+    if seyal_runtime::local_ipc::framing::ErrorCode::from_u16(code)
+        == Some(seyal_runtime::local_ipc::framing::ErrorCode::InvalidExecution)
+    {
+        ClientError::NoRunningExecution
+    } else {
+        server_error(code)
+    }
+}
 
 const DISPLAY_CHUNK_INDEX_OFFSET: usize = 32;
 const DISPLAY_CHUNK_COUNT_OFFSET: usize = 34;
@@ -504,6 +515,15 @@ impl LocalDisplayClient {
             true,
             deadline,
         )?;
+        send_control_until(&mut stream, MessageType::ListExecutions, &[], deadline)?;
+        let (kind, payload) = read_blocking_frame_until(&mut stream, deadline)?;
+        if kind != MessageType::ExecutionList {
+            return Err(ClientError::Protocol);
+        }
+        let executions = ExecutionList::decode(&payload).map_err(|_| ClientError::Protocol)?;
+        if !execution_is_running(&executions, execution_id) {
+            return Err(ClientError::NoRunningExecution);
+        }
         if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
             drop(stream);
             stream = connect_stream_until(socket_path, deadline)?;
@@ -633,7 +653,7 @@ impl LocalDisplayClient {
             let error = ErrorMessage::decode(&payload)
                 .map_err(|_| ClientError::Protocol)
                 .map_err(FinishAttachError::before_attached)?;
-            return Err(FinishAttachError::before_attached(server_error(
+            return Err(FinishAttachError::before_attached(attach_server_error(
                 error.error_code,
             )));
         }

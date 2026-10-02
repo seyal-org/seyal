@@ -342,6 +342,7 @@ fn decode_outcome(reserved: u32, handle: u64) -> Result<AttemptOutcome, i32> {
         4 => Ok(AttemptOutcome::Retryable),
         5 => Ok(AttemptOutcome::ControllerBusy),
         6 => Ok(AttemptOutcome::Blocked),
+        7 => Ok(AttemptOutcome::ExecutionEnded),
         _ => Err(-6),
     }
 }

@@ -90,6 +90,14 @@ macro_rules! define_generation {
                 self.0
             }
 
+            pub const fn from_raw(value: u64) -> Option<Self> {
+                if value == 0 {
+                    None
+                } else {
+                    Some(Self(value))
+                }
+            }
+
             pub(crate) fn next(self) -> Option<Self> {
                 self.0.checked_add(1).map(Self)
             }

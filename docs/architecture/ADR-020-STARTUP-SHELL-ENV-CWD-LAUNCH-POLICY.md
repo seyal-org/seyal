@@ -1,13 +1,13 @@
 # ADR-020 — Startup shell, environment and CWD launch policy
 
-- **Status:** Proposed (refinement output of Issue #1003; no production code in this decision)
+- **Status:** Accepted on merge of PR #1089 by a non-author maintainer under #1003. An author or agent comment is not that acceptance. ADR-017 owns the wire launch-profile selector; this ADR owns what profile `0` contains. Both ownership statements are normative. Children that need profile contents remain not Ready until this ADR is accepted — that is an implementation gate, not a condition on these sentences.
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent umbrella #676, epic #665; consumed by #994 provisioning children; related #686)
 - **Depends on:** ADR-005, ADR-008, ADR-009, ADR-015, SPEC-002, SPEC-003, SPEC-009
-- **Neighbor (Proposed, not on `master`):** [PR #1056](https://github.com/seyal-org/seyal/pull/1056) / Issue #994 proposes **ADR-017** (TerminalExecution provisioning and disposition). This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
-- **Numbering:** ADR-020 (vacant on `master`). Concurrent M003 provisional allocation: #994 → ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)), #1000 → ADR-018 ([PR #1055](https://github.com/seyal-org/seyal/pull/1055)), #1004 → ADR-019 ([PR #1057](https://github.com/seyal-org/seyal/pull/1057)), #1003 → **ADR-020** (this document). #1001 landed on `master` as ADR-021 / SPEC-025 (PR #1053). Numbers remain provisional until merge order is settled; siblings must not claim ADR-020.
+- **Neighbor:** ADR-017 (TerminalExecution provisioning and disposition) is Accepted on merge of PR #1088. This document defines the typed launch-policy object that ADR-017's Runtime composition root resolves when a create request selects a launch profile. It does **not** amend, renumber or rewrite ADR-017.
+- **Numbering:** ADR-020. Concurrent M003 allocation: #994 → ADR-017 (PR #1088), #1000 → ADR-018, #1004 → ADR-019, #1003 → **ADR-020** (this document). #1001 landed as ADR-021 / SPEC-025 (PR #1053). Siblings must not claim ADR-020.
 - **Scope:** deterministic cold-path policy for program/argv (including login bit), startup CWD, bounded environment construction, and `TERM`/`COLORTERM`/capability ownership when composing a new local interactive `TerminalExecution`
-- **Classification:** new architecture decision plus tightly scoped SPEC-023 (Proposed) and light SPEC-003/SPEC-009 cross-references
+- **Classification:** new architecture decision plus tightly scoped SPEC-023 (Accepted; not an implemented-behavior claim) and light SPEC-003/SPEC-009 cross-references
 
 ## 1. Context
 
@@ -20,7 +20,7 @@ M004 lists "Startup shell/environment/CWD policy" as a launch blocker under umbr
 - which environment keys a child may observe, and how diagnostics stay secret-safe;
 - who owns `COLORTERM` relative to ADR-008's `TERM`/terminfo claim;
 - how Finder/launchd-started Runtimes remain deterministic;
-- how that policy is expressed as a typed object for the #994 / proposed ADR-017 provisioning seam.
+- how that policy is expressed as a typed object for the #994 / ADR-017 provisioning seam.
 
 Today's production composition is underspecified and therefore precedent-prone:
 
@@ -35,7 +35,7 @@ seyal-runtime main()
 
 That path inherits whatever environment the Runtime process has, does not define login vs non-login, does not validate CWD, and does not distinguish account-record shell authority from an arbitrary `$SHELL`. SPEC-009 §8.1.1 already constructs a minimal helper-launch environment for the Runtime process itself; child-shell policy must not silently re-open that boundary.
 
-Proposed ADR-017 (PR #1056) correctly assigns **launch-policy ownership to the Runtime composition root** and keeps the provisioning wire free of paths, environment pairs and command strings. It deliberately defers the *contents* of that policy and named/configurable profiles to #676 / this Issue. Without this decision, ADR-017's profile `0` and any later profile selector have no normative resolution.
+ADR-017 correctly assigns **launch-policy ownership to the Runtime composition root** and keeps the provisioning wire free of paths, environment pairs and command strings. It deliberately defers the *contents* of that policy and named/configurable profiles to #676 / this Issue. Without this decision, ADR-017's profile `0` and any later profile selector have no normative resolution.
 
 ## 2. Why this is architecture
 
@@ -44,7 +44,7 @@ This is not an ordinary implementation detail. It decides:
 1. **Authority** — which layer owns every launch input (shell, login bit, cwd, env, capability keys);
 2. **Trust boundary** — that shell text and OSC 7/OSC 2 never become spawn authority;
 3. **Security/privacy** — bounded inheritance, redaction and failure diagnostics;
-4. **Seam contract** — the typed object proposed ADR-017's create path consumes so provisioning children do not invent policy inside a Runtime PR.
+4. **Seam contract** — the typed object ADR-017's create path consumes so provisioning children do not invent policy inside a Runtime PR.
 
 An implementation PR that "just picks `$SHELL` and inherits the environment" would set permanent product and security precedent without an ADR, which `AGENTS.md` forbids.
 
@@ -52,10 +52,10 @@ An implementation PR that "just picks `$SHELL` and inherits the environment" wou
 
 ### 3.1 One cold-path owner: Runtime composition root
 
-The Runtime composition root owns the complete **effective** launch policy for every interactive local execution it creates, including executions created through the proposed ADR-017 provisioning seam and executions created by an explicit developer/test command invocation that intentionally bypasses the interactive profile (see §3.11).
+The Runtime composition root owns the complete **effective** launch policy for every interactive local execution it creates, including executions created through the ADR-017 provisioning seam and executions created by an explicit developer/test command invocation that intentionally bypasses the interactive profile (see §3.11).
 
 ```text
-LaunchProfileId                    (wire: proposed ADR-017 create request)
+LaunchProfileId                    (wire: ADR-017 create request)
   → LaunchProfileIntent            (Runtime-local; profile 0 defaults now;
                                     named profiles later under #676)
   → EffectiveLaunchPolicy          (THIS ADR — typed, validated, secret-safe)
@@ -68,8 +68,8 @@ LaunchProfileId                    (wire: proposed ADR-017 create request)
 Rules:
 
 1. **Cold/control path only.** Policy resolution runs during execution creation. It must never enter PTY read/write, VT mutation, reactor fairness, snapshot encode or Metal hot paths.
-2. **One authority.** Native AppKit and `seyal-client` never choose program, argv, cwd or environment pairs for a Runtime-owned child. They may only select a bounded launch-profile identity on the provisioning request (proposed ADR-017), or surface bounded failure UX.
-3. **No shell text / OSC authority.** OSC 7, OSC 2, prompt text, composer draft, Block titles and any other terminal-derived string are display metadata only. They are never launch inputs (`seyal-terminal` presentation contract; proposed ADR-017 §4.3.1; spike #686 owns any future trusted CWD signal).
+2. **One authority.** Native AppKit and `seyal-client` never choose program, argv, cwd or environment pairs for a Runtime-owned child. They may only select a bounded launch-profile identity on the provisioning request (ADR-017), or surface bounded failure UX.
+3. **No shell text / OSC authority.** OSC 7, OSC 2, prompt text, composer draft, Block titles and any other terminal-derived string are display metadata only. They are never launch inputs (`seyal-terminal` presentation contract; ADR-017 §4.3.1; spike #686 owns any future trusted CWD signal).
 4. **PTY layer stays policy-neutral.** `seyal-exec` continues to accept an explicit `CommandSpec` and does not invent `TERM`, login bits or shell selection (ADR-005, SPEC-002).
 
 ### 3.2 Typed object: `EffectiveLaunchPolicy`
@@ -153,7 +153,7 @@ Profile `0` startup working directory:
 
 1. **Default:** the effective user's home directory from the account record (`pw_dir` / equivalent), validated as an existing directory the process can `chdir` to;
 2. **Explicit override:** only via launch-profile / config intent (future #676), never via OSC, Pane title, composer text or sibling-Pane heuristics;
-3. **Inheritance from another live execution:** **not authorized** until spike #686 accepts a trusted CWD signal and a scoped amendment updates this ADR / SPEC-023. Proposed ADR-017 §4.3.1 already forbids OSC 7 as spawn input; this ADR restates that prohibition as launch-policy law.
+3. **Inheritance from another live execution:** **not authorized** until spike #686 accepts a trusted CWD signal and a scoped amendment updates this ADR / SPEC-023. ADR-017 §4.3.1 already forbids OSC 7 as spawn input; this ADR restates that prohibition as launch-policy law.
 
 Invalid / unusable CWD behavior:
 
@@ -176,7 +176,7 @@ Production interactive launches **always** set `clear_environment = true` on `Co
 | `USER`, `LOGNAME` | account-record name |
 | `SHELL` | the validated `program` path actually being executed |
 | `PATH` | exactly `/usr/bin:/bin:/usr/sbin:/sbin` unless a later accepted profile extends it under #676 with the same validation discipline |
-| `TMPDIR` | already-validated absolute per-user temporary directory when available; otherwise omit |
+| `TMPDIR` | the Darwin per-user temporary directory from `confstr(_CS_DARWIN_USER_TEMP_DIR)`, validated as an absolute existing directory owned by the effective UID. It is never copied from the Runtime process environment; if it is unavailable or invalid it is omitted. |
 | `TERM`, `TERMINFO` | CapabilityPolicy (ADR-008) — applied as overrides after base env |
 
 **Policy-owned keys (named carve-out).** After the base allowlist, exactly two later policies may add keys, and only these:
@@ -226,19 +226,21 @@ Consequences for child shells:
 - Launch policy must not require a parent TTY, inherited `TERM`, or GUI session variables;
 - Account-record lookups are the primary shell/home authority so a missing or hostile `$SHELL` cannot redirect interactive provisioning.
 
-### 3.9 Inputs through the #994 / proposed ADR-017 provisioning seam
+### 3.9 Inputs through the #994 / ADR-017 provisioning seam
 
-| Input | On the wire (proposed ADR-017) | Resolved by |
+| Input | On the wire (ADR-017) | Resolved by |
 |---|---|---|
 | launch-profile selector | yes (bounded integer / id) | Runtime → `LaunchProfileIntent` → `EffectiveLaunchPolicy` |
-| `WorkspaceId`, request id, geometry | yes | proposed ADR-017 admission |
+| `WorkspaceId`, request id, geometry | yes | ADR-017 admission |
 | program / argv / cwd / env pairs | **never** | Runtime only |
 | `TERM` / `COLORTERM` | **never** | CapabilityPolicy |
 | OSC 7 / shell text | **never** | forbidden |
 
-Profile `0` is the only interactive profile authorized before #676 named profiles land. Unknown or reserved profile ids fail closed as proposed ADR-017 already requires (`UnsupportedLaunchProfile`); this ADR does not invent a second create path.
+Profile `0` is the only interactive profile authorized before #676 named profiles land. Unknown or reserved profile ids fail closed as ADR-017 already requires (`UnsupportedLaunchProfile`); this ADR does not invent a second create path.
 
 Named profiles, when #676 defines them, only extend the selector→intent map inside Runtime (or a Runtime-readable config authority). They must not turn the provisioning request into a command-line or environment channel.
+
+ADR-017 owns the wire launch-profile selector; this ADR owns what profile `0` contains. Both ownership statements are normative. Implementation children that need profile contents remain not Ready until this ADR is accepted — that is an implementation gate, not a condition on these sentences.
 
 ### 3.10 Error UX when shell or CWD is invalid
 
@@ -264,21 +266,35 @@ LaunchPolicyWarning =
 
 Mapping rules:
 
-- On the proposed ADR-017 create path, until SPEC-004 adds an additive
+- On the ADR-017 create path, until SPEC-004 adds an additive
   `17 LaunchPolicyRejected` result code (decomposition slice L0, owned by this
-  #1003 workstream as a separate SPEC-004 amendment PR after ADR-017
-  acceptance; 17 is the next free code after ADR-017's 15/16), **all** `LaunchPolicyFailure` variants map to create result code
-  `14 InternalFailure` with `detail_code` 0. The bounded failure class is kept
-  only in portable Rust product UI state and structured logs — never in the
-  create-result wire payload. `LaunchPolicyWarning` values are **not** surfaced
-  on the create-result wire (`Created` has no warning field); they reach the
-  Rust UI only through a separate product-state channel owned by the
-  implementation Issue. Implementations must not invent interim wire encodings
-  of paths, secrets, or warning bitmasks in `detail_code`.
+  #1003 workstream as a separate SPEC-004 amendment PR; 17 is the next free
+  code after ADR-017's 15/16), **all** `LaunchPolicyFailure` variants map to
+  create result code `14 InternalFailure` with `detail_code` 0. Runtime records
+  the failure class in structured logs. Until L0 merges, the client-side
+  portable Rust product UI receives only `14 InternalFailure` with
+  `detail_code` 0 and renders one generic bounded failure string
+  ("New terminal could not start"). Until L0 merges, fallback-with-warning
+  creates still succeed and the portable Rust product UI renders one generic
+  bounded warning string; class-specific failure and warning strings arrive at
+  L0. There is no silent success. L0 assigns `17 LaunchPolicyRejected` with the
+  bounded, non-secret `detail_code` values 1 `AccountRecordUnavailable`,
+  2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4 `CapabilityUnavailable`. No other
+  values are defined; clients treat any unknown value as generic.
+  `Created.detail_code` warning/failure bits are not visible to a client that
+  has not negotiated the launch-policy detail capability. Until that capability
+  is negotiated, `Created.detail_code` stays 0 (SPEC-004 §18.3). L0 allocates
+  that capability as `CAP_LAUNCH_POLICY_DETAIL`, the next free bit after
+  ADR-017's bit 10 (`CAP_EXECUTION_PROVISIONING`), when amending SPEC-004 (do
+  not reuse a bit SPEC-004 already assigned; if another specification claims
+  the candidate first, L0 takes the next free bit), and assigns
+  `Created.detail_code` bit 0 = `ConfiguredShellInvalid` and bit 1 =
+  `CwdOverrideInvalid`. All other bits are reserved and must be 0. No other
+  transport for launch-policy warnings is authorized. Implementations must not
+  invent interim wire encodings of paths or secrets in `detail_code`. The
+  interim wire ban covers everything before L0.
 - **Removal boundary.** The `14 InternalFailure` mapping is authoritative only
-  until L0 merges. L3 then switches every `LaunchPolicyFailure` to
-  `17 LaunchPolicyRejected` in the same PR that consumes it; the two mappings
-  never coexist. If another specification claims 17 first, L0 takes the next
+  until L0 merges. The PR that consumes L0 (L3 if L0 has merged before L3, otherwise the consumer child filed together with L0) switches every `LaunchPolicyFailure` to `17 LaunchPolicyRejected` with the §3.10 detail codes and sets the §3.10 `Created.detail_code` warning bits, and removes the code-14 mapping in that same PR; the two mappings never coexist. If another specification claims 17 first, L0 takes the next
   free code and updates this section.
 - Portable Rust product authority owns user-visible copy: short, non-secret strings such as "Shell unavailable", "Working directory unavailable", or "Using the default shell because the configured shell is invalid".
 - Native AppKit renders that bounded state only; it does not reinterpret OS error strings.
@@ -303,7 +319,7 @@ Rejected. Conflicts with SPEC-009 §8.1.1 intent, leaks secrets, and makes Finde
 
 ### B. Client sends shell path / cwd / env on the create request
 
-Rejected. Proposed ADR-017 correctly keeps the wire string-free. Client-supplied paths would also invite confused-deputy behavior inside the same-UID boundary and duplicate launch authority against ADR-015.
+Rejected. ADR-017 correctly keeps the wire string-free. Client-supplied paths would also invite confused-deputy behavior inside the same-UID boundary and duplicate launch authority against ADR-015.
 
 ### C. Default non-login for every execution
 
@@ -325,7 +341,7 @@ Rejected. PTY creation is policy-neutral (ADR-005). Product claims belong in Run
 
 Positive:
 
-- #994 / proposed ADR-017 children can resolve profile `0` without inventing shell/env/cwd rules mid-implementation;
+- #994 / ADR-017 children can resolve profile `0` without inventing shell/env/cwd rules mid-implementation;
 - Finder/launchd and terminal-started Runtimes converge on one child environment;
 - secrets and paths stay off the wire and out of ordinary diagnostics;
 - OSC/shell text cannot become filesystem authority.
@@ -335,13 +351,13 @@ Costs / honest limits:
 - CWD inheritance for splits remains unavailable until #686;
 - named configurable profiles remain #676 follow-on work;
 - login-by-default means profile scripts run for every new execution (including splits) until a non-login profile exists;
-- additive CreateExecutionResult codes for launch-policy rejection may require a small SPEC-004 follow-up after ADR-017 lands — recorded here so it is not "discovered" in an implementation PR.
+- additive CreateExecutionResult codes and `CAP_LAUNCH_POLICY_DETAIL` for launch-policy rejection may require a small SPEC-004 follow-up (decomposition L0) — recorded here so it is not "discovered" in an implementation PR.
 
 ## 6. Spec / milestone impact
 
-- **New:** [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (Proposed) — observable resolution, validation, failure and test contract.
+- **New:** [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md) (Accepted; not an implemented-behavior claim) — observable resolution, validation, failure and test contract.
 - **Cross-reference only:** SPEC-003 create transaction consumes `EffectiveLaunchPolicy`→`CommandSpec`; SPEC-009 helper env remains the Runtime-process contract, not the child-shell contract.
-- **Do not edit in this PR:** proposed ADR-017 files that exist only on PR #1056.
+- **Do not edit in this PR:** ADR-017 (Accepted on merge of PR #1088) or its SPEC amendments.
 - **Decomposition:** [`../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md`](../engineering/M003-LAUNCH-POLICY-DECOMPOSITION.md).
 
 ## 7. Security and privacy

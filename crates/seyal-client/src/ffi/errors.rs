@@ -24,6 +24,7 @@ pub extern "C" fn seyal_bridge_classify_open_result(failure_class: u8, retryable
         AttemptOutcome::EndpointMissing => 3,
         AttemptOutcome::Retryable => 4,
         AttemptOutcome::ControllerBusy => 5,
+        AttemptOutcome::ExecutionEnded => 7,
         AttemptOutcome::Blocked => 6,
         AttemptOutcome::Connected | AttemptOutcome::Opened { .. } => 6,
     }

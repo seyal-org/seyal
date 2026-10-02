@@ -1,21 +1,26 @@
 # M003 / #676 — startup launch-policy production decomposition
 
-- **Status:** Draft Issue bodies produced by refinement Issue #1003. **Not filed.**
-  A maintainer files these as GitHub Issues under parent
+- **Status:** Draft Issue bodies produced by refinement Issue #1003. L1 is
+  filed as [#1097](https://github.com/seyal-org/seyal/issues/1097) and L2 as
+  [#1102](https://github.com/seyal-org/seyal/issues/1102). Remaining slices
+  (L0, L3–L5) are filed by a maintainer under parent
   [#676](https://github.com/seyal-org/seyal/issues/676) (do not assign the
   umbrella). Coordination with provisioning children under [#674](https://github.com/seyal-org/seyal/issues/674) / #994 is explicit below.
 - **Authority:** [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md)
-  (Proposed), [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md)
-  (Proposed), ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1,
+  (Accepted; not an implemented-behavior claim), [`../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md`](../specs/SPEC-023-M003-STARTUP-LAUNCH-POLICY.md)
+  (Accepted; not an implemented-behavior claim), ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1,
   [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
-- **Neighbor:** Proposed ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056)) owns the create/dispose seam and
-  profile selector. These children supply the policy object that seam resolves.
-  Do not edit ADR-017 files on that PR from this workstream.
+- **Neighbor:** ADR-017 (Accepted on merge of PR #1088) owns the create/dispose
+  seam and profile selector. These children supply the policy object that seam
+  resolves. Do not edit ADR-017 or its SPEC amendments from this workstream.
 
 **Hard gate:** no child below may be marked **Ready** before ADR-020 and
 SPEC-023 are accepted on `master`. Children that call the provisioning create
 path also require ADR-017 + its SPEC amendments accepted. Until then these are
-refinement artifacts, not work authorizations.
+refinement artifacts, not work authorizations. ADR-017 owns the wire
+launch-profile selector; ADR-020 owns what profile `0` contains. Both ownership
+statements are normative; the Ready gate above is an implementation gate, not a
+condition on those sentences.
 
 Each child is one independently reviewable outcome with one human owner, one
 `<human-login>/issue/<number>` branch and one PR, per
@@ -25,24 +30,29 @@ Each child is one independently reviewable outcome with one human owner, one
 
 ```text
 ADR-020 + SPEC-023 accepted
-  → L1 EffectiveLaunchPolicy type + resolver (no spawn / no protocol)
-  → L2 Runtime composition applies policy on interactive create
+  → L1 EffectiveLaunchPolicy type + resolver (no spawn / no protocol)  #1097
+  → L2 Runtime composition applies policy on interactive create         #1102
        (headed profile 0; also replaces ad-hoc main $SHELL default)
+  → L0 SPEC-004 additive `17 LaunchPolicyRejected` + CAP_LAUNCH_POLICY_DETAIL
+       (docs-only amendment PR)
   → L3 bounded failure/warning UX in portable Rust product authority
+       (depends on L0 for class-specific strings; pre-L0 shows one generic
+        bounded failure string and one generic bounded warning string)
   → L4 config-declared shell / cwd / login bit     (needs #676 config schema child)
   → L5 adversarial + Finder-env + redaction acceptance fixtures
 
 Provisioning consume path (after ADR-017 accepted):
   ADR-017 P3 create admission
     → uses L2 policy resolution for profile 0
-  L0 SPEC-004 additive `17 LaunchPolicyRejected` (docs-only amendment PR)
-    → consumed by L3 (switches the interim 14 mapping in the same PR)
 ```
 
 L1 is independent of ADR-017. L2's developer/test argv path can land before
-provisioning; L2's headed multi-execution path needs ADR-017 P1/P3. L4 must not
-invent a TOML schema inside a launch-policy PR if a dedicated #676 config child
-owns that schema.
+provisioning; L2's headed multi-execution path needs ADR-017 P1/P3. L3 depends
+on L0 because L3's per-class visible strings cannot be met before L0; before L0
+the product still shows the one generic bounded failure string and one generic
+bounded warning string from ADR-020 §3.10 / SPEC-023 §9. L4 must not invent a
+TOML schema inside a launch-policy PR if a dedicated #676 config child owns that
+schema.
 
 ---
 
@@ -53,23 +63,26 @@ amendment PR; it does not edit ADR-017 files.
 
 **In scope**
 
-- Add `17 LaunchPolicyRejected` to the SPEC-004 §15 / §18 result-code
-  registry as an additive `CreateExecutionResult` code, with `detail_code` 0
-  and no path/env bytes. If 17 has been claimed by then, take the next free
-  code and update ADR-020 §3.10 in the same PR.
+- Add `17 LaunchPolicyRejected` to the SPEC-004 §15/§18 registry with `detail_code` 1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4 `CapabilityUnavailable` (unknown values render generic), and amend §18.3 so `Created` `detail_code` bit 0 = `ConfiguredShellInvalid` and bit 1 = `CwdOverrideInvalid`, with all other bits reserved and 0; no path/env bytes. If 17 has been claimed by then, take the next free code and update ADR-020 §3.10 in the same PR.
+- Allocate `CAP_LAUNCH_POLICY_DETAIL` as the next free capability bit after ADR-017's bit 10 (`CAP_EXECUTION_PROVISIONING`) when amending SPEC-004. Do not reuse a bit SPEC-004 already assigned; if another specification claims the candidate first, take the next free bit. Until a client negotiates that capability, `Created.detail_code` stays 0 (SPEC-004 §18.3); warning/failure detail bits are not visible without the capability.
 
 **Acceptance**
 
 - The registry lists the code; older clients treat it as a non-retryable
   unknown failure (SPEC-004 §15 rule).
+- SPEC-004 §18.3 states that a client must treat `Created` as success regardless of `detail_code`, must ignore unknown or reserved `Created.detail_code` bits, and must never infer failure from a nonzero `Created.detail_code`.
+- SPEC-004 states that Runtime sets nonzero `Created.detail_code` warning bits only when `CAP_LAUNCH_POLICY_DETAIL` was negotiated; otherwise `Created.detail_code` remains 0.
 
 **Dependencies:** ADR-017 accepted (it introduces the create result and codes
 15/16). Until L0 merges, ADR-020 §3.10's `14 InternalFailure` mapping is the
-only authoritative mapping.
+only authoritative failure-code mapping; pre-L0 product UI still shows one
+generic bounded failure string and one generic bounded warning string.
 
 ---
 
 ## L1 — `EffectiveLaunchPolicy` type and pure resolver
+
+**Filed:** [#1097](https://github.com/seyal-org/seyal/issues/1097)
 
 **In scope**
 
@@ -104,6 +117,8 @@ only authoritative mapping.
 ---
 
 ## L2 — Runtime composition applies launch policy
+
+**Filed:** [#1102](https://github.com/seyal-org/seyal/issues/1102)
 
 **In scope**
 
@@ -146,9 +161,14 @@ provisioning consume path also needs ADR-017 P1/P3.
   to a bounded warning state when create succeeds after fallback.
 - Thin native rendering of that bounded state only (ADR-015).
 - Protocol mapping: until L0 merges, every `LaunchPolicyFailure` maps to
-  create `14 InternalFailure` with `detail_code` 0 and warnings stay off the
-  wire (ADR-020 §3.10). When L0 has merged, L3 uses `17 LaunchPolicyRejected`
-  instead, in the same PR; the two mappings never coexist.
+  create `14 InternalFailure` with `detail_code` 0 and
+  `Created.detail_code` stays 0; the portable product UI still shows one
+  generic bounded failure string and one generic bounded warning string
+  (ADR-020 §3.10). When L0 has merged, L3 uses `17 LaunchPolicyRejected` with
+  the ADR-020 §3.10 detail codes and sets the ADR-020 §3.10
+  `Created.detail_code` warning bits only when `CAP_LAUNCH_POLICY_DETAIL` was
+  negotiated, and removes the code-14 mapping in the same PR; the two mappings
+  never coexist.
 - `pw_shell` empty/invalid with safe-default spawn → `ConfiguredShellInvalid`.
 
 **Out of scope**
@@ -158,16 +178,19 @@ provisioning consume path also needs ADR-017 P1/P3.
 **Acceptance**
 
 - Every failure and warning class in SPEC-023 §9 has a user-visible bounded
-  string; warnings never surface as create failures.
+  string; warnings never surface as create failures. Before L0 only the one
+  generic bounded failure string and one generic bounded warning string are
+  required; class-specific strings are required once L0 has merged.
 - No OS strerror, path or env value appears in default UI.
 
 **Tests**
 
-- SPEC-023 §12 items 15–16; snapshot/unit tests for each failure class;
+- SPEC-023 §12 items 15–17; snapshot/unit tests for each failure class;
   headed smoke that invalid home / exhausted shell fallback shows the bounded
   state.
 
-**Dependencies:** L2.
+**Dependencies:** L2 and L0. L3's per-class visible strings cannot be met
+before L0.
 
 ---
 
@@ -227,7 +250,7 @@ fields.
 
 ## Non-goals for all children
 
-- Production edits to proposed ADR-017 files on PR #1056;
+- Edits to ADR-017 or its SPEC amendments;
 - Trusted OSC CWD (#686);
 - Remote shell integration;
 - Persistence of dead process state;
