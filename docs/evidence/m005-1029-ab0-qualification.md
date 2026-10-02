@@ -4,8 +4,9 @@ Qualification record for Issue #1029 on PR #1170. This is not the exit
 decision. The exit stays pending independent human review and is posted on
 #1023 only by the human owner.
 
-Measured at code head `e5c5aa69bbe29c63fde6aa3fd95ad1e552ee895b`. Confirm with
-`git rev-parse HEAD` on `mahboobmonnamd/issue/1029` before citing CI.
+Measured at the current tip of `mahboobmonnamd/issue/1029` (PR #1170 head).
+Confirm with `git rev-parse HEAD` / the PR head SHA before citing CI; do not
+freeze a SHA inside this paragraph across follow-up docs-only commits.
 
 Every number below is labeled `performance_claim=false`. None of them is a
 production throughput or idle-cost claim.
