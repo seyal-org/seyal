@@ -61,6 +61,39 @@ pub enum DaemonError {
     Io,
 }
 
+impl DaemonError {
+    /// Per-client / handshake faults that leave a bound listener usable.
+    ///
+    /// `Endpoint(WrongOwner)` is a same-UID peer reject; other `Endpoint`
+    /// faults mean the bound path itself is compromised and stay fatal.
+    pub fn is_recoverable_client_fault(self) -> bool {
+        matches!(
+            self,
+            Self::TimedOut
+                | Self::Malformed
+                | Self::Oversized
+                | Self::Handshake(_)
+                | Self::Io
+                | Self::Endpoint(EndpointFault::WrongOwner)
+        )
+    }
+}
+
+#[cfg(test)]
+mod recoverable_fault_tests {
+    use super::{DaemonError, EndpointFault};
+    use seyal_agent_protocol::HandshakeError;
+
+    #[test]
+    fn wrong_owner_peer_is_recoverable_other_endpoint_faults_are_not() {
+        assert!(DaemonError::Endpoint(EndpointFault::WrongOwner).is_recoverable_client_fault());
+        assert!(!DaemonError::Endpoint(EndpointFault::Symlink).is_recoverable_client_fault());
+        assert!(!DaemonError::Endpoint(EndpointFault::InsecureMode).is_recoverable_client_fault());
+        assert!(DaemonError::Handshake(HandshakeError::Malformed).is_recoverable_client_fault());
+        assert!(!DaemonError::Unavailable.is_recoverable_client_fault());
+    }
+}
+
 pub struct AgentDaemon {
     listener: Option<UnixListener>,
     instance_id: BackendInstanceId,

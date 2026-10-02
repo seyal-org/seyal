@@ -60,29 +60,18 @@ fn main() {
                     process::exit(0);
                 }
             }
-            Err(error) if recoverable_client_serve_error(error) => {
-                // Per-client faults must not take down the process; the next
-                // accept turn serves an unrelated connection (AB-0/AB-1 tests).
-                eprintln!("seyal-agent-backend: client serve ended: {error:?}");
-            }
             Err(error) => {
-                eprintln!("seyal-agent-backend: serve failed: {error:?}");
-                process::exit(1);
+                if error.is_recoverable_client_fault() {
+                    // Per-client faults must not take down the process; the next
+                    // accept turn serves an unrelated connection (AB-0/AB-1 tests).
+                    eprintln!("seyal-agent-backend: client serve ended: {error:?}");
+                } else {
+                    eprintln!("seyal-agent-backend: serve failed: {error:?}");
+                    process::exit(1);
+                }
             }
         }
     }
-}
-
-/// Client-session / handshake faults that leave the bound daemon usable.
-fn recoverable_client_serve_error(error: DaemonError) -> bool {
-    matches!(
-        error,
-        DaemonError::TimedOut
-            | DaemonError::Malformed
-            | DaemonError::Oversized
-            | DaemonError::Handshake(_)
-            | DaemonError::Io
-    )
 }
 
 struct Options {
@@ -160,6 +149,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::parse_args;
+    use seyal_agent_backend::DaemonError;
+    use seyal_agent_protocol::HandshakeError;
 
     #[test]
     fn parse_requires_directory_and_defaults() {
@@ -195,16 +186,13 @@ mod tests {
 
     #[test]
     fn client_faults_are_recoverable_for_the_daemon_loop() {
-        use seyal_agent_backend::DaemonError;
-        use seyal_agent_protocol::HandshakeError;
-
-        assert!(recoverable_client_serve_error(DaemonError::TimedOut));
-        assert!(recoverable_client_serve_error(DaemonError::Malformed));
-        assert!(recoverable_client_serve_error(DaemonError::Oversized));
-        assert!(recoverable_client_serve_error(DaemonError::Io));
-        assert!(recoverable_client_serve_error(DaemonError::Handshake(
-            HandshakeError::Malformed
-        )));
-        assert!(!recoverable_client_serve_error(DaemonError::Unavailable));
+        assert!(DaemonError::TimedOut.is_recoverable_client_fault());
+        assert!(DaemonError::Malformed.is_recoverable_client_fault());
+        assert!(DaemonError::Oversized.is_recoverable_client_fault());
+        assert!(DaemonError::Io.is_recoverable_client_fault());
+        assert!(DaemonError::Handshake(HandshakeError::Malformed).is_recoverable_client_fault());
+        assert!(!DaemonError::Unavailable.is_recoverable_client_fault());
+        assert!(!DaemonError::InsecureDirectory.is_recoverable_client_fault());
+        assert!(!DaemonError::StartupContended.is_recoverable_client_fault());
     }
 }
