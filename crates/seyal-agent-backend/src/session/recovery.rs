@@ -1,7 +1,7 @@
 //! Restore persisted identities into the in-memory authority.
 
 use seyal_agent_core::{BindingGeneration, ControlGeneration, DomainError, WorkScopeKind};
-use seyal_agent_store::{AggregateId, AgentStore};
+use seyal_agent_store::{AgentStore, AggregateId};
 
 use crate::{AuthorizationRepository, ObservationAuthority};
 
@@ -16,7 +16,6 @@ pub(super) fn restore_identities(
     store: &AgentStore,
     authority: &mut ObservationAuthority,
     auth: &mut AuthorizationRepository,
-    principal_id: seyal_agent_core::ClientPrincipalId,
 ) -> Result<(), ServiceError> {
     for (id, kind) in store.work_scopes().map_err(|_| ServiceError::Failed)? {
         let kind = WorkScopeKind::from_code(kind).ok_or(ServiceError::Failed)?;
@@ -53,8 +52,7 @@ pub(super) fn restore_identities(
         }
         authority.mark_recovered(id);
         fence_recovered_run(store, authority, id)?;
-        auth.allow_run(principal_id, id)
-            .map_err(|_| ServiceError::Failed)?;
+        auth.allow_run_for_observers(id);
     }
     Ok(())
 }

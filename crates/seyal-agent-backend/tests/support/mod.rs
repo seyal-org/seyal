@@ -116,7 +116,16 @@ impl TestClient {
     }
 
     pub fn connect_with(path: &Path, scopes: Vec<u8>) -> Self {
-        let mut stream = handshake(path);
+        Self::connect_as(path, &[], scopes)
+    }
+
+    /// Distinct observe-only principal via Hello evidence `observer`.
+    pub fn connect_observer(path: &Path) -> Self {
+        Self::connect_as(path, b"observer", vec![2])
+    }
+
+    pub fn connect_as(path: &Path, evidence: &[u8], scopes: Vec<u8>) -> Self {
+        let mut stream = handshake_with_evidence(path, 4096, 32, evidence);
         let session_id = match round_trip(&mut stream, &Command::OpenSession { scopes }) {
             CommandResult::Opened { session_id } => session_id,
             other => panic!("open session: {other:?}"),
@@ -311,6 +320,15 @@ pub fn handshake(path: &Path) -> UnixStream {
 }
 
 pub fn handshake_with(path: &Path, max_frame_size: u32, event_window: u32) -> UnixStream {
+    handshake_with_evidence(path, max_frame_size, event_window, &[])
+}
+
+pub fn handshake_with_evidence(
+    path: &Path,
+    max_frame_size: u32,
+    event_window: u32,
+    evidence: &[u8],
+) -> UnixStream {
     let mut stream = UnixStream::connect(path).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(2)))
@@ -322,7 +340,7 @@ pub fn handshake_with(path: &Path, max_frame_size: u32, event_window: u32) -> Un
         supported_versions: vec![ProtocolVersion::V1],
         max_frame_size,
         event_window,
-        client_principal_evidence: Vec::new(),
+        client_principal_evidence: evidence.to_vec(),
     };
     let frame = encode_hello(&hello, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
     stream.write_all(&frame).unwrap();

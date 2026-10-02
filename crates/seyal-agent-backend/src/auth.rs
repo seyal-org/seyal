@@ -146,6 +146,41 @@ impl AuthorizationRepository {
         Ok(())
     }
 
+    /// Grant observe/control targets to every principal that holds `RunsObserve`.
+    /// Used when a run becomes durable so a distinct observe-only principal can
+    /// read the same backend-authoritative aggregate (SPEC-017 §5; matrix 16).
+    pub fn allow_run_for_observers(&mut self, run_id: AgentRunId) {
+        for principal in self.principals.values_mut() {
+            if principal.scopes.contains(&ClientScope::RunsObserve) {
+                principal.allowed_runs.insert(run_id);
+            }
+        }
+    }
+
+    /// Recognized Hello principal evidence tokens for this AB-0 daemon.
+    /// Same-UID admission is never enough: unknown evidence fails closed.
+    pub fn recognize_principal_evidence(evidence: &[u8]) -> Result<(), AuthorizationError> {
+        match evidence {
+            [] | b"cli" | b"observer" => Ok(()),
+            _ => Err(AuthorizationError::TransportAdmissionIsNotAuthorization),
+        }
+    }
+
+    /// Map Hello principal evidence to a registered principal.
+    pub fn principal_for_evidence(
+        &self,
+        evidence: &[u8],
+        owner: ClientPrincipalId,
+        observer: ClientPrincipalId,
+    ) -> Result<ClientPrincipalId, AuthorizationError> {
+        Self::recognize_principal_evidence(evidence)?;
+        match evidence {
+            [] | b"cli" => Ok(owner),
+            b"observer" => Ok(observer),
+            _ => Err(AuthorizationError::TransportAdmissionIsNotAuthorization),
+        }
+    }
+
     pub fn open_session(
         &mut self,
         principal_id: ClientPrincipalId,
@@ -198,6 +233,14 @@ impl AuthorizationRepository {
     ) -> Result<(), AuthorizationError> {
         let _session = self.session(session_id, backend_instance_id)?;
         Ok(())
+    }
+
+    pub fn session_principal(
+        &self,
+        session_id: ClientSessionId,
+        backend_instance_id: BackendInstanceId,
+    ) -> Result<ClientPrincipalId, AuthorizationError> {
+        Ok(self.session(session_id, backend_instance_id)?.principal_id)
     }
 
     fn session(
@@ -401,6 +444,50 @@ mod tests {
         assert_eq!(
             repo.authorize_control(session_a, backend, run_a, 1),
             Err(AuthorizationError::ReplayedRequest)
+        );
+    }
+
+    #[test]
+    fn hello_evidence_selects_distinct_principals_and_rejects_unknown() {
+        let mut repo = AuthorizationRepository::default();
+        let owner = repo.register_principal(
+            PrincipalKind::FirstPartyCli,
+            [
+                ClientScope::RunsCreate,
+                ClientScope::RunsObserve,
+                ClientScope::RunsControl,
+            ],
+        );
+        let observer =
+            repo.register_principal(PrincipalKind::ManagedClient, [ClientScope::RunsObserve]);
+        assert_eq!(repo.principal_for_evidence(&[], owner, observer), Ok(owner));
+        assert_eq!(
+            repo.principal_for_evidence(b"cli", owner, observer),
+            Ok(owner)
+        );
+        assert_eq!(
+            repo.principal_for_evidence(b"observer", owner, observer),
+            Ok(observer)
+        );
+        assert_eq!(
+            AuthorizationRepository::recognize_principal_evidence(b"unpaired"),
+            Err(AuthorizationError::TransportAdmissionIsNotAuthorization)
+        );
+        let run = AgentRunId::new();
+        repo.allow_run_for_observers(run);
+        let backend = BackendInstanceId::new();
+        let session = repo
+            .open_session(observer, backend, [ClientScope::RunsObserve])
+            .unwrap();
+        repo.authorize_run(session, backend, ClientScope::RunsObserve, run)
+            .unwrap();
+        assert_eq!(
+            repo.open_session(
+                observer,
+                backend,
+                [ClientScope::RunsCreate, ClientScope::RunsObserve]
+            ),
+            Err(AuthorizationError::ScopeEscalation)
         );
     }
 

@@ -351,20 +351,123 @@ fn observers_keep_independent_sequences_and_ignore_duplicate_observations() {
     let socket = daemon.socket_path();
     let run_id = started.run_id;
     let observer = thread::spawn(move || {
-        let mut client = TestClient::connect_with(&socket, vec![2]);
+        let mut client = TestClient::connect_observer(&socket);
         let replay = client.replay(AggregateRef::AgentRun(run_id));
         let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
         let create = client.command(&Command::CreateWorkScope {
             session_id: client.session_id,
             kind: WorkScopeKind::AdHoc,
         });
-        (replay, snapshot.incorporated_through, create)
+        let control = client.check_generation(run_id, 1, 1);
+        (replay, snapshot.incorporated_through, create, control)
     });
     daemon.serve_one().unwrap();
-    let (replay, through, create) = observer.join().unwrap();
+    let (replay, through, create, control) = observer.join().unwrap();
     assert_eq!(replay, run);
     assert_eq!(through, 4);
     assert_eq!(create, CommandResult::Error(CommandError::Denied));
+    assert_eq!(control, Err(CommandError::Denied));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unknown_hello_evidence_is_rejected_before_session() {
+    let dir = temp_dir("bad-evidence");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let hello = seyal_agent_protocol::Hello {
+            supported_versions: vec![seyal_agent_protocol::ProtocolVersion::V1],
+            max_frame_size: 4096,
+            event_window: 32,
+            client_principal_evidence: b"unpaired".to_vec(),
+        };
+        let frame = seyal_agent_protocol::encode_hello(&hello, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+        stream.write_all(&frame).unwrap();
+        read_frame(&mut stream).kind
+    });
+    assert_eq!(
+        daemon.serve_one(),
+        Err(seyal_agent_backend::DaemonError::Handshake(
+            seyal_agent_protocol::HandshakeError::Malformed
+        ))
+    );
+    assert_eq!(client.join().unwrap(), FrameKind::HandshakeError);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn observer_principal_cannot_escalate_or_resume_owner_session() {
+    let dir = temp_dir("principal-fence");
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ],
+    };
+    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let socket = daemon.socket_path();
+    let owner = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        (client.session_id, started.run_id, started.event_count)
+    });
+    daemon.serve_one().unwrap();
+    let (owner_session, run_id, event_count) = owner.join().unwrap();
+
+    let socket = daemon.socket_path();
+    let escalate = thread::spawn(move || {
+        let mut stream = handshake_with_evidence(&socket, 4096, 32, b"observer");
+        round_trip(
+            &mut stream,
+            &Command::OpenSession {
+                scopes: vec![1, 2, 4],
+            },
+        )
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(
+        escalate.join().unwrap(),
+        CommandResult::Error(CommandError::Denied)
+    );
+
+    let socket = daemon.socket_path();
+    let observe = thread::spawn(move || {
+        let mut client = TestClient::connect_observer(&socket);
+        client.replay(AggregateRef::AgentRun(run_id))
+    });
+    daemon.serve_one().unwrap();
+    let sequences = observe.join().unwrap();
+    assert_eq!(sequences.len() as u64, event_count);
+    assert_eq!(sequences, (1..=event_count).collect::<Vec<_>>());
+
+    let socket = daemon.socket_path();
+    let cross = thread::spawn(move || {
+        let mut stream = handshake_with_evidence(&socket, 4096, 32, b"observer");
+        match round_trip(
+            &mut stream,
+            &Command::ResumeSession {
+                session_id: owner_session,
+            },
+        ) {
+            CommandResult::Error(error) => error,
+            other => panic!("cross resume: {other:?}"),
+        }
+    });
+    daemon.serve_one().unwrap();
+    assert_eq!(cross.join().unwrap(), CommandError::Denied);
     let _ = fs::remove_dir_all(dir);
 }
 

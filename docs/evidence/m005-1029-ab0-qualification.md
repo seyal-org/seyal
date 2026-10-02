@@ -161,8 +161,8 @@ run after that fix. Crash artifacts were not committed.
 | 13 | Observation loss does not fabricate termination | `out_of_order_and_lost_observations_do_not_fabricate_termination` and the harness invariant | E + N |
 | 14 | Persistence fault is not false success | `persistence_fault_before_commit_does_not_publish_success` (includes segment-transaction fault); `repeated_store_faults_fail_bounded_and_recover`; mid-group `commit_output_group` apply undo | E + N |
 | 15 | High-volume segments stay bounded | `append_output_event` atomicity test; `high_volume_output_uses_segments_end_to_end` (256 KiB → 64 segments / 1 ref event; 1000×1-byte → 1 segment / 1 ref); `high_volume_subscribe_fits_frame_and_continues`; SIGKILL segment/ref consistency in `repeated_sigkill_during_writes_reopens_deterministically` | E + N |
-| 16 | Two authorized clients | **Gap / AB-1 deferred.** Daemon accepts one connection at a time; “two clients” coverage is sequential same-principal sessions with narrowed scopes, not distinct principals | Gap |
-| 17 | Unauthorized client and control are denied | **Partial / AB-1 deferred.** Scope narrowing and auth unit tests cover same-principal denial; unpaired distinct-principal denial is not claimed on this tip | Gap |
+| 16 | Two authorized clients | Distinct Hello principals (`cli` / `observer`); observe-only second principal in `observer_principal_cannot_escalate_or_resume_owner_session` and observers test. Sequential connections (daemon accepts one at a time) | E + N |
+| 17 | Unauthorized client and control are denied | Unknown Hello evidence rejected (`unknown_hello_evidence_is_rejected_before_session`); scope narrowing; observer cannot escalate scopes or resume owner session; `auth.rs` unit tests | E + N |
 | 18 | Malformed protocol and harness input stay bounded | Protocol tests, `malformed_scripts_are_bounded`, both fuzz targets | E + N |
 | 19 | Storage and schema reopen are deterministic | v2 migration tests, `bind_integration_recovers_migrated_v2_orphan_run`, `repeated_sigkill_during_writes_reopens_deterministically` | E + N |
 | 20 | No global event clock | `event_id` is the per-aggregate sequence in `insert_event`, plus row 4 | E |
@@ -243,9 +243,9 @@ These answer the six questions on #1029. They do not amend
 Implementation limits, not ADR conflicts:
 
 - Serving is serial, one connection at a time.
-- Distinct unpaired principals and true concurrent two-client auth (matrix
-  rows 16/17) are deferred; this tip does not claim them as pass.
-- Principal and session tables are in memory, with a single first-party principal.
+- Distinct Hello principals (`cli` / `observer`) are admitted; unknown evidence
+  fails closed. True concurrent two-client connections remain AB-1.
+- Principal and session tables are in memory.
 - `ObservationAuthority.applied` keeps full payloads and scans linearly for the next ordinal.
 - Recovered liveness ignores committed terminal observations and stays Unknown.
 - `start_agent_run` loads the full replay to count events.
@@ -258,9 +258,10 @@ Implementation limits, not ADR conflicts:
 
 ## Recommended exit
 
-Pending independent human review: **PASS for the AB-0 claims that remain
-labeled E/N above**. Rows 16 and 17 are explicit Gaps / AB-1 deferred and must
-not be treated as Done.
+Pending independent human review: **PASS for the AB-0 claims labeled E/N**.
+
+Distinct Hello principals close matrix rows 16/17 for sequential connections.
+True concurrent two-client connections remain AB-1 (serial accept loop).
 
 This recommendation is not the exit. Exact-head CI links and the final tip SHA
 are recorded after green Foundation Quality + M001 Production Fuzz on this

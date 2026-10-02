@@ -48,7 +48,12 @@ pub struct IntegrationConfig {
 
 pub struct IntegrationService {
     instance_id: seyal_agent_protocol::BackendInstanceId,
-    principal_id: seyal_agent_core::ClientPrincipalId,
+    /// First-party CLI principal (create/observe/control). Hello evidence empty or `cli`.
+    owner_principal_id: seyal_agent_core::ClientPrincipalId,
+    /// Distinct observe-only principal. Hello evidence `observer`.
+    observer_principal_id: seyal_agent_core::ClientPrincipalId,
+    /// Principal selected for the current accepted connection from Hello evidence.
+    connection_principal_id: Option<seyal_agent_core::ClientPrincipalId>,
     auth: AuthorizationRepository,
     authority: ObservationAuthority,
     store: AgentStore,
@@ -72,7 +77,7 @@ impl IntegrationService {
         let host = FakeExecutionHost::new(OUTPUT_CHUNK).map_err(|_| ServiceError::Failed)?;
         let store = AgentStore::open(&config.store_path).map_err(|_| ServiceError::Failed)?;
         let mut auth = AuthorizationRepository::default();
-        let principal_id = auth.register_principal(
+        let owner_principal_id = auth.register_principal(
             PrincipalKind::FirstPartyCli,
             [
                 ClientScope::RunsCreate,
@@ -80,17 +85,40 @@ impl IntegrationService {
                 ClientScope::RunsControl,
             ],
         );
+        let observer_principal_id =
+            auth.register_principal(PrincipalKind::ManagedClient, [ClientScope::RunsObserve]);
         let mut authority = ObservationAuthority::new(seyal_agent_core::AgentDomain::new());
-        restore_identities(&store, &mut authority, &mut auth, principal_id)?;
+        restore_identities(&store, &mut authority, &mut auth)?;
         Ok(Self {
             instance_id,
-            principal_id,
+            owner_principal_id,
+            observer_principal_id,
+            connection_principal_id: None,
             auth,
             authority,
             store,
             host,
             script: config.script.clone(),
         })
+    }
+
+    /// Bind this connection to a principal from Hello evidence.
+    /// Socket UID admission alone never selects a privileged principal.
+    pub fn begin_connection(&mut self, evidence: &[u8]) -> Result<(), ServiceError> {
+        let principal = self
+            .auth
+            .principal_for_evidence(
+                evidence,
+                self.owner_principal_id,
+                self.observer_principal_id,
+            )
+            .map_err(|_| ServiceError::Failed)?;
+        self.connection_principal_id = Some(principal);
+        Ok(())
+    }
+
+    pub fn end_connection(&mut self) {
+        self.connection_principal_id = None;
     }
 
     #[cfg(feature = "test-fault-injection")]
@@ -166,9 +194,12 @@ impl IntegrationService {
                 Err(_) => return CommandResult::Error(CommandError::Malformed),
             }
         }
+        let Some(principal_id) = self.connection_principal_id else {
+            return CommandResult::Error(CommandError::Denied);
+        };
         match self
             .auth
-            .open_session(self.principal_id, self.instance_id, decoded)
+            .open_session(principal_id, self.instance_id, decoded)
         {
             Ok(session_id) => CommandResult::Opened { session_id },
             Err(error) => CommandResult::Error(map_auth(error)),
@@ -176,8 +207,17 @@ impl IntegrationService {
     }
 
     fn resume_session(&mut self, session_id: seyal_agent_core::ClientSessionId) -> CommandResult {
-        match self.auth.resume_session(session_id, self.instance_id) {
-            Ok(()) => CommandResult::Resumed,
+        let Some(principal_id) = self.connection_principal_id else {
+            return CommandResult::Error(CommandError::Denied);
+        };
+        match self.auth.session_principal(session_id, self.instance_id) {
+            Ok(session_principal) if session_principal == principal_id => {
+                match self.auth.resume_session(session_id, self.instance_id) {
+                    Ok(()) => CommandResult::Resumed,
+                    Err(error) => CommandResult::Error(map_auth(error)),
+                }
+            }
+            Ok(_) => CommandResult::Error(CommandError::Denied),
             Err(error) => CommandResult::Error(map_auth(error)),
         }
     }
@@ -313,6 +353,7 @@ impl IntegrationService {
         if self.auth.allow_run(principal, run_id).is_err() {
             return CommandResult::Error(CommandError::Failed);
         }
+        self.auth.allow_run_for_observers(run_id);
 
         let observations = match self.host.execute(run_id, binding, &self.script) {
             Ok(observations) => observations,

@@ -209,7 +209,47 @@ impl AgentDaemon {
         }
         let idle = self.config.session_idle_timeout;
         let write_timeout = self.config.session_write_timeout;
-        let (mut stream, ack) = self.accept_stream()?;
+        let (mut stream, ack) = {
+            // Split borrow: accept_stream needs &self; begin_connection needs
+            // &mut integration. Validate evidence before HelloAck.
+            let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
+            let (mut stream, hello) = Self::accept_peer(
+                listener,
+                &self.socket_path(),
+                self.our_uid,
+                self.config.max_frame_size,
+                self.config.read_timeout,
+            )?;
+            let ack = match negotiate_hello(
+                &hello,
+                self.instance_id,
+                self.config.max_frame_size,
+                self.config.event_window,
+            ) {
+                Ok(ack) => ack,
+                Err(error) => {
+                    let bytes = encode_handshake_error(error, self.config.max_frame_size)
+                        .map_err(|_| DaemonError::Malformed)?;
+                    let _ = stream.write_all(&bytes);
+                    return Err(DaemonError::Handshake(error));
+                }
+            };
+            let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
+            if service
+                .begin_connection(&hello.client_principal_evidence)
+                .is_err()
+            {
+                let bytes =
+                    encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
+                        .map_err(|_| DaemonError::Malformed)?;
+                let _ = stream.write_all(&bytes);
+                return Err(DaemonError::Handshake(HandshakeError::Malformed));
+            }
+            let bytes =
+                encode_ack(&ack, self.config.max_frame_size).map_err(|_| DaemonError::Malformed)?;
+            stream.write_all(&bytes).map_err(map_io)?;
+            (stream, ack)
+        };
         stream
             .set_read_timeout(Some(idle))
             .map_err(|_| DaemonError::Io)?;
@@ -218,9 +258,22 @@ impl AgentDaemon {
             .map_err(|_| DaemonError::Io)?;
         let max_frame_size = ack.max_frame_size;
         let event_window = ack.event_window;
+        let result = self.serve_session(&mut stream, max_frame_size, event_window);
+        if let Some(service) = self.integration.as_mut() {
+            service.end_connection();
+        }
+        result
+    }
+
+    fn serve_session(
+        &mut self,
+        stream: &mut UnixStream,
+        max_frame_size: u32,
+        event_window: u32,
+    ) -> Result<(), DaemonError> {
         let service = self.integration.as_mut().ok_or(DaemonError::Unavailable)?;
         loop {
-            let frame = match crate::session::read_session_frame(&mut stream, max_frame_size) {
+            let frame = match crate::session::read_session_frame(stream, max_frame_size) {
                 crate::session::SessionRead::Frame(frame) => frame,
                 crate::session::SessionRead::Disconnected => return Ok(()),
                 crate::session::SessionRead::Oversized => return Err(DaemonError::Oversized),
@@ -252,24 +305,24 @@ impl AgentDaemon {
 
     fn accept_stream(&self) -> Result<(UnixStream, HelloAck), DaemonError> {
         let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
-        let (mut stream, _) = listener.accept().map_err(map_io)?;
-        stream
-            .set_read_timeout(Some(self.config.read_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        stream
-            .set_write_timeout(Some(self.config.read_timeout))
-            .map_err(|_| DaemonError::Io)?;
-        if !endpoint_still_owned(&self.socket_path(), self.our_uid) {
-            return Err(DaemonError::Endpoint(EndpointFault::Symlink));
+        let (mut stream, hello) = Self::accept_peer(
+            listener,
+            &self.socket_path(),
+            self.our_uid,
+            self.config.max_frame_size,
+            self.config.read_timeout,
+        )?;
+        if crate::AuthorizationRepository::recognize_principal_evidence(
+            &hello.client_principal_evidence,
+        )
+        .is_err()
+        {
+            let bytes =
+                encode_handshake_error(HandshakeError::Malformed, self.config.max_frame_size)
+                    .map_err(|_| DaemonError::Malformed)?;
+            let _ = stream.write_all(&bytes);
+            return Err(DaemonError::Handshake(HandshakeError::Malformed));
         }
-        peer::verify_same_user_peer(stream.as_raw_fd())
-            .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
-
-        let frame = read_one_frame(&mut stream as &mut dyn Read, self.config.max_frame_size)?;
-        if frame.kind != FrameKind::Hello {
-            return Err(DaemonError::Malformed);
-        }
-        let hello = decode_hello(&frame.body).map_err(|_| DaemonError::Malformed)?;
         match negotiate_hello(
             &hello,
             self.instance_id,
@@ -289,6 +342,34 @@ impl AgentDaemon {
                 Err(DaemonError::Handshake(error))
             }
         }
+    }
+
+    fn accept_peer(
+        listener: &UnixListener,
+        socket_path: &Path,
+        our_uid: u32,
+        max_frame_size: u32,
+        read_timeout: Duration,
+    ) -> Result<(UnixStream, Hello), DaemonError> {
+        let (mut stream, _) = listener.accept().map_err(map_io)?;
+        stream
+            .set_read_timeout(Some(read_timeout))
+            .map_err(|_| DaemonError::Io)?;
+        stream
+            .set_write_timeout(Some(read_timeout))
+            .map_err(|_| DaemonError::Io)?;
+        if !endpoint_still_owned(socket_path, our_uid) {
+            return Err(DaemonError::Endpoint(EndpointFault::Symlink));
+        }
+        peer::verify_same_user_peer(stream.as_raw_fd())
+            .map_err(|_| DaemonError::Endpoint(EndpointFault::WrongOwner))?;
+
+        let frame = read_one_frame(&mut stream as &mut dyn Read, max_frame_size)?;
+        if frame.kind != FrameKind::Hello {
+            return Err(DaemonError::Malformed);
+        }
+        let hello = decode_hello(&frame.body).map_err(|_| DaemonError::Malformed)?;
+        Ok((stream, hello))
     }
 
     /// Leave the socket pathname in place and record a dead owner, as a
