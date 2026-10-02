@@ -15,6 +15,8 @@ use std::fmt;
 
 use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
 
+use crate::pane_layout::SplitRatio;
+
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
 
@@ -31,6 +33,7 @@ pub enum ShellError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     CannotCloseBoundPane,
+    NoSplitDivider,
     ExecutionAlreadyBound,
     EmptyShell,
 }
@@ -52,6 +55,7 @@ impl ShellError {
             Self::CannotCloseBoundPane => {
                 "A Pane bound to an execution cannot be closed until execution disposition is available."
             }
+            Self::NoSplitDivider => "This Pane does not lead a split divider.",
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
         }
@@ -89,6 +93,11 @@ pub enum ShellAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    /// Resize the Split whose divider follows `pane` (see `PaneTree`).
+    SetSplitRatio {
+        pane: PaneId,
+        ratio: SplitRatio,
     },
     BindExecution {
         pane: PaneId,
@@ -300,6 +309,7 @@ impl ShellState {
             ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
             ShellAction::ClosePane { id } => self.close_pane(id),
             ShellAction::FocusPane { id } => self.focus_pane(id),
+            ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         };
         match result {
@@ -391,6 +401,7 @@ impl ShellState {
                 axis,
                 first: Box::new(PaneTree::Leaf(pane_id)),
                 second: Box::new(PaneTree::Leaf(id)),
+                ratio: SplitRatio::HALF,
             },
         );
         tab.focused = id;
@@ -434,6 +445,19 @@ impl ShellState {
         }
         tab.focused = id;
         Ok(())
+    }
+
+    fn set_split_ratio(&mut self, pane: PaneId, ratio: SplitRatio) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if !tab.panes.contains_key(&pane) {
+            return Err(ShellError::UnknownPane);
+        }
+        if tab.root.set_ratio(pane, ratio) {
+            Ok(())
+        } else {
+            Err(ShellError::NoSplitDivider)
+        }
     }
 
     fn bind_execution(

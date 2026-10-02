@@ -54,7 +54,8 @@ enum SeyalAppActionKind {
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
-     * bound to an execution; disposition is not yet available).
+     * bound to an execution; disposition is not yet available),
+     * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER).
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -118,7 +119,17 @@ enum SeyalAppActionKind {
      */
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
-    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /*
+     * Drag one Split divider (#928). target_execution_lo/hi = the divider's
+     * leading PaneId (SeyalAppPaneDivider.leading_pane_*); reserved = the raw
+     * pointer coordinate along the divider's axis in Tab unit space (x for
+     * axis 0, y for axis 1) as IEEE-754 f32 bits. It may lie outside the
+     * Split; Rust derives the ratio from the Split's area and clamps it to
+     * 0.1...0.9. NaN/infinity return -6. Unknown PaneId = UnknownPane; a Pane
+     * that leads no divider = 34 (NoSplitDivider).
+     */
+    SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER = 58
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -434,6 +445,33 @@ typedef struct SeyalAppPaneRegion {
     float height;
 } SeyalAppPaneRegion;
 
+/*
+ * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
+ * (outer Split first). x/y/width/height is the unit rect of the whole area
+ * the Split divides. line_x/line_y is where the divider sits: for axis 0
+ * (side by side) it is a vertical line at line_x spanning the area's height;
+ * for axis 1 (stacked) a horizontal line at line_y spanning its width. Hosts
+ * centre a hit zone on that line and forward raw pointer positions through
+ * SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER; Rust derives, clamps and re-projects.
+ * Out-of-range indices return size == 0.
+ */
+typedef struct SeyalAppPaneDivider {
+    uint16_t version;
+    uint16_t size;
+    uint16_t axis;
+    uint16_t reserved;
+    uint64_t leading_pane_lo;
+    uint64_t leading_pane_hi;
+    float x;
+    float y;
+    float width;
+    float height;
+    float line_x;
+    float line_y;
+    float ratio;
+    uint32_t reserved1;
+} SeyalAppPaneDivider;
+
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
 #define SEYAL_APP_ROW_PANE 2u
@@ -484,6 +522,7 @@ SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
+SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);

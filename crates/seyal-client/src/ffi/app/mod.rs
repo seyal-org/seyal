@@ -31,7 +31,7 @@ use encode::{
 };
 
 pub use block_projection::seyal_app_block_projection;
-pub use pane_region::seyal_app_pane_region;
+pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
@@ -917,5 +917,6 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
+        AppError::NoSplitDivider => 34,
     }
 }

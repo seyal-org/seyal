@@ -34,9 +34,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 747
-issue = 923
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs."
+acknowledged_loc = 756
+issue = 928
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1065 adds CancelRecovery/AdvanceRecoveryStage/reconstruction action variants that make Rust the sole recovery and continuity-fencing owner. #923 adds only the Pane-region projection accessor, the fence-Pane snapshot rule and the CannotCloseBoundPane error; region geometry and its tests live in pane_layout.rs. #928 adds only the MoveSplitDivider action variant, its dispatch arm and the NoSplitDivider error; divider geometry, pointer-to-ratio derivation and their tests live in pane_layout.rs and the reducer in chrome_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
@@ -46,9 +46,9 @@ reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module w
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 921
-issue = 865
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. Snapshot-call metering is cfg(test) thread-local state in visual.rs and is not part of this façade. #923 adds only the pane_region module declaration/re-export and the CannotCloseBoundPane error number; the export itself lives in pane_region.rs. #865 adds only the block_projection module declaration and re-export; the projection export lives in block_projection.rs."
+acknowledged_loc = 922
+issue = 928
+reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. Snapshot-call metering is cfg(test) thread-local state in visual.rs and is not part of this façade. #923 adds only the pane_region module declaration/re-export and the CannotCloseBoundPane error number; the export itself lives in pane_region.rs. #865 adds only the block_projection module declaration and re-export; the projection export lives in block_projection.rs. #928 adds only the seyal_app_pane_divider re-export and the NoSplitDivider error number; the divider export lives in pane_region.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

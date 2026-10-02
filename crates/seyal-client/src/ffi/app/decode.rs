@@ -9,6 +9,7 @@ use crate::app::{AppAction, AppFence, BindingEvidence};
 use crate::chrome::{AgentId, AttentionId, InspectorMode, LeftPanelMode};
 use crate::composer::{RuntimeBlockRecord, RuntimeComposerEligibility};
 use crate::ffi::with_active_client;
+use crate::pane_layout::SplitPosition;
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
 use crate::shell::SplitAxis;
 
@@ -276,6 +277,13 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             })
         }
         57 => Ok(AppAction::DisconnectReconstruction),
+        58 => Ok(AppAction::MoveSplitDivider {
+            pane: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            position: SplitPosition::from_unit(f32::from_bits(action.reserved)).ok_or(-6)?,
+        }),
         _ => Err(-6),
     }
 }

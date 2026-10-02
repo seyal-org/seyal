@@ -2,6 +2,8 @@
 
 use seyal_core::PaneId;
 
+use crate::pane_layout::SplitRatio;
+
 /// Horizontal or vertical split of one Tab's pane tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SplitAxis {
@@ -17,6 +19,8 @@ pub enum PaneTree {
         axis: SplitAxis,
         first: Box<PaneTree>,
         second: Box<PaneTree>,
+        /// Share of the Split's extent given to `first` (#928).
+        ratio: SplitRatio,
     },
 }
 
@@ -29,10 +33,12 @@ impl PaneTree {
                 axis,
                 first,
                 second,
+                ratio,
             } => Self::Split {
                 axis: *axis,
                 first: Box::new(first.replacing(target, replacement.clone())),
                 second: Box::new(second.replacing(target, replacement)),
+                ratio: *ratio,
             },
         }
     }
@@ -50,16 +56,46 @@ impl PaneTree {
                 axis,
                 first,
                 second,
+                ratio,
             } => match (first.removing(target), second.removing(target)) {
                 (Some(left), Some(right)) => Some(Self::Split {
                     axis: *axis,
                     first: Box::new(left),
                     second: Box::new(right),
+                    ratio: *ratio,
                 }),
                 (Some(left), None) => Some(left),
                 (None, Some(right)) => Some(right),
                 (None, None) => None,
             },
+        }
+    }
+
+    /// Set the ratio of the one Split whose divider follows `leading` (the
+    /// last leaf of that Split's `first` child). Every leaf but the tree's
+    /// last leads exactly one divider; returns false when none does.
+    pub(super) fn set_ratio(&mut self, leading: PaneId, value: SplitRatio) -> bool {
+        match self {
+            Self::Leaf(_) => false,
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                if first.last_pane() == leading {
+                    *ratio = value;
+                    return true;
+                }
+                first.set_ratio(leading, value) || second.set_ratio(leading, value)
+            }
+        }
+    }
+
+    pub(crate) fn last_pane(&self) -> PaneId {
+        match self {
+            Self::Leaf(id) => *id,
+            Self::Split { second, .. } => second.last_pane(),
         }
     }
 
