@@ -105,7 +105,9 @@ enum PendingKind {
 pub struct ProvisioningSession {
     next_owner: u64,
     pane_owners: HashMap<PaneId, ConnectionOwner>,
-    next_request_id: HashMap<ConnectionOwner, u64>,
+    /// Strictly increasing across every owner: C2 shares one wire connection,
+    /// and request ids are connection-scoped (ADR-017 §5.2 / SPEC-004 §18.2).
+    next_request_id: u64,
     pending_by_key: HashMap<(ConnectionOwner, u64), PendingIntent>,
     pending_kind: HashMap<(ConnectionOwner, u64), PendingKind>,
     /// Pane → create request_id while a create intent is outstanding.
@@ -161,6 +163,36 @@ impl ProvisioningSession {
         self.pending_by_key.get(&(owner, request_id))
     }
 
+    /// Locate a pending create intent by connection-local `request_id`.
+    pub fn pending_create_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
+        self.pending_by_key
+            .iter()
+            .find_map(|((owner, id), intent)| {
+                if *id == request_id
+                    && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Create)
+                {
+                    Some(intent)
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Locate a pending terminate intent by connection-local `request_id`.
+    pub fn pending_terminate_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
+        self.pending_by_key
+            .iter()
+            .find_map(|((owner, id), intent)| {
+                if *id == request_id
+                    && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
+                {
+                    Some(intent)
+                } else {
+                    None
+                }
+            })
+    }
+
     /// Assign per-pane connection ownership. Hosts cannot choose an execution.
     pub fn claim_connection(&mut self, pane: PaneId) -> ConnectionOwner {
         if let Some(owner) = self.pane_owners.get(&pane).copied() {
@@ -169,7 +201,6 @@ impl ProvisioningSession {
         let owner = ConnectionOwner(self.next_owner.saturating_add(1).max(1));
         self.next_owner = owner.0;
         self.pane_owners.insert(pane, owner);
-        self.next_request_id.entry(owner).or_insert(1);
         owner
     }
 
@@ -186,7 +217,7 @@ impl ProvisioningSession {
             return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
         }
         let owner = self.claim_connection(pane);
-        let request_id = self.allocate_request_id(owner)?;
+        let request_id = self.allocate_request_id()?;
         let (geometry, needs_bootstrap_resize) = match geometry {
             Some(geometry) => {
                 geometry.validate()?;
@@ -455,7 +486,7 @@ impl ProvisioningSession {
                 self.pane_pending.remove(&pane);
             }
         }
-        let dispose_id = match self.allocate_request_id(owner) {
+        let dispose_id = match self.allocate_request_id() {
             Ok(id) => id,
             Err(_) => {
                 self.unreferenced.insert(execution);
@@ -495,6 +526,46 @@ impl ProvisioningSession {
             .map(|owner| ProvisioningEffect::Detach { owner })
             .into_iter()
             .collect()
+    }
+
+    /// Explicit product terminate for a currently bound Controller attachment
+    /// (ADR-017 §6.2 / P4). Never used as a side effect of removing chrome.
+    pub fn begin_explicit_terminate(
+        &mut self,
+        pane: PaneId,
+        attachment: AttachmentId,
+    ) -> Result<Vec<ProvisioningEffect>, ProvisioningFailure> {
+        let Some(execution) = self.recorded_bindings.remove(&pane) else {
+            return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
+        };
+        let Some(owner) = self.bound_owners.remove(&pane) else {
+            self.unreferenced.insert(execution);
+            return Err(ProvisioningFailure::AttachFailed);
+        };
+        self.awaiting_bootstrap_resize.remove(&pane);
+        Ok(self.queue_terminate(pane, owner, execution, attachment))
+    }
+
+    /// Undo [`Self::begin_explicit_terminate`] when type 38 was not admitted.
+    /// Restores the recorded binding so a later terminate can retry (ADR-017 §6.2).
+    pub fn restore_binding_after_failed_terminate_admit(&mut self, request_id: u64) {
+        let Some(key) = self.pending_by_key.keys().copied().find(|(owner, id)| {
+            *id == request_id
+                && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
+        }) else {
+            return;
+        };
+        let Some(intent) = self.pending_by_key.remove(&key) else {
+            return;
+        };
+        self.pending_kind.remove(&key);
+        self.pane_pending.remove(&intent.pane);
+        let Some(execution) = execution_from_phase(intent.phase) else {
+            return;
+        };
+        self.recorded_bindings.insert(intent.pane, execution);
+        self.bound_owners.insert(intent.pane, intent.owner);
+        self.unreferenced.remove(&execution);
     }
 
     pub fn clear_bootstrap_resize(&mut self, pane: PaneId) {
@@ -591,20 +662,22 @@ impl ProvisioningSession {
         self.pane_pending.remove(&pane);
     }
 
-    fn allocate_request_id(&mut self, owner: ConnectionOwner) -> Result<u64, ProvisioningFailure> {
-        let counter = self.next_request_id.entry(owner).or_insert(1);
-        let request_id = *counter;
-        if request_id == 0 {
-            return Err(ProvisioningFailure::CreateRejected(
-                ErrorCode::MalformedPayload,
-            ));
+    /// Raise the connection-scoped request-id floor to match a live wire client
+    /// that already consumed ids (e.g. bootstrap CreateExecution used 1 → next 2).
+    pub fn seed_next_request_id(&mut self, next: u64) {
+        if next > self.next_request_id {
+            self.next_request_id = next;
         }
+    }
+
+    fn allocate_request_id(&mut self) -> Result<u64, ProvisioningFailure> {
+        let request_id = self.next_request_id.max(1);
         let Some(next) = request_id.checked_add(1) else {
             return Err(ProvisioningFailure::CreateRejected(
                 ErrorCode::MalformedPayload,
             ));
         };
-        *counter = next;
+        self.next_request_id = next;
         Ok(request_id)
     }
 
@@ -626,7 +699,7 @@ impl ProvisioningSession {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Vec<ProvisioningEffect> {
-        let terminate_id = match self.allocate_request_id(owner) {
+        let terminate_id = match self.allocate_request_id() {
             Ok(id) => id,
             Err(_) => {
                 self.unreferenced.insert(execution);

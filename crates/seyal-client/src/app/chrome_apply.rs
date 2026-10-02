@@ -7,30 +7,10 @@ use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanel
 use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
-    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::CreateTab)
-            .map_err(|_| AppError::TabCreationUnavailable)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::SplitFocused { axis })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::CloseTab { id })
-            .map_err(close_tab_error)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

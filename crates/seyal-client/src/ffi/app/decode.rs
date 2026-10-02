@@ -276,6 +276,9 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             })
         }
         57 => Ok(AppAction::DisconnectReconstruction),
+        // Explicit Controller terminate (ADR-017 §6.2 / P4). Distinct from
+        // CloseTab/ClosePane chrome removal. Requires a matching fence.
+        58 => Ok(AppAction::TerminateExecution { fence }),
         _ => Err(-6),
     }
 }

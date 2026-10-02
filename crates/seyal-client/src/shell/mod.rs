@@ -159,12 +159,14 @@ pub struct ShellState {
     /// Execution released by the most recent successful `ClosePane`, if any.
     /// Portable provisioning records it as unreferenced (ADR-017 §6.1).
     last_released_execution: Option<(PaneId, ExecutionId)>,
+    /// Pane ids removed by the most recent successful `CloseTab` (detach-only).
+    last_removed_tab_panes: Vec<PaneId>,
 }
 
 impl ShellState {
-    /// M001 production composition: one Runtime default workspace, one Tab,
-    /// one Pane. Extra tabs/splits stay fail-closed until a distinct execution
-    /// route exists.
+    /// Production composition: one Runtime default workspace, one Tab, one
+    /// Pane. Tab creation stays gated until the live create→attach→bind
+    /// driver exists (C2); pane splitting stays fail-closed until C3.
     pub fn m001_local(detail: impl Into<String>) -> Self {
         let pane = Pane {
             id: PaneId::new(),
@@ -189,6 +191,7 @@ impl ShellState {
             last_error: None,
             next_tab_ordinal: 2,
             last_released_execution: None,
+            last_removed_tab_panes: Vec::new(),
         }
     }
 
@@ -214,6 +217,7 @@ impl ShellState {
             last_error: None,
             next_tab_ordinal: 2,
             last_released_execution: None,
+            last_removed_tab_panes: Vec::new(),
         })
     }
 
@@ -229,6 +233,12 @@ impl ShellState {
         self.allows_tab_creation
     }
 
+    /// Test/C2 harness: flip the production gate without rebuilding the shell.
+    #[cfg(test)]
+    pub(crate) fn set_allows_tab_creation_for_test(&mut self, allowed: bool) {
+        self.allows_tab_creation = allowed;
+    }
+
     pub fn focused_pane_allows_implicit_bootstrap(&self) -> bool {
         self.focused_pane()
             .is_ok_and(|pane| pane.allows_implicit_execution_bootstrap)
@@ -241,6 +251,19 @@ impl ShellState {
     /// Take the execution released by the last successful `ClosePane`, if any.
     pub fn take_released_execution(&mut self) -> Option<(PaneId, ExecutionId)> {
         self.last_released_execution.take()
+    }
+
+    /// Take Pane ids removed by the last successful `CloseTab` (detach-only).
+    pub fn take_removed_tab_panes(&mut self) -> Vec<PaneId> {
+        std::mem::take(&mut self.last_removed_tab_panes)
+    }
+
+    /// Clear a Pane→execution binding without removing the Pane (explicit
+    /// terminate). Presentation close uses [`ShellAction::ClosePane`] /
+    /// [`ShellAction::CloseTab`] instead.
+    pub fn release_execution(&mut self, pane: PaneId) -> Result<Option<ExecutionId>, ShellError> {
+        let pane = self.pane_mut(pane)?;
+        Ok(pane.execution.take())
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
@@ -370,11 +393,15 @@ impl ShellState {
         let Some(index) = workspace.tabs.iter().position(|tab| tab.id == id) else {
             return Err(ShellError::UnknownTab);
         };
+        // Presentation removal only: Pane→execution bindings are released to
+        // portable provisioning as detach-only (ADR-017 §6.1), never terminate.
+        let removed: Vec<PaneId> = workspace.tabs[index].panes.keys().copied().collect();
         workspace.tabs.remove(index);
         if workspace.active_tab == id {
             let replacement = index.min(workspace.tabs.len() - 1);
             workspace.active_tab = workspace.tabs[replacement].id;
         }
+        self.last_removed_tab_panes = removed;
         Ok(())
     }
 
@@ -470,18 +497,22 @@ impl ShellState {
         tab.panes.get(&tab.focused).ok_or(ShellError::UnknownPane)
     }
 
+    /// Pane lookup is by id across every Tab: a create result may complete for a
+    /// background Tab's leaf after focus moved on (ADR-017 request-id correlation).
     fn pane(&self, id: PaneId) -> Result<&Pane, ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
-        let tab = workspace
-            .tab(workspace.active_tab)
-            .ok_or(ShellError::UnknownTab)?;
-        tab.panes.get(&id).ok_or(ShellError::UnknownPane)
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| workspace.tabs.iter())
+            .find_map(|tab| tab.panes.get(&id))
+            .ok_or(ShellError::UnknownPane)
     }
 
     fn pane_mut(&mut self, id: PaneId) -> Result<&mut Pane, ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        tab.panes.get_mut(&id).ok_or(ShellError::UnknownPane)
+        self.workspaces
+            .iter_mut()
+            .flat_map(|workspace| workspace.tabs.iter_mut())
+            .find_map(|tab| tab.panes.get_mut(&id))
+            .ok_or(ShellError::UnknownPane)
     }
 
     fn workspace(&self, id: WorkspaceId) -> Result<&Workspace, ShellError> {

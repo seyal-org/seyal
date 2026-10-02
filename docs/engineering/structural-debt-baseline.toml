@@ -34,33 +34,39 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 762
-issue = 1136
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility/provisioning_apply extraction; #1136 adds the portable ProvisioningSession field and accessors only — create/bind/disposition reducers live in provisioning/, close coordination in provisioning_apply.rs."
+acknowledged_loc = 787
+issue = 1149
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1149 keeps production tab creation gated until the wire create→attach→bind driver is live, which adds a few cfg/test helper lines on top of the macOS LocalDisplayClient field and pending wire-effect queue. Coordination stays in provisioning_apply.rs and C2 acceptance tests in tab_provisioning_tests.rs."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/provisioning/mod.rs"
+acknowledged_loc = 756
+issue = 1149
+reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create/terminate_by_request_id, connection-scoped request ids, seed_next_request_id, and restore_binding_after_failed_terminate_admit so fail-closed NoLiveClient terminate can roll back the recorded binding (ADR-017 §6.2)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
-acknowledged_loc = 753
-issue = 1136
-reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
+acknowledged_loc = 813
+issue = 1149
+reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id and bootstrap floor seeding coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 817
-issue = 1020
-reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production authority remains ApplicationRoot across concern modules. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 851
+issue = 1149
+reason = "Former app.rs #[cfg(test)] suite relocated as a sibling tests module; #1149 covers the production-off tab-creation gate (CreateTab/palette stay off by default, opt-in only via enable_tab_creation_for_test). New C2 acceptance cases live in tab_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 919
-issue = 923
-reason = "Published C ABI entry points and handle/row scratch stay one thin encode/decode façade after decode/encode/visual extraction. Product decode/encode stays in the sibling modules. Snapshot-call metering is cfg(test) thread-local state in visual.rs and is not part of this façade. #923 adds only the pane_region module declaration/re-export and the CannotCloseBoundPane error number; the export itself lives in pane_region.rs."
+acknowledged_loc = 923
+issue = 1149
+reason = "Published C ABI entry points stay one thin encode/decode façade; #1149 adds shell_composition_tests module declaration and provisioning error numbers 34/35 only. C2 shell composition FFI cases live in shell_composition_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
-acknowledged_loc = 773
-issue = 1065
-reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite relocated as a sibling tests module; #1065 imports encode-owned SNAP/block-row flag constants after those flags moved out of the façade, and the steady-state snapshot call-counter proof lives beside the counter in visual.rs."
+acknowledged_loc = 701
+issue = 1149
+reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shell composition cases to shell_composition_tests.rs and ratchets this ceiling down after the extraction."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
@@ -105,5 +111,5 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
 acknowledged_loc = 916
-issue = 1136
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1136 adds ADR-017 §6.3 row-1/row-2 dispose, FinishAttachError.terminated_on_attachment (including Resync-send and post-snapshot socket-mode failures after Attached) so callers never open a second dispose attach, and dispose_never_bound_orphan so adopt/reconnect cannot kill a live survivor. Further split would separate create, attach, and dispose that share one Ready-stream lifecycle."
+issue = 1149
+reason = "Connect/attach/bootstrap create stay one cold-path attach module after #1136 ADR-017 §6.3 dispose (row-1/row-2, FinishAttachError.terminated_on_attachment including Resync-send and post-snapshot socket-mode failures, dispose_never_bound_orphan) and #1149 queued create-result initializer; further split would separate create, attach, and dispose that share one Ready-stream lifecycle."

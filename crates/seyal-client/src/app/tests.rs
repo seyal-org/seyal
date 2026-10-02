@@ -94,17 +94,23 @@ fn new_root_is_one_unbound_pane() {
 }
 
 #[test]
-fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
-    // AppAction::CreateTab/SplitFocused (#922) route straight to the same
-    // ShellState that already disallows composition growth until a
-    // distinct execution route exists; the direct action must fail the
-    // same way the palette-mediated path already does, not silently
-    // no-op.
+fn split_focused_fails_closed_while_create_tab_is_enabled() {
+    // Production stays gated until a live create→attach→bind driver exists.
+    // Opted-in roots exercise CreateTab; splits stay fail-closed until C3.
     let mut root = ApplicationRoot::new();
+    assert!(!root.snapshot().shell.allows_tab_creation);
     assert_eq!(
         root.apply(AppAction::CreateTab),
         Err(AppError::TabCreationUnavailable)
     );
+    root.enable_tab_creation_for_test();
+    root.apply(AppAction::CreateTab)
+        .expect("opted-in root allows tab creation");
+    assert_eq!(root.snapshot().shell.tabs.len(), 2);
+    assert!(root
+        .provisioning()
+        .pending_intent(root.snapshot().shell.focused_pane)
+        .is_some());
     assert_eq!(
         root.apply(AppAction::SplitFocused {
             axis: SplitAxis::Right,
@@ -495,11 +501,39 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
         fence: root.fence(),
     })
     .unwrap();
+    let production = root.snapshot();
+    assert!(production.palette.open);
+    assert!(
+        !production
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label == "New Tab"),
+        "production composition omits New Tab while tab creation stays gated"
+    );
+    root.apply(AppAction::ClosePalette {
+        fence: root.fence(),
+    })
+    .unwrap();
+
+    root.enable_tab_creation_for_test();
+    root.apply(AppAction::OpenPalette {
+        fence: root.fence(),
+    })
+    .unwrap();
     let opened = root.snapshot();
     assert!(opened.palette.open);
     assert!(
-        !opened.palette.rows.iter().any(|row| row.label == "New Tab"),
-        "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+        opened.palette.rows.iter().any(|row| row.label == "New Tab"),
+        "opted-in composition lists New Tab"
+    );
+    assert!(
+        !opened
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label.starts_with("Split Pane")),
+        "splits stay omitted until C3"
     );
     assert!(!opened.palette.rows.is_empty());
 

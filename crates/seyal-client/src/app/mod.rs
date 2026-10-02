@@ -18,6 +18,8 @@ use accessibility::accessibility_nodes;
 
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
 
@@ -38,7 +40,7 @@ use crate::pane_layout::{self, PaneRegion};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
-use crate::provisioning::ProvisioningSession;
+use crate::provisioning::{ProvisioningEffect, ProvisioningSession};
 use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
@@ -46,7 +48,7 @@ use crate::recovery::{
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
-use crate::LocalDisplayClient;
+use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
 pub const APP_ABI_VERSION: u16 = 1;
@@ -86,6 +88,8 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
+    ProvisioningRejected,
+    ProvisioningCapacityExceeded,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +229,9 @@ pub enum AppAction {
     CloseTab {
         id: TabId,
     },
+    TerminateExecution {
+        fence: AppFence,
+    },
     SplitFocused {
         axis: SplitAxis,
     },
@@ -350,6 +357,13 @@ pub struct ApplicationRoot {
     authority: Option<PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
+    /// Cold-path wire client for create/terminate (tests/harness). Production
+    /// macOS may instead use [`Self::client_handle`] via the FFI registry.
+    #[cfg(target_os = "macos")]
+    wire_client: Option<LocalDisplayClient>,
+    /// Effects waiting for a negotiated wire client (SendCreate/SendTerminate)
+    /// or for host attach (AttachController / bootstrap resize).
+    pending_wire_effects: Vec<ProvisioningEffect>,
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
@@ -376,6 +390,13 @@ impl ApplicationRoot {
         Self::with_shell(ShellState::m001_local("local"))
     }
 
+    /// Test-only: enable CreateTab while production `m001_local` stays gated
+    /// until the live create→attach→bind driver exists (#1149 / #1159).
+    #[cfg(test)]
+    pub(crate) fn enable_tab_creation_for_test(&mut self) {
+        self.shell.set_allows_tab_creation_for_test(true);
+    }
+
     pub(crate) fn with_shell(shell: ShellState) -> Self {
         let pane = shell.snapshot().focused_pane;
         let mut composer = ComposerState::new();
@@ -390,6 +411,9 @@ impl ApplicationRoot {
             shell,
             authority: None,
             provisioning: ProvisioningSession::new(),
+            #[cfg(target_os = "macos")]
+            wire_client: None,
+            pending_wire_effects: Vec::new(),
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
@@ -620,6 +644,7 @@ impl ApplicationRoot {
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => self.create_tab(),
             AppAction::CloseTab { id } => self.close_tab(id),
+            AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),

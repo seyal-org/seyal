@@ -41,6 +41,9 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        // Bind ran before the handle was installed, so re-seed now that the
+        // live client is visible (bootstrap create may already have used id 1).
+        self.seed_provisioning_request_floor_from_wire();
         Ok(())
     }
 
@@ -77,6 +80,9 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(registered);
+        // Bind ran before the handle was installed, so re-seed now that the
+        // live client is visible (bootstrap create may already have used id 1).
+        self.seed_provisioning_request_floor_from_wire();
         Ok(())
     }
 
@@ -119,6 +125,13 @@ impl ApplicationRoot {
             bound.pty_generation = generation;
         }
         self.derive_presentation(alternate)?;
+        // Production path: absorb type-39 after poll_prepare decoded it into
+        // the registry client. `still_listed=true` is the safe Failed-outcome
+        // default without a fresh list snapshot (keeps an unreferenced record).
+        // Drain create results (one per admitted request) before terminate so
+        // interleaved creates each advance their own pending intent by id.
+        while self.absorb_wire_create_result()?.is_some() {}
+        let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())
@@ -153,6 +166,21 @@ impl ApplicationRoot {
             .map_err(|_| AppError::AlreadyBound)?;
         self.provisioning
             .record_adopted_binding(fence.pane, evidence.execution);
+        #[cfg(target_os = "macos")]
+        if let Some(handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+            && let Some(next) =
+                crate::ffi::with_client(handle, |client| client.next_provisioning_request_id)
+        {
+            self.provisioning.seed_next_request_id(next);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(client) = self.wire_client.as_ref() {
+            self.provisioning
+                .seed_next_request_id(client.next_provisioning_request_id);
+        }
         let identity = PresentationIdentity::new(evidence.execution, evidence.pty_generation)
             .ok_or(AppError::ZeroPtyGeneration)?;
         self.presentation

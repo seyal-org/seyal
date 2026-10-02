@@ -9,6 +9,8 @@ mod pane_region;
 mod visual;
 
 #[cfg(test)]
+mod shell_composition_tests;
+#[cfg(test)]
 mod tests;
 
 use std::{cell::RefCell, collections::HashMap, ptr};
@@ -915,5 +917,7 @@ fn error_number(error: AppError) -> i32 {
         AppError::CannotCloseLastTab => 31,
         AppError::CannotCloseLastPane => 32,
         AppError::CannotCloseBoundPane => 33,
+        AppError::ProvisioningRejected => 34,
+        AppError::ProvisioningCapacityExceeded => 35,
     }
 }
