@@ -144,19 +144,22 @@ fn host_selection_round_trip() {
 }
 
 #[test]
-fn launch_policy_rejected_is_code_17_and_15_16_stay_unknown() {
+fn launch_policy_rejected_is_code_17_after_adr017_workspace_profile_codes() {
     assert_eq!(ErrorCode::LaunchPolicyRejected as u16, 17);
     assert_eq!(
         ErrorCode::from_u16(17),
         Some(ErrorCode::LaunchPolicyRejected)
     );
     assert_eq!(ErrorCode::from_u16(14), Some(ErrorCode::InternalFailure));
+    // ADR-017 / SPEC-004 §18 occupy 15–16 on the same ErrorCode ladder as L0's 17.
     assert_eq!(
         ErrorCode::from_u16(15),
-        None,
-        "codes 15/16 belong to the ADR-017 stack and stay unknown here"
+        Some(ErrorCode::InvalidWorkspace)
     );
-    assert_eq!(ErrorCode::from_u16(16), None);
+    assert_eq!(
+        ErrorCode::from_u16(16),
+        Some(ErrorCode::UnsupportedLaunchProfile)
+    );
 }
 
 #[test]

@@ -29,7 +29,8 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppRow) == 112);
     REQUIRE(offsetof(SeyalAppRow, address_version) == 56);
     REQUIRE(offsetof(SeyalAppRow, address_bytes) == 64);
-    REQUIRE(SEYAL_APP_ACTION_NAVIGATE == 58);
+    REQUIRE(SEYAL_APP_ACTION_TERMINATE_EXECUTION == 58);
+    REQUIRE(SEYAL_APP_ACTION_NAVIGATE == 59);
     REQUIRE(sizeof(SeyalAppPaneRegion) == 40);
     REQUIRE(offsetof(SeyalAppPaneRegion, x) == 24);
     REQUIRE(sizeof(SeyalAppAction) != 0);

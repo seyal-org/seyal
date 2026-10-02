@@ -97,7 +97,7 @@ mod tests {
         assert_eq!(
             launch_policy_failure_copy(15, 1),
             GENERIC_FAILURE,
-            "codes 15/16 stay unknown on this stack"
+            "codes 15/16 are ADR-017 workspace/profile errors, not launch-policy UX detail"
         );
         assert_eq!(launch_policy_failure_copy(16, 1), GENERIC_FAILURE);
     }
