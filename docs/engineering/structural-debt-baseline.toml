@@ -140,11 +140,7 @@ acknowledged_loc = 868
 issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/local/discovery.rs"
-acknowledged_loc = 701
-issue = 1105
-reason = "Cold-path Runtime discovery/hello/capability negotiation stays one module after absorbing master CAP_VIEWPORT_LINE_IDS fallback alongside CAP_EXECUTION_PROVISIONING; further split would separate hello allowlist retries from the capability request helpers they exercise. Ceiling matches post-master-merge LOC."
+
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
