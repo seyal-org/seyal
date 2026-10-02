@@ -536,6 +536,44 @@ fn explicit_terminate_admits_type_38_on_registry_client_without_install_wire_cli
 }
 
 #[test]
+fn explicit_terminate_fails_closed_without_live_client_and_stays_retryable() {
+    let mut root = ApplicationRoot::new();
+    let client = negotiated_provisioning_client();
+    let execution = client.execution_id();
+    root.attach_client(root.fence(), client)
+        .expect("register Controller");
+    let handle = root.live_client_handle_for_test().expect("registry handle");
+    crate::ffi::unregister_client(handle);
+    let _ = root.poll_client(root.fence());
+    assert_eq!(root.live_client_handle_for_test(), None);
+    assert_eq!(
+        root.provisioning().recorded_execution(root.fence().pane),
+        Some(execution)
+    );
+
+    let error = root
+        .apply(AppAction::TerminateExecution {
+            fence: root.fence(),
+        })
+        .expect_err("terminate must not succeed without a live wire client");
+    assert_eq!(error, AppError::NoLiveClient);
+    assert_eq!(root.snapshot().last_error, Some(AppError::NoLiveClient));
+    assert_eq!(
+        root.provisioning().recorded_execution(root.fence().pane),
+        Some(execution),
+        "binding must remain so terminate can retry after reconnect"
+    );
+    assert!(
+        (1..=16u64).all(|id| {
+            root.provisioning()
+                .pending_terminate_by_request_id(id)
+                .is_none()
+        }),
+        "failed admit must not leak a PendingKind::Terminate"
+    );
+}
+
+#[test]
 fn newly_bound_pane_keeps_spec_008_presentation_fence() {
     let mut root = ApplicationRoot::new();
     root.enable_tab_creation_for_test();

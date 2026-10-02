@@ -183,13 +183,23 @@ impl ApplicationRoot {
                 .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
             "explicit terminate must queue a P4 TerminateExecutionRequest"
         );
-        self.dispatch_wire_effects(
+        let terminate_request_id = effects.iter().find_map(|effect| match effect {
+            ProvisioningEffect::SendTerminate { request_id, .. } => Some(*request_id),
+            _ => None,
+        });
+        if let Err(error) = self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
                 workspace_id: 0,
                 launch_profile: 0,
             },
-        )?;
+        ) {
+            if let Some(request_id) = terminate_request_id {
+                self.provisioning
+                    .restore_binding_after_failed_terminate_admit(request_id);
+            }
+            return Err(error);
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -519,8 +529,8 @@ impl ApplicationRoot {
         attachment: AttachmentId,
     ) -> Result<(), AppError> {
         if !self.has_wire_client() {
-            self.pending_wire_effects.push(effect);
-            return Ok(());
+            let _ = effect;
+            return Err(AppError::NoLiveClient);
         }
         self.with_wire_client_mut(|client| {
             client.submit_terminate_execution_with_id(request_id, execution, attachment)

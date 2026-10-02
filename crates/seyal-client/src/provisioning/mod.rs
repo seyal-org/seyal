@@ -546,6 +546,28 @@ impl ProvisioningSession {
         Ok(self.queue_terminate(pane, owner, execution, attachment))
     }
 
+    /// Undo [`Self::begin_explicit_terminate`] when type 38 was not admitted.
+    /// Restores the recorded binding so a later terminate can retry (ADR-017 §6.2).
+    pub fn restore_binding_after_failed_terminate_admit(&mut self, request_id: u64) {
+        let Some(key) = self.pending_by_key.keys().copied().find(|(owner, id)| {
+            *id == request_id
+                && self.pending_kind.get(&(*owner, *id)) == Some(&PendingKind::Terminate)
+        }) else {
+            return;
+        };
+        let Some(intent) = self.pending_by_key.remove(&key) else {
+            return;
+        };
+        self.pending_kind.remove(&key);
+        self.pane_pending.remove(&intent.pane);
+        let Some(execution) = execution_from_phase(intent.phase) else {
+            return;
+        };
+        self.recorded_bindings.insert(intent.pane, execution);
+        self.bound_owners.insert(intent.pane, intent.owner);
+        self.unreferenced.remove(&execution);
+    }
+
     pub fn clear_bootstrap_resize(&mut self, pane: PaneId) {
         self.awaiting_bootstrap_resize.remove(&pane);
     }
