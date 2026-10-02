@@ -2,10 +2,11 @@
 #![allow(dead_code)]
 
 use std::{
-    io::{Read, Write},
+    io::{self, Read, Write},
     os::unix::net::UnixStream,
     path::Path,
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use seyal_agent_core::WorkScopeKind;
@@ -330,11 +331,13 @@ pub fn handshake_with_evidence(
     evidence: &[u8],
 ) -> UnixStream {
     let mut stream = UnixStream::connect(path).unwrap();
+    // CI can stall on large subscribe pages; SO_RCVTIMEO surfaces as WouldBlock
+    // on Linux, so keep a generous per-op timeout and retry in `read_frame`.
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
     stream
-        .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+        .set_write_timeout(Some(Duration::from_secs(30)))
         .unwrap();
     let hello = Hello {
         supported_versions: vec![ProtocolVersion::V1],
@@ -357,14 +360,36 @@ pub fn round_trip(stream: &mut UnixStream, command: &Command) -> CommandResult {
     decode_result(&response.body).unwrap()
 }
 
+fn read_exact_deadline(stream: &mut UnixStream, buf: &mut [u8], deadline: Instant) {
+    let mut offset = 0;
+    while offset < buf.len() {
+        match stream.read(&mut buf[offset..]) {
+            Ok(0) => panic!("daemon closed stream mid-frame"),
+            Ok(n) => offset += n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error)
+                if error.kind() == io::ErrorKind::WouldBlock
+                    || error.kind() == io::ErrorKind::TimedOut =>
+            {
+                if Instant::now() >= deadline {
+                    panic!("timed out waiting for daemon frame bytes");
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("daemon frame read failed: {error}"),
+        }
+    }
+}
+
 pub fn read_frame(stream: &mut UnixStream) -> seyal_agent_protocol::Frame {
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut header = [0; 10];
-    stream.read_exact(&mut header).unwrap();
+    read_exact_deadline(stream, &mut header, deadline);
     let body_len =
         seyal_agent_protocol::accepted_body_len(&header, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
     let mut body = vec![0; body_len];
     if body_len > 0 {
-        stream.read_exact(&mut body).unwrap();
+        read_exact_deadline(stream, &mut body, deadline);
     }
     let mut bytes = header.to_vec();
     bytes.extend_from_slice(&body);
