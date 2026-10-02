@@ -151,7 +151,9 @@ final class SeyalBlockComponentTests: XCTestCase {
             uiFontSize: dark.uiFontSize, terminalFontSize: dark.terminalFontSize,
             windowPadding: dark.windowPadding, terminalPadding: dark.terminalPadding,
             reduceMaterial: dark.reduceMaterial, utilityMaterial: dark.utilityMaterial,
-            utilityOpacity: dark.utilityOpacity)
+            utilityOpacity: dark.utilityOpacity,
+            terminalDefaultForeground: dark.terminalDefaultForeground,
+            terminalDefaultBackground: dark.terminalDefaultBackground)
         let view = block(
             state: SEYAL_APP_BLOCK_STATE_RUNNING, canRerun: false, statusLabel: "Rust:Running")
         view.apply(theme: theme)

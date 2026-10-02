@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn theme_packs_block_component_roles() {
-        use super::{pack_srgb, seyal_app_theme, THEME_ALLOWS_MOTION};
+        use super::{pack_srgb, seyal_app_theme};
         use crate::theme::{canonical, AccessibilitySignals, ColorRole, ResolvedAppearance};
         for (appearance, resolved) in [
             (0, ResolvedAppearance::Dark),
