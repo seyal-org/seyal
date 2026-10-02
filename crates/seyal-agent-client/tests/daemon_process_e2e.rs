@@ -160,6 +160,52 @@ fn session_client_hello_work_run_snapshot_replay_against_daemon_binary() {
 }
 
 #[test]
+fn daemon_binary_survives_malformed_client_and_serves_next() {
+    use seyal_agent_protocol::encode_hello;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    let dir = temp_dir("malformed");
+    let socket = dir.join("agent.sock");
+    let mut child = spawn_daemon(&dir, 1024, None);
+    wait_ready(&socket);
+
+    // Hello succeeds, then a bad-magic frame: daemon must keep accepting.
+    let mut stream = UnixStream::connect(&socket).expect("connect bad client");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let hello = probe_hello();
+    let hello_frame = encode_hello(&hello, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+    stream.write_all(&hello_frame).unwrap();
+    let mut ack_buf = [0_u8; 512];
+    let _ = stream.read(&mut ack_buf);
+    let mut junk = [0_u8; 10];
+    junk[..4].copy_from_slice(b"BAD!");
+    let _ = stream.write_all(&junk);
+    drop(stream);
+
+    let started = Instant::now();
+    while child.0.try_wait().unwrap().is_none() && started.elapsed() < Duration::from_millis(300) {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        child.0.try_wait().unwrap().is_none(),
+        "daemon exited after malformed client"
+    );
+
+    let socket_for_client = socket.clone();
+    let ok = thread::spawn(move || {
+        let mut client = SessionClient::connect(&socket_for_client).unwrap();
+        client.create_work_scope(WorkScopeKind::Repository).unwrap()
+    });
+    ok.join().expect("SessionClient after malformed peer");
+    assert!(child.0.try_wait().unwrap().is_none());
+    drop(child);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn daemon_binary_exits_cleanly_after_bounded_connections() {
     let dir = temp_dir("shutdown");
     let socket = dir.join("agent.sock");
