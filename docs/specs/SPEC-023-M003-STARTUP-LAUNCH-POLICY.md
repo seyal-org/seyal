@@ -1,11 +1,11 @@
 # SPEC-023 — M003 startup shell, environment and CWD launch policy
 
-- **Status:** Proposed (normative only on ADR-020 acceptance)
+- **Status:** Accepted on merge of PR #1089 by a non-author maintainer under #1003 / ADR-020. An author or agent comment is not that acceptance. Normative with ADR-020. ADR-017 owns the wire launch-profile selector; ADR-020 owns what profile `0` contains. Both ownership statements are normative.
 - **Date:** 2026-09-25
 - **Issue:** #1003 (parent #676, epic #665)
-- **Architecture:** [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md) (Proposed)
+- **Architecture:** [`../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md`](../architecture/ADR-020-STARTUP-SHELL-ENV-CWD-LAUNCH-POLICY.md) (Accepted)
 - **Consumes:** ADR-005, ADR-008, ADR-009, SPEC-002, SPEC-003, SPEC-009 §8.1.1
-- **Neighbor:** Proposed ADR-017 ([PR #1056](https://github.com/seyal-org/seyal/pull/1056) / #994) defines the provisioning seam that selects a launch profile; this specification defines how Runtime resolves that profile into a spawnable `CommandSpec`
+- **Neighbor:** ADR-017 (Accepted on merge of PR #1088 / #994) defines the provisioning seam that selects a launch profile; this specification defines how Runtime resolves that profile into a spawnable `CommandSpec`
 
 ## 1. Purpose
 
@@ -42,7 +42,7 @@ Out of scope:
 1. Launch-policy resolution runs only on the execution-creation control path.
 2. Exactly one Runtime composition authority builds `EffectiveLaunchPolicy`.
 3. The local provisioning protocol never carries program, argv, cwd or env
-   strings (proposed ADR-017).
+   strings (ADR-017).
 4. OSC 7, OSC 2, prompt text, composer draft and Block titles are never launch
    inputs.
 5. `seyal-exec` does not invent shell selection, login bits, `TERM` or
@@ -139,7 +139,10 @@ Required:
 - `SHELL` = validated program path;
 - `PATH` = `/usr/bin:/bin:/usr/sbin:/sbin` unless a later accepted profile
   replaces it under the same validation discipline;
-- `TMPDIR` when a validated absolute per-user temp directory exists;
+- `TMPDIR`: the Darwin per-user temporary directory from
+  `confstr(_CS_DARWIN_USER_TEMP_DIR)`, validated as an absolute existing
+  directory owned by the effective UID. It is never copied from the Runtime
+  process environment; if it is unavailable or invalid it is omitted;
 - `TERM` / `TERMINFO` from CapabilityPolicy (ADR-008).
 
 Optional locale copy from the Runtime process env, each key independently, only
@@ -212,23 +215,51 @@ LaunchPolicyWarning =
 - Exactly one failure result to the create caller.
 - Until SPEC-004 adds additive `17 LaunchPolicyRejected`, every
   `LaunchPolicyFailure` maps to create result code `14 InternalFailure` with
-  `detail_code` 0. Warnings are not carried on the create-result wire. L0
-  (ADR-020 §3.10) owns adding code 17; L3 switches to it in the same PR, so
-  the two mappings never coexist.
-- User-visible strings are bounded and non-secret.
+  `detail_code` 0. Runtime records the failure class in structured logs. Until
+  L0 merges, the client-side portable Rust product UI receives only
+  `14 InternalFailure` with `detail_code` 0 and renders one generic bounded
+  failure string ("New terminal could not start"). Until L0 merges,
+  fallback-with-warning creates still succeed and the portable Rust product UI
+  renders one generic bounded warning string; class-specific failure and
+  warning strings arrive at L0. There is no silent success.
+  `Created.detail_code` warning/failure bits are not visible to a client that
+  has not negotiated `CAP_LAUNCH_POLICY_DETAIL`. Until that capability is
+  negotiated, `Created.detail_code` stays 0 (SPEC-004 §18.3). L0 assigns
+  `17 LaunchPolicyRejected` with the bounded, non-secret `detail_code` values
+  1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3 `CwdInvalid`, 4
+  `CapabilityUnavailable`. No other values are defined; clients treat any
+  unknown value as generic. L0 allocates `CAP_LAUNCH_POLICY_DETAIL` as the next
+  free bit after ADR-017's bit 10 when amending SPEC-004 (do not reuse a bit
+  SPEC-004 already assigned), and assigns `Created.detail_code` bit 0 =
+  `ConfiguredShellInvalid` and bit 1 = `CwdOverrideInvalid`. All other bits
+  are reserved and must be 0. No other transport for launch-policy warnings is
+  authorized. Implementations must not invent interim wire encodings of paths
+  or secrets in `detail_code`. The interim wire ban covers everything before
+  L0. L0 (ADR-020 §3.10) owns adding code 17, the capability bit, and the
+  `Created` warning bits; L3 (which depends on L0) switches both failures and
+  warnings to the L0 encoding and removes the code-14 mapping in that same PR,
+  so the two mappings never coexist.
+- User-visible strings are bounded and non-secret, including before L0.
 - Protocol payloads carry no paths or env data.
 
 ## 10. Relationship to provisioning
 
-Proposed ADR-017 create requests carry only a launch-profile selector. Runtime
-maps:
+ADR-017 create requests carry only a launch-profile selector. Runtime maps:
 
 ```text
 profile 0 → LaunchProfileIntent::default_interactive → EffectiveLaunchPolicy
 unknown/reserved → UnsupportedLaunchProfile (ADR-017) before policy resolution
 ```
 
-This specification does not define wire layouts.
+§9 assigns the `LaunchPolicyRejected` `detail_code` values and
+`Created.detail_code` warning bits; those wire values are capability-gated by
+`CAP_LAUNCH_POLICY_DETAIL`. The byte layout of the create result stays in
+SPEC-004.
+
+ADR-017 owns the wire launch-profile selector; ADR-020 owns what profile `0`
+contains. Both ownership statements are normative. Implementation children that
+need profile contents remain not Ready until ADR-020 is accepted — that is an
+implementation gate, not a condition on these sentences.
 
 ## 11. Performance / resource constraints
 
@@ -270,8 +301,10 @@ Implementation children must provide at least:
     `ConfiguredShellInvalid` warning, create succeeds.
 16. Interim wire mapping: each `LaunchPolicyFailure` variant → create
     `result_code` 14 with `detail_code` 0 and no path/env bytes in the payload;
-    a fallback-with-warning create returns `Created` with no warning on the
-    wire.
+    a fallback-with-warning create returns `Created` with `detail_code` 0
+    (capability not yet allocated) while the portable product UI still shows
+    the one generic bounded warning string.
+17. Post-L0 wire mapping: each `LaunchPolicyFailure` variant → `result_code` 17 with its §9 `detail_code` (1–4); a fallback-with-warning create returns `Created` with only the §9 warning bits set and all reserved bits 0 when `CAP_LAUNCH_POLICY_DETAIL` was negotiated (otherwise `detail_code` stays 0); no path/env bytes.
 
 ## 13. Acceptance criteria
 
@@ -279,7 +312,7 @@ Implementation children must provide at least:
 - Safe default and failure behavior match §§5–9.
 - Secrets/environment diagnostics are bounded.
 - No shell text/OSC becomes authority.
-- Proposed ADR-017 profile resolution can consume `EffectiveLaunchPolicy`.
+- ADR-017 profile resolution can consume `EffectiveLaunchPolicy`.
 - §12 fixtures are enumerated in Ready child Issues before coding.
 
 ## 14. Non-goals

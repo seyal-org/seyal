@@ -30,6 +30,7 @@ pub enum RecoveryStage {
     Usable,
     Exhausted,
     Blocked,
+    ExecutionEnded,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -86,6 +87,10 @@ impl ReconstructionState {
         self.stage == ReconstructionStage::Usable
     }
 
+    pub fn expected_execution(&self) -> Option<ContinuityIdentity> {
+        self.expected_execution
+    }
+
     pub fn begin_attempt(&mut self) {
         self.stage = ReconstructionStage::AwaitingAuthoritativeSnapshot;
     }
@@ -140,7 +145,30 @@ pub enum AttemptOutcome {
     EndpointMissing,
     Retryable,
     ControllerBusy,
+    ExecutionEnded,
     Blocked,
+}
+
+/// Classify a bridge open failure from `SeyalRecoveryResult` failure_class /
+/// retryable bits. Hosts must not reinterpret these classes in Swift.
+///
+/// Class 1 is a missing leaf. Class 2 is refused/disappeared: a dead
+/// `control.sock` looks like an unready listener, and only a Runtime
+/// singleton contender may replace it (SPEC-009). Both map to the
+/// one-launch-per-episode path; Rust launch-once accounting still prevents
+/// a second spawn while a just-started helper binds the canonical endpoint.
+pub fn classify_open_result(failure_class: u8, retryable: bool) -> AttemptOutcome {
+    if failure_class == 7 {
+        return AttemptOutcome::ExecutionEnded;
+    }
+    if !retryable {
+        return AttemptOutcome::Blocked;
+    }
+    match failure_class {
+        1 | 2 => AttemptOutcome::EndpointMissing,
+        3 => AttemptOutcome::ControllerBusy,
+        _ => AttemptOutcome::Retryable,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +202,15 @@ pub struct RecoveryCoordinator {
     attempt_count: u32,
     scheduled: bool,
     blocked_launch: bool,
+    /// True after `PerformAttempt` is emitted until `complete_attempt` (or
+    /// cancel/exhaust) clears it. Duplicate/late completions without an
+    /// outstanding attempt only dispose handles — they must not advance the
+    /// episode (AGENTS.md level-trigger / ADR-015).
+    attempt_outstanding: bool,
+    /// Remaining episode budget captured when `PerformAttempt` was emitted.
+    /// Survives host Ack of the effect so `seyal_app_recovery_param` still
+    /// returns a non-zero open budget after claim.
+    claimed_remaining: Option<Duration>,
 }
 
 impl RecoveryCoordinator {
@@ -212,7 +249,38 @@ impl RecoveryCoordinator {
         self.launch_claimed = false;
         self.blocked_launch = false;
         self.attempt_count = 0;
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.cancel();
+    }
+
+    pub fn has_outstanding_attempt(&self) -> bool {
+        self.attempt_outstanding
+    }
+
+    /// Open budget for the claimed attempt, even after the host Acked the
+    /// `PerformAttempt` effect out of the pending queue.
+    pub fn claimed_attempt_remaining(&self) -> Option<Duration> {
+        if self.attempt_outstanding {
+            self.claimed_remaining
+        } else {
+            None
+        }
+    }
+
+    /// Host reports presentation progress after connect (SPEC-009 §10).
+    /// Only RestoringInteraction and Usable are accepted, and only after
+    /// Reconstructing (or RestoringInteraction → Usable).
+    pub fn advance_presentation_stage(&mut self, stage: RecoveryStage) -> bool {
+        match (self.state.stage, stage) {
+            (RecoveryStage::Reconstructing, RecoveryStage::RestoringInteraction)
+            | (RecoveryStage::Reconstructing, RecoveryStage::Usable)
+            | (RecoveryStage::RestoringInteraction, RecoveryStage::Usable) => {
+                self.state.stage = stage;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn scheduled_fire(&mut self, generation: u64, now: Duration) -> Vec<RecoveryEffect> {
@@ -233,6 +301,29 @@ impl RecoveryCoordinator {
         if generation != self.state.generation {
             return self.dispose_opened(outcome);
         }
+        if !self.attempt_outstanding {
+            // Late LaunchHelper failure is reported through CompleteRecovery
+            // without a new PerformAttempt (host claimed launch, then helper
+            // missing). That is not a duplicate open; block the episode.
+            if matches!(outcome, AttemptOutcome::EndpointMissing)
+                && launch == Some(LaunchResult::HelperMissing)
+                && self.launch_claimed
+                && !self.blocked_launch
+                && self.deadline.is_some()
+                && self.state.stage == RecoveryStage::StartingRuntime
+            {
+                self.scheduled = false;
+                self.deadline = None;
+                self.blocked_launch = true;
+                self.state.stage = RecoveryStage::Blocked;
+                return Vec::new();
+            }
+            // No claimed attempt for this generation: ignore episode
+            // transitions; only dispose a handle the host may still hold.
+            return self.dispose_opened(outcome);
+        }
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         let Some(deadline) = self.deadline else {
             return self.dispose_opened(outcome);
         };
@@ -259,13 +350,15 @@ impl RecoveryCoordinator {
                 if !self.launch_claimed {
                     self.launch_claimed = true;
                     effects.push(RecoveryEffect::LaunchHelper { generation });
-                    if launch == Some(LaunchResult::HelperMissing) {
-                        self.scheduled = false;
-                        self.deadline = None;
-                        self.blocked_launch = true;
-                        self.state.stage = RecoveryStage::Blocked;
-                        return effects;
-                    }
+                }
+                // Hosts may report the failed launch after executing the
+                // claimed LaunchHelper effect; it still blocks the episode.
+                if launch == Some(LaunchResult::HelperMissing) {
+                    self.scheduled = false;
+                    self.deadline = None;
+                    self.blocked_launch = true;
+                    self.state.stage = RecoveryStage::Blocked;
+                    return effects;
                 }
                 effects.extend(self.schedule_retry(generation, now));
                 effects
@@ -284,12 +377,20 @@ impl RecoveryCoordinator {
                 self.state.stage = RecoveryStage::Blocked;
                 Vec::new()
             }
+            AttemptOutcome::ExecutionEnded => {
+                self.scheduled = false;
+                self.deadline = None;
+                self.state.stage = RecoveryStage::ExecutionEnded;
+                Vec::new()
+            }
         }
     }
 
     fn replace_generation(&mut self, stage: RecoveryStage) {
         self.scheduled = false;
         self.deadline = None;
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.begin();
         self.state.stage = stage;
     }
@@ -307,6 +408,8 @@ impl RecoveryCoordinator {
         }
         self.attempt_count += 1;
         let remaining = deadline.saturating_sub(now);
+        self.attempt_outstanding = true;
+        self.claimed_remaining = Some(remaining);
         vec![RecoveryEffect::PerformAttempt {
             generation,
             remaining,
@@ -338,6 +441,8 @@ impl RecoveryCoordinator {
         }
         self.scheduled = false;
         self.deadline = None;
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.stage = RecoveryStage::Reconstructing;
         Vec::new()
     }
@@ -348,6 +453,8 @@ impl RecoveryCoordinator {
         }
         self.scheduled = false;
         self.deadline = None;
+        self.attempt_outstanding = false;
+        self.claimed_remaining = None;
         self.state.stage = RecoveryStage::Exhausted;
         Vec::new()
     }
@@ -361,291 +468,4 @@ impl RecoveryCoordinator {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn drive_retryable(coordinator: &mut RecoveryCoordinator) -> Vec<Duration> {
-        let mut now = Duration::ZERO;
-        let mut delays = Vec::new();
-        let mut effects = coordinator.begin_episode(now);
-        let mut attempts = 0;
-        loop {
-            let next = match effects.as_slice() {
-                [RecoveryEffect::PerformAttempt { generation, .. }] => {
-                    let generation = *generation;
-                    attempts += 1;
-                    coordinator.complete_attempt(generation, AttemptOutcome::Retryable, now, None)
-                }
-                [RecoveryEffect::Schedule { generation, delay }] => {
-                    let generation = *generation;
-                    let delay = *delay;
-                    delays.push(delay);
-                    now += delay;
-                    coordinator.scheduled_fire(generation, now)
-                }
-                [] => break,
-                other => panic!("unexpected effects {other:?}"),
-            };
-            effects = next;
-            if attempts > 20 {
-                panic!("did not converge");
-            }
-        }
-        assert_eq!(attempts, MAXIMUM_ATTEMPTS);
-        delays
-    }
-
-    #[test]
-    fn seven_attempt_schedule_exhausts() {
-        let mut coordinator = RecoveryCoordinator::default();
-        let delays = drive_retryable(&mut coordinator);
-        assert_eq!(delays.as_slice(), &RETRY_DELAYS);
-        assert_eq!(coordinator.attempt_count(), MAXIMUM_ATTEMPTS);
-        assert_eq!(coordinator.state().stage, RecoveryStage::Exhausted);
-        assert!(!coordinator.has_scheduled_attempt());
-    }
-
-    #[test]
-    fn endpoint_missing_launches_once_controller_busy_never_launches() {
-        let mut missing = RecoveryCoordinator::default();
-        let mut now = Duration::ZERO;
-        let mut launches = 0;
-        let mut effects = missing.begin_episode(now);
-        for _ in 0..20 {
-            let next = match effects.as_slice() {
-                [RecoveryEffect::PerformAttempt { generation, .. }] => {
-                    let generation = *generation;
-                    missing.complete_attempt(
-                        generation,
-                        AttemptOutcome::EndpointMissing,
-                        now,
-                        Some(LaunchResult::Started),
-                    )
-                }
-                [RecoveryEffect::LaunchHelper { .. }, RecoveryEffect::Schedule { generation, delay }] =>
-                {
-                    let generation = *generation;
-                    let delay = *delay;
-                    launches += 1;
-                    now += delay;
-                    missing.scheduled_fire(generation, now)
-                }
-                [RecoveryEffect::Schedule { generation, delay }] => {
-                    let generation = *generation;
-                    let delay = *delay;
-                    now += delay;
-                    missing.scheduled_fire(generation, now)
-                }
-                [] => break,
-                other => panic!("unexpected {other:?}"),
-            };
-            effects = next;
-        }
-        assert_eq!(launches, 1);
-        assert_eq!(missing.state().stage, RecoveryStage::Exhausted);
-
-        let mut busy = RecoveryCoordinator::default();
-        now = Duration::ZERO;
-        effects = busy.begin_episode(now);
-        let RecoveryEffect::PerformAttempt {
-            generation: busy_generation,
-            ..
-        } = effects[0]
-        else {
-            panic!("expected attempt");
-        };
-        effects = busy.complete_attempt(busy_generation, AttemptOutcome::ControllerBusy, now, None);
-        assert_eq!(busy.state().stage, RecoveryStage::WaitingForController);
-        while let Some((generation, delay)) = match effects.as_slice() {
-            [RecoveryEffect::Schedule { generation, delay }] => Some((*generation, *delay)),
-            _ => None,
-        } {
-            now += delay;
-            effects = busy.scheduled_fire(generation, now);
-            if let [RecoveryEffect::PerformAttempt { generation, .. }] = effects.as_slice() {
-                let generation = *generation;
-                effects =
-                    busy.complete_attempt(generation, AttemptOutcome::ControllerBusy, now, None);
-            }
-        }
-        assert_eq!(launches, 1);
-        assert_eq!(busy.attempt_count(), MAXIMUM_ATTEMPTS);
-        assert_eq!(busy.state().stage, RecoveryStage::Exhausted);
-    }
-
-    #[test]
-    fn begin_episode_replaces_generation_and_cancels_prior_schedule() {
-        let mut coordinator = RecoveryCoordinator::default();
-        let first = coordinator.begin_episode(Duration::ZERO);
-        let RecoveryEffect::PerformAttempt {
-            generation: first_generation,
-            ..
-        } = first[0]
-        else {
-            panic!("expected attempt");
-        };
-        coordinator.complete_attempt(
-            first_generation,
-            AttemptOutcome::Retryable,
-            Duration::ZERO,
-            None,
-        );
-        assert!(coordinator.has_scheduled_attempt());
-        let second = coordinator.begin_episode(Duration::ZERO);
-        let RecoveryEffect::PerformAttempt {
-            generation: second_generation,
-            ..
-        } = second[0]
-        else {
-            panic!("expected attempt");
-        };
-        assert!(second_generation > first_generation);
-        assert_eq!(coordinator.attempt_count(), 1);
-        assert!(!coordinator.has_scheduled_attempt());
-        assert!(coordinator
-            .scheduled_fire(first_generation, Duration::from_millis(10))
-            .is_empty());
-        let stale = coordinator.complete_attempt(
-            first_generation,
-            AttemptOutcome::Connected,
-            Duration::from_millis(10),
-            None,
-        );
-        assert!(stale.is_empty());
-        assert_eq!(coordinator.state().generation, second_generation);
-        assert_eq!(coordinator.state().stage, RecoveryStage::Discovering);
-
-        let opened = coordinator.complete_attempt(
-            first_generation,
-            AttemptOutcome::Opened {
-                handle: 77,
-                adopted: true,
-            },
-            Duration::from_millis(10),
-            None,
-        );
-        assert_eq!(opened, vec![RecoveryEffect::DisposeHandle(77)]);
-        assert_eq!(coordinator.state().stage, RecoveryStage::Discovering);
-    }
-
-    #[test]
-    fn rejected_opened_handle_is_disposed_and_blocked() {
-        let mut coordinator = RecoveryCoordinator::default();
-        let started = coordinator.begin_episode(Duration::ZERO);
-        let RecoveryEffect::PerformAttempt { generation, .. } = started[0] else {
-            panic!("expected attempt");
-        };
-        let effects = coordinator.complete_attempt(
-            generation,
-            AttemptOutcome::Opened {
-                handle: 103,
-                adopted: false,
-            },
-            Duration::ZERO,
-            None,
-        );
-        assert_eq!(effects, vec![RecoveryEffect::DisposeHandle(103)]);
-        assert_eq!(coordinator.state().stage, RecoveryStage::Blocked);
-        assert!(!coordinator.has_scheduled_attempt());
-    }
-
-    #[test]
-    fn helper_missing_blocks_without_scheduling() {
-        let mut coordinator = RecoveryCoordinator::default();
-        let started = coordinator.begin_episode(Duration::ZERO);
-        let RecoveryEffect::PerformAttempt { generation, .. } = started[0] else {
-            panic!("expected attempt");
-        };
-        let effects = coordinator.complete_attempt(
-            generation,
-            AttemptOutcome::EndpointMissing,
-            Duration::ZERO,
-            Some(LaunchResult::HelperMissing),
-        );
-        assert_eq!(effects, vec![RecoveryEffect::LaunchHelper { generation }]);
-        assert_eq!(coordinator.state().stage, RecoveryStage::Blocked);
-        assert!(coordinator.blocked_launch());
-        assert!(!coordinator.has_scheduled_attempt());
-    }
-
-    #[test]
-    fn stale_launch_helper_carries_superseded_generation() {
-        let mut coordinator = RecoveryCoordinator::default();
-        let started = coordinator.begin_episode(Duration::ZERO);
-        let RecoveryEffect::PerformAttempt {
-            generation: first_generation,
-            ..
-        } = started[0]
-        else {
-            panic!("expected attempt");
-        };
-        let launched = coordinator.complete_attempt(
-            first_generation,
-            AttemptOutcome::EndpointMissing,
-            Duration::ZERO,
-            Some(LaunchResult::Started),
-        );
-        assert!(launched.contains(&RecoveryEffect::LaunchHelper {
-            generation: first_generation
-        }));
-        let second = coordinator.begin_episode(Duration::from_millis(10));
-        let RecoveryEffect::PerformAttempt {
-            generation: second_generation,
-            ..
-        } = second[0]
-        else {
-            panic!("expected attempt");
-        };
-        assert_ne!(first_generation, second_generation);
-        assert!(!launched.iter().any(|effect| matches!(
-            effect,
-            RecoveryEffect::LaunchHelper { generation } if *generation == second_generation
-        )));
-    }
-
-    #[test]
-    fn reconstruction_pins_runtime_execution_and_requires_fresh_attachment() {
-        let runtime = ContinuityIdentity { low: 1, high: 2 };
-        let execution = ContinuityIdentity { low: 3, high: 4 };
-        let first = ContinuityIdentity { low: 5, high: 6 };
-        let second = ContinuityIdentity { low: 7, high: 8 };
-        let mut state = ReconstructionState::default();
-        state.begin_attempt();
-        assert!(!state.can_mutate());
-        assert!(state.commit(runtime, execution, first, true, true));
-        assert!(state.can_mutate());
-        state.disconnect();
-        state.begin_attempt();
-        assert!(state.commit(runtime, execution, second, true, true));
-        state.disconnect();
-        state.begin_attempt();
-        assert!(!state.commit(
-            ContinuityIdentity { low: 99, high: 2 },
-            execution,
-            ContinuityIdentity { low: 9, high: 10 },
-            true,
-            true
-        ));
-        assert_eq!(state.stage, ReconstructionStage::BlockedIdentityMismatch);
-        assert!(!state.can_mutate());
-    }
-
-    #[test]
-    fn reconstruction_rejects_interrupted_snapshot_and_old_attachment() {
-        let runtime = ContinuityIdentity { low: 1, high: 2 };
-        let execution = ContinuityIdentity { low: 3, high: 4 };
-        let attachment = ContinuityIdentity { low: 5, high: 6 };
-        let mut state = ReconstructionState::default();
-        state.begin_attempt();
-        assert!(!state.commit(runtime, execution, attachment, true, false));
-        assert_eq!(
-            state.stage,
-            ReconstructionStage::AwaitingAuthoritativeSnapshot
-        );
-        assert!(state.commit(runtime, execution, attachment, true, true));
-        state.disconnect();
-        state.begin_attempt();
-        assert!(!state.commit(runtime, execution, attachment, true, true));
-        assert_eq!(state.stage, ReconstructionStage::BlockedIdentityMismatch);
-    }
-}
+mod tests;

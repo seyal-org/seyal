@@ -4,7 +4,7 @@
 maintainer files these as GitHub Issues under parent [#674](https://github.com/seyal-org/seyal/issues/674).
 
 **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md)
-(Proposed), SPEC-003 §4.1/§5.2, SPEC-004 §18, SPEC-009 §8.2.1,
+(accepted on merge of PR #1088), SPEC-003 §4.1/§5.2, SPEC-004 §18, SPEC-009 §8.2.1,
 [`MILESTONE-003.md`](MILESTONE-003.md) §5–§6, ADR-005, ADR-006, ADR-007, ADR-008,
 ADR-009, ADR-015.
 
@@ -19,17 +19,18 @@ independently reviewable outcome with one human owner, one
 
 ```text
 ADR-017 + SPEC amendments accepted
-  → P1 Runtime lifetime (zero-execution steady state)
   → P2 protocol encode/decode for types 36–39
   → P3 Runtime provisioning admission/creation
   → P4 Runtime explicit disposition
   → C1 portable client provisioning/binding/disposition authority
+      (includes the resident zero-execution lifetime and no-startup creation)
   → C2 headed Tab creation enablement
   → C3 headed split enablement                  (also requires #923)
   → M1 provisioning measurement/scaling evidence
 ```
 
-P1 and P2 are independent of each other and may proceed in parallel. C3 also
+P2 may proceed before C1. The resident lifetime (former P1) may not: it lands
+inside C1, in the same change as headed initial-Pane provisioning. C3 also
 depends on #923 split-tree projection. #936 multi-live Metal surfaces consumes
 C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
@@ -37,15 +38,21 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 ## P1 — Runtime process lifetime is independent of live-execution count
 
+This outcome lands **inside C1**, not before it. Filed Issue #1093 must state
+that rule. "Empty argv creates no execution" and "do not exit at zero" are the
+same change as headed initial-Pane provisioning (SPEC-003 §4.1).
+
 **In scope**
 
-- `seyal-runtime` binary: zero live executions becomes a valid steady state; the
-  process no longer exits when the live-execution count reaches zero.
-- On the production client-launched path (empty argument list per SPEC-009
-  §8.1.1) the Runtime creates no execution from its own startup.
+- `seyal-runtime` binary, in the C1 change: zero live executions becomes a valid
+  steady state; the process no longer exits when the live-execution count
+  reaches zero; empty argv creates no startup execution.
 - An explicit developer/test invocation with a command keeps creating that
   execution as Runtime's own composition.
 - Exit only on explicit shutdown (SPEC-003 §16) or an OS signal.
+- Until that C1 change, empty argv still creates one startup execution and the
+  process may still exit at zero. That interim is a required test, not the
+  steady state.
 
 **Out of scope**
 
@@ -62,8 +69,10 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 
 **Tests**
 
-- headless start with empty argv creates zero executions;
-- `ListExecutions` returns an empty list without error;
+- until the C1 change, empty argv still creates one startup execution, and
+  finalizing it may exit the process;
+- after the C1 change, headless start with empty argv creates zero executions;
+- `ListExecutions` returns an empty list without error after that change;
 - last-execution finalization does not exit the process, leaks no registration,
   descriptor or Workspace association;
 - idle CPU/wake behavior at zero executions has no polling;
@@ -71,7 +80,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
   execution;
 - existing SPEC-003 §19 tests remain green.
 
-**Dependencies:** SPEC-003 §4.1 accepted.
+**Dependencies:** SPEC-003 §4.1 accepted, and the same change as C1.
 
 ---
 
@@ -159,7 +168,7 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
   treatment as a Runtime-composed execution;
 - logs contain no program/argv/environment/cwd/terminal content.
 
-**Dependencies:** P1, P2, SPEC-003 §5.2 and SPEC-004 §18 accepted.
+**Dependencies:** P1, P2, SPEC-003 §5.2 and SPEC-004 §18 accepted; ADR-020 Accepted.
 
 ---
 
@@ -223,6 +232,8 @@ C1–C3 and must stay inside SPEC-004 §5 attachment maxima.
 - Per-Pane client/connection ownership so the headed path no longer depends on
   single-running-execution resolution.
 - Bounded non-secret failure state; no automatic provisioning retry.
+- On the production client-launched path (empty argument list per SPEC-009
+  §8.1.1) the Runtime creates no execution from its own startup.
 
 **Out of scope**
 

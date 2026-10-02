@@ -179,6 +179,14 @@ final class CommandBlockView: NSView {
         super.keyDown(with: event)
     }
 
+    override func accessibilityChildren() -> [Any]? {
+        // The card is itself an accessibility element, so XCUI and VoiceOver
+        // cannot reach the body (the live-tail target) or the seam actions
+        // without an explicit child list.
+        ([command, statusIcon, spinner] + actions.arrangedSubviews + [body])
+            .filter { !$0.isHidden }
+    }
+
     override func accessibilityPerformPress() -> Bool {
         onSelect?(row.isSelected)
         return true

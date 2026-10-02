@@ -35,7 +35,7 @@ impl LocalDisplayClient {
         if block_id == 0 {
             return Err(ClientError::Protocol);
         }
-        self.pending_block_copy = None;
+        self.abandon_block_copy();
         self.completed_block_copy = None;
         let Some((start_line, end_line)) = output_range else {
             self.completed_block_copy =
@@ -110,6 +110,19 @@ impl LocalDisplayClient {
                 }
             }
         }
+    }
+
+    /// Drop the pending Block copy and forget its in-flight history request,
+    /// so a late reply is ignored by the request table instead of being held
+    /// in `history_ranges` where nothing would consume it (and where it could
+    /// evict display or newer copy replies from the bounded cache).
+    fn abandon_block_copy(&mut self) {
+        let Some(pending) = self.pending_block_copy.take() else {
+            return;
+        };
+        self.history_requests.remove(&pending.request_id);
+        self.history_ranges
+            .remove(&(pending.block_id, pending.request_id));
     }
 
     /// Take a completed Block copy for the host pasteboard. Clears the slot.
@@ -240,6 +253,49 @@ mod tests {
         );
         client.advance_block_copy().unwrap();
         assert!(client.take_block_copy().is_none());
+    }
+
+    #[test]
+    fn superseded_block_copy_leaves_no_orphaned_history_request() {
+        use std::io::Write;
+
+        use seyal_runtime::local_ipc::framing::encode_frame;
+
+        let (client_stream, mut server) = UnixStream::pair().expect("socket pair");
+        client_stream.set_nonblocking(true).expect("nonblocking");
+        let mut client = test_client(client_stream);
+        // Copy A (request 1), then Copy B (request 2) supersedes it before
+        // A's reply arrives.
+        client
+            .begin_block_copy(9, BlockCopyKind::Output, String::new(), Some((4, 8)))
+            .unwrap();
+        client
+            .begin_block_copy(9, BlockCopyKind::Output, String::new(), Some((4, 8)))
+            .unwrap();
+        assert!(!client.history_requests.contains_key(&1), "A forgotten");
+        assert!(client.history_requests.contains_key(&2), "B in flight");
+
+        // A's late reply arrives on the wire: the request table no longer
+        // knows it, so nothing is held for A.
+        let late = copy_reply(1, HistoryRangeStatus::Complete, &[(4, "stale")]);
+        server
+            .write_all(&encode_frame(
+                MessageType::HistoryRangeSnapshot,
+                &late.encode(),
+            ))
+            .expect("write late reply");
+        let _ = client.poll_prepare();
+        assert!(client.history_range_for(9, 1).is_none(), "no orphan held");
+        assert!(client.take_block_copy().is_none(), "A never completes");
+
+        // B still completes from its own reply.
+        hold_reply(
+            &mut client,
+            copy_reply(2, HistoryRangeStatus::Complete, &[(4, "fresh")]),
+        );
+        client.advance_block_copy().unwrap();
+        assert_eq!(client.take_block_copy(), Some((9, "fresh".to_string())));
+        assert!(client.history_requests.is_empty());
     }
 
     #[test]

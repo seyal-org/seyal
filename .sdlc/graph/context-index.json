@@ -4,7 +4,7 @@
   "description": "Compact Seyal navigation index. Authoritative architecture, specs, milestones, code and tests always win on conflict.",
   "framework": {
     "name": "ai-sdlc",
-    "pinned_revision": "8d329477e41f00e82435fe47d49cfedd724aefc5"
+    "pinned_revision": "8d1cac09aef61bb3fb1431c35a114ef047aca12c"
   },
   "nodes": [
     {
@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "105266dc95d1c91391dc6edd8d06510439dfab8e"
+          "fingerprint": "f0e40a18c3b2b0e27b5a74298bd06301e3974a4a"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "105266dc95d1c91391dc6edd8d06510439dfab8e"
+          "fingerprint": "f0e40a18c3b2b0e27b5a74298bd06301e3974a4a"
         }
       ],
       "relationships": [
@@ -138,7 +138,7 @@
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
-          "fingerprint": "dd2e11bd8f7947808fa63658adeeccb6be8c66d4"
+          "fingerprint": "ac7f93f29278c7cbc54d74544ef16cdc82e5ef17"
         },
         {
           "path": "docs/architecture/ADR-015-RUST-PRODUCT-UI-THIN-SWIFT-HOST.md",
@@ -307,7 +307,7 @@
       "sources": [
         {
           "path": "docs/engineering/M001.1-SWIFT-OWNERSHIP-PARITY-MANIFEST.md",
-          "fingerprint": "408103a823c374e996534880ec1c42a86b0953f7"
+          "fingerprint": "221a4c138b99b649123367af63b904378a941f47"
         }
       ],
       "relationships": [

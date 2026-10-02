@@ -1,11 +1,18 @@
 //! Versioned local Agent Backend protocol boundary.
 //!
 //! AB-0.2 owns Hello/HelloAck negotiation and the bounded frame codec.
-//! Socket ownership, daemon lifecycle, and authorization stay outside this crate.
+//! V1 session commands are the closed post-hello catalog. Socket ownership,
+//! daemon lifecycle, and authorization stay outside this crate.
 
+mod command;
 mod frame;
 mod handshake;
 
+pub use command::{
+    decode_command, decode_result, encode_command, encode_result, AggregateRef, Command,
+    CommandError, CommandResult, ReplayEvent, SnapshotView, REPLAY_EVENT_OVERHEAD,
+    REPLAY_RESULT_OVERHEAD,
+};
 pub use frame::{
     accepted_body_len, decode_frame, encode_frame, push_untrusted, Frame, FrameError, FrameKind,
     ABSOLUTE_MAX_FRAME_SIZE,

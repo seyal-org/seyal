@@ -4,58 +4,73 @@ import AppKit
 @MainActor
 final class ProductChromeHostView: NSView {
     let pane: ThinPaneHostView
-    private let material = NSVisualEffectView()
+    let material = NSVisualEffectView()
     /// Headed/component probe for cold visual snapshot. Identifier-encoded so
     /// VoiceOver does not hear a pipe-delimited token string as the chrome value.
-    private let coldVisualProbe = NSView()
-    private let tabStrip = NSView()
-    private let tabTitle = NSTextField(labelWithString: "Terminal")
+    let coldVisualProbe = NSView()
+    let tabStrip = NSView()
+    let tabTitle = NSTextField(labelWithString: "Terminal")
     /// Layout-chrome cluster (#922): apply to the active Tab/focused Pane,
     /// never duplicated per-Pane (M001-CORE-TERMINAL-REFERENCE-SCREEN.md §4.3).
-    private let newTabButton = NSButton(title: "+", target: nil, action: nil)
-    private let closeTabButton = IdentityButton(title: "Close Tab", target: nil, action: nil)
-    private let splitRightButton = NSButton(title: "Split Right", target: nil, action: nil)
-    private let splitDownButton = NSButton(title: "Split Down", target: nil, action: nil)
-    private let closePaneButton = IdentityButton(title: "Close Pane", target: nil, action: nil)
-    private let left = NSView()
-    private let inspector = NSStackView()
-    private let attention = NSStackView()
-    private let transcript = NSScrollView()
-    private let blocks = NSStackView()
-    private let composer: ComposerBridgeView
+    let newTabButton = NSButton(title: "+", target: nil, action: nil)
+    let closeTabButton = IdentityButton(title: "Close Tab", target: nil, action: nil)
+    let splitRightButton = NSButton(title: "Split Right", target: nil, action: nil)
+    let splitDownButton = NSButton(title: "Split Down", target: nil, action: nil)
+    let closePaneButton = IdentityButton(title: "Close Pane", target: nil, action: nil)
+    let left = NSView()
+    let inspector = NSStackView()
+    let attention = NSStackView()
+    let transcript = NSScrollView()
+    let blocks = NSStackView()
+    let composer: ComposerBridgeView
     /// Rust-owned history overlay (#933); internal for component tests.
     let historyOverlay: ComposerHistoryOverlayView
     /// Global command palette overlay (#932); internal for component tests.
     let commandPalette: CommandPaletteOverlayView
-    private let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
-    private let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
-    private let recoveryLabel = NSTextField(labelWithString: "")
-    private let leftItems = NSStackView()
-    private let inspectorColumn = NSView()
-    private let centerColumn = NSView()
-    private var recoveryTimer: Timer?
-    private var lastSnapshotGeneration: UInt64 = .max
-    private var lastEligibility: UInt16 = .max
-    private var lastProjectedExecution = (lo: UInt64(0), hi: UInt64(0))
-    private var lastBlockCount: Int = 0
+    let workspacesButton = NSButton(title: "Workspaces", target: nil, action: nil)
+    let tabsButton = NSButton(title: "Tabs", target: nil, action: nil)
+    let recoveryLabel = NSTextField(labelWithString: "")
+    let leftItems = NSStackView()
+    let inspectorColumn = NSView()
+    /// Rust-projected Pane regions (#923); the live surface sits in
+    /// `centerColumn.liveContent`.
+    let centerColumn = PaneLayoutView()
+    var liveContent: NSView { centerColumn.liveContent }
+    var recoveryTimer: Timer?
+    var recoveryTimerGeneration: UInt64 = 0
+    /// Rust recovery generation whose PerformAttempt is open on the lifecycle
+    /// queue or still completing on MainActor (adopt + CompleteRecovery).
+    /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
+    /// second open while PerformAttempt remains the pending Rust effect.
+    var recoveryAttemptInFlight: UInt64?
+    /// Blocking hello/attach runs here so the AppKit actor never becomes the
+    /// lifecycle I/O executor.
+    let recoveryLifecycleQueue = DispatchQueue(
+        label: "com.seyal.runtime.lifecycle-recovery",
+        qos: .userInitiated
+    )
+    var lastSnapshotGeneration: UInt64 = .max
+    var lastEligibility: UInt16 = .max
+    var lastProjectedExecution = (lo: UInt64(0), hi: UInt64(0))
+    var lastBlockCount: Int = 0
     /// Live-end follow for Flow transcript. New Blocks and async history-body
     /// growth keep the viewport pinned only while the user was already at the
     /// live end; intentional history scroll must not be yanked forward.
-    private var followingLiveEnd = true
-    private var isProgrammaticTranscriptScroll = false
-    private var isReconcilingChrome = false
+    var followingLiveEnd = true
+    var isProgrammaticTranscriptScroll = false
+    var isReconcilingChrome = false
     /// Nested product/timeline pulses during a rebuild must not drop TUI.
-    private var chromeNeedsReconcile = false
-    private var blockCards: [UInt64: CommandBlockView] = [:]
-    private var transcriptFrameRevision: UInt64 = 0
-    private var paneFollowsTranscript: [NSLayoutConstraint] = []
-    private var paneFillsCenter: [NSLayoutConstraint] = []
-    private var centerLeadingHost: NSLayoutConstraint!
-    private var centerTrailingHost: NSLayoutConstraint!
-    private var centerTopHost: NSLayoutConstraint!
-    private var centerLeadingLeft: NSLayoutConstraint!
-    private var centerTrailingInspector: NSLayoutConstraint!
-    private var centerTopTab: NSLayoutConstraint!
+    var chromeNeedsReconcile = false
+    var blockCards: [UInt64: CommandBlockView] = [:]
+    var transcriptFrameRevision: UInt64 = 0
+    var paneFollowsTranscript: [NSLayoutConstraint] = []
+    var paneFillsCenter: [NSLayoutConstraint] = []
+    var centerLeadingHost: NSLayoutConstraint!
+    var centerTrailingHost: NSLayoutConstraint!
+    var centerTopHost: NSLayoutConstraint!
+    var centerLeadingLeft: NSLayoutConstraint!
+    var centerTrailingInspector: NSLayoutConstraint!
+    var centerTopTab: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         pane = ThinPaneHostView(frame: frameRect)
@@ -160,10 +175,13 @@ final class ProductChromeHostView: NSView {
         // Transcript chrome sits under the Pane Metal compositor. Flow clears
         // the drawable to transparent and paints only Block-body clips, so
         // command headers remain AppKit while output glyphs composite on top.
-        centerColumn.addSubview(transcript)
-        centerColumn.addSubview(pane)
-        centerColumn.addSubview(composer)
-        centerColumn.addSubview(historyOverlay)
+        liveContent.addSubview(transcript)
+        liveContent.addSubview(pane)
+        liveContent.addSubview(composer)
+        liveContent.addSubview(historyOverlay)
+        centerColumn.onFocusPane = { [weak self] lo, hi in
+            self?.focusPaneRegion(lo: lo, hi: hi)
+        }
 
         addSubview(tabStrip)
         addSubview(left)
@@ -253,14 +271,14 @@ final class ProductChromeHostView: NSView {
             recoveryLabel.heightAnchor.constraint(equalToConstant: 1),
 
             centerColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
-            transcript.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor, constant: 20),
-            transcript.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor, constant: -20),
-            transcript.topAnchor.constraint(equalTo: centerColumn.topAnchor, constant: 16),
+            transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
+            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
+            transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            composer.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor, constant: -24),
+            composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
+            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
             composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.bottomAnchor.constraint(equalTo: centerColumn.bottomAnchor, constant: -16),
+            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -283,10 +301,10 @@ final class ProductChromeHostView: NSView {
             pane.bottomAnchor.constraint(equalTo: transcript.bottomAnchor),
         ]
         paneFillsCenter = [
-            pane.leadingAnchor.constraint(equalTo: centerColumn.leadingAnchor),
-            pane.trailingAnchor.constraint(equalTo: centerColumn.trailingAnchor),
-            pane.topAnchor.constraint(equalTo: centerColumn.topAnchor),
-            pane.bottomAnchor.constraint(equalTo: centerColumn.bottomAnchor),
+            pane.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor),
+            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor),
+            pane.topAnchor.constraint(equalTo: liveContent.topAnchor),
+            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor),
         ]
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
@@ -299,6 +317,9 @@ final class ProductChromeHostView: NSView {
         }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
             self?.composer.focusEditor()
+        }
+        pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
+            self?.reconcileChrome()
         }
         composer.onHistoryOpened = { [weak self] in
             self?.reconcileChrome()
@@ -331,6 +352,10 @@ final class ProductChromeHostView: NSView {
         }
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
+            // Frame advances (and ViewportLineIds remaps) arrive here via
+            // ThinPaneHostView.onFrameChanged — keep running PRIMARY_CLIP
+            // membership and card height in sync with each prepared generation.
+            self?.refreshRunningBlockOutput()
         }
         NotificationCenter.default.addObserver(
             self,
@@ -345,7 +370,7 @@ final class ProductChromeHostView: NSView {
         fatalError("ProductChromeHostView is programmatic")
     }
 
-    @objc private func transcriptDidScroll() {
+    @objc func transcriptDidScroll() {
         if !isProgrammaticTranscriptScroll {
             followingLiveEnd = isNearLiveEnd()
         }
@@ -360,7 +385,8 @@ final class ProductChromeHostView: NSView {
     var inputSurface: InteractiveMetalSurfaceView { pane.inputSurface }
 
     func activateAfterWindowPresentation() {
-        beginRecovery()
+        // The surface is the single BeginRecovery requester; its effects
+        // reach `driveRecovery` through `onRecoveryEffectsPending`.
         pane.activateAfterWindowPresentation()
         reconcileChrome()
         applyTheme()
@@ -385,7 +411,7 @@ final class ProductChromeHostView: NSView {
         } while chromeNeedsReconcile && turns < 8
     }
 
-    private func performChromeReconcile() {
+    func performChromeReconcile() {
         var snapshot = seyal_app_snapshot(pane.appHandle)
         let bound = (lo: snapshot.execution_lo, hi: snapshot.execution_hi)
         if snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION) != 0,
@@ -401,6 +427,7 @@ final class ProductChromeHostView: NSView {
             historyOverlay.reconcile()
             commandPalette.reconcile()
             driveRecovery()
+            recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
             return
         }
         lastSnapshotGeneration = snapshot.generation
@@ -418,17 +445,20 @@ final class ProductChromeHostView: NSView {
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildTabStrip(shell: shell)
+        centerColumn.apply(
+            PaneLayoutView.readRegions(appHandle: pane.appHandle, paneCount: Int(shell.pane_count))
+        )
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
             rebuildBlocks()
         }
         applyTranscriptPresentation(snapshot)
-        recoveryLabel.stringValue = recoveryText(snapshot)
         composer.reconcile()
         historyOverlay.reconcile()
         commandPalette.reconcile()
         driveRecovery()
+        recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
         if eligibilityChanged {
             routeFocus()
         }
@@ -458,10 +488,10 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    private func rebuildTabStrip(shell: SeyalAppShell) {
+    func rebuildTabStrip(shell: SeyalAppShell) {
         if shell.tab_count > 0 {
             let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), 0)
-            tabTitle.stringValue = copyUTF8(row.title, row.title_len) ?? "Terminal"
+            tabTitle.stringValue = productChromeCopyUTF8(row.title, row.title_len) ?? "Terminal"
         }
         // Omit rather than disable (mirrors the command palette's own
         // omission of "New Tab"/"Split" when the M001 shell policy
@@ -477,15 +507,15 @@ final class ProductChromeHostView: NSView {
         closePaneButton.idHi = shell.focused_pane_hi
     }
 
-    private func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
+    func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
         leftItems.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if leftPanel == 0 {
             for index in 0..<Int(shell.workspace_count) {
                 let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_WORKSPACE), UInt32(index))
                 leftItems.addArrangedSubview(
                     rowButton(
-                        title: copyUTF8(row.title, row.title_len) ?? "Workspace",
-                        detail: copyUTF8(row.detail, row.detail_len),
+                        title: productChromeCopyUTF8(row.title, row.title_len) ?? "Workspace",
+                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
                         identifier: "seyal-workspace-\(index)",
                         selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
                         action: #selector(selectWorkspace(_:)),
@@ -500,8 +530,8 @@ final class ProductChromeHostView: NSView {
                 let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_TAB), UInt32(index))
                 leftItems.addArrangedSubview(
                     rowButton(
-                        title: copyUTF8(row.title, row.title_len) ?? "Tab",
-                        detail: copyUTF8(row.detail, row.detail_len),
+                        title: productChromeCopyUTF8(row.title, row.title_len) ?? "Tab",
+                        detail: productChromeCopyUTF8(row.detail, row.detail_len),
                         identifier: "seyal-tab-\(index)",
                         selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
                         action: #selector(selectTab(_:)),
@@ -516,7 +546,7 @@ final class ProductChromeHostView: NSView {
             let row = seyal_app_shell_row(pane.appHandle, UInt16(SEYAL_APP_ROW_PANE), UInt32(index))
             leftItems.addArrangedSubview(
                 rowButton(
-                    title: copyUTF8(row.title, row.title_len) ?? "Pane",
+                    title: productChromeCopyUTF8(row.title, row.title_len) ?? "Pane",
                     detail: nil,
                     identifier: "seyal-pane-\(index)",
                     selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
@@ -529,13 +559,13 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    private func rebuildInspector(_ chrome: SeyalAppChrome) {
+    func rebuildInspector(_ chrome: SeyalAppChrome) {
         inspector.arrangedSubviews.forEach { $0.removeFromSuperview() }
         attention.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for index in 0..<Int(chrome.inspector_row_count) {
             let row = seyal_app_chrome_row(pane.appHandle, UInt16(SEYAL_APP_ROW_INSPECTOR), UInt32(index))
-            let title = copyUTF8(row.title, row.title_len) ?? ""
-            let value = copyUTF8(row.detail, row.detail_len) ?? ""
+            let title = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+            let value = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
             let caption = NSTextField(labelWithString: title)
             caption.font = .systemFont(ofSize: 10, weight: .medium)
             caption.tag = 2
@@ -547,8 +577,8 @@ final class ProductChromeHostView: NSView {
         }
         for index in 0..<Int(chrome.attention_count) {
             let row = seyal_app_chrome_row(pane.appHandle, UInt16(SEYAL_APP_ROW_ATTENTION), UInt32(index))
-            let identity = copyUTF8(row.title, row.title_len) ?? ""
-            let title = copyUTF8(row.detail, row.detail_len) ?? identity
+            let identity = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+            let title = productChromeCopyUTF8(row.detail, row.detail_len) ?? identity
             let button = borderlessButton(title: title, action: #selector(openAttention(_:)))
             button.setAccessibilityIdentifier("seyal-attention-\(index)")
             button.identifier = NSUserInterfaceItemIdentifier(identity)
@@ -556,8 +586,8 @@ final class ProductChromeHostView: NSView {
         }
         for index in 0..<Int(chrome.agent_count) {
             let row = seyal_app_chrome_row(pane.appHandle, UInt16(SEYAL_APP_ROW_AGENT), UInt32(index))
-            let identity = copyUTF8(row.title, row.title_len) ?? ""
-            let name = copyUTF8(row.detail, row.detail_len) ?? identity
+            let identity = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+            let name = productChromeCopyUTF8(row.detail, row.detail_len) ?? identity
             let button = borderlessButton(title: name, action: #selector(selectAgent(_:)))
             button.setAccessibilityIdentifier("seyal-agent-\(index)")
             button.identifier = NSUserInterfaceItemIdentifier(identity)
@@ -566,7 +596,7 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    private func applyShellChrome(_ chrome: SeyalAppChrome) {
+    func applyShellChrome(_ chrome: SeyalAppChrome) {
         let leftOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_LEFT_VISIBLE) != 0
         let inspectorOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_INSPECTOR_VISIBLE) != 0
         let tabOn = chrome.reserved & UInt32(SEYAL_APP_CHROME_TAB_STRIP_VISIBLE) != 0
@@ -585,256 +615,7 @@ final class ProductChromeHostView: NSView {
         centerTopTab.isActive = tabOn
     }
 
-    private func projectRuntimeBlocks() {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_APPLY_RUNTIME_BLOCKS.rawValue)
-        action.applySnapshotFence(snapshot)
-        _ = seyal_app_apply(pane.appHandle, &action)
-    }
-
-    /// Relay Runtime's composer eligibility into the Rust root unchanged
-    /// (#978). Rust decides what the composer shows; this only carries it.
-    private func relayComposerStatus(_ status: NativeComposerStatus) {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS.rawValue)
-        action.applySnapshotFence(snapshot)
-        action.reserved = UInt32(status.eligibility)
-        action.target_execution_lo = status.revision
-        _ = seyal_app_apply(pane.appHandle, &action)
-    }
-
-    private func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
-            || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        transcript.isHidden = direct
-        if direct {
-            NSLayoutConstraint.deactivate(paneFollowsTranscript)
-            NSLayoutConstraint.activate(paneFillsCenter)
-            let mode: TerminalPresentationMode =
-                snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue) ? .tui : .raw
-            pane.inputSurface.applyRendererPresentation(.fullPane(mode))
-            pane.inputSurface.removeTranscriptRegions(except: [])
-            layoutSubtreeIfNeeded()
-        } else {
-            NSLayoutConstraint.deactivate(paneFillsCenter)
-            NSLayoutConstraint.activate(paneFollowsTranscript)
-            pane.inputSurface.applyRendererPresentation(.flow())
-            layoutSubtreeIfNeeded()
-            publishBlockOutputFrame()
-        }
-    }
-
-    private func rebuildBlocks() {
-        blocks.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        blockCards.removeAll()
-        let composer = seyal_app_composer(pane.appHandle)
-        let count = Int(composer.block_count)
-        let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
-        var retained = Set<UInt64>()
-        for index in 0..<count {
-            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
-            let title = copyUTF8(row.title, row.title_len) ?? ""
-            // Copy row text before the span/action calls re-encode the buffers.
-            let statusLabel = copyUTF8(row.detail, row.detail_len) ?? ""
-            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
-            let blockID = row.id_lo
-            let lines = outputLineCount(span)
-            let card = CommandBlockView(
-                row: CommandBlockRow(
-                    command: title,
-                    state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
-                    statusLabel: statusLabel,
-                    isSelected: row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0,
-                    actions: blockActions(blockIndex: UInt32(index))
-                ),
-                cellHeight: cellHeight,
-                lines: lines
-            )
-            card.setAccessibilityIdentifier("seyal-block-\(index)")
-            card.body.setAccessibilityIdentifier("seyal-block-\(index)-body")
-            let idLo = row.id_lo
-            let idHi = row.id_hi
-            card.onSelect = { [weak self] selected in
-                self?.selectBlock(idLo: idLo, idHi: idHi, deselect: selected)
-            }
-            card.onAction = { [weak self] action in
-                self?.performBlockAction(action, blockIndex: UInt32(index), idLo: idLo, idHi: idHi)
-            }
-            blocks.addArrangedSubview(card)
-            if blockID != 0 {
-                blockCards[blockID] = card
-                retained.insert(blockID)
-                requestBlockOutput(blockID: blockID, span: span)
-            }
-        }
-        pane.inputSurface.discardHistoryRequests(except: retained)
-        layoutSubtreeIfNeeded()
-        publishBlockOutputFrame()
-        if count > lastBlockCount, followingLiveEnd {
-            scrollTranscriptToLiveEnd()
-        }
-        lastBlockCount = count
-    }
-
-    /// Rust-projected quick actions for one Block row (#1010).
-    private func blockActions(blockIndex: UInt32) -> [CommandBlockActionRow] {
-        let count = seyal_app_block_action_count(pane.appHandle, blockIndex)
-        return (0..<count).compactMap { actionIndex in
-            let row = seyal_app_block_action_row(pane.appHandle, blockIndex, actionIndex)
-            guard row.kind != 0 else { return nil }
-            return CommandBlockActionRow(
-                kind: row.kind,
-                placement: (row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK))
-                    >> UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT),
-                label: copyUTF8(row.title, row.title_len) ?? "",
-                shortcut: copyUTF8(row.detail, row.detail_len) ?? "",
-                enabled: row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_ENABLED) != 0
-            )
-        }
-    }
-
-    /// Routes a Rust action kind. Availability was already decided by Rust;
-    /// disabled actions are never delivered by the view. Copy output kinds go
-    /// through `seyal_app_request_block_copy` so span/composition stay in Rust.
-    private func performBlockAction(
-        _ kind: UInt16,
-        blockIndex: UInt32,
-        idLo: UInt64,
-        idHi: UInt64
-    ) {
-        switch UInt32(kind) {
-        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND:
-            let row = seyal_app_block_row(pane.appHandle, blockIndex)
-            writePasteboard(copyUTF8(row.title, row.title_len) ?? "")
-        case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
-            _ = seyal_app_request_block_copy(pane.appHandle, blockIndex, kind)
-        case SEYAL_APP_BLOCK_ACTION_RERUN:
-            let snapshot = seyal_app_snapshot(pane.appHandle)
-            var rerun = SeyalAppAction()
-            rerun.version = UInt16(SEYAL_APP_ABI_VERSION)
-            rerun.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-            rerun.kind = UInt16(SEYAL_APP_ACTION_RERUN_BLOCK.rawValue)
-            rerun.applySnapshotFence(snapshot)
-            rerun.target_execution_lo = idLo
-            rerun.target_execution_hi = idHi
-            rerun.target_pty_generation = seyal_app_composer(pane.appHandle).epoch
-            guard seyal_app_apply(pane.appHandle, &rerun) == 0 else { return }
-            composer.submitRustDraft()
-        case SEYAL_APP_BLOCK_ACTION_INSPECT:
-            selectBlock(idLo: idLo, idHi: idHi, deselect: false)
-        default:
-            break
-        }
-    }
-
-    private func writePasteboard(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-    }
-
-    private func outputLineCount(_ span: SeyalAppBlockSpan) -> Int {
-        guard span.start_line > 0 else { return 1 }
-        if span.end_line >= span.start_line {
-            return Int(min(span.end_line - span.start_line + 1, 512))
-        }
-        return 8
-    }
-
-    private func refreshRunningBlockOutput() {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
-            || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        {
-            return
-        }
-        let composer = seyal_app_composer(pane.appHandle)
-        for index in 0..<Int(composer.block_count) {
-            let row = seyal_app_block_row(pane.appHandle, UInt32(index))
-            let span = seyal_app_block_span(pane.appHandle, UInt32(index))
-            guard row.id_lo != 0, span.start_line > 0, span.end_line == 0 else { continue }
-            requestBlockOutput(blockID: row.id_lo, span: span)
-        }
-    }
-
-    private func requestBlockOutput(blockID: UInt64, span: SeyalAppBlockSpan) {
-        guard span.start_line > 0 else { return }
-        let end = span.end_line >= span.start_line
-            ? span.end_line
-            : span.start_line &+ 511
-        _ = pane.inputSurface.requestHistoryRange(
-            startLine: span.start_line,
-            endLine: max(end, span.start_line),
-            blockID: blockID
-        )
-    }
-
-    private func applyHistoryRange(_ range: NativeHistoryRange) {
-        pane.inputSurface.retainHistoryRange(range)
-        let cellHeight = pane.inputSurface.terminalPresentationCellSize().height
-        if let card = blockCards[range.blockID] {
-            card.setOutputLines(max(range.rows.count, 1), cellHeight: cellHeight)
-        }
-        layoutSubtreeIfNeeded()
-        publishBlockOutputFrame()
-        // History replies arrive after the initial live-end scroll and can grow
-        // earlier cards. Keep following only when the user was already at the
-        // live end so the newly submitted Block stays hittable.
-        if followingLiveEnd {
-            scrollTranscriptToLiveEnd()
-        }
-    }
-
-    private func publishBlockOutputFrame() {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
-            || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        guard !direct else { return }
-        let surface = pane.inputSurface
-        var regions: [NativeTranscriptRegion] = []
-        for (blockID, card) in blockCards {
-            let clip = card.body.convert(card.body.bounds, to: surface)
-            guard clip.width > 0, clip.height > 0 else { continue }
-            regions.append(NativeTranscriptRegion(id: blockID, origin: clip.origin, clip: clip))
-        }
-        regions.sort { $0.id < $1.id }
-        transcriptFrameRevision &+= 1
-        surface.setTranscriptFrame(
-            NativeTranscriptFrame(
-                revision: transcriptFrameRevision,
-                regions: regions,
-                surfaceIdentity: ObjectIdentifier(surface)
-            )
-        )
-    }
-
-    private func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {
-        let document = transcript.documentView ?? blocks
-        let visible = transcript.contentView.bounds
-        let height = document.fittingSize.height
-        let maxY = max(height - visible.height, 0)
-        return visible.origin.y >= maxY - tolerance
-    }
-
-    private func scrollTranscriptToLiveEnd() {
-        isProgrammaticTranscriptScroll = true
-        defer { isProgrammaticTranscriptScroll = false }
-        let document = transcript.documentView ?? blocks
-        let visible = transcript.contentView.bounds.height
-        let height = document.fittingSize.height
-        let y = max(height - visible, 0)
-        transcript.contentView.scroll(to: NSPoint(x: 0, y: y))
-        transcript.reflectScrolledClipView(transcript.contentView)
-        followingLiveEnd = true
-    }
-
-    private func applyTheme() {
+    func applyTheme() {
         let theme = NativeThemeRealization.apply(
             to: self,
             material: material,
@@ -852,6 +633,7 @@ final class ProductChromeHostView: NSView {
             tabStrip.layer?.backgroundColor = theme.container.cgColor
         }
         centerColumn.layer?.backgroundColor = theme.canvas.cgColor
+        centerColumn.apply(theme: theme)
         transcript.backgroundColor = .clear
         left.layer?.borderWidth = 0
         tabTitle.font = .systemFont(ofSize: theme.uiFontSize, weight: .semibold)
@@ -871,7 +653,7 @@ final class ProductChromeHostView: NSView {
         }
     }
 
-    private func updateColdVisualProbe(_ theme: NativeTheme) {
+    func updateColdVisualProbe(_ theme: NativeTheme) {
         let appearanceToken = theme.appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
             ? "light"
             : "dark"
@@ -884,294 +666,4 @@ final class ProductChromeHostView: NSView {
             "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
         )
     }
-
-    private func recoveryText(_ snapshot: SeyalAppSnapshot) -> String {
-        let stage: String
-        switch snapshot.recovery_stage {
-        case 6: stage = "connected"
-        case 7: stage = "recovery exhausted"
-        case 8: stage = "blocked"
-        case 4, 5: stage = "restoring"
-        case 0: stage = "disconnected"
-        default: stage = "connecting"
-        }
-        if snapshot.recovery_stage == 6 {
-            return stage
-        }
-        return "\(stage) · attempts \(snapshot.recovery_attempts)"
-    }
-
-    private func beginRecovery() {
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
-        action.target_pty_generation = UInt64(Date().timeIntervalSince1970 * 1000)
-        _ = seyal_app_apply(pane.appHandle, &action)
-        driveRecovery()
-    }
-
-    private func driveRecovery() {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        switch snapshot.recovery_effect {
-        case UInt32(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue):
-            // CompleteRecovery replaces the effect queue. Acking here would
-            // drop LaunchHelper without spawning Runtime.
-            completeRecovery(connected: pane.inputSurface.terminalBridgeIsConnected)
-            driveRecovery()
-        case UInt32(SEYAL_APP_RECOVERY_EFFECT_SCHEDULE.rawValue):
-            let delayMs = max(seyal_app_recovery_param(pane.appHandle), 10)
-            recoveryTimer?.invalidate()
-            let generation = snapshot.recovery_generation
-            recoveryTimer = Timer.scheduledTimer(
-                withTimeInterval: TimeInterval(delayMs) / 1000,
-                repeats: false
-            ) { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.fireRecovery(generation: generation)
-                }
-            }
-            ackRecovery()
-        case UInt32(SEYAL_APP_RECOVERY_EFFECT_LAUNCH_HELPER.rawValue):
-            _ = BundledRuntimeLauncher().launch()
-            ackRecovery()
-            driveRecovery()
-        case UInt32(SEYAL_APP_RECOVERY_EFFECT_DISPOSE_HANDLE.rawValue):
-            seyal_bridge_disconnect_handle(seyal_app_recovery_param(pane.appHandle))
-            ackRecovery()
-            driveRecovery()
-        default:
-            break
-        }
-    }
-
-    private func completeRecovery(connected: Bool, helperMissing: Bool = false) {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
-        action.target_execution_lo = snapshot.recovery_generation
-        action.target_pty_generation = UInt64(Date().timeIntervalSince1970 * 1000)
-        if connected {
-            action.reserved = UInt32(SEYAL_APP_RECOVERY_CONNECTED.rawValue)
-        } else if helperMissing {
-            action.reserved = UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue)
-                | (UInt32(SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING.rawValue) << 8)
-        } else {
-            action.reserved = UInt32(SEYAL_APP_RECOVERY_ENDPOINT_MISSING.rawValue)
-                | (UInt32(SEYAL_APP_RECOVERY_LAUNCH_STARTED.rawValue) << 8)
-        }
-        _ = seyal_app_apply(pane.appHandle, &action)
-    }
-
-    private func fireRecovery(generation: UInt64) {
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_FIRE_RECOVERY.rawValue)
-        action.target_execution_lo = generation
-        action.target_pty_generation = UInt64(Date().timeIntervalSince1970 * 1000)
-        _ = seyal_app_apply(pane.appHandle, &action)
-        driveRecovery()
-    }
-
-    private func ackRecovery() {
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_ACK_RECOVERY.rawValue)
-        _ = seyal_app_apply(pane.appHandle, &action)
-    }
-
-    @objc private func showWorkspaces() {
-        applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 0)
-    }
-
-    @objc private func showTabs() {
-        applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 1)
-    }
-
-    @objc private func selectWorkspace(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_WORKSPACE.rawValue), button: sender)
-    }
-
-    @objc private func selectTab(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue), button: sender)
-    }
-
-    @objc private func focusPane(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue), button: sender)
-    }
-
-    @objc private func createTab() {
-        applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
-    }
-
-    @objc private func closeActiveTab(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue), button: sender)
-    }
-
-    @objc private func splitFocusedRight() {
-        applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 0)
-    }
-
-    @objc private func splitFocusedDown() {
-        applyChromeKind(UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue), reserved: 1)
-    }
-
-    @objc private func closeFocusedPane(_ sender: NSButton) {
-        applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue), button: sender)
-    }
-
-    @objc private func openAttention(_ sender: NSButton) {
-        applyPayload(UInt16(SEYAL_APP_ACTION_OPEN_ATTENTION.rawValue), text: sender.identifier?.rawValue ?? "")
-    }
-
-    @objc private func selectAgent(_ sender: NSButton) {
-        applyPayload(UInt16(SEYAL_APP_ACTION_SELECT_AGENT.rawValue), text: sender.identifier?.rawValue ?? "")
-    }
-
-    private func applyChromeKind(_ kind: UInt16, reserved: UInt32) {
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = kind
-        action.reserved = reserved
-        _ = seyal_app_apply(pane.appHandle, &action)
-        reconcileChrome()
-    }
-
-    private func applyIdentity(_ kind: UInt16, button: NSButton) {
-        guard let tagged = button as? IdentityButton else { return }
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = kind
-        action.target_execution_lo = tagged.idLo
-        action.target_execution_hi = tagged.idHi
-        _ = seyal_app_apply(pane.appHandle, &action)
-        reconcileChrome()
-    }
-
-    /// Block selection is Rust-owned (#935): the click only names the Block
-    /// identity; Rust validates it against the focused Pane's Block list.
-    private func selectBlock(idLo: UInt64, idHi: UInt64, deselect: Bool) {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(
-            deselect
-                ? SEYAL_APP_ACTION_CLEAR_BLOCK_SELECTION.rawValue
-                : SEYAL_APP_ACTION_SELECT_BLOCK.rawValue
-        )
-        action.applySnapshotFence(snapshot)
-        action.target_execution_lo = idLo
-        action.target_execution_hi = idHi
-        guard seyal_app_apply(pane.appHandle, &action) == 0 else { return }
-        // A successful apply bumps the snapshot generation; reconcile rebuilds
-        // cards (selected flag), inspector rows and inspector visibility.
-        reconcileChrome()
-    }
-
-    private func applyPayload(_ kind: UInt16, text: String) {
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = kind
-        action.applySnapshotFence(snapshot)
-        let utf8 = Array(text.utf8)
-        utf8.withUnsafeBufferPointer { buffer in
-            action.payload = buffer.baseAddress
-            action.payload_len = UInt32(buffer.count)
-            _ = seyal_app_apply(pane.appHandle, &action)
-        }
-        reconcileChrome()
-    }
-
-    private func configureChromeButtons() {
-        styleSwitcher(workspacesButton, identifier: "seyal-left-workspaces", action: #selector(showWorkspaces))
-        styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
-        newTabButton.setAccessibilityIdentifier("seyal-new-tab")
-        newTabButton.target = self
-        newTabButton.action = #selector(createTab)
-        closeTabButton.setAccessibilityIdentifier("seyal-close-tab")
-        closeTabButton.target = self
-        closeTabButton.action = #selector(closeActiveTab(_:))
-        splitRightButton.setAccessibilityIdentifier("seyal-split-right")
-        splitRightButton.target = self
-        splitRightButton.action = #selector(splitFocusedRight)
-        splitDownButton.setAccessibilityIdentifier("seyal-split-down")
-        splitDownButton.target = self
-        splitDownButton.action = #selector(splitFocusedDown)
-        closePaneButton.setAccessibilityIdentifier("seyal-close-pane")
-        closePaneButton.target = self
-        closePaneButton.action = #selector(closeFocusedPane(_:))
-    }
-
-    private func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {
-        button.setButtonType(.toggle)
-        button.bezelStyle = .inline
-        button.isBordered = false
-        button.font = .systemFont(ofSize: 11, weight: .semibold)
-        button.setAccessibilityIdentifier(identifier)
-        button.target = self
-        button.action = action
-    }
-
-    private func borderlessButton(title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .inline
-        button.isBordered = false
-        button.font = .systemFont(ofSize: 12, weight: .regular)
-        button.alignment = .left
-        return button
-    }
-
-    private func rowButton(
-        title: String,
-        detail: String?,
-        identifier: String,
-        selected: Bool,
-        action: Selector,
-        kind: UInt16,
-        idLo: UInt64,
-        idHi: UInt64
-    ) -> IdentityButton {
-        let label = detail.flatMap { $0.isEmpty ? nil : $0 }.map { "\(title)  \($0)" } ?? title
-        let button = IdentityButton(title: label, target: self, action: action)
-        button.idLo = idLo
-        button.idHi = idHi
-        button.kind = kind
-        button.bezelStyle = .inline
-        button.isBordered = false
-        button.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
-        button.alignment = .left
-        button.setAccessibilityIdentifier(identifier)
-        button.state = selected ? .on : .off
-        return button
-    }
-
-    private func expose(_ view: NSView, identifier: String) {
-        view.setAccessibilityElement(true)
-        view.setAccessibilityRole(.group)
-        view.setAccessibilityIdentifier(identifier)
-    }
-}
-
-private final class TranscriptClipView: NSClipView {
-    override var isFlipped: Bool { true }
-}
-
-private final class IdentityButton: NSButton {
-    var kind: UInt16 = 0
-    var idLo: UInt64 = 0
-    var idHi: UInt64 = 0
-}
-
-private func copyUTF8(_ pointer: UnsafePointer<UInt8>?, _ length: UInt32) -> String? {
-    guard length > 0, let pointer else { return nil }
-    return String(decoding: UnsafeBufferPointer(start: pointer, count: Int(length)), as: UTF8.self)
 }

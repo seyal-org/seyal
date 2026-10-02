@@ -85,9 +85,9 @@ final class SeyalBlockComponentTests: XCTestCase {
         XCTAssertEqual(dark.blockFocus, NativeThemeRealization.color(theme.block_focus))
         XCTAssertEqual(dark.blockSuccess, NativeThemeRealization.color(theme.success))
         XCTAssertEqual(dark.blockDanger, NativeThemeRealization.color(theme.danger))
-        XCTAssertEqual(theme.reserved & 1, 1, "default signals allow motion")
+        XCTAssertEqual(theme.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), "default signals allow motion")
         let reduced = seyal_app_theme(0, 1)
-        XCTAssertEqual(reduced.reserved & 1, 0, "reduce_motion clears allows_motion")
+        XCTAssertEqual(reduced.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), 0, "reduce_motion clears allows_motion")
     }
 
     func testRestBlockHidesActionsAndUsesRestSeam() {

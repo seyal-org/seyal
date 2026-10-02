@@ -26,6 +26,34 @@ final class SeyalHostWorkloadUITests: XCTestCase {
         attachScreenshot(app, name: "824-high-volume")
     }
 
+    func testPrimaryShellExitIsReportedAndKeepsFlowHistoryVisible() {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        submitComposerCommand(app, "printf 'seyal-1171-exit-before\\n'; exit 7")
+
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        let ended = expectation(
+            for: NSPredicate(format: "value CONTAINS 'shell exited'"),
+            evaluatedWith: recovery,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [ended], timeout: 15),
+            .completed,
+            "a completed primary shell must be reported as exited, not left waiting for a prompt"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        XCTAssertFalse(composer.firstMatch.isHittable, "an ended shell must not accept Flow commands")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-blocks"].firstMatch.isHittable,
+            "completed Flow history must remain visible after the shell exits"
+        )
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        XCTAssertTrue((terminal.value as? String ?? "").contains("execution=none"))
+        XCTAssertEqual(app.state, .runningForeground)
+        attachScreenshot(app, name: "1171-primary-shell-exit")
+    }
+
     func testUnicodeComposerSubmitAndResizeStayOnFlowBlocks() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

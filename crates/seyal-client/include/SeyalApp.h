@@ -53,7 +53,8 @@ enum SeyalAppActionKind {
      * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
-     * 32 = CannotCloseLastPane.
+     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
+     * bound to an execution; disposition is not yet available).
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -97,15 +98,36 @@ enum SeyalAppActionKind {
      * (transport lost) and the composer reads busy until Runtime republishes.
      */
     SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS = 52,
+    /** Cancel the active recovery episode (generation bump → Disconnected). */
+    SEYAL_APP_ACTION_CANCEL_RECOVERY = 53,
+    /**
+     * Advance presentation stage after connect.
+     * reserved = SEYAL_APP_RECOVERY_RESTORING (5) or SEYAL_APP_RECOVERY_USABLE (6).
+     */
+    SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE = 54,
+    /** Begin a continuity-identity commit attempt. */
+    SEYAL_APP_ACTION_BEGIN_RECONSTRUCTION = 55,
+    /**
+     * Commit Runtime/execution continuity and a fresh attachment (Rust-owned).
+     * fence_execution_* = Runtime pin; target_execution_* = execution pin;
+     * target_attachment_* = attachment pin. `reserved` is ignored.
+     * Controller authority and authoritative-snapshot commitment are derived
+     * from the live CLIENTS entry whose identities match those pins. A missing,
+     * non-controller, or snapshot-less client fails closed. SeyalAppAction
+     * layout is unchanged.
+     */
+    SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
+    /** Mark reconstruction disconnected after the host drops the live client. */
+    SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
     /*
      * Block Rerun (#1010). target_execution_lo/hi = BlockId,
      * target_pty_generation = composer epoch. Rust loads that focused-Pane
      * Block's command as the composer draft only when the composer is
      * Available and the draft is empty; the host then submits through the
-     * ordinary composer path. Error 30 = UnknownBlock, 33 = BlockRunning,
-     * 34 = ComposerUnavailable, 35 = ComposerDraftOccupied.
+     * ordinary composer path. Error 30 = UnknownBlock, 35 = BlockRunning,
+     * 36 = ComposerUnavailable, 37 = ComposerDraftOccupied.
      */
-    SEYAL_APP_ACTION_RERUN_BLOCK = 53
+    SEYAL_APP_ACTION_RERUN_BLOCK = 59
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -149,7 +171,8 @@ enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_RESTORING = 5,
     SEYAL_APP_RECOVERY_USABLE = 6,
     SEYAL_APP_RECOVERY_EXHAUSTED = 7,
-    SEYAL_APP_RECOVERY_BLOCKED = 8
+    SEYAL_APP_RECOVERY_BLOCKED = 8,
+    SEYAL_APP_RECOVERY_EXECUTION_ENDED = 9
 };
 
 enum SeyalAppRecoveryOutcome {
@@ -159,7 +182,8 @@ enum SeyalAppRecoveryOutcome {
     SEYAL_APP_RECOVERY_ENDPOINT_MISSING = 3,
     SEYAL_APP_RECOVERY_RETRYABLE = 4,
     SEYAL_APP_RECOVERY_CONTROLLER_BUSY = 5,
-    SEYAL_APP_RECOVERY_BLOCKED_OUTCOME = 6
+    SEYAL_APP_RECOVERY_BLOCKED_OUTCOME = 6,
+    SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME = 7
 };
 
 enum SeyalAppRecoveryLaunch {
@@ -381,8 +405,8 @@ typedef struct SeyalAppTheme {
     uint32_t text;
     uint32_t accent;
     uint16_t appearance;
-    /* Bit 0 set when Rust resolved allows_motion after accessibility flags. */
-    uint16_t reserved;
+    /* SEYAL_APP_THEME_* flags (#1010). */
+    uint16_t flags;
     /* Block Component roles (#1010), packed RGBA like the fields above. */
     uint32_t block_focus;
     uint32_t seam_rest;
@@ -390,6 +414,9 @@ typedef struct SeyalAppTheme {
     uint32_t success;
     uint32_t danger;
 } SeyalAppTheme;
+
+/* SeyalAppTheme.flags: Rust resolved allows_motion after accessibility. */
+#define SEYAL_APP_THEME_ALLOWS_MOTION 1u
 
 /*
  * SeyalAppShell.flags: whether CREATE_TAB/SPLIT_FOCUSED would currently be
@@ -422,6 +449,31 @@ typedef struct SeyalAppShell {
     uint64_t focused_pane_lo;
     uint64_t focused_pane_hi;
 } SeyalAppShell;
+
+/*
+ * Pane regions (#923): one per leaf of the active Tab's PaneTree, index
+ * 0..<SeyalAppShell.pane_count in the same order as SEYAL_APP_ROW_PANE rows.
+ * x/y/width/height are unit fractions of the Tab's center area, origin
+ * top-left; hosts position regions and never derive geometry. LIVE marks the
+ * single region that hosts the live terminal/Metal/composer surface; no region
+ * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
+ * indices return size == 0.
+ */
+#define SEYAL_APP_PANE_REGION_FOCUSED 1u
+#define SEYAL_APP_PANE_REGION_LIVE 2u
+
+typedef struct SeyalAppPaneRegion {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    float x;
+    float y;
+    float width;
+    float height;
+} SeyalAppPaneRegion;
 
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
@@ -472,6 +524,7 @@ SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
+SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);
@@ -492,6 +545,23 @@ SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, ui
  * COPY_COMMAND_AND_OUTPUT. Resolves span/command in Rust; final text arrives
  * via seyal_bridge_take_block_copy after poll. */
 int32_t seyal_app_request_block_copy(uint64_t handle, uint32_t block_index, uint16_t kind);
+
+/* #865 Flow output projection. Hosts must not invent start+511 ranges.
+ * PRIMARY_CLIP: reserved0 = first prepared-frame row; reserved1 = row count.
+ * HISTORY: start_line/end_line inclusive; reserved0/reserved1 unused (0). */
+#define SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED 0u
+#define SEYAL_APP_BLOCK_PROJECTION_HISTORY 1u
+#define SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP 2u
+
+typedef struct SeyalAppBlockProjection {
+    uint16_t kind;
+    uint16_t reserved0;
+    uint32_t reserved1;
+    uint64_t start_line;
+    uint64_t end_line;
+} SeyalAppBlockProjection;
+
+SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 /* appearance: 0 dark / 1 light. accessibility_flags bit0 = reduce_motion,
@@ -542,6 +612,7 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+
 int32_t seyal_app_last_error(uint64_t handle);
 
 #ifdef __cplusplus

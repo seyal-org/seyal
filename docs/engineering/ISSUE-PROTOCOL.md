@@ -36,7 +36,7 @@ The pickup contract is:
 fresh open Ready Issue
 → resolve authenticated **human** GitHub owner
 → exactly one human owner = sole assignee when assignable, otherwise acknowledged `Owner: @login`
-→ plan confirmed
+→ Issue body is the plan
 → create exact branch <human-login>/issue/<number>
 → re-read Issue and verify the same unique human owner record
 → coding agent may act only on behalf of that human owner
@@ -55,7 +55,7 @@ Rules:
 - If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
 - Project status (`Ready`, `In Progress`, and so on) is lifecycle metadata, not an ownership lock. Status never overrides the **human-owner rule**.
 - For new production pickups the exact branch name is `<human-login>/issue/<number>`, where `<human-login>` is the unique human owner. It may be in upstream or the contributor's fork. The **single human owner record prevents two people from owning the same implementation Issue at once**; the human-namespaced branch is only that owner's deterministic audit/resume backstop. Do not create alternative agent prefixes or short-name branches to evade an existing owner record.
-- Branch creation happens only after the implementation plan is confirmed. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim.
+- Branch creation happens after the Issue is Ready. The Issue body is the plan. If that same human owner's deterministic `<human-login>/issue/<number>` already exists in the canonical repository or declared contributor fork, stop by default. Resume only when explicitly asked and the same human remains the unique owner through sole assignment or an acknowledged external-owner claim. A closed unmerged head that was not rejected as the wrong architecture is resumed by rebasing that head. Do not re-implement it.
 - If concurrent owner-record or branch operations produce disagreement, stop before production edits and require explicit ownership resolution. Never steal or overwrite another valid owner record to win a race.
 - Legacy `issue/<number>`, `issue/<number>-<short-name>`, `cursor/...`, `codex/...`, `claude/...`, `copilot/...`, or other pre-policy/agent-named branches are historical claims. They may finish only after an explicit human-owner disposition; new pickups use only `<human-login>/issue/<number>`.
 
@@ -132,6 +132,35 @@ Every implementation Issue must state:
 
 `Documentation impact` must identify whether the change affects User Guide, Developer Guide, authoritative engineering docs, media/screenshots, or none. `None` is valid only with a reason.
 
+## Accepted implementation plan
+
+A chat outline is not an implementation plan. The Issue body is the implementation plan when it states the goal, scope, acceptance criteria, tests, and dependencies. A separate plan comment is not required. `implementation-planning` is used only when that production path is not yet in the Issue. It must not mark the Issue Ready.
+
+The human asking to start a Ready Issue is the acceptance to implement. Independent review remains the human review required before merge.
+
+When someone asks what to do next, name one next action: the Issue or pull request, why it is next, and the concrete step. Name what waits behind it.
+
+## Candidate lifecycle stage
+
+`candidate_lifecycle_stage` is the state of the single implementation pull request for that Issue. Count a pull request when its head branch is `<human-login>/issue/<number>` or legacy `issue/<number>`, or its body uses `Closes`, `Fixes`, or `Resolves` for this Issue. `Refs` and `Part of` do not make a pull request the candidate.
+
+- no such pull request: `NONE`
+- exactly one open draft: `IMPLEMENTATION_IN_PROGRESS`
+- exactly one open ready-for-review pull request: `IN_REVIEW`
+- exactly one closed unmerged pull request that was not rejected as the wrong architecture: `CLOSED_UNMERGED`
+- closed because the architecture was wrong: `REJECTED`
+- more than one, or the state cannot be read: `UNKNOWN`
+
+Do not open a pull request while accepted scope is incomplete. Until then the stage is `NONE` and work stays on the branch.
+
+When accepted scope is complete and no pull request exists, `implement-issue` opens one pull request ready for review. That stage is `IN_REVIEW`.
+
+If a draft pull request already exists, leave it a draft until accepted scope is complete, then mark that same pull request ready for review. Do not open a second pull request. Only `implement-issue` may open the pull request or change it from draft to ready for review.
+
+`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then handed back to one full `pr-review`. A decision blocker names the other pull request and keeps this one.
+
+`REJECTED` is not resumed.
+
 ## Ready gate
 
 An Issue is Ready only when all are true:
@@ -146,6 +175,7 @@ An Issue is Ready only when all are true:
 - [ ] documentation impact is classified
 - [ ] no unresolved architecture question remains
 - [ ] the mergeable implementation is a permanent production path, not a POC/spike/temporary parallel implementation
+- [ ] the Issue body states the goal, scope, acceptance criteria, tests, and dependencies. A chat outline is not a substitute. A separate plan comment is not required
 
 If any item is false, return the Issue to Refinement or Blocked. An agent must not silently fill the gap.
 

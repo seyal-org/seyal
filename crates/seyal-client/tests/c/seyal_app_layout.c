@@ -27,6 +27,8 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppTheme) == 36);
     REQUIRE(sizeof(SeyalAppShell) == 64);
     REQUIRE(sizeof(SeyalAppRow) == 56);
+    REQUIRE(sizeof(SeyalAppPaneRegion) == 40);
+    REQUIRE(offsetof(SeyalAppPaneRegion, x) == 24);
     REQUIRE(sizeof(SeyalAppAction) != 0);
     puts("seyal_app_layout ok");
     return 0;
