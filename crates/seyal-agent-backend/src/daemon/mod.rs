@@ -9,7 +9,7 @@ use std::{
         },
     },
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
 };
@@ -95,6 +95,7 @@ pub struct AgentDaemon {
     /// Shared domain service. Mutex serializes AgentRun/store writes while
     /// multiple peer connections may be live (AB-1.3).
     integration: Option<Arc<Mutex<crate::session::IntegrationService>>>,
+    exit_report: Option<mpsc::Sender<supervision::ServeExit>>,
 }
 
 pub struct DaemonSample {
@@ -174,6 +175,7 @@ impl AgentDaemon {
             cleanup: true,
             our_uid,
             integration: None,
+            exit_report: None,
         })
     }
 
@@ -247,16 +249,25 @@ impl AgentDaemon {
     /// never waits on peer bytes, so a peer that stalls before or during
     /// Hello cannot delay admission of other peers. Domain mutations stay
     /// serialized through the shared service mutex; there is no second
-    /// event clock.
+    /// event clock. An installed exit report receives exactly one [`ServeExit`]
+    /// per worker; with no report, nothing is queued.
     pub fn accept_and_spawn(
         &mut self,
     ) -> Result<thread::JoinHandle<Result<(), DaemonError>>, DaemonError> {
         let service = self.shared_service()?;
         let handshake = self.handshake();
         let mut stream = self.accept_admitted()?;
-        Ok(thread::spawn(move || {
+        let report = self.exit_report.clone();
+        Ok(supervision::spawn_supervised(report, move || {
             serve::handshake_and_serve(&service, &mut stream, handshake)
         }))
+    }
+
+    /// Install the completion channel before accept. Later workers each send one [`ServeExit`].
+    pub fn install_exit_report(&mut self) -> mpsc::Receiver<supervision::ServeExit> {
+        let (tx, rx) = mpsc::channel();
+        self.exit_report = Some(tx);
+        rx
     }
 
     fn shared_service(
@@ -676,5 +687,9 @@ pub(super) fn map_io(error: io::Error) -> DaemonError {
 }
 
 mod serve;
+mod supervision;
+
+pub use supervision::ServeExit;
+
 #[cfg(test)]
 mod tests;

@@ -25,7 +25,7 @@ pub use auth::{
     PrincipalKind, PrincipalStatus,
 };
 #[cfg(unix)]
-pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};
+pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample, ServeExit};
 pub use execution_host::{
     FakeExecutionHost, HostObservation, HostObservationKind, ScriptError, ScriptStep,
 };
