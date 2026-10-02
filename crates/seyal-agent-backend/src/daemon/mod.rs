@@ -301,9 +301,8 @@ impl AgentDaemon {
                 Ok(principal) => principal,
                 Err(_) => {
                     drop(guard);
-                    let bytes =
-                        encode_handshake_error(HandshakeError::Malformed, max_frame_cfg)
-                            .map_err(|_| DaemonError::Malformed)?;
+                    let bytes = encode_handshake_error(HandshakeError::Malformed, max_frame_cfg)
+                        .map_err(|_| DaemonError::Malformed)?;
                     let _ = stream.write_all(&bytes);
                     return Err(DaemonError::Handshake(HandshakeError::Malformed));
                 }
@@ -782,6 +781,6 @@ pub(super) fn map_io(error: io::Error) -> DaemonError {
     }
 }
 
+mod serve;
 #[cfg(test)]
 mod tests;
-mod serve;
