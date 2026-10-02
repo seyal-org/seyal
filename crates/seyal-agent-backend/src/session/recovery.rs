@@ -1,12 +1,16 @@
 //! Restore persisted identities into the in-memory authority.
 
 use seyal_agent_core::{BindingGeneration, ControlGeneration, DomainError, WorkScopeKind};
-
-use seyal_agent_store::AgentStore;
+use seyal_agent_store::{AggregateId, AgentStore};
 
 use crate::{AuthorizationRepository, ObservationAuthority};
 
+use super::wire::snapshot_payload;
 use super::ServiceError;
+
+/// Outbox marker appended when a recovered run fences generations and
+/// rewrites its snapshot so GetSnapshot cannot report pre-crash liveness.
+const EVENT_RECOVERY_FENCE: u16 = 3;
 
 pub(super) fn restore_identities(
     store: &AgentStore,
@@ -48,8 +52,44 @@ pub(super) fn restore_identities(
             Err(_) => return Err(ServiceError::Failed),
         }
         authority.mark_recovered(id);
+        fence_recovered_run(store, authority, id)?;
         auth.allow_run(principal_id, id)
             .map_err(|_| ServiceError::Failed)?;
     }
+    Ok(())
+}
+
+/// After crash recovery, ADVANCES binding and control generations, persists
+/// them, and rewrites the run snapshot so snapshot+replay cannot conclude
+/// ScriptedLive from a stale stored payload (SPEC-017 §11 / §14).
+fn fence_recovered_run(
+    store: &AgentStore,
+    authority: &mut ObservationAuthority,
+    run_id: seyal_agent_core::AgentRunId,
+) -> Result<(), ServiceError> {
+    let run = *authority
+        .domain()
+        .agent_run(run_id)
+        .ok_or(ServiceError::Failed)?;
+    let next_binding = authority
+        .advance_binding_generation(run_id, run.binding_generation())
+        .map_err(|_| ServiceError::Failed)?;
+    let next_control = authority
+        .advance_control_generation(run_id, run.control_generation())
+        .map_err(|_| ServiceError::Failed)?;
+    let sequence = store
+        .mutate_agent_run_and_append(
+            run_id,
+            run.attempt_id(),
+            next_binding.get(),
+            next_control.get(),
+            EVENT_RECOVERY_FENCE,
+            &[],
+        )
+        .map_err(|_| ServiceError::Failed)?;
+    let payload = snapshot_payload(authority, run_id);
+    store
+        .snapshot(AggregateId::AgentRun(run_id), sequence, &payload)
+        .map_err(|_| ServiceError::Failed)?;
     Ok(())
 }

@@ -4,10 +4,8 @@ Qualification record for Issue #1029 on PR #1170. This is not the exit
 decision. The exit stays pending independent human review and is posted on
 #1023 only by the human owner.
 
-Measured at code head `c9116bc93842ef3848a1e63bd64ac5adbb7793d5`. Later
-commits through `84031b73ce51c657bf1ae4b4807a01d80299ed5e` are docs, rustfmt,
-and a clippy type-alias only. Confirm with
-`git diff --stat c9116bc93842ef3848a1e63bd64ac5adbb7793d5..HEAD`.
+Measured at code head `TIP_SHA_PLACEHOLDER`. Confirm with
+`git rev-parse HEAD` on `mahboobmonnamd/issue/1029` before citing CI.
 
 Every number below is labeled `performance_claim=false`. None of them is a
 production throughput or idle-cost claim.
@@ -18,12 +16,8 @@ production throughput or idle-cost claim.
   before this qualification's new tests.
 - **N** means coverage added on `mahboobmonnamd/issue/1029` after `409c65bc`.
 
-A row can be both. Exact-head CI on `84031b73ce51c657bf1ae4b4807a01d80299ed5e`:
-
-- Foundation Quality
-  [36895766996](https://github.com/seyal-org/seyal/actions/runs/36895766996)
-- M001 Production Fuzz
-  [36895767040](https://github.com/seyal-org/seyal/actions/runs/36895767040)
+A row can be both. Exact-head CI links are filled after the tip lands green
+(Foundation Quality + M001 Production Fuzz on this SHA).
 
 The campaign test stays `#[ignore]`, so CI does not run it.
 
@@ -155,19 +149,19 @@ run after that fix. Crash artifacts were not committed.
 | 2 | No terminal, render, or commercial dependency | Same proof as row 1 | N |
 | 3 | Identity integrity | `standalone_path_survives_disconnect_and_restart` | E |
 | 4 | Independent monotonic sequences | `observers_keep_independent_sequences_and_ignore_duplicate_observations` | E |
-| 5 | Snapshot and replay converge | Rows 3 and 4, plus `sigkill_restart_recovers_identities_and_fences_old_session` | E + N |
+| 5 | Snapshot and replay converge | Rows 3 and 4, plus `sigkill_restart_recovers_identities_and_fences_old_session`; after restart GetSnapshot payload byte 0 matches ReadRun Unknown and snapshot+replay does not conclude live | E + N |
 | 6 | Explicit HistoryGap | `replay_window_is_bounded_and_truncation_is_a_history_gap` | E |
 | 7 | Slow subscriber is bounded | `slow_subscriber_is_dropped_and_resyncs_from_cursor`; `replay_page` limit; linear fit | N |
 | 8 | Disconnect and reconnect | `standalone_path_survives_disconnect_and_restart`; `idle_authenticated_client_is_released_and_session_survives` | E + N |
 | 9 | Process crash and restart | `sigkill_restart_recovers_identities_and_fences_old_session` | N |
 | 10 | Old ClientSession is invalid | Row 9, plus the in-process restart path in `standalone_path_survives_disconnect_and_restart` | E + N |
-| 11 | Stale binding and control are denied | In-process restart test and row 9 (`check_generation` stale binding and stale control) | E + N |
+| 11 | Stale binding and control are denied | Restart fences generations (pre-crash gens denied; current gens advanced); never-issued +1 also denied | E + N |
 | 12 | Duplicate and out-of-order observations | Observers test, `out_of_order_and_lost_observations_do_not_fabricate_termination`, harness fuzz | E + N |
 | 13 | Observation loss does not fabricate termination | `out_of_order_and_lost_observations_do_not_fabricate_termination` and the harness invariant | E + N |
-| 14 | Persistence fault is not false success | `persistence_fault_before_commit_does_not_publish_success` (includes segment-transaction fault); `repeated_store_faults_fail_bounded_and_recover` | E + N |
+| 14 | Persistence fault is not false success | `persistence_fault_before_commit_does_not_publish_success` (includes segment-transaction fault); `repeated_store_faults_fail_bounded_and_recover`; mid-group `commit_output_group` apply undo | E + N |
 | 15 | High-volume segments stay bounded | `append_output_event` atomicity test; `high_volume_output_uses_segments_end_to_end` (256 KiB → 64 segments / 1 ref event; 1000×1-byte → 1 segment / 1 ref); `high_volume_subscribe_fits_frame_and_continues`; SIGKILL segment/ref consistency in `repeated_sigkill_during_writes_reopens_deterministically` | E + N |
-| 16 | Two authorized clients | Observe-only second session in the observers test. Sequential, because the daemon accepts one connection at a time | E |
-| 17 | Unauthorized client and control are denied | `malformed_input_and_narrow_sessions_do_not_disturb_authority` and `auth.rs` unit tests | E |
+| 16 | Two authorized clients | **Gap / AB-1 deferred.** Daemon accepts one connection at a time; “two clients” coverage is sequential same-principal sessions with narrowed scopes, not distinct principals | Gap |
+| 17 | Unauthorized client and control are denied | **Partial / AB-1 deferred.** Scope narrowing and auth unit tests cover same-principal denial; unpaired distinct-principal denial is not claimed on this tip | Gap |
 | 18 | Malformed protocol and harness input stay bounded | Protocol tests, `malformed_scripts_are_bounded`, both fuzz targets | E + N |
 | 19 | Storage and schema reopen are deterministic | v2 migration tests, `bind_integration_recovers_migrated_v2_orphan_run`, `repeated_sigkill_during_writes_reopens_deterministically` | E + N |
 | 20 | No global event clock | `event_id` is the per-aggregate sequence in `insert_event`, plus row 4 | E |
@@ -228,8 +222,9 @@ These answer the six questions on #1029. They do not amend
    1024 output segments. Suitability here means that workload completed and
    reopened. It is not a throughput claim.
 4. Restart fencing and replay do not use a global clock. `event_id` is the
-   per-aggregate sequence. A stale binding generation and a stale control
-   generation are both denied.
+   per-aggregate sequence. Recovery advances binding and control generations and
+   rewrites the run snapshot; pre-crash generations are denied. Never-issued
+   generations remain denied.
 5. The backend does not own a terminal. `FakeExecutionHost` only submits
    `HostObservation` values. ADR-012 §5's typed ExecutionHost seam is for a
    Seyal-hosted terminal workload, which this head does not host. SPEC-018 §2
@@ -247,6 +242,8 @@ These answer the six questions on #1029. They do not amend
 Implementation limits, not ADR conflicts:
 
 - Serving is serial, one connection at a time.
+- Distinct unpaired principals and true concurrent two-client auth (matrix
+  rows 16/17) are deferred; this tip does not claim them as pass.
 - Principal and session tables are in memory, with a single first-party principal.
 - `ObservationAuthority.applied` keeps full payloads and scans linearly for the next ordinal.
 - Recovered liveness ignores committed terminal observations and stays Unknown.
@@ -260,16 +257,11 @@ Implementation limits, not ADR conflicts:
 
 ## Recommended exit
 
-Pending independent human review: **PASS**.
+Pending independent human review: **PASS for the AB-0 claims that remain
+labeled E/N above**. Rows 16 and 17 are explicit Gaps / AB-1 deferred and must
+not be treated as Done.
 
-All 20 rows have a named test or proof on code head
-`c9116bc93842ef3848a1e63bd64ac5adbb7793d5`. No accepted ADR or SPEC was amended,
-and none of the six questions produced an unimplementable assumption. Row 15
-now exercises the session path through bounded segments.
-
-This recommendation is not the exit. Exact-head Foundation Quality
-[36895766996](https://github.com/seyal-org/seyal/actions/runs/36895766996) and
-M001 Production Fuzz
-[36895767040](https://github.com/seyal-org/seyal/actions/runs/36895767040) are
-green on `84031b73`. Independent review on that head and the owner's update to
-#1023 are still open. Do not treat this document as that update.
+This recommendation is not the exit. Exact-head CI links and the final tip SHA
+are recorded after green Foundation Quality + M001 Production Fuzz on this
+branch tip. Independent review and the owner's update to #1023 are still open.
+Do not treat this document as that update.

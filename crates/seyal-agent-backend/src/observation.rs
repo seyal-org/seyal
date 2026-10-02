@@ -101,6 +101,23 @@ impl ObservationAuthority {
         self.set_liveness(run_id, RunLiveness::UnknownAfterCrash);
     }
 
+    /// Fence a recovered run so pre-crash binding/control presentations fail.
+    pub fn advance_binding_generation(
+        &mut self,
+        run_id: AgentRunId,
+        presented: seyal_agent_core::BindingGeneration,
+    ) -> Result<seyal_agent_core::BindingGeneration, DomainError> {
+        self.domain.advance_binding_generation(run_id, presented)
+    }
+
+    pub fn advance_control_generation(
+        &mut self,
+        run_id: AgentRunId,
+        presented: seyal_agent_core::ControlGeneration,
+    ) -> Result<seyal_agent_core::ControlGeneration, DomainError> {
+        self.domain.advance_control_generation(run_id, presented)
+    }
+
     pub fn liveness(&self, run_id: AgentRunId) -> RunLiveness {
         self.recorded_liveness(run_id)
             .unwrap_or(RunLiveness::ScriptedLive)

@@ -110,31 +110,73 @@ fn standalone_path_survives_disconnect_and_restart() {
     let recovered = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
         let run = client.read_run(run_id);
+        let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
+        let replay_after_snapshot = client.subscribe(
+            AggregateRef::AgentRun(run_id),
+            Some(snapshot.incorporated_through),
+        );
         let replay = client.replay(AggregateRef::AgentRun(run_id));
         let item_events = client.replay(AggregateRef::WorkItem(item));
         let attempt_events = client.replay(AggregateRef::Attempt(attempt));
-        let stale_binding = client.check_generation(run_id, 2, 1);
-        let stale_control = client.check_generation(run_id, 1, 2);
-        let current = client.check_generation(run_id, 1, 1);
+        let pre_crash = client.check_generation(run_id, 1, 1);
+        let stale_binding = client.check_generation(run_id, 3, 2);
+        let stale_control = client.check_generation(run_id, 2, 3);
+        let current = client.check_generation(run_id, 2, 2);
         (
             run,
+            snapshot,
+            replay_after_snapshot,
             replay.len(),
             item_events.len(),
             attempt_events.len(),
+            pre_crash,
             stale_binding,
             stale_control,
             current,
         )
     });
     restarted.serve_one().unwrap();
-    let (run, events, items, attempts, stale_binding, stale_control, current) =
-        recovered.join().unwrap();
-    assert_eq!(run.0, 1);
-    assert_eq!(run.1, 1);
+    let (
+        run,
+        snapshot,
+        replay_after_snapshot,
+        events,
+        items,
+        attempts,
+        pre_crash,
+        stale_binding,
+        stale_control,
+        current,
+    ) = recovered.join().unwrap();
+    assert_eq!(run.0, 2, "recovery fences binding generation");
+    assert_eq!(run.1, 2, "recovery fences control generation");
     assert_eq!(run.2, 3, "restart classifies liveness as unknown");
-    assert_eq!(events, 4);
+    assert_eq!(
+        snapshot.payload.first().copied(),
+        Some(3),
+        "GetSnapshot liveness must match ReadRun after restart"
+    );
+    assert_eq!(
+        snapshot.payload.first().copied(),
+        Some(run.2),
+        "snapshot and ReadRun must agree on recovered liveness"
+    );
+    match replay_after_snapshot {
+        CommandResult::Replay { events } => assert!(
+            events.is_empty(),
+            "snapshot+replay must not invent live progress after restart"
+        ),
+        other => panic!("unexpected replay after snapshot: {other:?}"),
+    }
+    // Full replay includes pre-crash observations plus the recovery fence event.
+    assert_eq!(events, 5);
     assert_eq!(items, 1);
     assert_eq!(attempts, 1);
+    assert_eq!(
+        pre_crash,
+        Err(CommandError::StaleBinding),
+        "pre-crash generations must be denied after recovery fence"
+    );
     assert_eq!(stale_binding, Err(CommandError::StaleBinding));
     assert_eq!(stale_control, Err(CommandError::StaleControl));
     assert_eq!(current, Ok(()));
@@ -579,8 +621,8 @@ fn bind_integration_recovers_migrated_v2_orphan_run() {
     });
     daemon.serve_one().unwrap();
     let (run, replay) = client.join().unwrap();
-    assert_eq!(run, (4, 5, 3));
-    assert_eq!(replay, vec![1]);
+    assert_eq!(run, (5, 6, 3));
+    assert_eq!(replay, vec![1, 2]);
     let _ = fs::remove_dir_all(dir);
 }
 

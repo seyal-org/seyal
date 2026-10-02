@@ -270,27 +270,58 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
             .map(|event| (event.sequence, event.kind, event.payload))
             .collect::<Vec<_>>();
         let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
-        let stale_binding = client.check_generation(run_id, binding.saturating_add(1), control);
-        let stale_control = client.check_generation(run_id, binding, control.saturating_add(1));
+        let pre_crash = client.check_generation(run_id, binding, control);
+        let stale_binding = client.check_generation(
+            run_id,
+            liveness.0.saturating_add(1),
+            liveness.1,
+        );
+        let stale_control = client.check_generation(
+            run_id,
+            liveness.0,
+            liveness.1.saturating_add(1),
+        );
+        let current = client.check_generation(run_id, liveness.0, liveness.1);
         (
             old,
             liveness,
             events,
             snapshot.incorporated_through,
+            snapshot.payload,
+            pre_crash,
             stale_binding,
             stale_control,
+            current,
         )
     });
-    let (old, liveness, events, again, stale_binding, stale_control) = checker.join().unwrap();
+    let (
+        old,
+        liveness,
+        events,
+        again,
+        snapshot_payload,
+        pre_crash,
+        stale_binding,
+        stale_control,
+        current,
+    ) = checker.join().unwrap();
     assert_child_alive(&mut restarted.0, "restarted workflow");
     assert_eq!(old, CommandResult::Error(CommandError::RejectedSession));
     assert_eq!(liveness.2, 3);
-    assert_eq!(liveness.0, binding);
-    assert_eq!(liveness.1, control);
-    assert_eq!(events, replay);
-    assert_eq!(again, through);
-    assert!(stale_binding.is_err());
-    assert!(stale_control.is_err());
+    assert_eq!(liveness.0, binding.saturating_add(1));
+    assert_eq!(liveness.1, control.saturating_add(1));
+    assert_eq!(
+        snapshot_payload.first().copied(),
+        Some(3),
+        "GetSnapshot must report Unknown after restart"
+    );
+    // Recovery appends one fence event after the pre-crash replay.
+    assert_eq!(events.len(), replay.len() + 1);
+    assert_eq!(again, through.saturating_add(1));
+    assert_eq!(pre_crash, Err(CommandError::StaleBinding));
+    assert_eq!(stale_binding, Err(CommandError::StaleBinding));
+    assert_eq!(stale_control, Err(CommandError::StaleControl));
+    assert_eq!(current, Ok(()));
 
     let db = dir.join("agent.db");
     let db_bytes = fs::metadata(&db).map(|meta| meta.len()).unwrap_or(0);

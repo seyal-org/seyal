@@ -89,6 +89,7 @@ pub struct RunState {
 
 pub struct Snap {
     pub incorporated_through: u64,
+    pub payload: Vec<u8>,
 }
 
 impl TestClient {
@@ -224,6 +225,7 @@ impl TestClient {
         ) {
             CommandResult::Snapshot { view: Some(view) } => Snap {
                 incorporated_through: view.incorporated_through,
+                payload: view.payload,
             },
             other => panic!("snapshot: {other:?}"),
         }
