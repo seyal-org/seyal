@@ -1,8 +1,9 @@
 //! Independent Agent Backend process/domain composition boundary.
 //!
-//! AB-0.2 owns the per-user Unix-domain daemon and Hello/HelloAck handshake.
-//! AB-0.4 adds in-memory principal/session authorization fencing.
-//! AB-0.5 adds a deterministic provider-free ExecutionHost fixture.
+//! The `seyal-agent-backend` binary is the production daemon entry. Library
+//! code owns the per-user Unix-domain daemon, Hello/HelloAck handshake,
+//! principal/session authorization fencing, the deterministic provider-free
+//! FakeExecutionHost fixture, and StandaloneProcessHost (SPEC-018 §2).
 //! `AgentDomain` remains the only lifecycle transition authority.
 
 mod auth;
@@ -17,10 +18,11 @@ mod observation;
 mod peer;
 #[cfg(unix)]
 mod session;
+mod standalone_process_host;
 
 pub use auth::{
-    AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
-    PrincipalStatus,
+    AuthorizationError, AuthorizationRepository, ClientScope, DurablePrincipal, PairingCredential,
+    PrincipalKind, PrincipalStatus,
 };
 #[cfg(unix)]
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};
@@ -31,7 +33,8 @@ pub use observation::{
     parse_script, ObservationAuthority, ObserveError, RunLiveness, WorkItemOutcome,
 };
 #[cfg(unix)]
-pub use session::IntegrationConfig;
-pub use seyal_agent_core::{AgentDomain, DomainError};
+pub use session::{IntegrationConfig, IntegrationService};
+pub use seyal_agent_core::{AgentDomain, DomainError, ExecutionHost, ExecutionHostKind};
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
+pub use standalone_process_host::{HostError, StandaloneProcessConfig, StandaloneProcessHost};

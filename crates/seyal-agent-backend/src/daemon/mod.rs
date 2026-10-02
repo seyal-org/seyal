@@ -58,7 +58,29 @@ pub enum DaemonError {
     Malformed,
     Oversized,
     TimedOut,
+    /// Per-session stream I/O after accept (recoverable for the accept loop).
     Io,
+    /// Listener `accept` failure — not a client fault; must not hot-loop.
+    AcceptIo,
+}
+
+impl DaemonError {
+    /// Per-client / handshake faults that leave a bound listener usable.
+    ///
+    /// `Endpoint(WrongOwner)` is a same-UID peer reject; other `Endpoint`
+    /// faults mean the bound path itself is compromised and stay fatal.
+    /// `AcceptIo` stays fatal so persistent accept failures cannot spin.
+    pub fn is_recoverable_client_fault(self) -> bool {
+        matches!(
+            self,
+            Self::TimedOut
+                | Self::Malformed
+                | Self::Oversized
+                | Self::Handshake(_)
+                | Self::Io
+                | Self::Endpoint(EndpointFault::WrongOwner)
+        )
+    }
 }
 
 pub struct AgentDaemon {
@@ -281,7 +303,7 @@ impl AgentDaemon {
     /// Accept a same-UID peer, validate Hello evidence, and negotiate limits.
     /// Does not write HelloAck so callers can bind a principal first.
     fn accept_negotiated(&self) -> Result<(UnixStream, Hello, HelloAck), DaemonError> {
-        let listener = self.listener.as_ref().ok_or(DaemonError::Io)?;
+        let listener = self.listener.as_ref().ok_or(DaemonError::AcceptIo)?;
         let (mut stream, hello) = Self::accept_peer(
             listener,
             &self.socket_path(),
@@ -329,7 +351,14 @@ impl AgentDaemon {
         max_frame_size: u32,
         read_timeout: Duration,
     ) -> Result<(UnixStream, Hello), DaemonError> {
-        let (mut stream, _) = listener.accept().map_err(map_io)?;
+        let (mut stream, _) = listener.accept().map_err(|error| {
+            if error.kind() == io::ErrorKind::TimedOut || error.kind() == io::ErrorKind::WouldBlock
+            {
+                DaemonError::TimedOut
+            } else {
+                DaemonError::AcceptIo
+            }
+        })?;
         stream
             .set_read_timeout(Some(read_timeout))
             .map_err(|_| DaemonError::Io)?;
