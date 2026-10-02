@@ -40,9 +40,9 @@ reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-s
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 734
+acknowledged_loc = 756
 issue = 1149
-reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create/terminate_by_request_id, connection-scoped request ids, and seed_next_request_id so post-bootstrap terminate cannot reuse create id 1."
+reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create/terminate_by_request_id, connection-scoped request ids, seed_next_request_id, and restore_binding_after_failed_terminate_admit so fail-closed NoLiveClient terminate can roll back the recorded binding (ADR-017 §6.2)."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
