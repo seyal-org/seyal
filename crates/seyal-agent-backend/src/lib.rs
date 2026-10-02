@@ -21,8 +21,8 @@ mod session;
 mod standalone_process_host;
 
 pub use auth::{
-    AuthorizationError, AuthorizationRepository, ClientScope, PairingCredential, PrincipalKind,
-    PrincipalStatus,
+    AuthorizationError, AuthorizationRepository, ClientScope, DurablePrincipal, PairingCredential,
+    PrincipalKind, PrincipalStatus,
 };
 #[cfg(unix)]
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample};

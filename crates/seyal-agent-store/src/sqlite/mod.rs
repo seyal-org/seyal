@@ -76,6 +76,16 @@ pub struct PersistedAgentRun {
     pub liveness: PersistedLiveness,
 }
 
+/// Durable ClientPrincipal row (SPEC-017 §5). Sessions are never persisted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersistedPrincipal {
+    pub id: seyal_agent_core::ClientPrincipalId,
+    pub kind: u8,
+    pub status: u8,
+    pub scopes: Vec<u8>,
+    pub evidence_key: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StoreError {
     UnsupportedSchema,
