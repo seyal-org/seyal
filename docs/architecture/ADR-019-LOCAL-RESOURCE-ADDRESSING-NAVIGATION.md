@@ -1,13 +1,13 @@
 # ADR-019 — Local Resource Addressing and navigation authority
 
-- **Status:** Accepted on merge of PR #1084 under #1004. An author or agent
-  comment is not that acceptance. Acceptance is the non-author review of
-  PR #1084.
+- **Status:** Proposed
 - **Date:** 2026-09-24
 - **Issue:** #1004 (refinement) — parent #674, epic #665
-- **Numbering:** ADR-019. Sibling documents stay on their own pull requests and
-  are not accepted here: #994 → ADR-017, #1000 → ADR-018, #1003 → ADR-020.
-  #1001 landed as ADR-021 / SPEC-025.
+- **Numbering:** Allocation across concurrent M003 refinements is
+  #994 → ADR-017 (execution provisioning, PR #1056), #1000 → ADR-018
+  (window/tab lifecycle, PR #1055), #1004 → ADR-019 (this document, PR #1057),
+  #1003 → ADR-020 (shell launch policy, PR #1050). #1001 landed on `master` as
+  ADR-021 / SPEC-025 (PR #1053). Siblings must not claim ADR-019.
 - **Scope:** portable local addressing of Workspace/Tab/Pane/Session-Execution navigation targets, target resolution and failure semantics, focus-history ownership, cross-window navigation, and the separation between an address and a user-visible label
 - **Consumes:** ADR-007 (Workspace/identity lifetimes), ADR-009 / SPEC-008 (presentation modes), ADR-015 (Rust product authority / thin native host), SPEC-009 (detach/reconnect), [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md)
 - **Does not change:** ADR-004/005/006 terminal ownership, SPEC-008 presentation contracts, ADR-007 persistence classes
@@ -97,9 +97,7 @@ Rules:
 - `ResourceAddress` contains no `String`, no path, no title, no index, no
   ordinal, no window handle and no PID. It is a plain `Copy` value type so it
   cannot own text by construction, and that is a testable invariant.
-- Composite forms are validated **whole**. `Workspace { w }` resolves only if
-  `w` is a current Workspace with at least one Window. `Tab { w, t }` resolves
-  only if `t` is currently a Tab of `w`. `Pane { w, t, p }` resolves only if
+- Composite forms are validated **whole**. `Pane { w, t, p }` resolves only if
   `p` is currently a leaf of `t`'s `PaneTree` and `t` currently belongs to `w`.
   A request whose components exist individually but do not currently compose is
   a rejection, never a repair.
@@ -174,16 +172,9 @@ explicit fail-closed outcome rather than an assumed invariant.
 Panes whose exited record the Runtime inventory still holds. A destroyed Workspace, Tab or Pane is
 removed from `ShellState` and is indistinguishable from one that never existed,
 so it always yields the corresponding `Unknown*` rejection. No tombstone store
-exists (see Alternative E). Authorization follows the SPEC-022 R3.4 two-step
-order. Immediately after kind/version/size validation, and before any
-existence or binding check, the access-set test runs: for `Workspace` /
-`Tab` / `Pane` addresses the `WorkspaceId` in the address must be in the
-principal's Workspace access set (ADR-007 §11); for an `Execution` address,
-which carries no `WorkspaceId`, that first test is only that the principal
-holds local navigation authority. After resolution, a target whose Workspace
-is outside the set is `NavigationDenied`, not `Unknown*` / `TargetUnbound` /
-`AmbiguousTarget`. That second result does not tell an unauthorized principal
-whether the target exists.
+exists (see Alternative E). Workspace authorization is evaluated immediately
+after kind/version validation, before any existence or binding check, so an
+unauthorized principal cannot probe what exists or how it is bound.
 
 Explicitly forbidden recovery behavior: nearest-match, fuzzy re-resolution,
 falling back to the first/last/active member of the container, silently
@@ -206,18 +197,6 @@ Workspace, selects the owning Tab, sets the focused Pane, and emits a typed
 window-activation effect when the target window is not the active one. Partial
 application is forbidden: a navigation that cannot complete every step commits
 none of them.
-
-Kind-specific success focus (SPEC-022 R3.2 / R4.1):
-
-- `Workspace { w }` focuses that Workspace's product-active Window if it has
-  one, otherwise its most recently active existing Window (ADR-018), then that
-  Window's active Tab and focused Pane. A Workspace with zero Windows does not
-  resolve; Navigate must not spawn a Window and must not call ADR-018
-  `ActivateWorkspace` (whose create path may create a Window).
-- `Tab { w, t }` selects that Tab and its focused Pane and activates that Tab's
-  Window.
-- `Pane { w, t, p }` and a resolved `Execution { e }` focus the resolved Pane
-  under the same activate/select/focus order.
 
 Navigation must never terminate an execution, spawn an execution, bind or
 unbind an execution, write bytes to a PTY, change Flow/Raw/TUI presentation

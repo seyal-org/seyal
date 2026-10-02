@@ -1,13 +1,13 @@
 # ADR-021 — Intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Accepted on merge of PR #1086 under #1001
+- **Status:** Proposed
 - **Date:** 2026-09-25
 - **Issue:** #1001 (refinement) — parent #674, epic #665
-- **Numbering:** Final. Allocation across concurrent M003 refinements is
+- **Numbering:** Provisional allocation across concurrent M003 refinements is
   #994 → ADR-017 (execution provisioning), #1000 → ADR-018 (window/tab
   lifecycle), #1004 → ADR-019 (Resource Addressing / focus history),
-  #1003 → ADR-020 (shell launch policy), #1001 → ADR-021 (this document).
-  Siblings must not claim ADR-021.
+  #1001 → ADR-021 (this document). Numbers remain provisional until merge order
+  is settled; siblings must not claim ADR-021.
 - **Scope:** deterministic Rust-owned intra-Tab `PaneTree` mutation for
   move/reparent, swap, zoom/unzoom, equalize, and directional focus; PaneId
   identity preservation; zoom as presentation overlay (not a second tree);
@@ -17,17 +17,16 @@
   (Workspace/identity lifetimes), ADR-009 / SPEC-008 (presentation modes),
   [`ui/M001-MULTIPANE-VIEW.md`](ui/M001-MULTIPANE-VIEW.md),
   [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md)
-- **Coordinates with:** ADR-019 / SPEC-022 (#1004, accepted on merge of
-  PR #1084) for focus-history retention, ordering, capacity, and Resource
-  Addressing; ADR-018 (#1000, accepted on merge of PR #1085) for window/tab
-  containment; ADR-017 (#994) for execution provisioning; #928 for
-  split-ratio storage
+- **Coordinates with (Proposed, do not amend here):** ADR-019 / SPEC-022 (#1004)
+  for focus-history retention, ordering, capacity, and Resource Addressing;
+  ADR-018 (#1000) for window/tab containment; ADR-017 (#994) for execution
+  provisioning; #928 for split-ratio storage
 - **Does not change:** ADR-004/005/006 terminal ownership, SPEC-008 presentation
   contracts, ADR-007 persistence classes, ADR-019 focus-history store shape
 
 ## Context
 
-`crates/seyal-client/src/shell/{mod.rs,tree.rs}` already owns a binary `PaneTree`
+`crates/seyal-client/src/shell.rs` already owns a binary `PaneTree`
 (`Leaf(PaneId)` / `Split { axis, first, second }`), per-Tab `focused: PaneId`,
 and the actions `SplitPane` / `ClosePane` / `FocusPane`. Split focuses the new
 leaf; close replaces a destroyed focused leaf with `first_pane()` of the
@@ -41,10 +40,9 @@ Product direction already names the missing behavior:
   F-017 (drag rearrange presentations while preserving execution identity)
 - `MILESTONE-003.md` §6.2 — #674 is not one Ready PR; reusable split/pane
   contracts must be refined before coding
-- ADR-019 (accepted on merge of PR #1084 under #1004) explicitly assigns
-  intra-Tab `PaneTree` operations and “which Pane receives focus after
-  split/close” to #1001, and keeps focus-history retention/addressing on the
-  ADR-019 side of the seam
+- ADR-019 (Proposed, #1004 / PR #1038) explicitly assigns intra-Tab `PaneTree`
+  operations and “which Pane receives focus after split/close” to #1001, and
+  keeps focus-history retention/addressing on the ADR-019 side of the seam
 
 Without this decision, an implementation PR would invent zoom authority,
 reparent identity rules, and focus successors by precedent — which `AGENTS.md`
@@ -62,7 +60,7 @@ forbids.
   already assigns the Tab the split tree and one primary keyboard focus. This
   ADR fills the missing operation contract beneath that surface.
 - **Milestone amendment — pointer only.** `MILESTONE-003.md` §6.2 gets a
-  non-normative pointer to this contract, matching #1000/#994 style.
+  non-normative pointer to this Proposed contract, matching #1000/#994 style.
 
 ## Decision
 
@@ -85,11 +83,8 @@ Rules:
   successful transition. Orphaned map entries and tree leaves without map
   entries are unreachable by construction and are a bug if observed.
 - A Pane never owns a PTY, VT, grid, renderer, or child process. At most one
-  `ExecutionId` may be bound to a Pane. Move, swap, zoom, unzoom, equalize,
-  and focus never create, destroy, bind, or unbind an execution.
-  `ClosePane` releases the closed Pane's binding and attachment per
-  ADR-018 §3 / ADR-017; the execution stays live and is never terminated by
-  close. Split's new leaf starts unbound; provisioning is ADR-017 / #994.
+  `ExecutionId` may be bound to a Pane; these operations never create, destroy,
+  bind, or unbind an execution (ADR-017 / #994 owns provisioning).
 - AppKit / `NSSplitView` realizes geometry from the Rust snapshot. Native code
   must not invent a parallel layout tree, zoom stack, or focus set.
 
@@ -121,8 +116,7 @@ Normative effects on success:
 - Focus after a successful move/swap: if the focused Pane still exists, it
   remains focused (including when it was the moved Pane). Focus does not jump
   to `neighbor` merely because topology changed.
-- Rejected requests leave the Tab byte-identical to the pre-action state
-  except `last_error`.
+- Rejected requests leave the Tab byte-identical to the pre-action state.
 
 Cross-Tab and cross-Window pane reparent are **out of scope** for this ADR.
 SPEC-022 R5.3 already forbids navigation from implicitly reparenting across
@@ -157,8 +151,9 @@ Rules:
     id still exists.
   - `SplitPane` / `MovePaneBeside` / `SwapPanes` / `Equalize` that succeed
     clear `zoomed` to `None` before applying (fail closed is not required;
-    clearing avoids a stale overlay over a changed geometry). The accepted
-    path is clear-then-apply.
+    clearing avoids a stale overlay over a changed geometry). Implementations
+    may reject these while zoomed instead only if SPEC-025 lists that rejection;
+    the default accepted path is clear-then-apply.
   - `FocusPane` / directional focus may change focus under zoom; they do not
     clear zoom unless the newly focused Pane is not the zoomed leaf — in which
     case zoom clears (focusing away from the overlay exits zoom).
@@ -170,14 +165,15 @@ Rules:
 to the equal binary share (`1/2`) without changing axis, child identities, or
 leaf set.
 
-- Scope `Focused`: every `Split.ratio` in the subtree rooted at the focused leaf's parent `Split`. If the Tab root is a single leaf, this is a ratio no-op that clears zoom.
+- Scope `Focused`: the smallest Split subtree that contains the focused leaf
+  and, when the focused leaf is the sole child of a larger tree, that leaf's
+  parent Split; if the Tab is a single leaf, equalize is a successful no-op.
 - Scope `Tab`: every Split node under the Tab root.
 - Without #928 ratio storage, equalize is specified but not implementable as a
   geometry-changing action; the production child that implements equalize
   depends on #928 (or lands ratio + equalize together only when that Issue
-  explicitly owns both). Topology-only trees treat equalize as a ratio no-op
-  that clears zoom until ratios exist — never as an invented alternate layout
-  engine.
+  explicitly owns both). Topology-only trees treat equalize as a successful
+  no-op until ratios exist — never as a invented alternate layout engine.
 
 ### 5. Directional focus selects a geometric neighbor leaf
 
@@ -193,7 +189,7 @@ candidates with overlapping projection on that axis. Ties break by pre-order
 tree walk order (stable, deterministic).
 
 - No wrap-around.
-- No neighbor → typed rejection; state unchanged except `last_error`.
+- No neighbor → typed rejection; state unchanged.
 - Success commits focus to that leaf (and interacts with zoom per §3).
 
 Mouse hit-testing remains: host maps a click to a `PaneId` and dispatches
@@ -203,12 +199,12 @@ canonical focused Pane.
 ### 6. Focus successors for split and close are explicit
 
 These rules define *which Pane becomes focused*. Recording that transition in
-focus history is owned by ADR-019 / SPEC-022; this ADR only emits a
+focus history is owned by Proposed ADR-019 / SPEC-022; this ADR only emits a
 committed focus change.
 
 | Operation | Focus after success |
 | --- | --- |
-| `SplitPane` / `SplitFocused` | the newly created leaf (matches current `shell/{mod.rs,tree.rs}`) |
+| `SplitPane` / `SplitFocused` | the newly created leaf (matches current `shell.rs`) |
 | `ClosePane` of a non-focused leaf | focus unchanged |
 | `ClosePane` of the focused leaf | the other child of the removed leaf's parent `Split`, preferring that sibling subtree's pre-order first leaf; if the parent was the root, that sibling is the new root's first leaf. Never an arbitrary Workspace-global pick. |
 | `SwapPanes` / `MovePaneBeside` | focused Pane unchanged if it still exists |
@@ -225,34 +221,24 @@ nothing. Adjacent-dedup and capacity rules stay entirely in ADR-019 / SPEC-022.
 
 ### 7. Stale and invalid actions fail closed
 
-Every rejection is typed and atomic: all state other than `last_error` is byte-identical to the pre-action state, and `last_error` is set to the typed rejection.
+Every rejection is typed, atomic, and leaves state byte-identical:
 
 ```text
 UnknownPane | UnknownTab | UnknownWorkspace
-InvalidMoveTarget          (pane == neighbor; SwapPanes a == b; neighbor not a leaf of this Tab)
+InvalidMoveTarget          (pane == neighbor; neighbor missing; side inconsistent)
 CannotCloseLastPane
 NoDirectionalNeighbor
-NotZoomed
+NotZoomed | AlreadyZoomedSame
 PaneSplitUnavailable       (existing gate until provisioning allows split)
-StaleContainment           (structural action whose carried containment_generation ≠ reducer)
 ```
 
 Forbidden recovery: nearest-Pane retarget, silently creating leaves, coercing a
 stale `PaneId` to the focused Pane, or partially applying a move.
 
-Structural PaneTree actions use the ADR-018 §6 `containment_generation` fence
-unconditionally:
-
-| Action class | Actions | Carry `containment_generation` | Bump on success |
-| --- | --- | --- | --- |
-| Structural | `SplitPane` / `SplitFocused`, `ClosePane`, `MovePaneBeside`, `SwapPanes`, `EqualizeFocused`, `EqualizeTab` | yes | yes |
-| Selection / focus | `FocusPane`, `FocusDirection`, `ZoomPane`, `Unzoom` | yes (snapshot identity) | no |
-
-A structural action whose carried generation is not exactly the reducer's
-current `containment_generation` is rejected with `StaleContainment` and
-changes nothing (except `last_error`). Selection / focus actions are
-identity-fenced only: they do not bump the generation and are not rejected
-solely for a stale generation.
+Structural PaneTree membership changes bump the same containment / structural
+generation fence Proposed ADR-018 defines for topology mutation, when that ADR
+is accepted. Selection-only actions (`FocusPane`, `FocusDirection`, `Zoom`/
+`Unzoom` that do not clear via structural mutation) are identity-fenced only.
 
 ### 8. Keyboard / mouse contract is typed Rust actions
 
@@ -269,34 +255,34 @@ Keybinding assignment for the verbs is owned by the keybinding refinement
 
 ## Boundaries with adjacent refinements
 
-- **ADR-019 / SPEC-022 (#1004, accepted on merge of PR #1084):** owns Resource
-  Addressing, Navigate, and the one application-scoped focus-history store
-  (capacity, `FocusSeq`, traversal apply vs user-initiated commit, eager
-  invalidation on destroy). This ADR defines which Pane becomes focused after
-  PaneTree ops; ADR-019 records those commits. **Do not amend ADR-019 in the
-  #1001 PR.**
-- **ADR-018 (#1000, accepted on merge of PR #1085):** owns Window/Tab
-  containment and close-is-not-terminate at window/tab granularity. This ADR
-  owns intra-Tab PaneTree ops and consumes ADR-018's `containment_generation`
-  fence for structural actions.
-- **ADR-017 (#994):** owns creating/disposing `TerminalExecution` for new
-  leaves. Split remains unavailable until that route exists; move/zoom/
-  equalize/focus never provision. Close unbinds per ADR-018 §3 / ADR-017 and
-  never terminates.
+- **ADR-019 / SPEC-022 (#1004, PR #1038):** owns Resource Addressing, Navigate,
+  and the one application-scoped focus-history store (capacity, `FocusSeq`,
+  traversal apply vs user-initiated commit, eager invalidation on destroy).
+  This ADR defines which Pane becomes focused after PaneTree ops; ADR-019
+  records those commits. **Do not amend ADR-019 in the #1001 PR.**
+- **ADR-018 (#1000, PR #1039):** owns Window/Tab containment and close-is-not-
+  terminate at window/tab granularity. This ADR owns intra-Tab PaneTree ops.
+- **ADR-017 (#994, PR #1040):** owns creating/disposing `TerminalExecution` for
+  new leaves. Split remains unavailable until that route exists; move/zoom/
+  equalize/focus never provision.
 - **#923 / #928 / #936:** projection, ratios, and multi-live Metal. This ADR
   requires projection to honor `zoomed` and tree topology; it does not authorize
   a second live Metal leaf.
 
-## Seam with ADR-019
+## Gap record against Proposed ADR-019
 
-1. **Zoom without focus change.** Already covered by ADR-019 adjacent
+Reviewed against PR #1038 text. Sufficient for this seam with one
+clarification left to ADR-019 acceptance review (not amended here):
+
+1. **Close/split successors as commits.** ADR-019 §6 / SPEC-022 R6.3 say only
+   committed focus transitions are recorded. This ADR states that split/close
+   successors are user-initiated commits. If ADR-019 acceptors want structural
+   successors excluded from history, that is an ADR-019 amendment — #1001 must
+   not fork a second history policy.
+2. **Zoom without focus change.** Already covered by ADR-019 adjacent
    deduplication; no gap.
-2. **Cross-window reparent.** Explicitly deferred; SPEC-022 R5.3 already
+3. **Cross-window reparent.** Explicitly deferred; SPEC-022 R5.3 already
    forbids Navigate from doing it.
-
-Close/split successors are user-initiated focus commits under this contract.
-That policy is recorded in accepted ADR-019; #1001 must not fork a second
-history policy.
 
 ## Alternatives considered
 
@@ -339,10 +325,9 @@ reusable contract before coding.
 
 See SPEC-025. At minimum: deterministic before/after fixtures per operation;
 identity-preservation properties for move/swap; zoom topology-invariance;
-fail-closed stale ids and stale containment generations; directional neighbor
-fixtures including ties; close successor sibling preference; property tests
-that every rejection is byte-identical except `last_error` and every successful
-transition keeps tree leaves ≡ pane map.
+fail-closed stale ids; directional neighbor fixtures including ties; close
+successor sibling preference; property tests that every rejection is
+byte-identical and every successful transition keeps tree leaves ≡ pane map.
 
 ## Not in this ADR
 
