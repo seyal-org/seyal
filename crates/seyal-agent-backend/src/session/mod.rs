@@ -95,11 +95,7 @@ impl IntegrationService {
         })
     }
 
-    /// Persist a principal status change (revoke/suspend) across process restart.
-    ///
-    /// Production entrypoint: dual-writes the in-memory authorization view and the
-    /// durable store. Callers must use this (not memory-only auth mutation) whenever
-    /// a status change must survive Backend restart (Issue #1178 AC3).
+    /// Persist revoke/suspend across restart: dual-write auth + durable store (#1178 AC3).
     pub fn set_principal_status(
         &mut self,
         id: seyal_agent_core::ClientPrincipalId,
