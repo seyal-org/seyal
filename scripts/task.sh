@@ -23,8 +23,20 @@ runtime_failure_matrix() {
 }
 
 agent_failure_matrix() {
+  cargo_pinned build -p seyal-agent-backend --bin seyal-agent-backend --locked
   cargo_pinned test -p seyal-agent-backend --locked --features test-fault-injection \
     --test integration_path --test session_bounds --test process_qualification -- --show-output
+  # SessionClient must exercise the daemon binary without linking seyal-agent-backend.
+  local target_dir="${CARGO_TARGET_DIR:-$ROOT/target}"
+  if [[ -x "${target_dir}/debug/seyal-agent-backend" ]]; then
+    export SEYAL_AGENT_BACKEND_BIN="${target_dir}/debug/seyal-agent-backend"
+  elif [[ -x "${target_dir}/release/seyal-agent-backend" ]]; then
+    export SEYAL_AGENT_BACKEND_BIN="${target_dir}/release/seyal-agent-backend"
+  else
+    echo "seyal-agent-backend binary missing under ${target_dir}" >&2
+    exit 1
+  fi
+  cargo_pinned test -p seyal-agent-client --locked --test daemon_process_e2e -- --show-output
 }
 
 case "$cmd" in
@@ -46,6 +58,7 @@ case "$cmd" in
     python3 scripts/test-m003-presentation-fixtures.py
     python3 scripts/fuzz-smoke.py
     bash scripts/check-toolchain.sh
+    cargo_pinned build -p seyal-agent-backend --bin seyal-agent-backend --locked
     cargo_pinned test --workspace --locked
     runtime_failure_matrix
     agent_failure_matrix
@@ -84,6 +97,7 @@ case "$cmd" in
     python3 scripts/test-m002-controlled-mode.py
     cargo_pinned fmt --all -- --check
     cargo_pinned clippy --workspace --all-targets --all-features -- -D warnings
+    cargo_pinned build -p seyal-agent-backend --bin seyal-agent-backend --locked
     cargo_pinned test --workspace --locked
     runtime_failure_matrix
     agent_failure_matrix

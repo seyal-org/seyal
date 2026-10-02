@@ -1,9 +1,10 @@
 //! Independent Agent Backend process/domain composition boundary.
 //!
-//! AB-0.2 owns the per-user Unix-domain daemon and Hello/HelloAck handshake.
-//! AB-0.4 adds in-memory principal/session authorization fencing.
-//! AB-0.5 adds a deterministic provider-free ExecutionHost fixture.
-//! `AgentDomain` remains the only lifecycle transition authority.
+//! The `seyal-agent-backend` binary is the production daemon entry. Library
+//! code owns the per-user Unix-domain daemon, Hello/HelloAck handshake,
+//! principal/session authorization fencing, and the deterministic
+//! provider-free ExecutionHost fixture. `AgentDomain` remains the only
+//! lifecycle transition authority.
 
 mod auth;
 #[cfg(unix)]
