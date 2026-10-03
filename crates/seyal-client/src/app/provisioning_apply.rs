@@ -619,6 +619,7 @@ impl ApplicationRoot {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn registry_client_for_attachment(
         &self,
         execution: ExecutionId,
