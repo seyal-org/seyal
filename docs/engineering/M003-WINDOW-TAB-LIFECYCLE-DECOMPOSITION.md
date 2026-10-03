@@ -221,7 +221,7 @@ stays off in the headed composition.
   is never consulted as authority.
 - The host holds no writable window/tab/pane model; only a derived copy plus
   disposable view/GPU state.
-- `⌥⌘1…9` window selection, `⌘T`, `⌘N` New Window, and window cycling route
+- `⌥⌘1…9` window selection, `⌘T` / `⌘N` New Tab, `⌘⇧N` New Window, and window cycling route
   through typed actions via `NSMenuItem` key equivalents, never `keyDown`
   interception; the host never constructs an `NSWindow` without a Rust effect.
 
@@ -252,15 +252,16 @@ headed window/tab creation admission.
   the last Window never quits in M003 (ADR-018 §2.5).
 - `⌘W` hierarchical close routes through a typed action via its `NSMenuItem`
   key equivalent.
-- File → New Window / `⌘N` forwards the one target-free create intent in
+- File → New Window / `⌘⇧N` forwards the one target-free create intent in
   ADR-018 §2.2 / §3.3a (Rust resolves Workspace and applies `CreateWindow`); it
   never depends on AppKit key-window state and never raises a miniaturized
-  Window instead of creating when the app is inactive.
+  Window instead of creating when the app is inactive. Default New Tab remains
+  `⌘T` / `⌘N` per SPEC-024 (TOML-customizable).
 - Dock reopen / `applicationShouldHandleReopen` with zero Windows forwards
   `ActivateWorkspace { workspace: last_active_workspace }` (ADR-018 §3.3a).
 
 **Tests.** Native XCTest/XCUI: close-forwarding; last-window-close leaves the app
-running; File → New Window / `⌘N` from zero Windows and from an inactive /
+running; File → New Window / `⌘⇧N` from zero Windows and from an inactive /
 all-miniaturized app creates via the §2.2 intent (never raises); Dock reopen from
 zero Windows creates via `ActivateWorkspace`; the ADR-018 §9 close-successor and
 `last_active_workspace` tests that the host can observe; executions from a closed
@@ -431,3 +432,8 @@ candidate now.
 4. **S1 SPEC-004 amendment.** Still a separate Architecture/R&D gate for W5
    (ADR-018 §5.1). If that amendment is rejected, ADR-018 §5 reopens with
    Alternative E (release the attachment on hide).
+5. **Default New Tab / New Window keybindings.** **Closed by product-owner
+   decision for PR #1208 / #1000 / #1002:** default New Tab is `⌘N` and `⌘T`;
+   default New Window is `⌘⇧N`. SPEC-024 owns the builtin rows and the
+   `[[keybindings]]` TOML override path; ADR-018 owns only CreateWindow /
+   zero-Window re-entry semantics.

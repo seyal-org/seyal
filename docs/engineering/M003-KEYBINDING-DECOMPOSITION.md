@@ -204,7 +204,8 @@ reads `FocusSeq` from the same snapshot, so it never self-rejects as stale.
 
 **Outcome:** SPEC-024 §5.0 catalog ids and builtins:
 `app.close_focused` (`cmd+w`, hierarchical Pane→Tab→Window), `window.new`
-(`cmd+n`, including `zero_window` context), `window.close`,
+(`cmd+shift+n`, including `zero_window` context; New Tab defaults remain
+`cmd+t` / `cmd+n` → `tab.create`), `window.close`,
 `window.cycle_next` / `window.cycle_previous` (`` cmd+` `` / `` cmd+shift+` ``),
 and `window.select_ordinal` (`cmd+opt+1`…`cmd+opt+9`).
 
@@ -216,7 +217,7 @@ ADR-018 child Issue.
 **Non-goals:** window/tab lifecycle semantics (ADR-018 owns them).
 
 **Tests:** SPEC-024 §14 items 2–3 for the included builtins; zero-Window
-`cmd+n` / R6.4.1 re-validation; hierarchical `cmd+w` peels Pane→Tab→Window.
+`cmd+shift+n` / R6.4.1 re-validation; hierarchical `cmd+w` peels Pane→Tab→Window.
 
 **Ready preconditions:** K3; ADR-018 Accepted; the matching #1000 production
 action merged.

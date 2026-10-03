@@ -184,7 +184,7 @@ stale generation and is rejected rather than silently creating a Window.
 
 `CreateWindow { workspace: WorkspaceId }` and `ActivateWorkspace { workspace: WorkspaceId }` name their target Workspace explicitly; the reducer never infers a Workspace from AppKit state. The `ShellState` reducer owns `last_active_workspace: WorkspaceId`. At headed-composition start, before any Window exists, its initial value is the first Workspace in the Rust-owned Workspace order. It is updated whenever the product-active Window changes and left unchanged when the Window count reaches zero. While at least one Window exists it equals the product-active Window's `WorkspaceId`. With zero Windows the snapshot reports no product-active Window and carries `last_active_workspace` as the sole re-entry Workspace.
 
-File → New Window / `⌘N` is **one** target-free host intent. It must not depend on AppKit key-window state and must not raise an existing miniaturized Window instead of creating when the app is inactive. Rust resolves the target Workspace from the product-active Window when one exists, otherwise from `last_active_workspace`, and applies `CreateWindow` for that Workspace. If there is no Window, the intent still creates (the zero-Window case). Dock reopen / `applicationShouldHandleReopen` when there are zero Windows forwards `ActivateWorkspace { workspace: last_active_workspace }` so the create-or-raise rule in this section applies; that path is Workspace activation, not a second File → New Window route. The raise path selects by the §1.3 derived most-recently-active Window order, never by AppKit order.
+File → New Window / `⌘⇧N` is **one** target-free host intent. It must not depend on AppKit key-window state and must not raise an existing miniaturized Window instead of creating when the app is inactive. Rust resolves the target Workspace from the product-active Window when one exists, otherwise from `last_active_workspace`, and applies `CreateWindow` for that Workspace. If there is no Window, the intent still creates (the zero-Window case). Dock reopen / `applicationShouldHandleReopen` when there are zero Windows forwards `ActivateWorkspace { workspace: last_active_workspace }` so the create-or-raise rule in this section applies; that path is Workspace activation, not a second File → New Window route. The raise path selects by the §1.3 derived most-recently-active Window order, never by AppKit order.
 
 `RequestQuit` is an application-scope action, not a window action, and resolves
 through §4.
@@ -298,7 +298,7 @@ again. Normative requirements:
 
 - Rust admits `CreateWindow` (and `ActivateWorkspace`, which may create a Window)
   in the zero-Window state;
-- File → New Window / `⌘N` is the one target-free create route in §2.2: the host
+- File → New Window / `⌘⇧N` is the one target-free create route in §2.2: the host
   forwards that intent (never `ActivateWorkspace` for this menu/shortcut), Rust
   resolves the Workspace from the product-active Window or else
   `last_active_workspace`, and applies `CreateWindow`. The host never locally
@@ -633,10 +633,10 @@ Children must carry, at minimum:
   is emitted before order-front / make-key for any successor Window.
 - **New-Window / `last_active_workspace` tests (§2.2, §3.3a):** initial
   `last_active_workspace` equals the first Workspace before any Window exists;
-  File → New Window / `⌘N` creates (never raises) with the target Workspace
+  File → New Window / `⌘⇧N` creates (never raises) with the target Workspace
   resolved from the product-active Window or else `last_active_workspace`,
   including when every Window is miniaturized or the app is inactive; zero-Window
-  `⌘N` still creates; Dock reopen with zero Windows uses
+  `⌘⇧N` still creates; Dock reopen with zero Windows uses
   `ActivateWorkspace { workspace: last_active_workspace }`.
 - **Quit tests:** `terminateLater` path; cleanup for N windows and N attachments
   under one deadline; deadline expiry still terminates; unrelated executions
@@ -731,9 +731,10 @@ Conflicts resolved here, with the higher authority named:
    window switching is presentation-level AppKit behavior over visible titled
    windows. That conflicts with ADR-015 once windows carry product identity.
    Window ordering, cycling and direct selection become Rust-owned; AppKit
-   realizes the order. The scaffold's `⌥⌘1…9` window, `⌘T`, hierarchical `⌘W`,
-   and `⌘N` (New Window / zero-Window re-entry, §3.3a) shortcut *capabilities*
-   are retained as Rust-owned policy.
+   realizes the order. The scaffold's `⌥⌘1…9` window, hierarchical `⌘W`,
+   `⌘T` / `⌘N` (New Tab), and `⌘⇧N` (New Window / zero-Window re-entry, §3.3a)
+   shortcut *capabilities* are retained as Rust-owned policy; SPEC-024 owns the
+   default strokes and TOML override path.
 4. **Workspace switching in place.** The scaffold switches the tab inventory of a
    single window when the Workspace changes. Under §1.1 a Window is bound to one
    Workspace, so `ActivateWorkspace` replaces in-place `SelectWorkspace` and
@@ -742,6 +743,11 @@ Conflicts resolved here, with the higher authority named:
    `MILESTONE-003.md` treats as subordinate preview authority.
 
 No other mockup conflict with ADR-015, ADR-007 or ADR-009 was found.
+
+**Product keybinding defaults (PO decision for PR #1208 / #1000 / #1002):**
+default New Tab is `⌘N` and `⌘T`; default New Window is `⌘⇧N`. SPEC-024 owns
+those builtin rows and the TOML `[[keybindings]]` override path; this ADR owns
+only the CreateWindow / zero-Window re-entry semantics those strokes dispatch.
 
 ## 12. Not in this ADR
 

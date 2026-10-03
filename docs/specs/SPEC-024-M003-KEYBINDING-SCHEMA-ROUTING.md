@@ -269,8 +269,9 @@ when §4.2 / §7 permit:
 |---|---|---|
 | `cmd+k` | `command_palette.open` | `app` |
 | `cmd+t` | `tab.create` | `app` |
+| `cmd+n` | `tab.create` | `app` |
 | `cmd+w` | `app.close_focused` | `app` |
-| `cmd+n` | `window.new` | `app`, `zero_window` |
+| `cmd+shift+n` | `window.new` | `app`, `zero_window` |
 | `` cmd+` `` / `` cmd+shift+` `` | `window.cycle_next` / `window.cycle_previous` | `app` |
 | `cmd+opt+1`…`cmd+opt+9` | `window.select_ordinal` with `ordinal` 1…9 (nine rows) | `app` |
 | `cmd+shift+[` | `tab.select_previous` | `app` |
@@ -286,6 +287,12 @@ when §4.2 / §7 permit:
 | `ctrl+r` | `composer.history_search.open` | `composer` |
 | `cmd+[` / `cmd+]` | `focus_history.back` / `focus_history.forward` | `app` |
 | `cmd+shift+o` | `goto.open` | `app` |
+
+**Product defaults (PO decision for PR #1208 / #1000 / #1002):** `cmd+n`
+and `cmd+t` both create a Tab (`tab.create`); `cmd+shift+n` creates a Window
+(`window.new`, including zero-Window re-entry via the `zero_window` context).
+Users may override these builtins with `[[keybindings]]` entries in the
+canonical TOML config (§2 / §3); native must not invent a second default table.
 
 There is no `settings.open` id or `cmd+,` builtin in M003. No production
 settings surface exists, and a catalog id whose only possible result is
@@ -434,7 +441,7 @@ for the window lifecycle and hierarchical-close keyboard policy ADR-018 §8 /
 | WorkspaceCommandId | ADR-018 action at invoke time | Builtin key (M003) |
 |---|---|---|
 | `app.close_focused` | hierarchical close: focused Pane if the active Tab has more than one Pane; else active Tab if the Window has more than one Tab; else Window (ADR-018 §8 / scaffold Pane→Tab→Window) | `cmd+w` |
-| `window.new` | `CreateWindow` / zero-Window re-entry (`ActivateWorkspace` path, ADR-018 §3.3a) | `cmd+n` (`app`, `zero_window`) |
+| `window.new` | `CreateWindow` / zero-Window re-entry (File → New Window / `cmd+shift+n`; Dock reopen uses `ActivateWorkspace`, ADR-018 §3.3a) | `cmd+shift+n` (`app`, `zero_window`) |
 | `window.close` | `CloseWindow` of the product-active Window | none |
 | `window.cycle_next` / `window.cycle_previous` | cycle product-active Window forward / backward in Rust-owned Window order | `` cmd+` `` / `` cmd+shift+` `` |
 | `window.select_ordinal` | select the Window at 1-based position `ordinal` in that order | `cmd+opt+1`…`cmd+opt+9` |
@@ -654,9 +661,11 @@ For one physical/native key event on the active presentation route:
 R6.2.1 **Command strokes reach the Rust keybinding table before AppKit
 main-menu `performKeyEquivalent`.** Native must not let the main menu accept a
 projected `WorkspaceCommand` key equivalent before §6.2 step 2b has run. Builtin
-`cmd+t` stays the projected New Tab equivalent only because Rust already decided
-`tab.create` (R11.1); the menu path must not accept `tab.create` in Raw before
-the specificity result of a more specific binding for the same stroke.
+`cmd+t` / `cmd+n` stay the projected New Tab equivalents only because Rust
+already decided `tab.create` (R11.1); the menu path must not accept
+`tab.create` in Raw before the specificity result of a more specific binding
+for the same stroke. Builtin `cmd+shift+n` is the projected New Window /
+zero-Window re-entry equivalent for `window.new`.
 
 One physical event still follows exactly one route.
 
@@ -1059,7 +1068,7 @@ this PR does not satisfy.
 - [x] Security / diagnostic policy defined (§7.2, §12).
 - [x] Key-assignment owner for ADR-021 verbs named and assigned (§5.1).
 - [x] Key-assignment owner for ADR-018 hierarchical close, window new/close/
-      cycle/select, and zero-Window `cmd+n` named and assigned (§5.0, §6.1).
+      cycle/select, and zero-Window `cmd+shift+n` named and assigned (§5.0, §6.1).
 - [x] Key-assignment owner for composer history search (§5.4) and SPEC-022
       Back/Forward/goto (§5.5) named and assigned; composer execute/newline
       left with SPEC-008 §4 (§4.1).
