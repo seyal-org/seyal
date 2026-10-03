@@ -2,7 +2,7 @@
 
 - **Status:** Proposed decomposition output of refinement Issue #1002
 - **Parent umbrella:** #676 (epic #665) — do **not** assign #676
-- **Authority:** [`../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md`](../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md) (Proposed), ADR-015, SPEC-006 (incl. §21.3 `input.option_as_alt`), SPEC-008 / ADR-009, Foundation cold keybinding rule, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
+- **Authority:** [`../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md`](../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md) (Accepted; not an implemented-behavior claim), ADR-015, SPEC-006 (incl. §21.3 `input.option_as_alt`), SPEC-008 / ADR-009, Foundation cold keybinding rule, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 
 This file is a planning artifact. It creates no implementation authority: each
 slice below becomes real work only as a GitHub child Issue of #676 that passes
@@ -30,6 +30,7 @@ SPEC-024 Accepted
   → K6 headed acceptance + adversarial matrix (M004 launch-blocker evidence)
 K7 ADR-021 pane-verb bindings: after K3 + the matching #1001 verb (per verb)
 K8 SPEC-022 navigation bindings: after K3 + the matching #1004 N3/N4 action
+K9 ADR-018 window bindings: after K3 + the matching #1000 / ADR-018 action
 ```
 
 K2 depends on K1. K3 depends on K1/K2 and must land before any binding can
@@ -62,7 +63,8 @@ privacy on fixtures).
 ## K2 — Defaults, reserved Command, conflict resolution
 
 **Outcome:** builtin default rows from SPEC-024 §4.1 (excluding ADR-021 pane
-rows, see K7, and SPEC-022 navigation rows, see K8; including the §5.4
+rows, see K7, SPEC-022 navigation rows, see K8, and ADR-018 window /
+hierarchical-close rows, see K9; including the §5.4
 `ctrl+r` composer history-search row); the enumerated reserved set from §4.2; per-context-bit last-wins
 resolution with `DuplicateSequence` diagnostics; `action = "none"` unbind.
 
@@ -198,6 +200,31 @@ N3/N4 production action merged.
 **Review risk:** no dead catalog entry before the action exists; the dispatch
 reads `FocusSeq` from the same snapshot, so it never self-rejects as stale.
 
+## K9 — ADR-018 window and hierarchical-close bindings
+
+**Outcome:** SPEC-024 §5.0 catalog ids and builtins:
+`app.close_focused` (`cmd+w`, hierarchical Pane→Tab→Window), `window.new`
+(`cmd+n`, including `zero_window` context), `window.close`,
+`window.cycle_next` / `window.cycle_previous` (`` cmd+` `` / `` cmd+shift+` ``),
+and `window.select_ordinal` (`cmd+opt+1`…`cmd+opt+9`).
+
+**Scope:** SPEC-024 §5.0, §6.1 `zero_window`, §10.2. Each id lands in the same
+PR as, or after, the #1000 / ADR-018 production child that implements its typed
+action (R5.0.1); it may be split per command family or folded into the matching
+ADR-018 child Issue.
+
+**Non-goals:** window/tab lifecycle semantics (ADR-018 owns them).
+
+**Tests:** SPEC-024 §14 items 2–3 for the included builtins; zero-Window
+`cmd+n` / R6.4.1 re-validation; hierarchical `cmd+w` peels Pane→Tab→Window.
+
+**Ready preconditions:** K3; ADR-018 Accepted; the matching #1000 production
+action merged.
+
+**Review risk:** do not leave `cmd+w` bound only to `tab.close_focused`; do not
+re-reserve `` cmd+` `` as AppKit-owned; no dead catalog entry before the action
+exists.
+
 ## Child Issue template (when opening after Acceptance)
 
 Each child should carry:
@@ -225,6 +252,7 @@ Do not mark children Ready until SPEC-024 is Accepted and
   rebindable in M003; composer history search is `composer.history_search.open`
   on `ctrl+r` (SPEC-024 §4.1, §5.4).
 - SPEC-022 Back/Forward/goto key ownership: SPEC-024 §5.5, slice K8.
+- ADR-018 window / hierarchical-close key ownership: SPEC-024 §5.0, slice K9.
 
 ## Open questions deferred to acceptance review (not blockers for this PR)
 
