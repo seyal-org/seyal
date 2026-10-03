@@ -375,7 +375,27 @@ mod tests {
     }
 
     #[test]
-    fn trait_dispatch_smoke_covers_fake_and_standalone() {
+    fn trait_dispatch_smoke_covers_standalone() {
+        let mut domain = AgentDomain::new();
+        let scope = domain.create_work_scope(WorkScopeKind::Repository);
+        let item = domain.create_work_item(scope).unwrap();
+        let attempt = domain.create_attempt(item).unwrap();
+        let run = domain.create_agent_run(attempt).unwrap();
+        let generation = domain.agent_run(run).unwrap().binding_generation();
+
+        let config = StandaloneProcessConfig::new("/bin/echo", ["dispatch"], 16).unwrap();
+        let mut standalone = StandaloneProcessHost::new(config);
+        assert_eq!(standalone.kind(), ExecutionHostKind::StandaloneProcess);
+        let host_obs = collect_via_trait(&mut standalone, run, generation).unwrap();
+        assert!(matches!(
+            host_obs.first().map(|o| &o.kind),
+            Some(HostObservationKind::Started)
+        ));
+    }
+
+    #[cfg(feature = "fixture-host")]
+    #[test]
+    fn trait_dispatch_smoke_covers_fake() {
         let mut fake = crate::FakeExecutionHost::new(8).unwrap();
         fake.set_script(vec![crate::ScriptStep::Emit(HostObservationKind::Started)]);
         assert_eq!(fake.kind(), ExecutionHostKind::Fake);
@@ -389,15 +409,6 @@ mod tests {
 
         let fake_obs = collect_via_trait(&mut fake, run, generation).unwrap();
         assert_eq!(fake_obs.len(), 1);
-
-        let config = StandaloneProcessConfig::new("/bin/echo", ["dispatch"], 16).unwrap();
-        let mut standalone = StandaloneProcessHost::new(config);
-        assert_eq!(standalone.kind(), ExecutionHostKind::StandaloneProcess);
-        let host_obs = collect_via_trait(&mut standalone, run, generation).unwrap();
-        assert!(matches!(
-            host_obs.first().map(|o| &o.kind),
-            Some(HostObservationKind::Started)
-        ));
     }
 
     #[test]

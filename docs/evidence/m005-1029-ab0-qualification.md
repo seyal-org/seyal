@@ -229,7 +229,8 @@ These answer the six questions on #1029. They do not amend
    per-aggregate sequence. Recovery advances binding and control generations and
    rewrites the run snapshot; pre-crash generations are denied. Never-issued
    generations remain denied.
-5. The backend does not own a terminal. `FakeExecutionHost` only submits
+5. The backend does not own a terminal. As of #1196, `FakeExecutionHost` is a
+   `fixture-host` qualification fixture only (not the production daemon). It only submits
    `HostObservation` values. ADR-012 §5's typed ExecutionHost seam is for a
    Seyal-hosted terminal workload, which this head does not host. SPEC-018 §2
    names the real hosts and does not name `FakeExecutionHost`. The Rust

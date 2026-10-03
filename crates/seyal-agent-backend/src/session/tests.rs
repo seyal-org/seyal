@@ -1,4 +1,6 @@
+use super::fixture_support::{open_with_script, open_with_script_instance};
 use super::*;
+use crate::ScriptStep;
 use seyal_agent_core::{AttemptId, WorkItemId, WorkScopeId};
 use seyal_agent_protocol::{
     decode_frame, decode_result, encode_command, BackendInstanceId, ClientSessionId, Command,
@@ -27,12 +29,9 @@ fn mid_group_apply_conflict_undoes_prior_outputs() {
     let dir = temp_store();
     std::fs::create_dir_all(&dir).unwrap();
     let store_path = dir.join("agent.db");
-    let config = IntegrationConfig {
-        store_path: store_path.clone(),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
-    };
-    let mut service =
-        IntegrationService::open(BackendInstanceId::new(), &config).expect("open service");
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
+    let config_store = store_path.clone();
+    let mut service = open_with_script(config_store.clone(), config_script.clone());
 
     let scope = WorkScopeId::new();
     let item = WorkItemId::new();
@@ -122,12 +121,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
         ])));
     }
     script.push(ScriptStep::Emit(HostObservationKind::KnownSuccess));
-    let config = IntegrationConfig {
-        store_path: store_path.clone(),
-        script,
-    };
-    let mut service =
-        IntegrationService::open(BackendInstanceId::new(), &config).expect("open service");
+    let mut service = open_with_script(store_path.clone(), script);
     let principal = service.begin_connection(b"cli").expect("hello principal");
 
     let opened = service.dispatch(
@@ -237,15 +231,15 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
     let terminal_path = dir.join("terminal.db");
     let live_path = dir.join("live.db");
 
-    let terminal_config = IntegrationConfig {
-        store_path: terminal_path.clone(),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
-    };
-    let mut terminal =
-        IntegrationService::open(BackendInstanceId::new(), &terminal_config).unwrap();
+    let terminal_config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ];
+    let terminal_config_store = terminal_path.clone();
+    let mut terminal = open_with_script(
+        terminal_config_store.clone(),
+        terminal_config_script.clone(),
+    );
     let principal = terminal.begin_connection(b"cli").unwrap();
     let session = match terminal.dispatch(
         principal,
@@ -312,19 +306,19 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
     );
     drop(terminal);
 
-    let recovered_terminal =
-        IntegrationService::open(BackendInstanceId::new(), &terminal_config).unwrap();
+    let recovered_terminal = open_with_script(
+        terminal_config_store.clone(),
+        terminal_config_script.clone(),
+    );
     assert_eq!(
         recovered_terminal.authority.liveness(run_id),
         RunLiveness::KnownTerminated,
         "recovered liveness must honor committed terminal observations"
     );
 
-    let live_config = IntegrationConfig {
-        store_path: live_path,
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
-    };
-    let mut live = IntegrationService::open(BackendInstanceId::new(), &live_config).unwrap();
+    let live_config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
+    let live_config_store = live_path;
+    let mut live = open_with_script(live_config_store.clone(), live_config_script.clone());
     let principal = live.begin_connection(b"cli").unwrap();
     let session = match live.dispatch(
         principal,
@@ -386,7 +380,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         other => panic!("{other:?}"),
     };
     drop(live);
-    let recovered_live = IntegrationService::open(BackendInstanceId::new(), &live_config).unwrap();
+    let recovered_live = open_with_script(live_config_store.clone(), live_config_script.clone());
     assert_eq!(
         recovered_live.authority.liveness(live_run),
         RunLiveness::UnknownAfterCrash,
@@ -401,12 +395,11 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
     let dir = temp_store();
     std::fs::create_dir_all(&dir).unwrap();
     let store_path = dir.join("agent.db");
-    let config = IntegrationConfig {
-        store_path: store_path.clone(),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
-    };
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
+    let config_store = store_path.clone();
     let first_instance = BackendInstanceId::new();
-    let mut service = IntegrationService::open(first_instance, &config).expect("open");
+    let mut service =
+        open_with_script_instance(first_instance, config_store.clone(), config_script.clone());
     let owner = service.owner_principal_id();
     let principal = service.begin_connection(b"cli").unwrap();
     let session = match service.dispatch(
@@ -426,7 +419,8 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
     drop(service);
 
     let second_instance = BackendInstanceId::new();
-    let mut restarted = IntegrationService::open(second_instance, &config).expect("reopen");
+    let mut restarted =
+        open_with_script_instance(second_instance, config_store.clone(), config_script.clone());
     // Prior process session cannot resume under a new BackendInstanceId.
     let principal = restarted.begin_connection(b"cli").unwrap();
     assert_eq!(
@@ -459,12 +453,9 @@ fn durable_principals_survive_restart_and_revoke_denies_after_reopen() {
 fn foreign_connection_session_bearing_commands_are_rejected_identically() {
     let dir = temp_store();
     std::fs::create_dir_all(&dir).unwrap();
-    let config = IntegrationConfig {
-        store_path: dir.join("agent.db"),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
-    };
-    let mut service =
-        IntegrationService::open(BackendInstanceId::new(), &config).expect("open service");
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
+    let config_store = dir.join("agent.db");
+    let mut service = open_with_script(config_store.clone(), config_script.clone());
     let owner = service.begin_connection(b"cli").expect("owner principal");
     let observer = service
         .begin_connection(b"observer")

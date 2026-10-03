@@ -1,7 +1,8 @@
 //! Process-level crash, restart, and idle evidence for the standalone daemon.
 //!
-//! Parent tests spawn the production `seyal-agent-backend` binary. That binary
-//! is the authoritative serve path; tests do not re-exec the test harness.
+//! Run-success, replay, and SIGKILL cases spawn the qualification binary
+//! (`fixture-host` Fake host). Production-binary cases cover hostless
+//! StartAgentRun fail-closed and rejection of `--output-bytes` (AB-1.9).
 
 mod support;
 
@@ -40,12 +41,16 @@ fn hello() -> Hello {
     }
 }
 
-fn daemon_bin() -> &'static str {
+fn production_bin() -> &'static str {
     env!("CARGO_BIN_EXE_seyal-agent-backend")
 }
 
-fn spawn_child(dir: &Path, output_bytes: usize) -> ChildDaemon {
-    let child = ProcessCommand::new(daemon_bin())
+fn qualification_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_seyal-agent-backend-qualification")
+}
+
+fn spawn_qualification(dir: &Path, output_bytes: usize) -> ChildDaemon {
+    let child = ProcessCommand::new(qualification_bin())
         .args([
             "--directory",
             dir.to_str().expect("utf-8 daemon directory"),
@@ -56,7 +61,21 @@ fn spawn_child(dir: &Path, output_bytes: usize) -> ChildDaemon {
         ])
         .stdin(Stdio::null())
         .spawn()
-        .expect("spawn seyal-agent-backend binary");
+        .expect("spawn seyal-agent-backend-qualification binary");
+    ChildDaemon(child)
+}
+
+fn spawn_production(dir: &Path) -> ChildDaemon {
+    let child = ProcessCommand::new(production_bin())
+        .args([
+            "--directory",
+            dir.to_str().expect("utf-8 daemon directory"),
+            "--deadline-secs",
+            "60",
+        ])
+        .stdin(Stdio::null())
+        .spawn()
+        .expect("spawn seyal-agent-backend production binary");
     ChildDaemon(child)
 }
 
@@ -169,7 +188,7 @@ fn parse_ps_time(text: &str) -> Option<Duration> {
 #[test]
 fn sigkill_restart_recovers_identities_and_fences_old_session() {
     let dir = temp_dir("sigkill");
-    let mut child = spawn_child(&dir, 4096);
+    let mut child = spawn_qualification(&dir, 4096);
     let socket = dir.join("agent.sock");
     let startup = wait_ready(&socket);
     assert_child_alive(&mut child.0, "startup");
@@ -214,7 +233,7 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
     child.0.kill().unwrap();
     child.0.wait().unwrap();
 
-    let mut restarted = spawn_child(&dir, 4096);
+    let mut restarted = spawn_qualification(&dir, 4096);
     let restart = wait_ready(&socket);
     let socket_for_client = socket.clone();
     let run_id = started.run_id;
@@ -284,7 +303,7 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
         .unwrap_or(0);
     let idle_cpu_ms = after.elapsed.saturating_sub(before.elapsed).as_millis();
     eprintln!(
-        "ab-1.1 process_measurement performance_claim=false host_class={} os={} arch={} build_mode={} startup_us={} restart_us={} idle_window_ms=2000 idle_cpu_ms={} idle_rss_kib={} post_run_rss_kib={} db_bytes={} wal_bytes={} daemon_bin=seyal-agent-backend",
+        "ab-1.1 process_measurement performance_claim=false host_class={} os={} arch={} build_mode={} startup_us={} restart_us={} idle_window_ms=2000 idle_cpu_ms={} idle_rss_kib={} post_run_rss_kib={} db_bytes={} wal_bytes={} daemon_bin=seyal-agent-backend-qualification",
         host_class(),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -305,7 +324,7 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
 fn repeated_sigkill_during_writes_reopens_deterministically() {
     let dir = temp_dir("repeat-kill");
     for iteration in 0..5 {
-        let mut child = spawn_child(&dir, 512 * 1024);
+        let mut child = spawn_qualification(&dir, 512 * 1024);
         let socket = dir.join("agent.sock");
         wait_ready(&socket);
         assert_child_alive(&mut child.0, "write iteration");
@@ -333,7 +352,7 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
         .unwrap()
         .agent_runs()
         .unwrap();
-    let mut child = spawn_child(&dir, 4096);
+    let mut child = spawn_qualification(&dir, 4096);
     let socket = dir.join("agent.sock");
     wait_ready(&socket);
     let socket_for_client = socket;
@@ -401,7 +420,7 @@ fn campaign_high_volume_session_workload() {
     let mut samples = Vec::new();
     for index in 0..5 {
         let dir = temp_dir(&format!("campaign-{index}"));
-        let mut child = spawn_child(&dir, 4 * 1024 * 1024);
+        let mut child = spawn_qualification(&dir, 4 * 1024 * 1024);
         let socket = dir.join("agent.sock");
         let startup = wait_ready(&socket);
         let socket_for_client = socket.clone();
@@ -515,4 +534,75 @@ fn campaign_high_volume_session_workload() {
             values.last().unwrap().as_micros()
         );
     }
+}
+
+#[test]
+fn production_start_agent_run_fails_closed_without_agent_run() {
+    let dir = temp_dir("prod-hostless");
+    let mut child = spawn_production(&dir);
+    let socket = dir.join("agent.sock");
+    wait_ready(&socket);
+    assert_child_alive(&mut child.0, "production startup");
+
+    let socket_for_client = socket.clone();
+    let worker = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket_for_client);
+        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        client.command(&Command::StartAgentRun {
+            session_id: client.session_id,
+            attempt_id: attempt,
+        })
+    });
+    let started = worker.join().unwrap();
+    assert_eq!(started, CommandResult::Error(CommandError::Failed));
+    assert_child_alive(&mut child.0, "after hostless StartAgentRun");
+
+    let store = AgentStore::open(dir.join("agent.db")).unwrap();
+    assert!(
+        store.agent_runs().unwrap().is_empty(),
+        "production Failed must leave no AgentRun"
+    );
+    drop(store);
+
+    // Fresh daemon on the same store must also see no AgentRun / observations.
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let restarted = spawn_production(&dir);
+    wait_ready(&socket);
+    let store = AgentStore::open(dir.join("agent.db")).unwrap();
+    assert!(store.agent_runs().unwrap().is_empty());
+    drop(store);
+    drop(restarted);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn production_binary_rejects_output_bytes_flag() {
+    let dir = temp_dir("prod-flag");
+    fs::create_dir_all(&dir).unwrap();
+    let output = ProcessCommand::new(production_bin())
+        .args([
+            "--directory",
+            dir.to_str().expect("utf-8 daemon directory"),
+            "--output-bytes",
+            "1024",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn production binary with --output-bytes");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "production binary must reject --output-bytes with exit 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown argument: --output-bytes"),
+        "stderr={stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
 }

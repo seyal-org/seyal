@@ -52,12 +52,12 @@ fn script() -> Vec<ScriptStep> {
 #[test]
 fn two_live_peers_owner_and_observer_share_authoritative_run() {
     let dir = temp_dir("concurrent-two-live");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -127,12 +127,12 @@ fn two_live_peers_owner_and_observer_share_authoritative_run() {
 #[test]
 fn observer_cannot_escalate_while_owner_is_live() {
     let dir = temp_dir("concurrent-no-escalate");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -193,12 +193,12 @@ fn peer_disconnect_leaves_other_connection_and_run_healthy() {
 
 fn peer_disconnect_variant(label: &str, response_in_flight: bool) {
     let dir = temp_dir(label);
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -279,13 +279,13 @@ fn stalled_pre_hello_peers_do_not_block_next_peer_admission() {
         read_timeout: handshake_timeout,
         ..DaemonConfig::default()
     };
-    let mut daemon = AgentDaemon::bind_integration_with(
+    let mut daemon = AgentDaemon::bind_integration_with_script_config(
         &dir,
         config,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -331,16 +331,16 @@ fn stalled_pre_hello_peers_do_not_block_next_peer_admission() {
 #[test]
 fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
     let dir = temp_dir("concurrent-dual-gap");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![
-                ScriptStep::Emit(HostObservationKind::Started),
-                ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
-                ScriptStep::Emit(HostObservationKind::KnownSuccess),
-            ],
         },
+        vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ],
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -450,16 +450,16 @@ fn stalled_reader_does_not_stall_other_peer() {
         session_idle_timeout: Duration::from_secs(30),
         ..DaemonConfig::default()
     };
-    let mut daemon = AgentDaemon::bind_integration_with(
+    let mut daemon = AgentDaemon::bind_integration_with_script_config(
         &dir,
         config,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![
-                ScriptStep::Emit(HostObservationKind::Started),
-                ScriptStep::Emit(HostObservationKind::Result(vec![9; 24 * 1024])),
-            ],
         },
+        vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Result(vec![9; 24 * 1024])),
+        ],
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -589,12 +589,12 @@ fn stalled_reader_does_not_stall_other_peer() {
 #[test]
 fn serial_serve_one_cannot_satisfy_two_live_rendezvous() {
     let dir = temp_dir("serial-rendezvous");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();

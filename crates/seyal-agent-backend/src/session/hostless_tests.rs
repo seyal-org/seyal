@@ -1,0 +1,185 @@
+//! Hostless StartAgentRun checks (AB-1.9 AC2/AC4) — no fixture-host required.
+
+use super::*;
+use seyal_agent_protocol::{
+    BackendInstanceId, Command, CommandError, CommandResult, ABSOLUTE_MAX_FRAME_SIZE,
+};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_STORE: AtomicU64 = AtomicU64::new(1);
+
+fn temp_store() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "seyal-session-hostless-{}-{}-{}",
+        std::process::id(),
+        NEXT_STORE.fetch_add(1, Ordering::Relaxed),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
+fn open_hostless() -> (PathBuf, IntegrationService, ClientPrincipalId) {
+    let dir = temp_store();
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+    };
+    let mut service =
+        IntegrationService::open(BackendInstanceId::new(), &config).expect("open hostless");
+    let principal = service.begin_connection(b"cli").expect("principal");
+    (dir, service, principal)
+}
+
+fn seed_attempt(service: &mut IntegrationService, principal: ClientPrincipalId) -> ClientSessionId {
+    let opened = service.dispatch(
+        principal,
+        Command::OpenSession {
+            scopes: vec![1, 2, 4],
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    let CommandResult::Opened { session_id } = opened else {
+        panic!("open session: {opened:?}");
+    };
+    let CommandResult::WorkScope { id: scope } = service.dispatch(
+        principal,
+        Command::CreateWorkScope {
+            session_id,
+            kind: WorkScopeKind::Repository,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("scope");
+    };
+    let CommandResult::WorkItem { id: item } = service.dispatch(
+        principal,
+        Command::CreateWorkItem {
+            session_id,
+            work_scope_id: scope,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("item");
+    };
+    let CommandResult::Attempt { .. } = service.dispatch(
+        principal,
+        Command::CreateAttempt {
+            session_id,
+            work_item_id: item,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("attempt");
+    };
+    session_id
+}
+
+#[test]
+fn start_agent_run_without_host_fails_closed_with_no_agent_run() {
+    let (dir, mut service, principal) = open_hostless();
+    let session_id = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+
+    let started = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    assert_eq!(started, CommandResult::Error(CommandError::Failed));
+    assert!(
+        service.store.agent_runs().unwrap().is_empty(),
+        "hostless Failed must not mint AgentRun"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn missing_attempt_is_not_found_not_failed_when_hostless() {
+    let (dir, mut service, principal) = open_hostless();
+    let session_id = seed_attempt(&mut service, principal);
+    let missing = AttemptId::new();
+    let result = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id: missing,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    assert_eq!(result, CommandResult::Error(CommandError::NotFound));
+    assert!(service.store.agent_runs().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn foreign_session_is_rejected_not_failed_when_hostless() {
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let foreign = ClientSessionId::new();
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let result = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id: foreign,
+            attempt_id,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    assert_eq!(result, CommandResult::Error(CommandError::RejectedSession));
+    assert!(service.store.agent_runs().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(feature = "fixture-host")]
+#[test]
+fn start_agent_run_uses_injected_host_script_via_collect_observations() {
+    use crate::{FakeExecutionHost, ScriptStep};
+
+    let dir = temp_store();
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+    };
+    let mut service = IntegrationService::open(BackendInstanceId::new(), &config).expect("open");
+    // Distinct from any historical default (Started + 0x05 output bytes).
+    let mut host = FakeExecutionHost::new(1024).unwrap();
+    host.set_script(vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::Progress { step: 7 }),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ]);
+    service.install_execution_host(Box::new(host));
+    let principal = service.begin_connection(b"cli").unwrap();
+    let session_id = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let started = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    let CommandResult::Started { event_count, .. } = started else {
+        panic!("expected Started via injected host: {started:?}");
+    };
+    // create-run append + three injected observations (not the old Started+0x05 default).
+    assert_eq!(event_count, 4);
+    assert_eq!(service.store.agent_runs().unwrap().len(), 1);
+    assert_eq!(service.authority.applied_count(), 3);
+    let _ = std::fs::remove_dir_all(dir);
+}

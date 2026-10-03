@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [features]
+fixture-host = []
 test-fault-injection = ["seyal-agent-store/test-fault-injection"]
 
 [dependencies]
@@ -20,6 +21,43 @@ libc = "=0.2.189"
 
 [dev-dependencies]
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+
+[[bin]]
+name = "seyal-agent-backend"
+path = "src/main.rs"
+
+[[bin]]
+name = "seyal-agent-backend-qualification"
+path = "src/bin/seyal-agent-backend-qualification.rs"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "integration_path"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "session_bounds"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "concurrent_serve"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "concurrent_fault_persistence"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "session_principal_binding"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "agent_harness_fuzz_smoke"
+required-features = ["fixture-host"]
+
+[[test]]
+name = "process_qualification"
+required-features = ["fixture-host"]
 
 [lints.rust]
 unsafe_code = "deny"

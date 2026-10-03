@@ -23,17 +23,27 @@ runtime_failure_matrix() {
 }
 
 agent_failure_matrix() {
+  # Production binary stays featureless; qualification binary needs fixture-host.
   cargo_pinned build -p seyal-agent-backend --bin seyal-agent-backend --locked
-  cargo_pinned test -p seyal-agent-backend --locked --features test-fault-injection \
+  cargo_pinned build -p seyal-agent-backend --bin seyal-agent-backend-qualification \
+    --features fixture-host --locked
+  cargo_pinned test -p seyal-agent-backend --locked \
+    --features fixture-host,test-fault-injection \
     --test integration_path --test session_bounds --test process_qualification -- --show-output
-  # SessionClient must exercise the daemon binary without linking seyal-agent-backend.
+  # SessionClient must exercise the daemon binaries without linking seyal-agent-backend.
   local target_dir="${CARGO_TARGET_DIR:-$ROOT/target}"
   if [[ -x "${target_dir}/debug/seyal-agent-backend" ]]; then
     export SEYAL_AGENT_BACKEND_BIN="${target_dir}/debug/seyal-agent-backend"
+    export SEYAL_AGENT_BACKEND_QUALIFICATION_BIN="${target_dir}/debug/seyal-agent-backend-qualification"
   elif [[ -x "${target_dir}/release/seyal-agent-backend" ]]; then
     export SEYAL_AGENT_BACKEND_BIN="${target_dir}/release/seyal-agent-backend"
+    export SEYAL_AGENT_BACKEND_QUALIFICATION_BIN="${target_dir}/release/seyal-agent-backend-qualification"
   else
     echo "seyal-agent-backend binary missing under ${target_dir}" >&2
+    exit 1
+  fi
+  if [[ ! -x "${SEYAL_AGENT_BACKEND_QUALIFICATION_BIN}" ]]; then
+    echo "seyal-agent-backend-qualification binary missing at ${SEYAL_AGENT_BACKEND_QUALIFICATION_BIN}" >&2
     exit 1
   fi
   cargo_pinned test -p seyal-agent-client --locked --test daemon_process_e2e -- --show-output

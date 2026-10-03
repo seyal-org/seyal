@@ -1,4 +1,6 @@
-use seyal_agent_core::{AgentRunId, BindingGeneration, ExecutionHost, ExecutionHostKind};
+use seyal_agent_core::{AgentRunId, BindingGeneration};
+#[cfg(feature = "fixture-host")]
+use seyal_agent_core::{ExecutionHost, ExecutionHostKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostObservationKind {
@@ -24,6 +26,24 @@ pub struct HostObservation {
     pub kind: HostObservationKind,
 }
 
+/// Object-safe host seam for [`crate::IntegrationService`] (AB-1.9).
+///
+/// Distinct from the associated-type [`ExecutionHost`] in `seyal-agent-core` so
+/// the session path can hold `Option<Box<dyn SessionExecutionHost>>`. Concrete
+/// hosts map their errors to `Err(())`; the session path reports
+/// [`seyal_agent_protocol::CommandError::Failed`].
+pub trait SessionExecutionHost: Send {
+    // Unit error keeps the object-safe seam free of host-specific error types;
+    // IntegrationService maps `Err(())` to CommandError::Failed (#1196).
+    #[allow(clippy::result_unit_err)]
+    fn collect_observations(
+        &mut self,
+        run_id: AgentRunId,
+        binding_generation: BindingGeneration,
+    ) -> Result<Vec<HostObservation>, ()>;
+}
+
+#[cfg(feature = "fixture-host")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScriptStep {
     Emit(HostObservationKind),
@@ -36,6 +56,7 @@ pub enum ScriptStep {
     DelayTicks(u64),
 }
 
+#[cfg(feature = "fixture-host")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScriptError {
     ZeroOutputChunk,
@@ -48,14 +69,16 @@ pub enum ScriptError {
 
 /// Deterministic provider-free ExecutionHost fixture (AB-0 / AB-1).
 ///
-/// `execute` remains the scripted API used by the session path. When a script
-/// is installed via [`FakeExecutionHost::set_script`], [`ExecutionHost::collect_observations`]
-/// dispatches through the typed seam.
+/// Available only behind `fixture-host`. Production composition never installs
+/// this host; qualification and in-process tests inject it through
+/// [`SessionExecutionHost`].
+#[cfg(feature = "fixture-host")]
 pub struct FakeExecutionHost {
     max_output_chunk: usize,
     script: Vec<ScriptStep>,
 }
 
+#[cfg(feature = "fixture-host")]
 impl FakeExecutionHost {
     pub fn new(max_output_chunk: usize) -> Result<Self, ScriptError> {
         if max_output_chunk == 0 {
@@ -145,6 +168,7 @@ impl FakeExecutionHost {
     }
 }
 
+#[cfg(feature = "fixture-host")]
 impl ExecutionHost for FakeExecutionHost {
     type Observation = HostObservation;
     type Error = ScriptError;
@@ -165,7 +189,18 @@ impl ExecutionHost for FakeExecutionHost {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "fixture-host")]
+impl SessionExecutionHost for FakeExecutionHost {
+    fn collect_observations(
+        &mut self,
+        run_id: AgentRunId,
+        binding_generation: BindingGeneration,
+    ) -> Result<Vec<HostObservation>, ()> {
+        ExecutionHost::collect_observations(self, run_id, binding_generation).map_err(|_| ())
+    }
+}
+
+#[cfg(all(test, feature = "fixture-host"))]
 mod tests {
     use super::*;
     use seyal_agent_core::{AgentDomain, WorkScopeKind};

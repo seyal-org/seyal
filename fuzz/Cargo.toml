@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-seyal-agent-backend = { path = "../crates/seyal-agent-backend" }
+seyal-agent-backend = { path = "../crates/seyal-agent-backend", features = ["fixture-host"] }
 seyal-agent-core = { path = "../crates/seyal-agent-core" }
 seyal-agent-protocol = { path = "../crates/seyal-agent-protocol" }
 seyal-exec = { path = "../crates/seyal-exec" }

@@ -8,7 +8,11 @@ mod frame_io;
 mod recovery;
 mod wire;
 
+#[cfg(all(test, feature = "fixture-host"))]
+mod fixture_support;
 #[cfg(test)]
+mod hostless_tests;
+#[cfg(all(test, feature = "fixture-host"))]
 mod tests;
 
 pub(crate) use frame_io::{read_session_frame, SessionRead};
@@ -27,9 +31,9 @@ use seyal_agent_protocol::{
 use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN};
 
 use crate::{
-    AuthorizationRepository, ClientScope, DurablePrincipal, FakeExecutionHost, HostObservation,
-    HostObservationKind, ObservationAuthority, ObserveError, PrincipalKind, PrincipalStatus,
-    RunLiveness, ScriptStep,
+    AuthorizationRepository, ClientScope, DurablePrincipal, HostObservation, HostObservationKind,
+    ObservationAuthority, ObserveError, PrincipalKind, PrincipalStatus, RunLiveness,
+    SessionExecutionHost,
 };
 
 use recovery::restore_identities;
@@ -38,13 +42,11 @@ use wire::{
     to_aggregate, ReplayPage,
 };
 
-const OUTPUT_CHUNK: usize = 1024;
 const EVENT_OBSERVATION: u16 = 2;
 
 #[derive(Clone, Debug)]
 pub struct IntegrationConfig {
     pub store_path: PathBuf,
-    pub script: Vec<ScriptStep>,
 }
 
 pub struct IntegrationService {
@@ -56,8 +58,7 @@ pub struct IntegrationService {
     auth: AuthorizationRepository,
     authority: ObservationAuthority,
     store: AgentStore,
-    host: FakeExecutionHost,
-    script: Vec<ScriptStep>,
+    host: Option<Box<dyn SessionExecutionHost>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,10 +71,6 @@ impl IntegrationService {
         instance_id: seyal_agent_protocol::BackendInstanceId,
         config: &IntegrationConfig,
     ) -> Result<Self, ServiceError> {
-        if config.script.is_empty() {
-            return Err(ServiceError::Failed);
-        }
-        let host = FakeExecutionHost::new(OUTPUT_CHUNK).map_err(|_| ServiceError::Failed)?;
         let store = AgentStore::open(&config.store_path).map_err(|_| ServiceError::Failed)?;
         let mut auth = AuthorizationRepository::default();
         let (owner_principal_id, observer_principal_id) =
@@ -87,12 +84,14 @@ impl IntegrationService {
             auth,
             authority,
             store,
-            host,
-            script: config.script.clone(),
+            host: None,
         })
     }
 
-    /// Persist revoke/suspend across restart: dual-write auth + durable store (#1178 AC3).
+    pub fn install_execution_host(&mut self, host: Box<dyn SessionExecutionHost>) {
+        self.host = Some(host);
+    }
+
     pub fn set_principal_status(
         &mut self,
         id: ClientPrincipalId,
@@ -346,12 +345,12 @@ impl IntegrationService {
         if self.authority.domain().attempt(attempt_id).is_none() {
             return CommandResult::Error(CommandError::NotFound);
         }
+        if self.host.is_none() {
+            return CommandResult::Error(CommandError::Failed);
+        }
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
         let control = ControlGeneration::FIRST;
-        // Persist the run before host observations. A later allow_run/host
-        // failure returns Failed even though the row remains for recovery
-        // (false failure, not false success).
         if self
             .store
             .mutate_agent_run_and_append(
@@ -376,16 +375,15 @@ impl IntegrationService {
         }
         self.auth.allow_run_for_observers(run_id);
 
-        let observations = match self.host.execute(run_id, binding, &self.script) {
+        let host = self.host.as_mut().expect("host checked present");
+        let observations = match host.collect_observations(run_id, binding) {
             Ok(observations) => observations,
-            Err(_) => return CommandResult::Error(CommandError::Failed),
+            Err(()) => return CommandResult::Error(CommandError::Failed),
         };
         if let Err(error) = self.commit_observation_batch(observations) {
             return CommandResult::Error(error);
         }
         let aggregate = AggregateId::AgentRun(run_id);
-        // Event count is the aggregate high-water mark. Do not load full replay
-        // payloads solely to count events (AB-1.6 / AB-0 shortcut removal).
         let event_count = match self.store.high_water(aggregate) {
             Ok(count) if count > 0 => count,
             _ => return CommandResult::Error(CommandError::Failed),

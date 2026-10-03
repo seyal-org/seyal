@@ -141,6 +141,17 @@ make docs-check    # run Starlight/Astro documentation validation
 
 `make docs` requires Node.js 22.12 or later. Do not create competing undocumented command paths.
 
+### Agent Backend daemon binaries (AB-1.9)
+
+- Production: `seyal-agent-backend --directory <path>` — builds without Cargo features and
+  installs **no** execution host. `StartAgentRun` fails closed with no durable AgentRun.
+  `--output-bytes` is unknown (exit 2).
+- Qualification: `seyal-agent-backend-qualification` (requires `--features fixture-host`) —
+  injects the scripted `FakeExecutionHost` fixture through the same typed seam for
+  process/qualification tests. Prefer this binary for fabricated-run scenarios.
+- Developer stores created by the pre-AB-1.9 production binary may contain fabricated
+  runs; discard them. There is no migration.
+
 Current behavior after Passes 1–10 (M001 **Done / closed**; Pass 10 #727 and parent #5 closed on freeze `c536c54`):
 
 - `make bootstrap` provisions/verifies the pinned Rust toolchain and, on macOS, validates full Xcode + Swift + macOS SDK + Metal tooling when that host tree exists;
