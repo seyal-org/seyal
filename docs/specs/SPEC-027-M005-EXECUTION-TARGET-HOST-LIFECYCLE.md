@@ -165,15 +165,15 @@ Until #1191 pairing is Done, `UserApprovedLocalClient` and `ManagedClient` canno
 
 ### 8.1 Command error
 
-`ExecutionTargetUnavailable` is a first-class `CommandError`. It is not `Failed`, `Denied`, or `NotFound`.
+`ExecutionTargetUnavailable` is a first-class `CommandError`. It is not `Failed`, `Denied`, `NotFound`, `AdapterNotEnabled`, or `AdapterExecuteDenied`.
 
-It is returned when checks 1–3 and 5 passed and:
+It is returned in these cases only, after checks 1–3 have passed:
 
-- no ExecutionHost of the required kind is composed (today: production `None`); or
-- §4.3 cannot resolve a pin/singleton (`ExecutionTargetUnavailable` cases only); or
-- the frozen launch descriptor cannot be materialized.
+- **§7 step 4 / §4.3, before `adapter.execute`:** unknown or uninstalled pin, hard-constraint miss, or unpinned zero/many enabled offerings;
+- **§7 step 6, after `adapter.execute` succeeded:** no ExecutionHost of the required kind is composed (today: production `None`);
+- after a target was resolved: the frozen launch descriptor cannot be materialized.
 
-It is **not** returned for a disabled adapter (`AdapterNotEnabled`) or a missing `adapter.execute` grant (`AdapterExecuteDenied`).
+A disabled adapter is always `AdapterNotEnabled` (§4.3 pin of a present but disabled adapter). A missing `adapter.execute` grant is always `AdapterExecuteDenied` (§7 step 5). Neither is `ExecutionTargetUnavailable`.
 
 No AgentRun, RoutingDecision, or observation is written.
 
@@ -262,8 +262,8 @@ In addition to SPEC-026 §12:
 
 | Code | Meaning |
 |---|---|
-| `ExecutionTargetUnavailable` | No composed host, no resolvable pin/singleton, or frozen descriptor missing |
-| `AdapterNotEnabled` | Pin or singleton refers to a disabled/uninstalled adapter |
+| `ExecutionTargetUnavailable` | No composed host; unknown/uninstalled pin; unpinned zero/many offerings; hard-constraint miss; or frozen descriptor missing |
+| `AdapterNotEnabled` | Pin names an installed offering whose adapter is disabled |
 | `AdapterExecuteDenied` | Principal lacks `adapter.execute` for that adapter |
 
 `Denied` remains correct when the session lacks `runs.create`. Do not collapse adapter-execute failure into `ExecutionTargetUnavailable`.
