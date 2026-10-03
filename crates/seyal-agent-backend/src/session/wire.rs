@@ -110,9 +110,9 @@ pub(super) fn observation_payload(observation: &HostObservation) -> Vec<u8> {
 
 pub(super) fn map_auth(error: AuthorizationError) -> CommandError {
     match error {
-        AuthorizationError::UnknownSession | AuthorizationError::StaleBackendInstance => {
-            CommandError::RejectedSession
-        }
+        AuthorizationError::UnknownSession
+        | AuthorizationError::StaleBackendInstance
+        | AuthorizationError::SessionPrincipalMismatch => CommandError::RejectedSession,
         AuthorizationError::Malformed | AuthorizationError::ReplayedRequest => {
             CommandError::Malformed
         }
