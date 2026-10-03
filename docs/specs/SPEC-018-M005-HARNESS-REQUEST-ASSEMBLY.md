@@ -33,6 +33,8 @@ SeyalTerminalExecutionHost references Runtime-owned TerminalExecution. The Agent
 
 Standalone V1 may mark TTY-required harness routes unsupported rather than implement a second PTY stack.
 
+Production host composition, launch-descriptor resolution, and the supervised start/observe/cancel/reap contract (replacing collect-until-exit `collect_observations`) are specified by Proposed [`SPEC-027`](SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md). Until that specification is Accepted they are not an implemented-behavior claim.
+
 ## 3. Adapter manifest and handshake
 
 Manifest includes:
@@ -47,6 +49,8 @@ Manifest includes:
 Manifest scopes are not OS sandbox proof.
 
 Repository content cannot silently install/enable an adapter.
+
+Program, argv, environment and cwd for a standalone host process come only from an installed and enabled manifest launch descriptor (Proposed SPEC-027 §5–§6). They are never daemon CLI flags and never `StartAgentRun` client fields.
 
 Handshake negotiates protocol/schema versions, frame bounds and capability versions. Unknown control capability versions fail closed.
 

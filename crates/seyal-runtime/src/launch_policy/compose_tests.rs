@@ -422,3 +422,45 @@ fn live_default_interactive_resolves_on_macos() {
     assert!(out.policy.cwd().is_absolute());
     assert!(out.policy.clear_environment());
 }
+
+/// L4: cold `[shell]` config changes the next resolve's program/cwd/login bit.
+#[test]
+fn seyal_config_shell_table_drives_default_interactive_resolve() {
+    let _guard = super::process_env_test_lock();
+    let dir = std::env::temp_dir().join(format!(
+        "seyal-l4-resolve-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let cwd = dir.join("workdir");
+    std::fs::create_dir_all(&cwd).expect("workdir");
+    let config_path = dir.join("config.toml");
+    let toml = format!(
+        "[shell]\nprogram = \"/bin/bash\"\ncwd = \"{}\"\nlogin = false\n",
+        cwd.display()
+    );
+    std::fs::write(&config_path, toml).expect("write config");
+
+    let previous = std::env::var_os(super::ENV_CONFIG);
+    // SAFETY: test holds process_env_test_lock; restored before unlock.
+    unsafe { std::env::set_var(super::ENV_CONFIG, &config_path) };
+
+    let out = resolve_default_interactive().expect("configured resolve");
+    assert_eq!(out.policy.program(), Path::new("/bin/bash"));
+    assert_eq!(out.policy.cwd(), cwd.as_path());
+    assert_eq!(out.policy.argv(), &[OsString::from("-i")]);
+    assert!(out.warnings.is_empty());
+
+    // SAFETY: still holds process_env_test_lock.
+    unsafe {
+        match previous {
+            Some(value) => std::env::set_var(super::ENV_CONFIG, value),
+            None => std::env::remove_var(super::ENV_CONFIG),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

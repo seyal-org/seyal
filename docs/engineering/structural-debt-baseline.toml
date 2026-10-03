@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 884
+acknowledged_loc = 914
 issue = 1010
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate, #928 MoveSplitDivider/NoSplitDivider, P3 provisioning terminate/create, and #867 resting Flow/Raw fields; goto_apply.rs, chrome_apply.rs, provisioning_apply.rs, and presentation_apply.rs own the reducers. #1010 adds only the RerunBlock action variant and dispatch arm, its three fail-closed errors, the snapshot_generation accessor the FFI row cache keys on, and the block_rerun_tests module declaration; the Rerun reducer lives in composer_apply.rs and its tests in block_rerun_tests.rs."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after tip A navigate/goto/provisioning/#867 resting fields plus tip C ChordPrefixState, ActionUnavailable, and R6.4.1 CreateTab/OpenPalette menu gates (#1106); keybinding_apply.rs owns match/dispatch and presentation_apply.rs owns resting transitions. #1010 adds only the RerunBlock action variant and dispatch arm, its three fail-closed errors, the snapshot_generation accessor the FFI row cache keys on, and the block_rerun_tests module declaration; the Rerun reducer lives in composer_apply.rs and its tests in block_rerun_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,9 +77,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 954
+acknowledged_loc = 960
 issue = 1010
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual extraction; master absorbs #928 MoveSplitDivider, P3 provisioning, SPEC-022 navigate/goto, and the shell_composition_tests declaration, with product decode in decode.rs. #1010 moves the AppError wire-number map into error_code.rs and adds only the block_actions module declaration/re-exports and the per-handle Block action row buffers and generation key; the action/copy exports live in block_actions.rs and row encoding in encode.rs."
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49, tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs (#1106); product decode lives in decode.rs. #1010 adds only the block_actions module declaration/re-exports and the per-handle Block action row buffers and generation key; Rerun errors 51-53 live in error_code.rs, the action/copy exports in block_actions.rs and row encoding in encode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -208,3 +208,17 @@ path = "crates/seyal-client/src/shell/mod.rs"
 acknowledged_loc = 728
 issue = 1105
 reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after absorbing L2 navigation inventory/commit_focus helpers, #928 MoveSplitDivider/NoSplitDivider, and P3 release_execution/take_removed_tab_panes detach-only dispose. Tree/window details stay in tree.rs and workspace.rs. Ceiling matches post-master-merge LOC."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView.swift"
+acknowledged_loc = 774
+issue = 1010
+reason = "Thin AppKit chrome host stays one cold-path façade; #1010 adds only the design-doc Block spacing/inset values and the Rust-built Block copy pasteboard callback wiring. #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+
+# #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/keybinding/tests.rs"
+acknowledged_loc = 701
+issue = 1106
+reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
+

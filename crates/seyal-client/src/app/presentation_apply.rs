@@ -34,6 +34,7 @@ impl ApplicationRoot {
                 epoch: current.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.clear_chord_prefix();
         self.sync_composer_presentation();
         Ok(())
     }

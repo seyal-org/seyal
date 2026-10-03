@@ -33,6 +33,8 @@ int main(void) {
     REQUIRE(SEYAL_APP_ACTION_TERMINATE_EXECUTION == 59);
     REQUIRE(SEYAL_APP_ACTION_NAVIGATE == 60);
     REQUIRE(SEYAL_APP_ACTION_RERUN_BLOCK == 63);
+    REQUIRE(sizeof(SeyalAppShortcutItem) == 64);
+    REQUIRE(offsetof(SeyalAppShortcutItem, key_base) == 12);
     REQUIRE(sizeof(SeyalAppPaneRegion) == 40);
     REQUIRE(offsetof(SeyalAppPaneRegion, x) == 24);
     REQUIRE(sizeof(SeyalAppPaneDivider) == 56);

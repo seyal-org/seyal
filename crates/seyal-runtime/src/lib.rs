@@ -43,14 +43,16 @@ pub use ids::{AttachmentId, BlockId, ExecutionId, ProjectionId, RuntimeId, Works
 pub use input::InputIngress;
 pub use launch_policy::{
     account_record_usable, command_spec_from_policy, compose_child_command, darwin_user_temp_dir,
-    encode_created_warnings, encode_launch_policy_failure, interactive_login_argv, is_valid_cwd,
-    is_valid_shell_program, lookup_effective_account_record, path_has_forbidden_chars,
-    resolve as resolve_launch_policy, resolve_default_interactive, AccountRecord,
-    CapabilityProfileId, ComposedChildCommand, CreateResultWire, EffectiveLaunchPolicy,
-    EmptyLocaleEnv, InteractiveCreateOutcome, LaunchPolicyFailure, LaunchPolicyResolution,
-    LaunchPolicyWarning, LaunchProfileIntent, LocaleEnv, PathProbe, ProcessLocaleEnv,
-    RealPathProbe, ResolveInputs, ShellFamily, CREATED_RESULT_CODE, DEFAULT_PATH,
-    PLATFORM_SAFE_FALLBACKS,
+    encode_created_warnings, encode_launch_policy_failure, interactive_argv,
+    interactive_login_argv, is_valid_cwd, is_valid_shell_program, launch_config_path,
+    launch_config_path_from, load_launch_profile_intent, load_launch_profile_intent_from_path,
+    load_launch_profile_intent_from_text, lookup_effective_account_record,
+    path_has_forbidden_chars, resolve as resolve_launch_policy, resolve_default_interactive,
+    resolve_interactive_intent, AccountRecord, CapabilityProfileId, ComposedChildCommand,
+    CreateResultWire, EffectiveLaunchPolicy, EmptyLocaleEnv, InteractiveCreateOutcome,
+    LaunchPolicyFailure, LaunchPolicyResolution, LaunchPolicyWarning, LaunchProfileIntent,
+    LocaleEnv, PathProbe, ProcessLocaleEnv, RealPathProbe, ResolveInputs, ShellFamily,
+    CREATED_RESULT_CODE, DEFAULT_PATH, ENV_CONFIG, PLATFORM_SAFE_FALLBACKS,
 };
 #[cfg(feature = "benchmark-instrumentation")]
 #[doc(hidden)]

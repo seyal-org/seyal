@@ -10,6 +10,7 @@ mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod goto_apply;
+mod keybinding_apply;
 mod palette_apply;
 mod presentation_apply;
 mod provisioning_apply;
@@ -20,6 +21,8 @@ use accessibility::accessibility_nodes;
 
 #[cfg(test)]
 mod block_rerun_tests;
+#[cfg(test)]
+mod keybinding_apply_tests;
 #[cfg(test)]
 mod presentation_tests;
 #[cfg(test)]
@@ -42,6 +45,7 @@ use crate::composer::{
     RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
+use crate::keybinding::ChordPrefixState;
 use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion, SplitPosition};
@@ -118,6 +122,9 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
+    /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
+    /// ABI numeric code 50 (after tip A goto errors 47-49).
+    ActionUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -459,6 +466,8 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
+    pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
     /// Last canonical alternate-screen evidence. TUI while this is set.
     alternate_screen: bool,
@@ -519,6 +528,7 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
@@ -527,6 +537,11 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
+    }
+
+    /// R8.4: clear chord prefix without dispatch and without PTY bytes.
+    pub(crate) fn clear_chord_prefix(&mut self) {
+        self.chord_prefix.clear();
     }
 
     /// Portable provisioning session (ADR-017 C1). Hosts/wire adapters drive
@@ -754,7 +769,15 @@ impl ApplicationRoot {
             }
             AppAction::SelectWorkspace { id } => self.select_workspace(id),
             AppAction::SelectTab { id } => self.select_tab(id),
-            AppAction::CreateTab => self.create_tab(),
+            AppAction::CreateTab => {
+                // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.
+                if self.palette.is_open() {
+                    self.require_workspace_command_for_menu(
+                        crate::keybinding::WorkspaceCommandId::TabCreate,
+                    )?;
+                }
+                self.create_tab()
+            }
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
@@ -768,7 +791,14 @@ impl ApplicationRoot {
                 inspector,
                 tab_strip,
             } => self.set_shell_visibility(left, inspector, tab_strip),
-            AppAction::OpenPalette { fence } => self.open_palette(fence),
+            AppAction::OpenPalette { fence } => {
+                if self.palette.is_open() {
+                    self.require_workspace_command_for_menu(
+                        crate::keybinding::WorkspaceCommandId::CommandPaletteOpen,
+                    )?;
+                }
+                self.open_palette(fence)
+            }
             AppAction::SetPaletteQuery { fence, query } => self.set_palette_query(fence, query),
             AppAction::MovePaletteSelection { fence, delta } => {
                 self.move_palette_selection(fence, delta)
@@ -831,7 +861,7 @@ impl ApplicationRoot {
         }
     }
 
-    fn fail(&mut self, error: AppError) -> Result<(), AppError> {
+    pub(crate) fn fail(&mut self, error: AppError) -> Result<(), AppError> {
         self.last_error = Some(error);
         Err(error)
     }

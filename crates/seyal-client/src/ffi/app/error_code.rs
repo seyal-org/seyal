@@ -55,7 +55,8 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::GotoNotOpen => 47,
         AppError::GotoNoSelection => 48,
         AppError::GotoUnsupportedScope => 49,
-        // #1010 Block Rerun. 50 is reserved by in-flight #1212 (ActionUnavailable).
+        AppError::ActionUnavailable => 50,
+        // #1010 Block Rerun.
         AppError::BlockRunning => 51,
         AppError::ComposerUnavailable => 52,
         AppError::ComposerDraftOccupied => 53,

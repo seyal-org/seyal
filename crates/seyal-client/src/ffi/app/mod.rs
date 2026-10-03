@@ -9,7 +9,10 @@ mod decode;
 mod encode;
 mod error_code;
 mod pane_region;
+mod shortcut;
 mod visual;
+
+use error_code::error_number;
 
 #[cfg(test)]
 mod shell_composition_tests;
@@ -33,13 +36,16 @@ use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
     encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
-use error_code::error_number;
 
 pub use block_actions::{
     seyal_app_block_action_count, seyal_app_block_action_row, seyal_app_request_block_copy,
 };
 pub use block_projection::seyal_app_block_projection;
 pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
+pub use shortcut::{
+    seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
+    seyal_app_shortcut_enabled, seyal_app_shortcut_item,
+};
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,

@@ -1715,6 +1715,337 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
     }
 
+    @MainActor
+    func testOpenGotoReusesPaletteOverlayWithDefaultPanesScope() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.openGoto()
+        let palette = seyal_app_palette(view.pane.appHandle)
+        XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_OPEN), 0)
+        XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
+        XCTAssertEqual(
+            UInt8(palette.reserved & 0xff),
+            UInt8(SEYAL_APP_GOTO_PANES.rawValue)
+        )
+    }
+
+    func testCommandKNormalizesToTheCommandModifierAndLowercaseK() throws {
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        let payload = try XCTUnwrap(KeybindingStrokeNormalizer.normalize(event))
+        XCTAssertEqual(payload.modifierBits, 1)
+        XCTAssertEqual(payload.namedKey, 0)
+        XCTAssertEqual(payload.base, UInt32(UnicodeScalar("k").value))
+        XCTAssertEqual(payload.shiftApplied, 0)
+    }
+
+    func testF5NormalizesAsNamedKeyThirteen() throws {
+        let f5 = String(Character(UnicodeScalar(NSF5FunctionKey)!))
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: f5,
+            charactersIgnoringModifiers: f5,
+            isARepeat: false,
+            keyCode: 96
+        ))
+        let payload = try XCTUnwrap(KeybindingStrokeNormalizer.normalize(event))
+        XCTAssertEqual(payload.namedKey, 1)
+        XCTAssertEqual(payload.base, KeybindingStrokeNormalizer.namedF5)
+        XCTAssertEqual(payload.shiftApplied, 0)
+    }
+
+    func testNamedKeyEquivalentMapsFKeysAndNavigation() {
+        XCTAssertEqual(
+            KeybindingShortcutRealization.namedKeyEquivalent(13),
+            String(Character(UnicodeScalar(NSF5FunctionKey)!))
+        )
+        XCTAssertEqual(
+            KeybindingShortcutRealization.namedKeyEquivalent(21),
+            String(Character(UnicodeScalar(NSHomeFunctionKey)!))
+        )
+        XCTAssertEqual(
+            KeybindingShortcutRealization.namedKeyEquivalent(25),
+            String(Character(UnicodeScalar(NSDeleteFunctionKey)!))
+        )
+    }
+
+    func testShortcutRealizationReadsTheRustCommandPaletteEquivalent() throws {
+        let row = try XCTUnwrap(
+            KeybindingShortcutRealization.item(commandId: KeybindingShortcutRealization.commandPaletteOpen)
+        )
+        XCTAssertEqual(row.command_id, KeybindingShortcutRealization.commandPaletteOpen)
+        XCTAssertNotEqual(row.has_key_equivalent, 0)
+    }
+
+    /// R6.2.1: Command key equivalents route through Rust before the main menu.
+    @MainActor
+    func testPerformKeyEquivalentRoutesCommandBeforeMenu() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        XCTAssertTrue(
+            view.performKeyEquivalent(with: event),
+            "matched cmd+k must be consumed before AppKit menu dispatch"
+        )
+        let palette = seyal_app_palette(view.pane.appHandle)
+        XCTAssertNotEqual(
+            palette.flags & UInt16(SEYAL_APP_PALETTE_OPEN),
+            0,
+            "Rust should have opened the palette via route_keystroke"
+        )
+    }
+
+    /// §6.2 step 2c: unbound Cmd+Left is native — must not be swallowed as consumed.
+    @MainActor
+    func testPerformKeyEquivalentLeavesUnboundCmdLeftNative() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command, .numericPad, .function],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{F702}",
+            charactersIgnoringModifiers: "\u{F702}",
+            isARepeat: false,
+            keyCode: 123
+        ))
+        let routed = KeybindingStrokeNormalizer.route(
+            appHandle: view.pane.appHandle,
+            event: event,
+            composerFocused: true,
+            compositionActive: false
+        )
+        guard case .nativeCommand = routed else {
+            XCTFail("unbound Cmd+Left must report native for composer text editing, got \(routed)")
+            return
+        }
+        // No window/menu ownership here: native path calls super and returns false.
+        XCTAssertFalse(
+            view.performKeyEquivalent(with: event),
+            "unbound Cmd+Left must not be consumed by the host"
+        )
+    }
+
+    /// R8.4 via R6.2.1: `performKeyEquivalent` must forward marked-text from the
+    /// focused metal surface (not hardcode `compositionActive: false`).
+    @MainActor
+    func testPerformKeyEquivalentSeesCompositionOnFocusedSurface() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        XCTAssertTrue(window.makeFirstResponder(view.inputSurface))
+        XCTAssertFalse(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            ),
+            "no marked text yet"
+        )
+
+        view.inputSurface.setMarkedText(
+            "ni",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        XCTAssertTrue(view.inputSurface.hasMarkedText())
+        XCTAssertTrue(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            ),
+            "focused metal surface with marked text must report composition"
+        )
+
+        // Wiring check: performKeyEquivalent must use the live probe. A matched
+        // single-stroke (⌘K) still consumes during composition (match precedes
+        // the R8.4 gate); the probe must still be true at the call site.
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        XCTAssertTrue(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            )
+        )
+        _ = view.performKeyEquivalent(with: event)
+        XCTAssertTrue(
+            view.inputSurface.hasMarkedText(),
+            "routing must not clear marked text as a side effect"
+        )
+    }
+
+    /// R8.4: palette / Go to… query field editor marked text must count as
+    /// composition so Command chord prefixes cannot activate during overlay IME.
+    @MainActor
+    func testPerformKeyEquivalentSeesCompositionOnPaletteQueryFieldEditor() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.openGoto()
+        view.layoutSubtreeIfNeeded()
+        let query = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-command-palette-query") as? NSTextField,
+            "goto overlay must expose the query field"
+        )
+        XCTAssertTrue(window.makeFirstResponder(query))
+        let editor = try XCTUnwrap(
+            (query.currentEditor() as? NSTextView) ?? (window.firstResponder as? NSTextView),
+            "NSTextField must install a field editor while first responder"
+        )
+
+        XCTAssertFalse(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            ),
+            "no marked text on palette query yet"
+        )
+
+        editor.setMarkedText(
+            "ni",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        XCTAssertTrue(editor.hasMarkedText())
+        XCTAssertTrue(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            ),
+            "focused palette/goto field editor with marked text must report composition"
+        )
+
+        // Live wiring: performKeyEquivalent must see the probe as true. Do not
+        // assert marked text survives afterward — reconcile may rewrite the
+        // query from Rust and AppKit field-editor IME state is not sticky across
+        // that path.
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        XCTAssertTrue(
+            ProductChromeHostView.compositionActiveForKeyRouting(
+                responder: window.firstResponder as? NSView,
+                composer: view.composer,
+                inputSurface: view.inputSurface
+            )
+        )
+        _ = view.performKeyEquivalent(with: event)
+    }
+
+    /// R11.2 / R6.4.1: Go to… is a projected WorkspaceCommand (title, enablement, invoke).
+    @MainActor
+    func testGotoMenuItemUsesProjectionInvokeAndRouteEnablement() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let item = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        item.target = view
+        KeybindingShortcutRealization.realize(item, commandId: KeybindingShortcutRealization.gotoOpen)
+        XCTAssertEqual(item.representedObject as? UInt16, KeybindingShortcutRealization.gotoOpen)
+        XCTAssertEqual(item.title, "Go to…")
+        XCTAssertTrue(
+            view.validateMenuItem(item),
+            "goto.open is app-route permitted while the palette is closed"
+        )
+
+        view.openCommandPalette()
+        XCTAssertFalse(
+            view.validateMenuItem(item),
+            "non-palette menu commands must disable while the palette owns the route"
+        )
+
+        // Fresh host: menu-invoke goto through the projected WorkspaceCommand path.
+        let invokeView = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let invokeItem = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        invokeItem.target = invokeView
+        KeybindingShortcutRealization.realize(
+            invokeItem,
+            commandId: KeybindingShortcutRealization.gotoOpen
+        )
+        invokeView.invokeProjectedWorkspaceCommand(invokeItem)
+        let palette = seyal_app_palette(invokeView.pane.appHandle)
+        XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
+    }
+
 }
 
 @discardableResult

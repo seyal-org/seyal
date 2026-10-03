@@ -33,14 +33,18 @@ impl fmt::Debug for CapabilityProfileId {
 }
 
 /// Runtime-local intent derived from a launch-profile selector (profile `0`
-/// today). Future named profiles (#676) extend fields; they do not put paths on
-/// the provisioning wire.
+/// today) plus optional cold `[shell]` config (L4). Named profiles may extend
+/// fields later; they do not put paths on the provisioning wire (ADR-017).
 #[derive(Clone)]
 pub struct LaunchProfileIntent {
-    /// Optional configured shell override (future #676). Absent for profile `0`.
+    /// Optional configured shell override from `[shell].program`.
     pub configured_shell: Option<PathBuf>,
-    /// Optional explicit CWD override (future #676). Absent for profile `0`.
+    /// Optional explicit CWD override from `[shell].cwd`.
     pub cwd_override: Option<PathBuf>,
+    /// Login interactive when true (default). `false` requests non-login
+    /// interactive argv for families that support a login flag. `/bin/sh` and
+    /// unknown families remain non-login regardless (SPEC-023 §5.2).
+    pub login: bool,
     pub capability_profile: CapabilityProfileId,
 }
 
@@ -50,6 +54,7 @@ impl LaunchProfileIntent {
         Self {
             configured_shell: None,
             cwd_override: None,
+            login: true,
             capability_profile: CapabilityProfileId::M001,
         }
     }
@@ -60,6 +65,7 @@ impl fmt::Debug for LaunchProfileIntent {
         f.debug_struct("LaunchProfileIntent")
             .field("has_configured_shell", &self.configured_shell.is_some())
             .field("has_cwd_override", &self.cwd_override.is_some())
+            .field("login", &self.login)
             .field("capability_profile", &self.capability_profile)
             .finish_non_exhaustive()
     }
