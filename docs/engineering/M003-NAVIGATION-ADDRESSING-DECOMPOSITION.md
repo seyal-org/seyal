@@ -2,7 +2,7 @@
 
 - **Status:** Proposed decomposition output of refinement Issue #1004
 - **Parent umbrella:** #674 (epic #665)
-- **Authority:** ADR-019 (Proposed), [`../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) (Proposed), ADR-007, ADR-015, SPEC-008, SPEC-009, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
+- **Authority:** ADR-019 (Accepted on merge of this PR under #1004), [`../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md`](../specs/SPEC-022-M003-LOCAL-RESOURCE-ADDRESSING-NAVIGATION.md) (Accepted on merge of this PR under #1004), ADR-007, ADR-015, SPEC-008, SPEC-009, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 
 This file is a planning artifact. It creates no implementation authority: each
 slice below becomes real work only as a GitHub child Issue of #674 that passes

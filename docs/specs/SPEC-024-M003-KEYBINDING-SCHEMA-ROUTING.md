@@ -1,13 +1,13 @@
 # SPEC-024 — M003 local keybinding schema, conflicts and routing
 
-- **Status:** Proposed (refinement output of #1002; not an implemented-behavior claim; not Accepted)
+- **Status:** Accepted on merge of this PR by a non-author maintainer under #1002 (refinement output of #1002; not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Architecture authority:** ADR-015 (Rust product UI / thin native host); Foundation §5.1 / §13 (cold precompiled keybinding lookup; TOML canonical static config). **No new ADR:** see §0.
 - **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership); ADR-015 menu/command forwarding.
 - **Issue:** #1002 — parent umbrella #676, epic #665
-- **Owns for others:** key assignment for the Proposed ADR-021 (#1001) PaneTree verbs (zoom/unzoom, equalize, swap, move, directional focus) per ADR-021 §8; ADR-021 / SPEC-025 own their semantics (§5.1).
-- **Owns for others (continued):** key assignment for Proposed SPEC-022 (#1004) focus-history Back/Forward and goto-open (§5.5), and for the composer history-search trigger delegated by `M001-COMPOSER-HISTORY-FUZZY-SEARCH.md` §6 (§5.4). SPEC-022 and SPEC-008 own their semantics.
-- **Related (do not own):** palette action enumeration on master (`PaletteCommand` / `ShellAction` / `PresentationAction`) is a naming/compatibility input only — existing code is never architectural authority; Proposed SPEC-022 (#1004) owns address-bearing navigation when Accepted; SPEC-008 §4 owns composer execute/newline keys (§4.1); #993 / PR #1006 owns theme/font startup wiring and must not be edited here.
+- **Owns for others:** key assignment for the Accepted ADR-021 (#1001) PaneTree verbs (zoom/unzoom, equalize, swap, move, directional focus) per ADR-021 §8; ADR-021 / SPEC-025 own their semantics (§5.1).
+- **Owns for others (continued):** key assignment for Accepted SPEC-022 (#1004) focus-history Back/Forward and goto-open (§5.5), and for the composer history-search trigger delegated by `M001-COMPOSER-HISTORY-FUZZY-SEARCH.md` §6 (§5.4). SPEC-022 and SPEC-008 own their semantics.
+- **Related (do not own):** palette action enumeration on master (`PaletteCommand` / `ShellAction` / `PresentationAction`) is a naming/compatibility input only — existing code is never architectural authority; Accepted SPEC-022 (#1004) owns address-bearing navigation; SPEC-008 §4 owns composer execute/newline keys (§4.1); #993 / PR #1006 owns theme/font startup wiring and must not be edited here.
 
 ## 0. Architecture-change verdict
 
@@ -31,8 +31,9 @@ inside that accepted boundary. It does **not** change PTY/VT ownership,
 renderer authority, process/IPC architecture, Block semantics, persistence,
 OSS/commercial boundary, or introduce a second product-command authority in
 Swift. Per `ISSUE-PROTOCOL.md` / `architecture-change`, **no new ADR is
-required**. Acceptance of this specification (separate review) is the gate
-before production children may be marked Ready.
+required**. Acceptance of this specification is merge of PR #1087 under #1002
+by a non-author maintainer; that merge is the gate before production children
+may be marked Ready.
 
 ## 1. Purpose and scope
 
@@ -63,7 +64,7 @@ Out of scope (explicit non-goals):
   owned by #1001 / ADR-021; this specification owns only their key assignment
   and focus-relative binding form, §5.1), window lifecycle (#1000), execution
   provisioning (#994), theme/font wiring (#993), startup shell/CWD (#1003);
-- address-bearing goto/palette navigation identity (Proposed SPEC-022).
+- address-bearing goto/palette navigation identity (Accepted SPEC-022).
 
 ## 2. Ownership and lifetime
 
@@ -127,7 +128,7 @@ action = "tab.create"
 context = ["flow", "raw", "tui"]
 
 [[keybindings]]
-keys = "cmd+opt+1"
+keys = "cmd+1"
 action = "tab.select_ordinal"
 ordinal = 1
 
@@ -141,13 +142,14 @@ action = "none"          # unbind (§7.3)
 | `keys` | yes | string | One stroke or a chord (see §3.2) |
 | `action` | yes | string | Allowlisted `WorkspaceCommandId` (§5), or the reserved literal `"none"` to unbind (§7.3) |
 | `context` | no | string array | Where the binding may consume (§6). Default: `["app"]` |
-| `ordinal` | only for `tab.select_ordinal` | integer `1..=9` | Target tab position (§5.2). Required for `tab.select_ordinal`; forbidden for every other action and for `"none"` |
+| `ordinal` | only for `tab.select_ordinal` / `window.select_ordinal` | integer `1..=9` | Target tab or window position (§5.2 / §5.0). Required for those ids; forbidden for every other action and for `"none"` |
 
 Unknown fields on a binding entry are diagnosed and ignored; the entry is still
 validated for known fields. A missing, non-integer or out-of-range `ordinal`
-for `tab.select_ordinal`, or an `ordinal` on any other action, rejects the
-entry (`InvalidActionArgument`). A non-table `keybindings` value is rejected as
-a whole with a category diagnostic and yields defaults-only for that array.
+for `tab.select_ordinal` or `window.select_ordinal`, or an `ordinal` on any
+other action, rejects the entry (`InvalidActionArgument`). A non-table
+`keybindings` value is rejected as a whole with a category diagnostic and
+yields defaults-only for that array.
 
 ### 3.2 `keys` notation
 
@@ -231,13 +233,13 @@ KeyStroke {
 
 BindingSequence { strokes: [KeyStroke; 1..=4] }
 
-BindingContext bits: APP | FLOW | RAW | TUI | COMPOSER | PALETTE
+BindingContext bits: APP | FLOW | RAW | TUI | COMPOSER | PALETTE | ZERO_WINDOW
 
 WorkspaceCommandId   # closed string enum / interned id from §5
 
 WorkspaceCommand {
   id: WorkspaceCommandId
-  ordinal: Option<Ordinal1To9>   # Some only for tab.select_ordinal (§5.2)
+  ordinal: Option<Ordinal1To9>   # Some for tab.select_ordinal / window.select_ordinal
 }
 
 CompiledBinding {
@@ -267,8 +269,10 @@ when §4.2 / §7 permit:
 |---|---|---|
 | `cmd+k` | `command_palette.open` | `app` |
 | `cmd+t` | `tab.create` | `app` |
-| `cmd+w` | `tab.close_focused` | `app` |
-| `cmd+n` | `window.new` | `app` |
+| `cmd+w` | `app.close_focused` | `app` |
+| `cmd+n` | `window.new` | `app`, `zero_window` |
+| `` cmd+` `` / `` cmd+shift+` `` | `window.cycle_next` / `window.cycle_previous` | `app` |
+| `cmd+opt+1`…`cmd+opt+9` | `window.select_ordinal` with `ordinal` 1…9 (nine rows) | `app` |
 | `cmd+shift+[` | `tab.select_previous` | `app` |
 | `cmd+shift+]` | `tab.select_next` | `app` |
 | `cmd+d` | `pane.split_right` | `app` |
@@ -317,11 +321,15 @@ responders with their standard Command key equivalents when a native text field
 ### 4.2 Reserved / non-rebindable Command behavior
 
 The following remain exclusively host/application and **cannot** be rebound to
-another `WorkspaceCommandId`. A user entry targeting the same `keys` sequence is
-rejected (`ReservedCommandCollision`) and the reserved behavior is retained:
+another `WorkspaceCommandId`. A user entry is rejected (`ReservedCommandCollision`)
+when **any** stroke in its `keys` sequence is a reserved Command stroke from
+either table below — not only when the whole sequence is identical to a reserved
+sequence — and the reserved behavior is retained. So `cmd+q>x`, `cmd+h>x`, and
+`ctrl+b>cmd+q` are rejected at load.
 
 **Application / AppKit menu equivalents** (delivered to Seyal; handled by the
-standard application, Window, View and Edit menus):
+standard application, View and Edit menus). Window cycle / direct-select strokes
+are **not** reserved here: ADR-018 §11 item 3 makes them Rust-owned (§5.0):
 
 | keys | reserved behavior |
 |---|---|
@@ -330,7 +338,6 @@ standard application, Window, View and Edit menus):
 | `cmd+opt+h` | macOS Hide Others |
 | `cmd+m` | macOS Minimize |
 | `cmd+opt+m` | macOS Minimize All |
-| `` cmd+` `` / `` cmd+shift+` `` | macOS cycle windows forward / backward |
 | `cmd+ctrl+f` | macOS standard Enter/Exit Full Screen (View menu) |
 | `cmd+x` / `cmd+c` / `cmd+v` / `cmd+a` | standard Edit menu when a text field owns first responder; otherwise existing product copy/paste policy — still not reassigned via `[[keybindings]]` in M003 |
 | `cmd+z` / `cmd+shift+z` | standard Edit Undo / Redo when a text field owns first responder |
@@ -407,12 +414,52 @@ presentation.toggle_raw
 presentation.toggle_tui
 window.new
 window.close
+window.cycle_next
+window.cycle_previous
+window.select_ordinal          # requires `ordinal` 1..=9 (§5.0)
+app.close_focused              # hierarchical Pane→Tab→Window (§5.0)
 composer.history_search.open   # focus-relative (§5.4)
 focus_history.back             # SPEC-022 gated (§5.5)
 focus_history.forward          # SPEC-022 gated (§5.5)
 goto.open                      # SPEC-022 gated (§5.5)
 app.quit                    # still subject to reserved Cmd-Q path; explicit bind of app.quit to non-reserved keys is allowed
 ```
+
+### 5.0 ADR-018 window and hierarchical-close bindings (owned here)
+
+ADR-018 (#1000) is Accepted (PR #1085). This specification owns key assignment
+for the window lifecycle and hierarchical-close keyboard policy ADR-018 §8 /
+§11 item 3 retain; ADR-018 owns the reducer semantics.
+
+| WorkspaceCommandId | ADR-018 action at invoke time | Builtin key (M003) |
+|---|---|---|
+| `app.close_focused` | hierarchical close: focused Pane if the active Tab has more than one Pane; else active Tab if the Window has more than one Tab; else Window (ADR-018 §8 / scaffold Pane→Tab→Window) | `cmd+w` |
+| `window.new` | `CreateWindow` / zero-Window re-entry (`ActivateWorkspace` path, ADR-018 §3.3a) | `cmd+n` (`app`, `zero_window`) |
+| `window.close` | `CloseWindow` of the product-active Window | none |
+| `window.cycle_next` / `window.cycle_previous` | cycle product-active Window forward / backward in Rust-owned Window order | `` cmd+` `` / `` cmd+shift+` `` |
+| `window.select_ordinal` | select the Window at 1-based position `ordinal` in that order | `cmd+opt+1`…`cmd+opt+9` |
+
+R5.0.1 These ids and their builtin rows are gated by the R5.1.3 rule: each
+enters the production catalog only in the same or a later PR that lands its
+typed Rust action (ADR-018 decomposition / K9). Before that the id is
+`UnknownAction` at load and its builtin stroke is an ordinary unbound Command
+stroke (§6.2 step 2c). `tab.close_focused` / `pane.close_focused` remain
+separate non-hierarchical catalog ids (no `cmd+w` builtin); they do not replace
+`app.close_focused`.
+
+R5.0.2 `tab.select_next` / `tab.select_previous` move one position in the
+focused window's tab order and wrap cyclically. `pane.focus_next` /
+`pane.focus_previous` move one leaf in depth-first leaf order of the focused
+Tab's PaneTree and wrap cyclically. With one Tab or one Pane respectively, the
+result is `ActionUnavailable` (§10.2). `tab.close_focused` /
+`pane.close_focused` resolve to `CloseTab` / `ClosePane` of the focused item
+from the same snapshot as the dispatch and surface their existing rejections
+unchanged.
+
+R5.0.3 `window.select_ordinal` uses the same `ordinal` encoding as §5.2
+(`1..=9` on the binding entry). Selecting an ordinal beyond the Window count is
+`ActionUnavailable` (§10.2). `cmd+1`…`cmd+9` remain Tabs; `cmd+opt+1`…`cmd+opt+9`
+are Windows (ADR-018 §11 item 3 / scaffold).
 
 Naming compatibility with master (informational, not authority):
 
@@ -454,9 +501,9 @@ the id is `UnknownAction` at load; no dead binding or placeholder dispatch
 ships. `pane.equalize_*` additionally depends on #928 ratio storage per
 ADR-021 §4.
 
-R5.1.4 ADR-021 is Proposed. If its acceptance renames or removes a verb, this
-table must be updated before any keybinding child that includes that verb is
-marked Ready.
+R5.1.4 ADR-021 / SPEC-025 are Accepted (PR #1086). If a later amendment renames
+or removes a verb, this table must be updated before any keybinding child that
+includes that verb is marked Ready.
 
 ### 5.2 Tab ordinal encoding
 
@@ -465,7 +512,7 @@ integer field on the binding entry (§3.1), never embedded in the id string:
 
 ```toml
 [[keybindings]]
-keys = "cmd+opt+3"
+keys = "cmd+3"
 action = "tab.select_ordinal"
 ordinal = 3
 ```
@@ -481,7 +528,7 @@ its `keys` (§7.3); no `ordinal` is given there. Strings such as
 
 R5.3.1 Identity-bearing navigation (`SwitchWorkspace(id)`, `FocusPane(id)`, …) is
 **not** bindable from TOML in M003. Those remain palette/goto surfaces and,
-when Accepted, SPEC-022 address commits. A TOML action string that embeds an
+under Accepted SPEC-022, address commits. A TOML action string that embeds an
 id, path, shell snippet, or URL is `UnknownAction` / `DisallowedActionPayload`.
 The only action argument in M003 is the bounded `ordinal` integer of §5.2.
 
@@ -512,9 +559,9 @@ the trigger like any other entry.
 
 ### 5.5 SPEC-022 navigation commands (owned here, gated on SPEC-022)
 
-Proposed SPEC-022 (#1004) owns focus-history Back/Forward and goto semantics
-and leaves key assignment out of scope (SPEC-022 §14). This specification owns
-the keys:
+Accepted SPEC-022 (#1004, PR #1084) owns focus-history Back/Forward and goto
+semantics and leaves key assignment out of scope (SPEC-022 §14). This
+specification owns the keys:
 
 | WorkspaceCommandId | SPEC-022 action at invoke time | Builtin key (M003) |
 |---|---|---|
@@ -546,17 +593,19 @@ Ready.
 
 | Context | Meaning |
 |---|---|
-| `app` | Application-level: eligible on every non-modal route (Flow, Raw, TUI). Default for user bindings. Because it spans Raw/TUI, it is valid only for non-terminal-capable first strokes (§6.3). |
+| `app` | Application-level: eligible on every non-modal route that has at least one Window (Flow, Raw, TUI). Default for user bindings. Because it spans Raw/TUI, it is valid only for non-terminal-capable first strokes (§6.3). |
 | `flow` | Active presentation is Flow and Flow owns input (composer/Block controls). |
 | `raw` | Active presentation is Raw and Raw owns direct-terminal input. |
 | `tui` | Active presentation is TUI and TUI owns direct-terminal input. |
 | `composer` | The Flow composer text field owns first responder. |
 | `palette` | The command palette is open and owns key focus (§6.4). |
+| `zero_window` | Headed composition has zero Windows (ADR-018 §3.3a). Only re-entry commands (default: `window.new`) are eligible; R6.4.1 re-validates menu-invoked commands against this set. |
 
 Current route context set:
 
 | Route | Context set |
 |---|---|
+| Zero Windows | `{zero_window}` |
 | Palette open (any presentation) | `{palette}` |
 | Flow, composer first responder | `{app, flow, composer}` |
 | Flow, otherwise | `{app, flow}` |
@@ -566,9 +615,10 @@ Current route context set:
 An event is tested only against bindings whose context intersects the current
 route context set. If more than one binding for the same sequence intersects
 it (possible only with different bits, §7.1), the most specific bit wins:
-`palette` > `composer` > `flow` / `raw` / `tui` > `app`. This is deterministic
-because after §7.1 each context bit of a sequence belongs to at most one
-binding.
+`palette` > `composer` > `flow` / `raw` / `tui` > `app` / `zero_window`. This
+is deterministic because after §7.1 each context bit of a sequence belongs to
+at most one binding. `zero_window` is mutually exclusive with the Window-bearing
+routes above.
 
 ### 6.2 Event order (extends SPEC-006 §5; does not replace it)
 
@@ -600,6 +650,13 @@ For one physical/native key event on the active presentation route:
    no hidden terminal fallthrough.
 7. Else ordinary native/app behavior.
 ```
+
+R6.2.1 **Command strokes reach the Rust keybinding table before AppKit
+main-menu `performKeyEquivalent`.** Native must not let the main menu accept a
+projected `WorkspaceCommand` key equivalent before §6.2 step 2b has run. Builtin
+`cmd+t` stays the projected New Tab equivalent only because Rust already decided
+`tab.create` (R11.1); the menu path must not accept `tab.create` in Raw before
+the specificity result of a more specific binding for the same stroke.
 
 One physical event still follows exactly one route.
 
@@ -664,8 +721,9 @@ example in `validateMenuItem`) only from the Rust projection. Disabled state is
 presentation only: R6.4.1 still rejects the command if the host is stale.
 
 R6.4.3 The §4.2 reserved application/menu equivalents (quit, hide, minimize,
-full screen, window cycling, Edit actions on the palette query field) are not
-`WorkspaceCommand`s and are unaffected.
+full screen, Edit actions on the palette query field) are not
+`WorkspaceCommand`s and are unaffected. Window cycle / select / new / hierarchical
+close are `WorkspaceCommand`s (§5.0) and follow R6.4.1.
 
 ## 7. Conflict, duplicate and diagnostic policy
 
@@ -677,8 +735,9 @@ After parsing all builtin + user entries:
    `InvalidActionArgument`, `ChordTooLong`, `TerminalPassthroughProtected`,
    …); they contribute no binding. Unbind entries (§7.3) are exempt from
    `TerminalPassthroughProtected` because they claim nothing.
-2. Reject `ReservedCommandCollision` entries (bindings and unbinds); reserved
-   behavior remains.
+2. Reject `ReservedCommandCollision` entries (bindings and unbinds) when any
+   stroke in the sequence is a §4.2 reserved Command stroke; reserved behavior
+   remains.
 3. Walk the remaining entries in declaration order (all builtins, then user
    rows in file order). Conflict resolution is **per context bit**: each
    `(BindingSequence, context bit)` pair is owned by the latest entry that
@@ -693,14 +752,26 @@ After parsing all builtin + user entries:
    and §6.1 specificity picks at runtime.
 7. Two different sequences that share a proper chord prefix are allowed; the
    prefix waits per §8.
+8. **Prefix shadowing.** If a surviving binding's sequence S is a proper prefix
+   of another surviving binding's sequence T, and some §6.1 route context set
+   contains at least one context bit of each, the binding for T is dropped with
+   a `ChordPrefixShadowed` diagnostic naming both action ids and sources,
+   regardless of declaration order. The whole route set of T is dropped (not
+   narrowed per bit as in steps 3–4): a binding that is illegal on any listed
+   route must not remain applicable on a still-legal route. To use T, a user
+   first unbinds S in those contexts (§7.3). At runtime a stroke that completes
+   a surviving binding therefore never also opens a chord prefix, and no
+   dispatch ever waits on the §8 timeout. Step 8 is applied to bindings in
+   ascending sequence length; a binding already dropped by step 8 is not a
+   surviving binding and shadows nothing.
 
 Worked examples:
 
 | Earlier | Later | Result |
 |---|---|---|
 | builtin `cmd+k` → `command_palette.open` `[app]` | user `cmd+k` → `tab.create` `[app, raw]` | user owns `app` and `raw`; builtin loses its only bit and is dropped; one `DuplicateSequence` (`app`) |
-| user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `window.new` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
-| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `window.new` `[raw]` | disjoint; both remain; in Raw, `window.new` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
+| user `ctrl+b>n` → `tab.create` `[flow, raw]` | user `ctrl+b>n` → `pane.split_down` `[raw]` | first keeps `[flow]`; second owns `[raw]`; one `DuplicateSequence` (`raw`) |
+| builtin `cmd+t` → `tab.create` `[app]` | user `cmd+t` → `pane.split_down` `[raw]` | disjoint; both remain; in Raw, `pane.split_down` wins by specificity (§6.1); in Flow/TUI, `tab.create` |
 
 ### 7.2 Diagnostics (non-secret)
 
@@ -715,6 +786,7 @@ KeybindingDiagnostic {
     ReservedCommandCollision,
     TerminalPassthroughProtected,
     DuplicateSequence,
+    ChordPrefixShadowed,
     UnbindNoEffect,
     UnknownFieldIgnored,
     TableIgnored,
@@ -752,7 +824,8 @@ action = "none"          # remove builtin pane.split_right; key goes to ordinary
 ```
 
 - `ordinal` on an unbind entry is `InvalidActionArgument`.
-- Unbinding a §4.2 reserved sequence is `ReservedCommandCollision`.
+- Unbinding a sequence that contains any §4.2 reserved Command stroke is
+  `ReservedCommandCollision`.
 - An unbind that takes no bits from any earlier entry emits `UnbindNoEffect`
   (informational; the entry is otherwise harmless).
 - A sequence with no remaining binding for the current route falls through the
@@ -763,7 +836,8 @@ action = "none"          # remove builtin pane.split_right; key goes to ordinary
 ## 8. Chords
 
 R8.1 A chord is a `BindingSequence` of length ≥ 2. After the first stroke
-matches a registered prefix, Rust enters `ChordPrefixActive { depth, deadline }`
+matches a registered prefix, Rust enters
+`ChordPrefixActive { prefix: [KeyStroke; 1..=3], deadline }`
 in product UI state (not VT state).
 
 R8.2 Prefix timeout: **1000 ms** of no completing stroke cancels the prefix
@@ -775,9 +849,14 @@ R8.3 An unmatched continuation cancels the prefix and does not synthesize
 terminal bytes for the prefix. The continuation event is reclassified from a
 clean state (composition rules still apply).
 
-R8.4 Chord state clears on: focus loss, presentation-route change, palette open,
-composition start, detach/reconnect, or process backgrounding as appropriate to
-kill stale prefixes.
+R8.4 Chord state clears, without dispatch and without PTY bytes, on each of:
+key-window or first-responder change, application deactivation,
+presentation-route or route-context-set change, palette open, composition
+start, detach/reconnect, and any menu-invoked `WorkspaceCommand` (R6.4.1). If a
+Command chord prefix would start (§6.2 step 2b) while composition/marked text is
+already active, cancel that prefix immediately rather than waiting for the
+§8.2 timeout (step 3 would otherwise consume continuations and leave the prefix
+stuck). At most one `ChordPrefixActive` exists per process.
 
 R8.5 **M003: chords are cold-start only** (same as the table). No runtime API
 adds chords.
@@ -902,8 +981,10 @@ Production Issues derived from this specification must include measurable cases:
    with a `DuplicateSequence` diagnostic when replacing builtin. `settings.open`
    is `UnknownAction` and `cmd+,` has no builtin.
 3. Reserved: a user binding on **every** stroke in both §4.2 tables →
-   `ReservedCommandCollision` (table-driven over the enumerated set); quit and
-   Enter Full Screen paths unchanged.
+   `ReservedCommandCollision` (table-driven over the enumerated set); chords
+   that embed a reserved Command stroke (`cmd+q>x`, `cmd+h>x`,
+   `ctrl+b>cmd+q`) also reject and do not load; quit and Enter Full Screen
+   paths unchanged.
 4. Command non-leak: matched and unmatched Command strokes produce zero PTY
    bytes under Raw/TUI.
 5. Passthrough protection: `keys = "ctrl+c"` with default `app` context, and
@@ -917,7 +998,11 @@ Production Issues derived from this specification must include measurable cases:
    (e.g. `cmd+k`) still resolves while composition is active (§6.2 step 2).
 8. `option_as_alt` true/false unchanged by keybinding load.
 9. Chord: `ctrl+b>n` dispatches once; timeout clears prefix; no PTY echo of
-   prefix.
+   prefix. builtin `cmd+k` plus user `cmd+k>t` `[app]` → chord dropped with
+   `ChordPrefixShadowed`; after `keys = "cmd+k"` `action = "none"` the chord
+   survives; user `ctrl+b` `[flow]` plus `ctrl+b>n` `[raw]` both survive; the
+   three-sequence case S=`ctrl+b` `[flow]`, T=`ctrl+b>n` `[flow, raw]`,
+   U=`ctrl+b>n>x` `[raw]` leaves S and U and drops T.
 10. Cold-only: simulated theme reload leaves `KeybindingTable` pointer/identity
     unchanged.
 11. Stale/unavailable action invoke → `ActionUnavailable`; no PTY fallback.
@@ -973,14 +1058,21 @@ this PR does not satisfy.
       §6.2, §9).
 - [x] Security / diagnostic policy defined (§7.2, §12).
 - [x] Key-assignment owner for ADR-021 verbs named and assigned (§5.1).
+- [x] Key-assignment owner for ADR-018 hierarchical close, window new/close/
+      cycle/select, and zero-Window `cmd+n` named and assigned (§5.0, §6.1).
 - [x] Key-assignment owner for composer history search (§5.4) and SPEC-022
       Back/Forward/goto (§5.5) named and assigned; composer execute/newline
       left with SPEC-008 §4 (§4.1).
 - [x] Production decomposition written
       (`docs/engineering/M003-KEYBINDING-DECOMPOSITION.md`).
-- [ ] SPEC-024 Accepted (separate review; gates every production child).
-- [ ] ADR-021 / SPEC-025 Accepted (gates only the §5.1 pane-verb bindings).
-- [ ] ADR-019 / SPEC-022 Accepted (gates only the §5.5 navigation bindings).
+- [ ] SPEC-024 Accepted (gates every production child; satisfied on merge of
+      PR #1087 under #1002 by a non-author maintainer).
+- [x] ADR-021 / SPEC-025 Accepted (gates only the §5.1 pane-verb bindings;
+      satisfied by PR #1086).
+- [x] ADR-019 / SPEC-022 Accepted (gates only the §5.5 navigation bindings;
+      satisfied by PR #1084).
+- [x] ADR-018 Accepted (gates the §5.0 window / hierarchical-close bindings
+      and builtins; satisfied by PR #1085).
 
 ## 16. Explicit non-goals / deferred
 
