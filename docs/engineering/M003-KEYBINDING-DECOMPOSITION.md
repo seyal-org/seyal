@@ -2,7 +2,7 @@
 
 - **Status:** Proposed decomposition output of refinement Issue #1002
 - **Parent umbrella:** #676 (epic #665) — do **not** assign #676
-- **Authority:** [`../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md`](../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md) (Proposed), ADR-015, SPEC-006 (incl. §21.3 `input.option_as_alt`), SPEC-008 / ADR-009, Foundation cold keybinding rule, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
+- **Authority:** [`../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md`](../specs/SPEC-024-M003-KEYBINDING-SCHEMA-ROUTING.md) (Accepted; not an implemented-behavior claim), ADR-015, SPEC-006 (incl. §21.3 `input.option_as_alt`), SPEC-008 / ADR-009, Foundation cold keybinding rule, [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
 
 This file is a planning artifact. It creates no implementation authority: each
 slice below becomes real work only as a GitHub child Issue of #676 that passes
@@ -204,7 +204,8 @@ reads `FocusSeq` from the same snapshot, so it never self-rejects as stale.
 
 **Outcome:** SPEC-024 §5.0 catalog ids and builtins:
 `app.close_focused` (`cmd+w`, hierarchical Pane→Tab→Window), `window.new`
-(`cmd+n`, including `zero_window` context), `window.close`,
+(`cmd+shift+n`, including `zero_window` context; New Tab defaults remain
+`cmd+t` / `cmd+n` → `tab.create`), `window.close`,
 `window.cycle_next` / `window.cycle_previous` (`` cmd+` `` / `` cmd+shift+` ``),
 and `window.select_ordinal` (`cmd+opt+1`…`cmd+opt+9`).
 
@@ -216,7 +217,7 @@ ADR-018 child Issue.
 **Non-goals:** window/tab lifecycle semantics (ADR-018 owns them).
 
 **Tests:** SPEC-024 §14 items 2–3 for the included builtins; zero-Window
-`cmd+n` / R6.4.1 re-validation; hierarchical `cmd+w` peels Pane→Tab→Window.
+`cmd+shift+n` / R6.4.1 re-validation; hierarchical `cmd+w` peels Pane→Tab→Window.
 
 **Ready preconditions:** K3; ADR-018 Accepted; the matching #1000 production
 action merged.
