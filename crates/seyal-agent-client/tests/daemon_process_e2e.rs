@@ -140,10 +140,7 @@ fn spawn_bin_opts(
     );
     let mut command = Command::new(bin);
     command
-        .args([
-            "--directory",
-            dir.to_str().expect("utf-8 daemon directory"),
-        ])
+        .args(["--directory", dir.to_str().expect("utf-8 daemon directory")])
         .stdin(Stdio::null());
     if let Some(bytes) = output_bytes {
         command.args(["--output-bytes", &bytes.to_string()]);
