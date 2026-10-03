@@ -247,6 +247,7 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
         root.provisioning()
             .recorded_execution(second_pane)
             .is_none()
+            && root.extra_pane_client_count() == 0
     });
     assert_eq!(
         root.provisioning().recorded_execution(first_pane),
