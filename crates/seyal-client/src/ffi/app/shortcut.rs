@@ -203,48 +203,6 @@ pub extern "C" fn seyal_app_invoke_workspace_command(
         }
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::keybinding::WorkspaceCommandId;
-
-    #[test]
-    fn shortcut_item_abi_size_is_stable() {
-        // version..reserved0 (12) + key_base (4) + title (8) + lens (8) +
-        // key_notation (8) + hints (8) + lens (8) + accessibility_label (8) = 64
-        assert_eq!(std::mem::size_of::<SeyalAppShortcutItem>(), 64);
-    }
-
-    #[test]
-    fn cold_projection_includes_palette_and_new_tab() {
-        let count = seyal_app_shortcut_count();
-        assert!(count >= 2);
-        let mut saw_palette = false;
-        let mut saw_tab = false;
-        for index in 0..count {
-            let item = seyal_app_shortcut_item(index);
-            assert_eq!(
-                item.size as usize,
-                std::mem::size_of::<SeyalAppShortcutItem>()
-            );
-            if item.command_id == workspace_command_ffi_id(WorkspaceCommandId::CommandPaletteOpen) {
-                saw_palette = true;
-                assert_eq!(item.has_key_equivalent, 1);
-                assert_eq!(item.modifier_bits & 1, 1); // CMD
-                assert_eq!(item.key_is_named, 0);
-                assert_eq!(item.key_base, u32::from(b'k'));
-            }
-            if item.command_id == workspace_command_ffi_id(WorkspaceCommandId::TabCreate) {
-                saw_tab = true;
-                assert_eq!(item.has_key_equivalent, 1);
-                assert_eq!(item.key_base, u32::from(b't'));
-            }
-        }
-        assert!(saw_palette && saw_tab);
-    }
-}
-
 /// SPEC-024 §6.2 route result codes for `seyal_app_route_keystroke`.
 pub const SEYAL_APP_ROUTE_FALLTHROUGH: i32 = 0;
 pub const SEYAL_APP_ROUTE_CONSUMED: i32 = 1;
@@ -311,4 +269,45 @@ pub extern "C" fn seyal_app_route_keystroke(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybinding::WorkspaceCommandId;
+
+    #[test]
+    fn shortcut_item_abi_size_is_stable() {
+        // version..reserved0 (12) + key_base (4) + title (8) + lens (8) +
+        // key_notation (8) + hints (8) + lens (8) + accessibility_label (8) = 64
+        assert_eq!(std::mem::size_of::<SeyalAppShortcutItem>(), 64);
+    }
+
+    #[test]
+    fn cold_projection_includes_palette_and_new_tab() {
+        let count = seyal_app_shortcut_count();
+        assert!(count >= 2);
+        let mut saw_palette = false;
+        let mut saw_tab = false;
+        for index in 0..count {
+            let item = seyal_app_shortcut_item(index);
+            assert_eq!(
+                item.size as usize,
+                std::mem::size_of::<SeyalAppShortcutItem>()
+            );
+            if item.command_id == workspace_command_ffi_id(WorkspaceCommandId::CommandPaletteOpen) {
+                saw_palette = true;
+                assert_eq!(item.has_key_equivalent, 1);
+                assert_eq!(item.modifier_bits & 1, 1); // CMD
+                assert_eq!(item.key_is_named, 0);
+                assert_eq!(item.key_base, u32::from(b'k'));
+            }
+            if item.command_id == workspace_command_ffi_id(WorkspaceCommandId::TabCreate) {
+                saw_tab = true;
+                assert_eq!(item.has_key_equivalent, 1);
+                assert_eq!(item.key_base, u32::from(b't'));
+            }
+        }
+        assert!(saw_palette && saw_tab);
+    }
 }
