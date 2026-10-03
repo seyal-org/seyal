@@ -63,12 +63,11 @@ impl AgentDomain {
             related_to,
         };
         if let Some(existing) = self.work_items.get(&id) {
-            return if *existing == item {
-                Ok(())
-            } else if existing.work_scope_id == work_scope_id
-                && existing.lifecycle == WorkItemLifecycle::Open
-                && lifecycle == WorkItemLifecycle::Open
-            {
+            let compatible = *existing == item
+                || (existing.work_scope_id == work_scope_id
+                    && existing.lifecycle == WorkItemLifecycle::Open
+                    && lifecycle == WorkItemLifecycle::Open);
+            return if compatible {
                 Ok(())
             } else {
                 Err(DomainError::Conflict)
@@ -94,6 +93,7 @@ impl AgentDomain {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn restore_attempt_state(
         &mut self,
         id: AttemptId,

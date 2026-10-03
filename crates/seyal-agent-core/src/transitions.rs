@@ -164,13 +164,13 @@ impl AgentDomain {
     ) -> Result<(), DomainError> {
         self.validate_control_generation(agent_run_id, control)?;
         let run = self.run_mut(agent_run_id)?;
-        if let Some(expected) = expected_revision {
-            if run.run_revision != expected {
-                return Err(DomainError::StaleRevision {
-                    expected,
-                    current: run.run_revision,
-                });
-            }
+        if let Some(expected) = expected_revision
+            && run.run_revision != expected
+        {
+            return Err(DomainError::StaleRevision {
+                expected,
+                current: run.run_revision,
+            });
         }
         if run.lifecycle.is_terminal() {
             return Err(DomainError::InvalidTransition);
