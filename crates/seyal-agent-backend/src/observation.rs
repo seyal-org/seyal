@@ -51,6 +51,10 @@ impl ObservationAuthority {
         &self.domain
     }
 
+    pub fn domain_mut(&mut self) -> &mut AgentDomain {
+        &mut self.domain
+    }
+
     pub fn restore_work_scope(
         &mut self,
         id: seyal_agent_core::WorkScopeId,
@@ -84,6 +88,35 @@ impl ObservationAuthority {
     ) -> Result<(), DomainError> {
         self.domain
             .restore_agent_run(id, attempt_id, binding_generation, control_generation)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_agent_run_state(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+        lifecycle: seyal_agent_core::AgentRunLifecycle,
+        execution_liveness: seyal_agent_core::ExecutionLiveness,
+        observation: seyal_agent_core::ObservationFact,
+        resumability: seyal_agent_core::ResumabilityFact,
+        run_revision: u64,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_agent_run_state(
+            id,
+            attempt_id,
+            binding_generation,
+            control_generation,
+            lifecycle,
+            execution_liveness,
+            observation,
+            resumability,
+            run_revision,
+            None,
+            None,
+            None,
+        )
     }
 
     pub fn restore_orphaned_agent_run(
@@ -195,7 +228,7 @@ impl ObservationAuthority {
         self.domain
             .validate_binding_generation(observation.run_id, observation.binding_generation)
             .map_err(|error| match error {
-                DomainError::StaleBindingGeneration { .. } => ObserveError::StaleGeneration,
+                DomainError::StaleBinding { .. } => ObserveError::StaleGeneration,
                 other => ObserveError::Domain(other),
             })?;
 

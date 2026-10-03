@@ -1,0 +1,383 @@
+//! WorkItem / Attempt / AgentRun lifecycle and orthogonal run facts (SPEC-026).
+//!
+//! Consumes SPEC-014 resumability classifications and SPEC-019 disposition /
+//! outcome values without restating their evaluation semantics.
+
+use crate::{AgentRunId, AttemptId};
+
+/// WorkItem lifecycle (SPEC-026 §4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkItemLifecycle {
+    Open,
+    Finalized,
+}
+
+/// AcceptanceContract mode stub (SPEC-019 §4). Detection-created work uses
+/// `HumanFinal` per SPEC-026 O3.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcceptanceContractMode {
+    HumanFinal,
+    PolicyFinal,
+    Hybrid,
+}
+
+/// WorkItem outcome (SPEC-019 §9). Owned only by WorkItem finalization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkItemOutcome {
+    Accepted,
+    Rejected,
+    Unresolved,
+    Abandoned,
+}
+
+/// Attempt origin (SPEC-026 §5). Set at creation; never changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttemptOrigin {
+    Initial,
+    RetryOf(AttemptId),
+    ForkOf(AttemptId),
+    ParallelCandidateOf(AttemptId),
+    StrategyChangeFrom(AttemptId),
+}
+
+impl AttemptOrigin {
+    pub const fn is_retry(self) -> bool {
+        matches!(self, Self::RetryOf(_))
+    }
+
+    pub const fn parent(self) -> Option<AttemptId> {
+        match self {
+            Self::Initial => None,
+            Self::RetryOf(id)
+            | Self::ForkOf(id)
+            | Self::ParallelCandidateOf(id)
+            | Self::StrategyChangeFrom(id) => Some(id),
+        }
+    }
+}
+
+/// Attempt lifecycle (SPEC-026 §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttemptLifecycle {
+    Created,
+    Active,
+    Closing,
+    Closed,
+}
+
+/// Attempt disposition (SPEC-019 §8). Immutable once Closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttemptDisposition {
+    CandidateAccepted,
+    Rejected,
+    Inconclusive,
+    Cancelled,
+    Interrupted,
+    Superseded,
+}
+
+/// AgentRun lifecycle (SPEC-026 §6.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentRunLifecycle {
+    Created,
+    Prepared,
+    Dispatching,
+    Active,
+    Terminating,
+    Terminated,
+}
+
+impl AgentRunLifecycle {
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Terminated)
+    }
+
+    pub const fn is_non_terminal(self) -> bool {
+        !self.is_terminal()
+    }
+}
+
+/// Orthogonal execution liveness (SPEC-026 §6.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionLiveness {
+    NotStarted,
+    Alive,
+    Exited,
+    Unknown,
+}
+
+/// Orthogonal observation connectivity (SPEC-026 §6.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObservationFact {
+    Connected,
+    Degraded,
+    Disconnected,
+}
+
+/// Behavioral resumability (SPEC-014 §9) plus `NotEvaluated` (SPEC-026 §6.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResumabilityFact {
+    NotEvaluated,
+    BehavioralResumeAvailable,
+    ReconciliationRequired,
+    ResumeUnavailable,
+}
+
+/// Run termination record (SPEC-026 §6.3). Never implies WorkItem outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunTermination {
+    pub kind: TerminationKind,
+    pub source: TerminationSource,
+    pub reason_code: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminationKind {
+    Completed,
+    Failed,
+    Cancelled,
+    Interrupted,
+    Lost,
+    Superseded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminationSource {
+    Backend,
+    Harness,
+    Provider,
+    Execution,
+    User,
+    Policy,
+}
+
+/// AgentRun lineage for forks (SPEC-026 §9.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentRunLineage {
+    ForkOf(AgentRunId),
+}
+
+/// Opaque routing-decision reference set when Prepared (SPEC-020).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RoutingDecisionRef(u64);
+
+impl RoutingDecisionRef {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Opaque execution-host reference for binding / detection (SPEC-018).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ExecutionRef(u64);
+
+impl ExecutionRef {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Durable binding evidence for external detection idempotency (SPEC-026 §9.9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ExternalIdentityKey {
+    pub execution_ref: ExecutionRef,
+    pub external_identity: u64,
+}
+
+/// Ephemeral client attachment access (SPEC-026 §8). Not durable identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentAccess {
+    Observe,
+    Interact,
+    Control,
+}
+
+/// Usage/cost accounting: missing is unknown, never zero (SPEC-026 §11 / fixture 28).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountingValue {
+    Unknown,
+    Observed(u64),
+}
+
+impl AccountingValue {
+    pub const fn is_unknown(self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+}
+
+/// Stable store/wire codes for durable lifecycle columns (fail-closed on unknown).
+pub mod codes {
+    use super::*;
+
+    pub const fn work_item_lifecycle(value: WorkItemLifecycle) -> u8 {
+        match value {
+            WorkItemLifecycle::Open => 1,
+            WorkItemLifecycle::Finalized => 2,
+        }
+    }
+
+    pub const fn work_item_lifecycle_from(code: u8) -> Option<WorkItemLifecycle> {
+        match code {
+            1 => Some(WorkItemLifecycle::Open),
+            2 => Some(WorkItemLifecycle::Finalized),
+            _ => None,
+        }
+    }
+
+    pub const fn attempt_lifecycle(value: AttemptLifecycle) -> u8 {
+        match value {
+            AttemptLifecycle::Created => 1,
+            AttemptLifecycle::Active => 2,
+            AttemptLifecycle::Closing => 3,
+            AttemptLifecycle::Closed => 4,
+        }
+    }
+
+    pub const fn attempt_lifecycle_from(code: u8) -> Option<AttemptLifecycle> {
+        match code {
+            1 => Some(AttemptLifecycle::Created),
+            2 => Some(AttemptLifecycle::Active),
+            3 => Some(AttemptLifecycle::Closing),
+            4 => Some(AttemptLifecycle::Closed),
+            _ => None,
+        }
+    }
+
+    pub const fn attempt_origin_kind(value: AttemptOrigin) -> u8 {
+        match value {
+            AttemptOrigin::Initial => 1,
+            AttemptOrigin::RetryOf(_) => 2,
+            AttemptOrigin::ForkOf(_) => 3,
+            AttemptOrigin::ParallelCandidateOf(_) => 4,
+            AttemptOrigin::StrategyChangeFrom(_) => 5,
+        }
+    }
+
+    pub const fn agent_run_lifecycle(value: AgentRunLifecycle) -> u8 {
+        match value {
+            AgentRunLifecycle::Created => 1,
+            AgentRunLifecycle::Prepared => 2,
+            AgentRunLifecycle::Dispatching => 3,
+            AgentRunLifecycle::Active => 4,
+            AgentRunLifecycle::Terminating => 5,
+            AgentRunLifecycle::Terminated => 6,
+        }
+    }
+
+    pub const fn agent_run_lifecycle_from(code: u8) -> Option<AgentRunLifecycle> {
+        match code {
+            1 => Some(AgentRunLifecycle::Created),
+            2 => Some(AgentRunLifecycle::Prepared),
+            3 => Some(AgentRunLifecycle::Dispatching),
+            4 => Some(AgentRunLifecycle::Active),
+            5 => Some(AgentRunLifecycle::Terminating),
+            6 => Some(AgentRunLifecycle::Terminated),
+            _ => None,
+        }
+    }
+
+    pub const fn execution_liveness(value: ExecutionLiveness) -> u8 {
+        match value {
+            ExecutionLiveness::NotStarted => 1,
+            ExecutionLiveness::Alive => 2,
+            ExecutionLiveness::Exited => 3,
+            ExecutionLiveness::Unknown => 4,
+        }
+    }
+
+    pub const fn execution_liveness_from(code: u8) -> Option<ExecutionLiveness> {
+        match code {
+            1 => Some(ExecutionLiveness::NotStarted),
+            2 => Some(ExecutionLiveness::Alive),
+            3 => Some(ExecutionLiveness::Exited),
+            4 => Some(ExecutionLiveness::Unknown),
+            _ => None,
+        }
+    }
+
+    pub const fn observation(value: ObservationFact) -> u8 {
+        match value {
+            ObservationFact::Connected => 1,
+            ObservationFact::Degraded => 2,
+            ObservationFact::Disconnected => 3,
+        }
+    }
+
+    pub const fn observation_from(code: u8) -> Option<ObservationFact> {
+        match code {
+            1 => Some(ObservationFact::Connected),
+            2 => Some(ObservationFact::Degraded),
+            3 => Some(ObservationFact::Disconnected),
+            _ => None,
+        }
+    }
+
+    pub const fn resumability(value: ResumabilityFact) -> u8 {
+        match value {
+            ResumabilityFact::NotEvaluated => 1,
+            ResumabilityFact::BehavioralResumeAvailable => 2,
+            ResumabilityFact::ReconciliationRequired => 3,
+            ResumabilityFact::ResumeUnavailable => 4,
+        }
+    }
+
+    pub const fn resumability_from(code: u8) -> Option<ResumabilityFact> {
+        match code {
+            1 => Some(ResumabilityFact::NotEvaluated),
+            2 => Some(ResumabilityFact::BehavioralResumeAvailable),
+            3 => Some(ResumabilityFact::ReconciliationRequired),
+            4 => Some(ResumabilityFact::ResumeUnavailable),
+            _ => None,
+        }
+    }
+
+    pub const fn attempt_disposition(value: AttemptDisposition) -> u8 {
+        match value {
+            AttemptDisposition::CandidateAccepted => 1,
+            AttemptDisposition::Rejected => 2,
+            AttemptDisposition::Inconclusive => 3,
+            AttemptDisposition::Cancelled => 4,
+            AttemptDisposition::Interrupted => 5,
+            AttemptDisposition::Superseded => 6,
+        }
+    }
+
+    pub const fn attempt_disposition_from(code: u8) -> Option<AttemptDisposition> {
+        match code {
+            1 => Some(AttemptDisposition::CandidateAccepted),
+            2 => Some(AttemptDisposition::Rejected),
+            3 => Some(AttemptDisposition::Inconclusive),
+            4 => Some(AttemptDisposition::Cancelled),
+            5 => Some(AttemptDisposition::Interrupted),
+            6 => Some(AttemptDisposition::Superseded),
+            _ => None,
+        }
+    }
+
+    pub const fn work_item_outcome(value: WorkItemOutcome) -> u8 {
+        match value {
+            WorkItemOutcome::Accepted => 1,
+            WorkItemOutcome::Rejected => 2,
+            WorkItemOutcome::Unresolved => 3,
+            WorkItemOutcome::Abandoned => 4,
+        }
+    }
+
+    pub const fn work_item_outcome_from(code: u8) -> Option<WorkItemOutcome> {
+        match code {
+            1 => Some(WorkItemOutcome::Accepted),
+            2 => Some(WorkItemOutcome::Rejected),
+            3 => Some(WorkItemOutcome::Unresolved),
+            4 => Some(WorkItemOutcome::Abandoned),
+            _ => None,
+        }
+    }
+}

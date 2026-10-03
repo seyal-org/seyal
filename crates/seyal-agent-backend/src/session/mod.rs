@@ -5,6 +5,7 @@
 //! therefore rejects every session opened by the previous process.
 
 mod frame_io;
+mod lifecycle_ops;
 mod recovery;
 mod wire;
 
@@ -38,8 +39,8 @@ use crate::{
 
 use recovery::restore_identities;
 use wire::{
-    fit_replay_events, liveness_code, map_auth, map_domain, observation_payload, snapshot_payload,
-    to_aggregate, ReplayPage,
+    fit_replay_events, liveness_code, map_auth, map_domain, observation_payload, to_aggregate,
+    ReplayPage,
 };
 
 const EVENT_OBSERVATION: u16 = 2;
@@ -329,78 +330,6 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
         CommandResult::Attempt { id }
-    }
-
-    fn start_agent_run(
-        &mut self,
-        principal_id: ClientPrincipalId,
-        session_id: ClientSessionId,
-        attempt_id: AttemptId,
-    ) -> CommandResult {
-        let principal =
-            match self.authorized_session(principal_id, session_id, ClientScope::RunsCreate) {
-                Ok(principal) => principal,
-                Err(error) => return CommandResult::Error(error),
-            };
-        if self.authority.domain().attempt(attempt_id).is_none() {
-            return CommandResult::Error(CommandError::NotFound);
-        }
-        if self.host.is_none() {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        let run_id = AgentRunId::new();
-        let binding = BindingGeneration::FIRST;
-        let control = ControlGeneration::FIRST;
-        if self
-            .store
-            .mutate_agent_run_and_append(
-                run_id,
-                attempt_id,
-                binding.get(),
-                control.get(),
-                1,
-                &attempt_id.to_bytes(),
-            )
-            .and_then(|_| {
-                self.authority
-                    .restore_agent_run(run_id, attempt_id, binding, control)
-                    .map_err(|_| StoreError::Corrupt)
-            })
-            .is_err()
-        {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        if self.auth.allow_run(principal, run_id).is_err() {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        self.auth.allow_run_for_observers(run_id);
-
-        let host = self.host.as_mut().expect("host checked present");
-        let observations = match host.collect_observations(run_id, binding) {
-            Ok(observations) => observations,
-            Err(()) => return CommandResult::Error(CommandError::Failed),
-        };
-        if let Err(error) = self.commit_observation_batch(observations) {
-            return CommandResult::Error(error);
-        }
-        let aggregate = AggregateId::AgentRun(run_id);
-        let event_count = match self.store.high_water(aggregate) {
-            Ok(count) if count > 0 => count,
-            _ => return CommandResult::Error(CommandError::Failed),
-        };
-        let Some(last) = AggregateSequence::from_raw(event_count) else {
-            return CommandResult::Error(CommandError::Failed);
-        };
-        let payload = snapshot_payload(&self.authority, run_id);
-        if self.store.snapshot(aggregate, last, &payload).is_err() {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        CommandResult::Started {
-            run_id,
-            binding_generation: binding.get(),
-            control_generation: control.get(),
-            event_count,
-        }
     }
 
     fn commit_observation_batch(
@@ -755,9 +684,7 @@ fn persist_principal(
 fn map_observe(error: ObserveError) -> CommandError {
     match error {
         ObserveError::StaleGeneration => CommandError::StaleBinding,
-        ObserveError::Domain(DomainError::StaleControlGeneration { .. }) => {
-            CommandError::StaleControl
-        }
+        ObserveError::Domain(DomainError::StaleControlEpoch { .. }) => CommandError::StaleControl,
         ObserveError::Domain(DomainError::UnknownAgentRun(_)) => CommandError::NotFound,
         _ => CommandError::Failed,
     }

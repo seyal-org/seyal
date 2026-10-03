@@ -106,6 +106,9 @@ macro_rules! define_generation {
 }
 
 define_generation!(BindingGeneration);
+// ControlGeneration is the client control epoch (SPEC-026 O1 / §8.3).
+// Advances on Agent Backend restart/recovery and whenever control authority is
+// re-established. Older epochs are rejected as StaleControlEpoch.
 define_generation!(ControlGeneration);
 
 #[cfg(test)]

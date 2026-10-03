@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 908
+acknowledged_loc = 938
 issue = 1175
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 adds per-pane maps plus test-only attach-failure injection for ADR-017 §6.3 live proofs."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 adds per-pane maps plus test-only attach-failure injection for ADR-017 §6.3 live proofs after tip C ChordPrefixState."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -83,9 +83,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 992
-issue = 1105
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual extraction; merge absorbs #928 NoSplitDivider=34, P3 provisioning errors 35/36, navigation 37-46, goto 47-49, and shell_composition_tests declaration. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs. Ceiling matches post-master-merge LOC."
+acknowledged_loc = 946
+issue = 1106
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49 remain; tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -164,19 +164,23 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # materialize_output_ref beside append_output_event.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 866
-issue = 1181
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1181 partial-segment merge and OutputRef materialization must share the append transaction/lock with insert_event. Extracting only segment merge would split the commit boundary that proves fault isolation."
+acknowledged_loc = 885
+issue = 678
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #678 adds schema-v5 AgentRun lifecycle column reads beside mutate_agent_run_and_append while lifecycle_columns.rs owns the column writers."
+
+# #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/observation.rs"
+acknowledged_loc = 717
+issue = 678
+reason = "ObservationAuthority stays one writer-facing bridge; #678 adds domain_mut and restore_agent_run_state so SPEC-026 lifecycle restore/recovery cannot fork a second authority."
 
 # #1179 connection-scoped principal threading through IntegrationService handle.
 # #1194 threads that caller into every session-bearing command. Authorization
 # decisions stay in auth/mod.rs, which is below review_loc after its unit tests
 # moved to auth/tests.rs.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 766
-issue = 1194
-reason = "V1 command catalog and observation dispatch stay one session façade; #1194 passes the connection principal into every session-bearing command through two private gates so foreign-session rejection cannot diverge from the auth lookup."
+# #678 extracted StartAgentRun lifecycle drive to session/lifecycle_ops.rs, so
+# session/mod.rs is below review_loc and needs no [[cohesion_acknowledgement]].
 
 # #1194 nine-command byte-identity regression lives with the other session façade tests.
 [[cohesion_acknowledgement]]
@@ -204,3 +208,16 @@ path = "crates/seyal-client/src/shell/mod.rs"
 acknowledged_loc = 731
 issue = 1175
 reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 enables production allows_tab_creation and documents the macOS-only test helper for force policy flips without splitting tree/workspace ownership."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView.swift"
+acknowledged_loc = 770
+issue = 1106
+reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+
+# #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/keybinding/tests.rs"
+acknowledged_loc = 701
+issue = 1106
+reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."

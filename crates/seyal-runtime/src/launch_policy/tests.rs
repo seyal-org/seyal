@@ -115,6 +115,41 @@ fn invalid_configured_shell_falls_back_with_warning() {
 }
 
 #[test]
+fn valid_configured_shell_and_cwd_and_non_login_apply() {
+    let account = account("/bin/zsh");
+    let mut intent = LaunchProfileIntent::default_interactive();
+    intent.configured_shell = Some(PathBuf::from("/usr/local/bin/bash"));
+    intent.cwd_override = Some(PathBuf::from("/tmp/workdir"));
+    intent.login = false;
+    let probe = MapProbe::default()
+        .shell("/usr/local/bin/bash", true)
+        .cwd("/tmp/workdir", true)
+        .cwd("/Users/alice", true);
+    let out = resolve_with(&intent, Some(&account), None, &probe).expect("resolve");
+    assert_eq!(out.policy.program(), Path::new("/usr/local/bin/bash"));
+    assert_eq!(out.policy.cwd(), Path::new("/tmp/workdir"));
+    assert_eq!(out.policy.argv(), &[OsString::from("-i")]);
+    assert!(out.warnings.is_empty());
+}
+
+#[test]
+fn config_text_feeds_intent_into_resolver() {
+    let (intent, diagnostics) = load_launch_profile_intent_from_text(Some(
+        "[shell]\nprogram = \"/custom/shell\"\ncwd = \"/custom/cwd\"\nlogin = false\n",
+    ));
+    assert!(diagnostics.is_empty());
+    let account = account("/bin/zsh");
+    let probe = MapProbe::default()
+        .shell("/custom/shell", true)
+        .cwd("/custom/cwd", true)
+        .cwd("/Users/alice", true);
+    let out = resolve_with(&intent, Some(&account), None, &probe).expect("resolve");
+    assert_eq!(out.policy.program(), Path::new("/custom/shell"));
+    assert_eq!(out.policy.cwd(), Path::new("/custom/cwd"));
+    assert_eq!(out.policy.argv(), &[OsString::from("-i")]);
+}
+
+#[test]
 fn account_lookup_failure_is_account_record_unavailable() {
     let probe = MapProbe::default();
     let err = resolve_with(
@@ -196,6 +231,32 @@ fn login_argv_shapes_match_spec_tables() {
     );
     assert_eq!(
         interactive_login_argv(Path::new("/usr/local/bin/unknownshell")),
+        vec![OsString::from("-i")]
+    );
+
+    assert_eq!(
+        interactive_argv(Path::new("/bin/zsh"), false),
+        vec![OsString::from("-i")]
+    );
+    assert_eq!(
+        interactive_argv(Path::new("/bin/bash"), false),
+        vec![OsString::from("-i")]
+    );
+    assert_eq!(
+        interactive_argv(Path::new("/usr/local/bin/fish"), false),
+        vec![OsString::from("-i")]
+    );
+    assert_eq!(
+        interactive_argv(Path::new("/bin/tcsh"), false),
+        vec![OsString::from("-i")]
+    );
+    // sh / unknown cannot be forced into login by the config bit.
+    assert_eq!(
+        interactive_argv(Path::new("/bin/sh"), true),
+        vec![OsString::from("-i")]
+    );
+    assert_eq!(
+        interactive_argv(Path::new("/usr/local/bin/unknownshell"), true),
         vec![OsString::from("-i")]
     );
 

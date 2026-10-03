@@ -1,15 +1,14 @@
 import AppKit
 
-/// Composer editor that reports `⌃R` (history recall, #933) instead of
-/// letting NSTextView swallow it. Every other key stays native.
+/// Composer editor. Product shortcuts (including history recall) are matched in
+/// Rust via the SPEC-024 table; this view only forwards a normalized stroke.
 @MainActor
 private final class ComposerTextView: NSTextView {
-    var onHistoryShortcut: (() -> Void)?
+    /// Returns true when the key event was consumed by Rust routing.
+    var onRouteKeystroke: ((NSEvent) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags == .control, event.charactersIgnoringModifiers == "r" {
-            onHistoryShortcut?()
+        if onRouteKeystroke?(event) == true {
             return
         }
         super.keyDown(with: event)
@@ -23,6 +22,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     var onSubmitRaw: ((String) -> Int32)?
     /// Rust accepted OpenComposerHistory; the host reconciles the overlay.
     var onHistoryOpened: (() -> Void)?
+    /// A table match changed product chrome (palette, tabs, presentation).
+    var onCommandConsumed: (() -> Void)?
 
     private let appHandle: UInt64
     private let textView = ComposerTextView()
@@ -77,7 +78,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         history.toolTip = "Command history"
 
         textView.delegate = self
-        textView.onHistoryShortcut = { [weak self] in self?.openHistory() }
+        textView.onRouteKeystroke = { [weak self] event in
+            self?.routeComposerKeystroke(event) ?? false
+        }
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -221,6 +224,40 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     @objc private func historyClicked() {
         openHistory()
     }
+
+    /// Rust owns the match; a consumed WorkspaceCommand already mutated product
+    /// state. Do not insert matched/Command strokes into the draft.
+    private func routeComposerKeystroke(_ event: NSEvent) -> Bool {
+        switch KeybindingStrokeNormalizer.route(
+            appHandle: appHandle,
+            event: event,
+            composerFocused: true,
+            compositionActive: hasMarkedText()
+        ) {
+        case .consumed:
+            reconcile()
+            onCommandConsumed?()
+            let history = seyal_app_composer_history(appHandle)
+            if history.flags & UInt16(SEYAL_APP_HISTORY_OPEN) != 0 {
+                onHistoryOpened?()
+            }
+            return true
+        case .nativeCommand:
+            // Reserved Command — ordinary native text commands
+            // (⌘←/⌘⌫/…); never PTY (this is the composer NSTextView).
+            return false
+        case .fallsThrough:
+            return false
+        }
+    }
+
+    private func hasMarkedText() -> Bool {
+        textView.hasMarkedText()
+    }
+
+    /// R6.2.1 / R8.4: host `performKeyEquivalent` must see the same marked-text
+    /// state as `routeComposerKeystroke`.
+    var hasMarkedComposition: Bool { hasMarkedText() }
 
     /// Rust decides whether recall is available (mode, entries); a rejected
     /// open leaves the composer untouched.

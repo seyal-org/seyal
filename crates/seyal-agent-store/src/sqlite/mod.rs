@@ -11,6 +11,7 @@ use seyal_agent_core::{
     decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, RetentionPolicyRef, StreamKind,
 };
 
+mod lifecycle_columns;
 mod schema;
 use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
 
@@ -38,6 +39,11 @@ pub struct PersistedAgentRun {
     pub binding_generation: u64,
     pub control_generation: u64,
     pub liveness: PersistedLiveness,
+    pub run_lifecycle: u8,
+    pub execution_liveness: u8,
+    pub observation: u8,
+    pub resumability: u8,
+    pub run_revision: u64,
 }
 
 /// Durable ClientPrincipal row (SPEC-017 §5). Sessions are never persisted.
@@ -128,8 +134,11 @@ impl AgentStore {
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
         tx.execute(
-            "INSERT INTO agent_run (id, attempt_id, binding_generation, control_generation, liveness)
-             VALUES (?1, ?2, ?3, ?4, 'unknown')
+            "INSERT INTO agent_run (
+                id, attempt_id, binding_generation, control_generation, liveness,
+                run_lifecycle, execution_liveness, observation, resumability, run_revision
+             )
+             VALUES (?1, ?2, ?3, ?4, 'unknown', 1, 1, 3, 1, 1)
              ON CONFLICT (id) DO UPDATE SET
                attempt_id = excluded.attempt_id,
                binding_generation = excluded.binding_generation,
@@ -679,7 +688,9 @@ impl AgentStore {
         let conn = self.conn.lock().expect("agent store lock");
         let row = conn
             .query_row(
-                "SELECT attempt_id, binding_generation, control_generation, liveness FROM agent_run WHERE id = ?1",
+                "SELECT attempt_id, binding_generation, control_generation, liveness,
+                        run_lifecycle, execution_liveness, observation, resumability, run_revision
+                 FROM agent_run WHERE id = ?1",
                 params![run_id.to_bytes().to_vec()],
                 |row| {
                     Ok((
@@ -687,11 +698,16 @@ impl AgentStore {
                         row.get::<_, i64>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
                     ))
                 },
             )
             .map_err(|_| StoreError::Corrupt)?;
-        if row.3 != "unknown" {
+        if row.3 != "unknown" || row.8 < 1 {
             return Err(StoreError::Corrupt);
         }
         let mut attempt_bytes = [0; 16];
@@ -704,6 +720,11 @@ impl AgentStore {
             binding_generation: row.1 as u64,
             control_generation: row.2 as u64,
             liveness: PersistedLiveness::Unknown,
+            run_lifecycle: u8::try_from(row.4).map_err(|_| StoreError::Corrupt)?,
+            execution_liveness: u8::try_from(row.5).map_err(|_| StoreError::Corrupt)?,
+            observation: u8::try_from(row.6).map_err(|_| StoreError::Corrupt)?,
+            resumability: u8::try_from(row.7).map_err(|_| StoreError::Corrupt)?,
+            run_revision: row.8 as u64,
         })
     }
 
