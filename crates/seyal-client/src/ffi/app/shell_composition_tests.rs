@@ -39,29 +39,11 @@ fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
     }
 }
 
-fn enable_tab_creation_for_test(handle: u64) {
-    APPS.with(|apps| {
-        apps.borrow_mut()
-            .get_mut(&handle)
-            .expect("handle")
-            .root
-            .enable_tab_creation_for_test();
-    });
-}
-
 #[test]
 fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);
 
-    assert_eq!(
-        unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
-        -4
-    );
-    assert_eq!(seyal_app_last_error(handle), 28, "TabCreationUnavailable");
-
-    enable_tab_creation_for_test(handle);
-    let snap = seyal_app_snapshot(handle);
     assert_eq!(
         unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
         0
@@ -71,7 +53,7 @@ fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
     assert_ne!(
         after_create.flags & SHELL_FLAG_ALLOWS_TAB_CREATION,
         0,
-        "opted-in composition advertises tab creation"
+        "production composition advertises tab creation after C2b"
     );
     let mut split = identity_fence(25, &seyal_app_snapshot(handle));
     split.reserved = 1;
@@ -113,15 +95,8 @@ fn shell_projection_is_one_local_workspace() {
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
     assert_eq!(
-        shell.flags, 0,
-        "production keeps tab creation gated until a live create→attach→bind driver exists"
-    );
-
-    enable_tab_creation_for_test(handle);
-    let opted_in = seyal_app_shell(handle);
-    assert_eq!(
-        opted_in.flags, SHELL_FLAG_ALLOWS_TAB_CREATION,
-        "opted-in composition advertises tab creation; splits and sole Tab/Pane close stay off"
+        shell.flags, SHELL_FLAG_ALLOWS_TAB_CREATION,
+        "production advertises tab creation after C2b; splits stay off"
     );
 
     let workspace = seyal_app_shell_row(handle, 0, 0);

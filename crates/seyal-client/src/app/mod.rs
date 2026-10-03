@@ -10,6 +10,8 @@ mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod goto_apply;
+#[cfg(target_os = "macos")]
+mod live_attach_apply;
 mod palette_apply;
 mod presentation_apply;
 mod provisioning_apply;
@@ -27,6 +29,7 @@ mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
@@ -423,7 +426,10 @@ struct PaneAuthority {
 pub struct ApplicationRoot {
     shell: ShellState,
     presentation: PresentationSession,
+    /// Active (focused bound) Controller fence for snapshot/input.
     authority: Option<PaneAuthority>,
+    /// Per-pane Controller authority after live create→attach→bind (#1175).
+    pane_authorities: HashMap<PaneId, PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
     /// Cold-path wire client for create/terminate (tests/harness). Production
@@ -454,8 +460,16 @@ pub struct ApplicationRoot {
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
+    /// Create-admitting Controller connection (first pane / session create).
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
+    /// Additional per-pane Controller clients after second+ attach (#1175).
+    /// Never duplicates [`Self::client_handle`].
+    #[cfg(target_os = "macos")]
+    extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Pane → registry raw for display/terminate (includes first pane).
+    #[cfg(target_os = "macos")]
+    pane_client_raws: HashMap<PaneId, u64>,
 }
 
 impl Default for ApplicationRoot {
@@ -469,8 +483,7 @@ impl ApplicationRoot {
         Self::with_shell(ShellState::m001_local("local"))
     }
 
-    /// Test-only: enable CreateTab while production `m001_local` stays gated
-    /// until the live create→attach→bind driver exists (#1149 / #1159).
+    /// Test-only: force CreateTab policy regardless of production composition.
     #[cfg(test)]
     pub(crate) fn enable_tab_creation_for_test(&mut self) {
         self.shell.set_allows_tab_creation_for_test(true);
@@ -489,6 +502,7 @@ impl ApplicationRoot {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
             authority: None,
+            pane_authorities: HashMap::new(),
             provisioning: ProvisioningSession::new(),
             #[cfg(target_os = "macos")]
             wire_client: None,
@@ -511,6 +525,10 @@ impl ApplicationRoot {
             integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
+            #[cfg(target_os = "macos")]
+            extra_pane_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            pane_client_raws: HashMap::new(),
         }
     }
 

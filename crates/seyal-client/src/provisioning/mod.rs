@@ -178,6 +178,39 @@ impl ProvisioningSession {
             })
     }
 
+    /// Locate the outstanding attach (create or §6.3 dispose-attach) request id
+    /// for `owner` + `execution` so the live Controller driver can correlate.
+    pub fn pending_attach_request_id(
+        &self,
+        owner: ConnectionOwner,
+        execution: ExecutionId,
+    ) -> Option<u64> {
+        self.pending_by_key.iter().find_map(|((o, id), intent)| {
+            if *o != owner {
+                return None;
+            }
+            let kind = self.pending_kind.get(&(*o, *id))?;
+            if !matches!(kind, PendingKind::Create | PendingKind::DisposeAttach) {
+                return None;
+            }
+            let matches_execution = match intent.phase {
+                IntentPhase::Attaching { execution: e }
+                | IntentPhase::Created { execution: e }
+                | IntentPhase::Disposing { execution: e, .. }
+                | IntentPhase::Attached { execution: e, .. } => e == execution,
+                _ => false,
+            };
+            matches_execution.then_some(*id)
+        })
+    }
+
+    /// Any pending intent keyed by connection-local `request_id`.
+    pub fn pending_intent_for_request(&self, request_id: u64) -> Option<&PendingIntent> {
+        self.pending_by_key
+            .iter()
+            .find_map(|((_, id), intent)| (*id == request_id).then_some(intent))
+    }
+
     /// Locate a pending terminate intent by connection-local `request_id`.
     pub fn pending_terminate_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
         self.pending_by_key

@@ -53,15 +53,15 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 861
-issue = 1105
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate, #928 MoveSplitDivider/NoSplitDivider, P3 provisioning terminate/create, and #867 resting Flow/Raw fields; goto_apply.rs, chrome_apply.rs, provisioning_apply.rs, and presentation_apply.rs own the reducers. Ceiling matches post-#1082-merge LOC."
+acknowledged_loc = 876
+issue = 1175
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 adds per-pane authority/client maps for live second-Controller CreateTab while live_attach_apply.rs, provisioning_apply.rs, and session.rs own the attach/poll reducers."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 756
-issue = 1149
-reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create/terminate_by_request_id, connection-scoped request ids, seed_next_request_id, and restore_binding_after_failed_terminate_admit so fail-closed NoLiveClient terminate can roll back the recorded binding (ADR-017 §6.2)."
+acknowledged_loc = 789
+issue = 1175
+reason = "Portable provisioning reducer stays one cold-path authority; #1175 adds pending_attach_request_id and pending_intent_for_request so the live Controller driver can correlate AttachController without fabricating AttachmentId."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -71,9 +71,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1044
+ceiling_loc = 1023
 issue = 1003
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1149 production-off tab-creation gate coverage also lives here. C2 acceptance cases stay in tab_provisioning_tests.rs."
+responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1175 updates production CreateTab enablement assertions here. C2 acceptance cases stay in tab_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -139,9 +139,9 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 939
-issue = 1105
-reason = "Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. Ceiling matches post-master-merge LOC."
+acknowledged_loc = 940
+issue = 1175
+reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175 adds harness_probe=false on live finish_attach so CreateTab's second-Controller driver can distinguish Runtime clients from in-process unit-test probes without splitting the Ready-stream lifecycle."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no

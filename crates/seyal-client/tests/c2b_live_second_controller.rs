@@ -1,0 +1,175 @@
+//! Issue #1175 / M003 C2b — live CreateTab create→attach→bind on a second
+//! Controller connection with a real Runtime `AttachmentId` (no fabrication).
+
+#![cfg(target_os = "macos")]
+
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+use seyal_client::app::{AppAction, ApplicationRoot};
+use seyal_client::LocalDisplayClient;
+use seyal_core::AttachmentId;
+use seyal_protocol::runtime_dir::{
+    override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
+};
+use seyal_runtime::{local_ipc::framing::Role, Runtime, RuntimeConfig};
+
+struct OverrideReset;
+
+impl Drop for OverrideReset {
+    fn drop(&mut self) {
+        reset_explicit_runtime_dir();
+    }
+}
+
+fn start_empty_isolated_runtime() -> (PathBuf, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let runtime_dir = PathBuf::from(format!(
+        "/tmp/s1175e{}{:x}",
+        std::process::id() % 100_000,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            % 0xFFFF
+    ));
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = Arc::clone(&stop);
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let join = thread::spawn(move || {
+        let mut runtime = Runtime::new(
+            RuntimeConfig::m001()
+                .expect("M001 Runtime config")
+                .isolated_to(runtime_dir),
+        )
+        .expect("isolated Runtime");
+        let socket_path = runtime
+            .local_ipc_socket_path()
+            .expect("local IPC socket")
+            .to_path_buf();
+        ready_tx.send(socket_path).expect("test receiver");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !stop_thread.load(Ordering::Relaxed) && Instant::now() < deadline {
+            runtime
+                .poll_once(Some(Duration::from_millis(5)))
+                .expect("Runtime poll");
+        }
+        runtime.begin_shutdown().expect("begin shutdown");
+        runtime
+            .run_until_empty(Instant::now() + Duration::from_secs(3))
+            .expect("shutdown");
+    });
+    let socket_path = ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("Runtime ready");
+    (socket_path, stop, join)
+}
+
+fn poll_until(
+    root: &mut ApplicationRoot,
+    deadline: Instant,
+    mut pred: impl FnMut(&ApplicationRoot) -> bool,
+) {
+    while Instant::now() < deadline {
+        let _ = root.poll_client(root.fence());
+        if pred(root) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("deadline exceeded waiting for CreateTab live bind");
+}
+
+#[test]
+fn create_tab_live_second_controller_attach_binds_distinct_execution() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("Controller creates profile 0 when empty Runtime has no execution");
+    let first_execution = first.execution_id();
+    assert!(
+        first.execution_provisioning_negotiated(),
+        "C2b requires CAP_EXECUTION_PROVISIONING on the create connection"
+    );
+    let _ = Role::Controller;
+
+    let mut root = ApplicationRoot::new();
+    assert!(
+        root.snapshot().shell.allows_tab_creation,
+        "production composition enables CreateTab"
+    );
+    let first_pane = root.snapshot().shell.focused_pane;
+    let fence = root.fence();
+    root.attach_client(fence, first)
+        .expect("bind first Controller");
+    assert_eq!(root.snapshot().execution, Some(first_execution));
+
+    root.apply(AppAction::CreateTab)
+        .expect("CreateTab admits type-36 on the live create connection");
+    let second_pane = root.snapshot().shell.focused_pane;
+    assert_ne!(first_pane, second_pane);
+    assert!(
+        root.provisioning().pending_intent(second_pane).is_some(),
+        "CreateTab must begin a pending create intent"
+    );
+
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
+
+    let second_execution = root
+        .provisioning()
+        .recorded_execution(second_pane)
+        .expect("second pane bound");
+    assert_ne!(
+        second_execution, first_execution,
+        "second tab must bind a distinct live ExecutionId"
+    );
+    let second_shell_exec = root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .find(|pane| pane.id == second_pane)
+        .and_then(|pane| pane.execution);
+    assert_eq!(second_shell_exec, Some(second_execution));
+    assert_eq!(root.snapshot().execution, Some(second_execution));
+    let attachment = root
+        .snapshot()
+        .attachment
+        .expect("live attach must record a real Runtime AttachmentId");
+    // Fabrication ban: must not match the C2a harness helper pattern.
+    let fabricated = AttachmentId::from_bytes([second_execution.to_bytes()[0]; 16]);
+    assert_ne!(
+        attachment, fabricated,
+        "production path must not fabricate AttachmentId from ExecutionId bytes"
+    );
+
+    let second_tab = root.snapshot().shell.active_tab;
+    root.apply(AppAction::CloseTab { id: second_tab })
+        .expect("close second tab (detach-only)");
+    assert!(root.provisioning().is_unreferenced(second_execution));
+    assert_eq!(
+        root.provisioning().recorded_execution(first_pane),
+        Some(first_execution),
+        "unrelated first execution must remain recorded after detach-only close"
+    );
+    assert_eq!(root.provisioning().automatic_retries(), 0);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}

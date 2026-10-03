@@ -210,7 +210,7 @@ impl ApplicationRoot {
     }
 
     /// Absorb a create result from the wire client and advance the session.
-    /// On `Created`, queues `AttachController` for the host (no automatic attach).
+    /// On `Created`, drives live Controller attach (or parks for harness probes).
     #[cfg(target_os = "macos")]
     pub fn absorb_wire_create_result(&mut self) -> Result<Option<CreateExecutionResult>, AppError> {
         let Some(result) = self.take_wire_create_result()? else {
@@ -230,13 +230,13 @@ impl ApplicationRoot {
         let effects =
             self.provisioning
                 .apply_create_result(intent.owner, result.request_id, outcome);
-        let _ = self.dispatch_wire_effects(
+        self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
                 workspace_id: 0,
                 launch_profile: 0,
             },
-        );
+        )?;
         Ok(Some(result))
     }
 
@@ -363,6 +363,22 @@ impl ApplicationRoot {
         if let Some(client) = self.wire_client.as_mut() {
             return Ok(client.take_terminate_result());
         }
+        // Prefer the focused/authority pane client (may be a second Controller).
+        if let Some(pane) = self.authority.map(|authority| authority.pane)
+            && let Some(handle) = self.pane_client_raws.get(&pane).copied()
+            && let Some(result) =
+                crate::ffi::with_client_mut(handle, |client| client.take_terminate_result())
+            && result.is_some()
+        {
+            return Ok(result);
+        }
+        for handle in self.pane_client_raws.values().copied() {
+            if let Some(Some(result)) =
+                crate::ffi::with_client_mut(handle, |client| client.take_terminate_result())
+            {
+                return Ok(Some(result));
+            }
+        }
         if let Some(handle) = self
             .client_handle
             .as_ref()
@@ -379,6 +395,9 @@ impl ApplicationRoot {
     }
 
     fn clear_authority_for_pane(&mut self, pane: PaneId) {
+        self.pane_authorities.remove(&pane);
+        #[cfg(target_os = "macos")]
+        self.unregister_extra_pane_client(pane);
         if self
             .authority
             .as_ref()
@@ -389,11 +408,12 @@ impl ApplicationRoot {
                 .presentation
                 .apply(crate::presentation::PresentationAction::ClearIdentity);
             self.sync_composer_presentation();
-            // ADR-017 §6.1 detach-only: keep the shared LocalDisplayClient /
+            // ADR-017 §6.1 detach-only: keep the shared create LocalDisplayClient /
             // client_handle registered so remaining tabs can still admit
-            // create/terminate on the same connection. Unregister happens on
-            // attach replace, quit, or ApplicationRoot drop — not on pane
-            // detach or per-execution terminate absorb.
+            // create on the same connection. Extra per-pane Controllers are
+            // unregistered above; create-client unregister is quit / replace / drop.
+            #[cfg(target_os = "macos")]
+            self.activate_focused_pane_authority();
         }
     }
 
@@ -443,8 +463,16 @@ impl ApplicationRoot {
                         .map_err(|_| AppError::AlreadyBound)?;
                     let _ = self.provisioning.apply_bind_success(pane, execution);
                 }
-                ProvisioningEffect::AttachController { .. }
-                | ProvisioningEffect::RequestBootstrapResize { .. } => {
+                ProvisioningEffect::AttachController { owner, execution } => {
+                    #[cfg(target_os = "macos")]
+                    self.drive_attach_controller(owner, execution)?;
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        self.pending_wire_effects
+                            .push(ProvisioningEffect::AttachController { owner, execution });
+                    }
+                }
+                ProvisioningEffect::RequestBootstrapResize { .. } => {
                     self.pending_wire_effects.push(effect);
                 }
             }
@@ -535,6 +563,26 @@ impl ApplicationRoot {
             let _ = effect;
             return Err(AppError::NoLiveClient);
         }
+        // P4: type 38 must ride the Controller connection that owns the
+        // attachment (second-tab Controllers are per-pane; create stays shared).
+        if let Some(pane) = self
+            .pane_authorities
+            .values()
+            .find(|authority| {
+                authority.execution == execution && authority.attachment == attachment
+            })
+            .map(|authority| authority.pane)
+            .or_else(|| self.authority.map(|authority| authority.pane))
+            && let Some(raw) = self.pane_client_raws.get(&pane).copied()
+        {
+            return match crate::ffi::with_client_mut(raw, |client| {
+                client.submit_terminate_execution_with_id(request_id, execution, attachment)
+            }) {
+                Some(Ok(())) => Ok(()),
+                Some(Err(error)) => Err(client_error(error)),
+                None => Err(AppError::NoLiveClient),
+            };
+        }
         self.with_wire_client_mut(|client| {
             client.submit_terminate_execution_with_id(request_id, execution, attachment)
         })?;
@@ -612,35 +660,7 @@ impl ApplicationRoot {
         evidence: BindingEvidence,
     ) -> Result<(), AppError> {
         let pane = self.shell.snapshot().focused_pane;
-        if self.authority.is_some() {
-            return Err(AppError::AlreadyBound);
-        }
-        if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
-            return Err(AppError::StaleExecution);
-        }
-        if evidence.pty_generation == 0 {
-            return Err(AppError::ZeroPtyGeneration);
-        }
-        let identity = crate::presentation::PresentationIdentity::new(
-            evidence.execution,
-            evidence.pty_generation,
-        )
-        .ok_or(AppError::ZeroPtyGeneration)?;
-        self.presentation
-            .apply(crate::presentation::PresentationAction::BindIdentity(
-                identity,
-            ))
-            .map_err(|_| AppError::AlreadyBound)?;
-        self.authority = Some(super::PaneAuthority {
-            pane,
-            execution: evidence.execution,
-            attachment: evidence.attachment,
-            controller: evidence.controller,
-            pty_generation: evidence.pty_generation,
-        });
-        self.derive_presentation(evidence.alternate_screen)?;
-        self.sync_composer_presentation();
-        Ok(())
+        self.install_pane_authority(pane, evidence)
     }
 }
 
