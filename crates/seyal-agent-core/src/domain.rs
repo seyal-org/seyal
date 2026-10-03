@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::client_control::LoggedObservation;
 use crate::lifecycle::{
-    AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage, AttemptDisposition,
-    AttemptLifecycle, AttemptOrigin, AttachmentAccess, ExecutionLiveness, ExecutionRef,
+    AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage, AttachmentAccess,
+    AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness, ExecutionRef,
     ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecisionRef, RunTermination,
     WorkItemLifecycle, WorkItemOutcome,
 };
-use crate::client_control::LoggedObservation;
 use crate::{
     AgentRunId, AttemptId, BindingGeneration, ClientSessionId, ControlGeneration, WorkItemId,
     WorkScopeId,
@@ -264,15 +264,8 @@ pub struct AgentDomain {
     pub(crate) work_items: HashMap<WorkItemId, WorkItem>,
     pub(crate) attempts: HashMap<AttemptId, Attempt>,
     pub(crate) agent_runs: HashMap<AgentRunId, AgentRun>,
-    pub(crate) attachments: HashMap<
-        ClientSessionId,
-        (
-            AgentRunId,
-            AttachmentAccess,
-            ControlGeneration,
-            u64,
-        ),
-    >,
+    pub(crate) attachments:
+        HashMap<ClientSessionId, (AgentRunId, AttachmentAccess, ControlGeneration, u64)>,
     pub(crate) detection_bindings: HashMap<ExternalIdentityKey, AgentRunId>,
     pub(crate) retired_executions: HashSet<ExecutionRef>,
     pub(crate) observation_keys: HashSet<(u64, u64, u64)>,

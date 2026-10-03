@@ -29,7 +29,12 @@ impl IntegrationService {
         if self.authority.domain().attempt(attempt_id).is_none() {
             return CommandResult::Error(CommandError::NotFound);
         }
-        if self.authority.domain().run_for_attempt(attempt_id).is_some() {
+        if self
+            .authority
+            .domain()
+            .run_for_attempt(attempt_id)
+            .is_some()
+        {
             return CommandResult::Error(CommandError::Failed);
         }
         // AB-1.9: hostless production fails closed before any AgentRun mint.
@@ -96,7 +101,11 @@ impl IntegrationService {
             .domain()
             .agent_run(run_id)
             .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Dispatching)
-            && self.authority.domain_mut().activate_agent_run(run_id).is_ok()
+            && self
+                .authority
+                .domain_mut()
+                .activate_agent_run(run_id)
+                .is_ok()
         {
             let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
         }

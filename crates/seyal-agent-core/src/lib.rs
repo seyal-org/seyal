@@ -6,15 +6,16 @@
 //!
 //! `ControlGeneration` is the client control epoch (SPEC-026 O1 / §8.3).
 
-mod domain;
-mod restore;
 mod client_control;
+mod domain;
 mod execution_host;
 mod identity;
 mod lifecycle;
 mod output_ref;
+mod restore;
 mod transitions;
 
+pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
 pub use execution_host::{ExecutionHost, ExecutionHostKind};
 pub use identity::{
@@ -23,7 +24,7 @@ pub use identity::{
 };
 pub use lifecycle::{
     codes, AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,
-    AttemptDisposition, AttemptLifecycle, AttemptOrigin, AttachmentAccess, ExecutionLiveness,
+    AttachmentAccess, AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness,
     ExecutionRef, ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecisionRef,
     RunTermination, TerminationKind, TerminationSource, WorkItemLifecycle, WorkItemOutcome,
 };
@@ -32,5 +33,4 @@ pub use output_ref::{
     RetentionPolicyRef, StreamKind, OUTPUT_REF_KIND, OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN,
     RETENTION_POLICY_RETAINED_STREAM,
 };
-pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use transitions::TransitionIds;

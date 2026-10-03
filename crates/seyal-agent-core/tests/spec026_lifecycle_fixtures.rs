@@ -5,14 +5,19 @@
 
 use seyal_agent_core::{
     AcceptanceContractMode, AccountingValue, AgentDomain, AgentRunLifecycle, AgentRunLineage,
-    AttemptDisposition, AttemptLifecycle, AttemptOrigin, AttachmentAccess, BindingGeneration,
+    AttachmentAccess, AttemptDisposition, AttemptLifecycle, AttemptOrigin, BindingGeneration,
     ClientSessionId, ControlGeneration, DomainError, ExecutionLiveness, ExecutionRef,
     ExternalIdentityKey, ObservationFact, ObservationKind, ObservationRecordResult,
     ResumabilityFact, RoutingDecisionRef, TerminationKind, TerminationSource, WorkItemLifecycle,
     WorkItemOutcome, WorkScopeKind,
 };
 
-fn seeded() -> (AgentDomain, seyal_agent_core::WorkItemId, seyal_agent_core::AttemptId, seyal_agent_core::AgentRunId) {
+fn seeded() -> (
+    AgentDomain,
+    seyal_agent_core::WorkItemId,
+    seyal_agent_core::AttemptId,
+    seyal_agent_core::AgentRunId,
+) {
     let mut domain = AgentDomain::new();
     let scope = domain.create_work_scope(WorkScopeKind::Repository);
     let item = domain.create_work_item(scope).unwrap();
@@ -41,7 +46,10 @@ fn fixture_01_start_active_harness_completes_same_run_no_work_item_outcome() {
         agent.termination().unwrap().kind,
         TerminationKind::Completed
     );
-    assert_eq!(domain.work_item(item).unwrap().lifecycle(), WorkItemLifecycle::Open);
+    assert_eq!(
+        domain.work_item(item).unwrap().lifecycle(),
+        WorkItemLifecycle::Open
+    );
     assert_eq!(domain.work_item(item).unwrap().outcome(), None);
 }
 
@@ -52,9 +60,7 @@ fn fixture_02_cancel_in_created_or_prepared_terminates_cancelled() {
         .prepare_agent_run(run, RoutingDecisionRef::new(1))
         .unwrap();
     let control = domain.agent_run(run).unwrap().control_generation();
-    domain
-        .cancel_agent_run(run, control, None, false)
-        .unwrap();
+    domain.cancel_agent_run(run, control, None, false).unwrap();
     assert_eq!(
         domain.agent_run(run).unwrap().lifecycle(),
         AgentRunLifecycle::Terminated
@@ -77,9 +83,7 @@ fn fixture_03_cancel_while_active_terminating_then_cancelled() {
     let (mut domain, _item, _attempt, run) = seeded();
     start_to_active(&mut domain, run);
     let control = domain.agent_run(run).unwrap().control_generation();
-    domain
-        .cancel_agent_run(run, control, None, false)
-        .unwrap();
+    domain.cancel_agent_run(run, control, None, false).unwrap();
     assert_eq!(
         domain.agent_run(run).unwrap().lifecycle(),
         AgentRunLifecycle::Terminating
@@ -132,7 +136,10 @@ fn fixture_05_client_detach_reconnect_same_attempt_and_run() {
         domain.agent_run(run).unwrap().lifecycle(),
         AgentRunLifecycle::Active
     );
-    assert_eq!(domain.retry_budget_consumed(domain.agent_run(run).unwrap().work_item_id()), 0);
+    assert_eq!(
+        domain.retry_budget_consumed(domain.agent_run(run).unwrap().work_item_id()),
+        0
+    );
 }
 
 #[test]
@@ -186,14 +193,7 @@ fn fixture_08_stale_adapter_cancel_after_rebind() {
         })
     );
     let result = domain
-        .record_observation(
-            run,
-            7,
-            stale,
-            Some(1),
-            ObservationKind::Output,
-            false,
-        )
+        .record_observation(run, 7, stale, Some(1), ObservationKind::Output, false)
         .unwrap();
     assert_eq!(result, ObservationRecordResult::StaleRetained);
     assert!(domain.observation_log().iter().any(|o| o.stale));
@@ -257,7 +257,11 @@ fn fixture_12_same_strategy_retry_new_attempt() {
     let (mut domain, item, attempt, run) = seeded();
     start_to_active(&mut domain, run);
     domain
-        .set_attempt_usage(attempt, AccountingValue::Observed(10), AccountingValue::Observed(3))
+        .set_attempt_usage(
+            attempt,
+            AccountingValue::Observed(10),
+            AccountingValue::Observed(3),
+        )
         .unwrap();
     domain
         .terminate_failed(run, TerminationSource::Harness)
@@ -342,7 +346,10 @@ fn fixture_16_rate_limit_not_started_dispatching_to_prepared() {
         .unwrap();
     let agent = domain.agent_run(run).unwrap();
     assert_eq!(agent.lifecycle(), AgentRunLifecycle::Prepared);
-    assert_eq!(agent.routing_decision_ref(), Some(RoutingDecisionRef::new(2)));
+    assert_eq!(
+        agent.routing_decision_ref(),
+        Some(RoutingDecisionRef::new(2))
+    );
     assert_eq!(agent.id(), run);
 }
 
@@ -378,7 +385,10 @@ fn fixture_18_backend_restart_active_reconciliation() {
     let agent = domain.agent_run(run).unwrap();
     assert_eq!(agent.execution_liveness(), ExecutionLiveness::Unknown);
     assert_eq!(agent.observation(), ObservationFact::Disconnected);
-    assert_eq!(agent.resumability(), ResumabilityFact::ReconciliationRequired);
+    assert_eq!(
+        agent.resumability(),
+        ResumabilityFact::ReconciliationRequired
+    );
     assert_eq!(
         domain.detach_client(session),
         Err(DomainError::NotAuthorized)
@@ -443,7 +453,10 @@ fn fixture_21_repeated_detection_idempotent_one_run() {
     assert_eq!(first.agent_run_id, second.agent_run_id);
     assert_eq!(first.attempt_id, second.attempt_id);
     assert_eq!(
-        domain.work_item(first.work_item_id).unwrap().acceptance_mode(),
+        domain
+            .work_item(first.work_item_id)
+            .unwrap()
+            .acceptance_mode(),
         AcceptanceContractMode::HumanFinal
     );
 }
@@ -480,14 +493,28 @@ fn fixture_23_exited_before_started_retained_order_respected() {
     let binding = domain.agent_run(run).unwrap().binding_generation();
     // Out-of-order: exited while still Dispatching / NotStarted — retained.
     domain
-        .record_observation(run, 2, binding, Some(1), ObservationKind::HarnessExited, false)
+        .record_observation(
+            run,
+            2,
+            binding,
+            Some(1),
+            ObservationKind::HarnessExited,
+            false,
+        )
         .unwrap();
     assert_eq!(
         domain.agent_run(run).unwrap().lifecycle(),
         AgentRunLifecycle::Dispatching
     );
     domain
-        .record_observation(run, 2, binding, Some(2), ObservationKind::HarnessStarted, false)
+        .record_observation(
+            run,
+            2,
+            binding,
+            Some(2),
+            ObservationKind::HarnessStarted,
+            false,
+        )
         .unwrap();
     assert_eq!(
         domain.agent_run(run).unwrap().lifecycle(),
@@ -529,10 +556,7 @@ fn fixture_25_mutation_of_finalized_work_item() {
     );
     let related = domain.create_related_work_item(item).unwrap();
     assert_ne!(related, item);
-    assert_eq!(
-        domain.work_item(related).unwrap().related_to(),
-        Some(item)
-    );
+    assert_eq!(domain.work_item(related).unwrap().related_to(), Some(item));
     assert_eq!(
         domain.work_item(related).unwrap().lifecycle(),
         WorkItemLifecycle::Open

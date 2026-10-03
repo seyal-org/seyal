@@ -37,7 +37,12 @@ impl AgentStore {
             resumability,
             run_revision,
         )?;
-        let sequence = insert_event(&tx, AggregateId::AgentRun(run_id), event_kind, event_payload)?;
+        let sequence = insert_event(
+            &tx,
+            AggregateId::AgentRun(run_id),
+            event_kind,
+            event_payload,
+        )?;
         tx.commit().map_err(|_| StoreError::WriteFailed)?;
         Ok(sequence)
     }
@@ -106,5 +111,4 @@ impl AgentStore {
         }
         Ok(())
     }
-
 }

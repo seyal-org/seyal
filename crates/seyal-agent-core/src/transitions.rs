@@ -4,14 +4,12 @@
 
 use crate::domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem};
 use crate::lifecycle::{
-    AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage, AttemptDisposition,
-    AttemptLifecycle, AttemptOrigin, ExecutionLiveness, ExecutionRef, ExternalIdentityKey,
-    ObservationFact, ResumabilityFact, RoutingDecisionRef, RunTermination, TerminationKind,
-    TerminationSource, WorkItemLifecycle, WorkItemOutcome,
+    AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,
+    AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness, ExecutionRef,
+    ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecisionRef, RunTermination,
+    TerminationKind, TerminationSource, WorkItemLifecycle, WorkItemOutcome,
 };
-use crate::{
-    AgentRunId, AttemptId, BindingGeneration, ControlGeneration, WorkItemId, WorkScopeId,
-};
+use crate::{AgentRunId, AttemptId, BindingGeneration, ControlGeneration, WorkItemId, WorkScopeId};
 
 /// Result of an identity-preserving or identity-minting transition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,10 +305,8 @@ impl AgentDomain {
             }
         }
         let work_item_id = prior.work_item_id;
-        let attempt_id = self.create_attempt_with_origin(
-            work_item_id,
-            AttemptOrigin::RetryOf(prior_attempt_id),
-        )?;
+        let attempt_id = self
+            .create_attempt_with_origin(work_item_id, AttemptOrigin::RetryOf(prior_attempt_id))?;
         // Preserve prior accounting evidence by leaving prior Attempt untouched.
         let agent_run_id = self.create_agent_run(attempt_id)?;
         Ok(TransitionIds {
@@ -555,8 +551,7 @@ impl AgentDomain {
             );
             id
         };
-        let attempt_id =
-            self.create_attempt_with_origin(work_item_id, AttemptOrigin::Initial)?;
+        let attempt_id = self.create_attempt_with_origin(work_item_id, AttemptOrigin::Initial)?;
         let agent_run_id = self.create_agent_run(attempt_id)?;
         {
             let run = self.run_mut(agent_run_id)?;

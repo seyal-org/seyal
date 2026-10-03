@@ -1,8 +1,6 @@
 //! Restore persisted identities into the in-memory authority.
 
-use seyal_agent_core::{
-    codes, BindingGeneration, ControlGeneration, DomainError, WorkScopeKind,
-};
+use seyal_agent_core::{codes, BindingGeneration, ControlGeneration, DomainError, WorkScopeKind};
 use seyal_agent_store::{AgentStore, AggregateId};
 
 use crate::{AuthorizationRepository, ObservationAuthority, RunLiveness};
@@ -41,12 +39,11 @@ pub(super) fn restore_identities(
             BindingGeneration::from_raw(run.binding_generation).ok_or(ServiceError::Failed)?;
         let control =
             ControlGeneration::from_raw(run.control_generation).ok_or(ServiceError::Failed)?;
-        let lifecycle = codes::agent_run_lifecycle_from(run.run_lifecycle)
-            .ok_or(ServiceError::Failed)?;
-        let execution_liveness = codes::execution_liveness_from(run.execution_liveness)
-            .ok_or(ServiceError::Failed)?;
-        let observation =
-            codes::observation_from(run.observation).ok_or(ServiceError::Failed)?;
+        let lifecycle =
+            codes::agent_run_lifecycle_from(run.run_lifecycle).ok_or(ServiceError::Failed)?;
+        let execution_liveness =
+            codes::execution_liveness_from(run.execution_liveness).ok_or(ServiceError::Failed)?;
+        let observation = codes::observation_from(run.observation).ok_or(ServiceError::Failed)?;
         let resumability =
             codes::resumability_from(run.resumability).ok_or(ServiceError::Failed)?;
         match authority.restore_agent_run_state(
@@ -120,9 +117,7 @@ fn fence_recovered_run(
         .attempt_id();
     // SPEC-026 §9.7: Unknown liveness, Disconnected observation, ReconciliationRequired,
     // advanced binding + control epoch before accepting new control.
-    let (next_binding, next_control) = match authority
-        .domain_mut()
-        .backend_restart_recovery(run_id)
+    let (next_binding, next_control) = match authority.domain_mut().backend_restart_recovery(run_id)
     {
         Ok(gens) => gens,
         Err(DomainError::ReconciliationRequired) => {

@@ -23,8 +23,10 @@ impl AgentDomain {
             .ok_or(DomainError::UnknownAgentRun(agent_run_id))?;
         let control_epoch = run.control_generation;
         let issued_run_revision = run.run_revision;
-        self.attachments
-            .insert(session_id, (agent_run_id, access, control_epoch, issued_run_revision));
+        self.attachments.insert(
+            session_id,
+            (agent_run_id, access, control_epoch, issued_run_revision),
+        );
         Ok(())
     }
 
@@ -49,7 +51,10 @@ impl AgentDomain {
         if attached_run != agent_run_id {
             return Err(DomainError::NotAuthorized);
         }
-        if !matches!(access, AttachmentAccess::Control | AttachmentAccess::Interact) {
+        if !matches!(
+            access,
+            AttachmentAccess::Control | AttachmentAccess::Interact
+        ) {
             return Err(DomainError::NotAuthorized);
         }
         if epoch != presented_epoch {
@@ -194,7 +199,6 @@ impl AgentDomain {
     pub fn execution_retired(&self, execution: ExecutionRef) -> bool {
         self.retired_executions.contains(&execution)
     }
-
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
