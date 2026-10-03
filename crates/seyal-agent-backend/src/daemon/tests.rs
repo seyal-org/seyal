@@ -1,5 +1,13 @@
 use super::*;
-use seyal_agent_protocol::{HandshakeError, ProtocolVersion, MAX_EVENT_WINDOW};
+use seyal_agent_protocol::{
+    decode_result, encode_command, encode_hello, Command, CommandResult, FrameKind, HandshakeError,
+    Hello, ProtocolVersion, ABSOLUTE_MAX_FRAME_SIZE, MAX_EVENT_WINDOW,
+};
+use seyal_agent_store::AgentStore;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::panic::AssertUnwindSafe;
+use std::sync::mpsc;
 use std::time::Instant;
 use std::{
     os::unix::net::UnixListener,
@@ -379,4 +387,280 @@ fn insecure_directory_and_world_socket_are_rejected() {
         Err(DaemonError::Endpoint(EndpointFault::InsecureMode))
     );
     assert!(dir.path().join(SOCKET_NAME).exists());
+}
+
+fn qualification_config(dir: &Path) -> crate::IntegrationConfig {
+    crate::IntegrationConfig {
+        store_path: dir.join("agent.db"),
+        script: vec![crate::ScriptStep::Emit(crate::HostObservationKind::Started)],
+    }
+}
+
+fn identity_sets(path: &Path) -> String {
+    let store = AgentStore::open(path).expect("identity snapshot");
+    format!(
+        "principals={:?}\nscopes={:?}\nitems={:?}\nattempts={:?}\nruns={:?}",
+        store.client_principals().unwrap(),
+        store.work_scopes().unwrap(),
+        store.work_items().unwrap(),
+        store.attempts().unwrap(),
+        store.agent_runs().unwrap(),
+    )
+}
+
+fn poison_service(daemon: &AgentDaemon) {
+    let service = std::sync::Arc::clone(daemon.integration.as_ref().expect("integration"));
+    let panicked = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let _guard = service.lock().expect("lock before poison");
+        panic!("poison service for fail-closed test");
+    }));
+    assert!(panicked.is_err(), "barrier poison-unwind did not panic");
+    assert!(
+        service.lock().is_err(),
+        "barrier service-poison: mutex was not poisoned"
+    );
+}
+
+fn client_stream(path: &Path) -> UnixStream {
+    let stream = UnixStream::connect(path).expect("connect");
+    // Timeouts before any write the peer reacts to: macOS setsockopt returns
+    // EINVAL once the peer has already closed.
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream
+}
+
+fn write_hello(stream: &mut UnixStream) {
+    let hello = Hello {
+        supported_versions: vec![ProtocolVersion::V1],
+        max_frame_size: ABSOLUTE_MAX_FRAME_SIZE,
+        event_window: 32,
+        client_principal_evidence: Vec::new(),
+    };
+    let bytes = encode_hello(&hello, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+    stream.write_all(&bytes).unwrap();
+}
+
+fn read_prefix(stream: &mut UnixStream) -> Vec<u8> {
+    let mut buf = vec![0_u8; 64];
+    let n = stream.read(&mut buf).expect("read");
+    buf.truncate(n);
+    buf
+}
+
+#[test]
+fn poisoned_service_fails_closed_before_hello_ack() {
+    let dir = TempDir::new();
+    let mut daemon =
+        AgentDaemon::bind_integration(dir.path(), qualification_config(dir.path())).unwrap();
+    let before = identity_sets(&dir.path().join("agent.db"));
+    poison_service(&daemon);
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut stream = client_stream(&socket);
+        write_hello(&mut stream);
+        read_prefix(&mut stream)
+    });
+    let worker = daemon.accept_and_spawn().expect("admit poisoned peer");
+    let prefix = client.join().unwrap();
+    assert!(
+        prefix.is_empty(),
+        "barrier poisoned-before-hello: expected EOF, peer received {prefix:?}"
+    );
+    assert_eq!(worker.join().unwrap(), Err(DaemonError::Unavailable));
+    assert_eq!(
+        identity_sets(&dir.path().join("agent.db")),
+        before,
+        "barrier poisoned-before-hello: store identity sets changed"
+    );
+}
+
+#[test]
+fn poisoned_service_fails_closed_mid_session() {
+    let dir = TempDir::new();
+    let mut daemon =
+        AgentDaemon::bind_integration(dir.path(), qualification_config(dir.path())).unwrap();
+    let socket = daemon.socket_path();
+    let store_path = dir.path().join("agent.db");
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (poisoned_tx, poisoned_rx) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let mut stream = client_stream(&socket);
+        write_hello(&mut stream);
+        let ack = super::read_one_frame(&mut stream, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+        assert_eq!(ack.kind, FrameKind::HelloAck);
+        let open = encode_command(
+            &Command::OpenSession {
+                scopes: vec![1, 2, 4],
+            },
+            ABSOLUTE_MAX_FRAME_SIZE,
+        )
+        .unwrap();
+        stream.write_all(&open).unwrap();
+        let opened = super::read_one_frame(&mut stream, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+        assert_eq!(opened.kind, FrameKind::Result);
+        let session_id = match decode_result(&opened.body).unwrap() {
+            CommandResult::Opened { session_id } => session_id,
+            other => panic!("open session: {other:?}"),
+        };
+        ready_tx.send(()).expect("barrier session-open send");
+        poisoned_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("barrier poisoned");
+        let create = encode_command(
+            &Command::CreateWorkScope {
+                session_id,
+                kind: seyal_agent_core::WorkScopeKind::Repository,
+            },
+            ABSOLUTE_MAX_FRAME_SIZE,
+        )
+        .unwrap();
+        stream.write_all(&create).unwrap();
+        read_prefix(&mut stream)
+    });
+    let worker = daemon.accept_and_spawn().expect("admit session");
+    ready_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("barrier session-open");
+    let before = identity_sets(&store_path);
+    poison_service(&daemon);
+    poisoned_tx.send(()).expect("barrier poisoned send");
+    let prefix = client.join().unwrap();
+    assert!(
+        prefix.is_empty(),
+        "barrier poisoned-mid-session: expected EOF, peer received {prefix:?}"
+    );
+    assert_eq!(worker.join().unwrap(), Err(DaemonError::Unavailable));
+    assert_eq!(
+        identity_sets(&store_path),
+        before,
+        "barrier poisoned-mid-session: store identity sets changed"
+    );
+}
+
+fn recv_exit(
+    rx: &mpsc::Receiver<ServeExit>,
+    budget: Duration,
+    started: Instant,
+    barrier: &str,
+) -> ServeExit {
+    let remaining = budget.saturating_sub(started.elapsed());
+    if remaining.is_zero() {
+        panic!("barrier {barrier} timed out");
+    }
+    match rx.recv_timeout(remaining) {
+        Ok(exit) => exit,
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!("barrier {barrier} timed out"),
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("barrier {barrier} disconnected"),
+    }
+}
+
+#[test]
+fn exit_report_delivers_one_message_per_worker() {
+    let dir = TempDir::new();
+    let config = DaemonConfig {
+        read_timeout: Duration::from_millis(1500),
+        ..DaemonConfig::default()
+    };
+    let mut daemon =
+        AgentDaemon::bind_integration_with(dir.path(), config, qualification_config(dir.path()))
+            .unwrap();
+    let exits = daemon.install_exit_report();
+    let socket = daemon.socket_path();
+
+    let normal_socket = socket.clone();
+    let normal = thread::spawn(move || {
+        let mut stream = client_stream(&normal_socket);
+        write_hello(&mut stream);
+        let ack = super::read_one_frame(&mut stream, ABSOLUTE_MAX_FRAME_SIZE).unwrap();
+        assert_eq!(ack.kind, FrameKind::HelloAck);
+    });
+    let malformed_socket = socket.clone();
+    let malformed = thread::spawn(move || {
+        let mut stream = client_stream(&malformed_socket);
+        stream.write_all(b"BAD!\x00\x00\x00\x00\x00\x00").unwrap();
+        let _ = read_prefix(&mut stream);
+    });
+    let (stall_tx, stall_rx) = mpsc::channel();
+    let stalled_socket = socket.clone();
+    let stalled = thread::spawn(move || {
+        let stream = client_stream(&stalled_socket);
+        let _ = stall_rx.recv_timeout(Duration::from_secs(5));
+        drop(stream);
+    });
+
+    let mut workers = Vec::new();
+    for _ in 0..3 {
+        workers.push(daemon.accept_and_spawn().expect("admit peer"));
+    }
+
+    let started = Instant::now();
+    let budget = Duration::from_secs(5);
+    let mut reports = Vec::new();
+    while reports.len() < 3 {
+        reports.push(recv_exit(&exits, budget, started, "worker-exits"));
+    }
+    let _ = stall_tx.send(());
+    normal.join().unwrap();
+    malformed.join().unwrap();
+    stalled.join().unwrap();
+    for worker in workers {
+        let _ = worker.join().unwrap();
+    }
+    match exits.recv_timeout(Duration::from_millis(50)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        other => panic!("barrier worker-exits: extra report {other:?}"),
+    }
+
+    let mut ended = reports
+        .into_iter()
+        .map(|exit| match exit {
+            ServeExit::Ended(result) => result,
+            ServeExit::Panicked => panic!("barrier worker-exits: unexpected panic"),
+        })
+        .collect::<Vec<_>>();
+    ended.sort_by_key(|result| match result {
+        Ok(()) => 0,
+        Err(DaemonError::Malformed) => 1,
+        Err(DaemonError::TimedOut) => 2,
+        Err(other) => panic!("barrier worker-exits: unexpected {other:?}"),
+    });
+    assert_eq!(
+        ended,
+        vec![
+            Ok(()),
+            Err(DaemonError::Malformed),
+            Err(DaemonError::TimedOut),
+        ]
+    );
+}
+
+#[test]
+fn exit_guard_reports_panicked_on_unwind() {
+    let dir = TempDir::new();
+    let mut daemon =
+        AgentDaemon::bind_integration(dir.path(), qualification_config(dir.path())).unwrap();
+    let exits = daemon.install_exit_report();
+    let tx = daemon
+        .exit_report
+        .clone()
+        .expect("barrier exit-report installed");
+    let worker = super::supervision::spawn_supervised(Some(tx), || -> Result<(), DaemonError> {
+        panic!("worker unwind");
+    });
+    let started = Instant::now();
+    let exit = recv_exit(&exits, Duration::from_secs(5), started, "panicked-exit");
+    assert_eq!(exit, ServeExit::Panicked);
+    assert!(
+        worker.join().is_err(),
+        "barrier panicked-exit: worker did not unwind"
+    );
+    match exits.recv_timeout(Duration::from_millis(50)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        other => panic!("barrier panicked-exit: extra report {other:?}"),
+    }
 }

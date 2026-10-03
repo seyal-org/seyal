@@ -4,7 +4,7 @@
 use std::{
     io::Write,
     os::unix::net::UnixStream,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
 
@@ -77,10 +77,10 @@ pub(super) fn handshake_and_serve(
     handshake: Handshake,
 ) -> Result<(), DaemonError> {
     let (hello, ack) = negotiate(stream, handshake)?;
-    let resolved = service
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .resolve_connection_principal(&hello.client_principal_evidence);
+    let resolved = {
+        let guard = lock_service(service)?;
+        guard.resolve_connection_principal(&hello.client_principal_evidence)
+    };
     let Ok(principal) = resolved else {
         return Err(reject(
             stream,
@@ -106,6 +106,12 @@ pub(super) fn handshake_and_serve(
         ack.max_frame_size,
         ack.event_window,
     )
+}
+
+fn lock_service(
+    service: &Arc<Mutex<crate::session::IntegrationService>>,
+) -> Result<MutexGuard<'_, crate::session::IntegrationService>, DaemonError> {
+    service.lock().map_err(|_| DaemonError::Unavailable)
 }
 
 fn reject(stream: &mut UnixStream, error: HandshakeError, max_frame_size: u32) -> DaemonError {
@@ -135,9 +141,7 @@ fn serve_session_locked(
             crate::session::SessionRead::Io => return Err(DaemonError::Io),
         };
         let response = {
-            let mut guard = service
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut guard = lock_service(service)?;
             match guard.handle(principal, frame, max_frame_size, event_window) {
                 Ok(response) => response,
                 Err(_) => seyal_agent_protocol::encode_result(
