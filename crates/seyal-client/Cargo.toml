@@ -45,3 +45,7 @@ required-features = ["benchmark-instrumentation"]
 [[bench]]
 name = "app_root"
 harness = false
+
+[[bench]]
+name = "m003_provisioning"
+harness = false

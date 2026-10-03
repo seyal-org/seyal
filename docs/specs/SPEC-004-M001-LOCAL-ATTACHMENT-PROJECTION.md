@@ -2,12 +2,13 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) **accepted** on merge of PR #1060 under Issue #1083 by a non-author maintainer (independent review of `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`). #865 consumes the accepted text; it does not own the amendment, and its implementation is not Done. M003 delivery-suspend and capacity amendment under Issue #1162 (2026-09-28).
-- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds), #1162 (M003 per-attachment delivery suspend and capacity)
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) **accepted** on merge of PR #1060 under Issue #1083 by a non-author maintainer (independent review of `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`). #865 consumes the accepted text; it does not own the amendment, and its implementation is not Done. M003 delivery-suspend and capacity amendment under Issue #1162 (2026-09-28); L0 launch-policy detail (`CAP_LAUNCH_POLICY_DETAIL`, bit 12) under Issue #1113.
+- **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds), #1162 (M003 per-attachment delivery suspend and capacity), #1113 (L0 launch-policy Created detail / CAP_LAUNCH_POLICY_DETAIL)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`; ADR-018 §5.1 for the §19 delivery-suspend / capacity amendment
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
-- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
+- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative** (ADR-017 Accepted). Create/terminate production path ships with Issue #1105 / PR #1112.
 - **Accepted M003 extension:** §19 per-attachment delivery suspend/resume and revised §5 maxima (types 40–41, capability bit 11) under Issue #1162; satisfies ADR-018 §5.1; Runtime/client implementation is W5 and is **not** part of this amendment.
+- **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
 
 ## 1. Purpose
 
@@ -226,10 +227,11 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
 - bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, accepted under #1083 / PR #1060;
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18 (ADR-017 Accepted; implemented under #1105);
 - bit 11: per-attachment delivery suspend/resume (`CAP_ATTACHMENT_DELIVERY_CONTROL`) — §19 / Issue #1162;
-- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+- bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are allocated to `ViewportLineIds` (§8.1, accepted under #1083 / PR #1060). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**. §19 deliberately skips type 35 and bits 8–10 (already claimed/allocated) and assigns the next free types **40–41** and capability bit **11**. Bit **12** remains reserved for L0 / #1113 `CAP_LAUNCH_POLICY_DETAIL` when that amendment lands; it is not accepted by this PR.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are allocated to `ViewportLineIds` (§8.1, accepted under #1083 / PR #1060). §18 assigns types **36–39** and capability **bit 10** (ADR-017 Accepted; implemented under #1105 / PR #1112). §19 assigns types **40–41** and capability **bit 11** (`CAP_ATTACHMENT_DELIVERY_CONTROL`). L0 / #1113 allocates `CAP_LAUNCH_POLICY_DETAIL` as **bit 12** (ADR-020 §3.10), matching the shipped L0/L2/L3 wire.
 
 ### 8.1 Viewport LineIds (accepted, #1083)
 
@@ -576,14 +578,36 @@ M001 defines:
 
 These numeric meanings are reused by `ResizeResult.result_code` values 1–14. `ResizeResult.result_code = 0` uniquely means `Applied`.
 
-§18 additionally defines, normative only on ADR-017 acceptance:
+§18 additionally defines (ADR-017 Accepted; implemented under #1105):
 
 ```text
 15 InvalidWorkspace
 16 UnsupportedLaunchProfile
 ```
 
-Both are additive. A client must treat an unrecognized result code as a non-retryable failure and must not infer success from it.
+ADR-020 additionally defines (SPEC-004 L0 amendment). Message type 17 remains
+`TerminalKey` and is a different table; this registry is result/error codes only:
+
+```text
+17 LaunchPolicyRejected
+```
+
+On `LaunchPolicyRejected`, `detail_code` is one of:
+
+```text
+1 AccountRecordUnavailable
+2 ShellFallbackExhausted
+3 CwdInvalid
+4 CapabilityUnavailable
+```
+
+No other values are defined; clients treat any unknown `detail_code` as generic.
+The payload carries no path or environment bytes.
+
+Codes 15–17 are additive. A client must treat an unrecognized result code as a
+non-retryable failure and must not infer success from it. Older clients that do
+not recognize code 17 therefore treat it as a non-retryable unknown failure under
+that rule.
 
 Semantic errors do not mutate canonical state before validation succeeds. Fatal framing/version/ancillary failures close the connection after bounded cleanup. SPEC-006 classifies resize failures, forbids immediate automatic resend loops and treats result/projection generation inconsistency as protocol failure.
 
@@ -660,7 +684,7 @@ Comparator/reference shared-projection code may remain only if isolated from pro
 
 ## 18. M003 execution provisioning and disposition extension
 
-- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance**.
+- **Status:** accepted amendment (ADR-017 Accepted); create/terminate implemented under Issue #1105 / PR #1112.
 - **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
 - **Nature:** additive, capability-gated. Framing version remains `1.0`. Nothing in §1–§17 changes.
 
@@ -733,7 +757,7 @@ u16  reserved0 = 0
 u32  detail_code = 0
 ```
 
-- `result_code = 0` uniquely means `Created`; 1–16 reuse §15 numeric meanings.
+- `result_code = 0` uniquely means `Created`; 1–17 reuse §15 numeric meanings.
 - On `Created`, `execution_id` is a published live execution with exactly one
   owning Workspace association, observable through `ListExecutions`, and
   attachable by `Attach`.
@@ -746,8 +770,23 @@ u32  detail_code = 0
 - Results are mandatory bounded control output: never presentation-superseded,
   and terminal progress never waits for a client to read one.
 - No attachment is created and no display state is queued by creation.
-- `detail_code` is `0` unless a later accepted specification assigns a bounded
-  non-secret reason.
+- On `Created`, `detail_code` is a bitfield of bounded, non-secret launch-policy
+  warnings: bit 0 is `ConfiguredShellInvalid`, bit 1 is `CwdOverrideInvalid`,
+  and all other bits are reserved and must be 0. Runtime sets nonzero
+  `Created.detail_code` bits only when the peer negotiated
+  `CAP_LAUNCH_POLICY_DETAIL` (`1 << 12`); otherwise `detail_code` remains `0`.
+  A client must treat `Created` as success regardless of `detail_code`, must
+  ignore unknown or reserved bits, and must never infer failure from a nonzero
+  `Created.detail_code`.
+- On `LaunchPolicyRejected` (`result_code = 17`), `detail_code` uses the §15
+  values 1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3
+  `CwdInvalid`, and 4 `CapabilityUnavailable`. Unknown values render generic.
+  The payload carries no path or environment bytes. Code 17 itself is not
+  capability-gated: ADR-020 gates only the `Created` warning bits, and a
+  non-negotiating client already treats unrecognized result codes as
+  non-retryable failure under §15.
+- For other failure codes, `detail_code` is `0` unless a later accepted
+  specification assigns a bounded non-secret reason.
 
 ### 18.4 `TerminateExecutionRequest` — exactly 40 bytes
 
@@ -896,10 +935,9 @@ live-attachment maximum of 100 still bounds attach; per-connection attachment
 count stays at 1 (§5.1). With the capability, multi-attachment demultiplexing
 follows §10.4 and per-connection attachment count may rise to 100.
 
-Capability-bit hygiene relative to concurrent L0 work: Issue #1113 / L0 (not landed on master in this PR)
-(`CAP_LAUNCH_POLICY_DETAIL`) also claims "next free after bit 10" in this file.
-Whichever amendment merges second MUST take bit **12** (or the then-next free
-bit) rather than reuse bit 11.
+Capability-bit hygiene: Issue #1113 / L0 has landed on `master` and allocates
+`CAP_LAUNCH_POLICY_DETAIL` as bit **12**. This §19 amendment therefore keeps
+bit **11** for `CAP_ATTACHMENT_DELIVERY_CONTROL` and does not reuse bit 12.
 
 Types 40 and 41 are legal only in connection state `Attached`, and only for an
 `AttachmentId` that is live on that connection.

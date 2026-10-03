@@ -12,6 +12,9 @@ pub(in crate::runtime) struct ConnectionMeta {
     pub(super) attachment: Option<AttachmentId>,
     pub(super) reactor_token: RegistrationToken,
     pub(super) last_resize_request_id: u64,
+    /// Connection-local request-ID space shared by SPEC-004 §18 types 36/38.
+    pub(super) last_provisioning_request_id: u64,
+    pub(super) outstanding_creates: usize,
     pub(super) client_capabilities: u32,
     pub(super) last_terminal_key_action_id: u32,
     pub(super) last_terminal_mouse_action_id: u32,
@@ -66,6 +69,7 @@ impl Runtime {
     }
 
     pub(super) fn close_local_connection(&mut self, token: u64) {
+        self.drop_pending_creates_for_connection(token);
         let (reactor_token, attachment) = {
             let Some(state) = self.local_ipc.as_mut() else {
                 return;

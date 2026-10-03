@@ -46,16 +46,16 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS_PANE = 21,
     SEYAL_APP_ACTION_SET_SHELL_CHROME = 22,
     /*
-     * Workspace/Tab/Pane composition mutations (#922). CREATE_TAB/CLOSE_TAB/
-     * SPLIT_FOCUSED/CLOSE_PANE route through the same Rust ShellState as
-     * SELECT_WORKSPACE/SELECT_TAB/FOCUS_PANE; they fail closed (do not
-     * mutate) rather than silently no-op. CLOSE_TAB/CLOSE_PANE:
+     * Workspace/Tab/Pane composition mutations (#922 / #1149). CREATE_TAB
+     * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
+     * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
+     * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
      * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
-     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
-     * bound to an execution; disposition is not yet available),
-     * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER).
+     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
+     * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER),
+     * 35 = ProvisioningRejected, 36 = ProvisioningCapacityExceeded.
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -82,8 +82,11 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_BLOCK = 45,
     SEYAL_APP_ACTION_CLEAR_BLOCK_SELECTION = 46,
     /*
-     * Global keyboard-first command palette (#932). The command list is never
-     * sent by the host. Error codes 26-29.
+     * Global keyboard-first command palette (#932 / SPEC-022 N2).
+     * RUN_PALETTE: when the selected row carries a ResourceAddress, payload =
+     *   address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
+     *   Verb/chrome rows send payload_len = 0; Rust runs the frozen command.
+     * Navigation never re-resolves by ordinal. Error codes 26-27, 37-46.
      */
     SEYAL_APP_ACTION_OPEN_PALETTE = 47,
     SEYAL_APP_ACTION_SET_PALETTE_QUERY = 48,
@@ -129,7 +132,37 @@ enum SeyalAppActionKind {
      * 0.1...0.9. NaN/infinity return -6. Unknown PaneId = UnknownPane; a Pane
      * that leads no divider = 34 (NoSplitDivider).
      */
-    SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER = 58
+    SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER = 58,
+    /**
+     * Explicit Controller terminate (ADR-017 §6.2 / P4). Distinct from
+     * CLOSE_TAB / CLOSE_PANE chrome removal. Requires a matching fence with
+     * controller authority. Never terminates as a side effect of detach.
+     */
+    SEYAL_APP_ACTION_TERMINATE_EXECUTION = 59,
+    /**
+     * Atomic Navigate(address) (SPEC-022 §4). Payload is required:
+     * address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
+     * Rejected navigate leaves focus unchanged. Error codes 37-46.
+     */
+    SEYAL_APP_ACTION_NAVIGATE = 60,
+    /*
+     * Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+     * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
+     * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
+     * while open. Error codes 47-49.
+     */
+    SEYAL_APP_ACTION_OPEN_GOTO = 61,
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
+};
+
+/* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
+enum SeyalAppGotoScope {
+    SEYAL_APP_GOTO_WORKSPACES = 0,
+    SEYAL_APP_GOTO_TABS = 1,
+    SEYAL_APP_GOTO_PANES = 2,
+    SEYAL_APP_GOTO_SESSIONS = 3,
+    /* SET_GOTO_SCOPE only: advance to next scope in Rust (ADR-015). */
+    SEYAL_APP_GOTO_CYCLE_NEXT = 255
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -304,6 +337,7 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_COPY_BLOCK_PROMPT 2u
 #define SEYAL_APP_COPY_COMPOSER_HISTORY 3u
 #define SEYAL_APP_COPY_COMPOSER_HISTORY_PLACEHOLDER 4u
+#define SEYAL_APP_COPY_PALETTE_PLACEHOLDER 5u
 
 /*
  * seyal_app_block_row flags: state in the low three bits, plus
@@ -492,6 +526,16 @@ typedef struct SeyalAppRow {
     const uint8_t *detail;
     uint32_t detail_len;
     uint32_t reserved2;
+    /*
+     * Optional ResourceAddress (SPEC-022 / N2). address_len == 0 means none.
+     * Palette navigation rows set these; other row kinds leave them zero.
+     * address_bytes holds up to 48 payload bytes (Pane = three UUIDs).
+     */
+    uint16_t address_version;
+    uint16_t address_kind;
+    uint16_t address_len;
+    uint16_t address_pad;
+    uint8_t address_bytes[48];
 } SeyalAppRow;
 
 /*
@@ -511,6 +555,10 @@ typedef struct SeyalAppPalette {
 } SeyalAppPalette;
 
 #define SEYAL_APP_PALETTE_OPEN 1u
+/** Overlay is projecting the navigation-only goto surface (N4). */
+#define SEYAL_APP_PALETTE_GOTO 2u
+/** Goto enumeration exceeded the bound; results are truncated (SPEC-022 R7.6). */
+#define SEYAL_APP_PALETTE_TRUNCATED 4u
 
 uint64_t seyal_app_create(void);
 int32_t seyal_app_destroy(uint64_t handle);
@@ -601,6 +649,21 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+
+/*
+ * Launch-policy product copy (ADR-015 / SPEC-023 §9). Rust owns the fixed
+ * non-secret UTF-8; native hosts only render it. Pointers are to static
+ * storage. result_code 17 + detail 1–4 are failures; Created.detail_code bit
+ * index 0/1 are success-after-fallback warnings.
+ */
+typedef struct SeyalLaunchPolicyCopy {
+    const uint8_t *text;
+    uint32_t text_len;
+    uint32_t reserved;
+} SeyalLaunchPolicyCopy;
+
+SeyalLaunchPolicyCopy seyal_launch_policy_failure_copy(uint16_t result_code, uint32_t detail_code);
+SeyalLaunchPolicyCopy seyal_launch_policy_warning_copy(uint32_t bit_index);
 
 int32_t seyal_app_last_error(uint64_t handle);
 

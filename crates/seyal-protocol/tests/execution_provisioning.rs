@@ -51,12 +51,17 @@ fn framing_version_stays_1_0_and_capability_bit_is_stable() {
 fn additive_result_codes_are_stable() {
     assert_eq!(ErrorCode::InvalidWorkspace as u16, 15);
     assert_eq!(ErrorCode::UnsupportedLaunchProfile as u16, 16);
+    assert_eq!(ErrorCode::LaunchPolicyRejected as u16, 17);
     assert_eq!(ErrorCode::from_u16(15), Some(ErrorCode::InvalidWorkspace));
     assert_eq!(
         ErrorCode::from_u16(16),
         Some(ErrorCode::UnsupportedLaunchProfile)
     );
-    assert_eq!(ErrorCode::from_u16(17), None);
+    assert_eq!(
+        ErrorCode::from_u16(17),
+        Some(ErrorCode::LaunchPolicyRejected)
+    );
+    assert_eq!(ErrorCode::from_u16(18), None);
 }
 
 #[test]
