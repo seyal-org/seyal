@@ -13,6 +13,7 @@ use crate::{CapabilityPolicy, RuntimeError, ShellIntegrationPolicy};
 
 use super::{
     account::lookup_effective_account_record,
+    config::load_launch_profile_intent,
     env::ProcessLocaleEnv,
     resolve::{resolve, ResolveInputs},
     tmpdir::darwin_user_temp_dir,
@@ -20,19 +21,29 @@ use super::{
     validate::RealPathProbe,
 };
 
-/// Resolve profile `0` from the live effective-UID account and process state.
+/// Resolve profile `0` from cold `[shell]` config (when present), the live
+/// effective-UID account, and process state.
 ///
-/// Does not spawn, open a PTY, or mutate the Runtime registry.
+/// Does not spawn, open a PTY, or mutate the Runtime registry. Config parse
+/// diagnostics are class/field-name only; invalid paths fall through SPEC-023
+/// §5.4 / §7 at resolve time and never brick the Runtime.
 pub fn resolve_default_interactive() -> Result<LaunchPolicyResolution, LaunchPolicyFailure> {
+    let (intent, _diagnostics) = load_launch_profile_intent();
+    resolve_interactive_intent(&intent)
+}
+
+/// Resolve a caller-supplied intent (tests and create composition).
+pub fn resolve_interactive_intent(
+    intent: &LaunchProfileIntent,
+) -> Result<LaunchPolicyResolution, LaunchPolicyFailure> {
     let account = lookup_effective_account_record();
     let process_shell_buf = std::env::var_os("SHELL").map(PathBuf::from);
     let process_shell = process_shell_buf
         .as_deref()
         .filter(|path| path.is_absolute());
     let tmpdir = darwin_user_temp_dir();
-    let intent = LaunchProfileIntent::default_interactive();
     resolve(ResolveInputs {
-        intent: &intent,
+        intent,
         account: account.as_ref(),
         process_shell,
         tmpdir: tmpdir.as_deref(),

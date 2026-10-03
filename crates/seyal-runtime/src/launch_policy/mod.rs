@@ -7,6 +7,7 @@
 mod account;
 mod argv;
 mod compose;
+mod config;
 mod env;
 mod resolve;
 #[allow(unsafe_code)]
@@ -21,12 +22,16 @@ mod compose_tests;
 mod tests;
 
 pub use account::lookup_effective_account_record;
-pub use argv::{interactive_login_argv, ShellFamily};
+pub use argv::{interactive_argv, interactive_login_argv, ShellFamily};
 #[cfg(all(test, target_os = "macos"))]
 pub use compose::apply_post_policy;
 pub use compose::{
     command_spec_from_policy, compose_child_command, resolve_default_interactive,
-    ComposedChildCommand,
+    resolve_interactive_intent, ComposedChildCommand,
+};
+pub use config::{
+    launch_config_path, launch_config_path_from, load_launch_profile_intent,
+    load_launch_profile_intent_from_path, load_launch_profile_intent_from_text, ENV_CONFIG,
 };
 
 /// Serialize process-env reads/writes across launch-policy and shell-integration
