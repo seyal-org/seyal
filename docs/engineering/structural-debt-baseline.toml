@@ -19,11 +19,7 @@ hard_loc = 1000
 # sibling-type and harness extraction (E1 dual-recovery deletion remains
 # architecture-gated under #882 and was not touched).
 
-# Grandfathered handwritten production debt at the #1021 freeze tip.
-# Increasing ceiling_loc requires a narrowly scoped [[exception]] tied to an owning Issue.
-# Reducing a grandfathered or [[exception]] file requires lowering ceiling_loc (or
-# removing the entry once <= hard_loc) in the same change — silent headroom is rejected.
-# [[cohesion_acknowledgement]] rows require acknowledged_loc in review_loc..hard_loc;
+[[cohesion_acknowledgement]] rows require acknowledged_loc in review_loc..hard_loc;
 # growth past acknowledged_loc needs a fresh re-ack, and an ack is stale below review_loc.
 # Generated/fixture exclusions use directory rules, `_generated`/`_test(s)` suffixes, or
 # path-specific [[excluded]] rows with a reason — never rename to escape the gate.
@@ -48,14 +44,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-
-# #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
-# and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
 acknowledged_loc = 861
 issue = 1105
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate, #928 MoveSplitDivider/NoSplitDivider, and P3 provisioning terminate/create paths; goto_apply.rs, chrome_apply.rs, and provisioning_apply.rs own the reducers. Ceiling matches post-master-merge LOC."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate, #928 MoveSplitDivider/NoSplitDivider, P3 provisioning terminate/create, and #867 resting Flow/Raw fields; goto_apply.rs, chrome_apply.rs, provisioning_apply.rs, and presentation_apply.rs own the reducers. Ceiling matches post-#1082-merge LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -93,15 +86,6 @@ acknowledged_loc = 856
 issue = 1020
 reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production composer reducer stays under review_loc. Ceiling matches rustfmt-normalized LOC after the split."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 799
-issue = 867
-reason = "Command enumeration stays one palette module. #867 adds the bound Pane's explicit Raw / Return to Flow choice beside the existing shell and chrome commands; splitting that list would let the host invent a second command set."
-
-# #1020 HistoryStore responsibility split: wrap occupancy math and the former
-# in-file unit-test module land in the cohesion-review band by design.
-
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
@@ -119,21 +103,11 @@ reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests modu
 # #1020 Screen responsibility split: edit/scroll/cursor mutations land in the
 # cohesion-review band by design; resize planner and Screen façade stay under
 # review_loc.
-
-# #1020 Screen responsibility split: edit/scroll/cursor mutations land in the
-# cohesion-review band by design; resize planner and Screen façade stay under
-# review_loc.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/screen/ops.rs"
 acknowledged_loc = 881
 issue = 1020
 reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl block after the resize-planner extraction; further fragmentation would separate tightly coupled DECSTBM region helpers. Ceiling matches rustfmt-normalized LOC after the split."
-
-# #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
-# partitioned into print / execute / csi / osc siblings; all landed ≤ review_loc,
-# so no [[exception]] or [[cohesion_acknowledgement]] remains for this surface.
-
-# #1067 docs-only ownership note on the protocol DisplayCache module (review band).
 
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
 # partitioned into print / execute / csi / osc siblings; all landed ≤ review_loc,
@@ -199,9 +173,9 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 824
-issue = 1090
-reason = "Command palette query, rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows and #1090 threads window identity through the same reducer; splitting the file would separate the row model from the command it runs."
+acknowledged_loc = 854
+issue = 1105
+reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows, #1090 threads window identity, and #867 adds bound-Pane explicit Raw / Return to Flow beside those commands; splitting would separate the row model from the command it runs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
