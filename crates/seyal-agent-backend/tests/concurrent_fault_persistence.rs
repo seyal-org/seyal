@@ -49,12 +49,12 @@ fn script() -> Vec<ScriptStep> {
 #[test]
 fn persistent_peer_faults_do_not_stall_owner_and_release_resources() {
     let dir = temp_dir("fault-persistence");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();

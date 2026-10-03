@@ -1,7 +1,10 @@
-//! SessionClient process E2E against the production `seyal-agent-backend` binary.
+//! SessionClient process E2E against production and qualification daemon binaries.
 //!
-//! This crate must not depend on `seyal-agent-backend`. The daemon is a separate
-//! process located via `SEYAL_AGENT_BACKEND_BIN` or the workspace target dir.
+//! This crate must not depend on `seyal-agent-backend`. Daemons are separate
+//! processes located via `SEYAL_AGENT_BACKEND_BIN` /
+//! `SEYAL_AGENT_BACKEND_QUALIFICATION_BIN` or the workspace target dir.
+//! Run-success cases use the qualification binary; admit/shutdown cases use
+//! the hostless production binary (AB-1.9).
 
 #![cfg(unix)]
 
@@ -29,10 +32,7 @@ impl Drop for ChildDaemon {
     }
 }
 
-fn backend_bin() -> PathBuf {
-    if let Ok(path) = env::var("SEYAL_AGENT_BACKEND_BIN") {
-        return PathBuf::from(path);
-    }
+fn target_bin(name: &str) -> PathBuf {
     let profile = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -41,8 +41,22 @@ fn backend_bin() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../target");
     path.push(profile);
-    path.push("seyal-agent-backend");
+    path.push(name);
     path
+}
+
+fn production_bin() -> PathBuf {
+    if let Ok(path) = env::var("SEYAL_AGENT_BACKEND_BIN") {
+        return PathBuf::from(path);
+    }
+    target_bin("seyal-agent-backend")
+}
+
+fn qualification_bin() -> PathBuf {
+    if let Ok(path) = env::var("SEYAL_AGENT_BACKEND_QUALIFICATION_BIN") {
+        return PathBuf::from(path);
+    }
+    target_bin("seyal-agent-backend-qualification")
 }
 
 fn temp_dir(label: &str) -> PathBuf {
@@ -69,32 +83,71 @@ fn temp_dir(label: &str) -> PathBuf {
     dir
 }
 
-fn spawn_daemon(dir: &Path, output_bytes: usize, max_connections: Option<u64>) -> ChildDaemon {
-    spawn_daemon_opts(dir, output_bytes, Some(60), max_connections, false)
+fn spawn_production(dir: &Path, max_connections: Option<u64>) -> ChildDaemon {
+    spawn_bin_opts(
+        &production_bin(),
+        "seyal-agent-backend",
+        dir,
+        None,
+        Some(60),
+        max_connections,
+        false,
+    )
+}
+
+fn spawn_qualification(dir: &Path, output_bytes: usize) -> ChildDaemon {
+    spawn_bin_opts(
+        &qualification_bin(),
+        "seyal-agent-backend-qualification",
+        dir,
+        Some(output_bytes),
+        Some(60),
+        None,
+        false,
+    )
 }
 
 fn spawn_daemon_opts(
     dir: &Path,
-    output_bytes: usize,
     deadline_secs: Option<u64>,
     max_connections: Option<u64>,
     capture_stderr: bool,
 ) -> ChildDaemon {
-    let bin = backend_bin();
+    spawn_bin_opts(
+        &production_bin(),
+        "seyal-agent-backend",
+        dir,
+        None,
+        deadline_secs,
+        max_connections,
+        capture_stderr,
+    )
+}
+
+fn spawn_bin_opts(
+    bin: &Path,
+    label: &str,
+    dir: &Path,
+    output_bytes: Option<usize>,
+    deadline_secs: Option<u64>,
+    max_connections: Option<u64>,
+    capture_stderr: bool,
+) -> ChildDaemon {
     assert!(
         bin.is_file(),
-        "seyal-agent-backend binary missing at {}; build with `cargo build -p seyal-agent-backend --bin seyal-agent-backend` or set SEYAL_AGENT_BACKEND_BIN",
+        "{label} binary missing at {}; build with `cargo build -p seyal-agent-backend --features fixture-host` or set the matching SEYAL_AGENT_BACKEND*_BIN env var",
         bin.display()
     );
-    let mut command = Command::new(&bin);
+    let mut command = Command::new(bin);
     command
         .args([
             "--directory",
             dir.to_str().expect("utf-8 daemon directory"),
-            "--output-bytes",
-            &output_bytes.to_string(),
         ])
         .stdin(Stdio::null());
+    if let Some(bytes) = output_bytes {
+        command.args(["--output-bytes", &bytes.to_string()]);
+    }
     if let Some(deadline) = deadline_secs {
         command.args(["--deadline-secs", &deadline.to_string()]);
     }
@@ -104,7 +157,9 @@ fn spawn_daemon_opts(
     if capture_stderr {
         command.stderr(Stdio::piped()).stdout(Stdio::null());
     }
-    ChildDaemon(command.spawn().expect("spawn seyal-agent-backend"))
+    ChildDaemon(command.spawn().unwrap_or_else(|error| {
+        panic!("spawn {label}: {error}");
+    }))
 }
 
 fn connect_ready(socket: &Path) -> SessionClient {
@@ -160,7 +215,7 @@ fn wait_ready(socket: &Path) {
 fn session_client_hello_work_run_snapshot_replay_against_daemon_binary() {
     let dir = temp_dir("path");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon(&dir, 4096, None);
+    let mut child = spawn_qualification(&dir, 4096);
     wait_ready(&socket);
 
     let socket_for_client = socket.clone();
@@ -193,7 +248,7 @@ fn session_client_hello_work_run_snapshot_replay_against_daemon_binary() {
     child.0.kill().unwrap();
     child.0.wait().unwrap();
 
-    let restarted = spawn_daemon(&dir, 4096, None);
+    let restarted = spawn_qualification(&dir, 4096);
     wait_ready(&socket);
     match SessionClient::resume(&socket, session_id) {
         Err(ClientError::RejectedSession) => {}
@@ -212,7 +267,7 @@ fn daemon_binary_survives_malformed_client_and_serves_next() {
 
     let dir = temp_dir("malformed");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon(&dir, 1024, None);
+    let mut child = spawn_production(&dir, None);
     wait_ready(&socket);
 
     // Hello succeeds, then a bad-magic frame: daemon must keep accepting.
@@ -256,7 +311,7 @@ fn daemon_binary_exits_cleanly_after_bounded_connections() {
     let socket = dir.join("agent.sock");
     // One admitted connection (the SessionClient) then exit 0.
     // Do not Hello-probe first; that would consume the single admission.
-    let mut child = spawn_daemon(&dir, 1024, Some(1));
+    let mut child = spawn_production(&dir, Some(1));
     let started = Instant::now();
     let mut client = loop {
         match SessionClient::connect(&socket) {
@@ -281,7 +336,7 @@ fn daemon_binary_exits_cleanly_after_bounded_connections() {
 fn bounded_daemon_exits_zero_after_two_concurrent_sessions() {
     let dir = temp_dir("two-bounded");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon(&dir, 1024, Some(2));
+    let mut child = spawn_production(&dir, Some(2));
     let (live_tx, live_rx) = mpsc::channel();
     let (go_a_tx, go_a_rx) = mpsc::channel();
     let (go_b_tx, go_b_rx) = mpsc::channel();
@@ -327,7 +382,7 @@ fn bounded_daemon_with_held_session_is_ended_by_deadline() {
 
     let dir = temp_dir("held-deadline");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon_opts(&dir, 1024, Some(2), Some(1), true);
+    let mut child = spawn_daemon_opts(&dir, Some(2), Some(1), true);
     let (held_tx, held_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let holder = thread::spawn(move || {
@@ -370,7 +425,7 @@ fn bounded_daemon_requires_deadline() {
 
     let dir = temp_dir("needs-deadline");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon_opts(&dir, 1024, None, Some(1), true);
+    let mut child = spawn_daemon_opts(&dir, None, Some(1), true);
     let started = Instant::now();
     let status = loop {
         if let Some(status) = child.0.try_wait().unwrap() {
@@ -420,7 +475,7 @@ fn bounded_daemon_counts_recoverable_fault_toward_budget() {
 
     let dir = temp_dir("recoverable-budget");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon_opts(&dir, 1024, Some(60), Some(1), true);
+    let mut child = spawn_daemon_opts(&dir, Some(60), Some(1), true);
     let started = Instant::now();
     let mut stream = loop {
         match UnixStream::connect(&socket) {

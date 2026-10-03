@@ -6,9 +6,17 @@ Evidence for Issue #1180 on branch `mahboobmonnamd/issue/1180`.
 
 `ExecutionHost` / `ExecutionHostKind` live in `seyal-agent-core` as the typed
 SPEC-018 §2 seam (associated `Observation` / `Error` keep core free of host
-payload and process I/O). `HostObservation` vocabulary, `FakeExecutionHost`,
-and `StandaloneProcessHost` stay in `seyal-agent-backend` beside the
-observation commit path. No PTY / TerminalState ownership.
+payload and process I/O). `HostObservation` vocabulary and
+`StandaloneProcessHost` stay in `seyal-agent-backend` beside the observation
+commit path. `FakeExecutionHost` is feature-gated (`fixture-host`) as of #1196
+and is not composed into the production daemon. No PTY / TerminalState ownership.
+
+## Residual closed by #1196
+
+AB-1.4’s Done clause that the typed seam is the production seam (no parallel
+host API as authority) is completed by #1196: `IntegrationService` holds
+`Option<Box<dyn SessionExecutionHost>>` and calls `collect_observations` only
+through that seam.
 
 ## Claims
 

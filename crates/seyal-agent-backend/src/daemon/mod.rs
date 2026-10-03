@@ -686,6 +686,7 @@ pub(super) fn map_io(error: io::Error) -> DaemonError {
     }
 }
 
+mod host_bind;
 mod serve;
 mod supervision;
 

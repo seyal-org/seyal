@@ -392,7 +392,6 @@ fn insecure_directory_and_world_socket_are_rejected() {
 fn qualification_config(dir: &Path) -> crate::IntegrationConfig {
     crate::IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![crate::ScriptStep::Emit(crate::HostObservationKind::Started)],
     }
 }
 

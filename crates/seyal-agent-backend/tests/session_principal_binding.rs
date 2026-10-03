@@ -33,12 +33,12 @@ fn session_at_sequence(template: ClientSessionId, sequence: u64) -> ClientSessio
 #[test]
 fn observer_connection_cannot_use_owner_session_while_both_live() {
     let dir = temp_dir("session-principal-both-live");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -106,12 +106,12 @@ fn observer_connection_cannot_use_owner_session_while_both_live() {
 fn derived_session_ids_grant_no_authority() {
     let dir = temp_dir("derived-session-ids");
     let store_path = dir.join("agent.db");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: store_path.clone(),
-            script: script(),
         },
+        script(),
     )
     .unwrap();
     let socket = daemon.socket_path();
