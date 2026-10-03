@@ -1748,6 +1748,41 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.shiftApplied, 0)
     }
 
+    func testF5NormalizesAsNamedKeyThirteen() throws {
+        let f5 = String(Character(UnicodeScalar(NSF5FunctionKey)!))
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: f5,
+            charactersIgnoringModifiers: f5,
+            isARepeat: false,
+            keyCode: 96
+        ))
+        let payload = try XCTUnwrap(KeybindingStrokeNormalizer.normalize(event))
+        XCTAssertEqual(payload.namedKey, 1)
+        XCTAssertEqual(payload.base, KeybindingStrokeNormalizer.namedF5)
+        XCTAssertEqual(payload.shiftApplied, 0)
+    }
+
+    func testNamedKeyEquivalentMapsFKeysAndNavigation() {
+        XCTAssertEqual(
+            KeybindingShortcutRealization.namedKeyEquivalent(13),
+            String(Character(UnicodeScalar(NSF5FunctionKey)!))
+        )
+        XCTAssertEqual(
+            KeybindingShortcutRealization.namedKeyEquivalent(21),
+            String(Character(UnicodeScalar(NSHomeFunctionKey)!))
+        )
+        XCTAssertEqual(
+            KeybindingShortcutRealization.namedKeyEquivalent(25),
+            String(Character(UnicodeScalar(NSDeleteFunctionKey)!))
+        )
+    }
+
     func testShortcutRealizationReadsTheRustCommandPaletteEquivalent() throws {
         let row = try XCTUnwrap(
             KeybindingShortcutRealization.item(commandId: KeybindingShortcutRealization.commandPaletteOpen)

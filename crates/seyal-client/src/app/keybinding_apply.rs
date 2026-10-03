@@ -149,7 +149,8 @@ impl ApplicationRoot {
             }
             // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
             WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
-            // K8 admits the bindings; N3 (#1117 / tip B) owns FocusHistory state.
+            // Catalog builtins/projection omit FocusHistory until N3 (#1117 / tip B).
+            // Custom TOML / FFI ids 19–20 stay parseable and return unavailable.
             WorkspaceCommandId::FocusHistoryBack | WorkspaceCommandId::FocusHistoryForward => {
                 Err(AppError::ActionUnavailable)
             }

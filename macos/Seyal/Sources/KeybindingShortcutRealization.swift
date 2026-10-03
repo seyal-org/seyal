@@ -90,7 +90,7 @@ enum KeybindingShortcutRealization {
         return String(Character(scalar))
     }
 
-    private static func namedKeyEquivalent(_ base: UInt32) -> String {
+    static func namedKeyEquivalent(_ base: UInt32) -> String {
         switch base {
         case 0: return "\r" // Enter
         case 1: return "\t"
@@ -101,6 +101,23 @@ enum KeybindingShortcutRealization {
         case 6: return String(Character(UnicodeScalar(NSDownArrowFunctionKey)!))
         case 7: return String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
         case 8: return String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
+        case 9: return String(Character(UnicodeScalar(NSF1FunctionKey)!))
+        case 10: return String(Character(UnicodeScalar(NSF2FunctionKey)!))
+        case 11: return String(Character(UnicodeScalar(NSF3FunctionKey)!))
+        case 12: return String(Character(UnicodeScalar(NSF4FunctionKey)!))
+        case 13: return String(Character(UnicodeScalar(NSF5FunctionKey)!))
+        case 14: return String(Character(UnicodeScalar(NSF6FunctionKey)!))
+        case 15: return String(Character(UnicodeScalar(NSF7FunctionKey)!))
+        case 16: return String(Character(UnicodeScalar(NSF8FunctionKey)!))
+        case 17: return String(Character(UnicodeScalar(NSF9FunctionKey)!))
+        case 18: return String(Character(UnicodeScalar(NSF10FunctionKey)!))
+        case 19: return String(Character(UnicodeScalar(NSF11FunctionKey)!))
+        case 20: return String(Character(UnicodeScalar(NSF12FunctionKey)!))
+        case 21: return String(Character(UnicodeScalar(NSHomeFunctionKey)!))
+        case 22: return String(Character(UnicodeScalar(NSEndFunctionKey)!))
+        case 23: return String(Character(UnicodeScalar(NSPageUpFunctionKey)!))
+        case 24: return String(Character(UnicodeScalar(NSPageDownFunctionKey)!))
+        case 25: return String(Character(UnicodeScalar(NSDeleteFunctionKey)!))
         default: return ""
         }
     }

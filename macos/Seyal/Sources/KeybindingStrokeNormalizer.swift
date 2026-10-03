@@ -11,6 +11,18 @@ enum KeybindingStrokeNormalizer {
     static let namedDown: UInt32 = 6
     static let namedLeft: UInt32 = 7
     static let namedRight: UInt32 = 8
+    static let namedF1: UInt32 = 9
+    static let namedF2: UInt32 = 10
+    static let namedF3: UInt32 = 11
+    static let namedF4: UInt32 = 12
+    static let namedF5: UInt32 = 13
+    static let namedF6: UInt32 = 14
+    static let namedF7: UInt32 = 15
+    static let namedF8: UInt32 = 16
+    static let namedF9: UInt32 = 17
+    static let namedF10: UInt32 = 18
+    static let namedF11: UInt32 = 19
+    static let namedF12: UInt32 = 20
     static let namedHome: UInt32 = 21
     static let namedEnd: UInt32 = 22
     static let namedPageUp: UInt32 = 23
@@ -66,12 +78,27 @@ enum KeybindingStrokeNormalizer {
         case .downArrow: return namedDown
         case .leftArrow: return namedLeft
         case .rightArrow: return namedRight
+        case .f1: return namedF1
+        case .f2: return namedF2
+        case .f3: return namedF3
+        case .f4: return namedF4
+        case .f5: return namedF5
+        case .f6: return namedF6
+        case .f7: return namedF7
+        case .f8: return namedF8
+        case .f9: return namedF9
+        case .f10: return namedF10
+        case .f11: return namedF11
+        case .f12: return namedF12
         case .home: return namedHome
         case .end: return namedEnd
         case .pageUp: return namedPageUp
         case .pageDown: return namedPageDown
         case .delete: return namedDelete
         default:
+            if let fromFunctionScalar = namedKeyFromFunctionKeyScalar(event) {
+                return fromFunctionScalar
+            }
             if event.charactersIgnoringModifiers == "\u{1b}" {
                 return namedEscape
             }
@@ -79,6 +106,36 @@ enum KeybindingStrokeNormalizer {
                 return namedSpace
             }
             return nil
+        }
+    }
+
+    /// Synthetic / some hardware paths expose NSF* scalars without `.specialKey`.
+    private static func namedKeyFromFunctionKeyScalar(_ event: NSEvent) -> UInt32? {
+        guard let ignoring = event.charactersIgnoringModifiers,
+              ignoring.unicodeScalars.count == 1,
+              let scalar = ignoring.unicodeScalars.first
+        else {
+            return nil
+        }
+        switch scalar.value {
+        case UInt32(NSF1FunctionKey): return namedF1
+        case UInt32(NSF2FunctionKey): return namedF2
+        case UInt32(NSF3FunctionKey): return namedF3
+        case UInt32(NSF4FunctionKey): return namedF4
+        case UInt32(NSF5FunctionKey): return namedF5
+        case UInt32(NSF6FunctionKey): return namedF6
+        case UInt32(NSF7FunctionKey): return namedF7
+        case UInt32(NSF8FunctionKey): return namedF8
+        case UInt32(NSF9FunctionKey): return namedF9
+        case UInt32(NSF10FunctionKey): return namedF10
+        case UInt32(NSF11FunctionKey): return namedF11
+        case UInt32(NSF12FunctionKey): return namedF12
+        case UInt32(NSHomeFunctionKey): return namedHome
+        case UInt32(NSEndFunctionKey): return namedEnd
+        case UInt32(NSPageUpFunctionKey): return namedPageUp
+        case UInt32(NSPageDownFunctionKey): return namedPageDown
+        case UInt32(NSDeleteFunctionKey): return namedDelete
+        default: return nil
         }
     }
 

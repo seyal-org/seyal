@@ -160,6 +160,34 @@ fn goto_open_projects_with_stable_menu_id() {
     assert!(round_trip.ordinal.is_none());
 }
 
+/// Focus-history stays out of the menu catalog until N3 / tip B (K8 review risk).
+#[test]
+fn focus_history_omitted_from_menu_projection_until_n3() {
+    let table = load_keybinding_table(None);
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+    assert!(
+        projected_item_for(
+            &projection,
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ordinal: None,
+            }
+        )
+        .is_none()
+    );
+    assert!(
+        projected_item_for(
+            &projection,
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ordinal: None,
+            }
+        )
+        .is_none()
+    );
+}
+
 /// §7.3 / R11.1 / R11.3: unbinding a projected command keeps title + route enablement.
 #[test]
 fn unbind_projected_command_keeps_title_and_route_enablement() {

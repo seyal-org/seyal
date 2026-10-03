@@ -49,15 +49,16 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneSplitDown
         | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
-        | WorkspaceCommandId::GotoOpen
-        | WorkspaceCommandId::FocusHistoryBack
-        | WorkspaceCommandId::FocusHistoryForward => command.ordinal.is_none(),
+        | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
+        // Focus-history menus land with N3 / tip B (no dead catalog entries).
         WorkspaceCommandId::TabSelectOrdinal
         | WorkspaceCommandId::CommandPaletteClose
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::FocusHistoryBack
+        | WorkspaceCommandId::FocusHistoryForward
         | WorkspaceCommandId::PresentationSetFlow
         | WorkspaceCommandId::PresentationSetRaw
         | WorkspaceCommandId::PresentationSetTui
@@ -79,8 +80,7 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
-        WorkspaceCommandId::FocusHistoryBack => "Back",
-        WorkspaceCommandId::FocusHistoryForward => "Forward",
+        // Focus-history titles land with N3 / tip B; keep out of the menu catalog until then.
         other => other.as_str(),
     }
 }
@@ -98,8 +98,6 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
         WorkspaceCommandId::PresentationToggleRaw,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
-        WorkspaceCommandId::FocusHistoryBack,
-        WorkspaceCommandId::FocusHistoryForward,
     ]
     .into_iter()
     .map(|id| WorkspaceCommand { id, ordinal: None })
