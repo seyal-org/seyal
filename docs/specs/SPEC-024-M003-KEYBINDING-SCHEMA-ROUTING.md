@@ -1,6 +1,6 @@
 # SPEC-024 — M003 local keybinding schema, conflicts and routing
 
-- **Status:** Accepted on merge of this PR by a non-author maintainer under #1002 (refinement output of #1002; not an implemented-behavior claim)
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1002 (refinement output of #1002; not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Architecture authority:** ADR-015 (Rust product UI / thin native host); Foundation §5.1 / §13 (cold precompiled keybinding lookup; TOML canonical static config). **No new ADR:** see §0.
 - **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership); ADR-015 menu/command forwarding.

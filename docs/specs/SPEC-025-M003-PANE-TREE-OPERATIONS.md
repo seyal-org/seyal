@@ -1,6 +1,6 @@
 # SPEC-025 — M003 intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Accepted on merge of this PR by a non-author maintainer under #1001 / ADR-021 (normative contract; not an implemented-behavior claim)
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1001 / ADR-021 (normative contract; not an implemented-behavior claim)
 - **Date:** 2026-09-25
 - **Issue:** #1001 — parent #674, epic #665
 - **Authority:** ADR-021. This document is the normative observable contract.

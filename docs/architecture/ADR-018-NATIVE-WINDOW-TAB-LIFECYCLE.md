@@ -1,6 +1,6 @@
 # ADR-018 — Native window and tab lifecycle, identity and ordering
 
-- **Status:** Accepted on merge of this PR by a non-author maintainer under #1000. An author or agent comment is not that acceptance.
+- **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1000. An author or agent comment is not that acceptance.
 - **Date:** 2026-09-24
 - **Issue:** #1000 (refinement); parent umbrella #674; epic #665
 - **Depends on:** ADR-005, ADR-006, ADR-007, ADR-009, ADR-015, SPEC-004, SPEC-005, SPEC-006, SPEC-008, SPEC-009, [`ui/SEYAL-UI-ARCHITECTURE-001.md`](ui/SEYAL-UI-ARCHITECTURE-001.md), [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md)
@@ -760,7 +760,7 @@ SPEC-008 and SPEC-009. No separate SPEC is required before W3. W3 defines the mu
 becomes required if #994 introduces a new public protocol shape, and that SPEC
 belongs to #994.
 
-**Acceptance of this ADR:** Accepted on merge of this PR under #1000, by a
+**Acceptance of this ADR:** Accepted on merge of PR #1208 under #1000, by a
 non-author maintainer. An author or agent comment is not that acceptance.
 That merge is the acceptance event that unblocks Ready-candidate children.
 Proposed status alone does not.

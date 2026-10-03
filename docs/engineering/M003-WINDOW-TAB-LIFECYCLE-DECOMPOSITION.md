@@ -5,7 +5,7 @@ Ready until its own `docs/engineering/ISSUE-PROTOCOL.md` §"Ready gate" checklis
 passes and a human owner claims it.
 
 **Authority:** [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md)
-(Accepted on merge of this PR under #1000, by a non-author maintainer; not an
+(Accepted on merge of PR #1208 under #1000, by a non-author maintainer; not an
 implemented-behavior claim). This file plans work; it creates no architecture.
 Where this file and ADR-018 disagree, ADR-018 wins.
 
