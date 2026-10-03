@@ -119,7 +119,10 @@ impl ConnectionState {
         let allowed = matches!(
             (self, message_type),
             (Self::AwaitHello, ClientHello)
-                | (Self::Ready, ListExecutions | Attach | Goodbye)
+                | (
+                    Self::Ready,
+                    ListExecutions | Attach | CreateExecutionRequest | Goodbye
+                )
                 | (
                     Self::Attached,
                     Input
@@ -130,6 +133,7 @@ impl ConnectionState {
                         | Resize
                         | Resync
                         | Detach
+                        | CreateExecutionRequest
                         | Goodbye
                 )
         );
@@ -226,6 +230,15 @@ pub(in crate::local_ipc::connection) struct Connection {
     pub(in crate::local_ipc::connection) display_inflight: Option<DisplayItem>,
     pub(in crate::local_ipc::connection) pending_display: Option<VecDeque<EncodedDisplayBatch>>,
     pub(in crate::local_ipc::connection) display_generation: u64,
+    /// When set, an attach `Attached` frame has advertised `current_generation`
+    /// for a snapshot that is still only in `pending_display` (not yet inflight).
+    /// Fanout must not supersede that pending snapshot or the peer observes
+    /// Attached gen N with DisplaySnapshot gen M. Cleared when the attach
+    /// snapshot enters inflight.
+    pub(in crate::local_ipc::connection) attach_snapshot_pin: bool,
+    /// Snapshot that arrived while [`Self::attach_snapshot_pin`] was held; applied
+    /// once the attach snapshot starts inflight.
+    pub(in crate::local_ipc::connection) deferred_after_attach: Option<EncodedDisplayBatch>,
 }
 
 impl Connection {

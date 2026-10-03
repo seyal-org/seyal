@@ -454,25 +454,31 @@ mod root_tests {
     /// Split-enabled root over the same production reducers; M001 policy
     /// keeps splitting disabled, so only tests reach multi-leaf trees (#923).
     fn split_enabled_root() -> ApplicationRoot {
-        use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWorkspaceSeed};
+        use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+        use seyal_core::WindowId;
 
         let tab = TabId::new();
+        let window = WindowId::new();
         let shell = ShellState::from_workspaces(
             vec![ShellWorkspaceSeed {
                 id: WorkspaceId::m001_default(),
                 name: "Local".to_owned(),
                 detail: None,
                 attention: false,
-                active_tab: tab,
-                tabs: vec![ShellTabSeed {
-                    id: tab,
-                    title: "Terminal".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: PaneId::new(),
-                        title: "Pane 1".to_owned(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                active_window: window,
+                windows: vec![ShellWindowSeed {
+                    id: window,
+                    active_tab: tab,
+                    tabs: vec![ShellTabSeed {
+                        id: tab,
+                        title: "Terminal".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: PaneId::new(),
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             }],
             WorkspaceId::m001_default(),
@@ -565,9 +571,10 @@ mod root_tests {
     #[test]
     fn split_focus_close_projection_keeps_one_live_bound_pane() {
         let mut root = split_enabled_root();
+        let bound_evidence = evidence(3, true, false);
         root.apply(AppAction::Bind {
             fence: root.fence(),
-            evidence: evidence(3, true, false),
+            evidence: bound_evidence,
         })
         .unwrap();
         let bound = root.snapshot().pane;
@@ -605,21 +612,20 @@ mod root_tests {
         assert!(!regions[1].live);
         assert_eq!(root.snapshot().shell.focused_pane, bound);
 
-        // The bound Pane cannot close; the unbound one collapses the tree.
-        assert_eq!(
-            root.apply(AppAction::ClosePane { id: bound }),
-            Err(AppError::CannotCloseBoundPane)
-        );
-        assert_eq!(root.pane_regions().len(), 2);
-        root.apply(AppAction::ClosePane { id: created }).unwrap();
+        // Bound Pane close is detach-only: execution stays unreferenced/live.
+        root.apply(AppAction::ClosePane { id: bound }).unwrap();
+        assert!(root
+            .provisioning()
+            .is_unreferenced(bound_evidence.execution));
         let regions = root.pane_regions();
         assert_eq!(regions.len(), 1);
-        assert_eq!(regions[0].pane, bound);
-        assert!(regions[0].live);
+        assert_eq!(regions[0].pane, created);
+        // No authority remains; the focused unbound leaf is the bind landing zone.
+        assert!(regions[0].focused && regions[0].live);
 
-        // Stale PaneIds fail closed and leave the projection unchanged.
+        // The closed Pane id fails closed.
         assert_eq!(
-            root.apply(AppAction::FocusPane { id: created }),
+            root.apply(AppAction::FocusPane { id: bound }),
             Err(AppError::UnknownPane)
         );
         assert_eq!(

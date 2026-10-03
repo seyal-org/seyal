@@ -6,7 +6,8 @@
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
-- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative on ADR-017 acceptance** and not implemented.
+- **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative** (ADR-017 Accepted). Create/terminate production path ships with Issue #1105 / PR #1112.
+- **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
 
 ## 1. Purpose
 
@@ -166,9 +167,11 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
 - bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, proposed under #1083;
-- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
+- bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18 (ADR-017 Accepted; implemented under #1105);
+- bit 11: unallocated on this tip (reserved for a separate #1162 delivery-control amendment; not part of this PR);
+- bit 12: launch-policy Created detail bits (`CAP_LAUNCH_POLICY_DETAIL`) — L0 / Issue #1113; gates nonzero `Created.detail_code` warning bits only.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are proposed for `ViewportLineIds` (§8.1, under #1083). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are proposed for `ViewportLineIds` (§8.1, under #1083). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**. L0 allocates `CAP_LAUNCH_POLICY_DETAIL` as **bit 12** (ADR-020 §3.10), matching the shipped L0/L2/L3 wire; bit 11 stays free for a future #1162 amendment rather than being claimed by this PR.
 
 ### 8.1 Viewport LineIds (proposed, #1083)
 
@@ -513,14 +516,36 @@ M001 defines:
 
 These numeric meanings are reused by `ResizeResult.result_code` values 1–14. `ResizeResult.result_code = 0` uniquely means `Applied`.
 
-§18 additionally defines, normative only on ADR-017 acceptance:
+§18 additionally defines (ADR-017 Accepted; implemented under #1105):
 
 ```text
 15 InvalidWorkspace
 16 UnsupportedLaunchProfile
 ```
 
-Both are additive. A client must treat an unrecognized result code as a non-retryable failure and must not infer success from it.
+ADR-020 additionally defines (SPEC-004 L0 amendment). Message type 17 remains
+`TerminalKey` and is a different table; this registry is result/error codes only:
+
+```text
+17 LaunchPolicyRejected
+```
+
+On `LaunchPolicyRejected`, `detail_code` is one of:
+
+```text
+1 AccountRecordUnavailable
+2 ShellFallbackExhausted
+3 CwdInvalid
+4 CapabilityUnavailable
+```
+
+No other values are defined; clients treat any unknown `detail_code` as generic.
+The payload carries no path or environment bytes.
+
+Codes 15–17 are additive. A client must treat an unrecognized result code as a
+non-retryable failure and must not infer success from it. Older clients that do
+not recognize code 17 therefore treat it as a non-retryable unknown failure under
+that rule.
 
 Semantic errors do not mutate canonical state before validation succeeds. Fatal framing/version/ancillary failures close the connection after bounded cleanup. SPEC-006 classifies resize failures, forbids immediate automatic resend loops and treats result/projection generation inconsistency as protocol failure.
 
@@ -597,7 +622,7 @@ Comparator/reference shared-projection code may remain only if isolated from pro
 
 ## 18. M003 execution provisioning and disposition extension
 
-- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance**.
+- **Status:** accepted amendment (ADR-017 Accepted); create/terminate implemented under Issue #1105 / PR #1112.
 - **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994.
 - **Nature:** additive, capability-gated. Framing version remains `1.0`. Nothing in §1–§17 changes.
 
@@ -670,7 +695,7 @@ u16  reserved0 = 0
 u32  detail_code = 0
 ```
 
-- `result_code = 0` uniquely means `Created`; 1–16 reuse §15 numeric meanings.
+- `result_code = 0` uniquely means `Created`; 1–17 reuse §15 numeric meanings.
 - On `Created`, `execution_id` is a published live execution with exactly one
   owning Workspace association, observable through `ListExecutions`, and
   attachable by `Attach`.
@@ -683,8 +708,23 @@ u32  detail_code = 0
 - Results are mandatory bounded control output: never presentation-superseded,
   and terminal progress never waits for a client to read one.
 - No attachment is created and no display state is queued by creation.
-- `detail_code` is `0` unless a later accepted specification assigns a bounded
-  non-secret reason.
+- On `Created`, `detail_code` is a bitfield of bounded, non-secret launch-policy
+  warnings: bit 0 is `ConfiguredShellInvalid`, bit 1 is `CwdOverrideInvalid`,
+  and all other bits are reserved and must be 0. Runtime sets nonzero
+  `Created.detail_code` bits only when the peer negotiated
+  `CAP_LAUNCH_POLICY_DETAIL` (`1 << 12`); otherwise `detail_code` remains `0`.
+  A client must treat `Created` as success regardless of `detail_code`, must
+  ignore unknown or reserved bits, and must never infer failure from a nonzero
+  `Created.detail_code`.
+- On `LaunchPolicyRejected` (`result_code = 17`), `detail_code` uses the §15
+  values 1 `AccountRecordUnavailable`, 2 `ShellFallbackExhausted`, 3
+  `CwdInvalid`, and 4 `CapabilityUnavailable`. Unknown values render generic.
+  The payload carries no path or environment bytes. Code 17 itself is not
+  capability-gated: ADR-020 gates only the `Created` warning bits, and a
+  non-negotiating client already treats unrecognized result codes as
+  non-retryable failure under §15.
+- For other failure codes, `detail_code` is `0` unless a later accepted
+  specification assigns a bounded non-secret reason.
 
 ### 18.4 `TerminateExecutionRequest` — exactly 40 bytes
 

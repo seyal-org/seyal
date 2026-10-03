@@ -42,6 +42,7 @@ fn run_palette(root: &mut ApplicationRoot, query: &str) {
     assert_eq!(rows.len(), 1, "palette query {query:?} matched {rows:?}");
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .unwrap();
 }

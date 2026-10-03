@@ -8,16 +8,6 @@ use crate::pane_layout::{self, SplitPosition};
 use crate::shell::{ShellAction, ShellError, SplitAxis};
 
 impl ApplicationRoot {
-    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::CreateTab)
-            .map_err(|_| AppError::TabCreationUnavailable)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::SplitFocused { axis })
@@ -28,24 +18,8 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::CloseTab { id })
-            .map_err(close_tab_error)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::ClosePane { id })
-            .map_err(close_pane_error)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
+        self.close_pane_with_disposition(id)
     }
 
     pub(super) fn set_left_panel(&mut self, mode: LeftPanelMode) -> Result<(), AppError> {

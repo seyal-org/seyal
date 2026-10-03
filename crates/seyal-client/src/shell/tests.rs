@@ -1,4 +1,5 @@
 use super::*;
+use seyal_core::WindowId;
 
 fn other_workspace() -> WorkspaceId {
     WorkspaceId::from_bytes([0x11; 16])
@@ -11,6 +12,8 @@ fn seed_two_workspaces() -> ShellState {
     let second_pane = PaneId::new();
     let first = WorkspaceId::m001_default();
     let second = other_workspace();
+    let first_window = WindowId::new();
+    let second_window = WindowId::new();
     ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -18,16 +21,20 @@ fn seed_two_workspaces() -> ShellState {
                 name: "Seyal OSS".to_owned(),
                 detail: Some("~/Projects/seyal".to_owned()),
                 attention: false,
-                active_tab: first_tab,
-                tabs: vec![ShellTabSeed {
-                    id: first_tab,
-                    title: "Core Terminal".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: first_pane,
-                        title: "Pane 1".to_owned(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                active_window: first_window,
+                windows: vec![ShellWindowSeed {
+                    id: first_window,
+                    active_tab: first_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: first_tab,
+                        title: "Core Terminal".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: first_pane,
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             },
             ShellWorkspaceSeed {
@@ -35,16 +42,20 @@ fn seed_two_workspaces() -> ShellState {
                 name: "Payments".to_owned(),
                 detail: Some("~/Projects/payments".to_owned()),
                 attention: true,
-                active_tab: second_tab,
-                tabs: vec![ShellTabSeed {
-                    id: second_tab,
-                    title: "API".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: second_pane,
-                        title: "Pane 1".to_owned(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: second_window,
+                windows: vec![ShellWindowSeed {
+                    id: second_window,
+                    active_tab: second_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: second_tab,
+                        title: "API".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: second_pane,
+                            title: "Pane 1".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],
@@ -56,7 +67,7 @@ fn seed_two_workspaces() -> ShellState {
 }
 
 #[test]
-fn production_shell_is_single_pane_and_fail_closed() {
+fn production_shell_keeps_tab_creation_gated_until_wire_driver_and_splits_fail_closed() {
     let mut shell = ShellState::m001_local("/tmp/seyal");
     let snap = shell.snapshot();
     assert_eq!(snap.workspaces.len(), 1);
@@ -66,6 +77,7 @@ fn production_shell_is_single_pane_and_fail_closed() {
     assert_eq!(snap.panes.len(), 1);
     assert_eq!(snap.panes[0].title, "Pane 1");
     assert!(snap.panes[0].allows_implicit_bootstrap);
+    // Production stays gated until create→attach→bind has a live driver (#1159 review).
     assert!(!shell.allows_tab_creation());
     assert!(!shell.allows_pane_splitting());
     assert!(!snap.allows_tab_close);
@@ -74,8 +86,8 @@ fn production_shell_is_single_pane_and_fail_closed() {
         shell.apply(ShellAction::CreateTab),
         Err(ShellError::TabCreationUnavailable)
     );
-    assert_eq!(shell.last_error(), Some(ShellError::TabCreationUnavailable));
-    let focused = snap.focused_pane;
+    assert_eq!(shell.snapshot().tabs.len(), 1);
+    let focused = shell.snapshot().focused_pane;
     assert_eq!(
         shell.apply(ShellAction::SplitPane {
             id: focused,
@@ -83,7 +95,6 @@ fn production_shell_is_single_pane_and_fail_closed() {
         }),
         Err(ShellError::PaneSplitUnavailable)
     );
-    assert_eq!(shell.snapshot().tabs.len(), 1);
     assert_eq!(shell.snapshot().layout, LayoutDescription::Single);
 }
 
@@ -206,13 +217,14 @@ fn split_focus_and_close_panes() {
 }
 
 #[test]
-fn execution_bound_pane_cannot_be_closed() {
+fn execution_bound_pane_close_releases_binding() {
     let mut shell = seed_two_workspaces();
     let bound = shell.snapshot().focused_pane;
+    let execution = ExecutionId::from_bytes([7; 16]);
     shell
         .apply(ShellAction::BindExecution {
             pane: bound,
-            execution: ExecutionId::from_bytes([7; 16]),
+            execution,
         })
         .expect("bind");
     shell
@@ -225,22 +237,15 @@ fn execution_bound_pane_cannot_be_closed() {
     shell
         .apply(ShellAction::FocusPane { id: bound })
         .expect("focus bound");
-    assert!(!shell.snapshot().allows_pane_close);
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane { id: bound }),
-        Err(ShellError::CannotCloseBoundPane)
-    );
-    assert_eq!(shell.snapshot().tabs[0].pane_count, 2);
+    assert!(shell.snapshot().allows_pane_close);
     shell
-        .apply(ShellAction::ClosePane { id: created })
-        .expect("close unbound");
+        .apply(ShellAction::ClosePane { id: bound })
+        .expect("close bound releases presentation");
+    assert_eq!(shell.take_released_execution(), Some((bound, execution)));
     let snap = shell.snapshot();
     assert_eq!(snap.layout, LayoutDescription::Single);
-    assert_eq!(snap.focused_pane, bound);
-    assert_eq!(
-        snap.panes[0].execution,
-        Some(ExecutionId::from_bytes([7; 16]))
-    );
+    assert_eq!(snap.focused_pane, created);
+    assert!(snap.panes[0].execution.is_none());
 }
 
 #[test]

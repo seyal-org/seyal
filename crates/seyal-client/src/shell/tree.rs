@@ -117,6 +117,15 @@ impl PaneTree {
         }
     }
 
+    pub(super) fn contains_leaf(&self, pane: PaneId) -> bool {
+        match self {
+            Self::Leaf(id) => *id == pane,
+            Self::Split { first, second, .. } => {
+                first.contains_leaf(pane) || second.contains_leaf(pane)
+            }
+        }
+    }
+
     pub(super) fn layout_description(&self) -> LayoutDescription {
         match self {
             Self::Leaf(_) => LayoutDescription::Single,

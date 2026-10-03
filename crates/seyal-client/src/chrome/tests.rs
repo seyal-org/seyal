@@ -1,6 +1,8 @@
 use super::*;
-use crate::shell::{ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWorkspaceSeed};
-use seyal_core::{BlockId, PaneId, TabId, WorkspaceId};
+use crate::shell::{
+    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+};
+use seyal_core::{BlockId, PaneId, TabId, WindowId, WorkspaceId};
 
 fn workspace(tag: u8) -> WorkspaceId {
     WorkspaceId::from_bytes([tag; 16])
@@ -20,6 +22,8 @@ fn seed_shell() -> ShellState {
     let local_tab = tab(1);
     let agent_tab = tab(2);
     let other_tab = tab(3);
+    let local_window = WindowId::new();
+    let other_window = WindowId::new();
     ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -27,45 +31,53 @@ fn seed_shell() -> ShellState {
                 name: "Seyal OSS".into(),
                 detail: Some("~/Projects/seyal".into()),
                 attention: false,
-                active_tab: local_tab,
-                tabs: vec![
-                    ShellTabSeed {
-                        id: local_tab,
-                        title: "Core Terminal".into(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: pane(1),
-                            title: "Pane 1".into(),
-                            allows_implicit_execution_bootstrap: true,
+                active_window: local_window,
+                windows: vec![ShellWindowSeed {
+                    id: local_window,
+                    active_tab: local_tab,
+                    tabs: vec![
+                        ShellTabSeed {
+                            id: local_tab,
+                            title: "Core Terminal".into(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: pane(1),
+                                title: "Pane 1".into(),
+                                allows_implicit_execution_bootstrap: true,
+                            },
                         },
-                    },
-                    ShellTabSeed {
-                        id: agent_tab,
-                        title: "Agent Development".into(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: pane(2),
-                            title: "Pane 2".into(),
-                            allows_implicit_execution_bootstrap: false,
+                        ShellTabSeed {
+                            id: agent_tab,
+                            title: "Agent Development".into(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: pane(2),
+                                title: "Pane 2".into(),
+                                allows_implicit_execution_bootstrap: false,
+                            },
                         },
-                    },
-                ],
+                    ],
+                }],
             },
             ShellWorkspaceSeed {
                 id: other,
                 name: "Payments".into(),
                 detail: Some("~/Projects/payments".into()),
                 attention: true,
-                active_tab: other_tab,
-                tabs: vec![ShellTabSeed {
-                    id: other_tab,
-                    title: "API".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: pane(3),
-                        title: "Pane 1".into(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: other_window,
+                windows: vec![ShellWindowSeed {
+                    id: other_window,
+                    active_tab: other_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: other_tab,
+                        title: "API".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: pane(3),
+                            title: "Pane 1".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],

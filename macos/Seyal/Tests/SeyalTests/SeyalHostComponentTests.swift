@@ -42,7 +42,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 64)
-        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 56)
+        XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
         let live = seyal_app_create()
         // Core Terminal chrome is visible by default (#922).
         let chrome = seyal_app_chrome(live)
@@ -156,11 +156,12 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testShellCompositionControlsAreOmittedWhenRustPolicyDisallowsThem() throws {
+    func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // M001 production policy: no tab creation/pane splitting, and the sole
-        // Tab/Pane cannot be closed. Rust reports all four as unset flags.
+        // C2 keeps production tab creation gated until a live create→attach→bind
+        // driver exists; pane splitting stays off. With a sole Tab/Pane, close
+        // controls remain omitted. Opt-in CreateTab coverage lives in Rust.
         let shell = seyal_app_shell(view.pane.appHandle)
         for bit in [
             SEYAL_APP_SHELL_ALLOWS_TAB_CREATION,
@@ -171,11 +172,30 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertEqual(shell.flags & UInt16(bit), 0)
         }
         for identifier in [
-            "seyal-new-tab", "seyal-close-tab", "seyal-split-right", "seyal-split-down", "seyal-close-pane",
+            "seyal-new-tab", "seyal-close-tab", "seyal-split-right", "seyal-split-down",
+            "seyal-close-pane",
         ] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
         }
+    }
+
+    @MainActor
+    func testCreateTabFailsClosedWhileProductionTabCreationStaysGated() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), -4)
+        XCTAssertEqual(seyal_app_last_error(handle), 28, "TabCreationUnavailable")
+        view.reconcileChrome()
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 1)
+        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
+        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
     }
 
     @MainActor
@@ -325,6 +345,17 @@ final class SeyalHostComponentTests: XCTestCase {
             IsolatedRuntimeDirectory.helperArguments(from: ["Seyal"], testHostLoaded: false),
             []
         )
+        // XCTest host with no `--runtime-dir` still synthesizes a directory and
+        // must supply a default Flow shell so true-P1 empty-argv helpers create
+        // one execution for headed component smoke (IME live callbacks).
+        let testHostOnly = IsolatedRuntimeDirectory.helperArguments(
+            from: ["Seyal"],
+            testHostLoaded: true
+        )
+        XCTAssertEqual(testHostOnly.count, 3)
+        XCTAssertEqual(testHostOnly[0], "--runtime-dir")
+        XCTAssertTrue(testHostOnly[1].hasPrefix("/"))
+        XCTAssertEqual(testHostOnly[2], "/bin/zsh")
         XCTAssertEqual(
             IsolatedRuntimeDirectory.helperArguments(
                 from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso"],
@@ -1340,7 +1371,7 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         XCTAssertFalse(
             sawNewTab,
-            "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+            "production composition omits New Tab while tab creation stays gated"
         )
     }
 
@@ -1459,6 +1490,25 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(fallback.flags & 2, 2, "full-default fallback flag")
         XCTAssertEqual(fallback.ui_font_size, 12, accuracy: 0.01)
         XCTAssertGreaterThan(fallback.warning_count, 0)
+    }
+
+    /// #1119: Swift only renders Rust-owned launch-policy copy (ADR-015).
+    func testLaunchPolicyProductCopyRendersRustOwnedStrings() {
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 2),
+            "Shell unavailable"
+        )
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 3),
+            "Working directory unavailable"
+        )
+        XCTAssertFalse(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 1).contains("/")
+        )
+        let warnings = LaunchPolicyProductCopy.warningMessages(detailCode: 0b11)
+        XCTAssertEqual(warnings.count, 2)
+        XCTAssertTrue(warnings[0].contains("default shell"))
+        XCTAssertTrue(warnings[1].contains("home directory"))
     }
 
     @MainActor
@@ -1645,6 +1695,24 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(unbound.end_line, 0)
         XCTAssertEqual(unbound.reserved0, 0)
         XCTAssertEqual(unbound.reserved1, 0)
+    }
+
+    @MainActor
+    func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
+        var empty = SeyalAppRow()
+        XCTAssertNil(CommandPaletteOverlayView.addressPayload(for: empty))
+        var row = SeyalAppRow()
+        row.address_version = 1
+        row.address_kind = 2
+        row.address_len = 1
+        let payload = try XCTUnwrap(CommandPaletteOverlayView.addressPayload(for: row))
+        XCTAssertEqual(Array(payload.prefix(4)), [1, 0, 2, 0])
+        XCTAssertEqual(payload.count, 5)
+    }
+
+    @MainActor
+    func testGotoOpenSelectorIsWiredOnTheChromeHost() {
+        XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
     }
 
 }

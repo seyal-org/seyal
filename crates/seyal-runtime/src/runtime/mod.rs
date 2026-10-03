@@ -86,6 +86,9 @@ pub struct Runtime {
     read_buffer: [u8; READ_BUFFER_SIZE],
     shutting_down: bool,
     rollback_reap: Vec<TerminalExecution>,
+    /// SPEC-004 §18.6: at most one provisioning create per reactor dispatch turn.
+    #[cfg(target_os = "macos")]
+    provisioning_created_this_turn: bool,
     #[cfg(target_os = "macos")]
     local_ipc: Option<LocalIpcState>,
     #[cfg(feature = "benchmark-instrumentation")]
@@ -144,6 +147,8 @@ impl Runtime {
             shutting_down: false,
             rollback_reap: Vec::new(),
             #[cfg(target_os = "macos")]
+            provisioning_created_this_turn: false,
+            #[cfg(target_os = "macos")]
             local_ipc,
             #[cfg(feature = "benchmark-instrumentation")]
             benchmark: BenchmarkRuntimeState::default(),
@@ -152,48 +157,69 @@ impl Runtime {
 
     pub fn poll_once(&mut self, max_wait: Option<Duration>) -> Result<usize, RuntimeError> {
         self.reap_failed_creations()?;
+        #[cfg(target_os = "macos")]
+        {
+            self.provisioning_created_this_turn = false;
+            self.drain_one_pending_create();
+        }
         let timeout = self.bound_wait_by_deadline(max_wait);
         let count = self.reactor.wait(&mut self.events, timeout)?;
+        // Within one wait batch, service local control/IPC before PTY/lifecycle
+        // events. Ordering is for test determinism around §18.5 disposition races
+        // (observe DrainingAfterPrimaryExit when terminate shares a turn with
+        // primary-exit); either interleaving remains spec-valid. Fairness is
+        // unchanged: each ready event is still serviced once per batch.
         let mut processed = 0usize;
-        for index in 0..count {
-            let event = self.events[index];
-            match event.kind {
-                ReactorEventKind::Control => {
-                    processed += self.drain_control()?;
+        for pass in 0..2 {
+            for index in 0..count {
+                let event = self.events[index];
+                let control_plane = matches!(
+                    event.kind,
+                    ReactorEventKind::Control
+                        | ReactorEventKind::AuxiliaryReadable
+                        | ReactorEventKind::AuxiliaryWritable
+                );
+                if control_plane != (pass == 0) {
+                    continue;
                 }
-                ReactorEventKind::Readable => {
-                    if let Some(id) = event
-                        .token
-                        .and_then(|token| self.by_token.get(&token).copied())
-                    {
-                        self.service_reads(id)?;
-                        processed += 1;
+                match event.kind {
+                    ReactorEventKind::Control => {
+                        processed += self.drain_control()?;
                     }
-                }
-                ReactorEventKind::Writable => {
-                    if let Some(id) = event
-                        .token
-                        .and_then(|token| self.by_token.get(&token).copied())
-                    {
-                        self.service_writes(id)?;
-                        processed += 1;
+                    ReactorEventKind::Readable => {
+                        if let Some(id) = event
+                            .token
+                            .and_then(|token| self.by_token.get(&token).copied())
+                        {
+                            self.service_reads(id)?;
+                            processed += 1;
+                        }
                     }
-                }
-                ReactorEventKind::PrimaryExited => {
-                    if let Some(id) = event
-                        .token
-                        .and_then(|token| self.by_token.get(&token).copied())
-                    {
-                        self.observe_primary_exit(id)?;
-                        processed += 1;
+                    ReactorEventKind::Writable => {
+                        if let Some(id) = event
+                            .token
+                            .and_then(|token| self.by_token.get(&token).copied())
+                        {
+                            self.service_writes(id)?;
+                            processed += 1;
+                        }
                     }
-                }
-                ReactorEventKind::AuxiliaryReadable | ReactorEventKind::AuxiliaryWritable =>
-                {
-                    #[cfg(target_os = "macos")]
-                    if let Some(token) = event.token {
-                        self.service_local_reactor_event(token, event.kind, event.hangup)?;
-                        processed += 1;
+                    ReactorEventKind::PrimaryExited => {
+                        if let Some(id) = event
+                            .token
+                            .and_then(|token| self.by_token.get(&token).copied())
+                        {
+                            self.observe_primary_exit(id)?;
+                            processed += 1;
+                        }
+                    }
+                    ReactorEventKind::AuxiliaryReadable | ReactorEventKind::AuxiliaryWritable =>
+                    {
+                        #[cfg(target_os = "macos")]
+                        if let Some(token) = event.token {
+                            self.service_local_reactor_event(token, event.kind, event.hangup)?;
+                            processed += 1;
+                        }
                     }
                 }
             }
@@ -283,7 +309,17 @@ impl Runtime {
             .map(|deadline| deadline.saturating_duration_since(now));
         #[cfg(not(target_os = "macos"))]
         let local: Option<Duration> = None;
-        [requested, execution, rollback, local]
+        // Level-trigger progress: queued CreateExecution work must not sleep
+        // behind the full reactor timeout on an otherwise idle Runtime.
+        #[cfg(target_os = "macos")]
+        let pending_creates = self
+            .local_ipc
+            .as_ref()
+            .filter(|state| !state.pending_creates.is_empty())
+            .map(|_| Duration::ZERO);
+        #[cfg(not(target_os = "macos"))]
+        let pending_creates: Option<Duration> = None;
+        [requested, execution, rollback, local, pending_creates]
             .into_iter()
             .flatten()
             .min()

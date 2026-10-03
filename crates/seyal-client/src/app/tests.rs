@@ -1,6 +1,6 @@
 use super::*;
 use crate::presentation::InputRoute;
-
+mod close_disposition_tests;
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
@@ -94,17 +94,23 @@ fn new_root_is_one_unbound_pane() {
 }
 
 #[test]
-fn create_tab_and_split_focused_fail_closed_under_m001_default_policy() {
-    // AppAction::CreateTab/SplitFocused (#922) route straight to the same
-    // ShellState that already disallows composition growth until a
-    // distinct execution route exists; the direct action must fail the
-    // same way the palette-mediated path already does, not silently
-    // no-op.
+fn split_focused_fails_closed_while_create_tab_is_enabled() {
+    // Production stays gated until a live create→attach→bind driver exists.
+    // Opted-in roots exercise CreateTab; splits stay fail-closed until C3.
     let mut root = ApplicationRoot::new();
+    assert!(!root.snapshot().shell.allows_tab_creation);
     assert_eq!(
         root.apply(AppAction::CreateTab),
         Err(AppError::TabCreationUnavailable)
     );
+    root.enable_tab_creation_for_test();
+    root.apply(AppAction::CreateTab)
+        .expect("opted-in root allows tab creation");
+    assert_eq!(root.snapshot().shell.tabs.len(), 2);
+    assert!(root
+        .provisioning()
+        .pending_intent(root.snapshot().shell.focused_pane)
+        .is_some());
     assert_eq!(
         root.apply(AppAction::SplitFocused {
             axis: SplitAxis::Right,
@@ -495,11 +501,39 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
         fence: root.fence(),
     })
     .unwrap();
+    let production = root.snapshot();
+    assert!(production.palette.open);
+    assert!(
+        !production
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label == "New Tab"),
+        "production composition omits New Tab while tab creation stays gated"
+    );
+    root.apply(AppAction::ClosePalette {
+        fence: root.fence(),
+    })
+    .unwrap();
+
+    root.enable_tab_creation_for_test();
+    root.apply(AppAction::OpenPalette {
+        fence: root.fence(),
+    })
+    .unwrap();
     let opened = root.snapshot();
     assert!(opened.palette.open);
     assert!(
-        !opened.palette.rows.iter().any(|row| row.label == "New Tab"),
-        "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+        opened.palette.rows.iter().any(|row| row.label == "New Tab"),
+        "opted-in composition lists New Tab"
+    );
+    assert!(
+        !opened
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label.starts_with("Split Pane")),
+        "splits stay omitted until C3"
     );
     assert!(!opened.palette.rows.is_empty());
 
@@ -525,7 +559,8 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     assert!(root.snapshot().palette.rows.is_empty());
     assert_eq!(
         root.apply(AppAction::RunPalette {
-            fence: root.fence()
+            fence: root.fence(),
+            address: None,
         }),
         Err(AppError::PaletteNoSelection)
     );
@@ -549,6 +584,7 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     assert!(root.snapshot().chrome.inspector_visible);
     root.apply(AppAction::RunPalette {
         fence: root.fence(),
+        address: None,
     })
     .unwrap();
     let after = root.snapshot();
@@ -558,6 +594,197 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
         !after.chrome.inspector_visible,
         "the resolved command actually ran"
     );
+}
+
+#[test]
+fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
+    use crate::navigation::ResourceAddress;
+    use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+    use seyal_core::WindowId;
+
+    let w1 = WorkspaceId::m001_default();
+    let w2 = WorkspaceId::from_bytes([0x22; 16]);
+    let win1 = WindowId::from_bytes([0x31; 16]);
+    let win2 = WindowId::from_bytes([0x32; 16]);
+    let t1 = TabId::from_bytes([0x01; 16]);
+    let t2 = TabId::from_bytes([0x02; 16]);
+    let p1 = PaneId::from_bytes([0x03; 16]);
+    let p2 = PaneId::from_bytes([0x04; 16]);
+    let shell = ShellState::from_workspaces(
+        vec![
+            ShellWorkspaceSeed {
+                id: w1,
+                name: "A".into(),
+                detail: None,
+                attention: false,
+                active_window: win1,
+                windows: vec![ShellWindowSeed {
+                    id: win1,
+                    active_tab: t1,
+                    tabs: vec![ShellTabSeed {
+                        id: t1,
+                        title: "T1".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "P1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
+                }],
+            },
+            ShellWorkspaceSeed {
+                id: w2,
+                name: "B".into(),
+                detail: None,
+                attention: false,
+                active_window: win2,
+                windows: vec![ShellWindowSeed {
+                    id: win2,
+                    active_tab: t2,
+                    tabs: vec![ShellTabSeed {
+                        id: t2,
+                        title: "T2".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "P2".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
+                }],
+            },
+        ],
+        w1,
+        true,
+        true,
+    )
+    .expect("fixture");
+    let mut root = ApplicationRoot::with_shell(shell);
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(1, true, false),
+    })
+    .unwrap();
+    let before = root.snapshot();
+    let epoch = before.presentation_epoch;
+    let execution = before.execution;
+    let attachment = before.attachment;
+    let focused = before.shell.focused_pane;
+
+    // Rejected navigate leaves focus unchanged.
+    assert_eq!(
+        root.apply(AppAction::Navigate {
+            fence: root.fence(),
+            address: ResourceAddress::Pane {
+                workspace: w2,
+                tab: t2,
+                pane: PaneId::from_bytes([0xee; 16]),
+            },
+        }),
+        Err(AppError::NavigationUnknownPane)
+    );
+    assert_eq!(root.snapshot().shell.focused_pane, focused);
+    assert_eq!(root.snapshot().shell.active_workspace, w1);
+
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w2,
+            tab: t2,
+            pane: p2,
+        },
+    })
+    .unwrap();
+    let after = root.snapshot();
+    assert_eq!(after.shell.active_workspace, w2);
+    assert_eq!(after.shell.focused_pane, p2);
+    assert_eq!(after.presentation_epoch, epoch);
+    assert_eq!(after.execution, execution);
+    assert_eq!(after.attachment, attachment);
+}
+
+#[test]
+fn palette_run_by_address_not_rebinding_ordinal() {
+    use crate::navigation::ResourceAddress;
+    use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+    use seyal_core::WindowId;
+
+    let w1 = WorkspaceId::m001_default();
+    let win1 = WindowId::from_bytes([0x21; 16]);
+    let t1 = TabId::from_bytes([0x11; 16]);
+    let t2 = TabId::from_bytes([0x12; 16]);
+    let p1 = PaneId::from_bytes([0x13; 16]);
+    let p2 = PaneId::from_bytes([0x14; 16]);
+    let shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: w1,
+            name: "A".into(),
+            detail: None,
+            attention: false,
+            active_window: win1,
+            windows: vec![ShellWindowSeed {
+                id: win1,
+                active_tab: t1,
+                tabs: vec![
+                    ShellTabSeed {
+                        id: t1,
+                        title: "One".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "P1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                    ShellTabSeed {
+                        id: t2,
+                        title: "Two".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "P2".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    },
+                ],
+            }],
+        }],
+        w1,
+        true,
+        true,
+    )
+    .expect("fixture");
+    let mut root = ApplicationRoot::with_shell(shell);
+    root.apply(AppAction::OpenPalette {
+        fence: root.fence(),
+    })
+    .unwrap();
+    root.apply(AppAction::SetPaletteQuery {
+        fence: root.fence(),
+        query: "Switch to Tab: Two".into(),
+    })
+    .unwrap();
+    let rows = root.snapshot().palette.rows;
+    assert_eq!(rows.len(), 1);
+    let address = rows[0].address.expect("navigation row carries address");
+    assert_eq!(
+        address,
+        ResourceAddress::Tab {
+            workspace: w1,
+            tab: t2
+        }
+    );
+    // Shift live ordinals; frozen row still holds t2.
+    root.apply(AppAction::CreateTab).unwrap();
+    assert_ne!(root.snapshot().shell.active_tab, t2);
+    root.apply(AppAction::RunPalette {
+        fence: root.fence(),
+        address: Some(address),
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.active_tab, t2);
+    assert!(!root.snapshot().palette.open);
 }
 
 #[test]
