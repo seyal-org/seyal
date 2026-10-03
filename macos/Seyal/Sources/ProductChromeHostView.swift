@@ -147,8 +147,9 @@ final class ProductChromeHostView: NSView {
 
         blocks.orientation = .vertical
         blocks.alignment = .width
-        blocks.spacing = 22
-        blocks.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        // M003-BLOCK-COMPONENT-DESIGN §3: block.gap 8 pt; Blocks inset from the Pane.
+        blocks.spacing = 8
+        blocks.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         blocks.translatesAutoresizingMaskIntoConstraints = false
         expose(blocks, identifier: "seyal-blocks")
         composer.setAccessibilityIdentifier("seyal-composer")
@@ -340,6 +341,9 @@ final class ProductChromeHostView: NSView {
             self?.projectRuntimeBlocks()
             self?.reconcileChrome()
             self?.refreshRunningBlockOutput()
+        }
+        pane.inputSurface.onHistoryCopy = { [weak self] _, text in
+            self?.writePasteboard(text)
         }
         pane.inputSurface.onHistoryRangeChanged = { [weak self] range in
             self?.applyHistoryRange(range)

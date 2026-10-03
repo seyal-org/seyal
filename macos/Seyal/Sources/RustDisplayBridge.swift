@@ -97,6 +97,8 @@ final class RustDisplayBridge {
   var historyRevisions: [PaneHistoryRequestKey: (revision: UInt64, requestID: UInt64)] = [:]
   var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
+  /// Delivered when Rust finishes a Block pasteboard copy (#1010).
+  var onHistoryCopy: ((UInt64, String) -> Void)?
   var lastComposerResultRequestID: UInt64 = 0
   var lastComposerStatusRevision: UInt64 = 0
 

@@ -20,6 +20,8 @@ mod session;
 use accessibility::accessibility_nodes;
 
 #[cfg(test)]
+mod block_rerun_tests;
+#[cfg(test)]
 mod keybinding_apply_tests;
 #[cfg(test)]
 mod presentation_tests;
@@ -100,6 +102,12 @@ pub enum AppError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     UnknownBlock,
+    /// Rerun refused: the Block's command is still running.
+    BlockRunning,
+    /// Rerun refused: composer is not Available (same gate as block_actions).
+    ComposerUnavailable,
+    /// Rerun refused: a non-empty draft would be overwritten.
+    ComposerDraftOccupied,
     CannotCloseBoundPane,
     NoSplitDivider,
     ProvisioningRejected,
@@ -367,6 +375,13 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+    /// Load a focused-Pane Block's command as the composer draft so the host
+    /// submits it through the ordinary composer path (#1010 Rerun).
+    RerunBlock {
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -545,6 +560,12 @@ impl ApplicationRoot {
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
         pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+    }
+
+    /// Monotonic product-state generation; every successful transition bumps
+    /// it. FFI encoders use it to skip re-projecting unchanged state.
+    pub fn snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
     }
 
     pub fn fence(&self) -> AppFence {
@@ -733,6 +754,11 @@ impl ApplicationRoot {
                 attention,
             } => self.replace_chrome(fence, agents, attention),
             AppAction::SelectBlock { fence, id } => self.select_block(fence, id),
+            AppAction::RerunBlock {
+                fence,
+                id,
+                composer_epoch,
+            } => self.rerun_block(fence, id, composer_epoch),
             AppAction::ClearBlockSelection { fence } => {
                 self.require_fence(fence)?;
                 let shell = self.shell.snapshot();

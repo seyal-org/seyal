@@ -27,6 +27,16 @@ extension RustDisplayBridge {
     }
   }
 
+  /// Deliver a completed Rust-owned Block pasteboard string, if any (#1010).
+  /// Range, chunk accumulation and composition already happened in Rust.
+  func publishBlockCopy() {
+    guard isConnected, selectClient() else { return }
+    let copy = seyal_bridge_take_block_copy()
+    guard copy.len > 0, let bytes = copy.utf8 else { return }
+    let text = String(decoding: UnsafeBufferPointer(start: bytes, count: Int(copy.len)), as: UTF8.self)
+    onHistoryCopy?(copy.block_id, text)
+  }
+
   func publishHistoryRanges() {
     guard isConnected, selectClient() else { return }
     for (requestKey, request) in Array(requestedHistoryRanges) {

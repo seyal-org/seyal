@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 888
-issue = 1106
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after tip A navigate/goto/provisioning/#867 resting fields plus tip C ChordPrefixState, ActionUnavailable, and R6.4.1 CreateTab/OpenPalette menu gates. keybinding_apply.rs owns match/dispatch; presentation_apply.rs owns resting transitions."
+acknowledged_loc = 914
+issue = 1010
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after tip A navigate/goto/provisioning/#867 resting fields plus tip C ChordPrefixState, ActionUnavailable, and R6.4.1 CreateTab/OpenPalette menu gates (#1106); keybinding_apply.rs owns match/dispatch and presentation_apply.rs owns resting transitions. #1010 adds only the RerunBlock action variant and dispatch arm, its three fail-closed errors, the snapshot_generation accessor the FFI row cache keys on, and the block_rerun_tests module declaration; the Rerun reducer lives in composer_apply.rs and its tests in block_rerun_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,9 +77,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 946
-issue = 1106
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49 remain; tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs."
+acknowledged_loc = 960
+issue = 1010
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49, tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs (#1106); product decode lives in decode.rs. #1010 adds only the block_actions module declaration/re-exports and the per-handle Block action row buffers and generation key; Rerun errors 51-53 live in error_code.rs, the action/copy exports in block_actions.rs and row encoding in encode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -138,10 +138,16 @@ issue = 1067
 reason = "Wire/value validation, decoder, and the sole DisplayCache type remain one protocol module; #1067 only records the accepted ownership disposition (no crate move). Ceiling matches post-doc LOC."
 
 [[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/mod.rs"
+acknowledged_loc = 720
+issue = 1010
+reason = "Local display client read loop and its per-connection history caches stay one module. #1010 adds the Block-copy state fields, the history_range_text accessor, and the post-read advance_block_copy call; copy accumulation lives in local/block_copy.rs and text building in history_text.rs. The history-reply guard is restructured so unexpected replies still advance the decode cursor."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 939
-issue = 1105
-reason = "Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. Ceiling matches post-master-merge LOC."
+acknowledged_loc = 942
+issue = 1010
+reason = "#1010 adds only the three Block-copy field initializers to the attached-client constructor. Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. Ceiling matches post-master-merge LOC."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
@@ -205,9 +211,9 @@ reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after a
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 770
-issue = 1106
-reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+acknowledged_loc = 774
+issue = 1010
+reason = "Thin AppKit chrome host stays one cold-path façade; #1010 adds only the design-doc Block spacing/inset values and the Rust-built Block copy pasteboard callback wiring. #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]

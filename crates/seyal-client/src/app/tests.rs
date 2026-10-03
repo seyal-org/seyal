@@ -1,7 +1,7 @@
 use super::*;
 use crate::presentation::InputRoute;
 mod close_disposition_tests;
-fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
+pub(super) fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
         attachment: AttachmentId::from_bytes([tag.wrapping_add(1); 16]),
@@ -13,7 +13,7 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
 
 /// Runtime published `Available` for the bound attachment: the only way
 /// the composer becomes submittable.
-fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
+pub(super) fn runtime_available(root: &mut ApplicationRoot, revision: u64) {
     root.apply(AppAction::ApplyRuntimeComposerStatus {
         fence: root.fence(),
         eligibility: Some(RuntimeComposerEligibility::Available),
