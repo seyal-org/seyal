@@ -226,12 +226,11 @@ fn create_result_is_absorbed_from_registry_client_without_install_wire_client() 
 }
 
 #[test]
-fn production_composition_keeps_tab_creation_gated_and_splits_fail_closed() {
+fn production_composition_enables_tab_creation_and_keeps_splits_fail_closed() {
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
-    // Production stays gated: the permanent path has one live client/authority
-    // and no per-pane attach driver for a new execution yet (Refs #1149).
-    assert!(!snap.shell.allows_tab_creation);
+    // C2b / #1175: production CreateTab enabled with live attach driver; splits stay off.
+    assert!(snap.shell.allows_tab_creation);
     assert!(!snap.shell.allows_pane_splitting);
     assert_eq!(
         root.apply(AppAction::SplitFocused {

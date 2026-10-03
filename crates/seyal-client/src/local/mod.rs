@@ -149,6 +149,9 @@ pub struct LocalDisplayClient {
     pub(crate) execution_provisioning_negotiated: bool,
     /// Shared connection-local request-id space for types 36 and 38.
     pub(crate) next_provisioning_request_id: u64,
+    /// In-process harness probe (`UnixStream::pair`); never drives live
+    /// `connect_execution` for AttachController (C2b / #1175).
+    pub(crate) harness_probe: bool,
     pub(crate) pending_create_requests: std::collections::HashSet<u64>,
     pub(crate) pending_terminate_requests: std::collections::HashSet<u64>,
     pub(crate) last_create_result: VecDeque<CreateExecutionResult>,
@@ -680,6 +683,7 @@ pub(crate) fn reconstruction_probe_client(
         last_admitted_mouse_action_id: 0,
         execution_provisioning_negotiated: false,
         next_provisioning_request_id: 1,
+        harness_probe: true,
         pending_create_requests: std::collections::HashSet::new(),
         pending_terminate_requests: std::collections::HashSet::new(),
         last_create_result: VecDeque::new(),

@@ -140,7 +140,24 @@ thread_local! {
     // terminal calls free of cross-pane locks.
     pub(crate) static CLIENTS: RefCell<HashMap<u64, Box<LocalDisplayClient>>> = RefCell::new(HashMap::new());
     pub(crate) static ACTIVE_HANDLE: Cell<u64> = const { Cell::new(0) };
+    /// ApplicationRoot-owned display client for the focused Pane. `seyal_bridge_select`
+    /// must not clobber this with the first-connect handle after CreateTab.
+    pub(crate) static FOCUSED_DISPLAY_HANDLE: Cell<u64> = const { Cell::new(0) };
     pub(crate) static LAST_RECOVERY_RESULT: Cell<SeyalRecoveryResult> = const { Cell::new(SeyalRecoveryResult::empty()) };
+}
+
+pub(crate) fn set_focused_display_handle(handle: u64) {
+    FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
+    if handle != 0 {
+        ACTIVE_HANDLE.with(|active| active.set(handle));
+    }
+}
+
+/// Test/diagnostic: live registry execution currently selected for display/input.
+#[doc(hidden)]
+pub fn active_registry_execution() -> Option<ExecutionId> {
+    let handle = ACTIVE_HANDLE.with(Cell::get);
+    with_client(handle, LocalDisplayClient::execution_id)
 }
 
 pub(crate) fn pending_clients() -> &'static Mutex<HashMap<u64, PendingClient>> {
@@ -247,10 +264,25 @@ pub(crate) fn unregister_client(handle: u64) -> Option<Box<LocalDisplayClient>> 
     if handle == 0 {
         return None;
     }
-    CLIENTS
+    let removed = CLIENTS
         .try_with(|clients| clients.borrow_mut().remove(&handle))
         .ok()
-        .flatten()
+        .flatten();
+    ACTIVE_HANDLE
+        .try_with(|active| {
+            if active.get() == handle {
+                active.set(0);
+            }
+        })
+        .ok();
+    FOCUSED_DISPLAY_HANDLE
+        .try_with(|focused| {
+            if focused.get() == handle {
+                focused.set(0);
+            }
+        })
+        .ok();
+    removed
 }
 
 /// Test/diagnostic: whether `handle` is present in the sole attach registry.

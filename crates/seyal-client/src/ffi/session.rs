@@ -21,7 +21,7 @@ use crate::{ClientError, DiscoveryFailure, LocalDisplayClient};
 use super::{
     active_handle, allocate_handle, identity_words, pending_clients, with_active_client,
     PendingClient, SeyalRecoveryResult, ACTIVE_HANDLE, CLIENTS, DEFAULT_RECOVERY_BUDGET_MICROS,
-    LAST_RECOVERY_RESULT,
+    FOCUSED_DISPLAY_HANDLE, LAST_RECOVERY_RESULT,
 };
 
 pub(crate) fn set_recovery_failure(error: ClientError) {
@@ -382,15 +382,25 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
 /// Selects the client used by the legacy-shaped bridge calls. Swift calls
 /// this before every operation, allowing the existing ABI to remain compact
 /// while each Pane still owns an independent socket/client.
+///
+/// After C2b CreateTab the host still holds the first-connect handle. When
+/// ApplicationRoot has a focused-pane display client, that client stays
+/// active so frames/keys follow Rust authority (ADR-015 / SPEC-008).
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_select(handle: u64) -> i32 {
     let exists = CLIENTS.with(|clients| clients.borrow().contains_key(&handle));
-    if exists {
-        ACTIVE_HANDLE.with(|active| active.set(handle));
-        0
-    } else {
-        -1
+    if !exists {
+        return -1;
     }
+    let focused = FOCUSED_DISPLAY_HANDLE.with(|focused| focused.get());
+    let display = if focused != 0 && CLIENTS.with(|clients| clients.borrow().contains_key(&focused))
+    {
+        focused
+    } else {
+        handle
+    };
+    ACTIVE_HANDLE.with(|active| active.set(display));
+    0
 }
 
 #[unsafe(no_mangle)]
@@ -404,6 +414,11 @@ pub extern "C" fn seyal_bridge_disconnect_handle(handle: u64) {
     ACTIVE_HANDLE.with(|active| {
         if active.get() == handle {
             active.set(0);
+        }
+    });
+    FOCUSED_DISPLAY_HANDLE.with(|focused| {
+        if focused.get() == handle {
+            focused.set(0);
         }
     });
 }

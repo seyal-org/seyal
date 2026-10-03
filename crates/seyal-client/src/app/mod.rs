@@ -11,6 +11,8 @@ mod chrome_apply;
 mod composer_apply;
 mod goto_apply;
 mod keybinding_apply;
+#[cfg(target_os = "macos")]
+mod live_attach_apply;
 mod palette_apply;
 mod presentation_apply;
 mod provisioning_apply;
@@ -30,6 +32,7 @@ mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
@@ -430,7 +433,10 @@ struct PaneAuthority {
 pub struct ApplicationRoot {
     shell: ShellState,
     presentation: PresentationSession,
+    /// Active (focused bound) Controller fence for snapshot/input.
     authority: Option<PaneAuthority>,
+    /// Per-pane Controller authority after live create→attach→bind (#1175).
+    pane_authorities: HashMap<PaneId, PaneAuthority>,
     /// Portable provisioning/disposition authority (ADR-017 C1).
     provisioning: ProvisioningSession,
     /// Cold-path wire client for create/terminate (tests/harness). Production
@@ -463,8 +469,19 @@ pub struct ApplicationRoot {
     /// Runtime reported unsupported shell integration. SPEC-008 requires
     /// full-Pane Raw until a later status says otherwise.
     integration_unsupported: bool,
+    /// Create-admitting Controller connection (first pane / session create).
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
+    /// Additional per-pane Controller clients after second+ attach (#1175).
+    /// Never duplicates [`Self::client_handle`].
+    #[cfg(target_os = "macos")]
+    extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Pane → registry raw for display/terminate (includes first pane).
+    #[cfg(target_os = "macos")]
+    pane_client_raws: HashMap<PaneId, u64>,
+    /// Remaining injected live-attach failures before a real connect (C2b tests).
+    #[cfg(target_os = "macos")]
+    inject_live_attach_failures: u32,
 }
 
 impl Default for ApplicationRoot {
@@ -478,9 +495,10 @@ impl ApplicationRoot {
         Self::with_shell(ShellState::m001_local("local"))
     }
 
-    /// Test-only: enable CreateTab while production `m001_local` stays gated
-    /// until the live create→attach→bind driver exists (#1149 / #1159).
+    /// Test-only: force CreateTab policy regardless of production composition.
+    /// Used by macOS C2 harness suites; unused on Linux libtest cfg.
     #[cfg(test)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn enable_tab_creation_for_test(&mut self) {
         self.shell.set_allows_tab_creation_for_test(true);
     }
@@ -498,6 +516,7 @@ impl ApplicationRoot {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
             authority: None,
+            pane_authorities: HashMap::new(),
             provisioning: ProvisioningSession::new(),
             #[cfg(target_os = "macos")]
             wire_client: None,
@@ -521,7 +540,38 @@ impl ApplicationRoot {
             integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
+            #[cfg(target_os = "macos")]
+            extra_pane_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            pane_client_raws: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            inject_live_attach_failures: 0,
         }
+    }
+
+    /// Test-only: fail the next `n` live second-Controller connects (ADR-017 §6.3).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn inject_live_attach_failures(&mut self, n: u32) {
+        self.inject_live_attach_failures = n;
+    }
+
+    /// Extra per-pane Controller registry entries (second+ tabs).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn extra_pane_client_count(&self) -> usize {
+        self.extra_pane_clients.len()
+    }
+
+    /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
+    /// work continues during CreateTab attach).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn pane_client_poll_ok(&self, pane: PaneId) -> bool {
+        let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
+            return false;
+        };
+        crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
     }
 
     /// R8.4: clear chord prefix without dispatch and without PTY bytes.
