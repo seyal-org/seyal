@@ -53,7 +53,7 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 876
+acknowledged_loc = 878
 issue = 1175
 reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 adds per-pane authority/client maps for live second-Controller CreateTab while live_attach_apply.rs, provisioning_apply.rs, and session.rs own the attach/poll reducers."
 

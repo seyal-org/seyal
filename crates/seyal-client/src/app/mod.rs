@@ -484,7 +484,9 @@ impl ApplicationRoot {
     }
 
     /// Test-only: force CreateTab policy regardless of production composition.
+    /// Used by macOS C2 harness suites; unused on Linux libtest cfg.
     #[cfg(test)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn enable_tab_creation_for_test(&mut self) {
         self.shell.set_allows_tab_creation_for_test(true);
     }

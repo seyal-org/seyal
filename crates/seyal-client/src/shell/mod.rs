@@ -269,6 +269,9 @@ impl ShellState {
 
     /// Test/C2 harness: flip the production gate without rebuilding the shell.
     #[cfg(test)]
+    /// Test-only policy flip. Called from macOS C2 harness suites via
+    /// `ApplicationRoot::enable_tab_creation_for_test`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn set_allows_tab_creation_for_test(&mut self, allowed: bool) {
         self.allows_tab_creation = allowed;
     }
