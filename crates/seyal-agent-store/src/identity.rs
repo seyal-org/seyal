@@ -195,7 +195,9 @@ impl AgentStore {
         let conn = self.conn.lock().expect("agent store lock");
         let mut statement = conn
             .prepare(
-                "SELECT id, attempt_id, binding_generation, control_generation, liveness FROM agent_run",
+                "SELECT id, attempt_id, binding_generation, control_generation, liveness,
+                        run_lifecycle, execution_liveness, observation, resumability, run_revision
+                 FROM agent_run",
             )
             .map_err(|_| StoreError::Corrupt)?;
         let rows = statement
@@ -206,13 +208,29 @@ impl AgentStore {
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
                 ))
             })
             .map_err(|_| StoreError::Corrupt)?;
         let mut records = Vec::new();
         for row in rows {
-            let (id, attempt, binding, control, liveness) = row.map_err(|_| StoreError::Corrupt)?;
-            if liveness != "unknown" || binding < 0 || control < 0 {
+            let (
+                id,
+                attempt,
+                binding,
+                control,
+                liveness,
+                run_lifecycle,
+                execution_liveness,
+                observation,
+                resumability,
+                run_revision,
+            ) = row.map_err(|_| StoreError::Corrupt)?;
+            if liveness != "unknown" || binding < 0 || control < 0 || run_revision < 1 {
                 return Err(StoreError::Corrupt);
             }
             records.push((
@@ -222,6 +240,12 @@ impl AgentStore {
                     binding_generation: binding as u64,
                     control_generation: control as u64,
                     liveness: PersistedLiveness::Unknown,
+                    run_lifecycle: u8::try_from(run_lifecycle).map_err(|_| StoreError::Corrupt)?,
+                    execution_liveness: u8::try_from(execution_liveness)
+                        .map_err(|_| StoreError::Corrupt)?,
+                    observation: u8::try_from(observation).map_err(|_| StoreError::Corrupt)?,
+                    resumability: u8::try_from(resumability).map_err(|_| StoreError::Corrupt)?,
+                    run_revision: run_revision as u64,
                 },
             ));
         }
@@ -474,6 +498,13 @@ mod tests {
         let version: i32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
+        let migrated = AgentStore::open(&legacy)
+            .unwrap()
+            .agent_run(prior_run)
+            .unwrap();
+        assert_eq!(migrated.run_lifecycle, 1);
+        assert_eq!(migrated.execution_liveness, 1);
+        assert_eq!(migrated.run_revision, 1);
     }
 }

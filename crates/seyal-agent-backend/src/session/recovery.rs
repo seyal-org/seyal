@@ -1,6 +1,6 @@
 //! Restore persisted identities into the in-memory authority.
 
-use seyal_agent_core::{BindingGeneration, ControlGeneration, DomainError, WorkScopeKind};
+use seyal_agent_core::{codes, BindingGeneration, ControlGeneration, DomainError, WorkScopeKind};
 use seyal_agent_store::{AgentStore, AggregateId};
 
 use crate::{AuthorizationRepository, ObservationAuthority, RunLiveness};
@@ -39,7 +39,24 @@ pub(super) fn restore_identities(
             BindingGeneration::from_raw(run.binding_generation).ok_or(ServiceError::Failed)?;
         let control =
             ControlGeneration::from_raw(run.control_generation).ok_or(ServiceError::Failed)?;
-        match authority.restore_agent_run(id, run.attempt_id, binding, control) {
+        let lifecycle =
+            codes::agent_run_lifecycle_from(run.run_lifecycle).ok_or(ServiceError::Failed)?;
+        let execution_liveness =
+            codes::execution_liveness_from(run.execution_liveness).ok_or(ServiceError::Failed)?;
+        let observation = codes::observation_from(run.observation).ok_or(ServiceError::Failed)?;
+        let resumability =
+            codes::resumability_from(run.resumability).ok_or(ServiceError::Failed)?;
+        match authority.restore_agent_run_state(
+            id,
+            run.attempt_id,
+            binding,
+            control,
+            lifecycle,
+            execution_liveness,
+            observation,
+            resumability,
+            run.run_revision,
+        ) {
             Ok(()) => {}
             Err(DomainError::UnknownAttempt(_)) => {
                 // Migrated/crash-recovered runs may lack WorkScope/WorkItem/
@@ -93,26 +110,47 @@ fn fence_recovered_run(
     authority: &mut ObservationAuthority,
     run_id: seyal_agent_core::AgentRunId,
 ) -> Result<(), ServiceError> {
-    let run = *authority
+    let attempt_id = authority
         .domain()
         .agent_run(run_id)
-        .ok_or(ServiceError::Failed)?;
-    let next_binding = authority
-        .advance_binding_generation(run_id, run.binding_generation())
-        .map_err(|_| ServiceError::Failed)?;
-    let next_control = authority
-        .advance_control_generation(run_id, run.control_generation())
-        .map_err(|_| ServiceError::Failed)?;
+        .ok_or(ServiceError::Failed)?
+        .attempt_id();
+    // SPEC-026 §9.7: Unknown liveness, Disconnected observation, ReconciliationRequired,
+    // advanced binding + control epoch before accepting new control.
+    let (next_binding, next_control) = match authority.domain_mut().backend_restart_recovery(run_id)
+    {
+        Ok(gens) => gens,
+        Err(DomainError::ReconciliationRequired) => {
+            let run = authority
+                .domain()
+                .agent_run(run_id)
+                .ok_or(ServiceError::Failed)?;
+            (run.binding_generation(), run.control_generation())
+        }
+        Err(_) => return Err(ServiceError::Failed),
+    };
     let sequence = store
         .mutate_agent_run_and_append(
             run_id,
-            run.attempt_id(),
+            attempt_id,
             next_binding.get(),
             next_control.get(),
             EVENT_RECOVERY_FENCE,
             &[],
         )
         .map_err(|_| ServiceError::Failed)?;
+    if let Some(run) = authority.domain().agent_run(run_id) {
+        store
+            .set_agent_run_lifecycle_columns(
+                run_id,
+                codes::agent_run_lifecycle(run.lifecycle()),
+                codes::execution_liveness(run.execution_liveness()),
+                codes::observation(run.observation()),
+                codes::resumability(run.resumability()),
+                run.run_revision(),
+            )
+            .map_err(|_| ServiceError::Failed)?;
+    }
     let payload = snapshot_payload(authority, run_id);
     store
         .snapshot(AggregateId::AgentRun(run_id), sequence, &payload)

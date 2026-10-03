@@ -158,19 +158,23 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module after
 # materialize_output_ref beside append_output_event.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 866
-issue = 1181
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1181 partial-segment merge and OutputRef materialization must share the append transaction/lock with insert_event. Extracting only segment merge would split the commit boundary that proves fault isolation."
+acknowledged_loc = 885
+issue = 678
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #678 adds schema-v5 AgentRun lifecycle column reads beside mutate_agent_run_and_append while lifecycle_columns.rs owns the column writers."
+
+# #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/observation.rs"
+acknowledged_loc = 717
+issue = 678
+reason = "ObservationAuthority stays one writer-facing bridge; #678 adds domain_mut and restore_agent_run_state so SPEC-026 lifecycle restore/recovery cannot fork a second authority."
 
 # #1179 connection-scoped principal threading through IntegrationService handle.
 # #1194 threads that caller into every session-bearing command. Authorization
 # decisions stay in auth/mod.rs, which is below review_loc after its unit tests
 # moved to auth/tests.rs.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 766
-issue = 1194
-reason = "V1 command catalog and observation dispatch stay one session façade; #1194 passes the connection principal into every session-bearing command through two private gates so foreign-session rejection cannot diverge from the auth lookup."
+# #678 extracted StartAgentRun lifecycle drive to session/lifecycle_ops.rs, so
+# session/mod.rs is below review_loc and needs no [[cohesion_acknowledgement]].
 
 # #1194 nine-command byte-identity regression lives with the other session façade tests.
 [[cohesion_acknowledgement]]

@@ -1,6 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::{AgentRunId, AttemptId, BindingGeneration, ControlGeneration, WorkItemId, WorkScopeId};
+use crate::client_control::LoggedObservation;
+use crate::lifecycle::{
+    AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage, AttachmentAccess,
+    AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness, ExecutionRef,
+    ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecisionRef, RunTermination,
+    WorkItemLifecycle, WorkItemOutcome,
+};
+use crate::{
+    AgentRunId, AttemptId, BindingGeneration, ClientSessionId, ControlGeneration, WorkItemId,
+    WorkScopeId,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkScopeKind {
@@ -33,8 +43,8 @@ impl WorkScopeKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorkScope {
-    id: WorkScopeId,
-    kind: WorkScopeKind,
+    pub(crate) id: WorkScopeId,
+    pub(crate) kind: WorkScopeKind,
 }
 
 impl WorkScope {
@@ -49,8 +59,12 @@ impl WorkScope {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorkItem {
-    id: WorkItemId,
-    work_scope_id: WorkScopeId,
+    pub(crate) id: WorkItemId,
+    pub(crate) work_scope_id: WorkScopeId,
+    pub(crate) lifecycle: WorkItemLifecycle,
+    pub(crate) outcome: Option<WorkItemOutcome>,
+    pub(crate) acceptance_mode: AcceptanceContractMode,
+    pub(crate) related_to: Option<WorkItemId>,
 }
 
 impl WorkItem {
@@ -61,12 +75,33 @@ impl WorkItem {
     pub const fn work_scope_id(self) -> WorkScopeId {
         self.work_scope_id
     }
+
+    pub const fn lifecycle(self) -> WorkItemLifecycle {
+        self.lifecycle
+    }
+
+    pub const fn outcome(self) -> Option<WorkItemOutcome> {
+        self.outcome
+    }
+
+    pub const fn acceptance_mode(self) -> AcceptanceContractMode {
+        self.acceptance_mode
+    }
+
+    pub const fn related_to(self) -> Option<WorkItemId> {
+        self.related_to
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attempt {
-    id: AttemptId,
-    work_item_id: WorkItemId,
+    pub(crate) id: AttemptId,
+    pub(crate) work_item_id: WorkItemId,
+    pub(crate) origin: AttemptOrigin,
+    pub(crate) lifecycle: AttemptLifecycle,
+    pub(crate) disposition: Option<AttemptDisposition>,
+    pub(crate) usage: AccountingValue,
+    pub(crate) cost: AccountingValue,
 }
 
 impl Attempt {
@@ -77,14 +112,49 @@ impl Attempt {
     pub const fn work_item_id(self) -> WorkItemId {
         self.work_item_id
     }
+
+    pub const fn origin(self) -> AttemptOrigin {
+        self.origin
+    }
+
+    pub const fn lifecycle(self) -> AttemptLifecycle {
+        self.lifecycle
+    }
+
+    pub const fn disposition(self) -> Option<AttemptDisposition> {
+        self.disposition
+    }
+
+    pub const fn usage(self) -> AccountingValue {
+        self.usage
+    }
+
+    pub const fn cost(self) -> AccountingValue {
+        self.cost
+    }
 }
 
+/// Durable AgentRun aggregate (SPEC-026 §6).
+///
+/// `control_generation` is the client control epoch (SPEC-026 O1 / §8.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AgentRun {
-    id: AgentRunId,
-    attempt_id: AttemptId,
-    binding_generation: BindingGeneration,
-    control_generation: ControlGeneration,
+    pub(crate) id: AgentRunId,
+    pub(crate) attempt_id: AttemptId,
+    pub(crate) work_item_id: WorkItemId,
+    pub(crate) binding_generation: BindingGeneration,
+    /// Client control epoch (SPEC-026 O1). Advances on backend restart/recovery
+    /// and whenever control authority is re-established (§8.3).
+    pub(crate) control_generation: ControlGeneration,
+    pub(crate) run_revision: u64,
+    pub(crate) lifecycle: AgentRunLifecycle,
+    pub(crate) execution_liveness: ExecutionLiveness,
+    pub(crate) observation: ObservationFact,
+    pub(crate) resumability: ResumabilityFact,
+    pub(crate) termination: Option<RunTermination>,
+    pub(crate) lineage: Option<AgentRunLineage>,
+    pub(crate) routing_decision_ref: Option<RoutingDecisionRef>,
+    pub(crate) current_execution: Option<ExecutionRef>,
 }
 
 impl AgentRun {
@@ -96,12 +166,57 @@ impl AgentRun {
         self.attempt_id
     }
 
+    pub const fn work_item_id(self) -> WorkItemId {
+        self.work_item_id
+    }
+
     pub const fn binding_generation(self) -> BindingGeneration {
         self.binding_generation
     }
 
+    /// Client control epoch (SPEC-026 O1).
     pub const fn control_generation(self) -> ControlGeneration {
         self.control_generation
+    }
+
+    pub const fn run_revision(self) -> u64 {
+        self.run_revision
+    }
+
+    pub const fn lifecycle(self) -> AgentRunLifecycle {
+        self.lifecycle
+    }
+
+    pub const fn execution_liveness(self) -> ExecutionLiveness {
+        self.execution_liveness
+    }
+
+    pub const fn observation(self) -> ObservationFact {
+        self.observation
+    }
+
+    pub const fn resumability(self) -> ResumabilityFact {
+        self.resumability
+    }
+
+    pub const fn termination(self) -> Option<RunTermination> {
+        self.termination
+    }
+
+    pub const fn lineage(self) -> Option<AgentRunLineage> {
+        self.lineage
+    }
+
+    pub const fn routing_decision_ref(self) -> Option<RoutingDecisionRef> {
+        self.routing_decision_ref
+    }
+
+    pub const fn current_execution(self) -> Option<ExecutionRef> {
+        self.current_execution
+    }
+
+    pub(crate) fn bump_revision(&mut self) {
+        self.run_revision = self.run_revision.saturating_add(1);
     }
 }
 
@@ -111,29 +226,50 @@ pub enum DomainError {
     UnknownWorkItem(WorkItemId),
     UnknownAttempt(AttemptId),
     UnknownAgentRun(AgentRunId),
-    StaleBindingGeneration {
+    /// SPEC-026 §12 `StaleBinding`.
+    StaleBinding {
         current: BindingGeneration,
         presented: BindingGeneration,
     },
-    StaleControlGeneration {
+    /// SPEC-026 §12 `StaleControlEpoch` (O1: ControlGeneration).
+    StaleControlEpoch {
         current: ControlGeneration,
         presented: ControlGeneration,
     },
     GenerationExhausted,
     Conflict,
+    InvalidTransition,
+    StaleRevision {
+        expected: u64,
+        current: u64,
+    },
+    NotAuthorized,
+    MultipleRunsNotPermitted,
+    ResumeNotAvailable {
+        reason: ResumabilityFact,
+    },
+    ReconciliationRequired,
+    AttemptNotClosable,
+    WorkItemFinalized,
 }
 
-/// Pure in-memory aggregate used to prove one agent-domain transition authority.
+/// Pure in-memory aggregate used as the sole agent-domain transition authority.
 ///
-/// Persistence/replay is deliberately outside AB-0.1. Later store/daemon layers
-/// may call this domain authority; they must not create peer writers for the
-/// same WorkScope/WorkItem/Attempt/AgentRun transitions.
+/// Persistence/replay layers may call this domain authority; they must not
+/// create peer writers for the same WorkScope/WorkItem/Attempt/AgentRun
+/// transitions (ADR-016 / SPEC-026 §3).
 #[derive(Debug, Default)]
 pub struct AgentDomain {
-    work_scopes: HashMap<WorkScopeId, WorkScope>,
-    work_items: HashMap<WorkItemId, WorkItem>,
-    attempts: HashMap<AttemptId, Attempt>,
-    agent_runs: HashMap<AgentRunId, AgentRun>,
+    pub(crate) work_scopes: HashMap<WorkScopeId, WorkScope>,
+    pub(crate) work_items: HashMap<WorkItemId, WorkItem>,
+    pub(crate) attempts: HashMap<AttemptId, Attempt>,
+    pub(crate) agent_runs: HashMap<AgentRunId, AgentRun>,
+    pub(crate) attachments:
+        HashMap<ClientSessionId, (AgentRunId, AttachmentAccess, ControlGeneration, u64)>,
+    pub(crate) detection_bindings: HashMap<ExternalIdentityKey, AgentRunId>,
+    pub(crate) retired_executions: HashSet<ExecutionRef>,
+    pub(crate) observation_keys: HashSet<(u64, u64, u64)>,
+    pub(crate) observation_log: Vec<LoggedObservation>,
 }
 
 impl AgentDomain {
@@ -155,22 +291,52 @@ impl AgentDomain {
             return Err(DomainError::UnknownWorkScope(work_scope_id));
         }
         let id = WorkItemId::new();
-        self.work_items.insert(id, WorkItem { id, work_scope_id });
+        self.work_items.insert(
+            id,
+            WorkItem {
+                id,
+                work_scope_id,
+                lifecycle: WorkItemLifecycle::Open,
+                outcome: None,
+                acceptance_mode: AcceptanceContractMode::HumanFinal,
+                related_to: None,
+            },
+        );
         Ok(id)
     }
 
     pub fn create_attempt(&mut self, work_item_id: WorkItemId) -> Result<AttemptId, DomainError> {
-        if !self.work_items.contains_key(&work_item_id) {
-            return Err(DomainError::UnknownWorkItem(work_item_id));
-        }
-        let id = AttemptId::new();
-        self.attempts.insert(id, Attempt { id, work_item_id });
-        Ok(id)
+        self.create_attempt_with_origin(work_item_id, AttemptOrigin::Initial)
     }
 
     pub fn create_agent_run(&mut self, attempt_id: AttemptId) -> Result<AgentRunId, DomainError> {
-        if !self.attempts.contains_key(&attempt_id) {
-            return Err(DomainError::UnknownAttempt(attempt_id));
+        self.create_agent_run_with_lineage(attempt_id, None)
+    }
+
+    pub(crate) fn create_agent_run_with_lineage(
+        &mut self,
+        attempt_id: AttemptId,
+        lineage: Option<AgentRunLineage>,
+    ) -> Result<AgentRunId, DomainError> {
+        let attempt = self
+            .attempts
+            .get(&attempt_id)
+            .ok_or(DomainError::UnknownAttempt(attempt_id))?;
+        let work_item_id = attempt.work_item_id;
+        if self
+            .work_items
+            .get(&work_item_id)
+            .is_some_and(|item| item.lifecycle == WorkItemLifecycle::Finalized)
+        {
+            return Err(DomainError::WorkItemFinalized);
+        }
+        // M005: one AgentRun per Attempt (SPEC-026 §5.2).
+        if self
+            .agent_runs
+            .values()
+            .any(|run| run.attempt_id == attempt_id)
+        {
+            return Err(DomainError::MultipleRunsNotPermitted);
         }
         let id = AgentRunId::new();
         self.agent_runs.insert(
@@ -178,8 +344,18 @@ impl AgentDomain {
             AgentRun {
                 id,
                 attempt_id,
+                work_item_id,
                 binding_generation: BindingGeneration::FIRST,
                 control_generation: ControlGeneration::FIRST,
+                run_revision: 1,
+                lifecycle: AgentRunLifecycle::Created,
+                execution_liveness: ExecutionLiveness::NotStarted,
+                observation: ObservationFact::Disconnected,
+                resumability: ResumabilityFact::NotEvaluated,
+                termination: None,
+                lineage,
+                routing_decision_ref: None,
+                current_execution: None,
             },
         );
         Ok(id)
@@ -201,6 +377,13 @@ impl AgentDomain {
         self.agent_runs.get(&id)
     }
 
+    pub fn run_for_attempt(&self, attempt_id: AttemptId) -> Option<AgentRunId> {
+        self.agent_runs
+            .values()
+            .find(|run| run.attempt_id == attempt_id)
+            .map(|run| run.id)
+    }
+
     pub fn validate_binding_generation(
         &self,
         agent_run_id: AgentRunId,
@@ -212,7 +395,7 @@ impl AgentDomain {
             .ok_or(DomainError::UnknownAgentRun(agent_run_id))?
             .binding_generation;
         if current != presented {
-            return Err(DomainError::StaleBindingGeneration { current, presented });
+            return Err(DomainError::StaleBinding { current, presented });
         }
         Ok(())
     }
@@ -228,10 +411,11 @@ impl AgentDomain {
             .ok_or(DomainError::UnknownAgentRun(agent_run_id))?;
         let current = run.binding_generation;
         if current != presented {
-            return Err(DomainError::StaleBindingGeneration { current, presented });
+            return Err(DomainError::StaleBinding { current, presented });
         }
         let next = current.next().ok_or(DomainError::GenerationExhausted)?;
         run.binding_generation = next;
+        run.bump_revision();
         Ok(next)
     }
 
@@ -246,7 +430,7 @@ impl AgentDomain {
             .ok_or(DomainError::UnknownAgentRun(agent_run_id))?
             .control_generation;
         if current != presented {
-            return Err(DomainError::StaleControlGeneration { current, presented });
+            return Err(DomainError::StaleControlEpoch { current, presented });
         }
         Ok(())
     }
@@ -262,265 +446,15 @@ impl AgentDomain {
             .ok_or(DomainError::UnknownAgentRun(agent_run_id))?;
         let current = run.control_generation;
         if current != presented {
-            return Err(DomainError::StaleControlGeneration { current, presented });
+            return Err(DomainError::StaleControlEpoch { current, presented });
         }
         let next = current.next().ok_or(DomainError::GenerationExhausted)?;
         run.control_generation = next;
+        run.bump_revision();
         Ok(next)
-    }
-
-    pub fn restore_work_scope(
-        &mut self,
-        id: WorkScopeId,
-        kind: WorkScopeKind,
-    ) -> Result<(), DomainError> {
-        if let Some(existing) = self.work_scopes.get(&id) {
-            return if existing.kind == kind {
-                Ok(())
-            } else {
-                Err(DomainError::Conflict)
-            };
-        }
-        self.work_scopes.insert(id, WorkScope { id, kind });
-        Ok(())
-    }
-
-    pub fn restore_work_item(
-        &mut self,
-        id: WorkItemId,
-        work_scope_id: WorkScopeId,
-    ) -> Result<(), DomainError> {
-        if !self.work_scopes.contains_key(&work_scope_id) {
-            return Err(DomainError::UnknownWorkScope(work_scope_id));
-        }
-        if let Some(existing) = self.work_items.get(&id) {
-            return if existing.work_scope_id == work_scope_id {
-                Ok(())
-            } else {
-                Err(DomainError::Conflict)
-            };
-        }
-        self.work_items.insert(id, WorkItem { id, work_scope_id });
-        Ok(())
-    }
-
-    pub fn restore_attempt(
-        &mut self,
-        id: AttemptId,
-        work_item_id: WorkItemId,
-    ) -> Result<(), DomainError> {
-        if !self.work_items.contains_key(&work_item_id) {
-            return Err(DomainError::UnknownWorkItem(work_item_id));
-        }
-        if let Some(existing) = self.attempts.get(&id) {
-            return if existing.work_item_id == work_item_id {
-                Ok(())
-            } else {
-                Err(DomainError::Conflict)
-            };
-        }
-        self.attempts.insert(id, Attempt { id, work_item_id });
-        Ok(())
-    }
-
-    pub fn restore_agent_run(
-        &mut self,
-        id: AgentRunId,
-        attempt_id: AttemptId,
-        binding_generation: BindingGeneration,
-        control_generation: ControlGeneration,
-    ) -> Result<(), DomainError> {
-        if !self.attempts.contains_key(&attempt_id) {
-            return Err(DomainError::UnknownAttempt(attempt_id));
-        }
-        self.insert_restored_agent_run(id, attempt_id, binding_generation, control_generation)
-    }
-
-    /// Recover a persisted AgentRun whose Attempt parent is absent.
-    ///
-    /// Schema migrations and crash recovery may keep a run row after parents
-    /// were never written. The run stays readable with honest unknown
-    /// liveness; creating new work under the missing Attempt remains denied.
-    pub fn restore_orphaned_agent_run(
-        &mut self,
-        id: AgentRunId,
-        attempt_id: AttemptId,
-        binding_generation: BindingGeneration,
-        control_generation: ControlGeneration,
-    ) -> Result<(), DomainError> {
-        if self.attempts.contains_key(&attempt_id) {
-            return self.restore_agent_run(id, attempt_id, binding_generation, control_generation);
-        }
-        self.insert_restored_agent_run(id, attempt_id, binding_generation, control_generation)
-    }
-
-    fn insert_restored_agent_run(
-        &mut self,
-        id: AgentRunId,
-        attempt_id: AttemptId,
-        binding_generation: BindingGeneration,
-        control_generation: ControlGeneration,
-    ) -> Result<(), DomainError> {
-        if let Some(existing) = self.agent_runs.get(&id) {
-            return if existing.attempt_id == attempt_id
-                && existing.binding_generation == binding_generation
-                && existing.control_generation == control_generation
-            {
-                Ok(())
-            } else {
-                Err(DomainError::Conflict)
-            };
-        }
-        self.agent_runs.insert(
-            id,
-            AgentRun {
-                id,
-                attempt_id,
-                binding_generation,
-                control_generation,
-            },
-        );
-        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn work_item_belongs_to_exactly_one_work_scope() {
-        let mut domain = AgentDomain::new();
-        let first_scope = domain.create_work_scope(WorkScopeKind::Repository);
-        let second_scope = domain.create_work_scope(WorkScopeKind::AdHoc);
-        let item = domain.create_work_item(first_scope).unwrap();
-
-        assert_eq!(domain.work_item(item).unwrap().work_scope_id(), first_scope);
-        assert_ne!(
-            domain.work_item(item).unwrap().work_scope_id(),
-            second_scope
-        );
-
-        let foreign_scope = WorkScopeId::new();
-        assert_eq!(
-            domain.create_work_item(foreign_scope),
-            Err(DomainError::UnknownWorkScope(foreign_scope))
-        );
-    }
-
-    #[test]
-    fn attempt_belongs_to_exactly_one_work_item() {
-        let mut domain = AgentDomain::new();
-        let scope = domain.create_work_scope(WorkScopeKind::Project);
-        let first_item = domain.create_work_item(scope).unwrap();
-        let second_item = domain.create_work_item(scope).unwrap();
-        let attempt = domain.create_attempt(first_item).unwrap();
-
-        assert_eq!(domain.attempt(attempt).unwrap().work_item_id(), first_item);
-        assert_ne!(domain.attempt(attempt).unwrap().work_item_id(), second_item);
-
-        let foreign_item = WorkItemId::new();
-        assert_eq!(
-            domain.create_attempt(foreign_item),
-            Err(DomainError::UnknownWorkItem(foreign_item))
-        );
-    }
-
-    #[test]
-    fn agent_run_belongs_to_exactly_one_attempt() {
-        let mut domain = AgentDomain::new();
-        let scope = domain.create_work_scope(WorkScopeKind::HostBound);
-        let item = domain.create_work_item(scope).unwrap();
-        let first_attempt = domain.create_attempt(item).unwrap();
-        let second_attempt = domain.create_attempt(item).unwrap();
-        let run = domain.create_agent_run(first_attempt).unwrap();
-
-        assert_eq!(domain.agent_run(run).unwrap().attempt_id(), first_attempt);
-        assert_ne!(domain.agent_run(run).unwrap().attempt_id(), second_attempt);
-
-        let foreign_attempt = AttemptId::new();
-        assert_eq!(
-            domain.create_agent_run(foreign_attempt),
-            Err(DomainError::UnknownAttempt(foreign_attempt))
-        );
-    }
-
-    #[test]
-    fn binding_and_control_generations_advance_and_reject_stale_presentations() {
-        let mut domain = AgentDomain::new();
-        let scope = domain.create_work_scope(WorkScopeKind::Repository);
-        let item = domain.create_work_item(scope).unwrap();
-        let attempt = domain.create_attempt(item).unwrap();
-        let run = domain.create_agent_run(attempt).unwrap();
-
-        let binding_first = domain.agent_run(run).unwrap().binding_generation();
-        let binding_second = domain
-            .advance_binding_generation(run, binding_first)
-            .unwrap();
-        assert!(binding_second > binding_first);
-        assert_eq!(
-            domain.validate_binding_generation(run, binding_first),
-            Err(DomainError::StaleBindingGeneration {
-                current: binding_second,
-                presented: binding_first,
-            })
-        );
-
-        let control_first = domain.agent_run(run).unwrap().control_generation();
-        let control_second = domain
-            .advance_control_generation(run, control_first)
-            .unwrap();
-        assert!(control_second > control_first);
-        assert_eq!(
-            domain.validate_control_generation(run, control_first),
-            Err(DomainError::StaleControlGeneration {
-                current: control_second,
-                presented: control_first,
-            })
-        );
-    }
-
-    #[test]
-    fn pure_domain_constructs_work_scope_to_agent_run_without_io() {
-        let mut domain = AgentDomain::new();
-        let scope = domain.create_work_scope(WorkScopeKind::Repository);
-        let item = domain.create_work_item(scope).unwrap();
-        let attempt = domain.create_attempt(item).unwrap();
-        let run = domain.create_agent_run(attempt).unwrap();
-
-        assert_eq!(domain.work_scope(scope).unwrap().id(), scope);
-        assert_eq!(domain.work_item(item).unwrap().work_scope_id(), scope);
-        assert_eq!(domain.attempt(attempt).unwrap().work_item_id(), item);
-        assert_eq!(domain.agent_run(run).unwrap().attempt_id(), attempt);
-    }
-
-    #[test]
-    fn orphaned_agent_run_restores_without_parent_attempt() {
-        let mut domain = AgentDomain::new();
-        let run = AgentRunId::new();
-        let missing_attempt = AttemptId::new();
-        assert_eq!(
-            domain.restore_agent_run(
-                run,
-                missing_attempt,
-                BindingGeneration::FIRST,
-                ControlGeneration::FIRST,
-            ),
-            Err(DomainError::UnknownAttempt(missing_attempt))
-        );
-        domain
-            .restore_orphaned_agent_run(
-                run,
-                missing_attempt,
-                BindingGeneration::FIRST,
-                ControlGeneration::FIRST,
-            )
-            .unwrap();
-        assert_eq!(domain.agent_run(run).unwrap().attempt_id(), missing_attempt);
-        assert!(domain.attempt(missing_attempt).is_none());
-        assert_eq!(
-            domain.create_agent_run(missing_attempt),
-            Err(DomainError::UnknownAttempt(missing_attempt))
-        );
-    }
-}
+#[path = "domain_tests.rs"]
+mod tests;
