@@ -20,13 +20,13 @@ mod session;
 use accessibility::accessibility_nodes;
 
 #[cfg(test)]
+mod keybinding_apply_tests;
+#[cfg(test)]
 mod presentation_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod tab_provisioning_tests;
-#[cfg(test)]
-mod keybinding_apply_tests;
 #[cfg(test)]
 mod tests;
 

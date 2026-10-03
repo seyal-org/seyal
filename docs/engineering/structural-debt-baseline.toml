@@ -77,7 +77,7 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 947
+acknowledged_loc = 946
 issue = 1106
 reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49 remain; tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs."
 

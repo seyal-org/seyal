@@ -312,5 +312,3 @@ pub extern "C" fn seyal_app_route_keystroke(
         }
     })
 }
-
-
