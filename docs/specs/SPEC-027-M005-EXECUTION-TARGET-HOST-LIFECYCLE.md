@@ -1,6 +1,6 @@
 # SPEC-027 — M005 AgentRun execution-target binding, launch-descriptor trust and ExecutionHost lifecycle
 
-- **Status:** Proposed under #1190. Not Accepted; not an implemented-behavior claim.
+- **Status:** Accepted on merge by a non-author maintainer under #1190 / ADR-016. An author or agent comment is not that acceptance. Not an implemented-behavior claim.
 - **Issue:** #1190
 - **Architecture:** ADR-012, ADR-016 (no ADR create/amend; §6 and §9 do not conflict)
 - **Consumes:** SPEC-017, SPEC-018, SPEC-020, SPEC-026
