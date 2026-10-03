@@ -19,7 +19,7 @@ use seyal_core::AttachmentId;
 use seyal_protocol::runtime_dir::{
     override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
 };
-use seyal_runtime::{local_ipc::framing::Role, Runtime, RuntimeConfig};
+use seyal_runtime::{Runtime, RuntimeConfig};
 
 struct OverrideReset;
 
@@ -30,6 +30,12 @@ impl Drop for OverrideReset {
 }
 
 fn start_empty_isolated_runtime() -> (PathBuf, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    start_isolated_runtime(None)
+}
+
+fn start_isolated_runtime(
+    max_executions: Option<usize>,
+) -> (PathBuf, Arc<AtomicBool>, thread::JoinHandle<()>) {
     let runtime_dir = PathBuf::from(format!(
         "/tmp/s1175e{}{:x}",
         std::process::id() % 100_000,
@@ -43,12 +49,13 @@ fn start_empty_isolated_runtime() -> (PathBuf, Arc<AtomicBool>, thread::JoinHand
     let stop_thread = Arc::clone(&stop);
     let (ready_tx, ready_rx) = mpsc::channel();
     let join = thread::spawn(move || {
-        let mut runtime = Runtime::new(
-            RuntimeConfig::m001()
-                .expect("M001 Runtime config")
-                .isolated_to(runtime_dir),
-        )
-        .expect("isolated Runtime");
+        let mut config = RuntimeConfig::m001()
+            .expect("M001 Runtime config")
+            .isolated_to(runtime_dir);
+        if let Some(max_executions) = max_executions {
+            config.max_executions = max_executions;
+        }
+        let mut runtime = Runtime::new(config).expect("isolated Runtime");
         let socket_path = runtime
             .local_ipc_socket_path()
             .expect("local IPC socket")
@@ -103,7 +110,6 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
         first.execution_provisioning_negotiated(),
         "C2b requires CAP_EXECUTION_PROVISIONING on the create connection"
     );
-    let _ = Role::Controller;
 
     let mut root = ApplicationRoot::new();
     assert!(
@@ -125,11 +131,19 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
         "CreateTab must begin a pending create intent"
     );
 
+    let mut first_stayed_pollable = false;
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        if root.pane_client_poll_ok(first_pane) {
+            first_stayed_pollable = true;
+        }
         root.provisioning()
             .recorded_execution(second_pane)
             .is_some()
     });
+    assert!(
+        first_stayed_pollable,
+        "first Controller must keep polling while the second tab attaches"
+    );
 
     let second_execution = root
         .provisioning()
@@ -325,6 +339,102 @@ fn create_tab_attach_failure_n_times_stays_bounded() {
             let _ = root.poll_client(root.fence());
         }
     }
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_live_three_tabs_keep_distinct_executions() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first)
+        .expect("bind first Controller");
+
+    let mut executions = vec![first_execution];
+    for _ in 0..2 {
+        root.apply(AppAction::CreateTab).expect("CreateTab");
+        let pane = root.snapshot().shell.focused_pane;
+        poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+            root.provisioning().recorded_execution(pane).is_some()
+        });
+        let execution = root
+            .provisioning()
+            .recorded_execution(pane)
+            .expect("bound extra tab");
+        assert!(
+            !executions.contains(&execution),
+            "each CreateTab must bind a distinct ExecutionId"
+        );
+        executions.push(execution);
+    }
+    assert_eq!(root.snapshot().shell.tabs.len(), 3);
+    assert_eq!(root.extra_pane_client_count(), 2);
+    assert_eq!(
+        root.provisioning().recorded_execution(first_pane),
+        Some(first_execution)
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_live_capacity_exceeded_is_bounded_without_retry() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_isolated_runtime(Some(2));
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first)
+        .expect("bind first Controller");
+
+    root.apply(AppAction::CreateTab).expect("fill last slot");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
+
+    root.apply(AppAction::CreateTab)
+        .expect("CreateTab still admits until Runtime rejects");
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        matches!(
+            root.provisioning().last_failure(),
+            Some((
+                _,
+                seyal_client::provisioning::ProvisioningFailure::CreateRejected(
+                    seyal_protocol::framing::ErrorCode::CapacityExceeded
+                )
+            ))
+        ) && !root.provisioning().has_outstanding_intent()
+    });
+    assert_eq!(root.provisioning().automatic_retries(), 0);
+    assert_eq!(
+        root.provisioning().recorded_execution(first_pane),
+        Some(first_execution)
+    );
+    assert_eq!(root.extra_pane_client_count(), 1);
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");

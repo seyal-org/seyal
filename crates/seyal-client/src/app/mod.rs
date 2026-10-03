@@ -553,6 +553,17 @@ impl ApplicationRoot {
         self.extra_pane_clients.len()
     }
 
+    /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
+    /// work continues during CreateTab attach).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn pane_client_poll_ok(&self, pane: PaneId) -> bool {
+        let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
+            return false;
+        };
+        crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
+    }
+
     /// Portable provisioning session (ADR-017 C1). Hosts/wire adapters drive
     /// effects; they cannot invent an [`ExecutionId`] or retry a rejection.
     pub fn provisioning(&self) -> &ProvisioningSession {

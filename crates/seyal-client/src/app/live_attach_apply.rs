@@ -105,10 +105,12 @@ impl ApplicationRoot {
                         self.unregister_extra_pane_client(pane);
                         return Err(error);
                     }
-                } else if let Some(focused) = self.authority.map(|bound| bound.pane) {
-                    if let Some(focused_raw) = self.pane_client_raws.get(&focused).copied() {
-                        crate::ffi::set_focused_display_handle(focused_raw);
-                    }
+                } else if let Some(focused_raw) = self
+                    .authority
+                    .map(|bound| bound.pane)
+                    .and_then(|focused| self.pane_client_raws.get(&focused).copied())
+                {
+                    crate::ffi::set_focused_display_handle(focused_raw);
                 }
                 Ok(())
             }

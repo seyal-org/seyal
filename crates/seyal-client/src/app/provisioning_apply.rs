@@ -304,6 +304,7 @@ impl ApplicationRoot {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub(super) fn dispatch_live_provisioning_effects(
         &mut self,
         effects: Vec<ProvisioningEffect>,
@@ -625,17 +626,15 @@ impl ApplicationRoot {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Option<u64> {
-        if let Some(pane) = self
+        if let Some(raw) = self
             .pane_authorities
             .values()
             .find(|authority| {
                 authority.execution == execution && authority.attachment == attachment
             })
-            .map(|authority| authority.pane)
+            .and_then(|authority| self.pane_client_raws.get(&authority.pane).copied())
         {
-            if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
-                return Some(raw);
-            }
+            return Some(raw);
         }
         self.pane_client_raws.values().copied().find(|raw| {
             crate::ffi::with_client(*raw, |client| {
