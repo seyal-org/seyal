@@ -1,6 +1,6 @@
 # SPEC-026 — M005 WorkItem, Attempt and AgentRun lifecycle, binding and recovery
 
-- **Status:** Proposed under #838. Not Accepted; not an implemented-behavior claim.
+- **Status:** Accepted on merge by a non-author maintainer under #838 / ADR-012. An author or agent comment is not that acceptance. Not an implemented-behavior claim.
 - **Issue:** #838 (promotes the 2026-09-22 drafts "AgentRun lifecycle + event/attachment/fencing contract v0.1" and "WorkItem / Attempt / Evaluation / Outcome contract v0.1")
 - **Architecture:** ADR-012, ADR-014, ADR-016
 - **Consumes:** SPEC-014, SPEC-016, SPEC-017, SPEC-018, SPEC-019
