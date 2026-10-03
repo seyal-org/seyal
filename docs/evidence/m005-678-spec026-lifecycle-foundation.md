@@ -2,7 +2,7 @@
 
 Evidence for Issue #678 on branch `mahboobmonnamd/issue/678`.
 
-- **Head SHA (`5dee3145e33d7e1b1e00f22339b79597306826d4`
+- **Head SHA:** `b1d5973` (update to merge SHA after land)
 - **Authority:** Accepted SPEC-026; consumes SPEC-014/016/017/018/019 as written
 - **Classification:** production permanent path (not POC)
 - `performance_claim=false`
