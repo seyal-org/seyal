@@ -64,7 +64,7 @@ Unknown/incompatible mandatory versions fail closed without affecting already-ru
 
 Schema evolution must define unknown-field behavior and compatibility windows before implementation.
 
-`server_capabilities.execution_host_kind` and the typed `ExecutionTargetUnavailable` command error are specified by Proposed [`SPEC-027`](SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) (§8). Until that specification is Accepted they are not an implemented-behavior claim. `local_session` alone does not mean a run can be started.
+`server_capabilities.execution_host_kind` and the typed `ExecutionTargetUnavailable` command error are specified by Accepted [`SPEC-027`](SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) (§8). `local_session` alone does not mean a run can be started.
 
 ## 5. ClientPrincipal and ClientSession
 
@@ -92,8 +92,8 @@ Backend restart invalidates prior ClientSessions. Session scope may narrow, neve
 Representative scopes:
 - connections.read / connections.use;
 - runs.create / runs.observe / runs.interact / runs.control;
-- adapter.execute (per `adapter_id`; Proposed SPEC-027 — required in addition to `runs.create` to start a host process);
-- admin.adapters (install/enable catalog; Proposed SPEC-027);
+- adapter.execute (per `adapter_id`; Accepted SPEC-027 — required in addition to `runs.create` to start a host process);
+- admin.adapters (install/enable catalog; Accepted SPEC-027);
 - attention.read / approval.decide;
 - artifacts.read / usage.read;
 - actions.request / reconciliation.resolve;

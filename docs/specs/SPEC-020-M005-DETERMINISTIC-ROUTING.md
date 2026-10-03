@@ -96,7 +96,7 @@ Routing candidates are adapter-advertised compatible RouteOfferings, never arbit
 
 Offerings record model/provider selection authority and request-assembly authority from SPEC-018.
 
-An AgentRun binds exactly one immutable RoutingDecision at `Prepared` (SPEC-026 §6.1). Before #681 ranking exists, a **pin** or **singleton** offering may create that decision with `selection_kind = Pinned` or `Singleton`; that is not V1 scoring and is specified by Proposed [`SPEC-027`](SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) §4. Zero or many eligible offerings without a pin fail closed with no AgentRun mint. Pins remain hard constraints after #681 and do not bypass §5.
+An AgentRun binds exactly one immutable RoutingDecision at `Prepared` (SPEC-026 §6.1). Before #681 ranking exists, a **pin** or **singleton** offering may create that decision with `selection_kind = Pinned` or `Singleton`; that is not V1 scoring and is specified by Accepted [`SPEC-027`](SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) §4. Zero or many eligible offerings without a pin fail closed with no AgentRun mint. Pins remain hard constraints after #681 and do not bypass §5.
 
 ## 5. Hard constraints
 
