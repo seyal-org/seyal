@@ -175,7 +175,7 @@ pub extern "C" fn seyal_app_shortcut_enabled(
 }
 
 /// R6.4.1 menu path: re-validate and invoke a WorkspaceCommand (zero PTY).
-/// Returns 0 on success, negative `-AppError` otherwise (34 = ActionUnavailable).
+/// Returns 0 on success, negative `-AppError` otherwise (50 = ActionUnavailable).
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_invoke_workspace_command(
     handle: u64,

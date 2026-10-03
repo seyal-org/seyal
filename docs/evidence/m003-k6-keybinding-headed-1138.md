@@ -35,14 +35,14 @@
 | IME/composition skip + Command still matches | Component | **PASS** |
 | TUI Control-C + arrows Fallthrough | Component (route FFI under TUI eligibility) | **PASS** |
 | Unmatched/reserved Command non-leak | Component | **PASS** |
-| Menu titles / ⌘K / TUI PTY bytes / Quit | XCUI `SeyalKeybindingUITests` | Wired into `SeyalUITests` Sources + group. CI run 36660029157 executed the suite: 3/4 green; `testCommandKOpensPaletteWithoutLeavingFlow` failed asserting composer `isHittable` while the palette overlay is open (Flow chrome still present). Assertion corrected to require Flow existence under the modal and hittability after Escape — **not marked PASS until exact-head smoke is green** |
+| Menu titles / ⌘K / TUI PTY bytes / Quit | XCUI `SeyalKeybindingUITests` | **PASS** (4/4) on exact-head `native-macos-smoke` [run 37090975690](https://github.com/seyal-org/seyal/actions/runs/37090975690) at `36f96a24` |
 | Menu entry clears chord prefix (R8.4) | Rust `k6_tests::menu_invoked_command_clears_active_chord_prefix` | **PASS** — `invoke_workspace_command_for_menu` clears before dispatch |
 | Composition×chord race | Rust `k6_tests` | **PASS** (no headed chord+IME injector) |
 | Cold OnceLock identity | Rust `k6_tests` | **PASS** |
 | Reserved override load diagnostics | Rust `k6_tests` | **PASS** |
 | Presentation switch mid-chord | Rust `k6_tests` | **PASS** |
 
-XCUI cases remain in-tree and run on hosted `native-macos-smoke`. Do not treat the XCUI row as PASS until the exact-head smoke job is green after the palette-overlay hittability fix.
+XCUI cases remain in-tree and run on hosted `native-macos-smoke`. Exact-head smoke at `36f96a24` executed `SeyalKeybindingUITests` 4/4 PASS.
 
 ## Explicitly unproven here (later catalog / out of scope)
 
