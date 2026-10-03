@@ -4,6 +4,7 @@
 - **Issue:** #838 (promotes the 2026-09-22 drafts "AgentRun lifecycle + event/attachment/fencing contract v0.1" and "WorkItem / Attempt / Evaluation / Outcome contract v0.1")
 - **Architecture:** ADR-012, ADR-014, ADR-016
 - **Consumes:** SPEC-014, SPEC-016, SPEC-017, SPEC-018, SPEC-019
+- **Related:** Proposed SPEC-027 (execution-target / host lifecycle; not an implemented-behavior claim until Accepted)
 - **Consumers:** #678 (primary), #679, #680, #681
 - **Scope:** durable lifecycle state machines for WorkItem, Attempt and AgentRun; the single transition writer; orthogonal run facts; RunTermination; adapter/worker binding generations and fencing; client attachment and control fencing; transition rules for start, cancel, resume, retry, fork, parallel candidates, route fallback, external detection and restart; observation de-duplication, ordering and late evidence on SPEC-017 aggregate streams; required fixtures
 
@@ -26,6 +27,7 @@ This specification adds lifecycle and transition behavior only. It does not rest
 |---|---|
 | WorkScope, aggregate event envelope, per-aggregate sequences, retention classes, snapshot/replay, HistoryGap, persistence and failure boundaries | SPEC-017 |
 | ExecutionHost family and adapter observation shape | SPEC-018 |
+| Execution-target binding, launch-descriptor trust, host start/cancel/reap | Proposed SPEC-027 |
 | EvaluationObservation, Evaluation, AcceptanceContract, AttemptDisposition values, WorkItemOutcome values, auto-finalization guardrails, usage/cost/time evidence | SPEC-019 |
 | Behavioral resumability classification (`BehavioralResumeAvailable` / `ReconciliationRequired` / `ResumeUnavailable`) and continuation plans | SPEC-014 |
 | Action identity, approval consumption, dispatch fencing and effect-unknown reconciliation | SPEC-016 |
@@ -202,7 +204,7 @@ RunAttachment {           // ephemeral; daemon-resident; not durable identity
 
 `CreateWorkItem` → `StartAttempt(origin)` → `StartAgentRun` creates the AgentRun in `Created`, then:
 
-- preparation binds route, context and permission → `Prepared`;
+- preparation binds route, context and permission → `Prepared` (execution target / RoutingDecision: Proposed SPEC-027 §4);
 - dispatch commits `Dispatching` **before** the ExecutionHost is invoked;
 - host confirmation → `Active`, with `execution_liveness = Alive`.
 
