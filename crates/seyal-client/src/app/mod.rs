@@ -9,7 +9,10 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod goto_apply;
 mod palette_apply;
+mod presentation_apply;
+mod provisioning_apply;
 mod recovery_apply;
 mod session;
 
@@ -18,7 +21,11 @@ use accessibility::accessibility_nodes;
 #[cfg(test)]
 mod block_rerun_tests;
 #[cfg(test)]
+mod presentation_tests;
+#[cfg(test)]
 mod recovery_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
 
@@ -34,11 +41,14 @@ use crate::composer::{
     ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
+use crate::goto::{GotoScope, GotoSnapshot, GotoState};
+use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion};
+use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
+use crate::provisioning::{ProvisioningEffect, ProvisioningSession};
 use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
@@ -46,7 +56,7 @@ use crate::recovery::{
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
-use crate::LocalDisplayClient;
+use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
 pub const APP_ABI_VERSION: u16 = 1;
@@ -80,6 +90,9 @@ pub enum AppError {
     UnknownChromeTab,
     PaletteNotOpen,
     PaletteNoSelection,
+    GotoNotOpen,
+    GotoNoSelection,
+    GotoUnsupportedScope,
     TabCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
@@ -92,6 +105,19 @@ pub enum AppError {
     /// Rerun refused: a non-empty draft would be overwritten.
     ComposerDraftOccupied,
     CannotCloseBoundPane,
+    NoSplitDivider,
+    ProvisioningRejected,
+    ProvisioningCapacityExceeded,
+    NavigationUnsupportedKind,
+    NavigationDenied,
+    NavigationUnknownWorkspace,
+    NavigationUnknownTab,
+    NavigationUnknownPane,
+    NavigationUnknownExecution,
+    NavigationNotComposed,
+    NavigationTargetTerminated,
+    NavigationTargetUnbound,
+    NavigationAmbiguousTarget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,6 +228,13 @@ pub enum AppAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
+    /// User choice of the non-TUI presentation (#867).
+    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
+    /// structured eligibility again.
+    SelectRestingPresentation {
+        fence: AppFence,
+        raw: bool,
+    },
     SetLeftPanel {
         mode: LeftPanelMode,
     },
@@ -231,6 +264,9 @@ pub enum AppAction {
     CloseTab {
         id: TabId,
     },
+    TerminateExecution {
+        fence: AppFence,
+    },
     SplitFocused {
         axis: SplitAxis,
     },
@@ -239,6 +275,11 @@ pub enum AppAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    /// Drag the divider that `pane` leads to a pointer position (#928).
+    MoveSplitDivider {
+        pane: PaneId,
+        position: SplitPosition,
     },
     SetShellVisibility {
         left: bool,
@@ -276,11 +317,47 @@ pub enum AppAction {
         fence: AppFence,
         delta: i32,
     },
-    /// Run the command bound to the current selection, then close.
+    /// Run the selected palette row. When `address` is `Some`, Navigate that
+    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
+    /// selected verb/chrome command. Never re-resolves by ordinal.
     RunPalette {
         fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    /// Atomic Navigate(address) commit (SPEC-022 §4).
+    Navigate {
+        fence: AppFence,
+        address: ResourceAddress,
     },
     ClosePalette {
+        fence: AppFence,
+    },
+    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
+    OpenGoto {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    SetGotoScope {
+        fence: AppFence,
+        scope: GotoScope,
+    },
+    CycleGotoScope {
+        fence: AppFence,
+    },
+    SetGotoQuery {
+        fence: AppFence,
+        query: String,
+    },
+    MoveGotoSelection {
+        fence: AppFence,
+        delta: i32,
+    },
+    /// Run the selected goto row by stored/host-echoed address.
+    RunGoto {
+        fence: AppFence,
+        address: Option<ResourceAddress>,
+    },
+    CloseGoto {
         fence: AppFence,
     },
     /// Bind the inspector to one Block of the focused Pane (#935).
@@ -345,6 +422,7 @@ pub struct AppSnapshot {
     pub composer: Option<ComposerSnapshot>,
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
+    pub goto: GotoSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -361,6 +439,15 @@ pub struct ApplicationRoot {
     shell: ShellState,
     presentation: PresentationSession,
     authority: Option<PaneAuthority>,
+    /// Portable provisioning/disposition authority (ADR-017 C1).
+    provisioning: ProvisioningSession,
+    /// Cold-path wire client for create/terminate (tests/harness). Production
+    /// macOS may instead use [`Self::client_handle`] via the FFI registry.
+    #[cfg(target_os = "macos")]
+    wire_client: Option<LocalDisplayClient>,
+    /// Effects waiting for a negotiated wire client (SendCreate/SendTerminate)
+    /// or for host attach (AttachController / bootstrap resize).
+    pending_wire_effects: Vec<ProvisioningEffect>,
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
@@ -372,6 +459,16 @@ pub struct ApplicationRoot {
     composer: ComposerState,
     chrome: ChromeState,
     palette: PaletteState,
+    goto: GotoState,
+    /// Last canonical alternate-screen evidence. TUI while this is set.
+    alternate_screen: bool,
+    /// Flow or Raw used while alternate screen is off.
+    resting: PresentationMode,
+    /// User asked for Raw until they ask to re-evaluate.
+    explicit_raw: bool,
+    /// Runtime reported unsupported shell integration. SPEC-008 requires
+    /// full-Pane Raw until a later status says otherwise.
+    integration_unsupported: bool,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -387,6 +484,13 @@ impl ApplicationRoot {
         Self::with_shell(ShellState::m001_local("local"))
     }
 
+    /// Test-only: enable CreateTab while production `m001_local` stays gated
+    /// until the live create→attach→bind driver exists (#1149 / #1159).
+    #[cfg(test)]
+    pub(crate) fn enable_tab_creation_for_test(&mut self) {
+        self.shell.set_allows_tab_creation_for_test(true);
+    }
+
     pub(crate) fn with_shell(shell: ShellState) -> Self {
         let pane = shell.snapshot().focused_pane;
         let mut composer = ComposerState::new();
@@ -400,6 +504,10 @@ impl ApplicationRoot {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
             authority: None,
+            provisioning: ProvisioningSession::new(),
+            #[cfg(target_os = "macos")]
+            wire_client: None,
+            pending_wire_effects: Vec::new(),
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
@@ -411,9 +519,24 @@ impl ApplicationRoot {
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
+            goto: GotoState::new(),
+            alternate_screen: false,
+            resting: PresentationMode::Flow,
+            explicit_raw: false,
+            integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
+    }
+
+    /// Portable provisioning session (ADR-017 C1). Hosts/wire adapters drive
+    /// effects; they cannot invent an [`ExecutionId`] or retry a rejection.
+    pub fn provisioning(&self) -> &ProvisioningSession {
+        &self.provisioning
+    }
+
+    pub fn provisioning_mut(&mut self) -> &mut ProvisioningSession {
+        &mut self.provisioning
     }
 
     /// Active Tab's Pane regions (#923). The one live surface belongs to the
@@ -460,12 +583,10 @@ impl ApplicationRoot {
                 .map(|composer| composer.blocks.as_slice())
                 .unwrap_or(&[]),
         );
-        let palette = self.palette.snapshot(
-            &shell,
-            &chrome,
-            self.shell.allows_tab_creation(),
-            self.shell.allows_pane_splitting(),
-        );
+        // When goto is open, the existing overlay ABI carries goto rows
+        // (one overlay component; ADR-019 §8).
+        let palette = self.overlay_palette_snapshot();
+        let goto = self.goto.snapshot();
         let eligibility = self.eligibility();
         let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
@@ -498,6 +619,7 @@ impl ApplicationRoot {
             composer,
             chrome,
             palette,
+            goto,
         }
     }
 
@@ -574,6 +696,9 @@ impl ApplicationRoot {
                 eligibility,
                 revision,
             } => self.apply_runtime_composer_status(fence, eligibility, revision),
+            AppAction::SelectRestingPresentation { fence, raw } => {
+                self.select_resting_presentation(fence, raw)
+            }
             AppAction::OpenComposerHistory { fence } => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
@@ -631,9 +756,13 @@ impl ApplicationRoot {
             AppAction::SelectTab { id } => self.select_tab(id),
             AppAction::CreateTab => self.create_tab(),
             AppAction::CloseTab { id } => self.close_tab(id),
+            AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
+            AppAction::MoveSplitDivider { pane, position } => {
+                self.move_split_divider(pane, position)
+            }
             AppAction::SetShellVisibility {
                 left,
                 inspector,
@@ -644,8 +773,19 @@ impl ApplicationRoot {
             AppAction::MovePaletteSelection { fence, delta } => {
                 self.move_palette_selection(fence, delta)
             }
-            AppAction::RunPalette { fence } => self.run_palette(fence),
+            AppAction::RunPalette { fence, address } => self.run_palette(fence, address),
+            AppAction::Navigate { fence, address } => {
+                self.require_fence(fence)?;
+                self.navigate_address(address)
+            }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
+            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
+            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::CycleGotoScope { fence } => self.cycle_goto_scope(fence),
+            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
+            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
+            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
+            AppAction::CloseGoto { fence } => self.close_goto(fence),
         };
         match result {
             Ok(()) => {
@@ -677,35 +817,6 @@ impl ApplicationRoot {
         if fence.presentation_epoch != current.presentation_epoch {
             return Err(AppError::StalePresentationEpoch);
         }
-        Ok(())
-    }
-
-    fn derive_presentation(&mut self, alternate_screen: bool) -> Result<(), AppError> {
-        let Some(bound) = self.authority else {
-            self.sync_composer_presentation();
-            return Ok(());
-        };
-        let desired = if alternate_screen {
-            PresentationMode::Tui
-        } else {
-            PresentationMode::Flow
-        };
-        let current = self.presentation.snapshot();
-        if current.mode == desired {
-            self.sync_composer_presentation();
-            return Ok(());
-        }
-        let identity = PresentationIdentity::new(bound.execution, bound.pty_generation)
-            .ok_or(AppError::ZeroPtyGeneration)?;
-        self.presentation
-            .apply(PresentationAction::Transition {
-                mode: desired,
-                identity,
-                explicit: false,
-                epoch: current.epoch,
-            })
-            .map_err(|_| AppError::StalePresentationEpoch)?;
-        self.sync_composer_presentation();
         Ok(())
     }
 

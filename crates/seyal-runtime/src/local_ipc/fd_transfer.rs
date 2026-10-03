@@ -533,12 +533,17 @@ mod tests {
 
     #[test]
     fn truncated_oversized_rights_header_is_bounded_and_closes_visible_fds() {
-        let source = std::fs::File::open("/dev/null").unwrap();
+        let mut ends = [0 as RawFd; 2];
+        // SAFETY: pipe creates two new descriptors owned by this test.
+        assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+        let read_end = ends[0];
+        let write_end = ends[1];
+        let pipe_id = pipe_identity(read_end);
         // SAFETY: dup duplicates a valid descriptor and returns a new owned raw
         // descriptor on success.
-        let first = unsafe { libc::dup(source.as_raw_fd()) };
+        let first = unsafe { libc::dup(read_end) };
         // SAFETY: same rationale as above.
-        let second = unsafe { libc::dup(source.as_raw_fd()) };
+        let second = unsafe { libc::dup(read_end) };
         assert!(first >= 0 && second >= 0);
 
         let mut ancillary = ReceiveAncillaryBuffer::for_fd_capacity(2).unwrap();
@@ -574,10 +579,36 @@ mod tests {
             parse_received_ancillary(&msg, &ancillary),
             RecvFd::Malformed
         ));
-        // SAFETY: F_GETFD only probes whether these integer descriptors remain
-        // open; it does not mutate descriptor state.
-        assert_eq!(unsafe { libc::fcntl(first, libc::F_GETFD) }, -1);
-        // SAFETY: same rationale as above.
-        assert_eq!(unsafe { libc::fcntl(second, libc::F_GETFD) }, -1);
+        // Another test may reuse a just-closed descriptor number. Identity is
+        // the pipe, so a recycled number is not this transfer.
+        assert_pipe_descriptor_released(first, pipe_id);
+        assert_pipe_descriptor_released(second, pipe_id);
+        unsafe {
+            libc::close(read_end);
+            libc::close(write_end);
+        }
+    }
+
+    fn pipe_identity(fd: RawFd) -> (u64, u64) {
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: fstat only inspects the descriptor the test just created.
+        assert_eq!(unsafe { libc::fstat(fd, &mut stat) }, 0);
+        (stat.st_dev as u64, stat.st_ino as u64)
+    }
+
+    fn assert_pipe_descriptor_released(fd: RawFd, pipe_id: (u64, u64)) {
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: fstat only inspects the descriptor; it does not close it.
+        let open = unsafe { libc::fstat(fd, &mut stat) } == 0;
+        if !open {
+            return;
+        }
+        let same = (stat.st_dev as u64, stat.st_ino as u64) == pipe_id;
+        if same {
+            // SAFETY: this is still the transferred dup, which the parser failed
+            // to close. Close it so the test process does not leak it.
+            unsafe { libc::close(fd) };
+        }
+        assert!(!same, "visible descriptor {fd} was not closed");
     }
 }

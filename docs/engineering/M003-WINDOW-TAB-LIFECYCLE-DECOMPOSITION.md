@@ -5,8 +5,9 @@ Ready until its own `docs/engineering/ISSUE-PROTOCOL.md` §"Ready gate" checklis
 passes and a human owner claims it.
 
 **Authority:** [`../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md`](../architecture/ADR-018-NATIVE-WINDOW-TAB-LIFECYCLE.md)
-(Proposed). This file plans work; it creates no architecture. Where this file and
-ADR-018 disagree, ADR-018 wins.
+(Accepted on merge of PR #1208 under #1000, by a non-author maintainer; not an
+implemented-behavior claim). This file plans work; it creates no architecture.
+Where this file and ADR-018 disagree, ADR-018 wins.
 
 **Parent umbrella:** #674. **Epic:** #665. **Milestone contract:**
 [`../milestones/MILESTONE-003.md`](../milestones/MILESTONE-003.md).
@@ -29,21 +30,22 @@ ADR-018 accepted
 S1   SPEC-004 amendment: per-attachment delivery suspend + capacity
      (separate Architecture/R&D PR)                                 → W5
 
-accepted #994 ─┐
-W2a + W3 ──────┴→ W6   live-unpresented enumeration + adopt/terminate
-                  → W2b  Rust close paths + hierarchical close
-W2b + W4a ──────→ W4b  headed close, last-window-close, zero-Window re-entry
+ADR-017 Accepted (PR #1088) ─┐
+W2a + W3 ────────────────────┴→ W6   live-unpresented enumeration + adopt/terminate
+                                 → W2b  Rust close paths + hierarchical close
+W2b + W4a ─────────────────────→ W4b  headed close, last-window-close, zero-Window re-entry
 
 W1 … W6, W2b, W4b → W7 adversarial matrix + headed acceptance + measurements
 ```
 
-**Every Tab/Window close path is blocked on accepted #994.** Closing a Tab or
-Window can remove a live execution's last binding and make it `Unpresented`
-(ADR-018 §3.2), and ADR-018 §3.3 forbids `Unpresented` executions with no route
-back. That route is W6, and W6 needs the accepted #994 bind contract because
-adoption and provisioning share the bind path. So close lives only in W2b
-(Rust) and W4b (host), both strictly after W6. The same gate applies to any
-ADR-021 child whose close path can unbind a live execution's last leaf.
+**Every Tab/Window close path is blocked on W6 (and therefore on ADR-017,
+Accepted on merge of PR #1088 under #994).** Closing a Tab or Window can remove
+a live execution's last binding and make it `Unpresented` (ADR-018 §3.2), and
+ADR-018 §3.3 forbids `Unpresented` executions with no route back. That route is
+W6, and W6 needs the ADR-017 bind contract because adoption and provisioning
+share the bind path. So close lives only in W2b (Rust) and W4b (host), both
+strictly after W6. The same gate applies to any ADR-021 child whose close path
+can unbind a live execution's last leaf.
 
 W1, W2a, W3 and W4a need neither #994 nor #923 and can land first. Moving a
 Window's only Tab (ADR-018 §6.1) destroys the source Window without unbinding
@@ -127,7 +129,7 @@ assertions comparing full state before and after every rejection.
 
 ## W2b — Rust close paths and hierarchical close
 
-**Depends on:** W2a, W6 (therefore accepted #994).
+**Depends on:** W2a, W6 (therefore ADR-017 Accepted on merge of PR #1088).
 
 **Scope.** `CloseTab`, `CloseWindow`, close of a bound Pane leaf's last binding,
 hierarchical close policy (focused Pane → active Tab → Window), and the ADR-018
@@ -141,14 +143,21 @@ hierarchical close policy (focused Pane → active Tab → Window), and the ADR-
   bound execution (ADR-018 §3.1). Never-bound in-flight disposition stays #994.
 - Hierarchical close never produces a zero-Pane Tab or zero-Tab Window.
 - Closing the last Window never produces a quit intent (ADR-018 §2.5); the
-  composition reaches zero Windows and admits `CreateWindow` /
-  `ActivateWorkspace` (ADR-018 §3.3a).
+  composition reaches zero Windows and admits the §2.2 / §3.3a create and
+  `ActivateWorkspace` re-entry paths.
+- Close successors follow ADR-018 §3.2 (active/inactive Tab, active/inactive
+  Window, cross-Workspace fallback, zero-Window with `last_active_workspace`
+  unchanged, last-Tab `CloseTab` → `CloseWindow`, destroy-before-order-front).
 - Close actions are structural and follow the W2a fence and atomicity rules.
 
 **Tests.** Close Pane/Tab/Window/last Window each keep executions live and
-enumerable by W6; duplicate-close rejection rather than retarget; stale close
-rejected; a test asserting no action variant both closes presentation and
-terminates an execution; last-Window close emits no quit.
+enumerable by W6; the ADR-018 §9 close-successor tests (active and inactive Tab
+close, active and inactive Window close, fallback to another Workspace, fallback
+to zero Windows with `last_active_workspace` unchanged, last-Tab `CloseTab`
+collapses to `CloseWindow`, destroy-before-order-front); duplicate-close
+rejection rather than retarget; stale close rejected; a test asserting no action
+variant both closes presentation and terminates an execution; last-Window close
+emits no quit.
 
 **Non-goals.** Host code, provisioning, split ratios.
 
@@ -212,7 +221,7 @@ stays off in the headed composition.
   is never consulted as authority.
 - The host holds no writable window/tab/pane model; only a derived copy plus
   disposable view/GPU state.
-- `⌥⌘1…9` window selection, `⌘T`, `⌘N` New Window, and window cycling route
+- `⌥⌘1…9` window selection, `⌘T` / `⌘N` New Tab, `⌘⇧N` New Window, and window cycling route
   through typed actions via `NSMenuItem` key equivalents, never `keyDown`
   interception; the host never constructs an `NSWindow` without a Rust effect.
 
@@ -229,7 +238,7 @@ leaves (#936).
 
 ## W4b — Headed close, last-window-close and zero-Window re-entry
 
-**Depends on:** W4a, W2b (therefore W6 and accepted #994).
+**Depends on:** W4a, W2b (therefore W6 and ADR-017 Accepted on merge of PR #1088).
 
 **Scope.** Wire user close and zero-Window behavior in the host, remove the
 remaining last-window-close decision from `AppDelegate.swift`, and turn on the
@@ -243,13 +252,20 @@ headed window/tab creation admission.
   the last Window never quits in M003 (ADR-018 §2.5).
 - `⌘W` hierarchical close routes through a typed action via its `NSMenuItem`
   key equivalent.
-- Zero-Window re-entry: Dock reopen / `applicationShouldHandleReopen` with no
-  visible Seyal windows and File → New Window both forward `CreateWindow` /
-  `ActivateWorkspace` (ADR-018 §3.3a).
+- File → New Window / `⌘⇧N` forwards the one target-free create intent in
+  ADR-018 §2.2 / §3.3a (Rust resolves Workspace and applies `CreateWindow`); it
+  never depends on AppKit key-window state and never raises a miniaturized
+  Window instead of creating when the app is inactive. Default New Tab remains
+  `⌘T` / `⌘N` per SPEC-024 (TOML-customizable).
+- Dock reopen / `applicationShouldHandleReopen` with zero Windows forwards
+  `ActivateWorkspace { workspace: last_active_workspace }` (ADR-018 §3.3a).
 
 **Tests.** Native XCTest/XCUI: close-forwarding; last-window-close leaves the app
-running; Dock reopen and File → New Window from zero Windows create a Window via
-a Rust effect; executions from a closed Window are reachable through W6.
+running; File → New Window / `⌘⇧N` from zero Windows and from an inactive /
+all-miniaturized app creates via the §2.2 intent (never raises); Dock reopen from
+zero Windows creates via `ActivateWorkspace`; the ADR-018 §9 close-successor and
+`last_active_workspace` tests that the host can observe; executions from a closed
+Window are reachable through W6.
 
 **Non-goals.** Renderer tiering, multi-live Metal leaves (#936).
 
@@ -310,8 +326,8 @@ while every leaf is `Hidden`; detached child exit while `Hidden`.
 
 ## W6 — Live-unpresented execution enumeration, adopt and explicit terminate
 
-**Depends on:** W2a, W3, accepted #994. **Blocks:** W2b, W4b (every Tab/Window
-close path).
+**Depends on:** W2a, W3, ADR-017 (Accepted on merge of PR #1088 under #994).
+**Blocks:** W2b, W4b (every Tab/Window close path).
 
 **Scope.** Implement ADR-018 §3.3: a deterministic, explicit, non-guessing way to
 enumerate the Workspace's live-unpresented executions and either bind one into a
@@ -396,25 +412,28 @@ candidate now.
 | Terminate-on-close and auto-close-on-exit configuration | config policy; must stay an explicit separately-actioned intent | #676, ADR-018 §3.4 |
 | Rich session inventory | blocked on session inventory authority | #929 |
 
-## Open items for reviewer decision
+## Closed decisions (were open reviewer items)
 
-1. **ADR versus SPEC placement.** ADR-018 carries normative observable behavior
-   that `docs/specs/README.md` would also accept as a SPEC. A reviewer may prefer
-   promoting ADR-018 §3–§6 into an unnumbered `SPEC-0xx-M003-WINDOW-TAB-LIFECYCLE`
-   (number allocated at promotion; SPEC-022–SPEC-025 are claimed by #1004 / #1003 / #1002 / #1001) and keeping
-   only ownership/containment in the ADR. This refinement chose one ADR to avoid a
-   second overlapping authority for the same contract.
-2. **Window↔Workspace binding.** ADR-018 §1.1 binds a Window to one Workspace for
-   life and changes `ActivateWorkspace` from the preview scaffold's
-   switch-inventory-in-place behavior to raise-or-create. This is the largest
-   product-behavior consequence of the decomposition and deserves explicit product
-   sign-off.
-3. **Sequencing against #994 / W6.** Closing a Tab/Window under ADR-018 §3.2 can
-   unbind live executions into `Unpresented`, so all close work is split into
-   W2b and W4b, which depend on W6, which depends on accepted #994. **No Tab or
-   Window close can merge until #994 is accepted and W6 has landed.** W1, W2a,
-   W3 and W4a do not wait on #994. Reviewers should confirm this delay to close
-   is acceptable, or prioritize #994.
-4. **S1 SPEC-004 amendment.** W5 is blocked on a separate Architecture/R&D
-   amendment to SPEC-004 (ADR-018 §5.1). If reviewers reject that amendment,
-   ADR-018 §5 reopens with Alternative E (release the attachment on hide).
+1. **ADR versus SPEC placement.** **Closed by ADR-018 §12:** no separate SPEC is
+   required before W3; the observable contract is this ADR plus accepted
+   SPEC-004 / SPEC-006 / SPEC-008 / SPEC-009. W3 may define snapshot/native-effect
+   record layout under ADR-015 and ADR-018 §2.1/§2.4 but not new lifecycle
+   semantics.
+2. **Window↔Workspace binding.** **Closed by ADR-018 §1.1** (a Window belongs to
+   exactly one `WorkspaceId` for its whole lifetime) and §2.2 / §11.4
+   (`ActivateWorkspace` replaces in-place `SelectWorkspace` with raise-or-create).
+   Acceptance of that product rule is the non-author maintainer review of
+   PR #1208 under #1000, not a new product invention in this file.
+3. **Sequencing against #994 / W6.** **Closed by ADR-018 §3.2 / §3.3 and this
+   decomposition's dependency order:** close can produce `Unpresented`
+   executions, so W2b/W4b follow W6, and W6 consumes ADR-017 (Accepted on merge
+   of PR #1088 under #994). **No Tab or Window close can merge until W6 has
+   landed.** W1, W2a, W3 and W4a do not wait on ADR-017.
+4. **S1 SPEC-004 amendment.** Still a separate Architecture/R&D gate for W5
+   (ADR-018 §5.1). If that amendment is rejected, ADR-018 §5 reopens with
+   Alternative E (release the attachment on hide).
+5. **Default New Tab / New Window keybindings.** **Closed by product-owner
+   decision for PR #1208 / #1000 / #1002:** default New Tab is `⌘N` and `⌘T`;
+   default New Window is `⌘⇧N`. SPEC-024 owns the builtin rows and the
+   `[[keybindings]]` TOML override path; ADR-018 owns only CreateWindow /
+   zero-Window re-entry semantics.

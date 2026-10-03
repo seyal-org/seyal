@@ -7,65 +7,30 @@ use crate::{
     AggregateEventEnvelopeV1, AggregateId, AggregateSequence, HistoryGap, HistoryGapReason,
     SnapshotPosition,
 };
+use seyal_agent_core::{
+    decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, RetentionPolicyRef, StreamKind,
+};
 
+mod lifecycle_columns;
 mod schema;
 use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
 
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
-/// Discriminant for a RunEvent payload that references `output_segment` rows.
-pub const OUTPUT_REF_KIND: u8 = 8;
-/// Fixed size of [`encode_output_ref`] (kind + indices + lengths + ordinals).
-pub const OUTPUT_REF_LEN: usize = 1 + 4 + 4 + 8 + 8 + 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OutputAppend {
     pub sequence: AggregateSequence,
     pub first_segment_index: u32,
     pub segment_count: u32,
+    pub byte_offset: u32,
     pub byte_length: u64,
+    pub output_ref: OutputRef,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PersistedLiveness {
     Unknown,
-}
-
-/// Encode a SPEC-017 §10 output reference. Raw output bytes never appear here.
-pub fn encode_output_ref(
-    first_segment_index: u32,
-    segment_count: u32,
-    byte_length: u64,
-    first_ordinal: u64,
-    last_ordinal: u64,
-) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(OUTPUT_REF_LEN);
-    payload.push(OUTPUT_REF_KIND);
-    payload.extend_from_slice(&first_segment_index.to_le_bytes());
-    payload.extend_from_slice(&segment_count.to_le_bytes());
-    payload.extend_from_slice(&byte_length.to_le_bytes());
-    payload.extend_from_slice(&first_ordinal.to_le_bytes());
-    payload.extend_from_slice(&last_ordinal.to_le_bytes());
-    payload
-}
-
-/// Decode a segment reference payload. Returns `None` when the shape is wrong.
-pub fn decode_output_ref(payload: &[u8]) -> Option<(u32, u32, u64, u64, u64)> {
-    if payload.len() != OUTPUT_REF_LEN || payload[0] != OUTPUT_REF_KIND {
-        return None;
-    }
-    let first_segment_index = u32::from_le_bytes(payload[1..5].try_into().ok()?);
-    let segment_count = u32::from_le_bytes(payload[5..9].try_into().ok()?);
-    let byte_length = u64::from_le_bytes(payload[9..17].try_into().ok()?);
-    let first_ordinal = u64::from_le_bytes(payload[17..25].try_into().ok()?);
-    let last_ordinal = u64::from_le_bytes(payload[25..33].try_into().ok()?);
-    Some((
-        first_segment_index,
-        segment_count,
-        byte_length,
-        first_ordinal,
-        last_ordinal,
-    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +39,21 @@ pub struct PersistedAgentRun {
     pub binding_generation: u64,
     pub control_generation: u64,
     pub liveness: PersistedLiveness,
+    pub run_lifecycle: u8,
+    pub execution_liveness: u8,
+    pub observation: u8,
+    pub resumability: u8,
+    pub run_revision: u64,
+}
+
+/// Durable ClientPrincipal row (SPEC-017 §5). Sessions are never persisted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersistedPrincipal {
+    pub id: seyal_agent_core::ClientPrincipalId,
+    pub kind: u8,
+    pub status: u8,
+    pub scopes: Vec<u8>,
+    pub evidence_key: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +68,10 @@ pub enum StoreError {
 pub struct AgentStore {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) writes_before_fault: AtomicU64,
+    /// Bytes loaded by `replay_after` / `replay_page` on this store instance.
+    /// Test-fault instrumentation only; production builds keep a cheap zeroed cell.
+    #[cfg(feature = "test-fault-injection")]
+    replay_payload_bytes_loaded: AtomicU64,
 }
 
 impl AgentStore {
@@ -113,6 +97,8 @@ impl AgentStore {
         Ok(Self {
             conn: Mutex::new(conn),
             writes_before_fault: AtomicU64::new(u64::MAX),
+            #[cfg(feature = "test-fault-injection")]
+            replay_payload_bytes_loaded: AtomicU64::new(0),
         })
     }
 
@@ -148,8 +134,11 @@ impl AgentStore {
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
         tx.execute(
-            "INSERT INTO agent_run (id, attempt_id, binding_generation, control_generation, liveness)
-             VALUES (?1, ?2, ?3, ?4, 'unknown')
+            "INSERT INTO agent_run (
+                id, attempt_id, binding_generation, control_generation, liveness,
+                run_lifecycle, execution_liveness, observation, resumability, run_revision
+             )
+             VALUES (?1, ?2, ?3, ?4, 'unknown', 1, 1, 3, 1, 1)
              ON CONFLICT (id) DO UPDATE SET
                attempt_id = excluded.attempt_id,
                binding_generation = excluded.binding_generation,
@@ -369,6 +358,11 @@ impl AgentStore {
         let mut events = Vec::new();
         for row in rows {
             let (sequence, event_id, kind, payload) = row.map_err(|_| StoreError::Corrupt)?;
+            #[cfg(feature = "test-fault-injection")]
+            {
+                self.replay_payload_bytes_loaded
+                    .fetch_add(payload.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            }
             events.push(AggregateEventEnvelopeV1 {
                 aggregate_id,
                 sequence: AggregateSequence::from_raw(sequence as u64)
@@ -379,6 +373,60 @@ impl AgentStore {
             });
         }
         Ok(events)
+    }
+
+    /// Aggregate-local high-water sequence (event count when sequences are dense from 1).
+    ///
+    /// Does not load event payloads. Used by start_agent_run for event_count.
+    pub fn high_water(&self, aggregate_id: AggregateId) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let (kind, id) = aggregate_key(aggregate_id);
+        let hwm: i64 = conn
+            .query_row(
+                "SELECT COALESCE(high_water, 0) FROM aggregate_sequence_hwm
+                 WHERE aggregate_kind = ?1 AND aggregate_id = ?2",
+                params![kind, id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?
+            .unwrap_or(0);
+        if hwm < 0 {
+            return Err(StoreError::Corrupt);
+        }
+        Ok(hwm as u64)
+    }
+
+    /// True when a committed observation payload records KnownSuccess (3) or
+    /// KnownFailure (4). Recovery-only; not a hot-path scan of full history into
+    /// memory — SQLite stops at the first match.
+    pub fn has_committed_terminal_observation(
+        &self,
+        run_id: crate::AgentRunId,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let id = run_id.to_bytes().to_vec();
+        // aggregate_kind 4 = AgentRun; event kind 2 = observation payload.
+        // Observation wire: 8-byte ordinal + kind byte (substr is 1-based).
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM aggregate_event
+                 WHERE aggregate_kind = 4 AND aggregate_id = ?1 AND kind = 2
+                   AND length(payload) >= 9
+                   AND substr(payload, 9, 1) IN (x'03', x'04')
+                 LIMIT 1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?;
+        Ok(found.is_some())
+    }
+
+    #[cfg(feature = "test-fault-injection")]
+    pub fn take_replay_payload_bytes_loaded(&self) -> u64 {
+        self.replay_payload_bytes_loaded
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn drop_events_before(
@@ -400,8 +448,9 @@ impl AgentStore {
     /// Persist high-volume output as bounded segments plus exactly one RunEvent
     /// whose payload is a fixed-size segment reference (SPEC-017 §10).
     ///
-    /// Segments and the referencing event share one transaction: a fault before
-    /// commit leaves neither behind.
+    /// Cross-batch appends continue an open (partial) last segment when capacity
+    /// remains. Segments and the referencing event share one transaction: a fault
+    /// before commit leaves neither behind.
     pub fn append_output_event(
         &self,
         run_id: crate::AgentRunId,
@@ -410,8 +459,43 @@ impl AgentStore {
         first_ordinal: u64,
         last_ordinal: u64,
     ) -> Result<OutputAppend, StoreError> {
-        let payload_probe =
-            encode_output_ref(0, 0, bytes.len() as u64, first_ordinal, last_ordinal);
+        self.append_output_event_with_refs(
+            run_id,
+            event_kind,
+            bytes,
+            first_ordinal,
+            last_ordinal,
+            StreamKind::Stdout,
+            FingerprintRef::public_content_digest(bytes),
+            RetentionPolicyRef::retained_stream(),
+        )
+    }
+
+    /// Like [`Self::append_output_event`] with explicit §10/§12 refs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_output_event_with_refs(
+        &self,
+        run_id: crate::AgentRunId,
+        event_kind: u16,
+        bytes: &[u8],
+        first_ordinal: u64,
+        last_ordinal: u64,
+        stream_kind: StreamKind,
+        fingerprint_ref: FingerprintRef,
+        retention_policy_ref: RetentionPolicyRef,
+    ) -> Result<OutputAppend, StoreError> {
+        let probe = OutputRef {
+            first_segment_index: 0,
+            segment_count: 0,
+            byte_offset: 0,
+            byte_length: bytes.len() as u64,
+            first_ordinal,
+            last_ordinal,
+            stream_kind,
+            fingerprint_ref,
+            retention_policy_ref,
+        };
+        let payload_probe = encode_output_ref(&probe);
         if payload_probe.len() > MAX_EVENT_PAYLOAD {
             return Err(StoreError::PayloadTooLarge);
         }
@@ -420,42 +504,89 @@ impl AgentStore {
         let tx = conn
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
-        let mut index: i64 = tx
+        let run_bytes = run_id.to_bytes().to_vec();
+        let last_row: Option<(i64, Vec<u8>)> = tx
             .query_row(
-                "SELECT COALESCE(MAX(segment_index), -1) FROM output_segment WHERE agent_run_id = ?1",
-                params![run_id.to_bytes().to_vec()],
-                |row| row.get(0),
+                "SELECT segment_index, payload FROM output_segment
+                 WHERE agent_run_id = ?1
+                 ORDER BY segment_index DESC LIMIT 1",
+                params![run_bytes.clone()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
+            .optional()
             .map_err(|_| StoreError::Corrupt)?;
-        let first_segment_index = if bytes.is_empty() {
-            0
-        } else {
-            (index + 1) as u32
-        };
+
+        let mut remaining = bytes;
+        let mut first_segment_index = 0_u32;
+        let mut byte_offset = 0_u32;
         let mut segments = 0_u32;
-        for chunk in bytes.chunks(OUTPUT_SEGMENT_LEN) {
-            index += 1;
-            segments += 1;
+        let mut next_index = last_row.as_ref().map(|(index, _)| *index + 1).unwrap_or(0);
+
+        if let Some((index, mut payload)) = last_row
+            && !remaining.is_empty()
+            && payload.len() < OUTPUT_SEGMENT_LEN
+        {
+            let room = OUTPUT_SEGMENT_LEN - payload.len();
+            let take = remaining.len().min(room);
+            first_segment_index = index as u32;
+            byte_offset = payload.len() as u32;
+            payload.extend_from_slice(&remaining[..take]);
             tx.execute(
-                "INSERT INTO output_segment (agent_run_id, segment_index, payload) VALUES (?1, ?2, ?3)",
-                params![run_id.to_bytes().to_vec(), index, chunk],
+                "UPDATE output_segment SET payload = ?1
+                 WHERE agent_run_id = ?2 AND segment_index = ?3",
+                params![payload, run_bytes.clone(), index],
             )
             .map_err(|_| StoreError::WriteFailed)?;
+            remaining = &remaining[take..];
+            segments = 1;
         }
-        let payload = encode_output_ref(
+
+        if segments == 0 && !remaining.is_empty() {
+            first_segment_index = next_index as u32;
+            byte_offset = 0;
+        } else if segments == 0 && remaining.is_empty() {
+            first_segment_index = 0;
+            byte_offset = 0;
+        }
+
+        while !remaining.is_empty() {
+            let take = remaining.len().min(OUTPUT_SEGMENT_LEN);
+            tx.execute(
+                "INSERT INTO output_segment (agent_run_id, segment_index, payload)
+                 VALUES (?1, ?2, ?3)",
+                params![run_bytes.clone(), next_index, &remaining[..take]],
+            )
+            .map_err(|_| StoreError::WriteFailed)?;
+            if segments == 0 {
+                first_segment_index = next_index as u32;
+                byte_offset = 0;
+            }
+            segments += 1;
+            next_index += 1;
+            remaining = &remaining[take..];
+        }
+
+        let output_ref = OutputRef {
             first_segment_index,
-            segments,
-            bytes.len() as u64,
+            segment_count: segments,
+            byte_offset,
+            byte_length: bytes.len() as u64,
             first_ordinal,
             last_ordinal,
-        );
+            stream_kind,
+            fingerprint_ref,
+            retention_policy_ref,
+        };
+        let payload = encode_output_ref(&output_ref);
         let sequence = insert_event(&tx, AggregateId::AgentRun(run_id), event_kind, &payload)?;
         tx.commit().map_err(|_| StoreError::WriteFailed)?;
         Ok(OutputAppend {
             sequence,
             first_segment_index,
             segment_count: segments,
+            byte_offset,
             byte_length: bytes.len() as u64,
+            output_ref,
         })
     }
 
@@ -469,6 +600,58 @@ impl AgentStore {
             )
             .map_err(|_| StoreError::Corrupt)?;
         Ok(count as u64)
+    }
+
+    /// Materialize bytes addressed by an [`OutputRef`] without loading unrelated runs.
+    pub fn materialize_output_ref(
+        &self,
+        run_id: crate::AgentRunId,
+        output_ref: &OutputRef,
+    ) -> Result<Vec<u8>, StoreError> {
+        if output_ref.byte_length == 0 {
+            return Ok(Vec::new());
+        }
+        if output_ref.segment_count == 0 {
+            return Err(StoreError::Corrupt);
+        }
+        let conn = self.conn.lock().expect("agent store lock");
+        let run_bytes = run_id.to_bytes().to_vec();
+        let mut out = Vec::with_capacity(output_ref.byte_length as usize);
+        let mut needed = output_ref.byte_length as usize;
+        let offset_in_first = output_ref.byte_offset as usize;
+        for step in 0..output_ref.segment_count {
+            let index = output_ref.first_segment_index as i64 + i64::from(step);
+            let payload: Vec<u8> = conn
+                .query_row(
+                    "SELECT payload FROM output_segment
+                     WHERE agent_run_id = ?1 AND segment_index = ?2",
+                    params![run_bytes.clone(), index],
+                    |row| row.get(0),
+                )
+                .map_err(|_| StoreError::Corrupt)?;
+            let start = if step == 0 { offset_in_first } else { 0 };
+            if start > payload.len() {
+                return Err(StoreError::Corrupt);
+            }
+            let available = &payload[start..];
+            let take = available.len().min(needed);
+            out.extend_from_slice(&available[..take]);
+            needed -= take;
+            if needed == 0 {
+                break;
+            }
+        }
+        if needed != 0 {
+            return Err(StoreError::Corrupt);
+        }
+        Ok(out)
+    }
+
+    /// Decode a persisted RunEvent payload as an output ref (§10). Explicit errors.
+    pub fn decode_persisted_output_ref(
+        payload: &[u8],
+    ) -> Result<OutputRef, seyal_agent_core::OutputRefError> {
+        decode_output_ref(payload)
     }
 
     /// Test-only AgentRun insert that skips the mutate+append commit boundary.
@@ -505,7 +688,9 @@ impl AgentStore {
         let conn = self.conn.lock().expect("agent store lock");
         let row = conn
             .query_row(
-                "SELECT attempt_id, binding_generation, control_generation, liveness FROM agent_run WHERE id = ?1",
+                "SELECT attempt_id, binding_generation, control_generation, liveness,
+                        run_lifecycle, execution_liveness, observation, resumability, run_revision
+                 FROM agent_run WHERE id = ?1",
                 params![run_id.to_bytes().to_vec()],
                 |row| {
                     Ok((
@@ -513,11 +698,16 @@ impl AgentStore {
                         row.get::<_, i64>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
                     ))
                 },
             )
             .map_err(|_| StoreError::Corrupt)?;
-        if row.3 != "unknown" {
+        if row.3 != "unknown" || row.8 < 1 {
             return Err(StoreError::Corrupt);
         }
         let mut attempt_bytes = [0; 16];
@@ -530,6 +720,11 @@ impl AgentStore {
             binding_generation: row.1 as u64,
             control_generation: row.2 as u64,
             liveness: PersistedLiveness::Unknown,
+            run_lifecycle: u8::try_from(row.4).map_err(|_| StoreError::Corrupt)?,
+            execution_liveness: u8::try_from(row.5).map_err(|_| StoreError::Corrupt)?,
+            observation: u8::try_from(row.6).map_err(|_| StoreError::Corrupt)?,
+            resumability: u8::try_from(row.7).map_err(|_| StoreError::Corrupt)?,
+            run_revision: row.8 as u64,
         })
     }
 

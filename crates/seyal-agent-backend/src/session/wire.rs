@@ -110,9 +110,9 @@ pub(super) fn observation_payload(observation: &HostObservation) -> Vec<u8> {
 
 pub(super) fn map_auth(error: AuthorizationError) -> CommandError {
     match error {
-        AuthorizationError::UnknownSession | AuthorizationError::StaleBackendInstance => {
-            CommandError::RejectedSession
-        }
+        AuthorizationError::UnknownSession
+        | AuthorizationError::StaleBackendInstance
+        | AuthorizationError::SessionPrincipalMismatch => CommandError::RejectedSession,
         AuthorizationError::Malformed | AuthorizationError::ReplayedRequest => {
             CommandError::Malformed
         }
@@ -122,12 +122,21 @@ pub(super) fn map_auth(error: AuthorizationError) -> CommandError {
 
 pub(super) fn map_domain(error: DomainError) -> CommandError {
     match error {
-        DomainError::StaleBindingGeneration { .. } => CommandError::StaleBinding,
-        DomainError::StaleControlGeneration { .. } => CommandError::StaleControl,
+        DomainError::StaleBinding { .. } => CommandError::StaleBinding,
+        DomainError::StaleControlEpoch { .. } => CommandError::StaleControl,
         DomainError::UnknownWorkScope(_)
         | DomainError::UnknownWorkItem(_)
         | DomainError::UnknownAttempt(_)
         | DomainError::UnknownAgentRun(_) => CommandError::NotFound,
-        DomainError::GenerationExhausted | DomainError::Conflict => CommandError::Failed,
+        DomainError::NotAuthorized => CommandError::Denied,
+        DomainError::GenerationExhausted
+        | DomainError::Conflict
+        | DomainError::InvalidTransition
+        | DomainError::StaleRevision { .. }
+        | DomainError::MultipleRunsNotPermitted
+        | DomainError::ResumeNotAvailable { .. }
+        | DomainError::ReconciliationRequired
+        | DomainError::AttemptNotClosable
+        | DomainError::WorkItemFinalized => CommandError::Failed,
     }
 }

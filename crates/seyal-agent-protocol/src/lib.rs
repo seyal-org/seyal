@@ -22,9 +22,12 @@ pub use handshake::{
     encode_hello, negotiate_hello, HandshakeError, Hello, HelloAck, ServerCapabilities,
     MAX_EVENT_WINDOW, MAX_PRINCIPAL_EVIDENCE, MAX_VERSIONS,
 };
+pub use seyal_agent_core::{decode_output_ref, encode_output_ref};
 pub use seyal_agent_core::{
     AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ControlGeneration, WorkItemId, WorkScopeId,
+    ClientSessionId, ControlGeneration, FingerprintRef, OutputRef, OutputRefError,
+    RetentionPolicyRef, StreamKind, WorkItemId, WorkScopeId, OUTPUT_REF_KIND, OUTPUT_REF_LEN,
+    RETENTION_POLICY_RETAINED_STREAM,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

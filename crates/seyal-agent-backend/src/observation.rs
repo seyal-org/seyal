@@ -29,6 +29,9 @@ pub enum WorkItemOutcome {
 pub struct ObservationAuthority {
     domain: AgentDomain,
     applied: HashMap<(AgentRunId, u64), HostObservationKind>,
+    /// Per-run next expected ordinal. Production next-lookup must not scan
+    /// `applied` payloads (AB-1.6 / AB-0 shortcut removal).
+    next_ordinal: HashMap<AgentRunId, u64>,
     liveness: HashMap<AgentRunId, RunLiveness>,
     effects_performed: u64,
 }
@@ -38,6 +41,7 @@ impl ObservationAuthority {
         Self {
             domain,
             applied: HashMap::new(),
+            next_ordinal: HashMap::new(),
             liveness: HashMap::new(),
             effects_performed: 0,
         }
@@ -45,6 +49,10 @@ impl ObservationAuthority {
 
     pub fn domain(&self) -> &AgentDomain {
         &self.domain
+    }
+
+    pub fn domain_mut(&mut self) -> &mut AgentDomain {
+        &mut self.domain
     }
 
     pub fn restore_work_scope(
@@ -82,6 +90,35 @@ impl ObservationAuthority {
             .restore_agent_run(id, attempt_id, binding_generation, control_generation)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_agent_run_state(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+        lifecycle: seyal_agent_core::AgentRunLifecycle,
+        execution_liveness: seyal_agent_core::ExecutionLiveness,
+        observation: seyal_agent_core::ObservationFact,
+        resumability: seyal_agent_core::ResumabilityFact,
+        run_revision: u64,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_agent_run_state(
+            id,
+            attempt_id,
+            binding_generation,
+            control_generation,
+            lifecycle,
+            execution_liveness,
+            observation,
+            resumability,
+            run_revision,
+            None,
+            None,
+            None,
+        )
+    }
+
     pub fn restore_orphaned_agent_run(
         &mut self,
         id: AgentRunId,
@@ -97,8 +134,23 @@ impl ObservationAuthority {
         )
     }
 
+    /// Record durable terminal evidence before crash recovery classification.
+    ///
+    /// `mark_recovered` must not erase KnownTerminated once this is set
+    /// (`set_liveness` keeps KnownTerminated sticky).
+    pub fn note_committed_terminal(&mut self, run_id: AgentRunId) {
+        self.liveness.insert(run_id, RunLiveness::KnownTerminated);
+    }
+
+    /// Crash recovery default: unknown liveness unless durable terminal
+    /// observations were already noted.
     pub fn mark_recovered(&mut self, run_id: AgentRunId) {
         self.set_liveness(run_id, RunLiveness::UnknownAfterCrash);
+    }
+
+    /// Next ordinal the authority will accept for `run_id` (1 when none yet).
+    pub fn next_expected_ordinal(&self, run_id: AgentRunId) -> u64 {
+        self.next_ordinal.get(&run_id).copied().unwrap_or(1)
     }
 
     /// Fence a recovered run so pre-crash binding/control presentations fail.
@@ -136,6 +188,19 @@ impl ObservationAuthority {
     ) {
         self.applied
             .remove(&(observation.run_id, observation.ordinal));
+        let expected_next = self.next_expected_ordinal(observation.run_id);
+        if observation
+            .ordinal
+            .checked_add(1)
+            .is_some_and(|tip| tip == expected_next)
+        {
+            if observation.ordinal <= 1 {
+                self.next_ordinal.remove(&observation.run_id);
+            } else {
+                self.next_ordinal
+                    .insert(observation.run_id, observation.ordinal);
+            }
+        }
         match previous_liveness {
             Some(liveness) => {
                 self.liveness.insert(observation.run_id, liveness);
@@ -163,7 +228,7 @@ impl ObservationAuthority {
         self.domain
             .validate_binding_generation(observation.run_id, observation.binding_generation)
             .map_err(|error| match error {
-                DomainError::StaleBindingGeneration { .. } => ObserveError::StaleGeneration,
+                DomainError::StaleBinding { .. } => ObserveError::StaleGeneration,
                 other => ObserveError::Domain(other),
             })?;
 
@@ -175,18 +240,11 @@ impl ObservationAuthority {
                 Err(ObserveError::Conflict)
             };
         }
-        let expected = self
-            .applied
-            .keys()
-            .filter(|(run_id, _)| *run_id == observation.run_id)
-            .map(|(_, ordinal)| *ordinal)
-            .max()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or(ObserveError::OutOfOrder)?;
+        let expected = self.next_expected_ordinal(observation.run_id);
         if observation.ordinal != expected {
             return Err(ObserveError::OutOfOrder);
         }
+        let next = expected.checked_add(1).ok_or(ObserveError::OutOfOrder)?;
 
         match &observation.kind {
             HostObservationKind::ObservationDisconnected => {
@@ -225,6 +283,7 @@ impl ObservationAuthority {
             }
         }
         self.applied.insert(key, observation.kind);
+        self.next_ordinal.insert(observation.run_id, next);
         Ok(())
     }
 
@@ -247,96 +306,12 @@ impl ObservationAuthority {
     }
 }
 
-pub fn parse_script(text: &str) -> Result<Vec<crate::ScriptStep>, crate::ScriptError> {
-    if text.len() > 64 * 1024 || text.lines().count() > 1024 {
-        return Err(crate::ScriptError::ScriptTooLarge);
-    }
-    let mut steps = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        steps.push(parse_line(line)?);
-    }
-    if steps.is_empty() {
-        return Err(crate::ScriptError::EmptyScript);
-    }
-    Ok(steps)
-}
-
-fn parse_line(line: &str) -> Result<crate::ScriptStep, crate::ScriptError> {
-    let mut parts = line.split_whitespace();
-    let verb = parts.next().ok_or(crate::ScriptError::MalformedScript)?;
-    match verb {
-        "duplicate" => Ok(crate::ScriptStep::DuplicateLast),
-        "delay" => {
-            let ticks = parts
-                .next()
-                .ok_or(crate::ScriptError::MalformedScript)?
-                .parse()
-                .map_err(|_| crate::ScriptError::MalformedScript)?;
-            Ok(crate::ScriptStep::DelayTicks(ticks))
-        }
-        "emit" => {
-            let kind = parts.next().ok_or(crate::ScriptError::MalformedScript)?;
-            let kind = match kind {
-                "started" => HostObservationKind::Started,
-                "progress" => {
-                    let step = parts
-                        .next()
-                        .ok_or(crate::ScriptError::MalformedScript)?
-                        .parse()
-                        .map_err(|_| crate::ScriptError::MalformedScript)?;
-                    HostObservationKind::Progress { step }
-                }
-                "disconnect" => HostObservationKind::ObservationDisconnected,
-                "reconnect" => HostObservationKind::ObservationReconnected,
-                "success" => HostObservationKind::KnownSuccess,
-                "failure" => HostObservationKind::KnownFailure,
-                "crash" => HostObservationKind::HarnessCrashed,
-                "unknown-liveness" => HostObservationKind::UnknownLiveness,
-                "effect-unknown" => HostObservationKind::EffectUnknown,
-                "result" | "output" => {
-                    let hex = parts.next().ok_or(crate::ScriptError::MalformedScript)?;
-                    let bytes = decode_hex(hex)?;
-                    if kind == "result" {
-                        HostObservationKind::Result(bytes)
-                    } else {
-                        HostObservationKind::Output(bytes)
-                    }
-                }
-                _ => return Err(crate::ScriptError::MalformedScript),
-            };
-            if parts.next().is_some() {
-                return Err(crate::ScriptError::MalformedScript);
-            }
-            Ok(crate::ScriptStep::Emit(kind))
-        }
-        _ => Err(crate::ScriptError::MalformedScript),
-    }
-}
-
-fn decode_hex(text: &str) -> Result<Vec<u8>, crate::ScriptError> {
-    // Byte length can be even while a window still splits a multibyte scalar.
-    // Reject that before slicing so malformed harness text stays an error.
-    if !text.is_ascii() || !text.len().is_multiple_of(2) || text.len() > 8192 {
-        return Err(crate::ScriptError::MalformedScript);
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&text[index..index + 2], 16)
-                .map_err(|_| crate::ScriptError::MalformedScript)
-        })
-        .collect()
-}
-
-#[cfg(test)]
+#[cfg(all(test, feature = "fixture-host"))]
 mod tests {
     use super::*;
-    use crate::{FakeExecutionHost, ScriptStep};
+    use crate::{parse_script, FakeExecutionHost, ScriptStep};
     use seyal_agent_core::{BindingGeneration, WorkScopeKind};
+    use std::time::Instant;
 
     const NORMAL_SUCCESS: &str = include_str!("../conformance/normal-success.script");
     const DISCONNECT: &str = include_str!("../conformance/disconnect-reconnect.script");
@@ -525,7 +500,6 @@ mod tests {
 
     #[test]
     fn records_normal_high_volume_reconnect_and_crash_resource_samples() {
-        use std::time::Instant;
         let samples = [
             ("normal", NORMAL_SUCCESS),
             ("high-volume", HIGH_VOLUME),
@@ -626,5 +600,118 @@ mod tests {
             }
             let _ = parse_script(&text);
         }
+    }
+
+    #[test]
+    fn next_ordinal_cursor_stays_constant_time_under_large_retained_payloads() {
+        // Scale fixture: many large payloads must not make next-ordinal lookup
+        // scan applied entries. A linear scan of 8_000 × 2 KiB keys would blow
+        // this bound; the per-run cursor must stay O(1).
+        const EVENTS: u64 = 8_000;
+        const PAYLOAD: usize = 2 * 1024;
+        let (mut authority, run, generation) = authority_with_run();
+        let payload = vec![0xAB; PAYLOAD];
+        let started = Instant::now();
+        for ordinal in 1..=EVENTS {
+            authority
+                .apply(HostObservation {
+                    run_id: run,
+                    binding_generation: generation,
+                    ordinal,
+                    kind: HostObservationKind::Result(payload.clone()),
+                })
+                .unwrap();
+        }
+        let fill = started.elapsed();
+        assert_eq!(authority.next_expected_ordinal(run), EVENTS + 1);
+        assert_eq!(authority.applied_count(), EVENTS as usize);
+
+        let probe = Instant::now();
+        for _ in 0..2_048 {
+            assert_eq!(
+                authority.apply(HostObservation {
+                    run_id: run,
+                    binding_generation: generation,
+                    ordinal: EVENTS + 2,
+                    kind: HostObservationKind::KnownSuccess,
+                }),
+                Err(ObserveError::OutOfOrder)
+            );
+            assert_eq!(authority.next_expected_ordinal(run), EVENTS + 1);
+        }
+        let probe_elapsed = probe.elapsed();
+        // Cursor lookup is O(1). A returned linear key scan over 8k entries for
+        // each probe would dominate; keep a generous absolute ceiling for CI.
+        assert!(
+            probe_elapsed.as_millis() < 500,
+            "next-ordinal probes must stay bounded with large retained history: fill={fill:?} probe={probe_elapsed:?}"
+        );
+
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: EVENTS + 1,
+                kind: HostObservationKind::KnownSuccess,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+        assert_eq!(authority.next_expected_ordinal(run), EVENTS + 2);
+    }
+
+    #[test]
+    fn mark_recovered_honors_committed_terminal_and_unknown_otherwise() {
+        let (mut authority, run, generation) = authority_with_run();
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 1,
+                kind: HostObservationKind::KnownSuccess,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+        authority.mark_recovered(run);
+        assert_eq!(
+            authority.liveness(run),
+            RunLiveness::KnownTerminated,
+            "committed terminal must survive recovery classification"
+        );
+
+        let (mut live, live_run, live_generation) = authority_with_run();
+        live.apply(HostObservation {
+            run_id: live_run,
+            binding_generation: live_generation,
+            ordinal: 1,
+            kind: HostObservationKind::Started,
+        })
+        .unwrap();
+        live.mark_recovered(live_run);
+        assert_eq!(live.liveness(live_run), RunLiveness::UnknownAfterCrash);
+
+        let (mut noted, noted_run, _) = authority_with_run();
+        noted.note_committed_terminal(noted_run);
+        noted.mark_recovered(noted_run);
+        assert_eq!(noted.liveness(noted_run), RunLiveness::KnownTerminated);
+    }
+
+    #[test]
+    fn undo_apply_rewinds_next_ordinal_cursor() {
+        let (mut authority, run, generation) = authority_with_run();
+        let observation = HostObservation {
+            run_id: run,
+            binding_generation: generation,
+            ordinal: 1,
+            kind: HostObservationKind::Output(vec![1, 2, 3, 4]),
+        };
+        let previous_liveness = authority.recorded_liveness(run);
+        let previous_effects = authority.effects_performed();
+        authority.apply(observation.clone()).unwrap();
+        assert_eq!(authority.next_expected_ordinal(run), 2);
+        authority.undo_apply(&observation, previous_liveness, previous_effects);
+        assert_eq!(authority.next_expected_ordinal(run), 1);
+        assert_eq!(authority.applied_count(), 0);
+        authority.apply(observation).unwrap();
+        assert_eq!(authority.next_expected_ordinal(run), 2);
     }
 }

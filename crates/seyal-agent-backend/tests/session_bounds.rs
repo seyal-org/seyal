@@ -36,13 +36,13 @@ fn slow_subscriber_is_dropped_and_resyncs_from_cursor() {
             1024
         ])));
     }
-    let mut daemon = AgentDaemon::bind_integration_with(
+    let mut daemon = AgentDaemon::bind_integration_with_script_config(
         &dir,
         bounded_config(Duration::from_secs(30), Duration::from_millis(200)),
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script,
         },
+        script,
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -101,13 +101,13 @@ fn slow_subscriber_is_dropped_and_resyncs_from_cursor() {
 #[test]
 fn idle_authenticated_client_is_released_and_session_survives() {
     let dir = temp_dir("idle");
-    let mut daemon = AgentDaemon::bind_integration_with(
+    let mut daemon = AgentDaemon::bind_integration_with_script_config(
         &dir,
         bounded_config(Duration::from_millis(200), Duration::from_secs(2)),
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![ScriptStep::Emit(HostObservationKind::Started)],
         },
+        vec![ScriptStep::Emit(HostObservationKind::Started)],
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -135,15 +135,15 @@ fn idle_authenticated_client_is_released_and_session_survives() {
 #[test]
 fn subscribe_fails_explicitly_when_one_event_cannot_fit() {
     let dir = temp_dir("tiny-frame");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![
-                ScriptStep::Emit(HostObservationKind::Started),
-                ScriptStep::Emit(HostObservationKind::Result(vec![4; 2048])),
-            ],
         },
+        vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Result(vec![4; 2048])),
+        ],
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -176,15 +176,15 @@ fn subscribe_fails_explicitly_when_one_event_cannot_fit() {
 #[test]
 fn unreplayable_observation_is_never_persisted() {
     let dir = temp_dir("too-big");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![
-                ScriptStep::Emit(HostObservationKind::Started),
-                ScriptStep::Emit(HostObservationKind::Result(vec![0; 65_520])),
-            ],
         },
+        vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::Result(vec![0; 65_520])),
+        ],
     )
     .unwrap();
     let socket = daemon.socket_path();
@@ -217,12 +217,12 @@ fn unreplayable_observation_is_never_persisted() {
 #[test]
 fn repeated_store_faults_fail_bounded_and_recover() {
     let dir = temp_dir("repeat-fault");
-    let mut daemon = AgentDaemon::bind_integration(
+    let mut daemon = AgentDaemon::bind_integration_with_script(
         &dir,
         IntegrationConfig {
             store_path: dir.join("agent.db"),
-            script: vec![ScriptStep::Emit(HostObservationKind::Started)],
         },
+        vec![ScriptStep::Emit(HostObservationKind::Started)],
     )
     .unwrap();
     daemon.fail_after_writes(0);

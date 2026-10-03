@@ -236,12 +236,12 @@ mod tests {
         );
 
         let bound = seyal_app_snapshot(handle);
-        let mut rerun = identity_fence(59, &bound);
+        let mut rerun = identity_fence(63, &bound);
         rerun.target_execution_lo = running.id_lo;
         rerun.target_execution_hi = running.id_hi;
         rerun.target_pty_generation = seyal_app_composer(handle).epoch;
         assert_eq!(unsafe { seyal_app_apply(handle, &rerun) }, -4);
-        assert_eq!(seyal_app_last_error(handle), 35, "BlockRunning");
+        assert_eq!(seyal_app_last_error(handle), 51, "BlockRunning");
 
         rerun.target_execution_lo = done.id_lo;
         rerun.target_execution_hi = done.id_hi;

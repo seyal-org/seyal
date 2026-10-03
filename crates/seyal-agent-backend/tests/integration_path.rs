@@ -29,16 +29,18 @@ fn standalone_path_survives_disconnect_and_restart() {
             .unwrap()
             .as_nanos()
     ));
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
     };
 
-    let mut daemon = AgentDaemon::bind_integration(&dir, config.clone()).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config.clone(), config_script.clone())
+            .unwrap();
     let first_instance = daemon.instance_id();
     let socket = daemon.socket_path();
     let socket_for_client = socket.clone();
@@ -94,7 +96,8 @@ fn standalone_path_survives_disconnect_and_restart() {
     assert_eq!(daemon.instance_id(), first_instance);
 
     daemon.abandon_as_crash();
-    let mut restarted = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut restarted =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     assert_ne!(restarted.instance_id(), first_instance);
 
     let socket = restarted.socket_path();
@@ -150,10 +153,13 @@ fn standalone_path_survives_disconnect_and_restart() {
     ) = recovered.join().unwrap();
     assert_eq!(run.0, 2, "recovery fences binding generation");
     assert_eq!(run.1, 2, "recovery fences control generation");
-    assert_eq!(run.2, 3, "restart classifies liveness as unknown");
+    assert_eq!(
+        run.2, 2,
+        "restart must honor committed terminal observations"
+    );
     assert_eq!(
         snapshot.payload.first().copied(),
-        Some(3),
+        Some(2),
         "GetSnapshot liveness must match ReadRun after restart"
     );
     assert_eq!(
@@ -189,6 +195,54 @@ fn standalone_path_survives_disconnect_and_restart() {
 }
 
 #[test]
+fn recovery_without_terminal_observation_stays_unknown_not_fabricated_termination() {
+    let dir = temp_dir("live-recover");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::ObservationDisconnected),
+    ];
+    let config = IntegrationConfig {
+        store_path: dir.join("agent.db"),
+    };
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config.clone(), config_script.clone())
+            .unwrap();
+    let socket = daemon.socket_path();
+    let client = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        let before = client.read_run(started.run_id);
+        (started.run_id, before)
+    });
+    daemon.serve_one().unwrap();
+    let (run_id, before) = client.join().unwrap();
+    assert_eq!(before.2, 4, "pre-crash observation-lost");
+    daemon.abandon_as_crash();
+
+    let mut restarted =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
+    let socket = restarted.socket_path();
+    let recovered = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket);
+        let run = client.read_run(run_id);
+        let snapshot = client.snapshot(AggregateRef::AgentRun(run_id));
+        (run, snapshot.payload)
+    });
+    restarted.serve_one().unwrap();
+    let (run, snapshot_payload) = recovered.join().unwrap();
+    assert_eq!(
+        run.2, 3,
+        "non-terminal recovery must stay UnknownAfterCrash"
+    );
+    assert_eq!(snapshot_payload.first().copied(), Some(3));
+    assert_ne!(run.2, 2, "must not fabricate KnownTerminated");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
     let dir = std::env::temp_dir().join(format!(
         "seyal-ag-m-{}-{}",
@@ -198,11 +252,13 @@ fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
             .unwrap()
             .as_nanos()
     ));
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config.clone()).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config.clone(), config_script.clone())
+            .unwrap();
     let socket = daemon.socket_path();
     let socket_for_client = socket.clone();
     let opened = thread::spawn(move || {
@@ -293,7 +349,8 @@ fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
     assert_eq!(still_there.join().unwrap(), 1);
 
     daemon.abandon_as_crash();
-    let mut restarted = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut restarted =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = restarted.socket_path();
     let rejected = thread::spawn(move || TestClient::resume(&socket, session_id));
     restarted.serve_one().unwrap();
@@ -314,16 +371,17 @@ fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
 #[test]
 fn observers_keep_independent_sequences_and_ignore_duplicate_observations() {
     let dir = temp_dir("observers");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::DuplicateLast,
+        ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::DuplicateLast,
-            ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
@@ -373,11 +431,12 @@ fn observers_keep_independent_sequences_and_ignore_duplicate_observations() {
 #[test]
 fn unknown_hello_evidence_is_rejected_before_session() {
     let dir = temp_dir("bad-evidence");
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
@@ -407,14 +466,15 @@ fn unknown_hello_evidence_is_rejected_before_session() {
 #[test]
 fn observer_principal_cannot_escalate_or_resume_owner_session() {
     let dir = temp_dir("principal-fence");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let owner = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
@@ -467,22 +527,23 @@ fn observer_principal_cannot_escalate_or_resume_owner_session() {
         }
     });
     daemon.serve_one().unwrap();
-    assert_eq!(cross.join().unwrap(), CommandError::Denied);
+    assert_eq!(cross.join().unwrap(), CommandError::RejectedSession);
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
 fn replay_window_is_bounded_and_truncation_is_a_history_gap() {
     let dir = temp_dir("gap");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::Progress { step: 1 }),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect_window(&socket, 1);
@@ -529,15 +590,16 @@ fn replay_window_is_bounded_and_truncation_is_a_history_gap() {
 #[test]
 fn out_of_order_and_lost_observations_do_not_fabricate_termination() {
     let dir = temp_dir("order");
+    let config_script = vec![ScriptStep::EmitExact {
+        binding_generation: BindingGeneration::FIRST,
+        ordinal: 3,
+        kind: HostObservationKind::KnownSuccess,
+    }];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![ScriptStep::EmitExact {
-            binding_generation: BindingGeneration::FIRST,
-            ordinal: 3,
-            kind: HostObservationKind::KnownSuccess,
-        }],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
@@ -570,14 +632,16 @@ fn out_of_order_and_lost_observations_do_not_fabricate_termination() {
     drop(daemon);
 
     let lost_dir = temp_dir("lost");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::ObservationDisconnected),
+    ];
     let config = IntegrationConfig {
         store_path: lost_dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::ObservationDisconnected),
-        ],
     };
-    let mut daemon = AgentDaemon::bind_integration(&lost_dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&lost_dir, config, config_script.clone())
+            .unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
@@ -597,11 +661,12 @@ fn out_of_order_and_lost_observations_do_not_fabricate_termination() {
 #[test]
 fn persistence_fault_before_commit_does_not_publish_success() {
     let dir = temp_dir("fault");
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::KnownSuccess)];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![ScriptStep::Emit(HostObservationKind::KnownSuccess)],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     daemon.fail_after_writes(4);
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
@@ -638,11 +703,12 @@ fn persistence_fault_before_commit_does_not_publish_success() {
     drop(daemon);
 
     let refused = temp_dir("refused");
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
     let config = IntegrationConfig {
         store_path: refused.join("agent.db"),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
     };
-    let mut daemon = AgentDaemon::bind_integration(&refused, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&refused, config, config_script.clone()).unwrap();
     daemon.fail_after_writes(0);
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
@@ -664,14 +730,16 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         .is_empty());
 
     let segment_fault = temp_dir("segment-fault");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::Output(vec![2; 8192])),
+    ];
     let config = IntegrationConfig {
         store_path: segment_fault.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::Output(vec![2; 8192])),
-        ],
     };
-    let mut daemon = AgentDaemon::bind_integration(&segment_fault, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&segment_fault, config, config_script.clone())
+            .unwrap();
     // create scope/item/attempt/run use writes; fault the output segment commit.
     daemon.fail_after_writes(5);
     let socket = daemon.socket_path();
@@ -698,7 +766,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         .unwrap();
     assert!(events
         .iter()
-        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_none()));
+        .all(|event| seyal_agent_store::decode_output_ref(&event.payload).is_err()));
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::remove_dir_all(refused);
     let _ = fs::remove_dir_all(segment_fault);
@@ -709,11 +777,12 @@ fn bind_integration_recovers_migrated_v2_orphan_run() {
     let dir = temp_dir("v2-orphan");
     let store_path = dir.join("agent.db");
     write_populated_v2_store(&store_path);
+    let config_script = vec![ScriptStep::Emit(HostObservationKind::Started)];
     let config = IntegrationConfig {
         store_path: store_path.clone(),
-        script: vec![ScriptStep::Emit(HostObservationKind::Started)],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let prior_run = AgentRunId::from_bytes([9u8; 16]);
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
@@ -744,11 +813,14 @@ fn high_volume_subscribe_fits_frame_and_continues() {
         ])));
     }
     script.push(ScriptStep::Emit(HostObservationKind::KnownSuccess));
-    let config = IntegrationConfig {
-        store_path: dir.join("agent.db"),
+    let mut daemon = AgentDaemon::bind_integration_with_script(
+        &dir,
+        IntegrationConfig {
+            store_path: dir.join("agent.db"),
+        },
         script,
-    };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    )
+    .unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect_limits(&socket, ABSOLUTE_MAX_FRAME_SIZE, 1024);
@@ -797,15 +869,16 @@ fn high_volume_subscribe_fits_frame_and_continues() {
 fn high_volume_output_uses_segments_end_to_end() {
     const OUTPUT_BYTES: usize = 256 * 1024;
     let dir = temp_dir("segments-e2e");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::Output(vec![9; OUTPUT_BYTES])),
+        ScriptStep::Emit(HostObservationKind::KnownSuccess),
+    ];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::Output(vec![9; OUTPUT_BYTES])),
-            ScriptStep::Emit(HostObservationKind::KnownSuccess),
-        ],
     };
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
@@ -823,29 +896,36 @@ fn high_volume_output_uses_segments_end_to_end() {
     assert_eq!(events.len(), 4);
     let output = events
         .iter()
-        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+        .find(|event| seyal_agent_store::decode_output_ref(&event.payload).is_ok())
         .expect("one output-ref event");
-    let (first_index, segments, byte_length, first_ordinal, last_ordinal) =
-        seyal_agent_store::decode_output_ref(&output.payload).unwrap();
-    assert_eq!(first_index, 0);
+    let decoded = seyal_agent_store::decode_output_ref(&output.payload).unwrap();
+    assert_eq!(decoded.first_segment_index, 0);
     assert_eq!(
-        segments as usize,
+        decoded.segment_count as usize,
         OUTPUT_BYTES / seyal_agent_store::OUTPUT_SEGMENT_LEN
     );
-    assert_eq!(byte_length as usize, OUTPUT_BYTES);
-    assert!(first_ordinal >= 1);
-    assert!(last_ordinal >= first_ordinal);
+    assert_eq!(decoded.byte_length as usize, OUTPUT_BYTES);
+    assert!(decoded.first_ordinal >= 1);
+    assert!(decoded.last_ordinal >= decoded.first_ordinal);
+    assert_eq!(
+        decoded.retention_policy_ref,
+        seyal_agent_store::RetentionPolicyRef::retained_stream()
+    );
+    assert!(matches!(
+        decoded.fingerprint_ref,
+        seyal_agent_store::FingerprintRef::PublicContentDigest(_)
+    ));
     assert!(
         events
             .iter()
-            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_some())
+            .filter(|event| seyal_agent_store::decode_output_ref(&event.payload).is_ok())
             .count()
             == 1
     );
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         store.output_segment_count(started.run_id).unwrap(),
-        segments as u64
+        decoded.segment_count as u64
     );
     drop(daemon);
     drop(store);
@@ -853,7 +933,7 @@ fn high_volume_output_uses_segments_end_to_end() {
     let reopened = AgentStore::open(dir.join("agent.db")).unwrap();
     assert_eq!(
         reopened.output_segment_count(started.run_id).unwrap(),
-        segments as u64
+        decoded.segment_count as u64
     );
     let again = reopened
         .replay_after(AggregateId::AgentRun(started.run_id), None)
@@ -868,11 +948,12 @@ fn high_volume_output_uses_segments_end_to_end() {
         one_byte.push(ScriptStep::Emit(HostObservationKind::Output(vec![1])));
     }
     one_byte.push(ScriptStep::Emit(HostObservationKind::KnownSuccess));
+    let config_script = one_byte;
     let config = IntegrationConfig {
         store_path: tiny.join("agent.db"),
-        script: one_byte,
     };
-    let mut daemon = AgentDaemon::bind_integration(&tiny, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&tiny, config, config_script.clone()).unwrap();
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
@@ -888,10 +969,10 @@ fn high_volume_output_uses_segments_end_to_end() {
     assert_eq!(started.event_count, 4);
     let output = events
         .iter()
-        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload))
+        .find_map(|event| seyal_agent_store::decode_output_ref(&event.payload).ok())
         .expect("coalesced one-byte outputs");
-    assert_eq!(output.1, 1);
-    assert_eq!(output.2, 1000);
+    assert_eq!(output.segment_count, 1);
+    assert_eq!(output.byte_length, 1000);
     assert_eq!(
         AgentStore::open(tiny.join("agent.db"))
             .unwrap()
@@ -906,15 +987,16 @@ fn high_volume_output_uses_segments_end_to_end() {
 fn records_session_startup_throughput_reconnect_and_storage_growth() {
     const OUTPUT_BYTES: usize = 32 * 1024;
     let dir = temp_dir("measure");
+    let config_script = vec![
+        ScriptStep::Emit(HostObservationKind::Started),
+        ScriptStep::Emit(HostObservationKind::Output(vec![7; OUTPUT_BYTES])),
+    ];
     let config = IntegrationConfig {
         store_path: dir.join("agent.db"),
-        script: vec![
-            ScriptStep::Emit(HostObservationKind::Started),
-            ScriptStep::Emit(HostObservationKind::Output(vec![7; OUTPUT_BYTES])),
-        ],
     };
     let started_bind = Instant::now();
-    let mut daemon = AgentDaemon::bind_integration(&dir, config).unwrap();
+    let mut daemon =
+        AgentDaemon::bind_integration_with_script(&dir, config, config_script.clone()).unwrap();
     let startup = started_bind.elapsed();
     let bytes_before = AgentStore::open(dir.join("agent.db"))
         .unwrap()

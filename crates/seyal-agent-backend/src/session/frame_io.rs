@@ -30,8 +30,10 @@ pub(crate) fn read_session_frame(
     if body_len > 0
         && let Err(error) = stream.read_exact(&mut body)
     {
+        // Match header-path disconnect classification: peer drop mid-body is a
+        // normal session end, not a daemon-fatal I/O fault.
         return if is_disconnect(&error) {
-            SessionRead::Io
+            SessionRead::Disconnected
         } else {
             map_read_error(error)
         };
@@ -61,5 +63,27 @@ fn map_read_error(error: std::io::Error) -> SessionRead {
         SessionRead::TimedOut
     } else {
         SessionRead::Io
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_session_frame, SessionRead};
+    use std::io::Cursor;
+
+    #[test]
+    fn peer_disconnect_mid_body_is_disconnected_not_io() {
+        // Valid AGB1 header with body_len=8, but only 2 body bytes then EOF so
+        // read_exact surfaces UnexpectedEof (same disconnect class as header).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"AGB1");
+        bytes.extend_from_slice(&4_u16.to_le_bytes()); // Command
+        bytes.extend_from_slice(&8_u32.to_le_bytes());
+        bytes.extend_from_slice(&[0xAB, 0xCD]);
+        let mut stream = Cursor::new(bytes);
+        assert!(matches!(
+            read_session_frame(&mut stream, 4096),
+            SessionRead::Disconnected
+        ));
     }
 }

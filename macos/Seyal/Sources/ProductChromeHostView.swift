@@ -182,6 +182,7 @@ final class ProductChromeHostView: NSView {
         centerColumn.onFocusPane = { [weak self] lo, hi in
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
+        centerColumn.appHandle = pane.appHandle
 
         addSubview(tabStrip)
         addSubview(left)
@@ -445,9 +446,7 @@ final class ProductChromeHostView: NSView {
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildTabStrip(shell: shell)
-        centerColumn.apply(
-            PaneLayoutView.readRegions(appHandle: pane.appHandle, paneCount: Int(shell.pane_count))
-        )
+        centerColumn.reconcile(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
@@ -469,6 +468,12 @@ final class ProductChromeHostView: NSView {
     /// Opening is Rust-owned; a rejected open leaves focus untouched.
     @objc func openCommandPalette() {
         commandPalette.requestOpen()
+    }
+
+    /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the
+    /// command-palette overlay; default scope is Panes.
+    @objc func openGoto() {
+        commandPalette.requestOpenGoto()
     }
 
     func routeFocus() {

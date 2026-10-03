@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 3;
+pub(super) const SCHEMA_VERSION: i32 = 5;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -18,6 +18,27 @@ CREATE TABLE IF NOT EXISTS attempt (
     id BLOB PRIMARY KEY,
     work_item_id BLOB NOT NULL
 );";
+pub(super) const CLIENT_PRINCIPAL_TABLE: &str = "
+CREATE TABLE IF NOT EXISTS client_principal (
+    id BLOB PRIMARY KEY,
+    kind INTEGER NOT NULL,
+    status INTEGER NOT NULL,
+    scopes BLOB NOT NULL,
+    evidence_key BLOB NOT NULL UNIQUE
+);";
+pub(super) const LIFECYCLE_COLUMNS_V5: &str = "
+ALTER TABLE work_item ADD COLUMN lifecycle INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE work_item ADD COLUMN outcome INTEGER;
+ALTER TABLE attempt ADD COLUMN origin_kind INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE attempt ADD COLUMN origin_ref BLOB;
+ALTER TABLE attempt ADD COLUMN lifecycle INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE attempt ADD COLUMN disposition INTEGER;
+ALTER TABLE agent_run ADD COLUMN run_lifecycle INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE agent_run ADD COLUMN execution_liveness INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE agent_run ADD COLUMN observation INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE agent_run ADD COLUMN resumability INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE agent_run ADD COLUMN run_revision INTEGER NOT NULL DEFAULT 1;
+";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
     if from >= SCHEMA_VERSION {
@@ -37,7 +58,6 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
             );",
         )
         .map_err(|_| StoreError::WriteFailed)?;
-        // Backfill from the max of retained events and snapshot frontiers.
         tx.execute_batch(
             "INSERT OR REPLACE INTO aggregate_sequence_hwm (aggregate_kind, aggregate_id, high_water)
              SELECT aggregate_kind, aggregate_id, MAX(seq) FROM (
@@ -50,6 +70,14 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
     }
     if from < 3 {
         tx.execute_batch(IDENTITY_TABLES)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 4 {
+        tx.execute_batch(CLIENT_PRINCIPAL_TABLE)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 5 {
+        tx.execute_batch(LIFECYCLE_COLUMNS_V5)
             .map_err(|_| StoreError::WriteFailed)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -93,7 +121,12 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
             attempt_id BLOB NOT NULL,
             binding_generation INTEGER NOT NULL,
             control_generation INTEGER NOT NULL,
-            liveness TEXT NOT NULL CHECK (liveness = 'unknown')
+            liveness TEXT NOT NULL CHECK (liveness = 'unknown'),
+            run_lifecycle INTEGER NOT NULL DEFAULT 1,
+            execution_liveness INTEGER NOT NULL DEFAULT 1,
+            observation INTEGER NOT NULL DEFAULT 3,
+            resumability INTEGER NOT NULL DEFAULT 1,
+            run_revision INTEGER NOT NULL DEFAULT 1
         );
         CREATE TABLE work_scope (
             id BLOB PRIMARY KEY,
@@ -101,11 +134,24 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE TABLE work_item (
             id BLOB PRIMARY KEY,
-            work_scope_id BLOB NOT NULL
+            work_scope_id BLOB NOT NULL,
+            lifecycle INTEGER NOT NULL DEFAULT 1,
+            outcome INTEGER
         );
         CREATE TABLE attempt (
             id BLOB PRIMARY KEY,
-            work_item_id BLOB NOT NULL
+            work_item_id BLOB NOT NULL,
+            origin_kind INTEGER NOT NULL DEFAULT 1,
+            origin_ref BLOB,
+            lifecycle INTEGER NOT NULL DEFAULT 1,
+            disposition INTEGER
+        );
+        CREATE TABLE client_principal (
+            id BLOB PRIMARY KEY,
+            kind INTEGER NOT NULL,
+            status INTEGER NOT NULL,
+            scopes BLOB NOT NULL,
+            evidence_key BLOB NOT NULL UNIQUE
         );",
     )
     .map_err(|_| StoreError::WriteFailed)?;

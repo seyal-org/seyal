@@ -55,7 +55,7 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(size_of::<SeyalAppAxNode>(), 72);
     assert_eq!(size_of::<SeyalAppAccessibility>(), 24);
     assert_eq!(size_of::<SeyalAppShell>(), 64);
-    assert_eq!(size_of::<SeyalAppRow>(), 56);
+    assert_eq!(size_of::<SeyalAppRow>(), 112);
     assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
     assert_eq!(size_of::<SeyalAppTheme>(), 36);
     assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);
@@ -152,7 +152,7 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
     assert_eq!(relay_composer_status(handle, 0, 0), 0);
     assert_eq!(seyal_app_composer(handle).mode, 2);
     assert_eq!(relay_composer_status(handle, 3, 1), 0);
-    assert_eq!(seyal_app_composer(handle).mode, 1);
+    assert_eq!(seyal_app_composer(handle).mode, 0);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -314,78 +314,6 @@ fn core_terminal_chrome_ffi_is_visible_by_default_and_can_be_hidden() {
     assert_eq!(shown.reserved & 1, 1);
     assert_eq!(shown.reserved & 2, 2);
     assert_eq!(shown.reserved & 4, 4);
-    assert_eq!(seyal_app_destroy(handle), 0);
-}
-
-#[test]
-fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
-    // CreateTab/CloseTab/SplitFocused/ClosePane (#922) are new at the FFI
-    // boundary; this proves each code decodes into the right AppAction
-    // and actually reaches ShellState rather than being silently
-    // unwired or misdecoded into a different action.
-    let handle = seyal_app_create();
-    let snap = seyal_app_snapshot(handle);
-    let tab_row = seyal_app_shell_row(handle, 1, 0);
-    let pane_row = seyal_app_shell_row(handle, 2, 0);
-
-    // CreateTab (23) and SplitFocused (25) reach the M001 default policy
-    // that disallows composition growth until a distinct execution
-    // route exists; they fail closed rather than no-op silently.
-    assert_eq!(
-        unsafe { seyal_app_apply(handle, &identity_fence(23, &snap)) },
-        -4
-    );
-    assert_eq!(seyal_app_last_error(handle), 28, "TabCreationUnavailable");
-    let mut split = identity_fence(25, &snap);
-    split.reserved = 1; // SplitAxis::Down
-    assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
-
-    // CloseTab (24) / ClosePane (26) on the sole Tab/Pane reach
-    // ShellState's last-of-one guard, whether the id is real or not.
-    let mut close_tab = identity_fence(24, &snap);
-    close_tab.target_execution_lo = tab_row.id_lo;
-    close_tab.target_execution_hi = tab_row.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 31, "CannotCloseLastTab");
-
-    let mut close_pane = identity_fence(26, &snap);
-    close_pane.target_execution_lo = pane_row.id_lo;
-    close_pane.target_execution_hi = pane_row.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 32, "CannotCloseLastPane");
-
-    // Shell composition is unchanged by every rejected action above.
-    let shell = seyal_app_shell(handle);
-    assert_eq!(shell.tab_count, 1);
-    assert_eq!(shell.pane_count, 1);
-    assert_eq!(seyal_app_destroy(handle), 0);
-}
-
-#[test]
-fn shell_projection_is_one_local_workspace() {
-    let handle = seyal_app_create();
-    let shell = seyal_app_shell(handle);
-    assert_eq!(shell.workspace_count, 1);
-    assert_eq!(shell.tab_count, 1);
-    assert_eq!(shell.pane_count, 1);
-    assert_eq!(
-        shell.flags, 0,
-        "M001 default shell policy disallows tab creation/pane splitting, \
-         and the sole Tab/Pane cannot be closed"
-    );
-    let workspace = seyal_app_shell_row(handle, 0, 0);
-    assert_eq!(workspace.flags & 1, 1);
-    let title = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(
-            workspace.title,
-            workspace.title_len as usize,
-        ))
-        .unwrap()
-    };
-    assert_eq!(title, "Local");
-    let inspector = seyal_app_chrome_row(handle, 0, 0);
-    assert!(inspector.title_len > 0);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 

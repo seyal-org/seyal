@@ -5,10 +5,15 @@
 //! therefore rejects every session opened by the previous process.
 
 mod frame_io;
+mod lifecycle_ops;
 mod recovery;
 mod wire;
 
+#[cfg(all(test, feature = "fixture-host"))]
+mod fixture_support;
 #[cfg(test)]
+mod hostless_tests;
+#[cfg(all(test, feature = "fixture-host"))]
 mod tests;
 
 pub(crate) use frame_io::{read_session_frame, SessionRead};
@@ -16,8 +21,8 @@ pub(crate) use frame_io::{read_session_frame, SessionRead};
 use std::path::PathBuf;
 
 use seyal_agent_core::{
-    AgentRunId, AttemptId, BindingGeneration, ControlGeneration, DomainError, WorkItemId,
-    WorkScopeId, WorkScopeKind,
+    AgentRunId, AttemptId, BindingGeneration, ClientPrincipalId, ClientSessionId,
+    ControlGeneration, DomainError, WorkItemId, WorkScopeId, WorkScopeKind,
 };
 use seyal_agent_protocol::{
     decode_command, encode_result, AggregateRef, Command, CommandError, CommandResult, Frame,
@@ -27,38 +32,34 @@ use seyal_agent_protocol::{
 use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN};
 
 use crate::{
-    AuthorizationRepository, ClientScope, FakeExecutionHost, HostObservation, HostObservationKind,
-    ObservationAuthority, ObserveError, PrincipalKind, RunLiveness, ScriptStep,
+    AuthorizationRepository, ClientScope, DurablePrincipal, HostObservation, HostObservationKind,
+    ObservationAuthority, ObserveError, PrincipalKind, PrincipalStatus, RunLiveness,
+    SessionExecutionHost,
 };
 
 use recovery::restore_identities;
 use wire::{
-    fit_replay_events, liveness_code, map_auth, map_domain, observation_payload, snapshot_payload,
-    to_aggregate, ReplayPage,
+    fit_replay_events, liveness_code, map_auth, map_domain, observation_payload, to_aggregate,
+    ReplayPage,
 };
 
-const OUTPUT_CHUNK: usize = 1024;
 const EVENT_OBSERVATION: u16 = 2;
 
 #[derive(Clone, Debug)]
 pub struct IntegrationConfig {
     pub store_path: PathBuf,
-    pub script: Vec<ScriptStep>,
 }
 
 pub struct IntegrationService {
     instance_id: seyal_agent_protocol::BackendInstanceId,
     /// First-party CLI principal (create/observe/control). Hello evidence empty or `cli`.
-    owner_principal_id: seyal_agent_core::ClientPrincipalId,
+    owner_principal_id: ClientPrincipalId,
     /// Distinct observe-only principal. Hello evidence `observer`.
-    observer_principal_id: seyal_agent_core::ClientPrincipalId,
-    /// Principal selected for the current accepted connection from Hello evidence.
-    connection_principal_id: Option<seyal_agent_core::ClientPrincipalId>,
+    observer_principal_id: ClientPrincipalId,
     auth: AuthorizationRepository,
     authority: ObservationAuthority,
     store: AgentStore,
-    host: FakeExecutionHost,
-    script: Vec<ScriptStep>,
+    host: Option<Box<dyn SessionExecutionHost>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,54 +72,64 @@ impl IntegrationService {
         instance_id: seyal_agent_protocol::BackendInstanceId,
         config: &IntegrationConfig,
     ) -> Result<Self, ServiceError> {
-        if config.script.is_empty() {
-            return Err(ServiceError::Failed);
-        }
-        let host = FakeExecutionHost::new(OUTPUT_CHUNK).map_err(|_| ServiceError::Failed)?;
         let store = AgentStore::open(&config.store_path).map_err(|_| ServiceError::Failed)?;
         let mut auth = AuthorizationRepository::default();
-        let owner_principal_id = auth.register_principal(
-            PrincipalKind::FirstPartyCli,
-            [
-                ClientScope::RunsCreate,
-                ClientScope::RunsObserve,
-                ClientScope::RunsControl,
-            ],
-        );
-        let observer_principal_id =
-            auth.register_principal(PrincipalKind::ManagedClient, [ClientScope::RunsObserve]);
+        let (owner_principal_id, observer_principal_id) =
+            load_or_seed_principals(&store, &mut auth)?;
         let mut authority = ObservationAuthority::new(seyal_agent_core::AgentDomain::new());
         restore_identities(&store, &mut authority, &mut auth)?;
         Ok(Self {
             instance_id,
             owner_principal_id,
             observer_principal_id,
-            connection_principal_id: None,
             auth,
             authority,
             store,
-            host,
-            script: config.script.clone(),
+            host: None,
         })
     }
 
-    /// Bind this connection to a principal from Hello evidence.
+    pub fn install_execution_host(&mut self, host: Box<dyn SessionExecutionHost>) {
+        self.host = Some(host);
+    }
+
+    pub fn set_principal_status(
+        &mut self,
+        id: ClientPrincipalId,
+        status: PrincipalStatus,
+    ) -> Result<(), ServiceError> {
+        self.auth
+            .set_principal_status(id, status)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .set_principal_status(id, status.code())
+            .map_err(|_| ServiceError::Failed)?;
+        Ok(())
+    }
+
+    pub fn owner_principal_id(&self) -> ClientPrincipalId {
+        self.owner_principal_id
+    }
+
+    /// Resolve Hello evidence to a principal for this connection.
     /// Socket UID admission alone never selects a privileged principal.
-    pub fn begin_connection(&mut self, evidence: &[u8]) -> Result<(), ServiceError> {
-        let principal = self
-            .auth
+    /// The returned id is connection-scoped and must be passed to every `handle`.
+    pub fn resolve_connection_principal(
+        &self,
+        evidence: &[u8],
+    ) -> Result<ClientPrincipalId, ServiceError> {
+        self.auth
             .principal_for_evidence(
                 evidence,
                 self.owner_principal_id,
                 self.observer_principal_id,
             )
-            .map_err(|_| ServiceError::Failed)?;
-        self.connection_principal_id = Some(principal);
-        Ok(())
+            .map_err(|_| ServiceError::Failed)
     }
 
-    pub fn end_connection(&mut self) {
-        self.connection_principal_id = None;
+    #[cfg(test)]
+    pub fn begin_connection(&mut self, evidence: &[u8]) -> Result<ClientPrincipalId, ServiceError> {
+        self.resolve_connection_principal(evidence)
     }
 
     #[cfg(feature = "test-fault-injection")]
@@ -128,6 +139,7 @@ impl IntegrationService {
 
     pub fn handle(
         &mut self,
+        principal_id: ClientPrincipalId,
         frame: Frame,
         max_frame_size: u32,
         event_window: u32,
@@ -136,7 +148,7 @@ impl IntegrationService {
             CommandResult::Error(CommandError::Malformed)
         } else {
             match decode_command(&frame.body) {
-                Ok(command) => self.dispatch(command, event_window, max_frame_size),
+                Ok(command) => self.dispatch(principal_id, command, event_window, max_frame_size),
                 Err(_) => CommandResult::Error(CommandError::Malformed),
             }
         };
@@ -145,48 +157,64 @@ impl IntegrationService {
 
     fn dispatch(
         &mut self,
+        principal_id: ClientPrincipalId,
         command: Command,
         event_window: u32,
         max_frame_size: u32,
     ) -> CommandResult {
         match command {
-            Command::OpenSession { scopes } => self.open_session(scopes),
-            Command::ResumeSession { session_id } => self.resume_session(session_id),
+            Command::OpenSession { scopes } => self.open_session(principal_id, scopes),
+            Command::ResumeSession { session_id } => self.resume_session(principal_id, session_id),
             Command::CreateWorkScope { session_id, kind } => {
-                self.create_work_scope(session_id, kind)
+                self.create_work_scope(principal_id, session_id, kind)
             }
             Command::CreateWorkItem {
                 session_id,
                 work_scope_id,
-            } => self.create_work_item(session_id, work_scope_id),
+            } => self.create_work_item(principal_id, session_id, work_scope_id),
             Command::CreateAttempt {
                 session_id,
                 work_item_id,
-            } => self.create_attempt(session_id, work_item_id),
+            } => self.create_attempt(principal_id, session_id, work_item_id),
             Command::StartAgentRun {
                 session_id,
                 attempt_id,
-            } => self.start_agent_run(session_id, attempt_id),
+            } => self.start_agent_run(principal_id, session_id, attempt_id),
             Command::GetSnapshot {
                 session_id,
                 aggregate,
-            } => self.snapshot(session_id, aggregate),
+            } => self.snapshot(principal_id, session_id, aggregate),
             Command::Subscribe {
                 session_id,
                 aggregate,
                 after,
-            } => self.subscribe(session_id, aggregate, after, event_window, max_frame_size),
+            } => self.subscribe(
+                principal_id,
+                session_id,
+                aggregate,
+                after,
+                event_window,
+                max_frame_size,
+            ),
             Command::CheckGeneration {
                 session_id,
                 run_id,
                 binding_generation,
                 control_generation,
-            } => self.check_generation(session_id, run_id, binding_generation, control_generation),
-            Command::ReadRun { session_id, run_id } => self.read_run(session_id, run_id),
+            } => self.check_generation(
+                principal_id,
+                session_id,
+                run_id,
+                binding_generation,
+                control_generation,
+            ),
+            Command::ReadRun { session_id, run_id } => {
+                self.read_run(principal_id, session_id, run_id)
+            }
         }
     }
 
-    fn open_session(&mut self, scopes: Vec<u8>) -> CommandResult {
+    fn open_session(&mut self, principal_id: ClientPrincipalId, scopes: Vec<u8>) -> CommandResult {
         let mut decoded = Vec::with_capacity(scopes.len());
         for scope in scopes {
             match ClientScope::decode(scope) {
@@ -194,9 +222,6 @@ impl IntegrationService {
                 Err(_) => return CommandResult::Error(CommandError::Malformed),
             }
         }
-        let Some(principal_id) = self.connection_principal_id else {
-            return CommandResult::Error(CommandError::Denied);
-        };
         match self
             .auth
             .open_session(principal_id, self.instance_id, decoded)
@@ -206,32 +231,30 @@ impl IntegrationService {
         }
     }
 
-    fn resume_session(&mut self, session_id: seyal_agent_core::ClientSessionId) -> CommandResult {
-        let Some(principal_id) = self.connection_principal_id else {
-            return CommandResult::Error(CommandError::Denied);
-        };
-        match self.auth.session_principal(session_id, self.instance_id) {
-            Ok(session_principal) if session_principal == principal_id => {
-                match self.auth.resume_session(session_id, self.instance_id) {
-                    Ok(()) => CommandResult::Resumed,
-                    Err(error) => CommandResult::Error(map_auth(error)),
-                }
-            }
-            Ok(_) => CommandResult::Error(CommandError::Denied),
+    fn resume_session(
+        &mut self,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
+    ) -> CommandResult {
+        match self
+            .auth
+            .resume_session(session_id, self.instance_id, principal_id)
+        {
+            Ok(()) => CommandResult::Resumed,
             Err(error) => CommandResult::Error(map_auth(error)),
         }
     }
 
     fn create_work_scope(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         kind: WorkScopeKind,
     ) -> CommandResult {
         if let Err(error) =
-            self.auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsCreate)
+            self.authorized_session(principal_id, session_id, ClientScope::RunsCreate)
         {
-            return CommandResult::Error(map_auth(error));
+            return CommandResult::Error(error);
         }
         let id = WorkScopeId::new();
         if self
@@ -251,14 +274,14 @@ impl IntegrationService {
 
     fn create_work_item(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         work_scope_id: WorkScopeId,
     ) -> CommandResult {
         if let Err(error) =
-            self.auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsCreate)
+            self.authorized_session(principal_id, session_id, ClientScope::RunsCreate)
         {
-            return CommandResult::Error(map_auth(error));
+            return CommandResult::Error(error);
         }
         if self.authority.domain().work_scope(work_scope_id).is_none() {
             return CommandResult::Error(CommandError::NotFound);
@@ -281,14 +304,14 @@ impl IntegrationService {
 
     fn create_attempt(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         work_item_id: WorkItemId,
     ) -> CommandResult {
         if let Err(error) =
-            self.auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsCreate)
+            self.authorized_session(principal_id, session_id, ClientScope::RunsCreate)
         {
-            return CommandResult::Error(map_auth(error));
+            return CommandResult::Error(error);
         }
         if self.authority.domain().work_item(work_item_id).is_none() {
             return CommandResult::Error(CommandError::NotFound);
@@ -307,83 +330,6 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
         CommandResult::Attempt { id }
-    }
-
-    fn start_agent_run(
-        &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
-        attempt_id: AttemptId,
-    ) -> CommandResult {
-        let principal =
-            match self
-                .auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsCreate)
-            {
-                Ok(principal) => principal,
-                Err(error) => return CommandResult::Error(map_auth(error)),
-            };
-        if self.authority.domain().attempt(attempt_id).is_none() {
-            return CommandResult::Error(CommandError::NotFound);
-        }
-        let run_id = AgentRunId::new();
-        let binding = BindingGeneration::FIRST;
-        let control = ControlGeneration::FIRST;
-        // Persist the run before host observations. A later allow_run/host
-        // failure returns Failed even though the row remains for recovery
-        // (false failure, not false success).
-        if self
-            .store
-            .mutate_agent_run_and_append(
-                run_id,
-                attempt_id,
-                binding.get(),
-                control.get(),
-                1,
-                &attempt_id.to_bytes(),
-            )
-            .and_then(|_| {
-                self.authority
-                    .restore_agent_run(run_id, attempt_id, binding, control)
-                    .map_err(|_| StoreError::Corrupt)
-            })
-            .is_err()
-        {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        if self.auth.allow_run(principal, run_id).is_err() {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        self.auth.allow_run_for_observers(run_id);
-
-        let observations = match self.host.execute(run_id, binding, &self.script) {
-            Ok(observations) => observations,
-            Err(_) => return CommandResult::Error(CommandError::Failed),
-        };
-        if let Err(error) = self.commit_observation_batch(observations) {
-            return CommandResult::Error(error);
-        }
-        let aggregate = AggregateId::AgentRun(run_id);
-        let events = match self.store.replay_after(aggregate, None) {
-            Ok(events) => events,
-            Err(_) => return CommandResult::Error(CommandError::Failed),
-        };
-        let Some(last) = events.last() else {
-            return CommandResult::Error(CommandError::Failed);
-        };
-        let payload = snapshot_payload(&self.authority, run_id);
-        if self
-            .store
-            .snapshot(aggregate, last.sequence, &payload)
-            .is_err()
-        {
-            return CommandResult::Error(CommandError::Failed);
-        }
-        CommandResult::Started {
-            run_id,
-            binding_generation: binding.get(),
-            control_generation: control.get(),
-            event_count: events.len() as u64,
-        }
     }
 
     fn commit_observation_batch(
@@ -507,10 +453,11 @@ impl IntegrationService {
 
     fn snapshot(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         aggregate: AggregateRef,
     ) -> CommandResult {
-        if let Err(error) = self.authorize_observe(session_id, aggregate) {
+        if let Err(error) = self.authorize_observe(principal_id, session_id, aggregate) {
             return CommandResult::Error(error);
         }
         match self.store.get_snapshot(to_aggregate(aggregate)) {
@@ -527,13 +474,14 @@ impl IntegrationService {
 
     fn subscribe(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         aggregate: AggregateRef,
         after: Option<u64>,
         event_window: u32,
         max_frame_size: u32,
     ) -> CommandResult {
-        if let Err(error) = self.authorize_observe(session_id, aggregate) {
+        if let Err(error) = self.authorize_observe(principal_id, session_id, aggregate) {
             return CommandResult::Error(error);
         }
         let after = match after {
@@ -565,18 +513,16 @@ impl IntegrationService {
 
     fn check_generation(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         run_id: AgentRunId,
         binding_generation: u64,
         control_generation: u64,
     ) -> CommandResult {
-        if let Err(error) = self.auth.authorize_run(
-            session_id,
-            self.instance_id,
-            ClientScope::RunsControl,
-            run_id,
-        ) {
-            return CommandResult::Error(map_auth(error));
+        if let Err(error) =
+            self.authorized_run(principal_id, session_id, ClientScope::RunsControl, run_id)
+        {
+            return CommandResult::Error(error);
         }
         let Some(binding) = BindingGeneration::from_raw(binding_generation) else {
             return CommandResult::Error(CommandError::Malformed);
@@ -603,16 +549,14 @@ impl IntegrationService {
 
     fn read_run(
         &mut self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         run_id: AgentRunId,
     ) -> CommandResult {
-        if let Err(error) = self.auth.authorize_run(
-            session_id,
-            self.instance_id,
-            ClientScope::RunsObserve,
-            run_id,
-        ) {
-            return CommandResult::Error(map_auth(error));
+        if let Err(error) =
+            self.authorized_run(principal_id, session_id, ClientScope::RunsObserve, run_id)
+        {
+            return CommandResult::Error(error);
         }
         let Some(run) = self.authority.domain().agent_run(run_id) else {
             return CommandResult::Error(CommandError::NotFound);
@@ -627,31 +571,120 @@ impl IntegrationService {
     /// Run snapshots and replays use the same target gate as `ReadRun`.
     fn authorize_observe(
         &self,
-        session_id: seyal_agent_core::ClientSessionId,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
         aggregate: AggregateRef,
     ) -> Result<(), CommandError> {
-        let decision = if let AggregateRef::AgentRun(run_id) = aggregate {
-            self.auth.authorize_run(
-                session_id,
-                self.instance_id,
-                ClientScope::RunsObserve,
-                run_id,
-            )
+        if let AggregateRef::AgentRun(run_id) = aggregate {
+            self.authorized_run(principal_id, session_id, ClientScope::RunsObserve, run_id)
         } else {
-            self.auth
-                .authorize_session(session_id, self.instance_id, ClientScope::RunsObserve)
+            self.authorized_session(principal_id, session_id, ClientScope::RunsObserve)
                 .map(|_| ())
-        };
-        decision.map_err(map_auth)
+        }
     }
+
+    fn authorized_session(
+        &self,
+        caller: ClientPrincipalId,
+        session_id: ClientSessionId,
+        scope: ClientScope,
+    ) -> Result<ClientPrincipalId, CommandError> {
+        self.auth
+            .authorize_session(session_id, self.instance_id, scope, caller)
+            .map_err(map_auth)
+    }
+
+    fn authorized_run(
+        &self,
+        caller: ClientPrincipalId,
+        session_id: ClientSessionId,
+        scope: ClientScope,
+        run_id: AgentRunId,
+    ) -> Result<(), CommandError> {
+        self.auth
+            .authorize_run(session_id, self.instance_id, scope, run_id, caller)
+            .map_err(map_auth)
+    }
+}
+
+fn load_or_seed_principals(
+    store: &AgentStore,
+    auth: &mut AuthorizationRepository,
+) -> Result<(ClientPrincipalId, ClientPrincipalId), ServiceError> {
+    let rows = store
+        .client_principals()
+        .map_err(|_| ServiceError::Failed)?;
+    if rows.is_empty() {
+        let owner = auth.register_principal_with_evidence(
+            PrincipalKind::FirstPartyCli,
+            [
+                ClientScope::RunsCreate,
+                ClientScope::RunsObserve,
+                ClientScope::RunsControl,
+            ],
+            b"cli".to_vec(),
+        );
+        let observer = auth.register_principal_with_evidence(
+            PrincipalKind::ManagedClient,
+            [ClientScope::RunsObserve],
+            b"observer".to_vec(),
+        );
+        persist_principal(store, auth, owner)?;
+        persist_principal(store, auth, observer)?;
+        return Ok((owner, observer));
+    }
+    for row in rows {
+        let kind = PrincipalKind::from_code(row.kind).ok_or(ServiceError::Failed)?;
+        let status = PrincipalStatus::from_code(row.status).ok_or(ServiceError::Failed)?;
+        let mut scopes = std::collections::BTreeSet::new();
+        for byte in row.scopes {
+            scopes.insert(ClientScope::decode(byte).map_err(|_| ServiceError::Failed)?);
+        }
+        auth.load_durable_principal(DurablePrincipal {
+            id: row.id,
+            kind,
+            status,
+            scopes,
+            evidence_key: row.evidence_key,
+        })
+        .map_err(|_| ServiceError::Failed)?;
+    }
+    let owner = auth
+        .principal_by_evidence_key(b"cli")
+        .ok_or(ServiceError::Failed)?;
+    let observer = auth
+        .principal_by_evidence_key(b"observer")
+        .ok_or(ServiceError::Failed)?;
+    Ok((owner, observer))
+}
+
+fn persist_principal(
+    store: &AgentStore,
+    auth: &AuthorizationRepository,
+    id: ClientPrincipalId,
+) -> Result<(), ServiceError> {
+    let durable = auth
+        .durable_principal(id)
+        .map_err(|_| ServiceError::Failed)?;
+    let mut scopes: Vec<u8> = durable.scopes.iter().map(|scope| scope.code()).collect();
+    scopes.sort_unstable();
+    scopes.dedup();
+    store
+        .upsert_principal(&seyal_agent_store::PersistedPrincipal {
+            id: durable.id,
+            kind: durable.kind.code(),
+            status: durable.status.code(),
+            scopes,
+            evidence_key: durable.evidence_key,
+        })
+        .map_err(|_| ServiceError::Failed)?;
+    Ok(())
 }
 
 fn map_observe(error: ObserveError) -> CommandError {
     match error {
         ObserveError::StaleGeneration => CommandError::StaleBinding,
-        ObserveError::Domain(DomainError::StaleControlGeneration { .. }) => {
-            CommandError::StaleControl
-        }
+        ObserveError::Domain(DomainError::StaleControlEpoch { .. }) => CommandError::StaleControl,
         ObserveError::Domain(DomainError::UnknownAgentRun(_)) => CommandError::NotFound,
         _ => CommandError::Failed,
     }

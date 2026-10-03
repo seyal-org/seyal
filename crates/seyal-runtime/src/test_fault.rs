@@ -24,6 +24,12 @@ pub enum FaultPoint {
     BlockCompletionAdmission,
     // Candidate-D display encode used by steady-state fanout / resync.
     DisplayEncode,
+    // SPEC-004 §18 / SPEC-003 §7 provisioning create transaction (P3).
+    ProvisioningSpawn,
+    ProvisioningRegistration,
+    ProvisioningPublication,
+    // SPEC-004 §18.5 terminate path: fail before §11 is armed.
+    RequestTermination,
     // Legacy Candidate-B comparator/reference resource lifecycle.
     ShmOpenWriter,
     Truncate,
