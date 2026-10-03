@@ -88,10 +88,12 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
     /// #865 / SPEC-008 §3.1: Flow transcript scroll must leave prepared-frame
     /// PTY size and cursor tokens unchanged on the terminal AX probe.
+    /// Hosted CI without a zsh `pw_shell` is ENVIRONMENT_UNSUPPORTED (this
+    /// case `XCTSkip`s); local zsh evidence must still prove clip motion.
     func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() throws {
         guard loginShellIsZsh() else {
             throw XCTSkip(
-                "Flow scroll→PTY/cursor invariant requires a zsh pw_shell (OSC 133 Blocks)."
+                "Flow scroll→PTY/cursor invariant requires a zsh pw_shell (OSC 133 Blocks). ENVIRONMENT_UNSUPPORTED on hosted CI without zsh."
             )
         }
         let app = hostedApp()
@@ -113,10 +115,17 @@ final class SeyalHostHistoryUITests: XCTestCase {
 
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
         XCTAssertTrue(transcript.waitForExistence(timeout: 5))
-        let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
-        let end = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15))
-        start.click(forDuration: 0.05, thenDragTo: end)
+        let content = transcript.children(matching: .any).element(boundBy: 0)
+        XCTAssertTrue(content.exists, "transcript must expose scrollable content")
+        let yBefore = content.frame.origin.y
+        transcript.scroll(byDeltaX: 0, deltaY: -320)
         waitBriefly(0.6)
+        let yAfter = content.frame.origin.y
+        XCTAssertNotEqual(
+            yBefore,
+            yAfter,
+            "visible transcript region must move after scroll(byDeltaX:deltaY:)"
+        )
 
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after Flow scroll")
         assertFlowBlocksOrFail(in: app)

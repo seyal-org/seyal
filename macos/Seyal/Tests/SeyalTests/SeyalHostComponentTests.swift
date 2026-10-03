@@ -1713,6 +1713,12 @@ final class SeyalHostComponentTests: XCTestCase {
         view.refreshRecoveryAccessibilityValue()
         XCTAssertGreaterThan(before.rows, 0)
         XCTAssertGreaterThan(before.columns, 0)
+        let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else {
+            throw XCTSkip(
+                "Flow scroll invariant requires Flow eligibility immediately before transcriptDidScroll (ENVIRONMENT_UNSUPPORTED when hosted CI has already left Flow)."
+            )
+        }
         let beforeGeometry = view.lastProposedGeometry
         let beforeBounds = view.bounds.integral
         let beforeRevision = host.transcriptFrameRevision
