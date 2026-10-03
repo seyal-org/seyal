@@ -6,8 +6,8 @@ Ready until ADR-021 and SPEC-025 are **Accepted**, that child's own
 owner claims it.
 
 **Authority:** [`../architecture/ADR-021-PANE-TREE-OPERATIONS.md`](../architecture/ADR-021-PANE-TREE-OPERATIONS.md)
-(Proposed) and [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md)
-(Proposed). This file plans work; it creates no architecture. Where this file
+(Accepted) and [`../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md`](../specs/SPEC-025-M003-PANE-TREE-OPERATIONS.md)
+(Accepted). This file plans work; it creates no architecture. Where this file
 and ADR-021/SPEC-025 disagree, those documents win.
 
 **Parent umbrella:** #674. **Epic:** #665. **Milestone contract:**
