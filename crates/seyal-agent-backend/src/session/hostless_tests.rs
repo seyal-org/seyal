@@ -177,7 +177,8 @@ fn start_agent_run_uses_injected_host_script_via_collect_observations() {
     let CommandResult::Started { event_count, .. } = started else {
         panic!("expected Started via injected host: {started:?}");
     };
-    // create-run append + three injected observations (not the old Started+0x05 default).
+    // create-run append + three injected observations (lifecycle columns are
+    // updated without extra outbox rows on the start path).
     assert_eq!(event_count, 4);
     assert_eq!(service.store.agent_runs().unwrap().len(), 1);
     assert_eq!(service.authority.applied_count(), 3);
