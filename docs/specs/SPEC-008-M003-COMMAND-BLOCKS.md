@@ -1,7 +1,7 @@
 # SPEC-008 — M003 command Blocks, Pane composer and presentation modes
 
-- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`)
-- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11
+- **Status:** Active implementation specification for accepted ADR-009, including the presentation amendment accepted by #858 / PR #859 (`8d08f2f`) and the duration / shell-metadata boundary amendment accepted by #686 / PR #1022
+- **Date:** 2026-08-28; presentation amendment accepted 2026-09-11; duration / shell-metadata alignment 2026-10-03 (#686)
 - **Architecture:** ADR-009 plus ADR-004/005/006/007/008; ADR-015 governs Rust/native ownership only and does not change this specification's behavior contract
 - **Depends on:** accepted SPEC-001 through SPEC-007 and completed Pass 7
 
@@ -235,6 +235,91 @@ This does not make the drawable a conventional terminal viewport.
 Outside registered Flow output regions the compositor must not paint unrelated
 terminal cells/cursor/background. UI canvas/chrome owns those pixels.
 
+### 5.4 Completed-Block duration
+
+Authority: accepted ADR-009 2026-09-19 amendment (#686 / PR #1022).
+
+Completed Blocks that finish through a matching nonce-trusted `D` expose an
+optional Runtime-measured elapsed duration. Running Blocks have no completed
+duration. The value is Runtime execution metadata derived from already-accepted
+command boundaries; it is not a shell-supplied clock and not a claim that every
+background descendant has stopped.
+
+Observable rules:
+
+- duration is `Some` only after a matching trusted `D` for that Block;
+- duration is `None` (unknown / unavailable) when `C` and `D` arrive in the same
+  PTY read, when the end is missing/untrusted/conflicting/lifecycle-only, or
+  when the peer did not negotiate duration;
+- clients never invent duration from composer-submit time, prompt time, child
+  exit, paint time, OSC 7, or wall-clock timestamps;
+- a completed duration is immutable for that Block while the same Runtime
+  retains its `BlockTimeline`.
+
+Display rounding (Flow chrome): when `Some(duration_ns)`, render elapsed time at
+millisecond resolution for values under one minute, otherwise at
+second resolution (truncate toward zero; do not round up a sub-second remainder
+into an extra second). Unknown duration must not render as `0s` or another
+numeric sentinel that implies a measured near-zero interval.
+
+#### Wire schema (duration-capable `BlockTimeline`)
+
+Capability bit 8 (`CAP_COMMAND_BLOCK_DURATION = 1 << 8`) is reserved in SPEC-004
+and depends on `CAP_COMMAND_BLOCKS`. Negotiation, dual-schema fan-out, and
+ClientHello fallback order are owned by the accepted ADR-009 amendment.
+
+Legacy (no duration bit) record fixed header remains exactly 36 bytes before
+command bytes, as already implemented for type 21.
+
+Duration-capable records use a 52-byte fixed header before command bytes
+(little-endian). Fields after the legacy header prefix:
+
+```text
+id              u64
+start_line      u64
+end_line        u64   # 0 when Running / absent
+state           u8    # 0 Running; 1 Completed+status; 2 Completed without status
+pad0            u8×3  # must be 0
+exit_status     i32   # 0 when Running or Completed-without-status
+duration_pres   u8    # 0 = None; 1 = Some; other values malformed
+pad1            u8×7  # must be 0
+duration_ns     u64   # meaningful only when duration_pres == 1; must be 0 when None
+command_len     u16
+pad2            u16   # must be 0
+command         u8 × command_len
+```
+
+Schema binding is by negotiated capability, never by payload length inference.
+A shape that disagrees with the negotiated bit, or duration without command
+Blocks, is a protocol violation: fail closed before applying that timeline.
+Production encode/decode of the duration-capable shape is owned by a separate
+implementation Issue after this specification alignment; absence of that code
+does not reopen the accepted trust boundary.
+
+### 5.5 Supported shells and CWD trust boundary
+
+M003 trusted structured integration is **zsh-only**, matching accepted ADR-009.
+
+| Shell / context | M003 contract |
+|---|---|
+| Interactive zsh launched by Seyal with accepted hooks | Trusted `A`/`C`/`D` markers; Flow/Blocks when eligibility is current; Runtime may measure completed-Block duration |
+| Interactive Bash | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
+| Interactive fish | Unsupported → full-Pane Raw; no Blocks from prompt/output scraping |
+| `/bin/sh` and any other shell without an accepted integration | Unsupported → full-Pane Raw; no guessed Blocks |
+| Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
+| Startup working directory | Launch/config policy (#676 / related launch-policy Issues) may supply initial CWD; not inferred from terminal output |
+| Live CWD / OSC 7 | **Deferred** for M003 Block semantics; OSC 7 and other terminal-emitted path text remain untrusted and must not populate Block or Workspace authority |
+
+**Accept-or-defer record (#686):**
+
+- **Accepted for M003:** zsh trusted integration; Unsupported/Raw for all other
+  interactive shells; Runtime-owned completed-Block duration as above.
+- **Deferred for M003:** trusted live CWD; Bash/fish (or other) integrations;
+  remote/SSH Block or live-CWD claims. Any later requirement needs a separate
+  architecture/spec decision before production readiness.
+- Evidence disposition and remaining zsh gaps are recorded in
+  `docs/evidence/m003-686-shell-metadata-decision.md`.
+
 ## 6. Reconnect and restoration
 
 SPEC-009 remains authoritative for Runtime survival, same `ExecutionId`, fresh
@@ -291,6 +376,9 @@ a different execution, attachment or presentation epoch.
 | controller handoff/loss | stale Controller callbacks cannot mutate current execution |
 | delayed composer result from old presentation epoch | cannot clear/authorize current draft or Block state |
 | unsupported shell/integration | Pane becomes full-Pane Raw; no guessed Block |
+| completed Block with trusted `D` (duration negotiated) | optional Runtime `duration_ns`; never a fabricated near-zero from same-read `C`/`D` |
+| completed Block without duration capability or unknown end | duration absent/unknown; UI must not show a fake `0s` measurement |
+| OSC 7 / terminal path text | untrusted; does not become Block or Workspace CWD authority |
 | secret/interactive child requiring direct input | Pane becomes Raw before arbitrary terminal input is routed |
 | supported SSH integration | may remain Flow using trusted remote boundaries |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
@@ -333,4 +421,5 @@ This specification does not require:
 - AppKit text reconstruction of terminal output;
 - a portable cross-platform GUI abstraction;
 - prompt/output scraping to recover missing trusted command boundaries;
+- Bash/fish/remote trusted integration or trusted live CWD in M003;
 - commercial/agent/cloud services on the terminal path.
