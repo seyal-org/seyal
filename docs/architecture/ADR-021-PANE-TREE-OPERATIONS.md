@@ -1,6 +1,6 @@
 # ADR-021 — Intra-Tab PaneTree operations and focus transitions
 
-- **Status:** Accepted on merge of PR #PLACEHOLDER by a non-author maintainer under #1001
+- **Status:** Accepted on merge of PR #1204 by a non-author maintainer under #1001
 - **Date:** 2026-09-25
 - **Issue:** #1001 (refinement) — parent #674, epic #665
 - **Numbering:** Final. Allocation across concurrent M003 refinements is
