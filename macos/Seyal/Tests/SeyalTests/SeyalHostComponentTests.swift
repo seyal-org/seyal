@@ -1715,6 +1715,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
     }
 
+    @MainActor
     func testOpenGotoReusesPaletteOverlayWithDefaultPanesScope() {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.openGoto()
