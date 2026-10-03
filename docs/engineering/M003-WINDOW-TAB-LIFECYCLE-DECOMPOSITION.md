@@ -422,7 +422,7 @@ candidate now.
    exactly one `WorkspaceId` for its whole lifetime) and §2.2 / §11.4
    (`ActivateWorkspace` replaces in-place `SelectWorkspace` with raise-or-create).
    Acceptance of that product rule is the non-author maintainer review of
-   this PR under #1000, not a new product invention in this file.
+   PR #1208 under #1000, not a new product invention in this file.
 3. **Sequencing against #994 / W6.** **Closed by ADR-018 §3.2 / §3.3 and this
    decomposition's dependency order:** close can produce `Unpresented`
    executions, so W2b/W4b follow W6, and W6 consumes ADR-017 (Accepted on merge
