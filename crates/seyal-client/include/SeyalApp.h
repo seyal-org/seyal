@@ -563,6 +563,69 @@ typedef struct SeyalAppPalette {
 uint64_t seyal_app_create(void);
 int32_t seyal_app_destroy(uint64_t handle);
 uint8_t seyal_app_option_as_alt(uint64_t handle);
+
+/*
+ * SPEC-024 §11 shortcut projection (K5). Cold key equivalents / hints come from
+ * Rust only; native menus realize them at startup. Live enabled state follows
+ * the route context set (palette modal disables non-palette items).
+ * command_id discriminants match WorkspaceCommandId (palette.open=0, tab.create=2, …).
+ * modifier_bits: CMD=1 CTRL=2 SHIFT=4 OPT=8.
+ * key_is_named != 0 → key_base is NamedKey (same map as route_keystroke).
+ */
+typedef struct SeyalAppShortcutItem {
+    uint16_t version;
+    uint16_t size;
+    uint16_t command_id;
+    uint8_t ordinal;
+    uint8_t has_key_equivalent;
+    uint8_t modifier_bits;
+    uint8_t key_is_named;
+    uint16_t reserved0;
+    uint32_t key_base;
+    const uint8_t *title;
+    uint32_t title_len;
+    uint32_t key_notation_len;
+    const uint8_t *key_notation;
+    const uint8_t *hints;
+    uint32_t hints_len;
+    uint32_t accessibility_label_len;
+    const uint8_t *accessibility_label;
+} SeyalAppShortcutItem;
+
+uint32_t seyal_app_shortcut_count(void);
+SeyalAppShortcutItem seyal_app_shortcut_item(uint32_t index);
+uint8_t seyal_app_shortcut_enabled(
+    uint64_t handle,
+    uint16_t command_id,
+    uint8_t ordinal,
+    uint8_t composer_focused);
+/* R6.4.1: menu-invoked WorkspaceCommand; 0 ok, negative = -AppError. */
+int32_t seyal_app_invoke_workspace_command(
+    uint64_t handle,
+    uint16_t command_id,
+    uint8_t ordinal,
+    uint8_t composer_focused);
+
+/*
+ * SPEC-024 §6.2 keybinding route (K3). Swift forwards an already-normalized
+ * stroke; Rust owns the match and dispatches WorkspaceCommands.
+ * modifier_bits: CMD=1 CTRL=2 SHIFT=4 OPT=8.
+ * named_key != 0 → base is NamedKey (Enter=0, Tab=1, Space=2, Escape=3,
+ * Backspace=4, Up=5, Down=6, Left=7, Right=8, F1..F12=9..20, Home=21, End=22,
+ * PageUp=23, PageDown=24, Delete=25).
+ * shift_applied: Unicode scalar or 0.
+ * Returns: 0 fallthrough, 1 consumed (zero PTY), 2 native Command handling,
+ * negative = -AppError (50 = ActionUnavailable).
+ */
+int32_t seyal_app_route_keystroke(
+    uint64_t handle,
+    uint8_t modifier_bits,
+    uint8_t named_key,
+    uint32_t base,
+    uint32_t shift_applied,
+    uint8_t composer_focused,
+    uint8_t composition_active);
+
 int32_t seyal_app_apply(uint64_t handle, const SeyalAppAction *action);
 SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);

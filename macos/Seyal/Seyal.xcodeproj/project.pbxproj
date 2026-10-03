@@ -40,6 +40,8 @@
 		C10000000000000000000002 /* SeyalHostUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* SeyalHostUITests.swift */; };
 		C10000000000000000000005 /* SeyalHostHistoryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* SeyalHostHistoryUITests.swift */; };
 		C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */; };
+		C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000008 /* KeybindingEvidenceTests.swift */; };
+		C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009 /* SeyalKeybindingUITests.swift */; };
 		C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007 /* IsolatedHostedRuntime.swift */; };
 		A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000050 /* TerminalCompositionDocument.swift */; };
 		A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */; };
@@ -50,6 +52,8 @@
 		A10000000000000000000057 /* MetalTerminalRenderer+Encode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000057 /* MetalTerminalRenderer+Encode.swift */; };
 		A1000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift */; };
 		A1000000000000000000006B /* MetalSurfaceView+LiveTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006B /* MetalSurfaceView+LiveTail.swift */; };
+		A1000000000000000000007A /* KeybindingStrokeNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000007A /* KeybindingStrokeNormalizer.swift */; };
+		A1000000000000000000007B /* KeybindingShortcutRealization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000007B /* KeybindingShortcutRealization.swift */; };
 		A10000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */; };
 		A10000000000000000000059 /* ProductChromeBlockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000059 /* ProductChromeBlockViews.swift */; };
 		A1000000000000000000005A /* ProductChromeHostView+Blocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */; };
@@ -103,6 +107,8 @@
 		C20000000000000000000004 /* SeyalHostUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000005 /* SeyalHostHistoryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostHistoryUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostWorkloadUITests.swift; sourceTree = "<group>"; };
+		C20000000000000000000008 /* KeybindingEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingEvidenceTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000009 /* SeyalKeybindingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalKeybindingUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000007 /* IsolatedHostedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedHostedRuntime.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* RustDisplayBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustDisplayBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* GlyphAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphAtlas.swift; sourceTree = "<group>"; };
@@ -137,6 +143,8 @@
 		A20000000000000000000057 /* MetalTerminalRenderer+Encode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+Encode.swift"; sourceTree = "<group>"; };
 		A2000000000000000000006A /* MetalTerminalRenderer+LiveTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+LiveTail.swift"; sourceTree = "<group>"; };
 		A2000000000000000000006B /* MetalSurfaceView+LiveTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+LiveTail.swift"; sourceTree = "<group>"; };
+		A2000000000000000000007A /* KeybindingStrokeNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingStrokeNormalizer.swift; sourceTree = "<group>"; };
+		A2000000000000000000007B /* KeybindingShortcutRealization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingShortcutRealization.swift; sourceTree = "<group>"; };
 		A20000000000000000000058 /* MetalTerminalRenderer+GPUCompletionSelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalTerminalRenderer+GPUCompletionSelfTest.swift"; sourceTree = "<group>"; };
 		A20000000000000000000059 /* ProductChromeBlockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeBlockViews.swift; sourceTree = "<group>"; };
 		A2000000000000000000005A /* ProductChromeHostView+Blocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProductChromeHostView+Blocks.swift"; sourceTree = "<group>"; };
@@ -229,6 +237,8 @@
 				A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */,
 				A20000000000000000000050 /* TerminalCompositionDocument.swift */,
 				A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */,
+				A2000000000000000000007A /* KeybindingStrokeNormalizer.swift */,
+				A2000000000000000000007B /* KeybindingShortcutRealization.swift */,
 				A20000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift */,
 				A20000000000000000000053 /* MetalSurfaceRecoveryState.swift */,
 				A20000000000000000000054 /* MetalSurfaceView+DisplayLink.swift */,
@@ -294,6 +304,7 @@
 			isa = PBXGroup;
 			children = (
 				C20000000000000000000003 /* SeyalHostComponentTests.swift */,
+				C20000000000000000000008 /* KeybindingEvidenceTests.swift */,
 			);
 			path = SeyalTests;
 			sourceTree = "<group>";
@@ -305,6 +316,7 @@
 				C20000000000000000000005 /* SeyalHostHistoryUITests.swift */,
 				C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */,
 				C20000000000000000000007 /* IsolatedHostedRuntime.swift */,
+				C20000000000000000000009 /* SeyalKeybindingUITests.swift */,
 			);
 			path = SeyalUITests;
 			sourceTree = "<group>";
@@ -441,6 +453,8 @@
 				A1000000000000000000002C /* SeyalAccessibilityAnnouncement.swift in Sources */,
 				A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */,
 				A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */,
+				A1000000000000000000007A /* KeybindingStrokeNormalizer.swift in Sources */,
+				A1000000000000000000007B /* KeybindingShortcutRealization.swift in Sources */,
 				A10000000000000000000052 /* InteractiveMetalSurfaceView+InputSelfTests.swift in Sources */,
 				A10000000000000000000053 /* MetalSurfaceRecoveryState.swift in Sources */,
 				A10000000000000000000054 /* MetalSurfaceView+DisplayLink.swift in Sources */,
@@ -497,6 +511,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */,
+				C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -508,6 +523,7 @@
 				C10000000000000000000005 /* SeyalHostHistoryUITests.swift in Sources */,
 				C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */,
 				C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */,
+				C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

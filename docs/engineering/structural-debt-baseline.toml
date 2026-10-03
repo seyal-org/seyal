@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 861
-issue = 1105
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after absorbing L2 goto/navigate, #928 MoveSplitDivider/NoSplitDivider, P3 provisioning terminate/create, and #867 resting Flow/Raw fields; goto_apply.rs, chrome_apply.rs, provisioning_apply.rs, and presentation_apply.rs own the reducers. Ceiling matches post-#1082-merge LOC."
+acknowledged_loc = 888
+issue = 1106
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after tip A navigate/goto/provisioning/#867 resting fields plus tip C ChordPrefixState, ActionUnavailable, and R6.4.1 CreateTab/OpenPalette menu gates. keybinding_apply.rs owns match/dispatch; presentation_apply.rs owns resting transitions."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,9 +77,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 992
-issue = 1105
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual extraction; merge absorbs #928 NoSplitDivider=34, P3 provisioning errors 35/36, navigation 37-46, goto 47-49, and shell_composition_tests declaration. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs. Ceiling matches post-master-merge LOC."
+acknowledged_loc = 946
+issue = 1106
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49 remain; tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -202,3 +202,17 @@ path = "crates/seyal-client/src/shell/mod.rs"
 acknowledged_loc = 728
 issue = 1105
 reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after absorbing L2 navigation inventory/commit_focus helpers, #928 MoveSplitDivider/NoSplitDivider, and P3 release_execution/take_removed_tab_panes detach-only dispose. Tree/window details stay in tree.rs and workspace.rs. Ceiling matches post-master-merge LOC."
+
+[[cohesion_acknowledgement]]
+path = "macos/Seyal/Sources/ProductChromeHostView.swift"
+acknowledged_loc = 770
+issue = 1106
+reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+
+# #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/keybinding/tests.rs"
+acknowledged_loc = 701
+issue = 1106
+reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
+

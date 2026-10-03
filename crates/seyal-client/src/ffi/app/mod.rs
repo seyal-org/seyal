@@ -6,8 +6,12 @@
 mod block_projection;
 mod decode;
 mod encode;
+mod error_code;
 mod pane_region;
+mod shortcut;
 mod visual;
+
+use error_code::error_number;
 
 #[cfg(test)]
 mod shell_composition_tests;
@@ -16,7 +20,7 @@ mod tests;
 
 use std::{cell::RefCell, collections::HashMap, ptr};
 
-use crate::app::{AppError, ApplicationRoot, APP_ABI_VERSION};
+use crate::app::{ApplicationRoot, APP_ABI_VERSION};
 use crate::chrome::{InspectorMode, LeftPanelMode};
 use crate::composer::{
     ComposerMode, BLOCK_PROMPT, COMPOSER_EXECUTE_LABEL, COMPOSER_HISTORY_LABEL,
@@ -34,6 +38,10 @@ use encode::{
 
 pub use block_projection::seyal_app_block_projection;
 pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
+pub use shortcut::{
+    seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
+    seyal_app_shortcut_enabled, seyal_app_shortcut_item,
+};
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
@@ -934,59 +942,5 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(Some(id16(lo, hi)?))
     } else {
         Ok(None)
-    }
-}
-
-fn error_number(error: AppError) -> i32 {
-    match error {
-        AppError::UnknownPane => 1,
-        AppError::StalePane => 2,
-        AppError::StaleExecution => 3,
-        AppError::StaleAttachment => 4,
-        AppError::StaleController => 5,
-        AppError::StalePresentationEpoch => 6,
-        AppError::UnboundUnauthorized => 7,
-        AppError::AlreadyBound => 8,
-        AppError::NotController => 9,
-        AppError::DirectInputUnauthorized => 10,
-        AppError::ZeroPtyGeneration => 11,
-        AppError::Frozen => 12,
-        AppError::NoLiveClient => 13,
-        AppError::InvalidPayload => 14,
-        AppError::StaleRecoveryGeneration => 15,
-        AppError::ComposerSubmitDisabled => 16,
-        AppError::StaleComposerRequest => 17,
-        AppError::StaleComposerEpoch => 18,
-        AppError::UnknownAgent => 19,
-        AppError::UnknownAttention => 20,
-        AppError::UnknownChromeWorkspace => 21,
-        AppError::UnknownChromeTab => 22,
-        AppError::ComposerHistoryUnavailable => 23,
-        AppError::ComposerHistoryClosed => 24,
-        AppError::ComposerHistoryNoSelection => 25,
-        AppError::PaletteNotOpen => 26,
-        AppError::PaletteNoSelection => 27,
-        AppError::TabCreationUnavailable => 28,
-        AppError::PaneSplitUnavailable => 29,
-        AppError::UnknownBlock => 30,
-        AppError::CannotCloseLastTab => 31,
-        AppError::CannotCloseLastPane => 32,
-        AppError::CannotCloseBoundPane => 33,
-        AppError::NoSplitDivider => 34,
-        AppError::ProvisioningRejected => 35,
-        AppError::ProvisioningCapacityExceeded => 36,
-        AppError::NavigationUnsupportedKind => 37,
-        AppError::NavigationDenied => 38,
-        AppError::NavigationUnknownWorkspace => 39,
-        AppError::NavigationUnknownTab => 40,
-        AppError::NavigationUnknownPane => 41,
-        AppError::NavigationUnknownExecution => 42,
-        AppError::NavigationNotComposed => 43,
-        AppError::NavigationTargetTerminated => 44,
-        AppError::NavigationTargetUnbound => 45,
-        AppError::NavigationAmbiguousTarget => 46,
-        AppError::GotoNotOpen => 47,
-        AppError::GotoNoSelection => 48,
-        AppError::GotoUnsupportedScope => 49,
     }
 }

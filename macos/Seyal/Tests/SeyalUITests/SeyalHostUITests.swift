@@ -920,12 +920,11 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertFalse(palette.waitForExistence(timeout: 1))
     }
 
-    func testViewMenuExposesGoTo() throws {
+    func testProjectedMenusExposeFileViewAndWindow() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
-        let view = app.menuBars.menuBarItems["View"]
-        XCTAssertTrue(view.waitForExistence(timeout: 5))
-        view.click()
-        XCTAssertTrue(view.menuItems["Go to…"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuBars.menuBarItems["File"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
 }
