@@ -41,24 +41,29 @@ impl ShellFamily {
     }
 }
 
-/// Build the interactive profile-0 argv for a validated program path.
+/// Build interactive argv for a validated program path and login bit.
 ///
-/// | Family | Argv | Semantics |
-/// |--------|------|-----------|
-/// | zsh    | `-l -i` | login interactive |
-/// | bash   | `-l -i` | login interactive |
-/// | fish   | `-l -i` | login interactive (documented `-l` / `-i`) |
-/// | tcsh/csh | `-l` | login interactive on a tty (`-l -i` is rejected) |
-/// | sh     | `-i`    | non-login interactive (fallback and `/bin/sh` accounts) |
-/// | other  | `-i`    | unknown family: non-login interactive |
+/// | Family | login=true | login=false |
+/// |--------|------------|-------------|
+/// | zsh/bash/fish | `-l -i` | `-i` |
+/// | tcsh/csh | `-l` | `-i` |
+/// | sh / other | `-i` | `-i` (login bit cannot force login) |
 ///
 /// Never includes user-supplied `-c` / `--command` payloads.
-pub fn interactive_login_argv(program: &Path) -> Vec<OsString> {
+pub fn interactive_argv(program: &Path, login: bool) -> Vec<OsString> {
     match ShellFamily::from_program(program) {
-        ShellFamily::Zsh | ShellFamily::Bash | ShellFamily::Fish => {
+        ShellFamily::Sh | ShellFamily::Other => vec![OsString::from("-i")],
+        ShellFamily::Zsh | ShellFamily::Bash | ShellFamily::Fish if login => {
             vec![OsString::from("-l"), OsString::from("-i")]
         }
-        ShellFamily::Tcsh => vec![OsString::from("-l")],
-        ShellFamily::Sh | ShellFamily::Other => vec![OsString::from("-i")],
+        ShellFamily::Tcsh if login => vec![OsString::from("-l")],
+        ShellFamily::Zsh | ShellFamily::Bash | ShellFamily::Fish | ShellFamily::Tcsh => {
+            vec![OsString::from("-i")]
+        }
     }
+}
+
+/// Profile-`0` default: login interactive (ADR-020 §3.3 / SPEC-023 §5.2).
+pub fn interactive_login_argv(program: &Path) -> Vec<OsString> {
+    interactive_argv(program, true)
 }

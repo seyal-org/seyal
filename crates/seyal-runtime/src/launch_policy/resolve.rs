@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    argv::interactive_login_argv,
+    argv::interactive_argv,
     env::{build_base_env, LocaleEnv},
     types::{
         AccountRecord, EffectiveLaunchPolicy, LaunchPolicyFailure, LaunchPolicyResolution,
@@ -92,7 +92,7 @@ fn finish(
     mut warnings: Vec<LaunchPolicyWarning>,
 ) -> Result<LaunchPolicyResolution, LaunchPolicyFailure> {
     let cwd = resolve_cwd(account, inputs.intent, inputs.probe, &mut warnings)?;
-    let argv = interactive_login_argv(&program);
+    let argv = interactive_argv(&program, inputs.intent.login);
     let env = build_base_env(
         account.name(),
         account.home(),
