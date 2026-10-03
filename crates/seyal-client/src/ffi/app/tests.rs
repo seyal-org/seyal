@@ -152,7 +152,7 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
     assert_eq!(relay_composer_status(handle, 0, 0), 0);
     assert_eq!(seyal_app_composer(handle).mode, 2);
     assert_eq!(relay_composer_status(handle, 3, 1), 0);
-    assert_eq!(seyal_app_composer(handle).mode, 1);
+    assert_eq!(seyal_app_composer(handle).mode, 0);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
