@@ -10,9 +10,9 @@ mod accessibility;
 mod chrome_apply;
 mod composer_apply;
 mod goto_apply;
+mod keybinding_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
-mod keybinding_apply;
 mod palette_apply;
 mod presentation_apply;
 mod provisioning_apply;
