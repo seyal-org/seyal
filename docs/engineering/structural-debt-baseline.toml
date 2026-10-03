@@ -195,6 +195,6 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 728
-issue = 1105
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after absorbing L2 navigation inventory/commit_focus helpers, #928 MoveSplitDivider/NoSplitDivider, and P3 release_execution/take_removed_tab_panes detach-only dispose. Tree/window details stay in tree.rs and workspace.rs. Ceiling matches post-master-merge LOC."
+acknowledged_loc = 731
+issue = 1175
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 enables production allows_tab_creation and documents the macOS-only test helper for force policy flips without splitting tree/workspace ownership."
