@@ -74,10 +74,14 @@ No host invocation happens at Prepared. SPEC-026 §9.1 still commits `Dispatchin
 
 Until SPEC-020 V1 ranking is implemented (#681):
 
-1. If `route_offering_id` is present: it must name an offering of an **installed and enabled** adapter; the offering must satisfy hard constraints (SPEC-020 §5) including enforcement class. Record `selection_kind = Pinned`. Do not claim a score.
-2. If it is absent and exactly one eligible enabled offering exists: record `selection_kind = Singleton` (still an immutable RoutingDecision, not ranking).
-3. If it is absent and zero or more than one eligible offering exists: **do not mint** an AgentRun. Return `ExecutionTargetUnavailable`.
-4. Scored selection (`RouterV1`) is forbidden until #681 is Ready. This document is not a second routing authority.
+1. If `route_offering_id` is present:
+   - unknown or uninstalled offering, or hard-constraint miss (SPEC-020 §5, including enforcement class): **do not mint**; return `ExecutionTargetUnavailable`;
+   - offering exists but its adapter is disabled: **do not mint**; return `AdapterNotEnabled`;
+   - otherwise record `selection_kind = Pinned`. Do not claim a score.
+2. If it is absent, count **enabled** offerings that satisfy those hard constraints. This count is **not** filtered by the caller's `adapter.execute` grants (`adapter.execute` is a later unique check).
+   - exactly one: record `selection_kind = Singleton` (still an immutable RoutingDecision, not ranking);
+   - zero or more than one: **do not mint**; return `ExecutionTargetUnavailable`.
+3. Scored selection (`RouterV1`) is forbidden until #681 is Ready. This document is not a second routing authority.
 
 A pin is not a client-supplied launch descriptor. The offering still resolves to manifest-owned program/argv (§5).
 
@@ -114,7 +118,7 @@ Resolution happens in the Agent Backend at dispatch:
 
 - **program** is taken from the enabled manifest at `adapter_manifest_generation`. Client path strings are rejected.
 - **argv** is the template expanded with WorkScope tokens (`{work_scope_root}` only when `cwd_policy = WorkScopeRoot` and the binding is a repository/root). No free-form client argv.
-- **env** is a clear + allowlist (ADR-020 analogue for agent hosts): only names in `env_allowlist`, plus backend-injected non-secret `SEYAL_*` identity refs. Client environment is not inherited. Secrets stay in CredentialStore (SPEC-017 §7).
+- **env** is a clear + allowlist, the same pattern as ADR-020 §3.6 (bounded environment inheritance and redaction) applied to agent hosts: only names in `env_allowlist`, plus backend-injected non-secret `SEYAL_*` identity refs. Client environment is not inherited. Secrets stay in CredentialStore (SPEC-017 §7).
 - **cwd** follows §6.
 
 Daemon CLI flags (`--output-bytes` and any spawn flags) are not a launch descriptor. AB-1.9 already removed `--output-bytes` from the production binary; this specification forbids putting it back as a spawn authority.
@@ -148,9 +152,10 @@ Check order for `StartAgentRun` (extends AB-1.7 / AB-1.9 / SPEC-026 §9.1):
 1. Session principal matches session owner → else `RejectedSession`.
 2. Session has `runs.create` → else `Denied`.
 3. Attempt exists and is startable (SPEC-026) → else `NotFound` / `InvalidTransition`.
-4. Resolved `adapter_id` is enabled; caller has `adapter.execute` for that id → else `Denied`.
-5. Execution target resolvable under §4.3 **and** a host of the required kind is composed → else `ExecutionTargetUnavailable`.
-6. Only then mint AgentRun, persist, `Created → Prepared`, `Prepared → Dispatching`, then `host.start` off-lock.
+4. Resolve the execution target under §4.3 (adapter now known) → else `ExecutionTargetUnavailable` or `AdapterNotEnabled` as §4.3 specifies.
+5. Caller has `adapter.execute` for that resolved `adapter_id` → else `AdapterExecuteDenied`.
+6. A host of the required kind is composed → else `ExecutionTargetUnavailable`.
+7. Only then mint AgentRun, persist, `Created → Prepared`, `Prepared → Dispatching`, then `host.start` off-lock.
 
 `runs.create` alone never starts a host process.
 
@@ -162,15 +167,17 @@ Until #1191 pairing is Done, `UserApprovedLocalClient` and `ManagedClient` canno
 
 `ExecutionTargetUnavailable` is a first-class `CommandError`. It is not `Failed`, `Denied`, or `NotFound`.
 
-It is returned when checks 1–4 passed and:
+It is returned when checks 1–3 and 5 passed and:
 
 - no ExecutionHost of the required kind is composed (today: production `None`); or
-- §4.3 cannot resolve a pin/singleton; or
+- §4.3 cannot resolve a pin/singleton (`ExecutionTargetUnavailable` cases only); or
 - the frozen launch descriptor cannot be materialized.
+
+It is **not** returned for a disabled adapter (`AdapterNotEnabled`) or a missing `adapter.execute` grant (`AdapterExecuteDenied`).
 
 No AgentRun, RoutingDecision, or observation is written.
 
-Until a protocol revision lands, an implementation MUST NOT encode this case as success. Mapping it to generic `Failed` is a transitional encoding only if the result payload distinguishes the reason; the #679 composition Issue must add the typed code.
+An implementation MUST NOT encode this case as success or as generic `Failed`. The #1224 composition child must ship the typed `ExecutionTargetUnavailable` code; a payload-distinguished `Failed` is not a substitute.
 
 ### 8.2 HelloAck capabilities
 
@@ -271,10 +278,10 @@ In addition to SPEC-026 §12:
 | 4 | No pin, exactly one eligible offering | `Singleton` RoutingDecision; same AgentRun |
 | 5 | Client-supplied argv/cwd on StartAgentRun | Malformed / ignored; never used as spawn |
 | 6 | Daemon CLI spawn flags | Unknown flag / not a descriptor |
-| 7 | `runs.create` without `adapter.execute` | `Denied`; no mint |
+| 7 | `runs.create` without `adapter.execute` | `AdapterExecuteDenied`; no mint |
 | 8 | Foreign session | `RejectedSession` before unavailable |
 | 9 | Missing attempt | `NotFound` before unavailable |
-| 10 | Disabled adapter pin | `AdapterNotEnabled` or unavailable as specified; no mint |
+| 10 | Disabled adapter pin | `AdapterNotEnabled`; no mint |
 | 11 | Manifest generation removed after Prepared | Dispatch fail closed; no latest-manifest substitution |
 | 12 | `start` holds no service mutex across child I/O | Concurrent `ReadRun` completes while child live |
 | 13 | Cancel of Active standalone child | `signal_cancel` + reap; run `Terminating` then evidenced `Terminated(Cancelled)` |
