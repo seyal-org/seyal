@@ -272,7 +272,9 @@ Legacy (no duration bit) record fixed header remains exactly 36 bytes before
 command bytes, as already implemented for type 21.
 
 Duration-capable records use a 52-byte fixed header before command bytes
-(little-endian). Fields after the legacy header prefix:
+(little-endian). This is **not** a suffix after the 36-byte legacy header and
+is **not** prefix-compatible with it: `command_len` moves from offset 32 to
+offset 48. Duration-capable record fixed header (52 bytes):
 
 ```text
 id              u64
@@ -380,7 +382,7 @@ a different execution, attachment or presentation epoch.
 | completed Block without duration capability or unknown end | duration absent/unknown; UI must not show a fake `0s` measurement |
 | OSC 7 / terminal path text | untrusted; does not become Block or Workspace CWD authority |
 | secret/interactive child requiring direct input | Pane becomes Raw before arbitrary terminal input is routed |
-| supported SSH integration | may remain Flow using trusted remote boundaries |
+| Nested shell or SSH child | No nonce/hooks propagated; remains part of the outer command; no nested/remote Block or live-CWD claim |
 | unsupported/nested SSH interaction | full-Pane Raw fallback; no simultaneous Flow + raw viewport |
 | Neovim/htop/full-screen app | TUI owns full Pane; composer/Flow interaction absent |
 | TUI exit | same execution returns to Flow or Raw after eligibility re-evaluation |
