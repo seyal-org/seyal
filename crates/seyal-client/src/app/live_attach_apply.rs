@@ -53,10 +53,23 @@ impl ApplicationRoot {
             .map(|intent| intent.pane)
             .ok_or(AppError::ProvisioningRejected)?;
 
-        match LocalDisplayClient::connect_execution_id(execution, Role::Controller) {
+        match self.take_live_attach_connect(execution) {
             Ok(client) => self.complete_live_controller_attach(pane, request_id, client),
-            Err(error) => self.fail_live_controller_attach(pane, error),
+            Err(error) => self.fail_live_controller_attach(owner, request_id, pane, error),
         }
+    }
+
+    fn take_live_attach_connect(
+        &mut self,
+        execution: ExecutionId,
+    ) -> Result<LocalDisplayClient, ClientError> {
+        if self.inject_live_attach_failures > 0 {
+            self.inject_live_attach_failures -= 1;
+            return Err(ClientError::Discovery(
+                crate::DiscoveryFailure::ConnectionRefused,
+            ));
+        }
+        LocalDisplayClient::connect_execution_id(execution, Role::Controller)
     }
 
     fn complete_live_controller_attach(
@@ -84,25 +97,57 @@ impl ApplicationRoot {
         }
         self.pane_client_raws.insert(pane, raw);
 
-        self.complete_create_attach_and_bind(request_id, evidence.attachment)?;
-        self.install_pane_authority(pane, evidence)?;
-        Ok(())
+        let attach = self.complete_create_attach_and_bind(request_id, evidence.attachment);
+        match attach {
+            Ok(execution) => {
+                if self.shell.pane_execution(pane).ok().flatten() == Some(execution) {
+                    if let Err(error) = self.install_pane_authority(pane, evidence) {
+                        self.unregister_extra_pane_client(pane);
+                        return Err(error);
+                    }
+                } else if let Some(focused) = self.authority.map(|bound| bound.pane) {
+                    if let Some(focused_raw) = self.pane_client_raws.get(&focused).copied() {
+                        crate::ffi::set_focused_display_handle(focused_raw);
+                    }
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.unregister_extra_pane_client(pane);
+                if self
+                    .client_handle
+                    .as_ref()
+                    .is_some_and(|handle| handle.raw() == raw)
+                {
+                    let _ = crate::ffi::unregister_client(raw);
+                    self.client_handle = None;
+                    self.pane_client_raws.remove(&pane);
+                }
+                Err(error)
+            }
+        }
     }
 
     fn fail_live_controller_attach(
         &mut self,
+        owner: crate::provisioning::ConnectionOwner,
+        request_id: u64,
         pane: PaneId,
         error: ClientError,
     ) -> Result<(), AppError> {
-        self.provisioning.note_rejected_without_retry(
-            pane,
-            match error {
-                ClientError::UnsupportedInteractiveCapability => {
-                    ProvisioningFailure::CapabilityMissing
-                }
-                _ => ProvisioningFailure::AttachFailed,
-            },
-        );
+        let failure = match error {
+            ClientError::UnsupportedInteractiveCapability => ProvisioningFailure::CapabilityMissing,
+            _ => ProvisioningFailure::AttachFailed,
+        };
+        let still_listed = !matches!(error, ClientError::UnsupportedInteractiveCapability);
+        let effects = self
+            .provisioning
+            .apply_attach_failure(owner, request_id, still_listed);
+        if effects.is_empty() {
+            self.provisioning.note_rejected_without_retry(pane, failure);
+        } else {
+            self.dispatch_live_provisioning_effects(effects)?;
+        }
         Err(map_client_error(error))
     }
 
@@ -139,6 +184,10 @@ impl ApplicationRoot {
             self.derive_presentation(evidence.alternate_screen)?;
             self.sync_composer_presentation();
             self.refresh_output_from_pane_client(pane);
+            #[cfg(target_os = "macos")]
+            if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
+                crate::ffi::set_focused_display_handle(raw);
+            }
         }
         Ok(())
     }
@@ -172,6 +221,9 @@ impl ApplicationRoot {
         let _ = self.derive_presentation(alternate);
         self.sync_composer_presentation();
         self.refresh_output_from_pane_client(focused);
+        if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
+            crate::ffi::set_focused_display_handle(raw);
+        }
     }
 
     fn refresh_output_from_pane_client(&mut self, pane: PaneId) {

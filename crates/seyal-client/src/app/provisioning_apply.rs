@@ -230,13 +230,17 @@ impl ApplicationRoot {
         let effects =
             self.provisioning
                 .apply_create_result(intent.owner, result.request_id, outcome);
-        self.dispatch_wire_effects(
+        if let Err(error) = self.dispatch_wire_effects(
             effects,
             WireDispatchContext {
                 workspace_id: 0,
                 launch_profile: 0,
             },
-        )?;
+        ) {
+            // Attach/dispose-attach may fail after Created; keep polling so
+            // type-39 and later §6.3 work still drain (do not stall terminate).
+            self.last_error = Some(error);
+        }
         Ok(Some(result))
     }
 
@@ -250,15 +254,24 @@ impl ApplicationRoot {
         request_id: u64,
         attachment: AttachmentId,
     ) -> Result<ExecutionId, AppError> {
-        let owner = self
+        let intent = self
             .provisioning
-            .pending_create_by_request_id(request_id)
-            .map(|intent| intent.owner)
+            .pending_attach_by_request_id(request_id)
+            .cloned()
             .ok_or(AppError::ProvisioningRejected)?;
+        let owner = intent.owner;
+        let pending_execution = match intent.phase {
+            crate::provisioning::IntentPhase::Attaching { execution }
+            | crate::provisioning::IntentPhase::Created { execution }
+            | crate::provisioning::IntentPhase::Disposing { execution, .. }
+            | crate::provisioning::IntentPhase::Attached { execution, .. } => execution,
+            _ => return Err(AppError::ProvisioningRejected),
+        };
         let effects = self
             .provisioning
             .apply_attach_success(owner, request_id, attachment);
         let mut bound = None;
+        let mut disposed = false;
         for effect in effects {
             match effect {
                 ProvisioningEffect::BindPane { pane, execution } => {
@@ -269,6 +282,9 @@ impl ApplicationRoot {
                     bound = Some(execution);
                 }
                 other => {
+                    if matches!(other, ProvisioningEffect::SendTerminate { .. }) {
+                        disposed = true;
+                    }
                     self.dispatch_wire_effects(
                         vec![other],
                         WireDispatchContext {
@@ -279,7 +295,26 @@ impl ApplicationRoot {
                 }
             }
         }
-        bound.ok_or(AppError::ProvisioningRejected)
+        if let Some(execution) = bound {
+            Ok(execution)
+        } else if disposed {
+            Ok(pending_execution)
+        } else {
+            Err(AppError::ProvisioningRejected)
+        }
+    }
+
+    pub(super) fn dispatch_live_provisioning_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+    ) -> Result<(), AppError> {
+        self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )
     }
 
     #[cfg(target_os = "macos")]
@@ -563,8 +598,32 @@ impl ApplicationRoot {
             let _ = effect;
             return Err(AppError::NoLiveClient);
         }
-        // P4: type 38 must ride the Controller connection that owns the
-        // attachment (second-tab Controllers are per-pane; create stays shared).
+        // Harness probe uses the in-process pair, not the per-pane registry.
+        if self.wire_client.is_some() {
+            self.with_wire_client_mut(|client| {
+                client.submit_terminate_execution_with_id(request_id, execution, attachment)
+            })?;
+            return Ok(());
+        }
+        // P4 / ADR-017 §6.2: type 38 rides only the Controller that owns the
+        // attachment. Never fall back to the focused pane or create connection.
+        let Some(raw) = self.registry_client_for_attachment(execution, attachment) else {
+            return Err(AppError::NotController);
+        };
+        match crate::ffi::with_client_mut(raw, |client| {
+            client.submit_terminate_execution_with_id(request_id, execution, attachment)
+        }) {
+            Some(Ok(())) => Ok(()),
+            Some(Err(error)) => Err(client_error(error)),
+            None => Err(AppError::NoLiveClient),
+        }
+    }
+
+    fn registry_client_for_attachment(
+        &self,
+        execution: ExecutionId,
+        attachment: AttachmentId,
+    ) -> Option<u64> {
         if let Some(pane) = self
             .pane_authorities
             .values()
@@ -572,21 +631,17 @@ impl ApplicationRoot {
                 authority.execution == execution && authority.attachment == attachment
             })
             .map(|authority| authority.pane)
-            .or_else(|| self.authority.map(|authority| authority.pane))
-            && let Some(raw) = self.pane_client_raws.get(&pane).copied()
         {
-            return match crate::ffi::with_client_mut(raw, |client| {
-                client.submit_terminate_execution_with_id(request_id, execution, attachment)
-            }) {
-                Some(Ok(())) => Ok(()),
-                Some(Err(error)) => Err(client_error(error)),
-                None => Err(AppError::NoLiveClient),
-            };
+            if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
+                return Some(raw);
+            }
         }
-        self.with_wire_client_mut(|client| {
-            client.submit_terminate_execution_with_id(request_id, execution, attachment)
-        })?;
-        Ok(())
+        self.pane_client_raws.values().copied().find(|raw| {
+            crate::ffi::with_client(*raw, |client| {
+                client.execution_id() == execution && client.attachment_id() == attachment
+            })
+            .unwrap_or(false)
+        })
     }
 
     #[cfg(not(target_os = "macos"))]

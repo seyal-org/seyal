@@ -134,6 +134,10 @@ impl ProvisioningSession {
         self.last_failure
     }
 
+    pub fn has_outstanding_intent(&self) -> bool {
+        !self.pending_by_key.is_empty()
+    }
+
     pub fn owner_for_pane(&self, pane: PaneId) -> Option<ConnectionOwner> {
         self.pane_owners
             .get(&pane)
@@ -174,6 +178,21 @@ impl ProvisioningSession {
                     Some(intent)
                 } else {
                     None
+                }
+            })
+    }
+
+    /// Locate a pending create **or** §6.3 dispose-attach intent by request id.
+    pub fn pending_attach_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
+        self.pending_by_key
+            .iter()
+            .find_map(|((owner, id), intent)| {
+                if *id != request_id {
+                    return None;
+                }
+                match self.pending_kind.get(&(*owner, *id))? {
+                    PendingKind::Create | PendingKind::DisposeAttach => Some(intent),
+                    PendingKind::Terminate => None,
                 }
             })
     }

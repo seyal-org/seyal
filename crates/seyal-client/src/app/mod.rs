@@ -470,6 +470,9 @@ pub struct ApplicationRoot {
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
+    /// Remaining injected live-attach failures before a real connect (C2b tests).
+    #[cfg(target_os = "macos")]
+    inject_live_attach_failures: u32,
 }
 
 impl Default for ApplicationRoot {
@@ -531,7 +534,23 @@ impl ApplicationRoot {
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            inject_live_attach_failures: 0,
         }
+    }
+
+    /// Test-only: fail the next `n` live second-Controller connects (ADR-017 §6.3).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn inject_live_attach_failures(&mut self, n: u32) {
+        self.inject_live_attach_failures = n;
+    }
+
+    /// Extra per-pane Controller registry entries (second+ tabs).
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn extra_pane_client_count(&self) -> usize {
+        self.extra_pane_clients.len()
     }
 
     /// Portable provisioning session (ADR-017 C1). Hosts/wire adapters drive

@@ -156,6 +156,7 @@ impl ApplicationRoot {
         // Drain create results from the create-admitting client (may differ
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;
+        self.poll_unfocused_pane_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
@@ -184,6 +185,27 @@ impl ApplicationRoot {
         });
         Ok(())
     }
+
+    /// Drain unfocused second-tab Controllers so type-39/control frames do not
+    /// stall until the tab is focused again. Display output stays focused-pane.
+    #[cfg(target_os = "macos")]
+    fn poll_unfocused_pane_clients(&mut self) {
+        let focused = self.authority.map(|bound| bound.pane);
+        let handles: Vec<u64> = self
+            .pane_client_raws
+            .iter()
+            .filter(|(pane, _)| focused != Some(**pane))
+            .map(|(_, raw)| *raw)
+            .collect();
+        for raw in handles {
+            let _ = crate::ffi::with_client_mut(raw, |client| {
+                let _ = client.poll_prepare();
+            });
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn poll_unfocused_pane_clients(&mut self) {}
 }
 
 impl ApplicationRoot {
