@@ -2,7 +2,7 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) is **proposed** under Issue #1083 in PR #1060. It becomes accepted on merge of that PR. #865 consumes the text after acceptance; it does not own the amendment, and its implementation is not Done.
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) **accepted** on merge of PR #1060 under Issue #1083 by a non-author maintainer (independent review of `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`). #865 consumes the accepted text; it does not own the amendment, and its implementation is not Done.
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`
 - **Depends on:** SPEC-001, SPEC-002, SPEC-003
@@ -148,7 +148,7 @@ Pass 7 extensions retain framing version `1.0` and are capability-gated. A clien
 | 17 | C→R | `TerminalKey` — Pass 7 capability-gated extension |
 | 18 | C→R | `ResizeRequest` — Pass 7 correlated resize |
 | 19 | R→C | `ResizeResult` — Pass 7 correlated resize result |
-| 35 | R→C | `ViewportLineIds` — §8.1, proposed under #1083 |
+| 35 | R→C | `ViewportLineIds` — §8.1, accepted under #1083 / PR #1060 |
 | 36 | C→R | `CreateExecutionRequest` — M003 provisioning (§18) |
 | 37 | R→C | `CreateExecutionResult` — M003 provisioning (§18) |
 | 38 | C→R | `TerminateExecutionRequest` — M003 disposition (§18) |
@@ -165,14 +165,14 @@ M001 / live capability bits (master + open claims), for allocation hygiene:
 - bit 6: grapheme display (`CAP_GRAPHEME_DISPLAY`);
 - bit 7: extended terminal key (`CAP_EXTENDED_TERMINAL_KEY`);
 - bit 8: reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION` (not yet in production code);
-- bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, proposed under #1083;
+- bit 9: visible-viewport LineIds (`CAP_VIEWPORT_LINE_IDS`, `1 << 9`) — §8.1, accepted under #1083 / PR #1060;
 - bit 10: execution provisioning/disposition (`CAP_EXECUTION_PROVISIONING`) — §18, normative only on ADR-017 acceptance.
 
-Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are proposed for `ViewportLineIds` (§8.1, under #1083). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**.
+Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` plus Pass 8 metadata). Beyond the rows above, the live owners are: 20 `ComposerCommand`, 21 `BlockTimeline`, 22 `ComposerResult`, 23 `ComposerStatus`, 24 `HistoryRangeRequest`, 25 `HistoryRangeSnapshot`, 26 `BLOCK_STATE_MESSAGE_TYPE` (R→C, `pass8.rs`, outside the `MessageType` enum), 27 `DisplaySnapshotV2`, 28 `DisplayDeltaV2`, 29 `TerminalKeyV2`, 30 `Paste`, 31 `HostSelection`, 32 `CopiedText`, 33 `HostSearch`, 34 `TerminalMouse`. Type **35** and bit 9 are allocated to `ViewportLineIds` (§8.1, accepted under #1083 / PR #1060). §18 therefore assigns the next free types, **36–39**, and the next free capability bit, **bit 10**.
 
-### 8.1 Viewport LineIds (proposed, #1083)
+### 8.1 Viewport LineIds (accepted, #1083)
 
-- **Status:** proposed under Issue #1083 in PR #1060. Acceptance is on merge of that PR by a reviewer other than the author. This text is a wire contract only; no production implementation is accepted by it. #865 / #1058 consume it after acceptance and must prove §16.2 before #865 can be Done.
+- **Status:** accepted on merge of PR #1060 under Issue #1083 by a non-author maintainer (independent review of `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`). This is a normative wire contract only; no production implementation is accepted by it. #865 / #1058 consume this contract and must prove §16.2 before #865 can be Done.
 - **Nature:** additive and capability-gated. Framing version remains `1.0`. §6 records the Attached `ViewportLineIds` edge. §11 names this frame as its own one-slot output class.
 
 Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS = 1 << 9`). It carries the visible viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only.
@@ -567,7 +567,7 @@ Accepted SPEC-006 requires the Pass 7 production implementation to prove:
 
 ### 16.2 ViewportLineIds validation (#1083)
 
-Required once #1083 is accepted on merge of PR #1060. The production proof lives on the #865 implementation candidate:
+Required now that #1083 is accepted on merge of PR #1060. The production proof lives on the #865 implementation candidate:
 
 - malformed payloads: generation 0, non-zero reserved, `row_count` 0 or greater than 256, length not `12 + 8 × row_count`, a zero id, a non-consecutive repeated id. A malformed frame is discarded and clears the stored vector. It does not close the connection;
 - a consecutive run of the same id is accepted. A narrowing resize that soft-wraps one source line across two visible rows publishes both rows with that id and the client commits the frame;
