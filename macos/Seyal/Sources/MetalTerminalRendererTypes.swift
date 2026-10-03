@@ -309,6 +309,8 @@ struct MetalRendererStats: Equatable {
     var rebuiltCells: UInt64 = 0
     var instanceBufferAllocations: UInt64 = 0
     var instanceBytes: UInt64 = 0
+    /// Cells rewritten into live-tail instance buffers (partial-damage evidence).
+    var liveTailCellsRewritten: UInt64 = 0
 }
 
 struct MetalSubmissionTiming {

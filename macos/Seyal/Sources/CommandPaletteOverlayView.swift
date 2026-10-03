@@ -113,11 +113,11 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
         }
         let isGoto = palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0
         let truncated = palette.flags & UInt16(SEYAL_APP_PALETTE_TRUNCATED) != 0
-        if isGoto {
-            let scope = gotoScopeName(UInt8(palette.reserved & 0xff))
-            query.placeholderString = truncated
-                ? "Go to \(scope) (truncated)…"
-                : "Go to \(scope)…"
+        if isGoto || open {
+            let placeholder = seyal_app_copy(appHandle, UInt16(SEYAL_APP_COPY_PALETTE_PLACEHOLDER))
+            if let text = copyUTF8(placeholder.title, placeholder.title_len) {
+                query.placeholderString = text
+            }
         } else {
             query.placeholderString = "Type a command..."
         }
@@ -270,21 +270,11 @@ final class CommandPaletteOverlayView: NSView, NSTextFieldDelegate {
     private func cycleGotoScope() {
         let palette = seyal_app_palette(appHandle)
         guard palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO) != 0 else { return }
-        let next = (Int(palette.reserved & 0xff) + 1) % 4
+        // Scope order is Rust product behavior (ADR-015); host only forwards Tab.
         dispatch(
             kind: UInt16(SEYAL_APP_ACTION_SET_GOTO_SCOPE.rawValue),
-            reserved: UInt32(next)
+            reserved: UInt32(SEYAL_APP_GOTO_CYCLE_NEXT.rawValue)
         )
-    }
-
-    private func gotoScopeName(_ value: UInt8) -> String {
-        switch value {
-        case UInt8(SEYAL_APP_GOTO_WORKSPACES.rawValue): return "Workspaces"
-        case UInt8(SEYAL_APP_GOTO_TABS.rawValue): return "Tabs"
-        case UInt8(SEYAL_APP_GOTO_PANES.rawValue): return "Panes"
-        case UInt8(SEYAL_APP_GOTO_SESSIONS.rawValue): return "Sessions"
-        default: return "…"
-        }
     }
 
     // MARK: Projection

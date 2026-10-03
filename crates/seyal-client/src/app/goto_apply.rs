@@ -30,6 +30,15 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    pub(super) fn cycle_goto_scope(&mut self, fence: AppFence) -> Result<(), AppError> {
+        self.require_fence(fence)?;
+        self.goto
+            .apply(GotoAction::CycleScope, 0)
+            .map_err(goto_error)?;
+        self.rebuild_goto();
+        Ok(())
+    }
+
     pub(super) fn set_goto_query(
         &mut self,
         fence: AppFence,

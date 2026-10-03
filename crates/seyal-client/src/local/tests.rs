@@ -1,7 +1,11 @@
 use super::*;
-use seyal_runtime::local_ipc::framing::{ErrorCode, ErrorMessage, MessageType};
+use seyal_runtime::local_ipc::framing::{
+    ErrorCode, ErrorMessage, ExecutionList, ExecutionListEntry, Lifecycle, LifecycleMessage,
+    MessageType,
+};
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 
 fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
@@ -57,6 +61,14 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        execution_provisioning_negotiated: false,
+        next_provisioning_request_id: 1,
+        pending_create_requests: std::collections::HashSet::new(),
+        pending_terminate_requests: std::collections::HashSet::new(),
+        last_create_result: VecDeque::new(),
+        last_terminate_result: None,
+        viewport_line_ids: Vec::new(),
+        viewport_line_ids_generation: 0,
     }
 }
 
@@ -125,6 +137,66 @@ fn malformed_v2_display_requests_resync_before_valid_snapshot_converges() {
     let header = FrameHeader::decode(&outbound[..count]).expect("resync header");
     assert_eq!(header.message_type, MessageType::Resync as u16);
     assert!(!client.resync_needed);
+}
+
+#[test]
+fn finalized_execution_ends_client_after_consuming_lifecycle_marker() {
+    let (client_stream, mut server_stream) = UnixStream::pair().expect("stream pair");
+    client_stream
+        .set_nonblocking(true)
+        .expect("nonblocking client");
+    let execution_id = ExecutionId::from_bytes([1; 16]);
+    let finalized = encode_frame(
+        MessageType::Lifecycle,
+        &LifecycleMessage {
+            execution_id,
+            lifecycle: Lifecycle::Finalized,
+        }
+        .encode(),
+    );
+    server_stream
+        .write_all(&finalized)
+        .expect("write finalized lifecycle");
+
+    let mut client = test_client(client_stream);
+    assert!(matches!(
+        client.poll_prepare(),
+        Err(ClientError::NoRunningExecution)
+    ));
+}
+
+#[test]
+fn pinned_execution_must_still_be_running_before_reconnect() {
+    let execution_id = ExecutionId::from_bytes([1; 16]);
+    let other_id = ExecutionId::from_bytes([2; 16]);
+    let running = ExecutionList {
+        entries: vec![ExecutionListEntry {
+            execution_id,
+            lifecycle: Lifecycle::Running,
+            has_controller: false,
+            attachment_count: 0,
+        }],
+    };
+    let finalized = ExecutionList {
+        entries: vec![ExecutionListEntry {
+            execution_id,
+            lifecycle: Lifecycle::Finalized,
+            has_controller: false,
+            attachment_count: 0,
+        }],
+    };
+    let different_execution = ExecutionList {
+        entries: vec![ExecutionListEntry {
+            execution_id: other_id,
+            lifecycle: Lifecycle::Running,
+            has_controller: false,
+            attachment_count: 0,
+        }],
+    };
+
+    assert!(execution_is_running(&running, execution_id));
+    assert!(!execution_is_running(&finalized, execution_id));
+    assert!(!execution_is_running(&different_execution, execution_id));
 }
 
 #[test]
@@ -235,8 +307,8 @@ fn composer_status_frames_update_the_client_in_revision_order() {
 
 #[test]
 fn raw_metadata_fallback_keeps_pass71_but_drops_only_pass8_capability() {
-    let full = discovery::requested_capabilities(true, true);
-    let fallback = discovery::requested_capabilities(false, true);
+    let full = discovery::requested_capabilities(true, true, true, true);
+    let fallback = discovery::requested_capabilities(false, true, true, true);
     assert_ne!(
         full & seyal_runtime::local_ipc::framing::CAP_EXTENDED_TERMINAL_KEY,
         0
@@ -480,5 +552,75 @@ fn v2_sent_bound_advances_only_after_wire_complete() {
             .classify_incoming_error(type29(ErrorCode::Backpressure, 7))
             .unwrap(),
         Some(InputAdmissionFailure::ClientBackpressure)
+    );
+}
+
+#[test]
+fn malformed_type_35_discards_and_clears_without_protocol_error() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 3;
+    client.cache.rows = 2;
+    client.viewport_line_ids = vec![10, 11];
+    client.viewport_line_ids_generation = 3;
+    let mut payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 1,
+        line_ids: vec![10, 11],
+    }
+    .encode();
+    payload[0..8].copy_from_slice(&0u64.to_le_bytes());
+    assert_eq!(client.apply_viewport_line_ids(&payload), Ok(true));
+    assert!(client.viewport_line_ids.is_empty());
+    assert_eq!(client.viewport_line_ids_generation, 0);
+}
+
+#[test]
+fn consecutive_soft_wrap_line_ids_commit() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 5;
+    client.cache.rows = 3;
+    let payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 5,
+        line_ids: vec![1, 1, 2],
+    }
+    .encode();
+    assert_eq!(client.apply_viewport_line_ids(&payload), Ok(true));
+    assert_eq!(client.viewport_line_ids, vec![1, 1, 2]);
+}
+
+#[test]
+fn same_generation_different_row_count_clears_without_fatal() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 5;
+    client.cache.rows = 3;
+    client.viewport_line_ids = vec![1, 2, 3];
+    client.viewport_line_ids_generation = 5;
+    let payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 5,
+        line_ids: vec![1, 2],
+    }
+    .encode();
+    assert_eq!(client.apply_viewport_line_ids(&payload), Ok(true));
+    assert!(client.viewport_line_ids.is_empty());
+}
+
+#[test]
+fn same_generation_and_row_count_conflicting_ids_are_fatal() {
+    let (stream, _peer) = UnixStream::pair().expect("pair");
+    let mut client = test_client(stream);
+    client.cache.generation = 5;
+    client.cache.rows = 2;
+    client.viewport_line_ids = vec![1, 2];
+    client.viewport_line_ids_generation = 5;
+    let payload = seyal_runtime::local_ipc::framing::ViewportLineIds {
+        generation: 5,
+        line_ids: vec![3, 4],
+    }
+    .encode();
+    assert_eq!(
+        client.apply_viewport_line_ids(&payload),
+        Err(ClientError::Protocol)
     );
 }

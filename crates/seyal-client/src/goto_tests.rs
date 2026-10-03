@@ -1,11 +1,13 @@
 //! SPEC-022 §12 items 28–30 and N4 scope-filter coverage for the goto surface.
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::app::{AppAction, ApplicationRoot};
 use crate::goto::{GotoAction, GotoScope, GotoState, GOTO_ENUMERATION_BOUND};
 use crate::navigation::ResourceAddress;
-use crate::shell::{ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWorkspaceSeed};
+use crate::shell::{
+    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+};
 
 fn twin_shell() -> (
     ShellState,
@@ -22,6 +24,8 @@ fn twin_shell() -> (
     let t2 = TabId::from_bytes([0xb2; 16]);
     let p1 = PaneId::from_bytes([0xc1; 16]);
     let p2 = PaneId::from_bytes([0xc2; 16]);
+    let win1 = WindowId::from_bytes([0xd1; 16]);
+    let win2 = WindowId::from_bytes([0xd2; 16]);
     let shell = ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -29,16 +33,20 @@ fn twin_shell() -> (
                 name: "Twin".into(),
                 detail: None,
                 attention: false,
-                active_tab: t1,
-                tabs: vec![ShellTabSeed {
-                    id: t1,
-                    title: "Shared".into(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p1,
+                active_window: win1,
+                windows: vec![ShellWindowSeed {
+                    id: win1,
+                    active_tab: t1,
+                    tabs: vec![ShellTabSeed {
+                        id: t1,
                         title: "Shared".into(),
-                        allows_implicit_execution_bootstrap: true,
-                    },
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "Shared".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    }],
                 }],
             },
             ShellWorkspaceSeed {
@@ -46,16 +54,20 @@ fn twin_shell() -> (
                 name: "Twin".into(),
                 detail: None,
                 attention: true,
-                active_tab: t2,
-                tabs: vec![ShellTabSeed {
-                    id: t2,
-                    title: "Shared".into(),
-                    attention: true,
-                    pane: ShellPaneSeed {
-                        id: p2,
+                active_window: win2,
+                windows: vec![ShellWindowSeed {
+                    id: win2,
+                    active_tab: t2,
+                    tabs: vec![ShellTabSeed {
+                        id: t2,
                         title: "Shared".into(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                        attention: true,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "Shared".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],
@@ -215,14 +227,19 @@ fn truncated_enumeration_is_reported_and_stable() {
             },
         });
     }
+    let window = WindowId::from_bytes([0xe1; 16]);
     let shell = ShellState::from_workspaces(
         vec![ShellWorkspaceSeed {
             id: workspace,
             name: "Wide".into(),
             detail: None,
             attention: false,
-            active_tab,
-            tabs,
+            active_window: window,
+            windows: vec![ShellWindowSeed {
+                id: window,
+                active_tab,
+                tabs,
+            }],
         }],
         workspace,
         true,
@@ -329,10 +346,16 @@ fn filter_sessions_scope_lists_only_executions() {
         .expect("bind");
     let mut goto = GotoState::new();
     open_scope(&mut goto, &shell, GotoScope::Sessions);
-    goto.apply(GotoAction::SetQuery("live".into()), 0).unwrap();
+    goto.apply(GotoAction::SetQuery("Shared".into()), 0)
+        .unwrap();
     goto.rebuild(&shell.navigation_inventory());
     let snap = goto.snapshot();
     assert_eq!(snap.rows.len(), 1);
+    assert!(
+        !snap.rows[0].label.contains("live"),
+        "session labels must not fabricate a live badge: {}",
+        snap.rows[0].label
+    );
     assert_scope_only_kind(GotoScope::Sessions, &snap.rows);
     assert_eq!(
         snap.rows[0].address,
@@ -364,4 +387,26 @@ fn filter_sessions_scope_lists_only_executions() {
     assert_eq!(root.snapshot().shell.active_tab, t1);
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     assert!(!root.snapshot().goto.open);
+}
+
+#[test]
+fn cycle_scope_advances_in_rust_owned_order() {
+    let (shell, _, _, _, _, _, _) = twin_shell();
+    let mut goto = GotoState::new();
+    open_scope(&mut goto, &shell, GotoScope::Workspaces);
+    assert_eq!(goto.snapshot().scope, GotoScope::Workspaces);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    goto.rebuild(&shell.navigation_inventory());
+    assert_eq!(goto.snapshot().scope, GotoScope::Tabs);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    assert_eq!(goto.snapshot().scope, GotoScope::Panes);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    assert_eq!(goto.snapshot().scope, GotoScope::Sessions);
+    goto.apply(GotoAction::CycleScope, 0).unwrap();
+    assert_eq!(goto.snapshot().scope, GotoScope::Workspaces);
+    assert_eq!(GotoScope::Panes.placeholder(false), "Go to Panes…");
+    assert_eq!(
+        GotoScope::Sessions.placeholder(true),
+        "Go to Sessions (truncated)…"
+    );
 }

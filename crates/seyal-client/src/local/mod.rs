@@ -2,6 +2,8 @@ mod attach;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod provisioning_wire;
+mod viewport_line_ids;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -14,9 +16,10 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{decode_chunk, DisplayCache},
     local_ipc::framing::{
-        encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus, ErrorCode,
-        FrameHeader, HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle, MessageType,
-        ResizeResult, Role, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
+        CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader, HistoryRangeRequest,
+        HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult, Role,
+        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
@@ -29,6 +32,7 @@ use seyal_runtime::local_ipc::framing::{
     TerminalKeyV2Event, TerminalKeyV2Kind, TerminalKeyV2Modifiers,
 };
 
+pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
@@ -78,6 +82,12 @@ pub(crate) fn server_error(code: u16) -> ClientError {
     ErrorCode::from_u16(code)
         .map(ClientError::Server)
         .unwrap_or(ClientError::Protocol)
+}
+
+pub(crate) fn execution_is_running(list: &ExecutionList, execution_id: ExecutionId) -> bool {
+    list.entries
+        .iter()
+        .any(|entry| entry.execution_id == execution_id && entry.lifecycle == Lifecycle::Running)
 }
 
 pub struct LocalDisplayClient {
@@ -135,6 +145,18 @@ pub struct LocalDisplayClient {
     pub(crate) last_sent_v2_action_id: u32,
     pub(crate) highest_v2_error_id: u32,
     pub(crate) last_admitted_mouse_action_id: u32,
+    /// SPEC-004 §18 capability bit 10 negotiated with Runtime.
+    pub(crate) execution_provisioning_negotiated: bool,
+    /// Shared connection-local request-id space for types 36 and 38.
+    pub(crate) next_provisioning_request_id: u64,
+    pub(crate) pending_create_requests: std::collections::HashSet<u64>,
+    pub(crate) pending_terminate_requests: std::collections::HashSet<u64>,
+    pub(crate) last_create_result: VecDeque<CreateExecutionResult>,
+    pub(crate) last_terminate_result: Option<TerminateExecutionResult>,
+    /// Primary viewport LineIds for the latest accepted `ViewportLineIds`
+    /// generation. Cleared on disconnect/resync; empty until Runtime publishes.
+    pub(crate) viewport_line_ids: Vec<u64>,
+    pub(crate) viewport_line_ids_generation: u64,
 }
 
 impl LocalDisplayClient {
@@ -441,14 +463,25 @@ impl LocalDisplayClient {
                         if lifecycle.execution_id != self.execution_id {
                             return Err(ClientError::Protocol);
                         }
-                        if lifecycle.lifecycle == Lifecycle::Finalized
-                            && self.block_metadata_negotiated
-                            && self
-                                .block_cache
-                                .visible()
-                                .is_some_and(|block| block.state == BlockLifecycle::Current)
-                        {
-                            return Err(self.quarantine_block_metadata());
+                        if lifecycle.lifecycle == Lifecycle::Finalized {
+                            // The Runtime orders the final display state (and
+                            // completed Block metadata, when negotiated) before
+                            // this lifecycle marker. The lifecycle event is the
+                            // terminal authority even if the disposable Block
+                            // cache is stale; keep final display/history and
+                            // end this client instead of waiting for a prompt.
+                            if self.block_metadata_negotiated
+                                && self
+                                    .block_cache
+                                    .visible()
+                                    .is_some_and(|block| block.state == BlockLifecycle::Current)
+                            {
+                                // Preserve SPEC-007's fail-closed rule for a
+                                // contradictory Block projection while still
+                                // reporting the stronger execution-ended fact.
+                                let _ = self.quarantine_block_metadata();
+                            }
+                            return Err(ClientError::NoRunningExecution);
                         }
                     }
                     MessageType::CopiedText => {
@@ -458,6 +491,21 @@ impl LocalDisplayClient {
                             return Err(ClientError::Protocol);
                         }
                         self.copied_text = copied.bytes.to_vec();
+                    }
+                    MessageType::CreateExecutionResult => {
+                        let result = CreateExecutionResult::decode(&frame[HEADER_LEN..])
+                            .map_err(|_| ClientError::Protocol)?;
+                        self.accept_create_result(result)?;
+                    }
+                    MessageType::TerminateExecutionResult => {
+                        let result = TerminateExecutionResult::decode(&frame[HEADER_LEN..])
+                            .map_err(|_| ClientError::Protocol)?;
+                        self.accept_terminate_result(result)?;
+                    }
+                    MessageType::ViewportLineIds => {
+                        // Copy off the read buffer before mutating attachment state.
+                        let payload = frame[HEADER_LEN..].to_vec();
+                        metadata_changed |= self.apply_viewport_line_ids(&payload)?;
                     }
                     _ => return Err(ClientError::Protocol),
                 }
@@ -475,6 +523,7 @@ impl LocalDisplayClient {
             let mut chunk = [0u8; READ_CHUNK_BYTES];
             match self.stream.read(&mut chunk) {
                 Ok(0) => {
+                    self.clear_viewport_line_ids();
                     self.input_failure = Some(InputAdmissionFailure::Disconnected);
                     self.resize_failure = Some(ResizeFailure::Disconnected);
                     return Err(ClientError::Disconnected);
@@ -499,6 +548,7 @@ impl LocalDisplayClient {
         }
 
         self.compact_buffer();
+        metadata_changed |= self.drop_unpaired_viewport_line_ids();
         if !committed_any && !metadata_changed {
             return Ok(None);
         }
@@ -628,6 +678,14 @@ pub(crate) fn reconstruction_probe_client(
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
+        execution_provisioning_negotiated: false,
+        next_provisioning_request_id: 1,
+        pending_create_requests: std::collections::HashSet::new(),
+        pending_terminate_requests: std::collections::HashSet::new(),
+        last_create_result: VecDeque::new(),
+        last_terminate_result: None,
+        viewport_line_ids: Vec::new(),
+        viewport_line_ids_generation: 0,
     }
 }
 

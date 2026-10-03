@@ -2,6 +2,19 @@ import AppKit
 import Foundation
 
 extension MetalSurfaceView {
+  /// Recovery remains pinned to the accepted execution after its transport
+  /// disconnects. An implicit first attach is only a bootstrap; its accepted
+  /// identity must not be forgotten and replaced with whichever execution is
+  /// running later.
+  var recoveryExecutionIdentity: String? {
+    if let requestedExecutionIdentity { return requestedExecutionIdentity }
+    guard let bridge else { return nil }
+    return Self.identityString((
+      low: bridge.lastRecoveryResult.executionIDLow,
+      high: bridge.lastRecoveryResult.executionIDHigh
+    ))
+  }
+
   /// Snapshot recovery stage (`SeyalAppRecoveryStage`). Zero handle → disconnected.
   var runtimeRecoveryStage: UInt16 {
     guard recoveryAppHandle != 0 else {
@@ -36,7 +49,8 @@ extension MetalSurfaceView {
       recoveryAppHandle != 0,
       !isRustRecoveryEpisodeActive,
       runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue),
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     else { return }
     beginRustRecoveryEpisode()
   }
@@ -49,7 +63,8 @@ extension MetalSurfaceView {
       bridge?.isConnected != true,
       bridge?.clientHandle == 0,
       recoveryAppHandle != 0,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     else { return bridge?.isConnected == true }
     beginRustRecoveryEpisode()
     return bridge?.isConnected == true
@@ -66,7 +81,8 @@ extension MetalSurfaceView {
       recoveryAppHandle != 0
     else { return false }
     if !isRustRecoveryEpisodeActive,
-      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue)
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_BLOCKED.rawValue),
+      runtimeRecoveryStage != UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue)
     {
       beginRustRecoveryEpisode()
     }

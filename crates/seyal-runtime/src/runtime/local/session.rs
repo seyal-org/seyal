@@ -8,6 +8,7 @@ use crate::{
         framing::{
             self, Attach as WireAttach, Attached as WireAttached, ErrorCode, ExecutionList,
             ExecutionListEntry, Lifecycle as WireLifecycle, MessageType, Role, CAP_COMMAND_BLOCKS,
+            CAP_EXECUTION_PROVISIONING,
         },
     },
     AttachmentId,
@@ -32,6 +33,21 @@ impl Runtime {
             return;
         };
         let Some(kind) = MessageType::from_u16(message_type) else {
+            self.send_error(token, ErrorCode::UnknownMessage, message_type);
+            return;
+        };
+        // SPEC-004 §18.2 / §18.4 validate capability before connection-state for
+        // types 36 and 38 (provisioning / disposition).
+        if kind == MessageType::CreateExecutionRequest {
+            self.handle_create_execution_request(token, payload);
+            return;
+        }
+        if kind == MessageType::TerminateExecutionRequest {
+            self.handle_terminate_execution_request(token, payload);
+            return;
+        }
+        if kind == MessageType::ViewportLineIds {
+            // Type 35 is Runtime→client only.
             self.send_error(token, ErrorCode::UnknownMessage, message_type);
             return;
         };
@@ -95,7 +111,9 @@ impl Runtime {
             & !(CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
-                | framing::CAP_EXTENDED_TERMINAL_KEY)
+                | framing::CAP_EXTENDED_TERMINAL_KEY
+                | CAP_EXECUTION_PROVISIONING
+                | framing::CAP_VIEWPORT_LINE_IDS)
             != 0
         {
             self.send_error(
@@ -114,7 +132,9 @@ impl Runtime {
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_COMMAND_BLOCKS
                 | CAP_BLOCK_METADATA
-                | framing::CAP_GRAPHEME_DISPLAY,
+                | framing::CAP_GRAPHEME_DISPLAY
+                | CAP_EXECUTION_PROVISIONING
+                | framing::CAP_VIEWPORT_LINE_IDS,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };
@@ -257,6 +277,12 @@ impl Runtime {
             self.close_local_connection(token);
             return;
         }
+        self.maybe_send_viewport_line_ids(
+            token,
+            attach.execution_id,
+            snapshot.source_damage_generation,
+            snapshot.rows,
+        );
         if !self.sync_local_writable(token) {
             return;
         }

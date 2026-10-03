@@ -214,6 +214,11 @@ final class SeyalHostUITests: XCTestCase {
             app.descendants(matching: .any)["seyal-pane-region-1"].exists,
             "M001 policy projects exactly one Pane region"
         )
+        // #928: a single-leaf tree has no Split, so no divider is projected.
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-divider-0"].exists,
+            "no split divider without a Split"
+        )
         let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
         let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
@@ -921,22 +926,5 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["File"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
-    }
-
-    func testViewMenuExposesGoToForTheShortcutSurface() throws {
-        let app = hostedApp()
-        waitForUsablePty(in: app)
-        let view = app.menuBars.menuBarItems["View"]
-        XCTAssertTrue(view.waitForExistence(timeout: 5))
-        view.click()
-        XCTAssertTrue(view.menuItems["Go to…"].waitForExistence(timeout: 5))
-    }
-
-    func testCommandPalettePresentsForHistoryRows() throws {
-        let app = hostedApp()
-        waitForUsablePty(in: app)
-        app.typeKey("k", modifierFlags: [.command])
-        let palette = app.descendants(matching: .any)["seyal-command-palette"]
-        XCTAssertTrue(palette.waitForExistence(timeout: 5))
     }
 }

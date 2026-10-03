@@ -46,15 +46,16 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS_PANE = 21,
     SEYAL_APP_ACTION_SET_SHELL_CHROME = 22,
     /*
-     * Workspace/Tab/Pane composition mutations (#922). CREATE_TAB/CLOSE_TAB/
-     * SPLIT_FOCUSED/CLOSE_PANE route through the same Rust ShellState as
-     * SELECT_WORKSPACE/SELECT_TAB/FOCUS_PANE; they fail closed (do not
-     * mutate) rather than silently no-op. CLOSE_TAB/CLOSE_PANE:
+     * Workspace/Tab/Pane composition mutations (#922 / #1149). CREATE_TAB
+     * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
+     * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
+     * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
      * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
-     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (the Pane is
-     * bound to an execution; disposition is not yet available).
+     * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
+     * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER),
+     * 35 = ProvisioningRejected, 36 = ProvisioningCapacityExceeded.
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -85,7 +86,7 @@ enum SeyalAppActionKind {
      * RUN_PALETTE: when the selected row carries a ResourceAddress, payload =
      *   address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
      *   Verb/chrome rows send payload_len = 0; Rust runs the frozen command.
-     * Navigation never re-resolves by ordinal. Error codes 26-27, 34-43.
+     * Navigation never re-resolves by ordinal. Error codes 26-27, 37-46.
      */
     SEYAL_APP_ACTION_OPEN_PALETTE = 47,
     SEYAL_APP_ACTION_SET_PALETTE_QUERY = 48,
@@ -122,23 +123,33 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_COMMIT_RECONSTRUCTION = 56,
     /** Mark reconstruction disconnected after the host drops the live client. */
     SEYAL_APP_ACTION_DISCONNECT_RECONSTRUCTION = 57,
+    /*
+     * Drag one Split divider (#928). target_execution_lo/hi = the divider's
+     * leading PaneId (SeyalAppPaneDivider.leading_pane_*); reserved = the raw
+     * pointer coordinate along the divider's axis in Tab unit space (x for
+     * axis 0, y for axis 1) as IEEE-754 f32 bits. It may lie outside the
+     * Split; Rust derives the ratio from the Split's area and clamps it to
+     * 0.1...0.9. NaN/infinity return -6. Unknown PaneId = UnknownPane; a Pane
+     * that leads no divider = 34 (NoSplitDivider).
+     */
+    SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER = 58,
+    /**
+     * Explicit Controller terminate (ADR-017 §6.2 / P4). Distinct from
+     * CLOSE_TAB / CLOSE_PANE chrome removal. Requires a matching fence with
+     * controller authority. Never terminates as a side effect of detach.
+     */
+    SEYAL_APP_ACTION_TERMINATE_EXECUTION = 59,
     /**
      * Atomic Navigate(address) (SPEC-022 §4). Payload is required:
      * address_version(u16 LE) + address_kind(u16 LE) + address_bytes[len].
-     * Rejected navigate leaves focus unchanged. Error codes 34-43.
+     * Rejected navigate leaves focus unchanged. Error codes 37-46.
      */
-    SEYAL_APP_ACTION_NAVIGATE = 58,
-    /*
-     * Focus-history Back/Forward (SPEC-022 §6 / N3).
-     * Payload is FocusSeq as little-endian u64.
-     */
-    SEYAL_APP_ACTION_HISTORY_BACK = 59,
-    SEYAL_APP_ACTION_HISTORY_FORWARD = 60,
+    SEYAL_APP_ACTION_NAVIGATE = 60,
     /*
      * Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
      * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
      * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
-     * while open.
+     * while open. Error codes 47-49.
      */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
     SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
@@ -149,7 +160,9 @@ enum SeyalAppGotoScope {
     SEYAL_APP_GOTO_WORKSPACES = 0,
     SEYAL_APP_GOTO_TABS = 1,
     SEYAL_APP_GOTO_PANES = 2,
-    SEYAL_APP_GOTO_SESSIONS = 3
+    SEYAL_APP_GOTO_SESSIONS = 3,
+    /* SET_GOTO_SCOPE only: advance to next scope in Rust (ADR-015). */
+    SEYAL_APP_GOTO_CYCLE_NEXT = 255
 };
 
 /* SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS reserved values. */
@@ -193,7 +206,8 @@ enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_RESTORING = 5,
     SEYAL_APP_RECOVERY_USABLE = 6,
     SEYAL_APP_RECOVERY_EXHAUSTED = 7,
-    SEYAL_APP_RECOVERY_BLOCKED = 8
+    SEYAL_APP_RECOVERY_BLOCKED = 8,
+    SEYAL_APP_RECOVERY_EXECUTION_ENDED = 9
 };
 
 enum SeyalAppRecoveryOutcome {
@@ -203,7 +217,8 @@ enum SeyalAppRecoveryOutcome {
     SEYAL_APP_RECOVERY_ENDPOINT_MISSING = 3,
     SEYAL_APP_RECOVERY_RETRYABLE = 4,
     SEYAL_APP_RECOVERY_CONTROLLER_BUSY = 5,
-    SEYAL_APP_RECOVERY_BLOCKED_OUTCOME = 6
+    SEYAL_APP_RECOVERY_BLOCKED_OUTCOME = 6,
+    SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME = 7
 };
 
 enum SeyalAppRecoveryLaunch {
@@ -322,6 +337,7 @@ enum SeyalAppComposerMode {
 #define SEYAL_APP_COPY_BLOCK_PROMPT 2u
 #define SEYAL_APP_COPY_COMPOSER_HISTORY 3u
 #define SEYAL_APP_COPY_COMPOSER_HISTORY_PLACEHOLDER 4u
+#define SEYAL_APP_COPY_PALETTE_PLACEHOLDER 5u
 
 /*
  * seyal_app_block_row flags: state in the low three bits, plus
@@ -463,6 +479,33 @@ typedef struct SeyalAppPaneRegion {
     float height;
 } SeyalAppPaneRegion;
 
+/*
+ * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
+ * (outer Split first). x/y/width/height is the unit rect of the whole area
+ * the Split divides. line_x/line_y is where the divider sits: for axis 0
+ * (side by side) it is a vertical line at line_x spanning the area's height;
+ * for axis 1 (stacked) a horizontal line at line_y spanning its width. Hosts
+ * centre a hit zone on that line and forward raw pointer positions through
+ * SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER; Rust derives, clamps and re-projects.
+ * Out-of-range indices return size == 0.
+ */
+typedef struct SeyalAppPaneDivider {
+    uint16_t version;
+    uint16_t size;
+    uint16_t axis;
+    uint16_t reserved;
+    uint64_t leading_pane_lo;
+    uint64_t leading_pane_hi;
+    float x;
+    float y;
+    float width;
+    float height;
+    float line_x;
+    float line_y;
+    float ratio;
+    uint32_t reserved1;
+} SeyalAppPaneDivider;
+
 #define SEYAL_APP_ROW_WORKSPACE 0u
 #define SEYAL_APP_ROW_TAB 1u
 #define SEYAL_APP_ROW_PANE 2u
@@ -572,7 +615,7 @@ int32_t seyal_app_invoke_workspace_command(
  * PageUp=23, PageDown=24, Delete=25).
  * shift_applied: Unicode scalar or 0.
  * Returns: 0 fallthrough, 1 consumed (zero PTY), 2 native Command handling,
- * negative = -AppError (34 = ActionUnavailable).
+ * negative = -AppError (50 = ActionUnavailable).
  */
 int32_t seyal_app_route_keystroke(
     uint64_t handle,
@@ -590,6 +633,7 @@ SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
+SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_copy(uint64_t handle, uint16_t kind);
@@ -604,6 +648,23 @@ typedef struct SeyalAppBlockSpan {
 } SeyalAppBlockSpan;
 
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
+
+/* #865 Flow output projection. Hosts must not invent start+511 ranges.
+ * PRIMARY_CLIP: reserved0 = first prepared-frame row; reserved1 = row count.
+ * HISTORY: start_line/end_line inclusive; reserved0/reserved1 unused (0). */
+#define SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED 0u
+#define SEYAL_APP_BLOCK_PROJECTION_HISTORY 1u
+#define SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP 2u
+
+typedef struct SeyalAppBlockProjection {
+    uint16_t kind;
+    uint16_t reserved0;
+    uint32_t reserved1;
+    uint64_t start_line;
+    uint64_t end_line;
+} SeyalAppBlockProjection;
+
+SeyalAppBlockProjection seyal_app_block_projection(uint64_t handle, uint32_t index);
 uint64_t seyal_app_recovery_param(uint64_t handle);
 SeyalAppAccessibility seyal_app_accessibility(uint64_t handle);
 SeyalAppTheme seyal_app_theme(uint16_t appearance);
@@ -651,6 +712,21 @@ SeyalAppVisual seyal_app_visual(uint16_t platform_appearance);
 SeyalAppVisualWarning seyal_app_visual_warning(uint32_t index);
 /* Test/native harness only: reload cold UI config from path (len 0 = default). */
 int32_t seyal_app_test_reload_ui_configuration(const uint8_t *path, size_t path_len);
+
+/*
+ * Launch-policy product copy (ADR-015 / SPEC-023 §9). Rust owns the fixed
+ * non-secret UTF-8; native hosts only render it. Pointers are to static
+ * storage. result_code 17 + detail 1–4 are failures; Created.detail_code bit
+ * index 0/1 are success-after-fallback warnings.
+ */
+typedef struct SeyalLaunchPolicyCopy {
+    const uint8_t *text;
+    uint32_t text_len;
+    uint32_t reserved;
+} SeyalLaunchPolicyCopy;
+
+SeyalLaunchPolicyCopy seyal_launch_policy_failure_copy(uint16_t result_code, uint32_t detail_code);
+SeyalLaunchPolicyCopy seyal_launch_policy_warning_copy(uint32_t bit_index);
 
 int32_t seyal_app_last_error(uint64_t handle);
 

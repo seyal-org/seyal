@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import Metal
 import XCTest
 
 @testable import Seyal
@@ -25,9 +26,15 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(snapshot.version, UInt16(SEYAL_APP_ABI_VERSION))
         XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue))
         XCTAssertEqual(MemoryLayout<SeyalAppBlockSpan>.size, 16)
+        XCTAssertEqual(MemoryLayout<SeyalAppBlockProjection>.size, 24)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED), 0)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_HISTORY), 1)
+        XCTAssertEqual(UInt16(SEYAL_APP_BLOCK_PROJECTION_PRIMARY_CLIP), 2)
         let emptySpan = seyal_app_block_span(handle, 0)
         XCTAssertEqual(emptySpan.start_line, 0)
         XCTAssertEqual(emptySpan.end_line, 0)
+        let emptyProjection = seyal_app_block_projection(handle, 0)
+        XCTAssertEqual(emptyProjection.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
         XCTAssertEqual(seyal_app_destroy(handle), 0)
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
@@ -149,11 +156,12 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testShellCompositionControlsAreOmittedWhenRustPolicyDisallowsThem() throws {
+    func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // M001 production policy: no tab creation/pane splitting, and the sole
-        // Tab/Pane cannot be closed. Rust reports all four as unset flags.
+        // C2 keeps production tab creation gated until a live create→attach→bind
+        // driver exists; pane splitting stays off. With a sole Tab/Pane, close
+        // controls remain omitted. Opt-in CreateTab coverage lives in Rust.
         let shell = seyal_app_shell(view.pane.appHandle)
         for bit in [
             SEYAL_APP_SHELL_ALLOWS_TAB_CREATION,
@@ -164,11 +172,30 @@ final class SeyalHostComponentTests: XCTestCase {
             XCTAssertEqual(shell.flags & UInt16(bit), 0)
         }
         for identifier in [
-            "seyal-new-tab", "seyal-close-tab", "seyal-split-right", "seyal-split-down", "seyal-close-pane",
+            "seyal-new-tab", "seyal-close-tab", "seyal-split-right", "seyal-split-down",
+            "seyal-close-pane",
         ] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
         }
+    }
+
+    @MainActor
+    func testCreateTabFailsClosedWhileProductionTabCreationStaysGated() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), -4)
+        XCTAssertEqual(seyal_app_last_error(handle), 28, "TabCreationUnavailable")
+        view.reconcileChrome()
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 1)
+        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
+        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
     }
 
     @MainActor
@@ -194,6 +221,28 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(live.isHidden)
         XCTAssertEqual(live.frame, regionView.frame)
         XCTAssertGreaterThan(live.frame.width, 0)
+    }
+
+    @MainActor
+    func testSinglePaneProjectsNoSplitDividerAndDividerDragFailsClosed() throws {
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 56)
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_pane_divider(handle, 0).size, 0)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        let row = seyal_app_shell_row(handle, UInt16(SEYAL_APP_ROW_PANE), 0)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER.rawValue)
+        action.target_execution_lo = row.id_lo
+        action.target_execution_hi = row.id_hi
+        action.reserved = Float(0.3).bitPattern
+        XCTAssertNotEqual(seyal_app_apply(handle, &action), 0)
+        XCTAssertEqual(seyal_app_last_error(handle), 34, "NoSplitDivider")
+        XCTAssertEqual(seyal_app_pane_region(handle, 0).width, 1.0, "rejected drag leaves the region full")
     }
 
     @MainActor
@@ -238,6 +287,54 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(composer.isHidden, "nested TUI refresh must hide composer")
     }
 
+    @MainActor
+    func testShellExitRecoveryKeepsFlowAndHidesComposer() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let handle = view.pane.appHandle
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        view.reconcileChrome()
+        let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertFalse(composer.isHidden, "a live Flow execution shows its composer")
+
+        var begin = SeyalAppAction()
+        begin.version = bind.version
+        begin.size = bind.size
+        begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
+        begin.target_pty_generation = 0
+        XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
+        let generation = seyal_app_snapshot(handle).recovery_generation
+
+        var ended = SeyalAppAction()
+        ended.version = bind.version
+        ended.size = bind.size
+        ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
+        ended.target_execution_lo = generation
+        ended.target_pty_generation = 1
+        ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
+
+        let snapshot = seyal_app_snapshot(handle)
+        XCTAssertEqual(snapshot.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
+        XCTAssertEqual(snapshot.recovery_stage, UInt16(SEYAL_APP_RECOVERY_EXECUTION_ENDED.rawValue))
+        XCTAssertEqual(view.recoveryText(snapshot), "shell exited")
+        view.reconcileChrome()
+        XCTAssertTrue(composer.isHidden, "an ended shell cannot accept Flow commands")
+        XCTAssertEqual(seyal_app_composer(handle).mode, UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue))
+    }
+
     func testBundledRuntimeLauncherUsesFixedHelperPath() {
         XCTAssertEqual(BundledRuntimeLauncher.helperRelativePath, "Contents/Helpers/seyal-runtime")
         XCTAssertEqual(BundledRuntimeLauncher.helperIdentifier, "dev.seyal.Seyal.runtime")
@@ -248,12 +345,45 @@ final class SeyalHostComponentTests: XCTestCase {
             IsolatedRuntimeDirectory.helperArguments(from: ["Seyal"], testHostLoaded: false),
             []
         )
+        // XCTest host with no `--runtime-dir` still synthesizes a directory and
+        // must supply a default Flow shell so true-P1 empty-argv helpers create
+        // one execution for headed component smoke (IME live callbacks).
+        let testHostOnly = IsolatedRuntimeDirectory.helperArguments(
+            from: ["Seyal"],
+            testHostLoaded: true
+        )
+        XCTAssertEqual(testHostOnly.count, 3)
+        XCTAssertEqual(testHostOnly[0], "--runtime-dir")
+        XCTAssertTrue(testHostOnly[1].hasPrefix("/"))
+        XCTAssertEqual(testHostOnly[2], "/bin/zsh")
         XCTAssertEqual(
             IsolatedRuntimeDirectory.helperArguments(
                 from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso"],
                 testHostLoaded: false
             ),
             ["--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: true
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false,
+                forwardHelperCommand: true
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
         )
         XCTAssertEqual(
             BundledRuntimeLauncher.helperArgv(
@@ -271,6 +401,95 @@ final class SeyalHostComponentTests: XCTestCase {
             ),
             ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
         )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: true
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: ["Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"],
+                testHostLoaded: false,
+                forwardHelperCommand: true
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+        )
+        // Release / production launch path: the env-var gate must not enable
+        // helper-command forwarding, and trailing argv after `--runtime-dir`
+        // PATH stays ignored even when the variable is set to "1".
+        let releaseForward = BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+            environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"],
+            allowUiTestOverride: false
+        )
+        XCTAssertFalse(releaseForward)
+        XCTAssertEqual(
+            BundledRuntimeLauncher.helperArgv(
+                executable: "/tmp/seyal-runtime",
+                processArguments: [
+                    "Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh", "--evil",
+                ],
+                testHostLoaded: false,
+                forwardHelperCommand: releaseForward
+            ),
+            ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso"]
+        )
+        XCTAssertEqual(
+            IsolatedRuntimeDirectory.helperArguments(
+                from: [
+                    "Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh", "--evil",
+                ],
+                testHostLoaded: false,
+                forwardHelperCommand: releaseForward
+            ),
+            ["--runtime-dir", "/tmp/seyal-iso"]
+        )
+        #if DEBUG
+            XCTAssertEqual(
+                BundledRuntimeLauncher.uiTestForwardRuntimeCommandEnvironmentKey,
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+            )
+            XCTAssertFalse(BundledRuntimeLauncher.uiTestRequestsHelperCommand(environment: [:]))
+            XCTAssertFalse(
+                BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                    environment: ["XCTestConfigurationFilePath": "/tmp/config"]
+                )
+            )
+            XCTAssertFalse(
+                BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                    environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "0"]
+                )
+            )
+            XCTAssertTrue(
+                BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                    environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"]
+                )
+            )
+            XCTAssertEqual(
+                BundledRuntimeLauncher.helperArgv(
+                    executable: "/tmp/seyal-runtime",
+                    processArguments: [
+                        "Seyal", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh",
+                    ],
+                    testHostLoaded: false,
+                    forwardHelperCommand: BundledRuntimeLauncher.uiTestRequestsHelperCommand(
+                        environment: ["SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1"]
+                    )
+                ),
+                ["/tmp/seyal-runtime", "--runtime-dir", "/tmp/seyal-iso", "/bin/zsh"]
+            )
+        #endif
     }
 
     @MainActor
@@ -451,10 +670,14 @@ final class SeyalHostComponentTests: XCTestCase {
         var connectedOnce = false
         var didRetryExhaustedRecovery = false
         let checkConnected = {
+            let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
+            // A zsh account is Flow. A bash account is full-pane Raw (SPEC-008)
+            // and is still a connected projection.
+            let projected = eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                || eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             if !connectedOnce, view.terminalBridgeIsConnected,
                 view.terminalCurrentFrame() != nil,
-                seyal_app_snapshot(pane.appHandle).eligibility
-                    == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+                projected
             {
                 connectedOnce = true
                 connected.fulfill()
@@ -699,6 +922,11 @@ final class SeyalHostComponentTests: XCTestCase {
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.
+    @MainActor
+    func testTerminalDefaultCellColorsFollowThemeWithoutRebuildingPreparedFrames() {
+        XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
+    }
+
     @MainActor
     func testM002RendererPrepareSubmissionContractWritesCohort() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath)
@@ -1143,7 +1371,7 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         XCTAssertFalse(
             sawNewTab,
-            "M001 default shell policy disallows tab creation; the command is omitted, not disabled"
+            "production composition omits New Tab while tab creation stays gated"
         )
     }
 
@@ -1247,6 +1475,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
         let theme = NativeThemeRealization.theme(from: visual)
         XCTAssertEqual(theme.appearance.name, NSAppearance.Name.aqua)
+        XCTAssertEqual(theme.terminalDefaultForeground, visual.text.byteSwapped)
+        XCTAssertEqual(theme.terminalDefaultBackground, visual.canvas.byteSwapped)
         XCTAssertEqual(theme.uiFontSize, 16, accuracy: 0.01)
         XCTAssertEqual(theme.terminalFontSize, 18, accuracy: 0.01)
         XCTAssertEqual(theme.windowPadding, 12, accuracy: 0.01)
@@ -1260,6 +1490,25 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(fallback.flags & 2, 2, "full-default fallback flag")
         XCTAssertEqual(fallback.ui_font_size, 12, accuracy: 0.01)
         XCTAssertGreaterThan(fallback.warning_count, 0)
+    }
+
+    /// #1119: Swift only renders Rust-owned launch-policy copy (ADR-015).
+    func testLaunchPolicyProductCopyRendersRustOwnedStrings() {
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 2),
+            "Shell unavailable"
+        )
+        XCTAssertEqual(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 3),
+            "Working directory unavailable"
+        )
+        XCTAssertFalse(
+            LaunchPolicyProductCopy.failureMessage(resultCode: 17, detailCode: 1).contains("/")
+        )
+        let warnings = LaunchPolicyProductCopy.warningMessages(detailCode: 0b11)
+        XCTAssertEqual(warnings.count, 2)
+        XCTAssertTrue(warnings[0].contains("default shell"))
+        XCTAssertTrue(warnings[1].contains("home directory"))
     }
 
     @MainActor
@@ -1315,6 +1564,138 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue((seyal_app_visual(0).flags & 1) != 0)
     }
 
+    // MARK: - Flow live-tail primary clip (#865)
+
+    /// Running Flow Blocks must clip only the Rust-mapped primary-frame row
+    /// slice into the Block region (skip preceding viewport rows) without
+    /// enabling Pane-wide live-grid drawing or inventing `start+511` history.
+    @MainActor
+    func testFlowLiveTailPrimaryClipStaysInsideBlockRegion() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("Metal unavailable")
+        }
+        let renderer = try MetalTerminalRenderer(device: device)
+        renderer.setPresentationPlan(.flow())
+
+        // Three prepared rows: preceding Block output on row 0, running
+        // Block on rows 1..2. Clip must exclude row 0.
+        func cell(_ ch: Character) -> SeyalPreparedCell {
+            var c = SeyalPreparedCell()
+            c.scalar = UInt32(ch.unicodeScalars.first!.value)
+            c.foreground = 0xffe9_e1d8
+            c.background = 0xff10_0d0b
+            return c
+        }
+        var cells = [
+            cell("A"), cell("B"),
+            cell("H"), cell("i"),
+            cell("!"), cell("!")
+        ]
+        func update(generation: UInt64, fullRebuild: Bool, damage: DamageMask) throws -> RendererUpdateResult {
+            try cells.withUnsafeBufferPointer { buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: generation,
+                        rows: 3,
+                        columns: 2,
+                        fullRebuild: fullRebuild,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                )
+            }
+        }
+        var damage = DamageMask()
+        damage.markAll(rows: 3)
+        XCTAssertEqual(try update(generation: 865, fullRebuild: true, damage: damage), .updated)
+
+        let cellSize = renderer.cellPixelSize(backingScale: 1)
+        let region = NativeTranscriptRegion(
+            id: 865,
+            origin: .zero,
+            clip: NSRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(cellSize.width * 2),
+                height: CGFloat(cellSize.height * 2)
+            )
+        )
+        renderer.setTranscriptRegions([region])
+        renderer.setLiveTailBlocks([
+            865: LiveTailClip(startLine: 30, firstRow: 1, rowCount: 2)
+        ])
+
+        XCTAssertEqual(renderer.liveTailRegionCount, 1)
+        // Dense layout: 2 rows × 2 cols (including any zero-size placeholders).
+        XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        // Block-local row 0 comes from prepared viewport row 1 ("H"), not
+        // preceding viewport row 0 ("A").
+        XCTAssertEqual(
+            renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1,
+            0,
+            "first painted live-tail row must be Block-local Y 0"
+        )
+        let allocationsAfterClip = renderer.stats.instanceBufferAllocations
+        let rewrittenAfterClip = renderer.stats.liveTailCellsRewritten
+        let inspection = renderer.inspectPresentation()
+        XCTAssertEqual(inspection.mode, .flow)
+        XCTAssertFalse(inspection.drawsLiveGrid)
+        XCTAssertFalse(inspection.drawsFullGridBackground)
+        XCTAssertFalse(inspection.drawsCursorOutsideBlockRegions)
+        XCTAssertEqual(inspection.blockRegionIDs, [865])
+
+        let paint = renderer.inspectFlowPaint()
+        XCTAssertTrue(paint.isClean, "Flow must not submit Pane-wide live grid")
+        XCTAssertEqual(paint.historyInstanceCount, 4)
+        XCTAssertEqual(paint.instancesOutsideClips, 0)
+
+        // Damage-free update must reuse the live-tail clip without allocating
+        // another live-tail buffer or rewriting cells.
+        XCTAssertEqual(try update(generation: 866, fullRebuild: false, damage: DamageMask()), .updated)
+        XCTAssertEqual(renderer.liveTailInstanceCount(for: 865), 4)
+        XCTAssertEqual(
+            renderer.stats.instanceBufferAllocations,
+            allocationsAfterClip,
+            "damage-free live-tail refresh must not allocate"
+        )
+        XCTAssertEqual(
+            renderer.stats.liveTailCellsRewritten,
+            rewrittenAfterClip,
+            "damage-free live-tail refresh must not rewrite cells"
+        )
+
+        // Partial damage on prepared row 2 (clip-local rowOffset 1) rewrites
+        // only that row's two cells, not the full 4-cell clip.
+        var partial = DamageMask()
+        partial.mark(row: 2)
+        cells[4] = cell("X")
+        cells[5] = cell("Y")
+        XCTAssertEqual(try update(generation: 867, fullRebuild: false, damage: partial), .updated)
+        XCTAssertEqual(
+            renderer.stats.liveTailCellsRewritten,
+            rewrittenAfterClip &+ 2,
+            "partial damage must rewrite only the damaged clip row"
+        )
+        XCTAssertEqual(renderer.liveTailPaintedInstanceCount(for: 865), 4)
+        XCTAssertEqual(renderer.liveTailFirstPaintedOriginY(for: 865) ?? -1, 0, accuracy: 0.01)
+
+        // Clearing live-tail must not re-enable Pane-wide live grid.
+        renderer.setLiveTailBlocks([:])
+        XCTAssertEqual(renderer.liveTailRegionCount, 0)
+        XCTAssertFalse(renderer.inspectPresentation().drawsLiveGrid)
+    }
+
+    func testBlockProjectionABIRejectsInventedRunningHistoryEnd() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let unbound = seyal_app_block_projection(handle, 0)
+        XCTAssertEqual(unbound.kind, UInt16(SEYAL_APP_BLOCK_PROJECTION_FAIL_CLOSED))
+        XCTAssertEqual(unbound.end_line, 0)
+        XCTAssertEqual(unbound.reserved0, 0)
+        XCTAssertEqual(unbound.reserved1, 0)
+    }
 
     @MainActor
     func testPaletteAddressPayloadOmitsEmptyRowsAndPrefixesVersionAndKind() throws {
@@ -1329,9 +1710,11 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(payload.count, 5)
     }
 
-    /// SPEC-022 N4 / #1127: host `openGoto` opens the existing overlay in goto
-    /// mode with the default Panes scope (no second surface).
     @MainActor
+    func testGotoOpenSelectorIsWiredOnTheChromeHost() {
+        XCTAssertTrue(ProductChromeHostView.instancesRespond(to: #selector(ProductChromeHostView.openGoto)))
+    }
+
     func testOpenGotoReusesPaletteOverlayWithDefaultPanesScope() {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.openGoto()
@@ -1653,6 +2036,4 @@ private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
         }
     }
     return nil
-
 }
-

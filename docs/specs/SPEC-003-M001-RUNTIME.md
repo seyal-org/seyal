@@ -4,7 +4,7 @@
 - **Date:** 2026-08-24
 - **Issues:** #70, #80, #82; #994 proposes §4.1 and §5.2
 - **Architecture:** Foundation Architecture + ADR-005 + ADR-006 + ADR-007
-- **Accepted M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative on ADR-017 acceptance** and not implemented.
+- **Accepted M003 amendments:** §4.1 Runtime lifetime versus execution count and §5.2 client-requested provisioning/disposition; **normative** (ADR-017 Accepted). §4.1 production path is on `master` (Issue #1103); §5.2 production path ships with Issue #1105 / PR #1112 (wire contract SPEC-004 §18).
 
 ## 1. Purpose
 
@@ -68,37 +68,42 @@ M001 does not claim that a Runtime crash preserves arbitrary live PTYs.
 
 ### 4.1 Runtime process lifetime versus live-execution count
 
-- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance** (Issue #994, ADR-017).
+- **Status:** accepted amendment (ADR-017 Accepted); implemented on `master` (Issue #1103 / P1).
 
-Runtime process lifetime is independent of the live-execution count. **Zero live
-executions is a valid steady state**: the Runtime keeps its singleton endpoint,
-its `RuntimeId` and its idle reactor wait. It must not exit merely because the
-last live execution finalized.
+The resident lifetime and the no-startup-creation rule are one change. They take
+effect only together with the headed client's initial-Pane provisioning
+(SPEC-009 §8.2.1, child C1). Until that change, a client-launched Runtime with
+an empty argument list keeps M001 behavior: it creates its single startup
+execution, and it may exit when the live-execution count reaches zero. That
+interim is required coverage. Shipping "do not exit at zero" first would leave
+the next GUI launch with a resident Runtime, zero survivors, and no provisioning
+path.
 
-**Who may end the Runtime process on the production path:**
+After that coupled change, Runtime process lifetime is independent of the
+live-execution count. **Zero live executions is a valid steady state**: the
+Runtime keeps its singleton endpoint, its `RuntimeId` and its idle reactor wait.
+It must not exit merely because the last live execution finalized. On the
+production client-launched path the Runtime is started with an empty argument
+list (SPEC-009 §8.1.1) and creates **no** execution from its own startup.
+Provisioning intent has exactly one owner. A Runtime started explicitly with a
+command by a developer or a test harness may still create that execution as its
+own composition, which is not a second product authority. Filed child #1093
+implements this coupled rule. "Empty argv creates no execution" is not a change
+that can merge before C1.
+
+**Who may end the Runtime process on the production path after that change:**
 
 - an OS signal that the process is required to honor;
 - an explicit controlled shutdown under §16, invoked only by a future
   authenticated same-UID control path that this amendment does **not** invent.
   Until that control path is accepted (tracked as a follow-on under #674 / M004
   market-ready Runtime lifecycle, not by #994 children P1–M1), the production
-  client-launched Runtime is **resident for the local user scope** after first
-  launch: headed GUI quit (ADR-018 / #1000) never terminates the Runtime and
-  never invokes §16.
+  client-launched Runtime is **resident for the local user scope** after the
+  coupled change: headed GUI quit (ADR-018 / #1000) never terminates the Runtime
+  and never invokes §16.
 
 Idle CPU and wake behavior at zero live executions must match the existing idle
 requirements in §18; an idle Runtime must not poll.
-
-On the production client-launched path the Runtime is started with an empty
-argument list (SPEC-009 §8.1.1) and must therefore create **no** execution from
-its own startup: provisioning intent has exactly one owner, and a startup-created
-execution would compete with it. A Runtime started explicitly with a command by a
-developer or a test harness may still create that execution as its own
-composition, which is not a second product authority. This no-startup-creation
-rule takes effect only in the same change that makes the headed client provision
-its initial Pane under SPEC-009 §8.2.1. Until then the client-launched Runtime
-keeps its single startup execution, and the zero-execution steady state above is
-the only lifetime change.
 
 ## 5. Execution registry
 
@@ -132,7 +137,7 @@ Pass 4 does not implement named Workspace CRUD, Workspace deletion, layout persi
 
 ### 5.2 M003 client-requested provisioning and disposition
 
-- **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance**.
+- **Status:** accepted amendment (ADR-017 Accepted); implemented under Issue #1105 / PR #1112.
 - **Authority:** [`../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md`](../architecture/ADR-017-EXECUTION-PROVISIONING-AND-DISPOSITION.md); Issue #994. Wire contract is SPEC-004 §18.
 
 An authenticated same-UID local client may request execution creation and, as
@@ -332,6 +337,9 @@ Requirements:
 - nearest pending termination/finalization deadline bounds the next reactor wait;
 - no signal is sent after primary reap;
 - after primary reap, finalization follows §10;
+- detach, or loss of the client connection, after termination has been accepted
+  (`TerminationRequested`) does not cancel this state machine. While Seyal still
+  owns a live primary child, the signalling and reap path stays valid;
 - a termination timeout/failure is observable and does not silently remove ownership bookkeeping;
 - a shell job placed in a distinct job-control process group must not keep Runtime terminal registrations/resources alive after the primary execution is finalized.
 

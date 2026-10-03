@@ -73,6 +73,8 @@ impl LocalIpcServer {
                             display_inflight: None,
                             pending_display: None,
                             display_generation: 0,
+                            attach_snapshot_pin: false,
+                            deferred_after_attach: None,
                         },
                     );
                     events.push(ServerEvent::Connected { token });

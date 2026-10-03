@@ -21,6 +21,7 @@ mod app;
 mod display;
 mod errors;
 mod input;
+mod launch_policy;
 mod session;
 mod types;
 
@@ -72,13 +73,12 @@ pub(crate) use types::{
 
 #[allow(unused_imports)]
 pub use app::{
-    seyal_app_accessibility, seyal_app_apply, seyal_app_block_row, seyal_app_block_span,
-    seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_copy, seyal_app_create,
-    seyal_app_destroy, seyal_app_invoke_workspace_command, seyal_app_last_error,
-    seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row, seyal_app_pane_region,
-    seyal_app_recovery_param, seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row,
-    seyal_app_shortcut_count, seyal_app_shortcut_enabled, seyal_app_shortcut_item,
-    seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
+    seyal_app_accessibility, seyal_app_apply, seyal_app_block_projection, seyal_app_block_row,
+    seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer,
+    seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_invoke_workspace_command, seyal_app_last_error,
+    seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row, seyal_app_pane_divider,
+    seyal_app_pane_region, seyal_app_recovery_param, seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
+    seyal_app_shortcut_item, seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
 };
 #[allow(unused_imports)]
@@ -104,6 +104,10 @@ pub use input::{
     seyal_bridge_propose_geometry, seyal_bridge_retry_resize, seyal_bridge_submit_composer,
     seyal_bridge_submit_host_search, seyal_bridge_submit_host_selection, seyal_bridge_submit_key,
     seyal_bridge_submit_mouse, seyal_bridge_submit_paste, seyal_bridge_submit_utf8,
+};
+#[allow(unused_imports)]
+pub use launch_policy::{
+    seyal_launch_policy_failure_copy, seyal_launch_policy_warning_copy, SeyalLaunchPolicyCopy,
 };
 #[allow(unused_imports)]
 pub use session::{

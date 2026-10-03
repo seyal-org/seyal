@@ -3,15 +3,16 @@
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 
-use seyal_core::{ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::shell::{
-    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWorkspaceSeed, SplitAxis,
+    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+    SplitAxis,
 };
 
 use super::{
-    decode_resource_address, navigate, resolve, ExecutionPresence, NavigateHistory,
-    NavigationPrincipal, NavigationRejection, ResolvedTarget, ResourceAddress, WorkspaceAccess,
+    decode_resource_address, navigate, resolve, ExecutionPresence, NavigationPrincipal,
+    NavigationRejection, ResolvedTarget, ResourceAddress, WorkspaceAccess,
     RESOURCE_ADDRESS_ABI_VERSION, RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE,
     RESOURCE_ADDRESS_KIND_TAB, RESOURCE_ADDRESS_KIND_WORKSPACE,
 };
@@ -61,6 +62,8 @@ fn seed_shell() -> (
     let p2 = PaneId::new();
     let t_other = TabId::new();
     let p_other = PaneId::new();
+    let win1 = WindowId::new();
+    let win2 = WindowId::new();
     let shell = ShellState::from_workspaces(
         vec![
             ShellWorkspaceSeed {
@@ -68,45 +71,53 @@ fn seed_shell() -> (
                 name: "Alpha".to_owned(),
                 detail: Some("shared-label".to_owned()),
                 attention: false,
-                active_tab: t1,
-                tabs: vec![
-                    ShellTabSeed {
-                        id: t1,
-                        title: "Tab One".to_owned(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: p1,
-                            title: "Pane A".to_owned(),
-                            allows_implicit_execution_bootstrap: true,
+                active_window: win1,
+                windows: vec![ShellWindowSeed {
+                    id: win1,
+                    active_tab: t1,
+                    tabs: vec![
+                        ShellTabSeed {
+                            id: t1,
+                            title: "Tab One".to_owned(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: p1,
+                                title: "Pane A".to_owned(),
+                                allows_implicit_execution_bootstrap: true,
+                            },
                         },
-                    },
-                    ShellTabSeed {
-                        id: t2,
-                        title: "Tab Two".to_owned(),
-                        attention: false,
-                        pane: ShellPaneSeed {
-                            id: p2,
-                            title: "Pane B".to_owned(),
-                            allows_implicit_execution_bootstrap: false,
+                        ShellTabSeed {
+                            id: t2,
+                            title: "Tab Two".to_owned(),
+                            attention: false,
+                            pane: ShellPaneSeed {
+                                id: p2,
+                                title: "Pane B".to_owned(),
+                                allows_implicit_execution_bootstrap: false,
+                            },
                         },
-                    },
-                ],
+                    ],
+                }],
             },
             ShellWorkspaceSeed {
                 id: w2,
                 name: "Alpha".to_owned(),
                 detail: Some("shared-label".to_owned()),
                 attention: false,
-                active_tab: t_other,
-                tabs: vec![ShellTabSeed {
-                    id: t_other,
-                    title: "Other".to_owned(),
-                    attention: false,
-                    pane: ShellPaneSeed {
-                        id: p_other,
-                        title: "Other Pane".to_owned(),
-                        allows_implicit_execution_bootstrap: false,
-                    },
+                active_window: win2,
+                windows: vec![ShellWindowSeed {
+                    id: win2,
+                    active_tab: t_other,
+                    tabs: vec![ShellTabSeed {
+                        id: t_other,
+                        title: "Other".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p_other,
+                            title: "Other Pane".to_owned(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
                 }],
             },
         ],
@@ -268,7 +279,7 @@ fn unknown_kind_version_or_size_is_unsupported_without_reading_state() {
 
 #[test]
 fn rejection_navigation_denied() {
-    let (shell, w1, _, _, _, _, _) = seed_shell();
+    let (mut shell, w1, w2, _, _, p1, _) = seed_shell();
     let denied = NavigationPrincipal {
         local_navigation: true,
         workspaces: WorkspaceAccess::Only(&[]),
@@ -290,6 +301,70 @@ fn rejection_navigation_denied() {
             &shell,
             &MapInventory::new(),
             denied
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+
+    // SPEC-022 test 13a(b): one binding outside the principal's Workspace set.
+    let single = ExecutionId::from_bytes([0x21; 16]);
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: p1,
+            execution: single,
+        })
+        .expect("bind single");
+    let only_w2 = NavigationPrincipal {
+        local_navigation: true,
+        workspaces: WorkspaceAccess::Only(std::slice::from_ref(&w2)),
+    };
+    assert_eq!(
+        resolve(
+            ResourceAddress::Execution { execution: single },
+            &shell,
+            &MapInventory::with(single, ExecutionPresence::Live),
+            only_w2
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+
+    // Same rule for n >= 2: AmbiguousTarget must not leak unauthorized shape.
+    let (mut shell_multi, _, w2b, _, _, p_multi, _) = seed_shell();
+    let multi = ExecutionId::from_bytes([0x22; 16]);
+    shell_multi
+        .apply(ShellAction::BindExecution {
+            pane: p_multi,
+            execution: multi,
+        })
+        .expect("bind first for multi");
+    shell_multi
+        .apply(ShellAction::SplitPane {
+            id: p_multi,
+            axis: SplitAxis::Right,
+        })
+        .expect("split");
+    let second = shell_multi
+        .snapshot()
+        .panes
+        .iter()
+        .map(|pane| pane.id)
+        .find(|id| *id != p_multi)
+        .expect("split pane");
+    shell_multi
+        .apply(ShellAction::BindExecution {
+            pane: second,
+            execution: multi,
+        })
+        .expect("bind second");
+    let only_w2_multi = NavigationPrincipal {
+        local_navigation: true,
+        workspaces: WorkspaceAccess::Only(std::slice::from_ref(&w2b)),
+    };
+    assert_eq!(
+        resolve(
+            ResourceAddress::Execution { execution: multi },
+            &shell_multi,
+            &MapInventory::with(multi, ExecutionPresence::Live),
+            only_w2_multi
         ),
         Err(NavigationRejection::NavigationDenied)
     );
@@ -623,8 +698,7 @@ fn navigate_pane_in_inactive_workspace_activates_all_in_one_transition() {
             address,
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w2,
@@ -653,8 +727,7 @@ fn navigate_already_active_pane_is_success_noop() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
@@ -663,7 +736,7 @@ fn navigate_already_active_pane_is_success_noop() {
         })
     );
     assert_eq!(shell.focus_checkpoint(), before);
-    // Focus unchanged; history recording is ApplyOnly in this N2 regression.
+    // N2 does not own focus history; no-op success implies no history side effect.
 }
 
 // --- §12.10 Navigate never changes presentation/binding/PTY facts -----------
@@ -690,7 +763,6 @@ fn navigate_does_not_change_bindings() {
         &mut shell,
         &MapInventory::new(),
         NavigationPrincipal::local_user(),
-        NavigateHistory::ApplyOnly,
     )
     .expect("navigate");
     assert_eq!(
@@ -719,8 +791,7 @@ fn navigate_rejects_destroyed_tab_without_workspace_change() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::UnknownTab)
     );
@@ -744,8 +815,7 @@ fn navigate_unbound_execution_is_target_unbound_without_attach() {
             ResourceAddress::Execution { execution: live },
             &mut shell,
             &MapInventory::with(live, ExecutionPresence::Live),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::TargetUnbound)
     );
@@ -767,8 +837,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::TargetTerminated)
     );
@@ -779,8 +848,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::UnknownExecution)
     );
@@ -797,8 +865,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Ok(ResolvedTarget::Pane {
             workspace: w1,
@@ -833,8 +900,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
             ResourceAddress::Execution { execution: exited },
             &mut shell,
             &MapInventory::with(exited, ExecutionPresence::ExitedHeld),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::AmbiguousTarget)
     );
@@ -851,8 +917,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::UnknownPane)
     );
@@ -860,7 +925,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
 
 #[test]
 fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
-    let (mut shell, w1, _, _, _, _, _) = seed_shell();
+    let (mut shell, w1, _, _, _, p1, _) = seed_shell();
     let denied = NavigationPrincipal {
         local_navigation: true,
         workspaces: WorkspaceAccess::Only(&[]),
@@ -871,8 +936,7 @@ fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
             ResourceAddress::Workspace { workspace: w1 },
             &mut shell,
             &MapInventory::new(),
-            denied,
-            NavigateHistory::ApplyOnly,
+            denied
         ),
         Err(NavigationRejection::NavigationDenied)
     );
@@ -883,12 +947,120 @@ fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
             },
             &mut shell,
             &MapInventory::new(),
-            denied,
-            NavigateHistory::ApplyOnly,
+            denied
         ),
         Err(NavigationRejection::NavigationDenied)
     );
     assert_eq!(shell.focus_checkpoint(), before);
+
+    // §12.13a(b): Execution bound once / twice in a denied Workspace → Denied,
+    // never AmbiguousTarget or an existence probe success.
+    let exec = ExecutionId::from_bytes([0x55; 16]);
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: p1,
+            execution: exec,
+        })
+        .expect("bind once");
+    let after_bind = shell.focus_checkpoint();
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exec },
+            &mut shell,
+            &MapInventory::with(exec, ExecutionPresence::Live),
+            denied
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+    assert_eq!(shell.focus_checkpoint(), after_bind);
+
+    shell
+        .apply(ShellAction::SplitPane {
+            id: p1,
+            axis: SplitAxis::Right,
+        })
+        .expect("split");
+    let second = shell
+        .snapshot()
+        .panes
+        .iter()
+        .map(|pane| pane.id)
+        .find(|id| *id != p1)
+        .expect("split pane");
+    shell
+        .apply(ShellAction::BindExecution {
+            pane: second,
+            execution: exec,
+        })
+        .expect("bind twice");
+    let after_ambiguous_bind = shell.focus_checkpoint();
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exec },
+            &mut shell,
+            &MapInventory::with(exec, ExecutionPresence::Live),
+            denied
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+    assert_eq!(shell.focus_checkpoint(), after_ambiguous_bind);
+
+    // local_navigation: false denies Execution addresses before binding lookup.
+    let no_local = NavigationPrincipal {
+        local_navigation: false,
+        workspaces: WorkspaceAccess::AllLocal,
+    };
+    assert_eq!(
+        navigate(
+            ResourceAddress::Execution { execution: exec },
+            &mut shell,
+            &MapInventory::with(exec, ExecutionPresence::Live),
+            no_local
+        ),
+        Err(NavigationRejection::NavigationDenied)
+    );
+    assert_eq!(shell.focus_checkpoint(), after_ambiguous_bind);
+}
+
+#[test]
+fn navigate_workspace_focuses_active_tab_and_focused_pane() {
+    // SPEC-022 §12.8a: Workspace navigation selects that Workspace's active Tab
+    // and focused Pane. Zero-Window Workspaces are unrepresentable in the
+    // single-window tree until the ADR-018 window slice; covered there (§12.8b).
+    let (mut shell, w1, w2, _, _, _, _) = seed_shell();
+    assert_ne!(shell.snapshot().active_workspace, w2);
+    assert_eq!(
+        navigate(
+            ResourceAddress::Workspace { workspace: w2 },
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Ok(ResolvedTarget::Workspace { workspace: w2 })
+    );
+    let snap = shell.snapshot();
+    assert_eq!(snap.active_workspace, w2);
+    let expected = shell
+        .workspace_focus(w2)
+        .expect("w2 focus triple after navigate");
+    assert_eq!(snap.active_tab, expected.active_tab);
+    assert_eq!(snap.focused_pane, expected.focused_pane);
+
+    // Return to w1 via Workspace address.
+    assert_eq!(
+        navigate(
+            ResourceAddress::Workspace { workspace: w1 },
+            &mut shell,
+            &MapInventory::new(),
+            NavigationPrincipal::local_user()
+        ),
+        Ok(ResolvedTarget::Workspace { workspace: w1 })
+    );
+    let back = shell.snapshot();
+    assert_eq!(back.active_workspace, w1);
+    let w1_focus = shell.workspace_focus(w1).expect("w1");
+    assert_eq!(back.active_tab, w1_focus.active_tab);
+    assert_eq!(back.focused_pane, w1_focus.focused_pane);
 }
 
 // --- §12.14 ordinal-rebinding regression ------------------------------------
@@ -917,8 +1089,7 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
             stored,
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Ok(ResolvedTarget::Tab {
             workspace: w1,
@@ -926,6 +1097,12 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
         })
     );
     assert_eq!(shell.snapshot().active_tab, t2);
+    assert_eq!(
+        shell.snapshot().focused_pane,
+        shell
+            .tab_focused_pane(w1, t2)
+            .expect("t2 focused pane after address run")
+    );
 }
 
 #[test]
@@ -958,8 +1135,7 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
             stored,
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user(),
-            NavigateHistory::ApplyOnly,
+            NavigationPrincipal::local_user()
         ),
         Err(NavigationRejection::UnknownPane)
     );

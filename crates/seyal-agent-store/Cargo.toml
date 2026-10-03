@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+test-fault-injection = []
+
 [dependencies]
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 seyal-agent-core = { path = "../seyal-agent-core" }

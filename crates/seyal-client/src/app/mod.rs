@@ -9,20 +9,24 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
-mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
 mod palette_apply;
+mod presentation_apply;
+mod provisioning_apply;
 mod recovery_apply;
 mod session;
 
 use accessibility::accessibility_nodes;
+
 #[cfg(test)]
-mod focus_history_tests;
-#[cfg(test)]
-mod keybinding_apply_tests;
+mod presentation_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod tab_provisioning_tests;
+#[cfg(test)]
+mod keybinding_apply_tests;
 #[cfg(test)]
 mod tests;
 
@@ -40,12 +44,13 @@ use crate::composer::{
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
-use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
+use crate::navigation::ResourceAddress;
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion};
+use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
+use crate::provisioning::{ProvisioningEffect, ProvisioningSession};
 use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
@@ -53,7 +58,7 @@ use crate::recovery::{
 use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
-use crate::LocalDisplayClient;
+use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
 pub const APP_ABI_VERSION: u16 = 1;
@@ -96,8 +101,9 @@ pub enum AppError {
     CannotCloseLastPane,
     UnknownBlock,
     CannotCloseBoundPane,
-    /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
-    ActionUnavailable,
+    NoSplitDivider,
+    ProvisioningRejected,
+    ProvisioningCapacityExceeded,
     NavigationUnsupportedKind,
     NavigationDenied,
     NavigationUnknownWorkspace,
@@ -108,8 +114,9 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
-    NavigationStaleHistoryCursor,
-    NavigationHistoryUnavailable,
+    /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
+    /// ABI numeric code 50 (after tip A goto errors 47-49).
+    ActionUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -220,6 +227,13 @@ pub enum AppAction {
         eligibility: Option<RuntimeComposerEligibility>,
         revision: u64,
     },
+    /// User choice of the non-TUI presentation (#867).
+    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
+    /// structured eligibility again.
+    SelectRestingPresentation {
+        fence: AppFence,
+        raw: bool,
+    },
     SetLeftPanel {
         mode: LeftPanelMode,
     },
@@ -249,6 +263,9 @@ pub enum AppAction {
     CloseTab {
         id: TabId,
     },
+    TerminateExecution {
+        fence: AppFence,
+    },
     SplitFocused {
         axis: SplitAxis,
     },
@@ -257,6 +274,11 @@ pub enum AppAction {
     },
     FocusPane {
         id: PaneId,
+    },
+    /// Drag the divider that `pane` leads to a pointer position (#928).
+    MoveSplitDivider {
+        pane: PaneId,
+        position: SplitPosition,
     },
     SetShellVisibility {
         left: bool,
@@ -306,16 +328,6 @@ pub enum AppAction {
         fence: AppFence,
         address: ResourceAddress,
     },
-    /// Focus-history Back (SPEC-022 R6.5 / R6.8).
-    HistoryBack {
-        fence: AppFence,
-        observed: FocusSeq,
-    },
-    /// Focus-history Forward (SPEC-022 R6.5 / R6.8).
-    HistoryForward {
-        fence: AppFence,
-        observed: FocusSeq,
-    },
     ClosePalette {
         fence: AppFence,
     },
@@ -327,6 +339,9 @@ pub enum AppAction {
     SetGotoScope {
         fence: AppFence,
         scope: GotoScope,
+    },
+    CycleGotoScope {
+        fence: AppFence,
     },
     SetGotoQuery {
         fence: AppFence,
@@ -400,9 +415,6 @@ pub struct AppSnapshot {
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
     pub goto: GotoSnapshot,
-    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
-    /// when history is empty.
-    pub focus_history_seq: Option<FocusSeq>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,6 +431,15 @@ pub struct ApplicationRoot {
     shell: ShellState,
     presentation: PresentationSession,
     authority: Option<PaneAuthority>,
+    /// Portable provisioning/disposition authority (ADR-017 C1).
+    provisioning: ProvisioningSession,
+    /// Cold-path wire client for create/terminate (tests/harness). Production
+    /// macOS may instead use [`Self::client_handle`] via the FFI registry.
+    #[cfg(target_os = "macos")]
+    wire_client: Option<LocalDisplayClient>,
+    /// Effects waiting for a negotiated wire client (SendCreate/SendTerminate)
+    /// or for host attach (AttachController / bootstrap resize).
+    pending_wire_effects: Vec<ProvisioningEffect>,
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
@@ -433,7 +454,15 @@ pub struct ApplicationRoot {
     /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
-    focus_history: FocusHistory,
+    /// Last canonical alternate-screen evidence. TUI while this is set.
+    alternate_screen: bool,
+    /// Flow or Raw used while alternate screen is off.
+    resting: PresentationMode,
+    /// User asked for Raw until they ask to re-evaluate.
+    explicit_raw: bool,
+    /// Runtime reported unsupported shell integration. SPEC-008 requires
+    /// full-Pane Raw until a later status says otherwise.
+    integration_unsupported: bool,
     #[cfg(target_os = "macos")]
     client_handle: Option<crate::ffi::ClientRegistryHandle>,
 }
@@ -449,6 +478,13 @@ impl ApplicationRoot {
         Self::with_shell(ShellState::m001_local("local"))
     }
 
+    /// Test-only: enable CreateTab while production `m001_local` stays gated
+    /// until the live create→attach→bind driver exists (#1149 / #1159).
+    #[cfg(test)]
+    pub(crate) fn enable_tab_creation_for_test(&mut self) {
+        self.shell.set_allows_tab_creation_for_test(true);
+    }
+
     pub(crate) fn with_shell(shell: ShellState) -> Self {
         let pane = shell.snapshot().focused_pane;
         let mut composer = ComposerState::new();
@@ -462,6 +498,10 @@ impl ApplicationRoot {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
             authority: None,
+            provisioning: ProvisioningSession::new(),
+            #[cfg(target_os = "macos")]
+            wire_client: None,
+            pending_wire_effects: Vec::new(),
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
@@ -475,7 +515,10 @@ impl ApplicationRoot {
             palette: PaletteState::new(),
             chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
-            focus_history: FocusHistory::new(),
+            alternate_screen: false,
+            resting: PresentationMode::Flow,
+            explicit_raw: false,
+            integration_unsupported: false,
             #[cfg(target_os = "macos")]
             client_handle: None,
         }
@@ -484,6 +527,16 @@ impl ApplicationRoot {
     /// R8.4: clear chord prefix without dispatch and without PTY bytes.
     pub(crate) fn clear_chord_prefix(&mut self) {
         self.chord_prefix.clear();
+    }
+
+    /// Portable provisioning session (ADR-017 C1). Hosts/wire adapters drive
+    /// effects; they cannot invent an [`ExecutionId`] or retry a rejection.
+    pub fn provisioning(&self) -> &ProvisioningSession {
+        &self.provisioning
+    }
+
+    pub fn provisioning_mut(&mut self) -> &mut ProvisioningSession {
+        &mut self.provisioning
     }
 
     /// Active Tab's Pane regions (#923). The one live surface belongs to the
@@ -529,7 +582,7 @@ impl ApplicationRoot {
         let palette = self.overlay_palette_snapshot();
         let goto = self.goto.snapshot();
         let eligibility = self.eligibility();
-        let composer_eligible = eligibility == PresentationEligibility::Flow && !self.frozen;
+        let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
             generation: self.snapshot_generation,
             // The fence Pane, not the focused one: host actions fenced from
@@ -561,7 +614,6 @@ impl ApplicationRoot {
             chrome,
             palette,
             goto,
-            focus_history_seq: self.focus_history.cursor_seq(),
         }
     }
 
@@ -638,6 +690,9 @@ impl ApplicationRoot {
                 eligibility,
                 revision,
             } => self.apply_runtime_composer_status(fence, eligibility, revision),
+            AppAction::SelectRestingPresentation { fence, raw } => {
+                self.select_resting_presentation(fence, raw)
+            }
             AppAction::OpenComposerHistory { fence } => {
                 self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
             }
@@ -698,9 +753,13 @@ impl ApplicationRoot {
                 self.create_tab()
             }
             AppAction::CloseTab { id } => self.close_tab(id),
+            AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
+            AppAction::MoveSplitDivider { pane, position } => {
+                self.move_split_divider(pane, position)
+            }
             AppAction::SetShellVisibility {
                 left,
                 inspector,
@@ -723,17 +782,10 @@ impl ApplicationRoot {
                 self.require_fence(fence)?;
                 self.navigate_address(address)
             }
-            AppAction::HistoryBack { fence, observed } => {
-                self.require_fence(fence)?;
-                self.history_back(observed)
-            }
-            AppAction::HistoryForward { fence, observed } => {
-                self.require_fence(fence)?;
-                self.history_forward(observed)
-            }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
             AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
+            AppAction::CycleGotoScope { fence } => self.cycle_goto_scope(fence),
             AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
             AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
             AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
@@ -769,36 +821,6 @@ impl ApplicationRoot {
         if fence.presentation_epoch != current.presentation_epoch {
             return Err(AppError::StalePresentationEpoch);
         }
-        Ok(())
-    }
-
-    fn derive_presentation(&mut self, alternate_screen: bool) -> Result<(), AppError> {
-        let Some(bound) = self.authority else {
-            self.sync_composer_presentation();
-            return Ok(());
-        };
-        let desired = if alternate_screen {
-            PresentationMode::Tui
-        } else {
-            PresentationMode::Flow
-        };
-        let current = self.presentation.snapshot();
-        if current.mode == desired {
-            self.sync_composer_presentation();
-            return Ok(());
-        }
-        let identity = PresentationIdentity::new(bound.execution, bound.pty_generation)
-            .ok_or(AppError::ZeroPtyGeneration)?;
-        self.presentation
-            .apply(PresentationAction::Transition {
-                mode: desired,
-                identity,
-                explicit: false,
-                epoch: current.epoch,
-            })
-            .map_err(|_| AppError::StalePresentationEpoch)?;
-        self.clear_chord_prefix();
-        self.sync_composer_presentation();
         Ok(())
     }
 

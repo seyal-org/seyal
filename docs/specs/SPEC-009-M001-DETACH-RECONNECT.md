@@ -344,7 +344,7 @@ For the user-visible Pass 9 proof, exactly one eligible surviving interactive ex
 
 If no eligible execution survives, continuity is not claimed. Creating a new execution is a separate path with a new `ExecutionId`.
 
-#### 8.2.1 Multi-execution resolution (proposed M003 amendment)
+#### 8.2.1 Multi-execution resolution (accepted M003 amendment)
 
 - **Status:** accepted amendment (ADR-017); **normative on ADR-017 acceptance** (Issue #994, ADR-017). It narrows resolution; it does not weaken any Pass 9 continuity requirement.
 

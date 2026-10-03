@@ -72,6 +72,10 @@ fn display_message_ids_replace_candidate_b_projection_messages() {
     assert_eq!(MessageType::from_u16(32), Some(MessageType::CopiedText));
     assert_eq!(MessageType::from_u16(33), Some(MessageType::HostSearch));
     assert_eq!(MessageType::from_u16(34), Some(MessageType::TerminalMouse));
+    assert_eq!(
+        MessageType::from_u16(35),
+        Some(MessageType::ViewportLineIds)
+    );
 }
 
 #[test]
@@ -137,6 +141,22 @@ fn host_selection_round_trip() {
         needle: "one",
     };
     assert_eq!(HostSearch::decode(&search.encode()).unwrap(), search);
+}
+
+#[test]
+fn launch_policy_rejected_is_code_17_after_adr017_workspace_profile_codes() {
+    assert_eq!(ErrorCode::LaunchPolicyRejected as u16, 17);
+    assert_eq!(
+        ErrorCode::from_u16(17),
+        Some(ErrorCode::LaunchPolicyRejected)
+    );
+    assert_eq!(ErrorCode::from_u16(14), Some(ErrorCode::InternalFailure));
+    // ADR-017 / SPEC-004 §18 occupy 15–16 on the same ErrorCode ladder as L0's 17.
+    assert_eq!(ErrorCode::from_u16(15), Some(ErrorCode::InvalidWorkspace));
+    assert_eq!(
+        ErrorCode::from_u16(16),
+        Some(ErrorCode::UnsupportedLaunchProfile)
+    );
 }
 
 #[test]

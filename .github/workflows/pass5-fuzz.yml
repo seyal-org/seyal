@@ -7,6 +7,10 @@ on:
       - "crates/seyal-exec/**"
       - "crates/seyal-protocol/**"
       - "crates/seyal-terminal/**"
+      - "crates/seyal-agent-core/**"
+      - "crates/seyal-agent-protocol/**"
+      - "crates/seyal-agent-store/**"
+      - "crates/seyal-agent-backend/**"
       - "fuzz/**"
       - "docs/engineering/M001-FUZZ-EVIDENCE.md"
       - ".github/workflows/pass5-fuzz.yml"
@@ -104,6 +108,16 @@ jobs:
         working-directory: fuzz
         run: |
           cargo +nightly-2026-08-20 fuzz run reconnect_resync_state_machine corpus/reconnect-resync-state-machine -- \
+            -max_total_time=${FUZZ_MAX_TOTAL_TIME} -timeout=10 -rss_limit_mb=1024 -print_final_stats=1
+      - name: Fuzz Agent Backend protocol decoder
+        working-directory: fuzz
+        run: |
+          cargo +nightly-2026-08-20 fuzz run agent_protocol_decode corpus/agent-protocol-decode -- \
+            -max_total_time=${FUZZ_MAX_TOTAL_TIME} -timeout=10 -rss_limit_mb=1024 -print_final_stats=1
+      - name: Fuzz Agent Backend harness observations
+        working-directory: fuzz
+        run: |
+          cargo +nightly-2026-08-20 fuzz run agent_harness_observation corpus/agent-harness-observation -- \
             -max_total_time=${FUZZ_MAX_TOTAL_TIME} -timeout=10 -rss_limit_mb=1024 -print_final_stats=1
 
   production-macos-state-fuzz:

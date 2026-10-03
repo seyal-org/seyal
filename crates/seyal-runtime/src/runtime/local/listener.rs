@@ -158,6 +158,8 @@ impl Runtime {
                                         attachment: None,
                                         reactor_token,
                                         last_resize_request_id: 0,
+                                        last_provisioning_request_id: 0,
+                                        outstanding_creates: 0,
                                         client_capabilities: 0,
                                         last_terminal_key_action_id: 0,
                                         last_terminal_mouse_action_id: 0,

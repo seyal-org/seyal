@@ -7,6 +7,12 @@ use crate::chrome::ChromeAction;
 use crate::composer::{ComposerAction, RuntimeBlockRecord, RuntimeComposerEligibility};
 
 impl ApplicationRoot {
+    pub(super) fn composer_eligible_for(&self, eligibility: PresentationEligibility) -> bool {
+        eligibility == PresentationEligibility::Flow
+            && !self.frozen
+            && self.recovery.state().stage != crate::recovery::RecoveryStage::ExecutionEnded
+    }
+
     pub(super) fn sync_composer_presentation(&mut self) {
         let pane = self.shell.snapshot().focused_pane;
         let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
@@ -20,6 +26,10 @@ impl ApplicationRoot {
             pane,
             mode,
             input_route,
+        });
+        let _ = self.composer.apply(ComposerAction::SetExecutionEnded {
+            pane,
+            ended: self.recovery.state().stage == crate::recovery::RecoveryStage::ExecutionEnded,
         });
     }
 
@@ -139,6 +149,12 @@ impl ApplicationRoot {
                 revision,
             })
             .map(|_| ())
-            .map_err(composer_error)
+            .map_err(composer_error)?;
+        if let Some(eligibility) = eligibility {
+            self.integration_unsupported = eligibility == RuntimeComposerEligibility::Unsupported;
+            self.recompute_resting();
+            self.derive_presentation(self.alternate_screen)?;
+        }
+        Ok(())
     }
 }

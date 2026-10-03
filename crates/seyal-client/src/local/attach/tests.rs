@@ -1,6 +1,9 @@
 use super::*;
 use seyal_runtime::{
-    local_ipc::framing::{encode_frame, Attached, ErrorCode, Lifecycle, Resync},
+    local_ipc::framing::{
+        encode_frame, Attached, ErrorCode, Lifecycle, Resync, TerminateExecutionRequest,
+        TerminateExecutionResult, TerminateExecutionResultCode,
+    },
     AttachmentId, ExecutionId,
 };
 use std::io::Write;
@@ -32,7 +35,7 @@ fn implicit_resolution_fails_closed_when_multiple_executions_are_running() {
 }
 
 #[test]
-fn attach_error_wire_codes_preserve_controller_busy_and_capacity_semantics() {
+fn attach_error_wire_codes_preserve_busy_capacity_and_ended_execution_semantics() {
     for (code, expected) in [
         (
             ErrorCode::ControllerBusy,
@@ -42,6 +45,7 @@ fn attach_error_wire_codes_preserve_controller_busy_and_capacity_semantics() {
             ErrorCode::CapacityExceeded,
             ClientError::Server(ErrorCode::CapacityExceeded),
         ),
+        (ErrorCode::InvalidExecution, ClientError::NoRunningExecution),
     ] {
         let (client, mut server) = UnixStream::pair().expect("unix stream pair");
         let execution_id = ExecutionId::from_bytes([3; 16]);
@@ -101,10 +105,7 @@ fn read_only_attach_requests_observer_authority() {
         9,
         false,
     );
-    assert_eq!(
-        result.err(),
-        Some(ClientError::Server(ErrorCode::InvalidExecution))
-    );
+    assert_eq!(result.err(), Some(ClientError::NoRunningExecution));
     server_thread.join().expect("server thread");
 }
 
@@ -127,9 +128,15 @@ fn startup_deadline_bounds_a_stalled_attach_read() {
         false,
         9,
         false,
+        false,
+        false,
+        1,
         std::time::Instant::now() + Duration::from_millis(25),
     );
-    assert!(matches!(result, Err(ClientError::StartupDeadlineExceeded)));
+    assert!(matches!(
+        result.as_ref().map_err(|e| &e.error),
+        Err(&ClientError::StartupDeadlineExceeded)
+    ));
     assert!(
         started.elapsed() < Duration::from_millis(90),
         "stalled attach exceeded the supplied startup deadline"
@@ -237,6 +244,9 @@ fn malformed_initial_snapshot_requests_resync_then_converges_transactionally() {
         false,
         9,
         false,
+        false,
+        false,
+        1,
         std::time::Instant::now() + Duration::from_millis(250),
     )
     .expect("initial resync should converge");
@@ -276,9 +286,15 @@ fn repeated_malformed_initial_snapshots_terminate_within_existing_deadline() {
         false,
         9,
         false,
+        false,
+        false,
+        1,
         std::time::Instant::now() + Duration::from_millis(250),
     );
-    assert_eq!(result.err(), Some(ClientError::Display));
+    assert_eq!(
+        result.as_ref().err().map(|e| &e.error),
+        Some(&ClientError::Display)
+    );
     assert!(started.elapsed() < Duration::from_millis(250));
     server_thread.join().expect("server thread");
 }
@@ -332,6 +348,9 @@ fn malformed_multichunk_attach_quarantines_stale_remainder_before_resync_snapsho
         false,
         9,
         false,
+        false,
+        false,
+        1,
         std::time::Instant::now() + Duration::from_millis(250),
     )
     .expect("stale remainder should not poison bounded resync");
@@ -346,6 +365,7 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
     let execution_id = ExecutionId::from_bytes([11; 16]);
     let attachment_id = AttachmentId::from_bytes([12; 16]);
     let (release_server, hold_server) = std::sync::mpsc::sync_channel(0);
+    let (timeline_written, wait_timeline) = std::sync::mpsc::sync_channel(0);
     let server_thread = std::thread::spawn(move || {
         let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
         assert_eq!(kind, MessageType::Attach);
@@ -377,6 +397,9 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
             server
                 .write_all(&block_timeline(7))
                 .expect("queued block timeline");
+            timeline_written
+                .send(())
+                .expect("signal timeline write completed");
         }
         hold_server.recv().expect("client release");
     });
@@ -389,14 +412,37 @@ fn assert_attach_resync_preserves_block_timeline(timeline_before_snapshot: bool)
         false,
         9,
         false,
+        false,
+        false,
+        1,
         std::time::Instant::now() + Duration::from_millis(250),
     )
     .expect("valid control frame must not poison bounded resync");
     assert_eq!(attached.cache().generation, 5);
     assert_eq!(attached.cache().cells[0].scalar, 'V');
-    attached
-        .poll_prepare()
-        .expect("retained timeline should reach normal consumer");
+    // When the timeline is written after the snapshot, wait for the server
+    // write barrier before draining so the poll loop is not racing the
+    // producer (avoids a fixed-deadline flake under CI load).
+    if !timeline_before_snapshot {
+        wait_timeline
+            .recv()
+            .expect("server must signal timeline write completion");
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(250);
+    loop {
+        attached
+            .poll_prepare()
+            .expect("retained timeline should reach normal consumer");
+        if attached.block_timeline().revision == 7 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "block timeline revision stayed {}; expected 7",
+            attached.block_timeline().revision
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert_eq!(attached.block_timeline().revision, 7);
     release_server.send(()).expect("release server");
     server_thread.join().expect("server thread");
@@ -410,4 +456,182 @@ fn attach_resync_retains_block_timeline_before_replacement_snapshot() {
 #[test]
 fn attach_resync_processes_block_timeline_after_replacement_snapshot() {
     assert_attach_resync_preserves_block_timeline(false);
+}
+
+fn terminate_result_frame(attachment_id: AttachmentId, request_id: u64) -> Vec<u8> {
+    encode_frame(
+        MessageType::TerminateExecutionResult,
+        &TerminateExecutionResult {
+            attachment_id,
+            request_id,
+            result_code: TerminateExecutionResultCode::TerminationRequested,
+            detail_code: 0,
+        }
+        .encode(),
+    )
+}
+
+/// ADR-017 §6.3 row 2: Created never-bound orphan Attached then snapshot fails
+/// → exactly one TerminateExecutionRequest on that attachment.
+#[test]
+fn orphan_attached_snapshot_failure_terminates_once_on_existing_attachment() {
+    let (client, mut server) = UnixStream::pair().expect("unix stream pair");
+    let execution_id = ExecutionId::from_bytes([0xA1; 16]);
+    let attachment_id = AttachmentId::from_bytes([0xA2; 16]);
+    let server_thread = std::thread::spawn(move || {
+        let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
+        assert_eq!(kind, MessageType::Attach);
+        server
+            .write_all(&attached(execution_id, attachment_id, 1))
+            .expect("attached");
+        server
+            .write_all(&malformed_snapshot(1))
+            .expect("first malformed");
+        let (kind, _) = read_blocking_frame(&mut server).expect("resync");
+        assert_eq!(kind, MessageType::Resync);
+        server
+            .write_all(&malformed_snapshot(1))
+            .expect("second malformed");
+        let (kind, payload) = read_blocking_frame(&mut server).expect("terminate");
+        assert_eq!(kind, MessageType::TerminateExecutionRequest);
+        let req = TerminateExecutionRequest::decode(&payload).expect("decode terminate");
+        assert_eq!(req.attachment_id, attachment_id);
+        assert_eq!(req.execution_id, execution_id);
+        assert_eq!(req.request_id, 2);
+        server
+            .write_all(&terminate_result_frame(attachment_id, 2))
+            .expect("terminate result");
+        // No further control frames: row 2 forbids a second attach on this path.
+        server
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .ok();
+        assert!(
+            read_blocking_frame(&mut server).is_err(),
+            "must not open a second attach or repeat terminate"
+        );
+    });
+
+    let result = LocalDisplayClient::finish_attach_with_deadline(
+        client,
+        execution_id,
+        Role::Controller,
+        false,
+        false,
+        9,
+        false,
+        true, // provisioning negotiated
+        true, // Created never-bound orphan
+        2,
+        std::time::Instant::now() + Duration::from_millis(500),
+    );
+    let failure = match result {
+        Err(failure) => failure,
+        Ok(_) => panic!("orphan snapshot failure must err"),
+    };
+    assert_eq!(failure.error, ClientError::Display);
+    assert!(
+        failure.terminated_on_attachment,
+        "row 2 must mark terminate-on-attachment so callers skip dispose attach"
+    );
+    server_thread.join().expect("server thread");
+}
+
+/// After Attached, a Resync send failure (peer already gone) must still mark
+/// `terminated_on_attachment` so the outer bootstrap path never opens a second
+/// dispose attach (ADR-017 §6.3 row 2 / connection-drop).
+#[test]
+fn orphan_attached_resync_send_failure_marks_terminated_on_attachment() {
+    let (client, mut server) = UnixStream::pair().expect("unix stream pair");
+    let execution_id = ExecutionId::from_bytes([0xC1; 16]);
+    let attachment_id = AttachmentId::from_bytes([0xC2; 16]);
+    let server_thread = std::thread::spawn(move || {
+        let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
+        assert_eq!(kind, MessageType::Attach);
+        server
+            .write_all(&attached(execution_id, attachment_id, 1))
+            .expect("attached");
+        server
+            .write_all(&malformed_snapshot(1))
+            .expect("first malformed");
+        // Close the peer before the client can deliver Resync. Terminate may
+        // also fail to send; the flag must still be true.
+        drop(server);
+    });
+
+    let result = LocalDisplayClient::finish_attach_with_deadline(
+        client,
+        execution_id,
+        Role::Controller,
+        false,
+        false,
+        9,
+        false,
+        true, // provisioning negotiated
+        true, // Created never-bound orphan
+        2,
+        std::time::Instant::now() + Duration::from_millis(500),
+    );
+    let failure = match result {
+        Err(failure) => failure,
+        Ok(_) => panic!("resync send failure must err"),
+    };
+    assert!(
+        failure.terminated_on_attachment,
+        "row 2 connection-drop after Attached must mark terminated_on_attachment"
+    );
+    server_thread.join().expect("server thread");
+}
+
+/// Adopt/reconnect must not kill a live survivor on transient snapshot failure.
+#[test]
+fn adopt_attached_snapshot_failure_does_not_terminate_execution() {
+    let (client, mut server) = UnixStream::pair().expect("unix stream pair");
+    let execution_id = ExecutionId::from_bytes([0xB1; 16]);
+    let attachment_id = AttachmentId::from_bytes([0xB2; 16]);
+    let server_thread = std::thread::spawn(move || {
+        let (kind, _) = read_blocking_frame(&mut server).expect("attach request");
+        assert_eq!(kind, MessageType::Attach);
+        server
+            .write_all(&attached(execution_id, attachment_id, 1))
+            .expect("attached");
+        server
+            .write_all(&malformed_snapshot(1))
+            .expect("first malformed");
+        let (kind, _) = read_blocking_frame(&mut server).expect("resync");
+        assert_eq!(kind, MessageType::Resync);
+        server
+            .write_all(&malformed_snapshot(1))
+            .expect("second malformed");
+        server
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .ok();
+        assert!(
+            read_blocking_frame(&mut server).is_err(),
+            "adopt/reconnect must not send TerminateExecutionRequest"
+        );
+    });
+
+    let result = LocalDisplayClient::finish_attach_with_deadline(
+        client,
+        execution_id,
+        Role::Controller,
+        false,
+        false,
+        9,
+        false,
+        true,  // provisioning negotiated — still must not dispose
+        false, // adopt/reconnect survivor, not Created orphan
+        1,
+        std::time::Instant::now() + Duration::from_millis(500),
+    );
+    let failure = match result {
+        Err(failure) => failure,
+        Ok(_) => panic!("snapshot failure must still surface"),
+    };
+    assert_eq!(failure.error, ClientError::Display);
+    assert!(
+        !failure.terminated_on_attachment,
+        "live survivor must not be terminated on attach snapshot failure"
+    );
+    server_thread.join().expect("server thread");
 }

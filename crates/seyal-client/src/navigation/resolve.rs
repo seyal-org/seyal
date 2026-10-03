@@ -6,7 +6,7 @@ use crate::shell::ShellState;
 
 use super::ResourceAddress;
 
-/// Typed rejection taxonomy from SPEC-022 R3.4 / R6.8. Exhaustive and ordered.
+/// Typed rejection taxonomy from SPEC-022 R3.4. Exhaustive and ordered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavigationRejection {
     UnsupportedKind,
@@ -19,10 +19,6 @@ pub enum NavigationRejection {
     TargetTerminated,
     TargetUnbound,
     AmbiguousTarget,
-    /// Back/Forward observed `FocusSeq` does not match the cursor (R6.8).
-    StaleHistoryCursor,
-    /// Back/Forward unavailable (empty history or no step in that direction).
-    HistoryUnavailable,
 }
 
 /// Successful resolution target. An [`ResourceAddress::Execution`] with exactly
@@ -128,6 +124,9 @@ pub fn resolve(
             if !shell.contains_workspace(workspace) {
                 return Err(NavigationRejection::UnknownWorkspace);
             }
+            // Zero-Window Workspace → NotComposed (R3.2 / test 8b) is unrepresentable
+            // until the window slice (ADR-018 / N5) lands; that slice must add the check
+            // (no spawn, no ActivateWorkspace).
             Ok(ResolvedTarget::Workspace { workspace })
         }
         ResourceAddress::Tab { workspace, tab } => {
@@ -196,7 +195,17 @@ pub fn resolve(
                         pane,
                     })
                 }
-                _ => Err(NavigationRejection::AmbiguousTarget),
+                _ => {
+                    // R3.4 step 2: any unauthorized binding Workspace is
+                    // NavigationDenied, never AmbiguousTarget (test 13a(b)).
+                    if bound
+                        .iter()
+                        .any(|(workspace, _, _)| !principal.allows_workspace(*workspace))
+                    {
+                        return Err(NavigationRejection::NavigationDenied);
+                    }
+                    Err(NavigationRejection::AmbiguousTarget)
+                }
             }
         }
     }

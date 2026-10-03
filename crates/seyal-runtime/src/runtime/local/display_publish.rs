@@ -3,7 +3,10 @@ use crate::{
     local_ipc::{
         connection::ConnectionState as LocalIpcConnState,
         connection::DeltaEnqueueResult,
-        framing::{self, ErrorCode, MessageType, CAP_GRAPHEME_DISPLAY},
+        framing::{
+            self, ErrorCode, MessageType, ViewportLineIds, CAP_GRAPHEME_DISPLAY,
+            CAP_VIEWPORT_LINE_IDS,
+        },
     },
     ExecutionId,
 };
@@ -141,7 +144,14 @@ impl Runtime {
             let batch = if grapheme { v2.clone() } else { v1.clone() };
             match batch {
                 Some(batch) => {
-                    let _ = self.send_snapshot_batch(token, batch);
+                    if self.send_snapshot_batch(token, batch) {
+                        self.maybe_send_viewport_line_ids(
+                            token,
+                            execution_id,
+                            snapshot.source_damage_generation,
+                            snapshot.rows,
+                        );
+                    }
                 }
                 None => self.close_local_connection(token),
             }
@@ -187,7 +197,7 @@ impl Runtime {
             let encode_ok = if use_snapshot {
                 self.fanout_snapshot(execution_id, &viewers)
             } else if let Some(previous) = previous {
-                self.fanout_delta(&update, previous.generation, &viewers)
+                self.fanout_delta(execution_id, &update, previous.generation, &viewers)
             } else {
                 false
             };
@@ -278,8 +288,15 @@ impl Runtime {
             let batch = if grapheme { v2.clone() } else { v1.clone() };
             match batch {
                 Some(batch) => {
-                    let _ = self.send_snapshot_batch(token, batch);
-                    any_ok = true;
+                    if self.send_snapshot_batch(token, batch) {
+                        self.maybe_send_viewport_line_ids(
+                            token,
+                            execution_id,
+                            snapshot.source_damage_generation,
+                            snapshot.rows,
+                        );
+                        any_ok = true;
+                    }
                 }
                 None => {
                     self.send_error(
@@ -300,6 +317,7 @@ impl Runtime {
 
     fn fanout_delta(
         &mut self,
+        execution_id: ExecutionId,
         update: &seyal_exec::TerminalProjectionUpdate,
         base_generation: u64,
         viewers: &[(u64, bool)],
@@ -344,7 +362,17 @@ impl Runtime {
                         .as_mut()
                         .and_then(|state| state.server.try_enqueue_delta(token, delta).ok());
                     match result {
-                        Some(DeltaEnqueueResult::Queued | DeltaEnqueueResult::Skipped) => {
+                        Some(DeltaEnqueueResult::Queued) => {
+                            self.sync_local_writable(token);
+                            self.maybe_send_viewport_line_ids(
+                                token,
+                                execution_id,
+                                update.source_damage_generation,
+                                update.rows,
+                            );
+                            any_ok = true;
+                        }
+                        Some(DeltaEnqueueResult::Skipped) => {
                             self.sync_local_writable(token);
                             any_ok = true;
                         }
@@ -390,5 +418,54 @@ impl Runtime {
                 None
             }
         })
+    }
+
+    /// After a successful display snapshot/delta enqueue for a viewer that
+    /// negotiated `CAP_VIEWPORT_LINE_IDS`, push the primary viewport LineIds
+    /// for that generation. Missing or zero ids skip the frame (never zero).
+    pub(super) fn maybe_send_viewport_line_ids(
+        &mut self,
+        token: u64,
+        execution_id: ExecutionId,
+        generation: u64,
+        rows: u16,
+    ) {
+        if rows == 0 {
+            return;
+        }
+        let wants = self.local_ipc.as_ref().is_some_and(|state| {
+            state
+                .connections
+                .get(&token)
+                .is_some_and(|meta| meta.client_capabilities & CAP_VIEWPORT_LINE_IDS != 0)
+        });
+        if !wants {
+            return;
+        }
+        let Some(line_ids) = self.collect_viewport_line_ids(execution_id, rows) else {
+            return;
+        };
+        let message = ViewportLineIds {
+            generation,
+            line_ids,
+        };
+        let _ = self.send_after_display_frame(
+            token,
+            framing::encode_frame(MessageType::ViewportLineIds, &message.encode()),
+        );
+    }
+
+    fn collect_viewport_line_ids(&self, execution_id: ExecutionId, rows: u16) -> Option<Vec<u64>> {
+        let entry = self.entries.get(&execution_id)?;
+        let terminal = entry.execution.terminal();
+        let mut line_ids = Vec::with_capacity(usize::from(rows));
+        for row in 0..rows {
+            let id = terminal.line_id(row)?;
+            if id.0 == 0 {
+                return None;
+            }
+            line_ids.push(id.0);
+        }
+        Some(line_ids)
     }
 }

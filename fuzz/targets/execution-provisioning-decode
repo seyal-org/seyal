@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+input="${1:?retained fuzz seed path is required}"
+SEYAL_FUZZ_INPUT="$input" cargo test --quiet -p seyal-protocol --test execution_provisioning_fuzz_smoke execution_provisioning_decode_seed -- --ignored --exact

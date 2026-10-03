@@ -14,16 +14,60 @@ use super::{
 use crate::display::DisplayKind;
 #[cfg(feature = "test-fault-injection")]
 use crate::test_fault::{self, FaultPoint};
-use crate::{display::EncodedDisplayBatch, local_ipc::fd_transfer};
+use crate::{
+    display::EncodedDisplayBatch,
+    local_ipc::{
+        fd_transfer,
+        framing::{FrameHeader, MessageType},
+    },
+};
 #[cfg(feature = "benchmark-instrumentation")]
 use std::sync::atomic::Ordering;
-use std::{io, os::fd::AsRawFd, sync::Arc};
+use std::{collections::VecDeque, io, os::fd::AsRawFd, sync::Arc};
+
+/// True when `bytes` is a complete type-35 `ViewportLineIds` frame.
+fn is_viewport_line_ids_frame(bytes: &[u8]) -> bool {
+    FrameHeader::decode(bytes)
+        .ok()
+        .is_some_and(|header| header.message_type == MessageType::ViewportLineIds as u16)
+}
+
+/// Drop not-yet-started type-35 frames only. Partial in-flight type 35 and
+/// every other after-display control frame (BlockState, ComposerStatus,
+/// BlockTimeline, …) must survive latest-wins LineIds replacement.
+fn drop_unsent_viewport_line_ids(
+    after_display: &mut VecDeque<OutboundItem>,
+    queued_control_bytes: &mut usize,
+) {
+    let mut index = 0;
+    while index < after_display.len() {
+        let should_drop = {
+            let item = &after_display[index];
+            item.sent == 0 && is_viewport_line_ids_frame(&item.bytes)
+        };
+        if should_drop {
+            let item = after_display
+                .remove(index)
+                .expect("index was in after_display");
+            *queued_control_bytes = queued_control_bytes.saturating_sub(item.remaining_len());
+        } else {
+            index += 1;
+        }
+    }
+}
 
 impl Connection {
     pub(in crate::local_ipc::connection) fn queue_snapshot(
         &mut self,
         snapshot: EncodedDisplayBatch,
     ) {
+        // Attach advertises current_generation on Attached before the snapshot
+        // bytes leave the host. Superseding that snapshot leaves the peer with
+        // Attached gen N and DisplaySnapshot gen M (local_ipc_protocol flake).
+        if self.attach_snapshot_pin {
+            self.deferred_after_attach = Some(snapshot);
+            return;
+        }
         self.display_generation = snapshot.generation;
         #[cfg(feature = "benchmark-instrumentation")]
         {
@@ -35,6 +79,19 @@ impl Connection {
         self.pending_display = Some(snapshot.into_transport_batches().into());
         #[cfg(feature = "benchmark-instrumentation")]
         update_display_queue_high_water(self.display_queue_bytes());
+    }
+
+    /// Clear the attach pin once the attach snapshot has entered inflight (first
+    /// byte delivery started). Fanout may then fill `pending_display`; the peer
+    /// still observes Attached gen N with the in-flight snapshot gen N first.
+    pub(in crate::local_ipc::connection) fn clear_attach_pin_starting_inflight(&mut self) {
+        if !self.attach_snapshot_pin {
+            return;
+        }
+        self.attach_snapshot_pin = false;
+        if let Some(deferred) = self.deferred_after_attach.take() {
+            self.queue_snapshot(deferred);
+        }
     }
 
     pub(in crate::local_ipc::connection) fn try_queue_delta(
@@ -120,7 +177,10 @@ impl LocalIpcServer {
         }
         connection.queued_control_bytes = new_total;
         connection.mandatory.push_back(OutboundItem::new(attached));
+        connection.deferred_after_attach = None;
         connection.queue_snapshot(snapshot);
+        // Pin after queueing so the attach snapshot itself is not deferred.
+        connection.attach_snapshot_pin = true;
         Ok(())
     }
 
@@ -136,6 +196,15 @@ impl LocalIpcServer {
                 "connection is closed",
             ));
         };
+        if after_display && is_viewport_line_ids_frame(&bytes) {
+            // Type 35 is latest-wins among not-yet-started copies only. A
+            // partial in-flight type 35 finishes; non-type-35 after-display
+            // work is never dropped for LineIds replacement (#865 / attach).
+            drop_unsent_viewport_line_ids(
+                &mut connection.after_display,
+                &mut connection.queued_control_bytes,
+            );
+        }
         let new_total = connection
             .queued_control_bytes
             .checked_add(bytes.len())
@@ -214,6 +283,9 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
                 continue;
             }
             connection.display_inflight = Some(DisplayItem::new(batches));
+            // Attach snapshot is now ordered after Attached on the wire; further
+            // fanout may supersede pending without violating Attached.generation.
+            connection.clear_attach_pin_starting_inflight();
         }
         let Some(item) = connection.display_inflight.as_mut() else {
             break;
@@ -287,6 +359,12 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
     // control work before allowing after-display work to run, otherwise a
     // queued control frame could still be delayed behind a later class.
     if !flush_mandatory(connection)? {
+        return Ok(());
+    }
+
+    // Type 35 waits until no display batch remains. Mandatory preemption
+    // between display frames must not release a not-yet-started frame.
+    if connection.display_inflight.is_some() || connection.pending_display.is_some() {
         return Ok(());
     }
 

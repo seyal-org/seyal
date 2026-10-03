@@ -24,6 +24,9 @@ struct NativeTheme {
     /// Rust `utility_material`: 0 opaque, 1 tonal, 2 frosted.
     let utilityMaterial: UInt16
     let utilityOpacity: CGFloat
+    /// Rust-resolved terminal defaults converted to Metal's little-byte RGBA packing.
+    let terminalDefaultForeground: UInt32
+    let terminalDefaultBackground: UInt32
 
     /// Utility chrome should show the host material effect (frosted, not reduced).
     var usesFrostedUtilityMaterial: Bool {
@@ -94,7 +97,9 @@ enum NativeThemeRealization {
             terminalPadding: CGFloat(packed.terminal_padding),
             reduceMaterial: (packed.flags & 1) != 0,
             utilityMaterial: packed.utility_material,
-            utilityOpacity: CGFloat(packed.utility_opacity)
+            utilityOpacity: CGFloat(packed.utility_opacity),
+            terminalDefaultForeground: packed.text.byteSwapped,
+            terminalDefaultBackground: packed.canvas.byteSwapped
         )
     }
 
@@ -179,6 +184,12 @@ enum NativeThemeRealization {
 
     @MainActor
     private static func applyColors(in view: NSView, theme: NativeTheme) {
+        if let surface = view as? MetalSurfaceView {
+            surface.renderer.setDefaultTerminalColors(
+                foreground: theme.terminalDefaultForeground,
+                background: theme.terminalDefaultBackground
+            )
+        }
         if let field = view as? NSTextField {
             field.textColor = field.tag == 2 ? theme.muted : (field.tag == 1 ? theme.secondary : theme.text)
             field.backgroundColor = .clear

@@ -29,6 +29,9 @@ pub enum WorkItemOutcome {
 pub struct ObservationAuthority {
     domain: AgentDomain,
     applied: HashMap<(AgentRunId, u64), HostObservationKind>,
+    /// Per-run next expected ordinal. Production next-lookup must not scan
+    /// `applied` payloads (AB-1.6 / AB-0 shortcut removal).
+    next_ordinal: HashMap<AgentRunId, u64>,
     liveness: HashMap<AgentRunId, RunLiveness>,
     effects_performed: u64,
 }
@@ -38,6 +41,7 @@ impl ObservationAuthority {
         Self {
             domain,
             applied: HashMap::new(),
+            next_ordinal: HashMap::new(),
             liveness: HashMap::new(),
             effects_performed: 0,
         }
@@ -47,11 +51,132 @@ impl ObservationAuthority {
         &self.domain
     }
 
+    pub fn restore_work_scope(
+        &mut self,
+        id: seyal_agent_core::WorkScopeId,
+        kind: seyal_agent_core::WorkScopeKind,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_work_scope(id, kind)
+    }
+
+    pub fn restore_work_item(
+        &mut self,
+        id: seyal_agent_core::WorkItemId,
+        work_scope_id: seyal_agent_core::WorkScopeId,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_work_item(id, work_scope_id)
+    }
+
+    pub fn restore_attempt(
+        &mut self,
+        id: seyal_agent_core::AttemptId,
+        work_item_id: seyal_agent_core::WorkItemId,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_attempt(id, work_item_id)
+    }
+
+    pub fn restore_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+    ) -> Result<(), DomainError> {
+        self.domain
+            .restore_agent_run(id, attempt_id, binding_generation, control_generation)
+    }
+
+    pub fn restore_orphaned_agent_run(
+        &mut self,
+        id: AgentRunId,
+        attempt_id: seyal_agent_core::AttemptId,
+        binding_generation: seyal_agent_core::BindingGeneration,
+        control_generation: seyal_agent_core::ControlGeneration,
+    ) -> Result<(), DomainError> {
+        self.domain.restore_orphaned_agent_run(
+            id,
+            attempt_id,
+            binding_generation,
+            control_generation,
+        )
+    }
+
+    /// Record durable terminal evidence before crash recovery classification.
+    ///
+    /// `mark_recovered` must not erase KnownTerminated once this is set
+    /// (`set_liveness` keeps KnownTerminated sticky).
+    pub fn note_committed_terminal(&mut self, run_id: AgentRunId) {
+        self.liveness.insert(run_id, RunLiveness::KnownTerminated);
+    }
+
+    /// Crash recovery default: unknown liveness unless durable terminal
+    /// observations were already noted.
+    pub fn mark_recovered(&mut self, run_id: AgentRunId) {
+        self.set_liveness(run_id, RunLiveness::UnknownAfterCrash);
+    }
+
+    /// Next ordinal the authority will accept for `run_id` (1 when none yet).
+    pub fn next_expected_ordinal(&self, run_id: AgentRunId) -> u64 {
+        self.next_ordinal.get(&run_id).copied().unwrap_or(1)
+    }
+
+    /// Fence a recovered run so pre-crash binding/control presentations fail.
+    pub fn advance_binding_generation(
+        &mut self,
+        run_id: AgentRunId,
+        presented: seyal_agent_core::BindingGeneration,
+    ) -> Result<seyal_agent_core::BindingGeneration, DomainError> {
+        self.domain.advance_binding_generation(run_id, presented)
+    }
+
+    pub fn advance_control_generation(
+        &mut self,
+        run_id: AgentRunId,
+        presented: seyal_agent_core::ControlGeneration,
+    ) -> Result<seyal_agent_core::ControlGeneration, DomainError> {
+        self.domain.advance_control_generation(run_id, presented)
+    }
+
     pub fn liveness(&self, run_id: AgentRunId) -> RunLiveness {
-        self.liveness
-            .get(&run_id)
-            .copied()
+        self.recorded_liveness(run_id)
             .unwrap_or(RunLiveness::ScriptedLive)
+    }
+
+    pub fn recorded_liveness(&self, run_id: AgentRunId) -> Option<RunLiveness> {
+        self.liveness.get(&run_id).copied()
+    }
+
+    /// Drop one accepted observation when its event did not commit.
+    pub fn undo_apply(
+        &mut self,
+        observation: &HostObservation,
+        previous_liveness: Option<RunLiveness>,
+        previous_effects: u64,
+    ) {
+        self.applied
+            .remove(&(observation.run_id, observation.ordinal));
+        let expected_next = self.next_expected_ordinal(observation.run_id);
+        if observation
+            .ordinal
+            .checked_add(1)
+            .is_some_and(|tip| tip == expected_next)
+        {
+            if observation.ordinal <= 1 {
+                self.next_ordinal.remove(&observation.run_id);
+            } else {
+                self.next_ordinal
+                    .insert(observation.run_id, observation.ordinal);
+            }
+        }
+        match previous_liveness {
+            Some(liveness) => {
+                self.liveness.insert(observation.run_id, liveness);
+            }
+            None => {
+                self.liveness.remove(&observation.run_id);
+            }
+        }
+        self.effects_performed = previous_effects;
     }
 
     pub fn work_item_outcome(&self, _run_id: AgentRunId) -> WorkItemOutcome {
@@ -82,18 +207,11 @@ impl ObservationAuthority {
                 Err(ObserveError::Conflict)
             };
         }
-        let expected = self
-            .applied
-            .keys()
-            .filter(|(run_id, _)| *run_id == observation.run_id)
-            .map(|(_, ordinal)| *ordinal)
-            .max()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or(ObserveError::OutOfOrder)?;
+        let expected = self.next_expected_ordinal(observation.run_id);
         if observation.ordinal != expected {
             return Err(ObserveError::OutOfOrder);
         }
+        let next = expected.checked_add(1).ok_or(ObserveError::OutOfOrder)?;
 
         match &observation.kind {
             HostObservationKind::ObservationDisconnected => {
@@ -132,6 +250,7 @@ impl ObservationAuthority {
             }
         }
         self.applied.insert(key, observation.kind);
+        self.next_ordinal.insert(observation.run_id, next);
         Ok(())
     }
 
@@ -225,7 +344,9 @@ fn parse_line(line: &str) -> Result<crate::ScriptStep, crate::ScriptError> {
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, crate::ScriptError> {
-    if !text.len().is_multiple_of(2) || text.len() > 8192 {
+    // Byte length can be even while a window still splits a multibyte scalar.
+    // Reject that before slicing so malformed harness text stays an error.
+    if !text.is_ascii() || !text.len().is_multiple_of(2) || text.len() > 8192 {
         return Err(crate::ScriptError::MalformedScript);
     }
     (0..text.len())
@@ -242,6 +363,7 @@ mod tests {
     use super::*;
     use crate::{FakeExecutionHost, ScriptStep};
     use seyal_agent_core::{BindingGeneration, WorkScopeKind};
+    use std::time::Instant;
 
     const NORMAL_SUCCESS: &str = include_str!("../conformance/normal-success.script");
     const DISCONNECT: &str = include_str!("../conformance/disconnect-reconnect.script");
@@ -430,7 +552,6 @@ mod tests {
 
     #[test]
     fn records_normal_high_volume_reconnect_and_crash_resource_samples() {
-        use std::time::Instant;
         let samples = [
             ("normal", NORMAL_SUCCESS),
             ("high-volume", HIGH_VOLUME),
@@ -517,6 +638,9 @@ mod tests {
     fn malformed_scripts_are_bounded() {
         assert!(parse_script("emit nope").is_err());
         assert!(parse_script("").is_err());
+        // Minimized libFuzzer crash: even byte length, odd char boundary.
+        assert!(parse_script("emit result e\u{00c2}e").is_err());
+        assert!(parse_script("emit output e\u{00c2}e").is_err());
         let huge = "x".repeat(70_000);
         assert!(parse_script(&huge).is_err());
         let mut state = 9_u64;
@@ -528,5 +652,118 @@ mod tests {
             }
             let _ = parse_script(&text);
         }
+    }
+
+    #[test]
+    fn next_ordinal_cursor_stays_constant_time_under_large_retained_payloads() {
+        // Scale fixture: many large payloads must not make next-ordinal lookup
+        // scan applied entries. A linear scan of 8_000 × 2 KiB keys would blow
+        // this bound; the per-run cursor must stay O(1).
+        const EVENTS: u64 = 8_000;
+        const PAYLOAD: usize = 2 * 1024;
+        let (mut authority, run, generation) = authority_with_run();
+        let payload = vec![0xAB; PAYLOAD];
+        let started = Instant::now();
+        for ordinal in 1..=EVENTS {
+            authority
+                .apply(HostObservation {
+                    run_id: run,
+                    binding_generation: generation,
+                    ordinal,
+                    kind: HostObservationKind::Result(payload.clone()),
+                })
+                .unwrap();
+        }
+        let fill = started.elapsed();
+        assert_eq!(authority.next_expected_ordinal(run), EVENTS + 1);
+        assert_eq!(authority.applied_count(), EVENTS as usize);
+
+        let probe = Instant::now();
+        for _ in 0..2_048 {
+            assert_eq!(
+                authority.apply(HostObservation {
+                    run_id: run,
+                    binding_generation: generation,
+                    ordinal: EVENTS + 2,
+                    kind: HostObservationKind::KnownSuccess,
+                }),
+                Err(ObserveError::OutOfOrder)
+            );
+            assert_eq!(authority.next_expected_ordinal(run), EVENTS + 1);
+        }
+        let probe_elapsed = probe.elapsed();
+        // Cursor lookup is O(1). A returned linear key scan over 8k entries for
+        // each probe would dominate; keep a generous absolute ceiling for CI.
+        assert!(
+            probe_elapsed.as_millis() < 500,
+            "next-ordinal probes must stay bounded with large retained history: fill={fill:?} probe={probe_elapsed:?}"
+        );
+
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: EVENTS + 1,
+                kind: HostObservationKind::KnownSuccess,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+        assert_eq!(authority.next_expected_ordinal(run), EVENTS + 2);
+    }
+
+    #[test]
+    fn mark_recovered_honors_committed_terminal_and_unknown_otherwise() {
+        let (mut authority, run, generation) = authority_with_run();
+        authority
+            .apply(HostObservation {
+                run_id: run,
+                binding_generation: generation,
+                ordinal: 1,
+                kind: HostObservationKind::KnownSuccess,
+            })
+            .unwrap();
+        assert_eq!(authority.liveness(run), RunLiveness::KnownTerminated);
+        authority.mark_recovered(run);
+        assert_eq!(
+            authority.liveness(run),
+            RunLiveness::KnownTerminated,
+            "committed terminal must survive recovery classification"
+        );
+
+        let (mut live, live_run, live_generation) = authority_with_run();
+        live.apply(HostObservation {
+            run_id: live_run,
+            binding_generation: live_generation,
+            ordinal: 1,
+            kind: HostObservationKind::Started,
+        })
+        .unwrap();
+        live.mark_recovered(live_run);
+        assert_eq!(live.liveness(live_run), RunLiveness::UnknownAfterCrash);
+
+        let (mut noted, noted_run, _) = authority_with_run();
+        noted.note_committed_terminal(noted_run);
+        noted.mark_recovered(noted_run);
+        assert_eq!(noted.liveness(noted_run), RunLiveness::KnownTerminated);
+    }
+
+    #[test]
+    fn undo_apply_rewinds_next_ordinal_cursor() {
+        let (mut authority, run, generation) = authority_with_run();
+        let observation = HostObservation {
+            run_id: run,
+            binding_generation: generation,
+            ordinal: 1,
+            kind: HostObservationKind::Output(vec![1, 2, 3, 4]),
+        };
+        let previous_liveness = authority.recorded_liveness(run);
+        let previous_effects = authority.effects_performed();
+        authority.apply(observation.clone()).unwrap();
+        assert_eq!(authority.next_expected_ordinal(run), 2);
+        authority.undo_apply(&observation, previous_liveness, previous_effects);
+        assert_eq!(authority.next_expected_ordinal(run), 1);
+        assert_eq!(authority.applied_count(), 0);
+        authority.apply(observation).unwrap();
+        assert_eq!(authority.next_expected_ordinal(run), 2);
     }
 }

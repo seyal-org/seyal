@@ -119,6 +119,9 @@ pub enum PresentationError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PresentationAction {
     BindIdentity(PresentationIdentity),
+    /// Drop the bound identity after presentation detach (pane/tab close).
+    /// Bumps the epoch so stale native transitions fail closed.
+    ClearIdentity,
     Transition {
         mode: PresentationMode,
         identity: PresentationIdentity,
@@ -163,6 +166,10 @@ impl PresentationSession {
     pub fn apply(&mut self, action: PresentationAction) -> Result<(), PresentationError> {
         match action {
             PresentationAction::BindIdentity(identity) => self.bind_identity(identity),
+            PresentationAction::ClearIdentity => {
+                self.clear_identity();
+                Ok(())
+            }
             PresentationAction::Transition {
                 mode,
                 identity,
@@ -199,6 +206,14 @@ impl PresentationSession {
             Some(current) if current == identity => Ok(()),
             Some(_) => Err(PresentationError::IdentityMismatch),
         }
+    }
+
+    fn clear_identity(&mut self) {
+        self.identity = None;
+        self.mode = PresentationMode::Flow;
+        self.input_route = Self::route(PresentationMode::Flow);
+        self.last_transition_was_explicit = false;
+        self.epoch = self.epoch.checked_add(1).unwrap_or(1);
     }
 
     fn transition(
@@ -395,6 +410,24 @@ mod tests {
         );
         assert_eq!(session.snapshot().identity, Some(bound));
         assert_eq!(session.snapshot().mode, PresentationMode::Raw);
+    }
+
+    #[test]
+    fn clear_identity_allows_a_later_distinct_bind() {
+        let bound = identity(1, 3);
+        let mut session = PresentationSession::new(Some(bound), PresentationMode::Raw);
+        let before = session.snapshot().epoch;
+        session
+            .apply(PresentationAction::ClearIdentity)
+            .expect("clear");
+        let cleared = session.snapshot();
+        assert_eq!(cleared.identity, None);
+        assert_eq!(cleared.mode, PresentationMode::Flow);
+        assert_eq!(cleared.epoch, before + 1);
+        session
+            .apply(PresentationAction::BindIdentity(identity(2, 7)))
+            .expect("rebind");
+        assert_eq!(session.snapshot().identity, Some(identity(2, 7)));
     }
 
     #[test]

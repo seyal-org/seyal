@@ -3,6 +3,7 @@
 //! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
+mod block_projection;
 mod decode;
 mod encode;
 mod error_code;
@@ -12,6 +13,8 @@ mod visual;
 
 use error_code::error_number;
 
+#[cfg(test)]
+mod shell_composition_tests;
 #[cfg(test)]
 mod tests;
 
@@ -33,10 +36,11 @@ use encode::{
     encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
-pub use pane_region::seyal_app_pane_region;
+pub use block_projection::seyal_app_block_projection;
+pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
 pub use shortcut::{
-    seyal_app_invoke_workspace_command, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
-    seyal_app_shortcut_item,
+    seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
+    seyal_app_shortcut_enabled, seyal_app_shortcut_item,
 };
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
@@ -264,8 +268,8 @@ impl SeyalAppRow {
     }
 }
 
-pub(super) struct AppHandle {
-    pub(super) root: ApplicationRoot,
+struct AppHandle {
+    root: ApplicationRoot,
     output: Vec<u8>,
     composer_draft: Vec<u8>,
     ax_nodes: Vec<SeyalAppAxNode>,
@@ -277,6 +281,7 @@ pub(super) struct AppHandle {
     history_text: Vec<u8>,
     palette_query: Vec<u8>,
     palette_text: Vec<u8>,
+    palette_placeholder: Vec<u8>,
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
@@ -285,7 +290,7 @@ pub(super) struct AppHandle {
 }
 
 thread_local! {
-    pub(super) static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
+    static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
 impl SeyalAppSnapshot {
@@ -340,74 +345,6 @@ pub extern "C" fn seyal_app_option_as_alt(handle: u64) -> u8 {
     })
 }
 
-/// SPEC-024 §6.2 route result codes for `seyal_app_route_keystroke`.
-pub const SEYAL_APP_ROUTE_FALLTHROUGH: i32 = 0;
-pub const SEYAL_APP_ROUTE_CONSUMED: i32 = 1;
-pub const SEYAL_APP_ROUTE_NATIVE_COMMAND: i32 = 2;
-/// Route one already-normalized keystroke (ADR-015). Rust owns the match and
-/// dispatches matched WorkspaceCommands; ApplicationCommand paths write zero
-/// PTY bytes. Swift must not reinterpret product shortcuts.
-/// `modifier_bits`: CMD=1, CTRL=2, SHIFT=4, OPT=8.
-/// `named_key` non-zero means `base` is a NamedKey discriminant (Enter=0…).
-/// `shift_applied` is 0 when absent.
-/// `composer_focused` / `composition_active`: 0 or 1.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_route_keystroke(
-    handle: u64,
-    modifier_bits: u8,
-    named_key: u8,
-    base: u32,
-    shift_applied: u32,
-    composer_focused: u8,
-    composition_active: u8,
-) -> i32 {
-    use crate::keybinding::{
-        process_keybinding_table, projected_menu_steals_unmatched_command, NormalizedStroke,
-        RouteOutcome,
-    };
-
-    let Some(stroke) =
-        NormalizedStroke::from_ffi(modifier_bits, named_key != 0, base, shift_applied)
-    else {
-        return -4;
-    };
-    APPS.with(|apps| {
-        let mut apps = apps.borrow_mut();
-        let Some(state) = apps.get_mut(&handle) else {
-            return -1;
-        };
-        match state.root.route_normalized_keystroke(
-            &stroke,
-            composer_focused != 0,
-            composition_active != 0,
-        ) {
-            Ok(RouteOutcome::Matched { .. }) | Ok(RouteOutcome::PrefixWait) => {
-                SEYAL_APP_ROUTE_CONSUMED
-            }
-            Ok(RouteOutcome::UnmatchedCommand) => {
-                // §6.2 step 2c: miss → native. Consume only cross-context menu steal.
-                let table = process_keybinding_table();
-                let route = state.root.keybinding_route_context(composer_focused != 0);
-                if projected_menu_steals_unmatched_command(table, &stroke, route) {
-                    SEYAL_APP_ROUTE_CONSUMED
-                } else {
-                    SEYAL_APP_ROUTE_NATIVE_COMMAND
-                }
-            }
-            Ok(RouteOutcome::ReservedCommand) => SEYAL_APP_ROUTE_NATIVE_COMMAND,
-            Ok(RouteOutcome::CompositionConsumes) | Ok(RouteOutcome::Fallthrough) => {
-                SEYAL_APP_ROUTE_FALLTHROUGH
-            }
-            Err(error) => {
-                // Matched binding whose invoke failed: still consumed — never
-                // fall through to the PTY (SPEC-024 R10.2 / R10.3 / §14 item 11).
-                let _ = state.root.fail(error);
-                SEYAL_APP_ROUTE_CONSUMED
-            }
-        }
-    })
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_create() -> u64 {
     let handle = allocate_handle();
@@ -427,6 +364,7 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 history_text: Vec::new(),
                 palette_query: Vec::new(),
                 palette_text: Vec::new(),
+                palette_placeholder: Vec::new(),
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
@@ -875,41 +813,60 @@ pub extern "C" fn seyal_app_palette_row(handle: u64, index: u32) -> SeyalAppRow 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_copy(handle: u64, kind: u16) -> SeyalAppRow {
-    let mode = APPS.with(|apps| {
-        apps.borrow()
-            .get(&handle)
-            .and_then(|state| state.root.snapshot().composer)
-            .map(|composer| composer.mode)
-    });
-    let text = match kind {
-        0 => match &mode {
-            Some(mode) => mode.editor_placeholder(),
-            None => ComposerMode::Available.editor_placeholder(),
-        },
-        1 => COMPOSER_EXECUTE_LABEL,
-        2 => BLOCK_PROMPT,
-        3 => COMPOSER_HISTORY_LABEL,
-        4 => COMPOSER_HISTORY_PLACEHOLDER,
-        _ => "",
-    };
-    SeyalAppRow {
-        kind,
-        flags: 0,
-        reserved: 0,
-        id_lo: 0,
-        id_hi: 0,
-        title: text.as_ptr(),
-        title_len: text.len() as u32,
-        reserved1: 0,
-        detail: ptr::null(),
-        detail_len: 0,
-        reserved2: 0,
-        address_version: 0,
-        address_kind: 0,
-        address_len: 0,
-        address_pad: 0,
-        address_bytes: [0; 48],
-    }
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return SeyalAppRow::empty();
+        };
+        let snap = state.root.snapshot();
+        let mode = snap.composer.map(|composer| composer.mode);
+        let text: &[u8] = match kind {
+            0 => {
+                let s = match &mode {
+                    Some(mode) => mode.editor_placeholder(),
+                    None => ComposerMode::Available.editor_placeholder(),
+                };
+                s.as_bytes()
+            }
+            1 => COMPOSER_EXECUTE_LABEL.as_bytes(),
+            2 => BLOCK_PROMPT.as_bytes(),
+            3 => COMPOSER_HISTORY_LABEL.as_bytes(),
+            4 => COMPOSER_HISTORY_PLACEHOLDER.as_bytes(),
+            5 => {
+                // Palette / goto placeholder is Rust-owned (ADR-015).
+                state.palette_placeholder = if snap.goto.open {
+                    snap.goto
+                        .scope
+                        .placeholder(snap.goto.truncated)
+                        .into_bytes()
+                } else if snap.palette.open {
+                    b"Type a command...".to_vec()
+                } else {
+                    Vec::new()
+                };
+                state.palette_placeholder.as_slice()
+            }
+            _ => b"",
+        };
+        SeyalAppRow {
+            kind,
+            flags: 0,
+            reserved: 0,
+            id_lo: 0,
+            id_hi: 0,
+            title: text.as_ptr(),
+            title_len: text.len() as u32,
+            reserved1: 0,
+            detail: ptr::null(),
+            detail_len: 0,
+            reserved2: 0,
+            address_version: 0,
+            address_kind: 0,
+            address_len: 0,
+            address_pad: 0,
+            address_bytes: [0; 48],
+        }
+    })
 }
 
 #[repr(C)]
@@ -987,3 +944,4 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(None)
     }
 }
+

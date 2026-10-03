@@ -4,20 +4,10 @@ use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
-use crate::navigation::{matches_destroyed_pane, matches_destroyed_tab, ResourceAddress};
-use crate::shell::{ShellAction, SplitAxis};
+use crate::pane_layout::{self, SplitPosition};
+use crate::shell::{ShellAction, ShellError, SplitAxis};
 
 impl ApplicationRoot {
-    pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::CreateTab)
-            .map_err(|_| AppError::TabCreationUnavailable)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
             .apply(ShellAction::SplitFocused { axis })
@@ -28,55 +18,8 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_active = focus_before.active_tab == id;
-        self.shell
-            .apply(ShellAction::CloseTab { id })
-            .map_err(close_tab_error)?;
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
-        // product close path — surfaces do not scan history themselves.
-        let focus_after = self.shell.focus_checkpoint();
-        let successor = if was_active {
-            Some(ResourceAddress::Pane {
-                workspace: focus_after.active_workspace,
-                tab: focus_after.active_tab,
-                pane: focus_after.focused_pane,
-            })
-        } else {
-            None
-        };
-        self.focus_history
-            .on_destroy(|addr| matches_destroyed_tab(addr, id), successor);
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        let focus_before = self.shell.focus_checkpoint();
-        let was_focused = focus_before.focused_pane == id;
-        self.shell
-            .apply(ShellAction::ClosePane { id })
-            .map_err(close_pane_error)?;
-        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
-        let focus_after = self.shell.focus_checkpoint();
-        let successor = if was_focused {
-            Some(ResourceAddress::Pane {
-                workspace: focus_after.active_workspace,
-                tab: focus_after.active_tab,
-                pane: focus_after.focused_pane,
-            })
-        } else {
-            None
-        };
-        self.focus_history
-            .on_destroy(|addr| matches_destroyed_pane(addr, id), successor);
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
+        self.close_pane_with_disposition(id)
     }
 
     pub(super) fn set_left_panel(&mut self, mode: LeftPanelMode) -> Result<(), AppError> {
@@ -179,6 +122,39 @@ impl ApplicationRoot {
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    /// Active Tab's Split dividers (#928), pre-order.
+    pub fn pane_dividers(&self) -> Vec<pane_layout::PaneDivider> {
+        pane_layout::dividers(&self.shell.snapshot().tree)
+    }
+
+    /// Resize the Split whose divider `pane` leads (#928). The host sends the
+    /// raw pointer position; Rust derives and clamps the ratio from the
+    /// divider's own area, so no host inverts the layout.
+    pub(super) fn move_split_divider(
+        &mut self,
+        pane: PaneId,
+        position: SplitPosition,
+    ) -> Result<(), AppError> {
+        let shell = self.shell.snapshot();
+        let Some(divider) = pane_layout::dividers(&shell.tree)
+            .into_iter()
+            .find(|divider| divider.leading == pane)
+        else {
+            return Err(if shell.panes.iter().any(|row| row.id == pane) {
+                AppError::NoSplitDivider
+            } else {
+                AppError::UnknownPane
+            });
+        };
+        let ratio = divider.ratio_at(position).ok_or(AppError::NoSplitDivider)?;
+        self.shell
+            .apply(ShellAction::SetSplitRatio { pane, ratio })
+            .map_err(|error| match error {
+                ShellError::NoSplitDivider => AppError::NoSplitDivider,
+                _ => AppError::UnknownPane,
+            })
     }
 
     pub(super) fn replace_chrome(

@@ -149,20 +149,9 @@ impl ApplicationRoot {
             }
             // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
             WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
-            WorkspaceCommandId::FocusHistoryBack => {
-                // R5.5 / R6.8: FocusSeq from the same snapshot history committed.
-                let observed = self
-                    .snapshot()
-                    .focus_history_seq
-                    .ok_or(AppError::ActionUnavailable)?;
-                self.history_back(observed)
-            }
-            WorkspaceCommandId::FocusHistoryForward => {
-                let observed = self
-                    .snapshot()
-                    .focus_history_seq
-                    .ok_or(AppError::ActionUnavailable)?;
-                self.history_forward(observed)
+            // K8 admits the bindings; N3 (#1117 / tip B) owns FocusHistory state.
+            WorkspaceCommandId::FocusHistoryBack | WorkspaceCommandId::FocusHistoryForward => {
+                Err(AppError::ActionUnavailable)
             }
             WorkspaceCommandId::AppQuit => self.quit(),
         }

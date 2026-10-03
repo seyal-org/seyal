@@ -181,6 +181,7 @@ final class ProductChromeHostView: NSView {
         centerColumn.onFocusPane = { [weak self] lo, hi in
             self?.focusPaneRegion(lo: lo, hi: hi)
         }
+        centerColumn.appHandle = pane.appHandle
 
         addSubview(tabStrip)
         addSubview(left)
@@ -354,6 +355,10 @@ final class ProductChromeHostView: NSView {
         }
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
+            // Frame advances (and ViewportLineIds remaps) arrive here via
+            // ThinPaneHostView.onFrameChanged — keep running PRIMARY_CLIP
+            // membership and card height in sync with each prepared generation.
+            self?.refreshRunningBlockOutput()
         }
         NotificationCenter.default.addObserver(
             self,
@@ -443,9 +448,7 @@ final class ProductChromeHostView: NSView {
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildTabStrip(shell: shell)
-        centerColumn.apply(
-            PaneLayoutView.readRegions(appHandle: pane.appHandle, paneCount: Int(shell.pane_count))
-        )
+        centerColumn.reconcile(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
@@ -468,6 +471,7 @@ final class ProductChromeHostView: NSView {
     @objc func openCommandPalette() {
         commandPalette.requestOpen()
     }
+
 
     /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
     /// WorkspaceCommand. Rust re-validates against the current route context.
@@ -544,6 +548,9 @@ final class ProductChromeHostView: NSView {
         }
         return false
     }
+
+    /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the
+    /// command-palette overlay; default scope is Panes.
 
     /// Navigation-only goto surface (SPEC-022 N4 / `goto.open`). Reuses the
     /// command-palette overlay; default scope is Panes.

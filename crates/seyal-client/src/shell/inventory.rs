@@ -73,16 +73,16 @@ pub(super) fn build(
     let mut seen_executions = HashSet::new();
 
     for workspace in workspaces {
-        let active_tab = workspace.active_tab;
+        let active_tab = workspace.active_tab_id();
         out_workspaces.push(WorkspaceNavItem {
             id: workspace.id,
             name: workspace.name.clone(),
             detail: workspace.detail.clone(),
             attention: workspace.attention,
             active: workspace.id == active_workspace,
-            tab_count: workspace.tabs.len(),
+            tab_count: workspace.tab_count(),
         });
-        for tab in &workspace.tabs {
+        for tab in workspace.tabs() {
             let focused = tab.focused;
             tabs.push(TabNavItem {
                 workspace: workspace.id,

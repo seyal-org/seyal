@@ -146,7 +146,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let snapshot = seyal_app_snapshot(appHandle)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        isHidden = direct
+        isHidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         let available = composer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available
