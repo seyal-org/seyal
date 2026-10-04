@@ -10,13 +10,13 @@ use crate::{
     LocalDisplayClient,
 };
 
-use super::{error_code, with_active_client, with_active_client_mut, SeyalCopiedText};
+use super::{error_code, with_display_client, with_display_client_mut, SeyalCopiedText};
 
 /// Reports whether the attached Runtime negotiated the additive TerminalKeyV2
 /// message. Native input uses this to preserve M001 routing with older peers.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_supports_key_v2() -> u8 {
-    super::with_active_client(|client| u8::from(client.extended_terminal_key_supported()))
+    super::with_display_client(|client| u8::from(client.extended_terminal_key_supported()))
         .unwrap_or(0)
 }
 
@@ -45,7 +45,7 @@ pub unsafe extern "C" fn seyal_bridge_submit_utf8(bytes: *const u8, len: u32) ->
     let Ok(text) = str::from_utf8(bytes) else {
         return -4;
     };
-    with_active_client_mut(|client| client.submit_committed_text(text))
+    with_display_client_mut(|client| client.submit_committed_text(text))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
@@ -63,7 +63,7 @@ pub unsafe extern "C" fn seyal_bridge_submit_paste(bytes: *const u8, len: u32) -
         return -11;
     };
     let bytes = unsafe { slice::from_raw_parts(bytes, len) };
-    with_active_client_mut(|client| client.submit_paste(bytes))
+    with_display_client_mut(|client| client.submit_paste(bytes))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
@@ -81,7 +81,7 @@ pub extern "C" fn seyal_bridge_submit_host_selection(
     let Ok(action) = HostSelectionAction::from_u8(action) else {
         return -4;
     };
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         client.submit_host_selection(action, kind, start_col, start_row, end_col, end_row)
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
@@ -112,14 +112,14 @@ pub unsafe extern "C" fn seyal_bridge_submit_host_search(
         };
         text
     };
-    with_active_client_mut(|client| client.submit_host_search(needle, forward != 0))
+    with_display_client_mut(|client| client.submit_host_search(needle, forward != 0))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
 /// Borrowed yanked text until the next mutating bridge call.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_copied_text() -> SeyalCopiedText {
-    with_active_client(|client| match client.copied_text() {
+    with_display_client(|client| match client.copied_text() {
         Some(bytes) => SeyalCopiedText {
             utf8: bytes.as_ptr(),
             len: bytes.len() as u32,
@@ -132,7 +132,7 @@ pub extern "C" fn seyal_bridge_copied_text() -> SeyalCopiedText {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_copied_text_consume() -> i32 {
-    with_active_client_mut(LocalDisplayClient::take_copied_text).map_or(-1, |_| 0)
+    with_display_client_mut(LocalDisplayClient::take_copied_text).map_or(-1, |_| 0)
 }
 
 /// Submit one complete command from the Pane composer through the
@@ -159,7 +159,7 @@ pub unsafe extern "C" fn seyal_bridge_submit_composer(bytes: *const u8, len: u32
     let Ok(command) = str::from_utf8(bytes) else {
         return -4;
     };
-    with_active_client_mut(|client| client.submit_composer_command(command))
+    with_display_client_mut(|client| client.submit_composer_command(command))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
@@ -170,7 +170,7 @@ pub extern "C" fn seyal_bridge_submit_key(kind: u16, scalar: u32) -> i32 {
     let Some(kind) = terminal_key_kind(kind) else {
         return -4;
     };
-    with_active_client_mut(|client| client.submit_terminal_key(kind, scalar))
+    with_display_client_mut(|client| client.submit_terminal_key(kind, scalar))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
@@ -193,7 +193,7 @@ pub extern "C" fn seyal_bridge_submit_key_v2(
     let Some(modifiers) = modifiers else {
         return -4;
     };
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         client.submit_terminal_key_v2(kind, modifiers, value, event, shifted_ascii, action_id)
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
@@ -251,7 +251,7 @@ pub extern "C" fn seyal_bridge_submit_mouse(
     let Some(modifiers) = TerminalKeyV2Modifiers::from_bits_for_ffi(modifiers) else {
         return -4;
     };
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         client.submit_terminal_mouse(kind, button, modifiers, col, row, action_id)
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
@@ -279,7 +279,7 @@ pub extern "C" fn seyal_bridge_propose_geometry(
     ) else {
         return -17;
     };
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         client.set_desired_geometry_for_layout(geometry, meaningful_layout_epoch != 0)
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
@@ -287,7 +287,7 @@ pub extern "C" fn seyal_bridge_propose_geometry(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_retry_resize() -> i32 {
-    with_active_client_mut(LocalDisplayClient::retry_resize)
+    with_display_client_mut(LocalDisplayClient::retry_resize)
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 

@@ -379,28 +379,39 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
     0
 }
 
-/// Selects the client used by the legacy-shaped bridge calls. Swift calls
-/// this before every operation, allowing the existing ABI to remain compact
-/// while each Pane still owns an independent socket/client.
-///
-/// After C2b CreateTab the host still holds the first-connect handle. When
-/// ApplicationRoot has a focused-pane display client, that client stays
-/// active so frames/keys follow Rust authority (ADR-015 / SPEC-008).
+/// Selects the client used by readiness-driven poll/flush for `handle`'s fd.
+/// Does not redirect onto the focused display client: a first-connect
+/// DispatchSource must drain its own socket (AGENTS.md level-trigger rule).
+/// Frames and keys use [`super::display_handle`] separately.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_select(handle: u64) -> i32 {
     let exists = CLIENTS.with(|clients| clients.borrow().contains_key(&handle));
     if !exists {
         return -1;
     }
-    let focused = FOCUSED_DISPLAY_HANDLE.with(|focused| focused.get());
-    let display = if focused != 0 && CLIENTS.with(|clients| clients.borrow().contains_key(&focused))
-    {
-        focused
-    } else {
-        handle
-    };
-    ACTIVE_HANDLE.with(|active| active.set(display));
+    ACTIVE_HANDLE.with(|active| active.set(handle));
     0
+}
+
+/// Walk adopted live clients. `after == 0` returns the smallest handle;
+/// otherwise the next handle strictly greater than `after`. `0` ends.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_next_handle(after: u64) -> u64 {
+    CLIENTS.with(|clients| {
+        clients
+            .borrow()
+            .keys()
+            .copied()
+            .filter(|handle| *handle > after)
+            .min()
+            .unwrap_or(0)
+    })
+}
+
+/// Socket fd for an adopted handle without changing the selected poll client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_socket_fd_for(handle: u64) -> i32 {
+    super::with_client(handle, LocalDisplayClient::socket_fd).unwrap_or(-1)
 }
 
 #[unsafe(no_mangle)]

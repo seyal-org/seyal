@@ -482,6 +482,12 @@ pub struct ApplicationRoot {
     /// Remaining injected live-attach failures before a real connect (C2b tests).
     #[cfg(target_os = "macos")]
     inject_live_attach_failures: u32,
+    /// In-flight second-Controller connect (off the host poll thread).
+    #[cfg(target_os = "macos")]
+    pending_live_attach: Option<live_attach_apply::PendingLiveAttach>,
+    /// Test gate: worker waits before `connect_execution_id`.
+    #[cfg(target_os = "macos")]
+    live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
 }
 
 impl Default for ApplicationRoot {
@@ -546,6 +552,10 @@ impl ApplicationRoot {
             pane_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
+            #[cfg(target_os = "macos")]
+            pending_live_attach: None,
+            #[cfg(target_os = "macos")]
+            live_attach_gate: None,
         }
     }
 
@@ -556,11 +566,25 @@ impl ApplicationRoot {
         self.inject_live_attach_failures = n;
     }
 
+    /// Hold the next live second-Controller connect until `tx.send(())`.
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn gate_next_live_attach(&mut self, rx: std::sync::mpsc::Receiver<()>) {
+        self.live_attach_gate = Some(rx);
+    }
+
     /// Extra per-pane Controller registry entries (second+ tabs).
     #[doc(hidden)]
     #[cfg(target_os = "macos")]
     pub fn extra_pane_client_count(&self) -> usize {
         self.extra_pane_clients.len()
+    }
+
+    /// Registry handle for a pane's Controller, if attached.
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn pane_client_raw(&self, pane: PaneId) -> Option<u64> {
+        self.pane_client_raws.get(&pane).copied()
     }
 
     /// Whether the pane's Controller still accepts a nonblocking poll (unrelated

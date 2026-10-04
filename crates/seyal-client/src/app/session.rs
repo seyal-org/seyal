@@ -59,6 +59,28 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// After FFI `Bind`, name the already-adopted bridge client as the create
+    /// Controller so production CreateTab can admit type-36.
+    pub fn adopt_bridge_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
+        if crate::ffi::with_client(handle, |_| ()).is_none() {
+            return self.fail(AppError::NoLiveClient);
+        }
+        if self
+            .client_handle
+            .as_ref()
+            .is_some_and(|owned| owned.raw() == handle)
+        {
+            return Ok(());
+        }
+        if self.client_handle.is_none() {
+            self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        }
+        self.pane_client_raws.insert(fence.pane, handle);
+        self.clear_chord_prefix();
+        self.seed_provisioning_request_floor_from_wire();
+        Ok(())
+    }
+
     /// Attach a freshly connected client by registering it as the sole live entry.
     ///
     /// Rejects when `CLIENTS` already holds a live client for the same
@@ -157,6 +179,8 @@ impl ApplicationRoot {
             }
         }
         self.derive_presentation(alternate)?;
+        #[cfg(target_os = "macos")]
+        self.complete_pending_live_attach()?;
         // Drain create results from the create-admitting client (may differ
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;

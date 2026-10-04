@@ -188,8 +188,8 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
     );
     assert_eq!(
         seyal_client::ffi_test_active_registry_execution(),
-        Some(second_execution),
-        "seyal_bridge_select of the first handle must not steal focused display"
+        Some(first_execution),
+        "seyal_bridge_select of the first fd must poll that Controller"
     );
 
     let second_tab = root.snapshot().shell.active_tab;
@@ -436,6 +436,100 @@ fn create_tab_live_capacity_exceeded_is_bounded_without_retry() {
         Some(first_execution)
     );
     assert_eq!(root.extra_pane_client_count(), 1);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_select_does_not_steal_first_controller_poll() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+    let first_handle = root.pane_client_raw(first_pane).expect("first handle");
+
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
+    let second_execution = root
+        .provisioning()
+        .recorded_execution(second_pane)
+        .expect("second");
+    let second_handle = root.pane_client_raw(second_pane).expect("second handle");
+    assert_ne!(first_handle, second_handle);
+
+    assert_eq!(seyal_client::seyal_bridge_select(first_handle), 0);
+    assert_eq!(
+        seyal_client::ffi_test_active_registry_execution(),
+        Some(first_execution),
+        "select of the first fd must poll that Controller, not the focused tab"
+    );
+    assert_eq!(seyal_client::seyal_bridge_select(second_handle), 0);
+    assert_eq!(
+        seyal_client::ffi_test_active_registry_execution(),
+        Some(second_execution)
+    );
+    assert!(root.pane_client_poll_ok(first_pane));
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_gated_attach_keeps_first_controller_polling() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+    let (release_tx, release_rx) = mpsc::channel();
+    root.gate_next_live_attach(release_rx);
+
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    for _ in 0..25 {
+        let _ = root.poll_client(root.fence());
+        assert!(
+            root.pane_client_poll_ok(first_pane),
+            "first Controller must stay pollable while second attach is in flight"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_none(),
+        "gated attach must not complete before release"
+    );
+    release_tx.send(()).expect("release attach");
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");

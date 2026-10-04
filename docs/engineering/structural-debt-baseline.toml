@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 938
+acknowledged_loc = 962
 issue = 1175
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 adds per-pane maps plus test-only attach-failure injection for ADR-017 §6.3 live proofs after tip C ChordPrefixState."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 adds off-thread live-attach gate/pending plus per-pane maps for ADR-017 §6.3 live proofs after tip C ChordPrefixState."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -83,9 +83,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 946
-issue = 1106
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49 remain; tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs. Product decode for MoveSplitDivider/OpenGoto/TerminateExecution lives in decode.rs."
+acknowledged_loc = 972
+issue = 1175
+reason = "Published C ABI entry points stay one thin façade. #1175 wires Bind to the adopted create Controller and drives ApplicationRoot from seyal_bridge_poll so Seyal.app CreateTab reaches type-36 without growing Swift product authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

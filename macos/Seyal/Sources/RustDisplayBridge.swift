@@ -73,6 +73,7 @@ final class RustDisplayBridge {
   var onCopiedText: ((String) -> Void)?
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
+  var auxiliaryReadSources: [UInt64: DispatchSourceRead] = [:]
   var socketFileDescriptor: Int32 = -1
   let handleBox = RustBridgeHandleBox()
   var teardown: RustBridgeTeardownCoordinator!
@@ -254,6 +255,7 @@ final class RustDisplayBridge {
 
     publishCurrentFrame()
     synchronizeWriteReadinessSource()
+    armAuxiliaryReadSources()
     onStatusChanged()
     return true
   }
@@ -396,11 +398,53 @@ final class RustDisplayBridge {
     return seyal_bridge_select(clientHandle) == 0
   }
 
+  /// One DispatchSourceRead per live Controller fd. CreateTab's second
+  /// client must not steal the first connection's readiness handler.
+  func armAuxiliaryReadSources() {
+    guard isConnected else { return }
+    var live = Set<UInt64>()
+    var cursor: UInt64 = 0
+    while true {
+      let handle = seyal_bridge_next_handle(cursor)
+      if handle == 0 { break }
+      cursor = handle
+      live.insert(handle)
+      if handle == clientHandle { continue }
+      if auxiliaryReadSources[handle] != nil { continue }
+      let fd = seyal_bridge_socket_fd_for(handle)
+      guard fd >= 0 else { continue }
+      let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+      source.setEventHandler { [weak self] in
+        seyalRunAsMainActorFromMainQueue {
+          guard let self else { return }
+          _ = seyal_bridge_select(handle)
+          _ = seyal_bridge_poll()
+          _ = self.selectClient()
+          self.publishCurrentFrame()
+          self.synchronizeWriteReadinessSource()
+        }
+      }
+      source.setCancelHandler { [teardown = teardown!] in
+        teardown.sourceCancelled()
+      }
+      teardown.sourceCreated()
+      auxiliaryReadSources[handle] = source
+      source.resume()
+    }
+    for (handle, source) in auxiliaryReadSources where !live.contains(handle) {
+      source.cancel()
+      auxiliaryReadSources.removeValue(forKey: handle)
+    }
+  }
+
   deinit {
     // The coordinator is retained by cancellation handlers, so teardown
     // completes even if the owning surface destroys this bridge first.
     teardown.requestDisconnect()
     readSource?.cancel()
     writeSource?.cancel()
+    for source in auxiliaryReadSources.values {
+      source.cancel()
+    }
   }
 }

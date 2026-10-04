@@ -259,9 +259,11 @@ extension RustDisplayBridge {
       }
       if result == 1 {
         publishCurrentFrame()
+        armAuxiliaryReadSources()
         continue
       }
       if result == 0 {
+        armAuxiliaryReadSources()
         return
       }
 

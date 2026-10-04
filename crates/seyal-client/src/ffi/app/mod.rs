@@ -293,6 +293,20 @@ thread_local! {
     static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
+/// Drive ApplicationRoot wire create/attach from the production poll path.
+pub(crate) fn drive_application_roots() {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        for state in apps.values_mut() {
+            if state.root.live_client_handle_for_test().is_none() {
+                continue;
+            }
+            let fence = state.root.fence();
+            let _ = state.root.poll_client(fence);
+        }
+    });
+}
+
 impl SeyalAppSnapshot {
     const fn empty() -> Self {
         Self {
@@ -411,13 +425,25 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
         Ok(decoded) => decoded,
         Err(code) => return code,
     };
+    let bind_fence = match &decoded {
+        crate::app::AppAction::Bind { fence, .. } => Some(*fence),
+        _ => None,
+    };
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let Some(state) = apps.get_mut(&handle) else {
             return -1;
         };
         match state.root.apply(decoded) {
-            Ok(()) => 0,
+            Ok(()) => {
+                if let Some(fence) = bind_fence {
+                    let live = crate::ffi::active_handle();
+                    if live != 0 {
+                        let _ = state.root.adopt_bridge_handle(fence, live);
+                    }
+                }
+                0
+            }
             Err(_) => -4,
         }
     })

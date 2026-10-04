@@ -4,6 +4,9 @@
 //! `ExecutionId`, records the real Runtime `AttachmentId`, and binds the Pane.
 //! Harness probe clients keep `AttachController` parked for unit tests.
 
+use std::sync::mpsc;
+use std::thread;
+
 use seyal_core::{ExecutionId, PaneId};
 use seyal_runtime::local_ipc::framing::Role;
 
@@ -11,6 +14,13 @@ use super::{AppError, ApplicationRoot, BindingEvidence, PaneAuthority};
 use crate::local::{ClientError, LocalDisplayClient};
 use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::provisioning::{ConnectionOwner, ProvisioningEffect, ProvisioningFailure};
+
+pub(super) struct PendingLiveAttach {
+    pub owner: ConnectionOwner,
+    pub request_id: u64,
+    pub pane: PaneId,
+    pub rx: mpsc::Receiver<Result<LocalDisplayClient, ClientError>>,
+}
 
 impl ApplicationRoot {
     /// True when the create-admitting client is an in-process probe that must
@@ -53,23 +63,64 @@ impl ApplicationRoot {
             .map(|intent| intent.pane)
             .ok_or(AppError::ProvisioningRejected)?;
 
-        match self.take_live_attach_connect(execution) {
-            Ok(client) => self.complete_live_controller_attach(pane, request_id, client),
-            Err(error) => self.fail_live_controller_attach(owner, request_id, pane, error),
-        }
-    }
-
-    fn take_live_attach_connect(
-        &mut self,
-        execution: ExecutionId,
-    ) -> Result<LocalDisplayClient, ClientError> {
         if self.inject_live_attach_failures > 0 {
             self.inject_live_attach_failures -= 1;
-            return Err(ClientError::Discovery(
-                crate::DiscoveryFailure::ConnectionRefused,
-            ));
+            return self.fail_live_controller_attach(
+                owner,
+                request_id,
+                pane,
+                ClientError::Discovery(crate::DiscoveryFailure::ConnectionRefused),
+            );
         }
-        LocalDisplayClient::connect_execution_id(execution, Role::Controller)
+        if self.pending_live_attach.is_some() {
+            return Ok(());
+        }
+        let gate = self.live_attach_gate.take();
+        let (tx, rx) = mpsc::channel();
+        thread::Builder::new()
+            .name("seyal-live-attach".into())
+            .spawn(move || {
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
+                let _ = tx.send(LocalDisplayClient::connect_execution_id(
+                    execution,
+                    Role::Controller,
+                ));
+            })
+            .map_err(|_| AppError::NoLiveClient)?;
+        self.pending_live_attach = Some(PendingLiveAttach {
+            owner,
+            request_id,
+            pane,
+            rx,
+        });
+        Ok(())
+    }
+
+    pub(super) fn complete_pending_live_attach(&mut self) -> Result<(), AppError> {
+        let Some(pending) = self.pending_live_attach.as_ref() else {
+            return Ok(());
+        };
+        let result = match pending.rx.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return Ok(()),
+            Err(mpsc::TryRecvError::Disconnected) => Err(ClientError::Discovery(
+                crate::DiscoveryFailure::ConnectionRefused,
+            )),
+        };
+        let pending = self.pending_live_attach.take().expect("pending attach");
+        match result {
+            Ok(client) => {
+                self.complete_live_controller_attach(pending.pane, pending.request_id, client)
+            }
+            Err(error) => self.fail_live_controller_attach(
+                pending.owner,
+                pending.request_id,
+                pending.pane,
+                error,
+            ),
+        }
     }
 
     fn complete_live_controller_attach(

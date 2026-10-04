@@ -115,11 +115,12 @@ pub use launch_policy::{
 pub use session::{
     seyal_bridge_adopt_handle, seyal_bridge_attachment_id_high, seyal_bridge_attachment_id_low,
     seyal_bridge_connect_first, seyal_bridge_disconnect, seyal_bridge_disconnect_handle,
-    seyal_bridge_execution_id_high, seyal_bridge_execution_id_low, seyal_bridge_open_execution,
-    seyal_bridge_open_execution_until, seyal_bridge_open_first,
+    seyal_bridge_execution_id_high, seyal_bridge_execution_id_low, seyal_bridge_next_handle,
+    seyal_bridge_open_execution, seyal_bridge_open_execution_until, seyal_bridge_open_first,
     seyal_bridge_open_first_observer_until, seyal_bridge_open_first_until,
     seyal_bridge_runtime_id_high, seyal_bridge_runtime_id_low, seyal_bridge_select,
-    seyal_bridge_set_runtime_dir, seyal_bridge_socket_fd, test_register_pending_client,
+    seyal_bridge_set_runtime_dir, seyal_bridge_socket_fd, seyal_bridge_socket_fd_for,
+    test_register_pending_client,
 };
 
 /// A completed lifecycle connection crosses executors exactly once, before it
@@ -140,17 +141,45 @@ thread_local! {
     // terminal calls free of cross-pane locks.
     pub(crate) static CLIENTS: RefCell<HashMap<u64, Box<LocalDisplayClient>>> = RefCell::new(HashMap::new());
     pub(crate) static ACTIVE_HANDLE: Cell<u64> = const { Cell::new(0) };
-    /// ApplicationRoot-owned display client for the focused Pane. `seyal_bridge_select`
-    /// must not clobber this with the first-connect handle after CreateTab.
+        /// Focused Pane's display/input client. `seyal_bridge_select` must never
+    /// redirect a readiness source onto this handle; poll/flush stay on the
+    /// selected fd, while frames/keys use this when it is live.
     pub(crate) static FOCUSED_DISPLAY_HANDLE: Cell<u64> = const { Cell::new(0) };
     pub(crate) static LAST_RECOVERY_RESULT: Cell<SeyalRecoveryResult> = const { Cell::new(SeyalRecoveryResult::empty()) };
 }
 
 pub(crate) fn set_focused_display_handle(handle: u64) {
     FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
-    if handle != 0 {
-        ACTIVE_HANDLE.with(|active| active.set(handle));
+}
+
+fn focused_display_handle_if_live() -> u64 {
+    let focused = FOCUSED_DISPLAY_HANDLE.with(Cell::get);
+    if focused != 0 && with_client(focused, |_| ()).is_some() {
+        focused
+    } else {
+        0
     }
+}
+
+fn display_handle() -> u64 {
+    let focused = focused_display_handle_if_live();
+    if focused != 0 {
+        focused
+    } else {
+        active_handle()
+    }
+}
+
+pub(crate) fn with_display_client<R>(
+    operation: impl FnOnce(&LocalDisplayClient) -> R,
+) -> Option<R> {
+    with_client(display_handle(), operation)
+}
+
+pub(crate) fn with_display_client_mut<R>(
+    operation: impl FnOnce(&mut LocalDisplayClient) -> R,
+) -> Option<R> {
+    with_client_mut(display_handle(), operation)
 }
 
 /// Test/diagnostic: live registry execution currently selected for display/input.

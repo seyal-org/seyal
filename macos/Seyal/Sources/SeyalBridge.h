@@ -179,6 +179,8 @@ uint64_t seyal_bridge_open_execution_until(
 );
 int32_t seyal_bridge_adopt_handle(uint64_t handle);
 int32_t seyal_bridge_select(uint64_t handle);
+uint64_t seyal_bridge_next_handle(uint64_t after);
+int32_t seyal_bridge_socket_fd_for(uint64_t handle);
 void seyal_bridge_disconnect_handle(uint64_t handle);
 int32_t seyal_bridge_socket_fd(void);
 uint64_t seyal_bridge_execution_id_low(void);

@@ -3,24 +3,25 @@ use seyal_runtime::local_ipc::framing::{ComposerEligibility, ComposerResultCode}
 use crate::LocalDisplayClient;
 
 use super::{
-    error_code, with_active_client, with_active_client_mut, SeyalBlockRecord, SeyalComposerResult,
-    SeyalComposerStatus, SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange,
-    SeyalHistoryRow, SeyalHistorySidecar, SeyalPreparedFrame,
+    error_code, with_active_client, with_active_client_mut, with_display_client,
+    with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
+    SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
+    SeyalHistorySidecar, SeyalPreparedFrame,
 };
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_block_timeline_revision() -> u64 {
-    with_active_client(|client| client.block_timeline().revision).unwrap_or(0)
+    with_display_client(|client| client.block_timeline().revision).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_next_composer_request_id() -> u64 {
-    with_active_client(LocalDisplayClient::next_composer_request_id).unwrap_or(0)
+    with_display_client(LocalDisplayClient::next_composer_request_id).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_block_count() -> u32 {
-    with_active_client(|client| u32::try_from(client.block_timeline().records.len()).ok())
+    with_display_client(|client| u32::try_from(client.block_timeline().records.len()).ok())
         .flatten()
         .unwrap_or(0)
 }
@@ -29,7 +30,7 @@ pub extern "C" fn seyal_bridge_block_count() -> u32 {
 /// cache. The command pointer is valid until the next bridge poll/disconnect.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_block_record(index: u32) -> SeyalBlockRecord {
-    with_active_client(|client| {
+    with_display_client(|client| {
         let Some(record) = client.block_timeline().records.get(index as usize) else {
             return SeyalBlockRecord::empty();
         };
@@ -68,7 +69,7 @@ pub extern "C" fn seyal_bridge_block_record(index: u32) -> SeyalBlockRecord {
 /// Native callers retain this typed fence and use it for every later lookup.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_next_history_request_id() -> u64 {
-    with_active_client(LocalDisplayClient::next_history_request_id).unwrap_or(0)
+    with_display_client(LocalDisplayClient::next_history_request_id).unwrap_or(0)
 }
 
 /// Atomically peeks one bounded response by its typed Block/request identity.
@@ -78,7 +79,7 @@ pub extern "C" fn seyal_bridge_history_range_peek_for(
     block_id: u64,
     request_id: u64,
 ) -> SeyalHistoryRange {
-    with_active_client(|client| {
+    with_display_client(|client| {
         let Some(range) = client.history_range_for(block_id, request_id) else {
             return SeyalHistoryRange::empty();
         };
@@ -116,7 +117,7 @@ pub extern "C" fn seyal_bridge_history_range_row_for(
     request_id: u64,
     index: u32,
 ) -> SeyalHistoryRow {
-    with_active_client(|client| {
+    with_display_client(|client| {
         let Some(range) = client.history_range_for(block_id, request_id) else {
             return SeyalHistoryRow::empty();
         };
@@ -140,7 +141,7 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
     block_id: u64,
     request_id: u64,
 ) -> SeyalHistorySidecar {
-    with_active_client(|client| {
+    with_display_client(|client| {
         let Some(range) = client.history_range_for(block_id, request_id) else {
             return SeyalHistorySidecar::empty();
         };
@@ -157,7 +158,7 @@ pub extern "C" fn seyal_bridge_history_range_sidecar_for(
 /// the native consumer. Identity is always the typed block/request pair.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_history_range_consume(block_id: u64, request_id: u64) -> u8 {
-    with_active_client_mut(|client| u8::from(client.consume_history_range(block_id, request_id)))
+    with_display_client_mut(|client| u8::from(client.consume_history_range(block_id, request_id)))
         .unwrap_or(0)
 }
 
@@ -165,7 +166,7 @@ pub extern "C" fn seyal_bridge_history_range_consume(block_id: u64, request_id: 
 /// text crosses this boundary; request ID is the only submission identity.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
-    with_active_client(|client| client.last_composer_result())
+    with_display_client(|client| client.last_composer_result())
         .flatten()
         .map(|result| SeyalComposerResult {
             request_id: result.request_id,
@@ -187,7 +188,7 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
 /// The host relays it verbatim; Rust remains the only reader of its meaning.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
-    with_active_client(|client| client.composer_status())
+    with_display_client(|client| client.composer_status())
         .flatten()
         .map(|status| SeyalComposerStatus {
             revision: status.revision,
@@ -205,7 +206,7 @@ pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
 /// text, terminal cells, history, cwd, or PTY bytes cross this seam.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_execution_block_metadata() -> SeyalExecutionBlockMetadata {
-    with_active_client(|client| client.block_state())
+    with_display_client(|client| client.block_state())
         .flatten()
         .map(|block| {
             let bytes = block.block_id.to_bytes();
@@ -231,13 +232,16 @@ pub extern "C" fn seyal_bridge_execution_block_metadata() -> SeyalExecutionBlock
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_poll() -> i32 {
     let Some(result) = with_active_client_mut(|client| client.poll_prepare()) else {
+        super::app::drive_application_roots();
         return -1;
     };
-    match result {
+    let code = match result {
         Ok(Some(_)) => 1,
         Ok(None) => 0,
         Err(error) => error_code(error),
-    }
+    };
+    super::app::drive_application_roots();
+    code
 }
 
 /// Ensure the initial PreparedSurface after attach snapshot commit. Idempotent.
@@ -246,7 +250,7 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
 /// negative diagnostic code on prepare failure.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_ensure_prepared() -> i32 {
-    match with_active_client_mut(|client| client.ensure_prepared_surface()) {
+    match with_display_client_mut(|client| client.ensure_prepared_surface()) {
         Some(Ok(_)) => 0,
         Some(Err(error)) => error_code(error),
         None => -1,
@@ -283,7 +287,7 @@ pub extern "C" fn seyal_bridge_request_history_range(
     max_cells: u32,
     start_unit: u32,
 ) -> i32 {
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         client.request_history_range(
             block_id, start_line, end_line, max_lines, max_cells, start_unit,
         )
@@ -304,7 +308,7 @@ pub extern "C" fn seyal_bridge_request_history_range(
 /// Panics abort the process; they never unwind into Swift.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_frame() -> SeyalPreparedFrame {
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         if client.ensure_prepared_surface().is_err() {
             return SeyalPreparedFrame::empty();
         }
