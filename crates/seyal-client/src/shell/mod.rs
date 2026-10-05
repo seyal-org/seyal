@@ -6,11 +6,14 @@
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
 mod inventory;
+mod pane_ops;
 mod tree;
 mod workspace;
 
 #[cfg(test)]
 mod pt1_tests;
+#[cfg(test)]
+mod pt2_tests;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +26,7 @@ use crate::pane_layout::SplitRatio;
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
+pub use pane_ops::MoveSide;
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
@@ -51,6 +55,8 @@ pub enum ShellError {
     StaleContainment,
     /// `Unzoom` while the active Tab has no zoom overlay.
     NotZoomed,
+    /// `pane == neighbor`, `SwapPanes` with `a == b`, or neighbor not a same-Tab leaf.
+    InvalidMoveTarget,
 }
 
 impl ShellError {
@@ -76,6 +82,7 @@ impl ShellError {
             Self::UnknownWindow => "Unknown Window.",
             Self::StaleContainment => "The shell containment generation is stale.",
             Self::NotZoomed => "The Tab is not zoomed.",
+            Self::InvalidMoveTarget => "Invalid pane move or swap target.",
         }
     }
 }
@@ -127,6 +134,17 @@ pub enum ShellAction {
         id: PaneId,
     },
     Unzoom,
+    SwapPanes {
+        a: PaneId,
+        b: PaneId,
+        containment_generation: u64,
+    },
+    MovePaneBeside {
+        pane: PaneId,
+        neighbor: PaneId,
+        side: MoveSide,
+        containment_generation: u64,
+    },
     /// Resize the Split whose divider follows `pane` (see `PaneTree`).
     SetSplitRatio {
         pane: PaneId,
@@ -585,6 +603,21 @@ impl ShellState {
             ShellAction::FocusPane { id } => self.focus_pane(id),
             ShellAction::ZoomPane { id } => self.zoom_pane(id),
             ShellAction::Unzoom => self.unzoom(),
+            ShellAction::SwapPanes {
+                a,
+                b,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.swap_panes(a, b)),
+            ShellAction::MovePaneBeside {
+                pane,
+                neighbor,
+                side,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         };
