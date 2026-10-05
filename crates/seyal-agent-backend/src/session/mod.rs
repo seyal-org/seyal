@@ -105,7 +105,11 @@ impl IntegrationService {
         // by `grant_adapter_execute`'s own first-party gating, but even if
         // present it is inert here — `AuthorizationRepository::
         // grant_adapter_execute` still refuses it.
+        // SPEC-027 §5.2: same posture for durable `admin.adapters`.
         for principal_id in [owner_principal_id, observer_principal_id] {
+            if store.has_admin_adapters(principal_id).unwrap_or(false) {
+                let _ = auth.grant_admin_adapters(principal_id);
+            }
             let Ok(grants) = store.adapter_execute_grants(principal_id) else {
                 continue;
             };
@@ -167,6 +171,53 @@ impl IntegrationService {
             .map_err(|_| ServiceError::Failed)
     }
 
+    /// Grant durable `admin.adapters` to a first-party principal (SPEC-027
+    /// §5.2). Persist then apply in-memory. Not a client Command.
+    pub fn grant_admin_adapters(
+        &mut self,
+        principal: seyal_agent_core::ClientPrincipalId,
+    ) -> Result<(), ServiceError> {
+        self.auth
+            .grant_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .grant_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)
+    }
+
+    /// First-party catalog install/update requiring `admin.adapters`
+    /// (SPEC-027 §5.2 / D2). No client Command.
+    pub fn install_or_update_adapter(
+        &mut self,
+        principal: seyal_agent_core::ClientPrincipalId,
+        adapter_id: seyal_agent_core::AdapterId,
+        execution_host_kind: u8,
+        enabled: bool,
+        launch: &seyal_agent_store::LaunchDescriptorTemplate,
+    ) -> Result<u64, ServiceError> {
+        self.auth
+            .authorize_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .install_or_update_adapter(adapter_id, execution_host_kind, enabled, launch)
+            .map_err(|_| ServiceError::Failed)
+    }
+
+    /// First-party set-enabled requiring `admin.adapters` (SPEC-027 §5.2).
+    pub fn set_adapter_enabled(
+        &mut self,
+        principal: seyal_agent_core::ClientPrincipalId,
+        adapter_id: seyal_agent_core::AdapterId,
+        enabled: bool,
+    ) -> Result<(), ServiceError> {
+        self.auth
+            .authorize_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .set_adapter_enabled(adapter_id, enabled)
+            .map_err(|_| ServiceError::Failed)
+    }
+
     /// HelloAck advertisement inputs (SPEC-027 §8.2): the composed host kind
     /// (never authorization) and the durable catalog generation. `Fake`
     /// (qualification/fixture-host builds only, never production) advertises
@@ -199,14 +250,16 @@ impl IntegrationService {
             seyal_agent_store::CwdPolicy::AdapterWorkDir,
         )
         .with_argv(["fixture-host-default"]);
-        self.store
-            .install_or_update_adapter(adapter_id, 0, true, &launch)
+        let owner = self.owner_principal_id;
+        self.grant_admin_adapters(owner)
+            .expect("grant admin.adapters");
+        self.install_or_update_adapter(owner, adapter_id, 0, true, &launch)
             .expect("install adapter");
         self.store
             .add_route_offering(seyal_agent_core::RouteOfferingId::new(), adapter_id, false)
             .expect("add offering");
         self.auth
-            .grant_adapter_execute(self.owner_principal_id, adapter_id)
+            .grant_adapter_execute(owner, adapter_id)
             .expect("grant adapter.execute");
         adapter_id
     }

@@ -392,3 +392,23 @@ fn session_is_principal_bound_not_connection_bound() {
     repo.authorize_control(session, backend, run, 1, caller_on_another_connection)
         .unwrap();
 }
+
+#[test]
+fn admin_adapters_grant_is_first_party_only_and_required() {
+    let mut repo = AuthorizationRepository::default();
+    let owner = repo.register_principal(
+        PrincipalKind::FirstPartyCli,
+        [ClientScope::RunsCreate, ClientScope::RunsObserve],
+    );
+    let managed = repo.register_principal(PrincipalKind::ManagedClient, [ClientScope::RunsObserve]);
+    assert_eq!(
+        repo.authorize_admin_adapters(owner),
+        Err(AuthorizationError::TargetDenied)
+    );
+    repo.grant_admin_adapters(owner).unwrap();
+    assert_eq!(repo.authorize_admin_adapters(owner), Ok(()));
+    assert_eq!(
+        repo.grant_admin_adapters(managed),
+        Err(AuthorizationError::ScopeEscalation)
+    );
+}
