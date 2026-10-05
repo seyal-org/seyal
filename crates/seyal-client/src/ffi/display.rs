@@ -1,5 +1,6 @@
 use seyal_runtime::local_ipc::framing::{ComposerEligibility, ComposerResultCode};
 
+use crate::local::ClientError;
 use crate::LocalDisplayClient;
 
 use super::{
@@ -242,7 +243,7 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
         Ok(None) => 0,
         Err(error) => {
             let code = error_code(error);
-            if handle != 0 {
+            if is_terminal_client_loss(&error) && handle != 0 {
                 super::app::note_application_roots_client_loss(handle);
                 let _ = super::unregister_client(handle);
             }
@@ -255,8 +256,8 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
 
 /// Poll one registry handle without changing the selected readiness client.
 ///
-/// On any prepare failure, unregisters that client and drops its live map
-/// entry so level-triggered DispatchSources stop refiring.
+/// Terminal disconnect/IO unregisters that client so level-triggered sources
+/// stop refiring. Transient prepare errors stay on the live registry.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
     super::drain_attach_wakeup();
@@ -273,13 +274,22 @@ pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
         Ok(None) => 0,
         Err(error) => {
             let code = error_code(error);
-            super::app::note_application_roots_client_loss(handle);
-            let _ = super::unregister_client(handle);
+            if is_terminal_client_loss(&error) {
+                super::app::note_application_roots_client_loss(handle);
+                let _ = super::unregister_client(handle);
+            }
             code
         }
     };
     super::app::drive_application_roots();
     code
+}
+
+fn is_terminal_client_loss(error: &ClientError) -> bool {
+    matches!(
+        error,
+        ClientError::Disconnected | ClientError::Io | ClientError::NoRunningExecution
+    )
 }
 
 /// Ensure the initial PreparedSurface after attach snapshot commit. Idempotent.

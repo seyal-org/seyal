@@ -212,9 +212,14 @@ impl ApplicationRoot {
         if display_handle == Some(create_handle) {
             return Ok(());
         }
-        let lost =
-            crate::ffi::with_client_mut(create_handle, |client| client.poll_prepare().is_err())
-                .unwrap_or(true);
+        let lost = match crate::ffi::with_client_mut(create_handle, LocalDisplayClient::poll_prepare)
+        {
+            None => true,
+            Some(Err(crate::local::ClientError::Disconnected))
+            | Some(Err(crate::local::ClientError::Io))
+            | Some(Err(crate::local::ClientError::NoRunningExecution)) => true,
+            Some(_) => false,
+        };
         if lost {
             self.note_registry_client_loss(create_handle);
             let _ = crate::ffi::unregister_client(create_handle);
@@ -236,12 +241,16 @@ impl ApplicationRoot {
             .map(|(pane, raw)| (*pane, *raw))
             .collect();
         for (_pane, raw) in handles {
-            match crate::ffi::with_client_mut(raw, |client| client.poll_prepare()) {
-                Some(Ok(_)) => {}
-                Some(Err(_)) | None => {
-                    self.note_registry_client_loss(raw);
-                    let _ = crate::ffi::unregister_client(raw);
-                }
+            let lost = match crate::ffi::with_client_mut(raw, LocalDisplayClient::poll_prepare) {
+                None => true,
+                Some(Err(crate::local::ClientError::Disconnected))
+                | Some(Err(crate::local::ClientError::Io))
+                | Some(Err(crate::local::ClientError::NoRunningExecution)) => true,
+                Some(_) => false,
+            };
+            if lost {
+                self.note_registry_client_loss(raw);
+                let _ = crate::ffi::unregister_client(raw);
             }
         }
     }

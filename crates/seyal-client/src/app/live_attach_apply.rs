@@ -348,11 +348,6 @@ impl ApplicationRoot {
                 self.pane_client_raws.remove(&pane);
             }
         }
-        crate::ffi::set_focused_display_handle(
-            self.authority
-                .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
-                .unwrap_or(0),
-        );
     }
 
     fn refresh_output_from_pane_client(&mut self, pane: PaneId) {
