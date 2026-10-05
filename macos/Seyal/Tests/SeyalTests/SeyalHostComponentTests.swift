@@ -2193,6 +2193,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
     /// R8.4 via R6.2.1: `performKeyEquivalent` must forward marked-text from the
     /// focused metal surface (not hardcode `compositionActive: false`).
+    /// Metal is first-responder only after Rust selects Raw/TUI (#866); Flow
+    /// keeps exclusive composer IME.
     @MainActor
     func testPerformKeyEquivalentSeesCompositionOnFocusedSurface() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
@@ -2208,6 +2210,35 @@ final class SeyalHostComponentTests: XCTestCase {
             view.removeFromSuperview()
             window.close()
         }
+
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        snap = seyal_app_snapshot(handle)
+        var refresh = SeyalAppAction()
+        refresh.version = bind.version
+        refresh.size = bind.size
+        refresh.kind = UInt16(SEYAL_APP_ACTION_REFRESH.rawValue)
+        refresh.applySnapshotFence(snap)
+        refresh.flags |= UInt16(SEYAL_APP_FLAG_ALTERNATE_SCREEN)
+        XCTAssertEqual(seyal_app_apply(handle, &refresh), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        )
+        view.inputSurface.syncInputRoutePresentation()
+        XCTAssertTrue(view.inputSurface.acceptsFirstResponder)
 
         XCTAssertTrue(window.makeFirstResponder(view.inputSurface))
         XCTAssertFalse(
