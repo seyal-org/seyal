@@ -377,6 +377,8 @@ fn fixture_11_post_mint_frozen_generation_removal_fails_closed_no_latest_substit
         .get_adapter_manifest(adapter_id)
         .unwrap()
         .is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
 
 /// Fixture 13 / AC13: CancelRun of an Active standalone (fixture) child
 /// yields Terminating then evidenced Terminated(Cancelled).
