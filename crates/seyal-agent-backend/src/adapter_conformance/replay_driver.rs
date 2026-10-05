@@ -1,50 +1,52 @@
-//! Fixture-host conformance driver — harness proof substrate (#1277).
+//! Permanent offline replay / fake adapter conformance driver (#1278).
 //!
-//! Runs the shared scripted probes against FakeExecutionHost before/alongside
-//! the permanent offline replay adapter (#1278). Available only with
-//! `--features fixture-host`.
+//! Registers as [`ConformanceDriverKind::ReplayAdapter`] and satisfies the
+//! full Track E catalog without a live Claude/Codex CLI. Available only with
+//! `--features fixture-host` — never composed into the production daemon.
 
 use crate::adapter_conformance::driver::{
     AdapterConformanceDriver, AdapterConformanceRegistration, ConformanceDriverKind,
     ConformanceVerdict,
 };
-use crate::adapter_conformance::harness::FIXTURE_HOST_SMOKE_CASE_IDS;
+use crate::adapter_conformance::registration::replay_adapter_registration;
 use crate::adapter_conformance::scripted_probes::{self, FULL_CATALOG_CASE_IDS};
 
-/// Registration published by the fixture-host driver (full catalog coverage).
-pub const FIXTURE_HOST_REGISTRATION: AdapterConformanceRegistration =
+/// Registration published by the offline replay adapter (full catalog coverage).
+pub const REPLAY_ADAPTER_REGISTRATION: AdapterConformanceRegistration =
     AdapterConformanceRegistration {
-        adapter_label: "fixture-host",
-        driver_kind: ConformanceDriverKind::FixtureHost,
+        adapter_label: "replay-adapter",
+        driver_kind: ConformanceDriverKind::ReplayAdapter,
         covered_case_ids: FULL_CATALOG_CASE_IDS,
     };
 
-/// Driver that exercises catalog probes on the FakeExecutionHost substrate.
-pub struct FixtureHostConformanceDriver {
+/// Deterministic offline replay adapter judged by the shared catalog harness.
+pub struct ReplayAdapterConformanceDriver {
     label: &'static str,
 }
 
-impl FixtureHostConformanceDriver {
+impl ReplayAdapterConformanceDriver {
     pub fn new() -> Self {
+        // Validate registration shape at construction (unknown IDs fail closed).
+        let _ = replay_adapter_registration(
+            REPLAY_ADAPTER_REGISTRATION.adapter_label,
+            REPLAY_ADAPTER_REGISTRATION.covered_case_ids,
+        )
+        .expect("replay registration must cover only catalog members");
         Self {
-            label: FIXTURE_HOST_REGISTRATION.adapter_label,
+            label: REPLAY_ADAPTER_REGISTRATION.adapter_label,
         }
-    }
-
-    pub fn smoke_case_ids() -> &'static [&'static str] {
-        FIXTURE_HOST_SMOKE_CASE_IDS
     }
 }
 
-impl Default for FixtureHostConformanceDriver {
+impl Default for ReplayAdapterConformanceDriver {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AdapterConformanceDriver for FixtureHostConformanceDriver {
+impl AdapterConformanceDriver for ReplayAdapterConformanceDriver {
     fn kind(&self) -> ConformanceDriverKind {
-        ConformanceDriverKind::FixtureHost
+        ConformanceDriverKind::ReplayAdapter
     }
 
     fn adapter_label(&self) -> &str {
