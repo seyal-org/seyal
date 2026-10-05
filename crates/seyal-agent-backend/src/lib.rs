@@ -14,6 +14,8 @@
 //! remains the only lifecycle transition authority.
 
 pub mod adapter_conformance;
+#[cfg(unix)]
+pub mod adapters;
 mod auth;
 #[cfg(unix)]
 mod daemon;
@@ -36,6 +38,13 @@ mod session;
 #[allow(unsafe_code)]
 mod standalone_process_host;
 
+#[cfg(unix)]
+pub use adapters::{
+    codex_adapter_id, install_enabled_codex_adapter, resolve_codex_program,
+    CodexAdapterConformanceDriver, CodexCapabilitySheet, CodexInstallError, CodexInstallRequest,
+    CodexLaunchPlan, CODEX_ADAPTER_LABEL, CODEX_ADAPTER_REGISTRATION, CODEX_CAPABILITY_SHEET,
+    CODEX_EXEC_ARGV, CODEX_PROGRAM_ENV, CODEX_PROGRAM_NAME,
+};
 pub use auth::{
     AuthorizationError, AuthorizationRepository, ClientScope, DurablePrincipal, PairingCredential,
     PrincipalKind, PrincipalStatus,
@@ -62,4 +71,5 @@ pub use seyal_agent_core::{
 };
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
+#[cfg(unix)]
 pub use standalone_process_host::{HostError, StandaloneProcessConfig, StandaloneProcessHost};
