@@ -166,6 +166,14 @@ make docs-check    # run Starlight/Astro documentation validation
 - Developer stores created by the pre-AB-1.9 production binary may contain fabricated
   runs; discard them. There is no migration.
 
+### Agent evaluation / outcome / cost (SPEC-019)
+
+- Domain APIs: `seyal-agent-core::evaluation` (`EvaluationPlane`, observations,
+  contracts, usage/cost/time, routing-quality export schema).
+- Developer guide: [`AGENT-EVALUATION.md`](AGENT-EVALUATION.md).
+- Fixtures: `cargo test -p seyal-agent-core --locked --test spec019_evaluation_fixtures`.
+- Does not implement SPEC-020 ranking, Context Engine, or MemoryStore.
+
 Current behavior after Passes 1–10 (M001 **Done / closed**; Pass 10 #727 and parent #5 closed on freeze `c536c54`):
 
 - `make bootstrap` provisions/verifies the pinned Rust toolchain and, on macOS, validates full Xcode + Swift + macOS SDK + Metal tooling when that host tree exists;

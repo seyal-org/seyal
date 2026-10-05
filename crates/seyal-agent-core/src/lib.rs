@@ -8,6 +8,7 @@
 
 mod client_control;
 mod domain;
+mod evaluation;
 mod execution_host;
 mod identity;
 mod lifecycle;
@@ -19,6 +20,7 @@ mod transitions;
 
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
+pub use evaluation::*;
 pub use execution_host::{
     ExecutionHost, ExecutionHostKind, HostExitEvidence, HostExitKind, HostStartFailure,
     LaunchDescriptor,
