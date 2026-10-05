@@ -7,6 +7,7 @@ mod block_projection;
 mod decode;
 mod encode;
 mod error_code;
+mod loss;
 mod pane_region;
 mod shortcut;
 mod visual;
@@ -37,6 +38,7 @@ use encode::{
 };
 
 pub use block_projection::seyal_app_block_projection;
+pub(crate) use loss::note_application_roots_client_loss;
 pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
@@ -293,6 +295,20 @@ thread_local! {
     static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
+/// Drive ApplicationRoot create/attach only while provisioning work is outstanding.
+pub(crate) fn drive_application_roots() {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        for state in apps.values_mut() {
+            if !state.root.needs_provisioning_drive() {
+                continue;
+            }
+            let fence = state.root.fence();
+            let _ = state.root.poll_client(fence);
+        }
+    });
+}
+
 impl SeyalAppSnapshot {
     const fn empty() -> Self {
         Self {
@@ -411,13 +427,30 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
         Ok(decoded) => decoded,
         Err(code) => return code,
     };
+    let bind_adopt = match &decoded {
+        crate::app::AppAction::Bind { fence, evidence } => Some((*fence, evidence.execution)),
+        _ => None,
+    };
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let Some(state) = apps.get_mut(&handle) else {
             return -1;
         };
         match state.root.apply(decoded) {
-            Ok(()) => 0,
+            Ok(()) => {
+                if let Some((fence, execution)) = bind_adopt {
+                    let live = crate::ffi::active_handle();
+                    // Only the Controller for this Bind's ExecutionId — never a
+                    // leftover ACTIVE_HANDLE from another XCTest / pane.
+                    let matches = live != 0
+                        && crate::ffi::with_client(live, |client| client.execution_id())
+                            == Some(execution);
+                    if matches {
+                        let _ = state.root.adopt_bridge_handle(fence, live);
+                    }
+                }
+                0
+            }
             Err(_) => -4,
         }
     })

@@ -874,6 +874,7 @@ impl LocalDisplayClient {
             last_admitted_mouse_action_id: 0,
             execution_provisioning_negotiated,
             next_provisioning_request_id: 1,
+            harness_probe: false,
             pending_create_requests: std::collections::HashSet::new(),
             pending_terminate_requests: std::collections::HashSet::new(),
             last_create_result: VecDeque::new(),

@@ -73,6 +73,9 @@ final class RustDisplayBridge {
   var onCopiedText: ((String) -> Void)?
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
+  var auxiliaryWriteSources: [UInt64: DispatchSourceWrite] = [:]
+  var auxiliaryReadSources: [UInt64: DispatchSourceRead] = [:]
+  var provisioningWakeupSource: DispatchSourceRead?
   var socketFileDescriptor: Int32 = -1
   let handleBox = RustBridgeHandleBox()
   var teardown: RustBridgeTeardownCoordinator!
@@ -254,6 +257,8 @@ final class RustDisplayBridge {
 
     publishCurrentFrame()
     synchronizeWriteReadinessSource()
+    armAuxiliaryReadSources()
+    armProvisioningWakeupSource()
     onStatusChanged()
     return true
   }
@@ -316,6 +321,7 @@ final class RustDisplayBridge {
       self.writeSource = nil
       writeSource.cancel()
     }
+    cancelAuxiliaryReadSources()
     socketFileDescriptor = -1
     if clientHandle != 0 {
       let handle = clientHandle
@@ -361,6 +367,7 @@ final class RustDisplayBridge {
       self.writeSource = nil
       writeSource.cancel()
     }
+    cancelAuxiliaryReadSources()
     socketFileDescriptor = -1
 
     // Disconnect CLIENT on this MainActor turn (same ownership hand-off as
@@ -396,11 +403,115 @@ final class RustDisplayBridge {
     return seyal_bridge_select(clientHandle) == 0
   }
 
+  /// One DispatchSourceRead per live Controller fd. CreateTab's second
+  /// client must not steal the first connection's readiness handler.
+  func armAuxiliaryReadSources() {
+    guard isConnected else { return }
+    var live = Set<UInt64>()
+    var cursor: UInt64 = 0
+    while true {
+      let handle = seyal_bridge_next_handle(cursor)
+      if handle == 0 { break }
+      cursor = handle
+      live.insert(handle)
+      if handle == clientHandle { continue }
+      if auxiliaryReadSources[handle] != nil { continue }
+      let fd = seyal_bridge_socket_fd_for(handle)
+      guard fd >= 0 else { continue }
+      let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+      source.setEventHandler { [weak self] in
+        seyalRunAsMainActorFromMainQueue {
+          guard let self, self.isConnected else { return }
+          let result = seyal_bridge_poll_for(handle)
+          if result < 0 {
+            // Level-trigger progress: EOF/disconnect must disarm this fd's
+            // sources and drop the dead client. Tab 1 stays up (do not stop()).
+            self.cancelAuxiliarySources(for: handle)
+            seyal_bridge_disconnect_handle(handle)
+            _ = self.selectClient()
+            self.publishCurrentFrame()
+            self.synchronizeWriteReadinessSource()
+            self.armAuxiliaryReadSources()
+            self.onStatusChanged()
+            return
+          }
+          _ = self.selectClient()
+          self.publishCurrentFrame()
+          self.synchronizeWriteReadinessSource()
+        }
+      }
+      source.setCancelHandler { [teardown = teardown!] in
+        teardown.sourceCancelled()
+      }
+      teardown.sourceCreated()
+      auxiliaryReadSources[handle] = source
+      source.resume()
+    }
+    for (handle, source) in auxiliaryReadSources where !live.contains(handle) {
+      source.cancel()
+      auxiliaryReadSources.removeValue(forKey: handle)
+    }
+  }
+
+  /// Wake `seyal_bridge_poll` when an off-thread second-Controller connect finishes.
+  func armProvisioningWakeupSource() {
+    guard isConnected, provisioningWakeupSource == nil else { return }
+    let fd = seyal_bridge_provisioning_wakeup_fd()
+    guard fd >= 0 else { return }
+    let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+    source.setEventHandler { [weak self] in
+      seyalRunAsMainActorFromMainQueue {
+        guard let self, self.isConnected else { return }
+        _ = seyal_bridge_poll()
+        self.armAuxiliaryReadSources()
+        self.publishCurrentFrame()
+        self.synchronizeWriteReadinessSource()
+      }
+    }
+    source.setCancelHandler { [teardown = teardown!] in
+      teardown.sourceCancelled()
+    }
+    teardown.sourceCreated()
+    provisioningWakeupSource = source
+    source.resume()
+  }
+
+  func cancelAuxiliarySources(for handle: UInt64) {
+    if let source = auxiliaryReadSources.removeValue(forKey: handle) {
+      source.cancel()
+    }
+    if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
+      source.cancel()
+    }
+  }
+
+  func cancelAuxiliaryReadSources() {
+    for source in auxiliaryReadSources.values {
+      source.cancel()
+    }
+    auxiliaryReadSources.removeAll()
+    for source in auxiliaryWriteSources.values {
+      source.cancel()
+    }
+    auxiliaryWriteSources.removeAll()
+    if let wakeup = provisioningWakeupSource {
+      provisioningWakeupSource = nil
+      wakeup.cancel()
+    }
+  }
+
   deinit {
     // The coordinator is retained by cancellation handlers, so teardown
     // completes even if the owning surface destroys this bridge first.
     teardown.requestDisconnect()
     readSource?.cancel()
     writeSource?.cancel()
+    for source in auxiliaryReadSources.values {
+      source.cancel()
+    }
+    for source in auxiliaryWriteSources.values {
+      source.cancel()
+    }
+    provisioningWakeupSource?.cancel()
   }
 }
