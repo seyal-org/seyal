@@ -39,4 +39,4 @@ Traversal depth 64, 100,000 entries, 32 symlink hops, 100,000 visited identities
 
 Named SPEC-013 §23 cases for this slice live in
 `crates/seyal-agent-context/tests/spec013_discovery.rs` (`spec013_23_08` … `spec013_23_38`).
-§23.40 measured Runtime isolation remains [unqualified](../evidence/m005-1271-spec013-23-40-terminal-isolation-unqualified.md).
+§23.40 measured Runtime isolation: **PASS** — [#1301 evidence](../evidence/m005-1301-spec013-23-40-terminal-isolation.md) (supersedes the historical [unqualified placeholder](../evidence/m005-1271-spec013-23-40-terminal-isolation-unqualified.md)).

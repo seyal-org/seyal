@@ -94,6 +94,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "m005-spec013-terminal-isolation"
+version = "0.0.0"
+dependencies = [
+ "seyal-agent-context",
+ "seyal-agent-core",
+ "seyal-agent-store",
+ "seyal-exec",
+ "seyal-runtime",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
