@@ -4,7 +4,10 @@
 //! concurrent Local Context Engine discovery/index load (active + failure).
 //! Does not couple production crates: this package alone depends on both sides.
 
-#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#![cfg_attr(
+    not(target_os = "macos"),
+    allow(dead_code, unused_imports, unused_variables)
+)]
 
 use std::env;
 use std::fs;
@@ -414,6 +417,7 @@ fn terminal_contains(runtime: &Runtime, exec_id: seyal_runtime::ExecutionId, nee
     terminal_haystack(runtime, exec_id).contains(needle)
 }
 
+#[cfg(target_os = "macos")]
 fn terminal_haystack(runtime: &Runtime, exec_id: seyal_runtime::ExecutionId) -> String {
     let Some(execution) = runtime.execution(exec_id) else {
         return String::new();
@@ -428,6 +432,7 @@ fn terminal_haystack(runtime: &Runtime, exec_id: seyal_runtime::ExecutionId) -> 
     out
 }
 
+#[cfg(target_os = "macos")]
 fn terminal_snapshot(runtime: &Runtime, exec_id: seyal_runtime::ExecutionId) -> String {
     let haystack = terminal_haystack(runtime, exec_id);
     if haystack.len() <= 240 {
