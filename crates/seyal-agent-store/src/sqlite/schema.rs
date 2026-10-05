@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 5;
+pub(super) const SCHEMA_VERSION: i32 = 6;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -38,6 +38,30 @@ ALTER TABLE agent_run ADD COLUMN execution_liveness INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE agent_run ADD COLUMN observation INTEGER NOT NULL DEFAULT 3;
 ALTER TABLE agent_run ADD COLUMN resumability INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE agent_run ADD COLUMN run_revision INTEGER NOT NULL DEFAULT 1;
+";
+/// Durable adapter catalog (SPEC-027 §5.2). Owned by the agent store, not the
+/// terminal/workspace store (ADR-016 §7). A catalog edit bumps `generation`
+/// in place; it never rewrites the generation a committed RoutingDecision
+/// already froze, so a lookup pinned to a stale generation fails closed
+/// instead of silently resolving to the latest row (§5.2 fixture 11).
+pub(super) const ADAPTER_CATALOG_TABLES_V6: &str = "
+CREATE TABLE IF NOT EXISTS adapter_manifest (
+    adapter_id BLOB PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    enabled INTEGER NOT NULL,
+    execution_host_kind INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS route_offering (
+    route_offering_id BLOB PRIMARY KEY,
+    adapter_id BLOB NOT NULL,
+    adapter_manifest_generation INTEGER NOT NULL,
+    requires_tty INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS adapter_catalog_meta (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    generation INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO adapter_catalog_meta (singleton, generation) VALUES (1, 0);
 ";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
@@ -78,6 +102,10 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
     }
     if from < 5 {
         tx.execute_batch(LIFECYCLE_COLUMNS_V5)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 6 {
+        tx.execute_batch(ADAPTER_CATALOG_TABLES_V6)
             .map_err(|_| StoreError::WriteFailed)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -155,6 +183,8 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         );",
     )
     .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(ADAPTER_CATALOG_TABLES_V6)
+        .map_err(|_| StoreError::WriteFailed)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     Ok(())
