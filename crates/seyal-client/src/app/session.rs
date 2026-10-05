@@ -212,8 +212,9 @@ impl ApplicationRoot {
         if display_handle == Some(create_handle) {
             return Ok(());
         }
-        let lost = crate::ffi::with_client_mut(create_handle, |client| client.poll_prepare().is_err())
-            .unwrap_or(true);
+        let lost =
+            crate::ffi::with_client_mut(create_handle, |client| client.poll_prepare().is_err())
+                .unwrap_or(true);
         if lost {
             self.note_registry_client_loss(create_handle);
             let _ = crate::ffi::unregister_client(create_handle);
