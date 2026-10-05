@@ -7,7 +7,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use super::tree::PaneTree;
 use super::ShellError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Pane {
     pub(super) id: PaneId,
     pub(super) title: String,
@@ -15,7 +15,7 @@ pub(super) struct Pane {
     pub(super) allows_implicit_execution_bootstrap: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Tab {
     pub(super) id: TabId,
     pub(super) title: String,
@@ -23,10 +23,12 @@ pub(super) struct Tab {
     pub(super) panes: HashMap<PaneId, Pane>,
     pub(super) root: PaneTree,
     pub(super) focused: PaneId,
+    /// Tab-scoped presentation overlay; never a second layout authority (ADR-021 §3).
+    pub(super) zoomed: Option<PaneId>,
 }
 
 /// One Window inside a Workspace. `workspace_id` is fixed at construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Window {
     pub(super) id: WindowId,
     /// Stored with the window. Shell tests read it; the library build does not.
@@ -36,7 +38,7 @@ pub(super) struct Window {
     pub(super) active_tab: TabId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
     pub(super) name: String,
@@ -342,6 +344,7 @@ impl Tab {
             panes,
             root: PaneTree::Leaf(pane_id),
             focused: pane_id,
+            zoomed: None,
         }
     }
 
@@ -365,6 +368,7 @@ impl Tab {
             panes: HashMap::new(),
             root: PaneTree::Leaf(PaneId::new()),
             focused: PaneId::new(),
+            zoomed: None,
         }
     }
 }

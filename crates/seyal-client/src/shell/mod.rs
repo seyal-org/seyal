@@ -12,6 +12,8 @@ mod tree;
 mod workspace;
 
 #[cfg(test)]
+mod pt1_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod w2a_tests;
@@ -53,6 +55,8 @@ pub enum ShellError {
     StaleContainment,
     MoveWouldNotChangeContainment,
     CrossWorkspaceMove,
+    /// `Unzoom` while the active Tab has no zoom overlay.
+    NotZoomed,
 }
 
 impl ShellError {
@@ -81,6 +85,7 @@ impl ShellError {
                 "Moving this Tab would not change Window containment."
             }
             Self::CrossWorkspaceMove => "A Tab cannot move across Workspaces.",
+            Self::NotZoomed => "The Tab is not zoomed.",
         }
     }
 }
@@ -153,17 +158,24 @@ pub enum ShellAction {
     },
     SplitFocused {
         axis: SplitAxis,
+        containment_generation: u64,
     },
     SplitPane {
         id: PaneId,
         axis: SplitAxis,
+        containment_generation: u64,
     },
     ClosePane {
         id: PaneId,
+        containment_generation: u64,
     },
     FocusPane {
         id: PaneId,
     },
+    ZoomPane {
+        id: PaneId,
+    },
+    Unzoom,
     /// Resize the Split whose divider follows `pane` (see `PaneTree`).
     SetSplitRatio {
         pane: PaneId,
@@ -183,6 +195,8 @@ pub struct ShellSnapshot {
     pub tabs: Vec<TabSnapshot>,
     pub active_tab: TabId,
     pub focused_pane: PaneId,
+    /// Active-Tab zoom overlay (`None` when not zoomed). Topology unchanged.
+    pub zoomed: Option<PaneId>,
     pub panes: Vec<PaneSnapshot>,
     pub tree: PaneTree,
     pub layout: LayoutDescription,
@@ -230,11 +244,12 @@ pub struct TabSnapshot {
 }
 
 /// Authoritative headed composition state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShellState {
     workspaces: Vec<Workspace>,
     active_workspace: WorkspaceId,
     last_active_workspace: WorkspaceId,
+    /// Monotonic ADR-018 fence; bumps only on containment mutations.
     containment_generation: u64,
     focus_history: FocusHistory,
     allows_pane_splitting: bool,
@@ -343,6 +358,13 @@ impl ShellState {
 
     pub fn last_active_workspace(&self) -> WorkspaceId {
         self.last_active_workspace
+    }
+
+    /// Containment identity for atomicity checks (excludes `last_error`).
+    pub fn containment_fingerprint(&self) -> ShellState {
+        let mut clone = self.clone();
+        clone.last_error = None;
+        clone
     }
 
     /// Product-active Window of the product-active Workspace.
@@ -584,7 +606,11 @@ impl ShellState {
         self.last_active_workspace = workspace;
         let workspace_mut = self.workspace_mut(workspace)?;
         workspace_mut.select_tab(tab)?;
-        workspace_mut.active_tab_mut()?.focused = pane;
+        let active_tab = workspace_mut.active_tab_mut()?;
+        if active_tab.zoomed.is_some_and(|zoomed| zoomed != pane) {
+            active_tab.zoomed = None;
+        }
+        active_tab.focused = pane;
         self.focus_history.record(pane);
         self.last_error = None;
         Ok(())
@@ -621,6 +647,7 @@ impl ShellState {
                 .collect(),
             active_tab: workspace.active_tab_id().expect("active Tab must exist"),
             focused_pane: tab.focused,
+            zoomed: tab.zoomed,
             panes: tab
                 .root
                 .pane_ids()
@@ -675,13 +702,31 @@ impl ShellState {
             | ShellAction::MoveTabToWindow { .. }
             | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
             ShellAction::CloseTab { id } => self.close_tab(id),
-            ShellAction::SplitFocused { axis } => {
-                let focused = self.focused_pane_id()?;
-                self.split_pane(focused, axis).map(|_| ())
-            }
-            ShellAction::SplitPane { id, axis } => self.split_pane(id, axis).map(|_| ()),
-            ShellAction::ClosePane { id } => self.close_pane(id),
+            ShellAction::SplitFocused {
+                axis,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| {
+                    let focused = self.focused_pane_id()?;
+                    self.split_pane(focused, axis).map(|_| ())
+                }),
+            ShellAction::SplitPane {
+                id,
+                axis,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.split_pane(id, axis).map(|_| ())),
+            ShellAction::ClosePane {
+                id,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.close_pane(id)),
             ShellAction::FocusPane { id } => self.focus_pane(id),
+            ShellAction::ZoomPane { id } => self.zoom_pane(id),
+            ShellAction::Unzoom => self.unzoom(),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }
@@ -718,6 +763,8 @@ impl ShellState {
             allows_implicit_execution_bootstrap: false,
         };
         let id = pane.id;
+        // ADR-021 §3: successful structural mutation clears zoom.
+        tab.zoomed = None;
         tab.panes.insert(id, pane);
         tab.root = tab.root.replacing(
             pane_id,
@@ -745,15 +792,18 @@ impl ShellState {
         // Bound close releases presentation only (ADR-017 §6.1). Disposition
         // (detach-only / unreferenced record) is portable provisioning authority.
         let released = pane.execution.map(|execution| (pane_id, execution));
+        let sibling_successor = tab.root.sibling_first_leaf(pane_id);
         let Some(root) = tab.root.removing(pane_id) else {
             return Err(ShellError::CannotCloseLastPane);
         };
         tab.root = root;
         tab.panes.remove(&pane_id);
+        if tab.zoomed == Some(pane_id) {
+            tab.zoomed = None;
+        }
         if tab.focused == pane_id || !tab.panes.contains_key(&tab.focused) {
-            tab.focused = tab
-                .root
-                .first_pane()
+            tab.focused = sibling_successor
+                .or_else(|| tab.root.first_pane())
                 .expect("remaining Pane tree must contain a Pane");
         }
         self.last_released_execution = released;
@@ -768,8 +818,32 @@ impl ShellState {
         if !tab.panes.contains_key(&id) {
             return Err(ShellError::UnknownPane);
         }
+        if tab.zoomed.is_some_and(|zoomed| zoomed != id) {
+            tab.zoomed = None;
+        }
         tab.focused = id;
         self.focus_history.record(id);
+        Ok(())
+    }
+
+    fn zoom_pane(&mut self, id: PaneId) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if !tab.panes.contains_key(&id) {
+            return Err(ShellError::UnknownPane);
+        }
+        tab.zoomed = Some(id);
+        tab.focused = id;
+        Ok(())
+    }
+
+    fn unzoom(&mut self) -> Result<(), ShellError> {
+        let workspace = self.workspace_mut(self.active_workspace)?;
+        let tab = workspace.active_tab_mut()?;
+        if tab.zoomed.is_none() {
+            return Err(ShellError::NotZoomed);
+        }
+        tab.zoomed = None;
         Ok(())
     }
 

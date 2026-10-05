@@ -125,7 +125,10 @@ impl ApplicationRoot {
     /// terminated as a side effect of presentation close.
     pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::ClosePane { id })
+            .apply(ShellAction::ClosePane {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(close_pane_error)?;
         if let Some((pane, execution)) = self.shell.take_released_execution() {
             let effects = self.provisioning.on_bound_pane_closed(pane);
