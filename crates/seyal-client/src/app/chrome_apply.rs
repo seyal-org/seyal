@@ -108,6 +108,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::SelectTab { id })
             .map_err(|_| AppError::UnknownChromeTab)?;
+        #[cfg(target_os = "macos")]
+        self.activate_focused_pane_authority();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

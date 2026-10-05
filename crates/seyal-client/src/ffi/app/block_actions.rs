@@ -5,7 +5,7 @@
 //! root generation. Copy resolves the Block's span and command here and hands
 //! the final text to the host through `seyal_bridge_take_block_copy`.
 
-use crate::ffi::{error_code, with_active_client_mut};
+use crate::ffi::{error_code, with_display_client_mut};
 
 use super::encode::encode_block_rows;
 use super::{SeyalAppRow, APPS};
@@ -92,7 +92,7 @@ pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, ki
     let Some((block_id, command, output_range)) = prepared else {
         return -4;
     };
-    with_active_client_mut(|client| {
+    with_display_client_mut(|client| {
         client.begin_block_copy(block_id, copy_kind, command, output_range)
     })
     .map_or(-1, |result| result.map_or_else(error_code, |_| 0))

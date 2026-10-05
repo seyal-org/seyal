@@ -260,9 +260,13 @@ extension RustDisplayBridge {
       }
       if result == 1 {
         publishCurrentFrame()
+        armAuxiliaryReadSources()
+        armProvisioningWakeupSource()
         continue
       }
       if result == 0 {
+        armAuxiliaryReadSources()
+        armProvisioningWakeupSource()
         return
       }
 
@@ -273,45 +277,117 @@ extension RustDisplayBridge {
   }
 
   func synchronizeWriteReadinessSource() {
-    guard isConnected, selectClient() else {
+    guard isConnected else {
       writeSource?.cancel()
       writeSource = nil
+      for source in auxiliaryWriteSources.values {
+        source.cancel()
+      }
+      auxiliaryWriteSources.removeAll()
       return
     }
 
-    let wantsWrite = seyal_bridge_wants_write()
+    synchronizeWriteSource(
+      handle: clientHandle,
+      fileDescriptor: socketFileDescriptor,
+      existing: &writeSource
+    )
+
+    var live = Set<UInt64>()
+    var cursor: UInt64 = 0
+    while true {
+      let handle = seyal_bridge_next_handle(cursor)
+      if handle == 0 { break }
+      cursor = handle
+      live.insert(handle)
+      if handle == clientHandle { continue }
+      let fd = seyal_bridge_socket_fd_for(handle)
+      let wants = seyal_bridge_wants_write_for(handle)
+      if wants < 0 {
+        onError(wants)
+        stop()
+        return
+      }
+      if wants != 1 || fd < 0 {
+        if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
+          source.cancel()
+        }
+        continue
+      }
+      if auxiliaryWriteSources[handle] != nil { continue }
+      let source = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: .main)
+      source.setEventHandler { [weak self] in
+        seyalRunAsMainActorFromMainQueue {
+          guard let self, self.isConnected else { return }
+          let result = seyal_bridge_flush_writable_for(handle)
+          guard result == 0 else {
+            self.onError(result)
+            self.stop(reconnect: result == -18)
+            return
+          }
+          self.synchronizeWriteReadinessSource()
+          self.onStatusChanged()
+        }
+      }
+      source.setCancelHandler { [teardown = teardown!] in
+        teardown.sourceCancelled()
+      }
+      teardown.sourceCreated()
+      auxiliaryWriteSources[handle] = source
+      source.resume()
+    }
+    for (handle, source) in auxiliaryWriteSources where !live.contains(handle) {
+      source.cancel()
+      auxiliaryWriteSources.removeValue(forKey: handle)
+    }
+  }
+
+  func synchronizeWriteSource(
+    handle: UInt64,
+    fileDescriptor: Int32,
+    existing: inout DispatchSourceWrite?
+  ) {
+    let wantsWrite = seyal_bridge_wants_write_for(handle)
     if wantsWrite < 0 {
       onError(wantsWrite)
       stop()
       return
     }
     guard wantsWrite == 1 else {
-      writeSource?.cancel()
-      writeSource = nil
+      existing?.cancel()
+      existing = nil
       return
     }
-    guard writeSource == nil, socketFileDescriptor >= 0 else { return }
+    guard existing == nil, fileDescriptor >= 0 else { return }
 
     let source = DispatchSource.makeWriteSource(
-      fileDescriptor: socketFileDescriptor,
+      fileDescriptor: fileDescriptor,
       queue: .main
     )
     source.setEventHandler { [weak self] in
       seyalRunAsMainActorFromMainQueue {
-        self?.flushReadyControlWork()
+        guard let self, self.isConnected else { return }
+        let result = seyal_bridge_flush_writable_for(handle)
+        guard result == 0 else {
+          self.onError(result)
+          self.stop(reconnect: result == -18)
+          return
+        }
+        self.synchronizeWriteReadinessSource()
+        self.onStatusChanged()
       }
     }
     source.setCancelHandler { [teardown = teardown!] in
       teardown.sourceCancelled()
     }
     teardown.sourceCreated()
-    writeSource = source
+    existing = source
     source.resume()
   }
 
   func flushReadyControlWork() {
-    guard isConnected, selectClient() else { return }
-    let result = seyal_bridge_flush_writable()
+    guard isConnected else { return }
+    let result = seyal_bridge_flush_writable_for(clientHandle)
     guard result == 0 else {
       onError(result)
       stop(reconnect: result == -18)

@@ -95,17 +95,11 @@ fn new_root_is_one_unbound_pane() {
 
 #[test]
 fn split_focused_fails_closed_while_create_tab_is_enabled() {
-    // Production stays gated until a live create→attach→bind driver exists.
-    // Opted-in roots exercise CreateTab; splits stay fail-closed until C3.
+    // C2b / #1175: production CreateTab is enabled; splits stay fail-closed until C3.
     let mut root = ApplicationRoot::new();
-    assert!(!root.snapshot().shell.allows_tab_creation);
-    assert_eq!(
-        root.apply(AppAction::CreateTab),
-        Err(AppError::TabCreationUnavailable)
-    );
-    root.enable_tab_creation_for_test();
+    assert!(root.snapshot().shell.allows_tab_creation);
     root.apply(AppAction::CreateTab)
-        .expect("opted-in root allows tab creation");
+        .expect("production root allows tab creation");
     assert_eq!(root.snapshot().shell.tabs.len(), 2);
     assert!(root
         .provisioning()
@@ -504,29 +498,14 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     let production = root.snapshot();
     assert!(production.palette.open);
     assert!(
-        !production
+        production
             .palette
             .rows
             .iter()
             .any(|row| row.label == "New Tab"),
-        "production composition omits New Tab while tab creation stays gated"
+        "production composition lists New Tab after C2b enablement"
     );
-    root.apply(AppAction::ClosePalette {
-        fence: root.fence(),
-    })
-    .unwrap();
-
-    root.enable_tab_creation_for_test();
-    root.apply(AppAction::OpenPalette {
-        fence: root.fence(),
-    })
-    .unwrap();
-    let opened = root.snapshot();
-    assert!(opened.palette.open);
-    assert!(
-        opened.palette.rows.iter().any(|row| row.label == "New Tab"),
-        "opted-in composition lists New Tab"
-    );
+    let opened = production;
     assert!(
         !opened
             .palette

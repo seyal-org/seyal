@@ -192,8 +192,8 @@ pub struct ShellState {
 
 impl ShellState {
     /// Production composition: one Runtime default workspace, one Tab, one
-    /// Pane. Tab creation stays gated until the live create→attach→bind
-    /// driver exists (C2); pane splitting stays fail-closed until C3.
+    /// Pane. Tab creation is enabled on the live create→attach→bind path
+    /// (C2b / #1175); pane splitting stays fail-closed until C3.
     pub fn m001_local(detail: impl Into<String>) -> Self {
         let pane = Pane {
             id: PaneId::new(),
@@ -218,7 +218,7 @@ impl ShellState {
             active_workspace: workspace.id,
             workspaces: vec![workspace],
             allows_pane_splitting: false,
-            allows_tab_creation: false,
+            allows_tab_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
             last_released_execution: None,
@@ -269,6 +269,9 @@ impl ShellState {
 
     /// Test/C2 harness: flip the production gate without rebuilding the shell.
     #[cfg(test)]
+    /// Test-only policy flip. Called from macOS C2 harness suites via
+    /// `ApplicationRoot::enable_tab_creation_for_test`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn set_allows_tab_creation_for_test(&mut self, allowed: bool) {
         self.allows_tab_creation = allowed;
     }

@@ -276,6 +276,9 @@ extension ProductChromeHostView {
                 surfaceIdentity: ObjectIdentifier(surface)
             )
         )
+        // Scroll / clip republish must not propose geometry; refresh the
+        // read-only AX probe so headed tests can observe unchanged PTY size.
+        surface.refreshRecoveryAccessibilityValue()
     }
 
     func isNearLiveEnd(tolerance: CGFloat = 24) -> Bool {

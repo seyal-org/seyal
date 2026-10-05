@@ -53,15 +53,21 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 914
+acknowledged_loc = 956
 issue = 1010
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after tip A navigate/goto/provisioning/#867 resting fields plus tip C ChordPrefixState, ActionUnavailable, and R6.4.1 CreateTab/OpenPalette menu gates (#1106); keybinding_apply.rs owns match/dispatch and presentation_apply.rs owns resting transitions. #1010 adds only the RerunBlock action variant and dispatch arm, its three fail-closed errors, the snapshot_generation accessor the FFI row cache keys on, and the block_rerun_tests module declaration; the Rerun reducer lives in composer_apply.rs and its tests in block_rerun_tests.rs."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after tip A navigate/goto/provisioning/#867 resting fields plus tip C ChordPrefixState, ActionUnavailable, and R6.4.1 CreateTab/OpenPalette menu gates (#1106); keybinding_apply.rs owns match/dispatch and presentation_apply.rs owns resting transitions. #1175 adds off-thread pending live attach, queued attaches and the wakeup-drive flag; its macOS live-attach test/diagnostic accessors and needs_provisioning_drive live in live_attach_apply.rs. #1010 adds only the RerunBlock action variant and dispatch arm, its three fail-closed errors, the snapshot_generation accessor the FFI row cache keys on, and the block_rerun_tests module declaration; the Rerun reducer lives in composer_apply.rs and its tests in block_rerun_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 756
-issue = 1149
-reason = "Portable provisioning reducer stays one cold-path authority after intent/disposition/resolution extraction; #1149 adds begin_explicit_terminate, pending_create/terminate_by_request_id, connection-scoped request ids, seed_next_request_id, and restore_binding_after_failed_terminate_admit so fail-closed NoLiveClient terminate can roll back the recorded binding (ADR-017 §6.2)."
+acknowledged_loc = 808
+issue = 1175
+reason = "Portable provisioning reducer stays one cold-path authority; #1175 adds pending_attach_by_request_id so dispose-attach after Created can correlate without fabricating AttachmentId."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/app/provisioning_apply.rs"
+acknowledged_loc = 737
+issue = 1175
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch without splitting the cold control path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -71,15 +77,15 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1044
+ceiling_loc = 1023
 issue = 1003
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1149 production-off tab-creation gate coverage also lives here. C2 acceptance cases stay in tab_provisioning_tests.rs."
+responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1175 updates production CreateTab enablement assertions here. C2 acceptance cases stay in tab_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 960
+acknowledged_loc = 993
 issue = 1010
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49, tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs (#1106); product decode lives in decode.rs. #1010 adds only the block_actions module declaration/re-exports and the per-handle Block action row buffers and generation key; Rerun errors 51-53 live in error_code.rs, the action/copy exports in block_actions.rs and row encoding in encode.rs."
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/shortcut/error_code extraction. Tip A errors through goto 47-49, tip C ActionUnavailable=50 and route_keystroke live in error_code.rs / shortcut.rs (#1106); product decode lives in decode.rs. #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; registry-loss fan-out lives in loss.rs. #1010 adds only the block_actions module declaration/re-exports and the per-handle Block action row buffers and generation key; Rerun errors 51-53 live in error_code.rs, the action/copy exports in block_actions.rs and row encoding in encode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -139,15 +145,15 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 720
+acknowledged_loc = 726
 issue = 1010
-reason = "Local display client read loop and its per-connection history caches stay one module. #1010 adds the Block-copy state fields, the history_range_text accessor, and the post-read advance_block_copy call; copy accumulation lives in local/block_copy.rs and text building in history_text.rs. The history-reply guard is restructured so unexpected replies still advance the decode cursor."
+reason = "Local display client read loop and its per-connection history caches stay one module. #1010 adds the Block-copy state fields, the history_range_text accessor, and the post-read advance_block_copy call; copy accumulation lives in local/block_copy.rs and text building in history_text.rs. The history-reply guard is restructured so unexpected replies still advance the decode cursor. Ceiling includes #1175's force_eof_for_test hook after the master merge."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 942
+acknowledged_loc = 943
 issue = 1010
-reason = "#1010 adds only the three Block-copy field initializers to the attached-client constructor. Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. Ceiling matches post-master-merge LOC."
+reason = "Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. #1175 adds harness_probe=false on live finish_attach so CreateTab's second-Controller driver can distinguish Runtime clients from in-process unit-test probes. #1010 adds only the three Block-copy field initializers to the attached-client constructor. Ceiling matches post-master-merge LOC."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
@@ -205,9 +211,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 728
-issue = 1105
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade after absorbing L2 navigation inventory/commit_focus helpers, #928 MoveSplitDivider/NoSplitDivider, and P3 release_execution/take_removed_tab_panes detach-only dispose. Tree/window details stay in tree.rs and workspace.rs. Ceiling matches post-master-merge LOC."
+acknowledged_loc = 731
+issue = 1175
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 enables production allows_tab_creation and documents the macOS-only test helper for force policy flips without splitting tree/workspace ownership."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -221,4 +227,3 @@ path = "crates/seyal-client/src/keybinding/tests.rs"
 acknowledged_loc = 701
 issue = 1106
 reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
-

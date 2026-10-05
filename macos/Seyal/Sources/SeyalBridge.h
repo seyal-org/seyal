@@ -179,6 +179,10 @@ uint64_t seyal_bridge_open_execution_until(
 );
 int32_t seyal_bridge_adopt_handle(uint64_t handle);
 int32_t seyal_bridge_select(uint64_t handle);
+uint64_t seyal_bridge_next_handle(uint64_t after);
+int32_t seyal_bridge_socket_fd_for(uint64_t handle);
+/// Readable when an off-thread CreateTab Controller connect completes.
+int32_t seyal_bridge_provisioning_wakeup_fd(void);
 void seyal_bridge_disconnect_handle(uint64_t handle);
 int32_t seyal_bridge_socket_fd(void);
 uint64_t seyal_bridge_execution_id_low(void);
@@ -189,11 +193,16 @@ uint64_t seyal_bridge_attachment_id_low(void);
 uint64_t seyal_bridge_attachment_id_high(void);
 SeyalExecutionBlockMetadata seyal_bridge_execution_block_metadata(void);
 int32_t seyal_bridge_poll(void);
+/// Poll one adopted handle without changing the selected readiness client.
+/// On terminal disconnect, unregisters that client (level-trigger progress).
+int32_t seyal_bridge_poll_for(uint64_t handle);
 /// Ensure the initial PreparedSurface exists after attach snapshot commit.
 /// Returns 0 on success, negative on failure. Idempotent.
 int32_t seyal_bridge_ensure_prepared(void);
 int32_t seyal_bridge_wants_write(void);
+int32_t seyal_bridge_wants_write_for(uint64_t handle);
 int32_t seyal_bridge_flush_writable(void);
+int32_t seyal_bridge_flush_writable_for(uint64_t handle);
 int32_t seyal_bridge_submit_utf8(const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_paste(const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_host_selection(

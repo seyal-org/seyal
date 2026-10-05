@@ -50,9 +50,8 @@ pub(crate) const MAX_UNRESOLVED_RESIZES: usize = 1_024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientError {
     Discovery(DiscoveryFailure),
-    /// The caller's absolute startup/recovery deadline elapsed while the
-    /// disposable connection was still discovering, handshaking, attaching,
-    /// or collecting its initial authoritative snapshot.
+    /// Absolute startup/recovery deadline elapsed during discover, handshake,
+    /// attach, or the initial authoritative snapshot.
     StartupDeadlineExceeded,
     Io,
     Protocol,
@@ -160,12 +159,13 @@ pub struct LocalDisplayClient {
     pub(crate) execution_provisioning_negotiated: bool,
     /// Shared connection-local request-id space for types 36 and 38.
     pub(crate) next_provisioning_request_id: u64,
+    /// In-process harness probe (`UnixStream::pair`); never drives live
+    /// `connect_execution` for AttachController (C2b / #1175).
+    pub(crate) harness_probe: bool,
     pub(crate) pending_create_requests: std::collections::HashSet<u64>,
     pub(crate) pending_terminate_requests: std::collections::HashSet<u64>,
     pub(crate) last_create_result: VecDeque<CreateExecutionResult>,
     pub(crate) last_terminate_result: Option<TerminateExecutionResult>,
-    /// Primary viewport LineIds for the latest accepted `ViewportLineIds`
-    /// generation. Cleared on disconnect/resync; empty until Runtime publishes.
     pub(crate) viewport_line_ids: Vec<u64>,
     pub(crate) viewport_line_ids_generation: u64,
 }
@@ -173,6 +173,11 @@ pub struct LocalDisplayClient {
 impl LocalDisplayClient {
     pub fn socket_fd(&self) -> i32 {
         self.stream.as_raw_fd()
+    }
+
+    #[doc(hidden)]
+    pub fn force_eof_for_test(&mut self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
     }
 
     pub fn execution_id(&self) -> ExecutionId {
@@ -707,6 +712,7 @@ pub(crate) fn reconstruction_probe_client(
         last_admitted_mouse_action_id: 0,
         execution_provisioning_negotiated: false,
         next_provisioning_request_id: 1,
+        harness_probe: true,
         pending_create_requests: std::collections::HashSet::new(),
         pending_terminate_requests: std::collections::HashSet::new(),
         last_create_result: VecDeque::new(),

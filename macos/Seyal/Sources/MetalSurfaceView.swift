@@ -247,6 +247,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// Makes the authoritative recovery state observable to VoiceOver and to
   /// native acceptance automation without introducing a second terminal
   /// model or changing the Runtime protocol.
+  ///
+  /// Prepared-frame rows/columns/cursor are mirrored read-only so headed
+  /// Flow-scroll acceptance (#865 / SPEC-008 §3.1) can prove transcript
+  /// scrolling does not mutate PTY size or terminal cursor state.
   func refreshRecoveryAccessibilityValue() {
     let connection = terminalBridgeIsConnected ? "usable" : "disconnected"
     let runtime = terminalRuntimeIdentity ?? "none"
@@ -254,11 +258,20 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let attachment = terminalAttachmentIdentity ?? "none"
     let alternate = lastAlternateScreen == true ? "true" : "false"
     let flowPaint = renderer.inspectFlowPaint().accessibilityToken
+    let geometry: String
+    if let frame = terminalCurrentFrame(), frame.rows > 0, frame.columns > 0 {
+      geometry =
+        "rows=\(frame.rows) columns=\(frame.columns) "
+        + "cursor=\(frame.cursor_row),\(frame.cursor_column) "
+        + "cursor-visible=\(frame.cursor_visible != 0 ? "true" : "false")"
+    } else {
+      geometry = "rows=0 columns=0 cursor=0,0 cursor-visible=false"
+    }
     setAccessibilityValue(
       "process=\(ProcessInfo.processInfo.processIdentifier) connection=\(connection) "
         + "runtime=\(runtime) execution=\(execution) "
         + "attachment=\(attachment) alternate-screen=\(alternate) "
-        + "flow-paint=\(flowPaint)"
+        + "\(geometry) flow-paint=\(flowPaint)"
     )
   }
 

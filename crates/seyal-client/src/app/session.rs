@@ -5,9 +5,18 @@ use super::*;
 #[cfg(target_os = "macos")]
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
+        let mut seen = std::collections::HashSet::new();
         if let Some(handle) = self.client_handle.take() {
+            seen.insert(handle.raw());
             let _ = crate::ffi::unregister_client(handle.raw());
         }
+        for (_, handle) in self.extra_pane_clients.drain() {
+            let raw = handle.raw();
+            if seen.insert(raw) {
+                let _ = crate::ffi::unregister_client(raw);
+            }
+        }
+        self.pane_client_raws.clear();
     }
 }
 
@@ -41,10 +50,37 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        self.pane_client_raws.insert(fence.pane, handle);
+        crate::ffi::set_focused_display_handle(handle);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
         // live client is visible (bootstrap create may already have used id 1).
+        self.seed_provisioning_request_floor_from_wire();
+        Ok(())
+    }
+
+    /// After FFI `Bind`, name the already-adopted bridge client as the create
+    /// Controller so production CreateTab can admit type-36.
+    pub fn adopt_bridge_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
+        if crate::ffi::with_client(handle, |_| ()).is_none() {
+            return self.fail(AppError::NoLiveClient);
+        }
+        if self
+            .client_handle
+            .as_ref()
+            .is_some_and(|owned| owned.raw() == handle)
+        {
+            return Ok(());
+        }
+        if self.client_handle.is_none() {
+            self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
+        }
+        self.pane_client_raws.insert(fence.pane, handle);
+        if self.shell.snapshot().focused_pane == fence.pane {
+            crate::ffi::set_focused_display_handle(handle);
+        }
+        self.clear_chord_prefix();
         self.seed_provisioning_request_floor_from_wire();
         Ok(())
     }
@@ -81,7 +117,10 @@ impl ApplicationRoot {
         if let Some(previous) = self.client_handle.take() {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
+        let raw = registered.raw();
         self.client_handle = Some(registered);
+        self.pane_client_raws.insert(fence.pane, raw);
+        crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
@@ -101,44 +140,131 @@ impl ApplicationRoot {
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
-        let Some(handle) = self
-            .client_handle
-            .as_ref()
-            .map(crate::ffi::ClientRegistryHandle::raw)
-        else {
+        let display_handle = self
+            .authority
+            .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
+            .or_else(|| {
+                self.client_handle
+                    .as_ref()
+                    .map(crate::ffi::ClientRegistryHandle::raw)
+            });
+        let Some(handle) = display_handle else {
             return self.fail(AppError::NoLiveClient);
         };
-        let Some(result) = crate::ffi::with_client_mut(handle, |client| {
-            client.poll_prepare().map_err(|_| AppError::NoLiveClient)?;
-            let alternate = client.cache().alternate_screen;
-            let generation = client.cache().generation.max(1);
-            let output = project_cache_text(client.cache());
-            Ok::<_, AppError>((alternate, generation, output))
-        }) else {
+        let Some(result) = crate::ffi::with_client_mut(handle, |client| client.poll_prepare())
+        else {
             // External bridge disconnect can remove the shared-handle entry
             // while the root still caches the id; clear the stale name (N2).
-            self.client_handle = None;
+            self.note_registry_client_loss(handle);
             return self.fail(AppError::NoLiveClient);
         };
-        let (alternate, generation, output) = match result {
-            Ok(value) => value,
-            Err(error) => return self.fail(error),
+        let result = match result {
+            Ok(_) => crate::ffi::with_client_mut(handle, |client| {
+                let alternate = client.cache().alternate_screen;
+                let generation = client.cache().generation.max(1);
+                let output = project_cache_text(client.cache());
+                (alternate, generation, output)
+            }),
+            // Transient prepare/protocol errors must not drop the live
+            // Controller: `seyal_bridge_poll` already ran poll_prepare, and
+            // XCTest/Seyal.app retry the same fd. Unregister only on terminal
+            // socket loss (same set as `seyal_bridge_poll_for`).
+            Err(error) if is_terminal_registry_loss(&error) => {
+                self.note_registry_client_loss(handle);
+                let _ = crate::ffi::unregister_client(handle);
+                return self.fail(AppError::NoLiveClient);
+            }
+            Err(_) => return self.fail(AppError::NoLiveClient),
+        };
+        let Some((alternate, generation, output)) = result else {
+            self.note_registry_client_loss(handle);
+            return self.fail(AppError::NoLiveClient);
         };
         self.output_utf8 = output;
         if let Some(bound) = self.authority.as_mut() {
             bound.pty_generation = generation;
+            if let Some(stored) = self.pane_authorities.get_mut(&bound.pane) {
+                stored.pty_generation = generation;
+            }
         }
         self.derive_presentation(alternate)?;
-        // Production path: absorb type-39 after poll_prepare decoded it into
-        // the registry client. `still_listed=true` is the safe Failed-outcome
-        // default without a fresh list snapshot (keeps an unreferenced record).
-        // Drain create results (one per admitted request) before terminate so
-        // interleaved creates each advance their own pending intent by id.
+        #[cfg(target_os = "macos")]
+        self.complete_pending_live_attach()?;
+        // Drain create results from the create-admitting client (may differ
+        // from the focused display Controller after a second-tab attach).
+        self.poll_create_client_prepare()?;
+        self.poll_unfocused_pane_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())
+    }
+
+    /// Ensure the create connection has flushed/read control frames when it is
+    /// distinct from the focused display client.
+    fn poll_create_client_prepare(&mut self) -> Result<(), AppError> {
+        let Some(create_handle) = self
+            .client_handle
+            .as_ref()
+            .map(crate::ffi::ClientRegistryHandle::raw)
+        else {
+            return Ok(());
+        };
+        let display_handle = self
+            .authority
+            .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied());
+        if display_handle == Some(create_handle) {
+            return Ok(());
+        }
+        if registry_client_is_gone(create_handle) {
+            self.note_registry_client_loss(create_handle);
+            let _ = crate::ffi::unregister_client(create_handle);
+        }
+        Ok(())
+    }
+
+    /// Drain unfocused second-tab Controllers so type-39/control frames do not
+    /// stall until the tab is focused again. Display output stays focused-pane.
+    /// Terminal poll errors clear that pane's authority (same loss path as
+    /// `seyal_bridge_poll_for`) so a dead fd cannot spin forever.
+    #[cfg(target_os = "macos")]
+    fn poll_unfocused_pane_clients(&mut self) {
+        let focused = self.shell.snapshot().focused_pane;
+        let handles: Vec<(PaneId, u64)> = self
+            .pane_client_raws
+            .iter()
+            .filter(|(pane, _)| **pane != focused)
+            .map(|(pane, raw)| (*pane, *raw))
+            .collect();
+        for (_pane, raw) in handles {
+            if registry_client_is_gone(raw) {
+                self.note_registry_client_loss(raw);
+                let _ = crate::ffi::unregister_client(raw);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn poll_unfocused_pane_clients(&mut self) {}
+}
+
+#[cfg(target_os = "macos")]
+fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
+    matches!(
+        error,
+        crate::local::ClientError::Disconnected
+            | crate::local::ClientError::Io
+            | crate::local::ClientError::NoRunningExecution
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn registry_client_is_gone(handle: u64) -> bool {
+    match crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare) {
+        None => true,
+        Some(Err(error)) => is_terminal_registry_loss(&error),
+        Some(Ok(_)) => false,
     }
 }
 
@@ -192,13 +318,15 @@ impl ApplicationRoot {
         self.presentation
             .apply(PresentationAction::BindIdentity(identity))
             .map_err(|_| AppError::AlreadyBound)?;
-        self.authority = Some(PaneAuthority {
+        let authority = PaneAuthority {
             pane: fence.pane,
             execution: evidence.execution,
             attachment: evidence.attachment,
             controller: evidence.controller,
             pty_generation: evidence.pty_generation,
-        });
+        };
+        self.pane_authorities.insert(fence.pane, authority);
+        self.authority = Some(authority);
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();
         // R8.4 / #1124: new bind/attach must not keep a prior chord prefix.
@@ -213,22 +341,36 @@ impl ApplicationRoot {
     ) -> Result<(), AppError> {
         self.require_fence(fence)?;
         #[cfg(target_os = "macos")]
-        if let Some(handle) = self
-            .client_handle
-            .as_ref()
-            .map(crate::ffi::ClientRegistryHandle::raw)
         {
-            if let Some(output) = crate::ffi::with_client(handle, |client| {
-                (
-                    project_cache_text(client.cache()),
-                    client.cache().alternate_screen,
-                )
-            }) {
-                self.output_utf8 = output.0;
-                return self.derive_presentation(output.1);
+            let handle = self
+                .authority
+                .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
+                .or_else(|| {
+                    self.client_handle
+                        .as_ref()
+                        .map(crate::ffi::ClientRegistryHandle::raw)
+                });
+            if let Some(handle) = handle {
+                // Host Refresh carries the presentation fence (ADR-015). Sync
+                // output text from the live client, but do not let a stale
+                // cache.alternate_screen override the action's flag — that
+                // broke TUI evidence when Bind had adopted a create Controller.
+                if let Some(output) =
+                    crate::ffi::with_client(handle, |client| project_cache_text(client.cache()))
+                {
+                    self.output_utf8 = output;
+                    return self.derive_presentation(alternate_screen);
+                }
+                // Shared-handle disconnect left a stale id; clear before fallback (N2).
+                if self
+                    .client_handle
+                    .as_ref()
+                    .is_some_and(|owned| owned.raw() == handle)
+                {
+                    self.client_handle = None;
+                }
+                self.pane_client_raws.retain(|_, raw| *raw != handle);
             }
-            // Shared-handle disconnect left a stale id; clear before fallback (N2).
-            self.client_handle = None;
         }
         self.derive_presentation(alternate_screen)
     }
@@ -252,9 +394,8 @@ impl ApplicationRoot {
         #[cfg(target_os = "macos")]
         {
             let Some(handle) = self
-                .client_handle
-                .as_ref()
-                .map(crate::ffi::ClientRegistryHandle::raw)
+                .authority
+                .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
             else {
                 return Err(AppError::NoLiveClient);
             };
@@ -265,7 +406,14 @@ impl ApplicationRoot {
             }) {
                 Some(result) => result,
                 None => {
-                    self.client_handle = None;
+                    if self
+                        .client_handle
+                        .as_ref()
+                        .is_some_and(|owned| owned.raw() == handle)
+                    {
+                        self.client_handle = None;
+                    }
+                    self.pane_client_raws.retain(|_, raw| *raw != handle);
                     Err(AppError::NoLiveClient)
                 }
             }

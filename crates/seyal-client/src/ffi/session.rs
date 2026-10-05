@@ -21,7 +21,7 @@ use crate::{ClientError, DiscoveryFailure, LocalDisplayClient};
 use super::{
     active_handle, allocate_handle, identity_words, pending_clients, with_active_client,
     PendingClient, SeyalRecoveryResult, ACTIVE_HANDLE, CLIENTS, DEFAULT_RECOVERY_BUDGET_MICROS,
-    LAST_RECOVERY_RESULT,
+    FOCUSED_DISPLAY_HANDLE, LAST_RECOVERY_RESULT,
 };
 
 pub(crate) fn set_recovery_failure(error: ClientError) {
@@ -376,21 +376,45 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
         clients.borrow_mut().insert(handle, pending.client);
     });
     ACTIVE_HANDLE.with(|active| active.set(handle));
+    // Bootstrap/recovery: display/input follow the adopted Controller until
+    // ApplicationRoot CreateTab/select fails closed or rebinds focus.
+    FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
     0
 }
 
-/// Selects the client used by the legacy-shaped bridge calls. Swift calls
-/// this before every operation, allowing the existing ABI to remain compact
-/// while each Pane still owns an independent socket/client.
+/// Selects the client used by readiness-driven poll/flush for `handle`'s fd.
+/// Does not redirect onto the focused display client: a first-connect
+/// DispatchSource must drain its own socket (AGENTS.md level-trigger rule).
+/// Frames and keys use [`super::display_handle`] separately.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_select(handle: u64) -> i32 {
     let exists = CLIENTS.with(|clients| clients.borrow().contains_key(&handle));
-    if exists {
-        ACTIVE_HANDLE.with(|active| active.set(handle));
-        0
-    } else {
-        -1
+    if !exists {
+        return -1;
     }
+    ACTIVE_HANDLE.with(|active| active.set(handle));
+    0
+}
+
+/// Walk adopted live clients. `after == 0` returns the smallest handle;
+/// otherwise the next handle strictly greater than `after`. `0` ends.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_next_handle(after: u64) -> u64 {
+    CLIENTS.with(|clients| {
+        clients
+            .borrow()
+            .keys()
+            .copied()
+            .filter(|handle| *handle > after)
+            .min()
+            .unwrap_or(0)
+    })
+}
+
+/// Socket fd for an adopted handle without changing the selected poll client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_socket_fd_for(handle: u64) -> i32 {
+    super::with_client(handle, LocalDisplayClient::socket_fd).unwrap_or(-1)
 }
 
 #[unsafe(no_mangle)]
@@ -404,6 +428,11 @@ pub extern "C" fn seyal_bridge_disconnect_handle(handle: u64) {
     ACTIVE_HANDLE.with(|active| {
         if active.get() == handle {
             active.set(0);
+        }
+    });
+    FOCUSED_DISPLAY_HANDLE.with(|focused| {
+        if focused.get() == handle {
+            focused.set(0);
         }
     });
 }

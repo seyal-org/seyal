@@ -75,10 +75,28 @@ pub use ffi::{
     seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_snapshot,
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning, seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle,
-    seyal_bridge_ensure_prepared, seyal_bridge_frame, seyal_bridge_poll, seyal_bridge_select,
-    seyal_bridge_set_runtime_dir, seyal_launch_policy_failure_copy,
+    seyal_bridge_ensure_prepared, seyal_bridge_flush_writable_for, seyal_bridge_frame,
+    seyal_bridge_next_handle, seyal_bridge_poll, seyal_bridge_poll_for,
+    seyal_bridge_provisioning_wakeup_fd, seyal_bridge_select, seyal_bridge_set_runtime_dir,
+    seyal_bridge_socket_fd_for, seyal_bridge_wants_write_for, seyal_launch_policy_failure_copy,
     seyal_launch_policy_warning_copy, test_register_pending_client,
 };
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::active_registry_execution as ffi_test_active_registry_execution;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::focused_registry_handle as ffi_test_focused_registry_handle;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::force_registry_client_eof as ffi_test_force_registry_client_eof;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::submit_utf8_for_test as ffi_test_submit_utf8;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
@@ -87,3 +105,11 @@ pub use ffi::client_registry_contains as ffi_test_client_registry_contains;
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use ffi::client_registry_has_execution as ffi_test_client_registry_has_execution;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::drain_attach_wakeup as ffi_test_drain_attach_wakeup;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::try_read_attach_wakeup as ffi_test_try_read_attach_wakeup;
