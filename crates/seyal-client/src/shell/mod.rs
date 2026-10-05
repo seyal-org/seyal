@@ -6,6 +6,7 @@
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
 mod actions;
+mod focus_direction;
 mod focus_history;
 mod inventory;
 mod pane_ops;
@@ -17,6 +18,8 @@ mod pt1_tests;
 #[cfg(test)]
 mod pt2_tests;
 #[cfg(test)]
+mod pt3_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod w2a_tests;
@@ -27,6 +30,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::pane_layout::SplitRatio;
 
+pub use focus_direction::FocusDirection;
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
@@ -63,6 +67,8 @@ pub enum ShellError {
     NotZoomed,
     /// `pane == neighbor`, `SwapPanes` with `a == b`, or neighbor not a same-Tab leaf.
     InvalidMoveTarget,
+    /// No geometric neighbor in the requested direction (SPEC-025 §5.7).
+    NoDirectionalNeighbor,
 }
 
 impl ShellError {
@@ -93,6 +99,7 @@ impl ShellError {
             Self::CrossWorkspaceMove => "A Tab cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
+            Self::NoDirectionalNeighbor => "No directional neighbor pane in that direction.",
         }
     }
 }
@@ -193,6 +200,10 @@ pub enum ShellAction {
         neighbor: PaneId,
         side: MoveSide,
         containment_generation: u64,
+    },
+    /// Focus the geometric neighbor of the focused leaf (SPEC-025 §5.7).
+    FocusDirection {
+        direction: FocusDirection,
     },
     /// Resize the Split whose divider follows `pane` (see `PaneTree`).
     SetSplitRatio {
@@ -760,6 +771,7 @@ impl ShellState {
             } => self
                 .require_containment_generation(containment_generation)
                 .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
+            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }
