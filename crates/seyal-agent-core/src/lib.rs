@@ -12,6 +12,7 @@ mod execution_host;
 mod identity;
 mod lifecycle;
 mod output_ref;
+mod presence;
 mod restore;
 mod routing;
 mod transitions;
@@ -37,6 +38,11 @@ pub use output_ref::{
     decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, OutputRefError,
     RetentionPolicyRef, StreamKind, OUTPUT_REF_KIND, OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN,
     RETENTION_POLICY_RETAINED_STREAM,
+};
+pub use presence::{
+    classify_external_cli_effect_evidence, terminal_text_authorizes_approval, CapabilityId,
+    CapabilitySupport, ClaimMode, EnforcementClass, NegotiatedCapability,
+    PresenceCapabilityProjection, PresenceError, PresenceObservation, PresenceSourceTier,
 };
 pub use routing::{resolve_execution_target, AdapterCandidate, ResolveFailure, ResolvedTarget};
 pub use transitions::TransitionIds;
