@@ -6,6 +6,7 @@
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
 mod actions;
+mod equalize;
 mod focus_direction;
 mod focus_history;
 mod inventory;
@@ -19,6 +20,8 @@ mod pt1_tests;
 mod pt2_tests;
 #[cfg(test)]
 mod pt3_tests;
+#[cfg(test)]
+mod pt4_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -209,6 +212,12 @@ pub enum ShellAction {
     SetSplitRatio {
         pane: PaneId,
         ratio: SplitRatio,
+    },
+    EqualizeTab {
+        containment_generation: u64,
+    },
+    EqualizeFocused {
+        containment_generation: u64,
     },
     BindExecution {
         pane: PaneId,
@@ -773,6 +782,16 @@ impl ShellState {
                 .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
             ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
+            ShellAction::EqualizeTab {
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.equalize_tab()),
+            ShellAction::EqualizeFocused {
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.equalize_focused()),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }
     }

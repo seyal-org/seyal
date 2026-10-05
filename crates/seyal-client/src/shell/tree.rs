@@ -92,6 +92,57 @@ impl PaneTree {
         }
     }
 
+    /// Set every `Split.ratio` under this node to [`SplitRatio::HALF`]
+    /// (SPEC-025 §5.6 `EqualizeTab` / P3). Topology is unchanged.
+    pub(super) fn equalize_all(&mut self) {
+        match self {
+            Self::Leaf(_) => {}
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                *ratio = SplitRatio::HALF;
+                first.equalize_all();
+                second.equalize_all();
+            }
+        }
+    }
+
+    /// Equalize ratios in the subtree rooted at the nearest ancestor `Split`
+    /// of `focused` (SPEC-025 §5.6 `EqualizeFocused`). A single-leaf root is
+    /// a successful ratio no-op. Returns false when `focused` is not a leaf
+    /// in this tree.
+    pub(super) fn equalize_focused_scope(&mut self, focused: PaneId) -> bool {
+        match self {
+            Self::Leaf(id) => *id == focused,
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                let in_first = first.contains_leaf(focused);
+                let in_second = second.contains_leaf(focused);
+                if !in_first && !in_second {
+                    return false;
+                }
+                if in_first && matches!(**first, Self::Split { .. }) {
+                    return first.equalize_focused_scope(focused);
+                }
+                if in_second && matches!(**second, Self::Split { .. }) {
+                    return second.equalize_focused_scope(focused);
+                }
+                // Focused leaf is a direct child; this Split is its nearest ancestor.
+                *ratio = SplitRatio::HALF;
+                first.equalize_all();
+                second.equalize_all();
+                true
+            }
+        }
+    }
+
     pub(crate) fn last_pane(&self) -> PaneId {
         match self {
             Self::Leaf(id) => *id,
