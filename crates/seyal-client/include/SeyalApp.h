@@ -176,6 +176,7 @@ enum SeyalAppActionKind {
 #define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
 #define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
 #define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
+#define SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED 10u
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
 enum SeyalAppGotoScope {
@@ -571,7 +572,7 @@ typedef struct SeyalAppPaneTreeNode {
  * ADR-018 §2.4 native effects in commit order.
  * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
  *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
- *       5 QuitCleanupComplete.
+ *       5 QuitCleanupComplete, 6 WindowActivation (SPEC-022 §5).
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -587,6 +588,8 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
 #define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 5u
+#define SEYAL_APP_EFFECT_WINDOW_ACTIVATION 6u
+#define SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS 3u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u

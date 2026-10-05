@@ -246,6 +246,36 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
+    func testWindowActivationRaisesOnlyTheNamedWindow() {
+        let host = seededQuitHost(windows: 2)
+        defer { host.performQuitCleanup() }
+        let target = seyal_app_window(host.appHandle, 1)
+        XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
+        host.applyPendingEffectsAndReconcile()
+        let expectedId = "seyal-window-\(target.window_lo)-\(target.window_hi)"
+        XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
+        let windows = host.snapshotOrderedWindowKeys()
+        XCTAssertEqual(windows.count, 2)
+        XCTAssertEqual(windows[1].lo, target.window_lo)
+        XCTAssertEqual(windows[1].hi, target.window_hi)
+    }
+
+    func testWindowActivationFailureRetriesBoundedTimesAndKeepsFocus() {
+        let host = seededQuitHost(windows: 2)
+        defer { host.performQuitCleanup() }
+        let target = seyal_app_window(host.appHandle, 1)
+        let liveBefore = host.liveHost.window
+        XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
+        host.activationFailBudget = 8
+        host.applyPendingEffects()
+        XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        let after = seyal_app_window(host.appHandle, 1)
+        XCTAssertNotEqual(after.flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE), 0)
+        XCTAssertTrue(host.liveHost.window === liveBefore)
+        XCTAssertEqual(host.activationFailBudget, 8 - Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+    }
+
     func testCreateWindowRejectedDoesNotMoveLiveHost() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
@@ -282,6 +312,33 @@ final class MultiWindowHostTests: XCTestCase {
             XCTAssertTrue(host.liveHost.window === liveWindow)
             XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
         }
+    }
+
+    @discardableResult
+    private func navigateToActiveTab(of window: SeyalAppWindow, handle: UInt64) -> Int32 {
+        var payload = [UInt8](repeating: 0, count: 36)
+        payload[0] = 1
+        payload[2] = 2
+        writeId(&payload, offset: 4, lo: window.workspace_lo, hi: window.workspace_hi)
+        writeId(&payload, offset: 20, lo: window.active_tab_lo, hi: window.active_tab_hi)
+        let snapshot = seyal_app_snapshot(handle)
+        return payload.withUnsafeBufferPointer { buffer in
+            var action = SeyalAppAction()
+            action.version = UInt16(SEYAL_APP_ABI_VERSION)
+            action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            action.kind = UInt16(SEYAL_APP_ACTION_NAVIGATE.rawValue)
+            action.applySnapshotFence(snapshot)
+            action.payload = buffer.baseAddress
+            action.payload_len = 36
+            return seyal_app_apply(handle, &action)
+        }
+    }
+
+    private func writeId(_ payload: inout [UInt8], offset: Int, lo: UInt64, hi: UInt64) {
+        var lo = lo.littleEndian
+        var hi = hi.littleEndian
+        withUnsafeBytes(of: &lo) { payload.replaceSubrange(offset..<(offset + 8), with: $0) }
+        withUnsafeBytes(of: &hi) { payload.replaceSubrange((offset + 8)..<(offset + 16), with: $0) }
     }
 }
 

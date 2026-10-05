@@ -1,10 +1,11 @@
-//! Atomic `Navigate(address)` commit (SPEC-022 §4).
+//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5).
 //!
 //! Resolve with the N1 resolver, then apply workspace/tab/pane focus in one
-//! transition. Rejection leaves shell focus unchanged. No focus history,
-//! window activation, presentation, binding, or PTY mutation (N2 scope).
+//! transition. When the hosting window is not product-active, emit exactly one
+//! [`crate::shell::ShellNativeEffect::WindowActivation`]. Rejection leaves
+//! focus unchanged. No presentation, binding, or PTY mutation.
 
-use crate::shell::ShellState;
+use crate::shell::{ShellNativeEffect, ShellState};
 
 use super::{
     resolve, ExecutionInventory, NavigationPrincipal, NavigationRejection, ResolvedTarget,
@@ -37,12 +38,13 @@ pub fn navigate(
         } => (workspace, tab, pane),
     };
 
+    let previous_window = shell.product_window_id().ok();
     let before = shell.focus_checkpoint();
     if before.active_workspace == workspace
         && before.active_tab == tab
         && before.focused_pane == pane
     {
-        // Already active: success no-op (R4.4).
+        // Already active: success no-op (R4.4). No extra activation (R5.2).
         return Ok(target);
     }
 
@@ -68,6 +70,11 @@ pub fn navigate(
     shell
         .commit_focus(workspace, tab, pane)
         .expect("composition re-validated immediately above");
+    if let Some(window) = shell.window_of_tab(tab)
+        && previous_window != Some(window)
+    {
+        shell.push_effect(ShellNativeEffect::WindowActivation { window });
+    }
     Ok(target)
 }
 
