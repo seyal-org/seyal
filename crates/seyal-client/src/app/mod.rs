@@ -580,6 +580,18 @@ impl ApplicationRoot {
         self.extra_pane_clients.len()
     }
 
+    /// True when the production poll path must run [`Self::poll_client`] for
+    /// create/attach/terminate progress (not every Candidate-D frame).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn needs_provisioning_drive(&self) -> bool {
+        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
+            return false;
+        }
+        self.pending_live_attach.is_some()
+            || self.provisioning.has_outstanding_intent()
+            || !self.pending_wire_effects.is_empty()
+    }
+
     /// Registry handle for a pane's Controller, if attached.
     #[doc(hidden)]
     #[cfg(target_os = "macos")]

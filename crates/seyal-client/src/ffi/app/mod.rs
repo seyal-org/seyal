@@ -294,11 +294,14 @@ thread_local! {
 }
 
 /// Drive ApplicationRoot wire create/attach from the production poll path.
+/// Only when CreateTab / dispose / pending second-Controller work needs it —
+/// not on every frame (that re-derived presentation against every poll and
+/// stalled live connect / TUI evidence).
 pub(crate) fn drive_application_roots() {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         for state in apps.values_mut() {
-            if state.root.live_client_handle_for_test().is_none() {
+            if !state.root.needs_provisioning_drive() {
                 continue;
             }
             let fence = state.root.fence();
@@ -425,8 +428,8 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
         Ok(decoded) => decoded,
         Err(code) => return code,
     };
-    let bind_fence = match &decoded {
-        crate::app::AppAction::Bind { fence, .. } => Some(*fence),
+    let bind_adopt = match &decoded {
+        crate::app::AppAction::Bind { fence, evidence } => Some((*fence, evidence.execution)),
         _ => None,
     };
     APPS.with(|apps| {
@@ -436,9 +439,14 @@ pub unsafe extern "C" fn seyal_app_apply(handle: u64, action: *const SeyalAppAct
         };
         match state.root.apply(decoded) {
             Ok(()) => {
-                if let Some(fence) = bind_fence {
+                if let Some((fence, execution)) = bind_adopt {
                     let live = crate::ffi::active_handle();
-                    if live != 0 {
+                    // Only the Controller for this Bind's ExecutionId — never a
+                    // leftover ACTIVE_HANDLE from another XCTest / pane.
+                    let matches = live != 0
+                        && crate::ffi::with_client(live, |client| client.execution_id())
+                            == Some(execution);
+                    if matches {
                         let _ = state.root.adopt_bridge_handle(fence, live);
                     }
                 }

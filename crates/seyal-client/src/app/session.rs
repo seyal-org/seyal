@@ -319,14 +319,15 @@ impl ApplicationRoot {
                         .map(crate::ffi::ClientRegistryHandle::raw)
                 });
             if let Some(handle) = handle {
-                if let Some(output) = crate::ffi::with_client(handle, |client| {
-                    (
-                        project_cache_text(client.cache()),
-                        client.cache().alternate_screen,
-                    )
-                }) {
-                    self.output_utf8 = output.0;
-                    return self.derive_presentation(output.1);
+                // Host Refresh carries the presentation fence (ADR-015). Sync
+                // output text from the live client, but do not let a stale
+                // cache.alternate_screen override the action's flag — that
+                // broke TUI evidence when Bind had adopted a create Controller.
+                if let Some(output) =
+                    crate::ffi::with_client(handle, |client| project_cache_text(client.cache()))
+                {
+                    self.output_utf8 = output;
+                    return self.derive_presentation(alternate_screen);
                 }
                 // Shared-handle disconnect left a stale id; clear before fallback (N2).
                 if self
