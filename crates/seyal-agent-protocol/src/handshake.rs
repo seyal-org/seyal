@@ -12,9 +12,22 @@ pub struct Hello {
     pub client_principal_evidence: Vec<u8>,
 }
 
+/// SPEC-027 §8.2 execution-host advertisement. Not authorization and not a
+/// launch descriptor; clients MUST NOT infer `StartAgentRun` success from
+/// `local_session` alone (SPEC-027 §8.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionHostKind {
+    None,
+    StandaloneProcess,
+    SeyalTerminal,
+    Remote,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ServerCapabilities {
     pub local_session: bool,
+    pub execution_host_kind: ExecutionHostKind,
+    pub adapter_catalog_generation: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +51,26 @@ pub fn negotiate_hello(
     backend_instance_id: BackendInstanceId,
     server_max_frame_size: u32,
     server_event_window: u32,
+) -> Result<HelloAck, HandshakeError> {
+    negotiate_hello_with_capabilities(
+        hello,
+        backend_instance_id,
+        server_max_frame_size,
+        server_event_window,
+        ExecutionHostKind::None,
+        None,
+    )
+}
+
+/// Same negotiation, advertising the daemon's actual composed host kind
+/// (SPEC-027 §8.2) instead of defaulting to hostless `None`.
+pub fn negotiate_hello_with_capabilities(
+    hello: &Hello,
+    backend_instance_id: BackendInstanceId,
+    server_max_frame_size: u32,
+    server_event_window: u32,
+    execution_host_kind: ExecutionHostKind,
+    adapter_catalog_generation: Option<u64>,
 ) -> Result<HelloAck, HandshakeError> {
     if hello.supported_versions.len() > MAX_VERSIONS
         || hello.client_principal_evidence.len() > MAX_PRINCIPAL_EVIDENCE
@@ -66,6 +99,8 @@ pub fn negotiate_hello(
         backend_instance_id,
         capabilities: ServerCapabilities {
             local_session: true,
+            execution_host_kind,
+            adapter_catalog_generation,
         },
         max_frame_size: hello.max_frame_size.min(server_max_frame_size),
         event_window: hello.event_window.min(server_event_window),
@@ -116,13 +151,40 @@ pub fn decode_hello(body: &[u8]) -> Result<Hello, FrameError> {
     })
 }
 
+fn execution_host_kind_code(kind: ExecutionHostKind) -> u8 {
+    match kind {
+        ExecutionHostKind::None => 0,
+        ExecutionHostKind::StandaloneProcess => 1,
+        ExecutionHostKind::SeyalTerminal => 2,
+        ExecutionHostKind::Remote => 3,
+    }
+}
+
+fn execution_host_kind_from_code(code: u8) -> Result<ExecutionHostKind, FrameError> {
+    match code {
+        0 => Ok(ExecutionHostKind::None),
+        1 => Ok(ExecutionHostKind::StandaloneProcess),
+        2 => Ok(ExecutionHostKind::SeyalTerminal),
+        3 => Ok(ExecutionHostKind::Remote),
+        _ => Err(FrameError::Malformed),
+    }
+}
+
 pub fn encode_ack(ack: &HelloAck, max_frame_size: u32) -> Result<Vec<u8>, FrameError> {
-    let mut body = Vec::with_capacity(24);
+    let mut body = Vec::with_capacity(32);
     body.extend_from_slice(&ack.selected_version.get().to_le_bytes());
     body.extend_from_slice(&ack.backend_instance_id.to_bytes());
     body.push(u8::from(ack.capabilities.local_session));
     body.extend_from_slice(&ack.max_frame_size.to_le_bytes());
     body.extend_from_slice(&ack.event_window.to_le_bytes());
+    body.push(execution_host_kind_code(ack.capabilities.execution_host_kind));
+    match ack.capabilities.adapter_catalog_generation {
+        Some(generation) => {
+            body.push(1);
+            body.extend_from_slice(&generation.to_le_bytes());
+        }
+        None => body.push(0),
+    }
     crate::frame::encode_frame(crate::frame::FrameKind::HelloAck, &body, max_frame_size)
 }
 
@@ -138,11 +200,21 @@ pub fn decode_ack(body: &[u8]) -> Result<HelloAck, FrameError> {
     };
     let max_frame_size = reader.u32()?;
     let event_window = reader.u32()?;
+    let execution_host_kind = execution_host_kind_from_code(reader.u8()?)?;
+    let adapter_catalog_generation = match reader.u8()? {
+        0 => None,
+        1 => Some(reader.u64()?),
+        _ => return Err(FrameError::Malformed),
+    };
     reader.finish()?;
     Ok(HelloAck {
         selected_version,
         backend_instance_id: BackendInstanceId::from_bytes(id_bytes),
-        capabilities: ServerCapabilities { local_session },
+        capabilities: ServerCapabilities {
+            local_session,
+            execution_host_kind,
+            adapter_catalog_generation,
+        },
         max_frame_size,
         event_window,
     })
@@ -200,6 +272,13 @@ impl<'a> Reader<'a> {
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
+    fn u64(&mut self) -> Result<u64, FrameError> {
+        let bytes = self.bytes(8)?;
+        let mut buf = [0; 8];
+        buf.copy_from_slice(bytes);
+        Ok(u64::from_le_bytes(buf))
+    }
+
     fn bytes(&mut self, len: usize) -> Result<&'a [u8], FrameError> {
         let end = self.index.checked_add(len).ok_or(FrameError::Malformed)?;
         if end > self.buf.len() {
@@ -243,8 +322,42 @@ mod tests {
         assert_eq!(ack.selected_version, ProtocolVersion::V1);
         assert_eq!(ack.backend_instance_id, backend);
         assert!(ack.capabilities.local_session);
+        assert_eq!(ack.capabilities.execution_host_kind, ExecutionHostKind::None);
+        assert_eq!(ack.capabilities.adapter_catalog_generation, None);
         assert_eq!(ack.max_frame_size, 512);
         assert_eq!(ack.event_window, 64);
+    }
+
+    #[test]
+    fn negotiate_with_capabilities_advertises_composed_host_and_catalog_generation() {
+        let backend = BackendInstanceId::new();
+        let hello = Hello {
+            supported_versions: vec![ProtocolVersion::V1],
+            max_frame_size: 1024,
+            event_window: 64,
+            client_principal_evidence: Vec::new(),
+        };
+
+        let ack = negotiate_hello_with_capabilities(
+            &hello,
+            backend,
+            1024,
+            64,
+            ExecutionHostKind::StandaloneProcess,
+            Some(7),
+        )
+        .unwrap();
+
+        assert_eq!(
+            ack.capabilities.execution_host_kind,
+            ExecutionHostKind::StandaloneProcess
+        );
+        assert_eq!(ack.capabilities.adapter_catalog_generation, Some(7));
+
+        let encoded = encode_ack(&ack, 1024).unwrap();
+        let frame = crate::decode_frame(&encoded, 1024).unwrap();
+        let decoded = decode_ack(&frame.body).unwrap();
+        assert_eq!(decoded, ack);
     }
 
     #[test]

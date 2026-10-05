@@ -31,6 +31,16 @@ fn commands_round_trip_and_trailing_bytes_fail() {
             binding_generation: 2,
             control_generation: 1,
         },
+        Command::StartAgentRun {
+            session_id: session,
+            attempt_id: AttemptId::new(),
+            route_offering_id: None,
+        },
+        Command::StartAgentRun {
+            session_id: session,
+            attempt_id: AttemptId::new(),
+            route_offering_id: Some(RouteOfferingId::new()),
+        },
     ];
     for command in commands {
         let frame = encode_command(&command, 4096).unwrap();
@@ -81,6 +91,26 @@ fn unknown_command_code_and_zero_generation_fail_closed() {
 }
 
 #[test]
+fn spec_027_command_error_wire_codes_are_stable() {
+    assert_eq!(error_code(CommandError::ExecutionTargetUnavailable), 8);
+    assert_eq!(error_code(CommandError::AdapterNotEnabled), 9);
+    assert_eq!(error_code(CommandError::AdapterExecuteDenied), 10);
+    assert_eq!(decode_error(8), Ok(CommandError::ExecutionTargetUnavailable));
+    assert_eq!(decode_error(9), Ok(CommandError::AdapterNotEnabled));
+    assert_eq!(decode_error(10), Ok(CommandError::AdapterExecuteDenied));
+}
+
+#[test]
+fn start_agent_run_route_offering_flag_byte_fails_closed_on_unknown_value() {
+    let mut body = Vec::new();
+    body.extend_from_slice(&6_u16.to_le_bytes());
+    body.extend_from_slice(&ClientSessionId::new().to_bytes());
+    body.extend_from_slice(&AttemptId::new().to_bytes());
+    body.push(2); // neither 0 (absent) nor 1 (present)
+    assert_eq!(decode_command(&body), Err(FrameError::Malformed));
+}
+
+#[test]
 fn results_round_trip() {
     let results = [
         CommandResult::Opened {
@@ -88,6 +118,9 @@ fn results_round_trip() {
         },
         CommandResult::Error(CommandError::RejectedSession),
         CommandResult::Error(CommandError::StaleBinding),
+        CommandResult::Error(CommandError::ExecutionTargetUnavailable),
+        CommandResult::Error(CommandError::AdapterNotEnabled),
+        CommandResult::Error(CommandError::AdapterExecuteDenied),
         CommandResult::Snapshot {
             view: Some(SnapshotView {
                 incorporated_through: 4,
