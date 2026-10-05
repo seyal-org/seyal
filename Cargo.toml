@@ -10,6 +10,7 @@ members = [
     "crates/seyal-agent-core",
     "crates/seyal-agent-protocol",
     "crates/seyal-agent-store",
+    "crates/seyal-agent-context",
     "crates/seyal-agent-backend",
     "crates/seyal-agent-client",
 ]

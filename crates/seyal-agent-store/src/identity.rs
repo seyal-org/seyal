@@ -498,7 +498,7 @@ mod tests {
         let version: i32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         let migrated = AgentStore::open(&legacy)
             .unwrap()
             .agent_run(prior_run)

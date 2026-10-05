@@ -35,6 +35,10 @@ Blocks represent real terminal execution. They do not create another PTY, own an
 
 GUI detach and runtime survival are separate from crash recovery, scrollback persistence, and reboot recovery. Journaling cannot reconstruct a live PTY.
 
+## Local Context Engine
+
+M005 source discovery and rebuildable index/cache live in `seyal-agent-context` (agent domain), not on the terminal hot path. See the [Local Context Engine](./local-context-engine.md) developer page and ADR-013 / SPEC-013 for authority.
+
 ## OSS and commercial boundary
 
 ```text
