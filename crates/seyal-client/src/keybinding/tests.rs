@@ -386,20 +386,18 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     .expect("ctrl+r composer history-search");
     assert_eq!(history.context, BindingContext::COMPOSER);
 
-    // §5.5 / K8: goto.open lands with N4; focus-history builtins wait for N3 / tip B.
+    // §5.5 / K8: focus-history builtins (N3) and goto.open (N4).
+    let back = binding_for(&table, "cmd+[", WorkspaceCommandId::FocusHistoryBack)
+        .expect("cmd+[ focus_history.back");
+    assert_eq!(back.context, BindingContext::APP);
+    assert_eq!(back.source, BindingSource::Builtin);
+    let forward = binding_for(&table, "cmd+]", WorkspaceCommandId::FocusHistoryForward)
+        .expect("cmd+] focus_history.forward");
+    assert_eq!(forward.context, BindingContext::APP);
+    assert_eq!(forward.source, BindingSource::Builtin);
     let goto = binding_for(&table, "cmd+shift+o", WorkspaceCommandId::GotoOpen)
         .expect("cmd+shift+o goto.open");
     assert_eq!(goto.context, BindingContext::APP);
-    assert!(
-        binding_for(&table, "cmd+[", WorkspaceCommandId::FocusHistoryBack).is_none(),
-        "no dead focus_history.back builtin before N3"
-    );
-    assert!(
-        binding_for(&table, "cmd+]", WorkspaceCommandId::FocusHistoryForward).is_none(),
-        "no dead focus_history.forward builtin before N3"
-    );
-    assert!(contexts_for(&table, "cmd+[").is_empty());
-    assert!(contexts_for(&table, "cmd+]").is_empty());
     // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());

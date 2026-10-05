@@ -1,8 +1,12 @@
-//! ApplicationRoot focus-history wiring (SPEC-022 §6 / N3).
+//! ApplicationRoot focus-history wiring (SPEC-022 §6 / N3) and K8 bindings.
 
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
+use crate::keybinding::{
+    BindingContext, KeySym, Modifiers, NormalizedStroke, RouteOutcome, WorkspaceCommand,
+    WorkspaceCommandId,
+};
 use crate::navigation::{FocusSeq, ResourceAddress};
 use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
@@ -118,6 +122,109 @@ fn select_tab_and_focus_pane_record_focus_history() {
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     assert!(root.snapshot().focus_history_seq.is_some());
     let _ = w1;
+}
+
+#[test]
+fn builtin_focus_history_back_and_forward_dispatch_committed_seq() {
+    let (mut root, w1, t1, p1, p2) = two_pane_root();
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p1,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p2,
+        },
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    let seq_at_p2 = root
+        .snapshot()
+        .focus_history_seq
+        .expect("cursor after navigate");
+
+    // Builtin cmd+[ → FocusHistoryBack; FocusSeq from the committed cursor.
+    let back = NormalizedStroke {
+        modifiers: Modifiers::CMD,
+        key: KeySym::Char('['),
+        shift_applied: None,
+    };
+    let outcome = root
+        .route_normalized_keystroke(&back, false, false)
+        .expect("route cmd+[");
+    assert!(matches!(
+        outcome,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ..
+            }
+        }
+    ));
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_ne!(
+        root.snapshot()
+            .focus_history_seq
+            .expect("cursor after back"),
+        seq_at_p2
+    );
+
+    // Builtin cmd+] → FocusHistoryForward with the new committed cursor.
+    let forward = NormalizedStroke {
+        modifiers: Modifiers::CMD,
+        key: KeySym::Char(']'),
+        shift_applied: None,
+    };
+    let outcome = root
+        .route_normalized_keystroke(&forward, false, false)
+        .expect("route cmd+]");
+    assert!(matches!(
+        outcome,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ..
+            }
+        }
+    ));
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+
+    // At the forward end → HistoryUnavailable (N3 surfaces SPEC-022 rejection).
+    assert_eq!(
+        root.invoke_workspace_command(
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ordinal: None,
+            },
+            BindingContext::APP,
+        ),
+        Err(AppError::NavigationHistoryUnavailable)
+    );
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+}
+
+#[test]
+fn focus_history_binding_empty_history_is_unavailable() {
+    let mut root = ApplicationRoot::new();
+    assert!(root.snapshot().focus_history_seq.is_none());
+    assert_eq!(
+        root.invoke_workspace_command(
+            WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ordinal: None,
+            },
+            BindingContext::APP,
+        ),
+        Err(AppError::NavigationHistoryUnavailable)
+    );
 }
 
 #[test]
