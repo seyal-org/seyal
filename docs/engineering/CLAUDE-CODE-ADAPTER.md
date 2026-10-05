@@ -89,3 +89,4 @@ claude --version   # record in PR evidence, e.g. 2.1.x
 - `SeyalTerminalExecutionHost` / shared PTY for M005 exit
 - Attention UX / Action dispatch beyond observation honesty
 - ADR create/amend
+
