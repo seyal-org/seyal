@@ -18,6 +18,8 @@ mod history;
 mod resolve;
 
 #[cfg(test)]
+mod adversarial_matrix_tests;
+#[cfg(test)]
 mod history_integration_tests;
 #[cfg(test)]
 mod tests;
