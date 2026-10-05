@@ -148,9 +148,12 @@ fn install_adapter(
         seyal_agent_store::CwdPolicy::AdapterWorkDir,
     )
     .with_argv(["spec027-catalog-fixture"]);
+    let owner = service.owner_principal_id;
     service
-        .store
-        .install_or_update_adapter(adapter_id, 0, enabled, &launch)
+        .grant_admin_adapters(owner)
+        .expect("grant admin.adapters");
+    service
+        .install_or_update_adapter(owner, adapter_id, 0, enabled, &launch)
         .expect("install adapter");
     let offering_id = RouteOfferingId::new();
     service
@@ -655,9 +658,12 @@ fn fixture_17_repository_bound_root_traversal_is_rejected_no_mint() {
         seyal_agent_store::CwdPolicy::WorkScopeRoot,
     )
     .with_argv(["{work_scope_root}/../escape"]);
+    let owner = service.owner_principal_id;
     service
-        .store
-        .install_or_update_adapter(adapter_id, 0, true, &launch)
+        .grant_admin_adapters(owner)
+        .expect("grant admin.adapters");
+    service
+        .install_or_update_adapter(owner, adapter_id, 0, true, &launch)
         .expect("install adapter");
     service
         .store
@@ -665,7 +671,7 @@ fn fixture_17_repository_bound_root_traversal_is_rejected_no_mint() {
         .expect("add offering");
     service
         .auth
-        .grant_adapter_execute(service.owner_principal_id, adapter_id)
+        .grant_adapter_execute(owner, adapter_id)
         .expect("grant");
     let principal = service.begin_connection(b"cli").unwrap();
     let CommandResult::Opened { session_id } = service.dispatch(
@@ -773,5 +779,59 @@ fn fixture_18_adhoc_work_scope_resolves_cwd_to_adapter_work_dir_on_disk() {
         expected_cwd.is_dir(),
         "expected AdapterWorkDir {expected_cwd:?} to exist on disk after dispatch"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// SPEC-027 §5.2 / #1252: install and set-enabled require durable
+/// `admin.adapters` on the IntegrationService path (no client Command).
+#[test]
+fn admin_adapters_grant_required_for_install_and_set_enabled() {
+    let (dir, mut service) = open_bare();
+    let owner = service.owner_principal_id;
+    let adapter_id = AdapterId::new();
+    let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+        "/bin/echo",
+        seyal_agent_store::CwdPolicy::AdapterWorkDir,
+    )
+    .with_argv(["admin-adapters-gate"]);
+
+    assert!(
+        service
+            .install_or_update_adapter(owner, adapter_id, 0, true, &launch)
+            .is_err(),
+        "install without admin.adapters must fail closed"
+    );
+    assert!(
+        service.store.get_adapter_manifest(adapter_id).unwrap().is_none(),
+        "catalog must be unchanged without grant"
+    );
+
+    service.grant_admin_adapters(owner).expect("grant");
+    let generation = service
+        .install_or_update_adapter(owner, adapter_id, 0, true, &launch)
+        .expect("install with grant");
+    assert_eq!(generation, 1);
+    assert!(service.store.get_adapter_manifest(adapter_id).unwrap().unwrap().enabled);
+
+    service
+        .set_adapter_enabled(owner, adapter_id, false)
+        .expect("set-enabled with grant");
+    assert!(!service.store.get_adapter_manifest(adapter_id).unwrap().unwrap().enabled);
+
+    // Revoke in-memory only: durable row remains, but authorize fails until
+    // re-applied. Clear by opening a fresh service without re-granting the
+    // in-memory bit after wiping auth is hard; instead prove a second
+    // principal without the grant cannot mutate.
+    let stranger = service.auth.register_principal(
+        crate::PrincipalKind::FirstPartySeyal,
+        [
+            crate::ClientScope::RunsCreate,
+            crate::ClientScope::RunsObserve,
+        ],
+    );
+    assert!(service
+        .set_adapter_enabled(stranger, adapter_id, true)
+        .is_err());
+    assert!(!service.store.get_adapter_manifest(adapter_id).unwrap().unwrap().enabled);
     let _ = std::fs::remove_dir_all(dir);
 }

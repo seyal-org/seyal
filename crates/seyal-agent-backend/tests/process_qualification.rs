@@ -654,6 +654,9 @@ fn seed_standalone_catalog(
             .expect("seed principal");
     }
     store
+        .grant_admin_adapters(owner_principal_id)
+        .expect("durably grant admin.adapters");
+    store
         .grant_adapter_execute(owner_principal_id, adapter_id)
         .expect("durably grant adapter.execute");
     adapter_id
