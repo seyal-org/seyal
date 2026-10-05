@@ -21,7 +21,7 @@ mod tests;
 
 pub(crate) use frame_io::{read_session_frame, SessionRead};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use seyal_agent_core::{
     AgentRunId, AttemptId, BindingGeneration, ClientPrincipalId, ClientSessionId,
@@ -75,6 +75,8 @@ pub struct IntegrationService {
     /// Removed on `KnownTerminated`/`UnknownAfterCrash` — nothing further to
     /// usefully drain from the host for either outcome.
     active_hosted_runs: std::collections::HashMap<AgentRunId, crate::HostHandle>,
+    #[cfg(test)]
+    last_resolved_launch: Option<seyal_agent_core::LaunchDescriptor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,11 +126,31 @@ impl IntegrationService {
             host: None,
             adapter_work_root,
             active_hosted_runs: std::collections::HashMap::new(),
+            #[cfg(test)]
+            last_resolved_launch: None,
         })
     }
 
     pub fn install_execution_host(&mut self, host: Box<dyn SessionExecutionHost>) {
         self.host = Some(host);
+    }
+
+    /// Trusted first-party bind of a WorkScope root (SPEC-027 §6). Not a
+    /// client command and not authorization. Canonicalizes to an existing
+    /// directory before the store write.
+    pub fn bind_work_scope_root(
+        &self,
+        work_scope_id: WorkScopeId,
+        path: &Path,
+    ) -> Result<(), ServiceError> {
+        let canonical = path.canonicalize().map_err(|_| ServiceError::Failed)?;
+        if !canonical.is_dir() {
+            return Err(ServiceError::Failed);
+        }
+        let text = canonical.to_str().ok_or(ServiceError::Failed)?;
+        self.store
+            .bind_work_scope_root(work_scope_id, text)
+            .map_err(|_| ServiceError::Failed)
     }
 
     /// HelloAck advertisement inputs (SPEC-027 §8.2): the composed host kind
