@@ -262,8 +262,18 @@ pub fn serve(
             .max_connections
             .is_some_and(|limit| accepted >= limit)
         {
-            let code = supervisor.join().unwrap_or(1);
-            stop_with_host_reap(&mut daemon, code);
+            // Admission is spent, but a deadline must still be able to
+            // interrupt a stuck worker join (held session) with exit 2.
+            loop {
+                if ACCEPT_SHUTDOWN.load(Ordering::SeqCst) {
+                    stop_with_host_reap(&mut daemon, ACCEPT_EXIT_CODE.load(Ordering::SeqCst));
+                }
+                if supervisor.is_finished() {
+                    let code = supervisor.join().unwrap_or(1);
+                    stop_with_host_reap(&mut daemon, code);
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
         }
         match daemon.accept_and_spawn() {
             Ok(worker) => {
