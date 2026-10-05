@@ -2,6 +2,8 @@
 
 Evidence for Issue #1274 on branch `issue/1274`.
 
+- **Head SHA:** `bd7c55d`
+
 - **Authority:** Accepted SPEC-019; consumes Done #678 / SPEC-026 identity separation
 - **Classification:** production permanent path (not POC)
 - `performance_claim=false`
