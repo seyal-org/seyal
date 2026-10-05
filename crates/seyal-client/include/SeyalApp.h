@@ -152,8 +152,30 @@ enum SeyalAppActionKind {
      * while open. Error codes 47-49.
      */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
-    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
+    /*
+     * W4a multi-window host intents (ADR-018 §2.2 / §2.3).
+     * SELECT_WINDOW / REPORT_WINDOW_EVENT: target_execution_lo/hi = WindowId.
+     * CYCLE_WINDOW: reserved = 0 next, nonzero 0 previous.
+     * CREATE_WINDOW: target-free; Rust resolves Workspace. Error 52 =
+     * WindowCreationUnavailable while admission is off.
+     */
+    SEYAL_APP_ACTION_SELECT_WINDOW = 63,
+    SEYAL_APP_ACTION_CYCLE_WINDOW = 64,
+    SEYAL_APP_ACTION_CREATE_WINDOW = 65,
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 66
 };
+
+#define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_KEY 1u
+#define SEYAL_APP_WINDOW_EVENT_BECAME_MAIN 2u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_MAIN 3u
+#define SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED 4u
+#define SEYAL_APP_WINDOW_EVENT_MINIATURIZED 5u
+#define SEYAL_APP_WINDOW_EVENT_DEMINIATURIZED 6u
+#define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
+#define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
+#define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
 enum SeyalAppGotoScope {
@@ -551,8 +573,9 @@ typedef struct SeyalAppPaneTreeNode {
 
 /*
  * ADR-018 §2.4 native effects in commit order.
- * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
- *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
+ * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
+ *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
+ *       5 QuitCleanupComplete.
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -567,6 +590,7 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
+#define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 5u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u
@@ -684,6 +708,13 @@ typedef struct SeyalAppPalette {
 
 uint64_t seyal_app_create(void);
 int32_t seyal_app_destroy(uint64_t handle);
+
+/** Test harness: install N windows + N live attachments; admission stays off. */
+int32_t seyal_app_test_seed_quit_case(uint64_t handle, uint32_t windows);
+int32_t seyal_app_test_seed_windows_only(uint64_t handle, uint32_t windows);
+/** Test harness: live display attachments still registered for handle. */
+uint32_t seyal_app_test_live_attachment_count(uint64_t handle);
+
 uint8_t seyal_app_option_as_alt(uint64_t handle);
 
 /*
@@ -754,6 +785,24 @@ SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
+SeyalAppWindow seyal_app_window(uint64_t handle, uint32_t index);
+SeyalAppTab seyal_app_tab(uint64_t handle, uint32_t window_index, uint32_t tab_index);
+SeyalAppPaneLeaf seyal_app_pane_leaf(
+    uint64_t handle,
+    uint32_t window_index,
+    uint32_t tab_index,
+    uint32_t pane_index);
+SeyalAppPaneTreeNode seyal_app_tab_tree_node(
+    uint64_t handle,
+    uint32_t window_index,
+    uint32_t tab_index,
+    uint32_t node_index);
+SeyalAppNativeEffect seyal_app_native_effect(uint64_t handle, uint32_t index);
+/**
+ * Fail-closed version/size check for W3 records.
+ * Returns 0 when compatible; -1 unknown kind; -2 version; -3 size.
+ */
+int32_t seyal_app_record_compatible(uint16_t version, uint16_t size, uint16_t kind);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);

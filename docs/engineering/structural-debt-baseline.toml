@@ -51,11 +51,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 991
-issue = 1217
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane_provisioning_tests beside the existing tab provisioning suite without expanding apply dispatch."
+ceiling_loc = 1048
+issue = 1123
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning beside tab provisioning and #1123 adds W4a window actions, native events, quit deadline, and live-attachment fixture fields beside the existing live-attach maps."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,15 +77,15 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1028
-issue = 1108
-responsibility = "Legacy ApplicationRoot lifecycle tests remain in one suite; #1108 moved multi-window effect queue coverage into app/tests/window_effect_tests.rs, reducing this file's ratchet from 1067 to 1028 LOC."
+ceiling_loc = 1080
+issue = 1123
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1108 retains effect queue coverage and #1123 adds bootstrap effect ordering and install_quit_fixture probe-detach evidence."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 962
-issue = 1108
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/."
+ceiling_loc = 1076
+issue = 1123
+responsibility = "Published C ABI entry points stay one thin façade; #1123 adds seed_quit_case/seed_windows_only/live_attachment_count harnesses with APPS extract-mutate-restore so headed XCTest cannot BorrowMut-abort under Metal."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -244,19 +244,19 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 path = "crates/seyal-client/src/navigation/tests.rs"
 ceiling_loc = 1139
 issue = 1122
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads ADR-018 containment_generation on Split/Close actions while W2a adds Window-aware navigation fixtures."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through actions and #1123 configures W4a fixture admission defaults."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
 acknowledged_loc = 857
 issue = 1092
-reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract and selection call site."
+reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries containment generation through window-aware actions, and #1123 configures W4a fixture admission defaults without moving projection authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
 acknowledged_loc = 937
 issue = 1108
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1092 adds Window-aware actions and containment fencing, while #1108 drains native effects and emits OrderFrontMakeKey from Navigate/commit_focus when the active Window changes. Snapshot encoding stays in shell/snapshot.rs."
+reason = "Shell composition reducer remains the portable Workspace/Window/Tab/Pane authority; #1108 carries snapshot/effects and #1123 adds fail-closed window-creation admission. Snapshot encoding stays in shell/snapshot.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -270,3 +270,15 @@ path = "crates/seyal-client/src/keybinding/tests.rs"
 acknowledged_loc = 701
 issue = 1106
 reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/decode.rs"
+acknowledged_loc = 700
+issue = 1123
+reason = "ABI action decode stays one match surface; #1123 adds SelectWindow/CycleWindow/CreateWindow/ReportWindowEvent kinds after goto without splitting the versioned kind table."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/mod.rs"
+acknowledged_loc = 747
+issue = 1123
+reason = "LocalDisplayClient stays one attach/poll client; #1123 adds request_bounded_detach and fallible try_reconstruction_probe_client for ADR-018 §4 quit fixtures without waiting on Detached."

@@ -2,7 +2,7 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use seyal_protocol::framing::{CommandBlock, CommandBlockState};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
@@ -313,8 +313,47 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
+        // W4a window host intents (ADR-018 §2.2 / §2.3). Numbers follow tip A goto.
+        63 => Ok(AppAction::SelectWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        64 => Ok(AppAction::CycleWindow {
+            direction: if action.reserved == 0 {
+                crate::shell::CycleDirection::Next
+            } else {
+                crate::shell::CycleDirection::Previous
+            },
+        }),
+        65 => Ok(AppAction::CreateWindow),
+        66 => Ok(AppAction::ReportWindowEvent {
+            window: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            event: decode_window_event(action.reserved)?,
+        }),
         _ => Err(-6),
     }
+}
+
+fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i32> {
+    use crate::app::WindowNativeEvent::*;
+    Ok(match reserved {
+        0 => BecameKey,
+        1 => ResignedKey,
+        2 => BecameMain,
+        3 => ResignedMain,
+        4 => OcclusionChanged,
+        5 => Miniaturized,
+        6 => Deminiaturized,
+        7 => EnteredFullscreen,
+        8 => ExitedFullscreen,
+        9 => ScreenOrScaleChanged,
+        _ => return Err(-6),
+    })
 }
 
 fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
