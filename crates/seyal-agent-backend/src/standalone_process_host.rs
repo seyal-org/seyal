@@ -13,9 +13,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
+/// Bound on buffered `HostObservation` entries per child. Further stdout is
+/// not read until a drain frees space (backpressure, not unbounded RSS).
+const MAX_QUEUED_OBSERVATIONS: usize = 256;
+/// Bound on buffered output payload bytes per child (chunk size is separate).
+const MAX_QUEUED_OUTPUT_BYTES: usize = 256 * 1024;
 
 use seyal_agent_core::{AgentRunId, BindingGeneration, LaunchDescriptor};
 
@@ -76,9 +85,17 @@ impl StandaloneProcessConfig {
     }
 }
 
+struct ObservationBuffer {
+    items: VecDeque<HostObservation>,
+    output_bytes: usize,
+}
+
 struct SupervisedChild {
+    pid: u32,
     child: Arc<Mutex<Child>>,
-    observations: Arc<Mutex<VecDeque<HostObservation>>>,
+    observations: Arc<Mutex<ObservationBuffer>>,
+    space: Arc<Condvar>,
+    shutdown: Arc<AtomicBool>,
     exit_evidence: Arc<Mutex<Option<HostExitEvidence>>>,
 }
 
@@ -138,22 +155,41 @@ impl StandaloneProcessHost {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            // Own process group so cancel/shutdown SIGKILL reaches grandchildren.
+            command.process_group(0);
+        }
         let mut child = command.spawn().map_err(|_| HostError::SpawnFailed)?;
+        let pid = child.id();
         let stdout = child.stdout.take().ok_or(HostError::SpawnFailed)?;
 
-        let observations = Arc::new(Mutex::new(VecDeque::new()));
-        observations.lock().unwrap().push_back(HostObservation {
-            run_id,
-            binding_generation,
-            ordinal: 1,
-            kind: HostObservationKind::Started,
-        });
+        let observations = Arc::new(Mutex::new(ObservationBuffer {
+            items: VecDeque::new(),
+            output_bytes: 0,
+        }));
+        let space = Arc::new(Condvar::new());
+        let shutdown = Arc::new(AtomicBool::new(false));
+        Self::push_observation(
+            &observations,
+            &space,
+            &shutdown,
+            HostObservation {
+                run_id,
+                binding_generation,
+                ordinal: 1,
+                kind: HostObservationKind::Started,
+            },
+            true,
+        );
 
         let child = Arc::new(Mutex::new(child));
         let exit_evidence: Arc<Mutex<Option<HostExitEvidence>>> = Arc::new(Mutex::new(None));
 
         let thread_child = Arc::clone(&child);
         let thread_observations = Arc::clone(&observations);
+        let thread_space = Arc::clone(&space);
+        let thread_shutdown = Arc::clone(&shutdown);
         let thread_exit_evidence = Arc::clone(&exit_evidence);
         let max_output_chunk = self.config.max_output_chunk;
         let disconnect_grace = self.config.disconnect_grace;
@@ -167,15 +203,61 @@ impl StandaloneProcessHost {
                 disconnect_grace,
                 &thread_child,
                 &thread_observations,
+                &thread_space,
+                &thread_shutdown,
                 &thread_exit_evidence,
             );
         });
 
         Ok(SupervisedChild {
+            pid,
             child,
             observations,
+            space,
+            shutdown,
             exit_evidence,
         })
+    }
+
+    fn output_bytes(kind: &HostObservationKind) -> usize {
+        match kind {
+            HostObservationKind::Output(bytes) => bytes.len(),
+            _ => 0,
+        }
+    }
+
+    fn is_terminal_kind(kind: &HostObservationKind) -> bool {
+        matches!(
+            kind,
+            HostObservationKind::KnownSuccess
+                | HostObservationKind::KnownFailure
+                | HostObservationKind::HarnessCrashed
+                | HostObservationKind::UnknownLiveness
+                | HostObservationKind::ObservationDisconnected
+        )
+    }
+
+    fn push_observation(
+        observations: &Mutex<ObservationBuffer>,
+        space: &Condvar,
+        shutdown: &AtomicBool,
+        observation: HostObservation,
+        bypass_backpressure: bool,
+    ) {
+        let add = Self::output_bytes(&observation.kind);
+        let mut guard = observations.lock().unwrap();
+        if !bypass_backpressure && !Self::is_terminal_kind(&observation.kind) {
+            while guard.items.len() >= MAX_QUEUED_OBSERVATIONS
+                || guard.output_bytes.saturating_add(add) > MAX_QUEUED_OUTPUT_BYTES
+            {
+                if shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+                guard = space.wait(guard).unwrap();
+            }
+        }
+        guard.output_bytes = guard.output_bytes.saturating_add(add);
+        guard.items.push_back(observation);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -186,35 +268,35 @@ impl StandaloneProcessHost {
         max_output_chunk: usize,
         disconnect_grace: Duration,
         child: &Arc<Mutex<Child>>,
-        observations: &Arc<Mutex<VecDeque<HostObservation>>>,
+        observations: &Arc<Mutex<ObservationBuffer>>,
+        space: &Arc<Condvar>,
+        shutdown: &Arc<AtomicBool>,
         exit_evidence: &Arc<Mutex<Option<HostExitEvidence>>>,
     ) {
         let mut next_ordinal = 2_u64;
         let mut buf = vec![0_u8; max_output_chunk];
-        let push = |kind: HostObservationKind, ordinal: &mut u64| {
-            observations.lock().unwrap().push_back(HostObservation {
-                run_id,
-                binding_generation,
-                ordinal: *ordinal,
-                kind,
-            });
+        let push = |kind: HostObservationKind, ordinal: &mut u64, bypass: bool| {
+            Self::push_observation(
+                observations,
+                space,
+                shutdown,
+                HostObservation {
+                    run_id,
+                    binding_generation,
+                    ordinal: *ordinal,
+                    kind,
+                },
+                bypass,
+            );
             *ordinal = ordinal.saturating_add(1);
         };
         loop {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
             match stdout.read(&mut buf) {
                 Ok(0) => {
-                    let resolved = {
-                        let mut guard = child.lock().unwrap();
-                        match guard.try_wait() {
-                            Ok(Some(status)) => Some(Self::classify_exit(status)),
-                            Ok(None) => match Self::wait_for_exit(&mut guard, disconnect_grace) {
-                                Ok(Some(status)) => Some(Self::classify_exit(status)),
-                                Ok(None) => None,
-                                Err(_) => Some(HostExitKind::Unknown),
-                            },
-                            Err(_) => Some(HostExitKind::Unknown),
-                        }
-                    };
+                    let resolved = Self::wait_for_exit(child.as_ref(), disconnect_grace);
                     match resolved {
                         Some(kind) => {
                             push(
@@ -225,16 +307,17 @@ impl StandaloneProcessHost {
                                     HostExitKind::Unknown => HostObservationKind::UnknownLiveness,
                                 },
                                 &mut next_ordinal,
+                                true,
                             );
                             *exit_evidence.lock().unwrap() = Some(HostExitEvidence { kind });
                         }
                         None => {
-                            // Child still alive with closed observation pipe.
-                            // Honest disconnect — never fabricate KnownTerminated.
                             push(
                                 HostObservationKind::ObservationDisconnected,
                                 &mut next_ordinal,
+                                true,
                             );
+                            Self::spawn_exit_waiter(Arc::clone(child), Arc::clone(exit_evidence));
                         }
                     }
                     break;
@@ -243,31 +326,119 @@ impl StandaloneProcessHost {
                     push(
                         HostObservationKind::Output(buf[..n].to_vec()),
                         &mut next_ordinal,
+                        false,
                     );
                 }
                 Err(_) => {
                     push(
                         HostObservationKind::ObservationDisconnected,
                         &mut next_ordinal,
+                        true,
                     );
-                    let mut guard = child.lock().unwrap();
-                    let _ = guard.kill();
-                    let _ = guard.wait();
+                    Self::kill_pid(child.lock().unwrap().id());
+                    Self::spawn_exit_waiter(Arc::clone(child), Arc::clone(exit_evidence));
                     break;
                 }
             }
         }
     }
 
-    fn wait_for_exit(child: &mut Child, grace: Duration) -> Result<Option<ExitStatus>, HostError> {
+    fn wait_for_exit(child: &Mutex<Child>, grace: Duration) -> Option<HostExitKind> {
         let deadline = Instant::now() + grace;
         loop {
-            match child.try_wait() {
-                Ok(Some(status)) => return Ok(Some(status)),
-                Ok(None) if Instant::now() >= deadline => return Ok(None),
-                Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-                Err(_) => return Err(HostError::Io),
+            {
+                let mut guard = child.lock().unwrap();
+                match guard.try_wait() {
+                    Ok(Some(status)) => return Some(Self::classify_exit(status)),
+                    Ok(None) => {}
+                    Err(_) => return Some(HostExitKind::Unknown),
+                }
             }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn spawn_exit_waiter(
+        child: Arc<Mutex<Child>>,
+        exit_evidence: Arc<Mutex<Option<HostExitEvidence>>>,
+    ) {
+        std::thread::spawn(move || loop {
+            {
+                let mut guard = child.lock().unwrap();
+                match guard.try_wait() {
+                    Ok(Some(status)) => {
+                        let mut evidence = exit_evidence.lock().unwrap();
+                        if evidence.is_none() {
+                            *evidence = Some(HostExitEvidence {
+                                kind: Self::classify_exit(status),
+                            });
+                        }
+                        return;
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        let mut evidence = exit_evidence.lock().unwrap();
+                        if evidence.is_none() {
+                            *evidence = Some(HostExitEvidence {
+                                kind: HostExitKind::Unknown,
+                            });
+                        }
+                        return;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        });
+    }
+
+    #[allow(unsafe_code)]
+    fn kill_pid(pid: u32) {
+        #[cfg(unix)]
+        {
+            let raw = pid as i32;
+            if raw > 0 {
+                // Negative pid: signal the child's process group (set at spawn).
+                let _ = unsafe { libc::kill(-raw, libc::SIGKILL) };
+            }
+        }
+        let _ = pid;
+    }
+
+    fn shutdown_child(supervised: &SupervisedChild) {
+        supervised.shutdown.store(true, Ordering::Relaxed);
+        supervised.space.notify_all();
+        Self::kill_pid(supervised.pid);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if supervised.exit_evidence.lock().unwrap().is_some() {
+                break;
+            }
+            {
+                let mut child = supervised.child.lock().unwrap();
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        *supervised.exit_evidence.lock().unwrap() = Some(HostExitEvidence {
+                            kind: Self::classify_exit(status),
+                        });
+                        break;
+                    }
+                    Ok(None) if Instant::now() >= deadline => {
+                        let _ = child.kill();
+                        if let Ok(status) = child.wait() {
+                            *supervised.exit_evidence.lock().unwrap() = Some(HostExitEvidence {
+                                kind: Self::classify_exit(status),
+                            });
+                        }
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(_) => break,
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 }
@@ -298,44 +469,71 @@ impl SessionExecutionHost for StandaloneProcessHost {
 
     fn observe(&mut self, handle: HostHandle) -> Result<Vec<HostObservation>, ()> {
         let supervised = self.children.get(&handle.get()).ok_or(())?;
-        let mut queue = supervised.observations.lock().unwrap();
-        Ok(queue.drain(..).collect())
+        let mut buffer = supervised.observations.lock().unwrap();
+        let drained: Vec<_> = buffer.items.drain(..).collect();
+        buffer.output_bytes = 0;
+        supervised.space.notify_all();
+        Ok(drained)
     }
 
     fn signal_cancel(&mut self, handle: HostHandle) -> Result<(), ()> {
         let supervised = self.children.get(&handle.get()).ok_or(())?;
-        let mut child = supervised.child.lock().unwrap();
-        child.kill().map_err(|_| ())
+        supervised.shutdown.store(true, Ordering::Relaxed);
+        supervised.space.notify_all();
+        Self::kill_pid(supervised.pid);
+        Ok(())
     }
 
     fn reap(&mut self, handle: HostHandle) -> Result<HostExitEvidence, ()> {
         let deadline = Instant::now() + self.config.disconnect_grace.max(Duration::from_secs(2));
         let evidence = loop {
             let supervised = self.children.get(&handle.get()).ok_or(())?;
-            let current = *supervised.exit_evidence.lock().unwrap();
-            if let Some(evidence) = current {
+            if let Some(evidence) = *supervised.exit_evidence.lock().unwrap() {
                 break evidence;
             }
             if Instant::now() >= deadline {
-                // Bounded: force resolution rather than waiting indefinitely
-                // (AGENTS.md termination invariant).
-                let mut child = supervised.child.lock().unwrap();
-                let _ = child.kill();
-                let evidence = match child.wait() {
-                    Ok(status) => HostExitEvidence {
-                        kind: Self::classify_exit(status),
-                    },
-                    Err(_) => HostExitEvidence {
+                Self::shutdown_child(supervised);
+                break supervised
+                    .exit_evidence
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(HostExitEvidence {
                         kind: HostExitKind::Unknown,
-                    },
-                };
-                drop(child);
-                break evidence;
+                    });
             }
             std::thread::sleep(Duration::from_millis(5));
         };
         self.children.remove(&handle.get());
         Ok(evidence)
+    }
+
+    fn shutdown_all(&mut self) {
+        let handles: Vec<_> = self.children.keys().copied().collect();
+        for raw in handles {
+            let _ = self.signal_cancel(HostHandle::new(raw));
+            let _ = self.reap(HostHandle::new(raw));
+        }
+    }
+}
+
+impl Drop for StandaloneProcessHost {
+    fn drop(&mut self) {
+        self.shutdown_all();
+    }
+}
+
+impl StandaloneProcessHost {
+    #[cfg(test)]
+    fn child_pid(&self, handle: HostHandle) -> Option<u32> {
+        self.children.get(&handle.get()).map(|child| child.pid)
+    }
+
+    #[cfg(test)]
+    fn queued_observation_count(&self, handle: HostHandle) -> usize {
+        self.children
+            .get(&handle.get())
+            .map(|child| child.observations.lock().unwrap().items.len())
+            .unwrap_or(0)
     }
 }
 
@@ -617,5 +815,101 @@ mod tests {
         assert_eq!(rebuilt.len(), 48 * 1024);
         assert!(rebuilt.iter().all(|b| *b == b'x'));
         let _ = std::fs::remove_dir_all(dir);
+        let _ = host.reap(handle);
+    }
+
+    #[allow(unsafe_code)]
+    fn child_still_running(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            let rc = unsafe { libc::kill(pid as i32, 0) };
+            rc == 0
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = pid;
+            false
+        }
+    }
+
+    #[test]
+    fn dropping_the_host_kills_a_live_child() {
+        let (_, run, generation) = seeded_run();
+        let config = StandaloneProcessConfig::new(32).unwrap();
+        let mut host = StandaloneProcessHost::new(config);
+        let HostStartOutcome::Started(handle) =
+            host.start(run, generation, descriptor("/bin/sleep", ["30"]))
+        else {
+            panic!("expected spawn");
+        };
+        let pid = host.child_pid(handle).expect("pid");
+        assert!(child_still_running(pid));
+        drop(host);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while child_still_running(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !child_still_running(pid),
+            "live child must not survive host Drop"
+        );
+    }
+
+    #[test]
+    fn stdout_eof_while_child_alive_is_later_reaped_without_a_zombie() {
+        let (_, run, generation) = seeded_run();
+        let config = StandaloneProcessConfig::new(32)
+            .unwrap()
+            .with_disconnect_grace(Duration::from_millis(20));
+        let mut host = StandaloneProcessHost::new(config);
+        let HostStartOutcome::Started(handle) = host.start(
+            run,
+            generation,
+            descriptor(
+                "/usr/bin/env",
+                [
+                    "python3",
+                    "-c",
+                    "import os,sys,time; sys.stdout.close(); os.close(1); time.sleep(0.4)",
+                ],
+            ),
+        ) else {
+            panic!("expected spawn");
+        };
+        let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
+        assert!(observations
+            .iter()
+            .any(|o| matches!(o.kind, HostObservationKind::ObservationDisconnected)));
+        let evidence = host.reap(handle).unwrap();
+        let _ = evidence;
+    }
+
+    #[test]
+    fn unread_output_queue_stays_bounded_under_persistent_pressure() {
+        let (_, run, generation) = seeded_run();
+        let config = StandaloneProcessConfig::new(1024).unwrap();
+        let mut host = StandaloneProcessHost::new(config);
+        let HostStartOutcome::Started(handle) = host.start(
+            run,
+            generation,
+            descriptor(
+                "/usr/bin/env",
+                [
+                    "python3",
+                    "-c",
+                    "import sys,time\nwhile True:\n    sys.stdout.write('x'*4096)\n    sys.stdout.flush()\n    time.sleep(0.001)",
+                ],
+            ),
+        ) else {
+            panic!("expected spawn");
+        };
+        std::thread::sleep(Duration::from_millis(400));
+        let queued = host.queued_observation_count(handle);
+        assert!(
+            queued <= 256,
+            "observation queue grew without bound: {queued}"
+        );
+        host.signal_cancel(handle).unwrap();
+        let _ = host.reap(handle);
     }
 }

@@ -773,6 +773,89 @@ fn production_concurrent_read_run_completes_promptly_while_the_real_child_is_sti
     let _ = fs::remove_dir_all(dir);
 }
 
+fn children_of(pid: u32) -> Vec<u32> {
+    let output = ProcessCommand::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .output()
+        .expect("pgrep -P");
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect()
+}
+
+#[allow(unsafe_code)]
+fn send_sigterm(pid: u32) {
+    let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    assert_eq!(rc, 0, "SIGTERM daemon pid {pid}");
+}
+
+#[allow(unsafe_code)]
+fn pid_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// SPEC-027 §11 fixture 13: SIGTERM on the production daemon must reap the
+/// live `StandaloneProcessHost` child (process-group kill), not leave it.
+#[test]
+fn production_sigterm_reaps_live_standalone_child() {
+    let dir = temp_dir("prod-fixture13-sigterm");
+    seed_standalone_catalog(&dir, "/bin/sleep", &["30"]);
+
+    let mut child = spawn_production(&dir);
+    let socket = dir.join("agent.sock");
+    wait_ready(&socket);
+    let daemon_pid = child.0.id();
+    assert!(pid_alive(daemon_pid), "production daemon must be running");
+
+    let mut client = TestClient::connect(&socket);
+    let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+    let item = client.create_work_item(scope);
+    let attempt = client.create_attempt(item);
+    let _started = client.start_agent_run(attempt);
+
+    let descendants = children_of(daemon_pid);
+    assert!(
+        !descendants.is_empty(),
+        "StartAgentRun must leave a live sleep child under the daemon"
+    );
+
+    send_sigterm(daemon_pid);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let status = loop {
+        match child.0.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                panic!("production daemon did not exit within 3s of SIGTERM")
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Err(error) => panic!("wait daemon after SIGTERM: {error}"),
+        }
+    };
+    assert!(
+        status.success(),
+        "SIGTERM should exit 0 after host reap; status={status:?}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let still_live: Vec<u32> = loop {
+        let live: Vec<u32> = descendants
+            .iter()
+            .copied()
+            .filter(|pid| pid_alive(*pid))
+            .collect();
+        if live.is_empty() || Instant::now() >= deadline {
+            break live;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        still_live.is_empty(),
+        "live sleep descendants survived daemon SIGTERM: {still_live:?}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn production_binary_rejects_output_bytes_flag() {
     let dir = temp_dir("prod-flag");

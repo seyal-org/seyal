@@ -110,6 +110,10 @@ pub trait SessionExecutionHost: Send {
     /// Bounded wait for exit evidence (AGENTS.md termination invariant).
     #[allow(clippy::result_unit_err)]
     fn reap(&mut self, handle: HostHandle) -> Result<HostExitEvidence, ()>;
+
+    /// Best-effort signal-and-reap of every live handle (daemon shutdown /
+    /// `Drop`). Default is a no-op for hosts that do not own OS children.
+    fn shutdown_all(&mut self) {}
 }
 
 #[cfg(feature = "fixture-host")]

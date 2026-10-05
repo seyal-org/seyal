@@ -340,6 +340,7 @@ impl AgentDaemon {
 
 impl Drop for AgentDaemon {
     fn drop(&mut self) {
+        self.shutdown_execution_host();
         if !self.cleanup {
             return;
         }

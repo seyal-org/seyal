@@ -143,9 +143,11 @@ make docs-check    # run Starlight/Astro documentation validation
 
 ### Agent Backend daemon binaries (AB-1.9)
 
-- Production: `seyal-agent-backend --directory <path>` — builds without Cargo features and
-  installs **no** execution host. `StartAgentRun` fails closed with no durable AgentRun.
-  `--output-bytes` is unknown (exit 2).
+- Production: `seyal-agent-backend --directory <path>` — builds without Cargo features
+  and composes `StandaloneProcessHost`. `StartAgentRun` requires a trusted adapter
+  catalog (fail-closed with no durable AgentRun when none is installed). SIGTERM,
+  SIGINT, and process `Drop` reap live children by process group. `--output-bytes`
+  is unknown (exit 2).
 - Qualification: `seyal-agent-backend-qualification` (requires `--features fixture-host`) —
   injects the scripted `FakeExecutionHost` fixture through the same typed seam for
   process/qualification tests. Prefer this binary for fabricated-run scenarios.

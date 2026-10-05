@@ -266,6 +266,24 @@ impl IntegrationService {
             event_count,
         }
     }
+
+    /// Daemon shutdown: signal-and-reap every live hosted child (AGENTS.md
+    /// termination invariant / SPEC-027 §9.4).
+    pub(crate) fn shutdown_hosted_runs(&mut self) {
+        let handles: Vec<_> = self
+            .active_hosted_runs
+            .drain()
+            .map(|(_, handle)| handle)
+            .collect();
+        let Some(host) = self.host.as_mut() else {
+            return;
+        };
+        for handle in handles {
+            let _ = host.signal_cancel(handle);
+            let _ = host.reap(handle);
+        }
+        host.shutdown_all();
+    }
 }
 
 fn persist_run_lifecycle(

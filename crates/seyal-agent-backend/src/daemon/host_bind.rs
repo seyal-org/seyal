@@ -3,6 +3,20 @@
 use super::AgentDaemon;
 
 impl AgentDaemon {
+    pub fn shutdown_execution_host(&mut self) {
+        if let Some(service) = self.integration.as_ref() {
+            service
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .shutdown_hosted_runs();
+        }
+    }
+
+    pub fn listener_raw_fd(&self) -> Option<i32> {
+        use std::os::fd::AsRawFd;
+        self.listener.as_ref().map(|listener| listener.as_raw_fd())
+    }
+
     /// Install a host on the bound integration service (qualification / tests).
     pub fn install_execution_host(&mut self, host: Box<dyn crate::SessionExecutionHost>) {
         if let Some(service) = self.integration.as_ref() {

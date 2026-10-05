@@ -20,6 +20,7 @@ mod daemon;
 mod endpoint;
 mod execution_host;
 #[cfg(unix)]
+#[allow(unsafe_code)]
 pub mod launch;
 mod observation;
 #[cfg(unix)]
@@ -29,6 +30,8 @@ mod peer;
 mod script;
 #[cfg(unix)]
 mod session;
+#[cfg(unix)]
+#[allow(unsafe_code)]
 mod standalone_process_host;
 
 pub use auth::{

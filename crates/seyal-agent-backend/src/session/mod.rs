@@ -678,8 +678,10 @@ impl IntegrationService {
         if matches!(
             self.authority.liveness(run_id),
             RunLiveness::KnownTerminated | RunLiveness::UnknownAfterCrash
-        ) {
-            self.active_hosted_runs.remove(&run_id);
+        ) && let Some(handle) = self.active_hosted_runs.remove(&run_id)
+            && let Some(host) = self.host.as_mut()
+        {
+            let _ = host.reap(handle);
         }
         Ok(())
     }

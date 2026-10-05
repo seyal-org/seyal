@@ -167,7 +167,7 @@ reason = "SQLite aggregate append/replay/snapshot ownership stays one module wit
 # ServerCapabilities projection. Tests stay beside those façades.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 708
+acknowledged_loc = 709
 issue = 1224
 reason = "Daemon bind/listen/handshake stay one process façade; #1224 threads composed ExecutionHostKind and adapter_catalog_generation into HelloAck without splitting listen from handshake."
 
@@ -179,9 +179,15 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 807
+acknowledged_loc = 809
 issue = 1224
 reason = "IntegrationService remains the Agent Backend session façade; #1224 adds server_capabilities and live host-handle bookkeeping for SPEC-027 StartAgentRun without a second session authority."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/standalone_process_host.rs"
+acknowledged_loc = 915
+issue = 1224
+reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1224 adds process-group cancel, bounded observation backpressure, Drop/shutdown reap, and proofs of those invariants beside spawn/observe rather than a second host type."
 
 # #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
 [[cohesion_acknowledgement]]

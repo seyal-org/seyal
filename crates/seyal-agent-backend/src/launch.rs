@@ -3,9 +3,71 @@
 //! Argument parsing and the AB-1.8 connection supervisor live here so the two
 //! thin entry points cannot diverge.
 
-use std::{path::PathBuf, process, sync::mpsc, thread, time::Duration};
+use std::{
+    path::PathBuf,
+    process,
+    sync::{
+        atomic::{AtomicBool, AtomicI32, Ordering},
+        mpsc, OnceLock,
+    },
+    thread,
+    time::Duration,
+};
+
+use std::os::unix::net::UnixStream;
 
 use crate::{AgentDaemon, IntegrationConfig, ServeExit, SessionExecutionHost};
+
+static ACCEPT_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+static ACCEPT_FD: AtomicI32 = AtomicI32::new(-1);
+static ACCEPT_EXIT_CODE: AtomicI32 = AtomicI32::new(0);
+static ACCEPT_SOCKET: OnceLock<PathBuf> = OnceLock::new();
+
+fn request_accept_shutdown(exit_code: i32) {
+    ACCEPT_EXIT_CODE.store(exit_code, Ordering::SeqCst);
+    ACCEPT_SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+#[allow(unsafe_code)]
+fn wake_accept() {
+    let fd = ACCEPT_FD.load(Ordering::SeqCst);
+    if fd >= 0 {
+        unsafe {
+            libc::shutdown(fd, libc::SHUT_RDWR);
+        }
+    }
+    if let Some(path) = ACCEPT_SOCKET.get() {
+        let _ = UnixStream::connect(path);
+    }
+}
+
+extern "C" fn termination_signal(_: libc::c_int) {
+    request_accept_shutdown(0);
+}
+
+#[allow(unsafe_code)]
+fn install_termination_wakeup(fd: i32) {
+    ACCEPT_FD.store(fd, Ordering::SeqCst);
+    thread::spawn(|| {
+        while !ACCEPT_SHUTDOWN.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(20));
+        }
+        wake_accept();
+    });
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = termination_signal as *const () as usize;
+        action.sa_flags = 0;
+        libc::sigemptyset(&mut action.sa_mask);
+        libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
+        libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut());
+    }
+}
+
+fn stop_with_host_reap(daemon: &mut AgentDaemon, code: i32) -> ! {
+    daemon.shutdown_execution_host();
+    process::exit(code);
+}
 
 /// Flags shared by every daemon composition.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,7 +209,7 @@ pub fn serve(
             eprintln!(
                 "seyal-agent-backend child_deadline_exceeded seconds={deadline} performance_claim=false"
             );
-            process::exit(2);
+            request_accept_shutdown(2);
         });
     }
 
@@ -166,6 +228,7 @@ pub fn serve(
     if let Some(host) = host {
         daemon.install_execution_host(host);
     }
+    let _ = ACCEPT_SOCKET.set(options.directory.join("agent.sock"));
     // Qualification-only, and only when the caller explicitly asks: seed one
     // enabled, non-TTY adapter + offering so SPEC-027 §4.3 unpinned
     // resolution has a Singleton target and §7 step 5's `adapter.execute`
@@ -182,32 +245,40 @@ pub fn serve(
     #[cfg(not(feature = "fixture-host"))]
     let _ = seed_test_catalog;
 
+    if let Some(fd) = daemon.listener_raw_fd() {
+        install_termination_wakeup(fd);
+    }
+
     let exits = daemon.install_exit_report();
     let limit = options.max_connections;
     let supervisor = thread::spawn(move || supervise(exits, limit));
 
     let mut accepted = 0u64;
     loop {
+        if ACCEPT_SHUTDOWN.load(Ordering::SeqCst) {
+            stop_with_host_reap(&mut daemon, ACCEPT_EXIT_CODE.load(Ordering::SeqCst));
+        }
         if options
             .max_connections
             .is_some_and(|limit| accepted >= limit)
         {
-            // Admission budget is spent. Join the supervisor; do not accept N+1.
             let code = supervisor.join().unwrap_or(1);
-            process::exit(code);
+            stop_with_host_reap(&mut daemon, code);
         }
         match daemon.accept_and_spawn() {
             Ok(worker) => {
-                // Detach. The supervisor observes the single ServeExit.
                 drop(worker);
                 accepted += 1;
+            }
+            Err(_) if ACCEPT_SHUTDOWN.load(Ordering::SeqCst) => {
+                stop_with_host_reap(&mut daemon, ACCEPT_EXIT_CODE.load(Ordering::SeqCst));
             }
             Err(error) if error.is_recoverable_client_fault() => {
                 eprintln!("seyal-agent-backend: accept ended: {error:?}");
             }
             Err(error) => {
                 eprintln!("seyal-agent-backend: accept failed: {error:?}");
-                process::exit(1);
+                stop_with_host_reap(&mut daemon, 1);
             }
         }
     }
