@@ -84,6 +84,7 @@ fn seed_shell() -> ShellState {
         local,
         true,
         true,
+        false,
     )
     .expect("seed")
 }
