@@ -203,12 +203,9 @@ impl IntegrationService {
                 "/bin/false",
                 seyal_agent_store::CwdPolicy::AdapterWorkDir,
             );
-            let _ = self.store.install_or_update_adapter(
-                routing.adapter_id,
-                0,
-                true,
-                &launch,
-            );
+            let _ = self
+                .store
+                .install_or_update_adapter(routing.adapter_id, 0, true, &launch);
         }
         if !matches!(
             self.store.get_adapter_manifest_at_generation(

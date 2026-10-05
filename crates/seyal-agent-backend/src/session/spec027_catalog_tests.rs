@@ -343,7 +343,11 @@ fn fixture_11_post_mint_frozen_generation_removal_fails_closed_no_latest_substit
         CommandResult::Error(CommandError::ExecutionTargetUnavailable)
     );
     let runs = service.store.agent_runs().unwrap();
-    assert_eq!(runs.len(), 1, "AgentRun stays minted (post-mint fail-closed)");
+    assert_eq!(
+        runs.len(),
+        1,
+        "AgentRun stays minted (post-mint fail-closed)"
+    );
     let run_id = runs[0].0;
     let run = service
         .authority
