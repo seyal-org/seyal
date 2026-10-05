@@ -212,9 +212,12 @@ impl ApplicationRoot {
         if display_handle == Some(create_handle) {
             return Ok(());
         }
-        let _ = crate::ffi::with_client_mut(create_handle, |client| {
-            let _ = client.poll_prepare();
-        });
+        let lost = crate::ffi::with_client_mut(create_handle, |client| client.poll_prepare().is_err())
+            .unwrap_or(true);
+        if lost {
+            self.note_registry_client_loss(create_handle);
+            let _ = crate::ffi::unregister_client(create_handle);
+        }
         Ok(())
     }
 
@@ -374,11 +377,6 @@ impl ApplicationRoot {
             let Some(handle) = self
                 .authority
                 .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
-                .or_else(|| {
-                    self.client_handle
-                        .as_ref()
-                        .map(crate::ffi::ClientRegistryHandle::raw)
-                })
             else {
                 return Err(AppError::NoLiveClient);
             };

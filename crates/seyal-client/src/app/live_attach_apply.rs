@@ -326,7 +326,10 @@ impl ApplicationRoot {
         }
     }
 
-    /// Registry client lost its socket: clear maps/authority for that handle.
+    /// Drop a lost registry client without unbinding the pane.
+    /// Socket EOF is not CloseTab: keep shell/provisioning identity so terminate
+    /// can retry after reconnect. Fail-closed input uses a zero display handle
+    /// and no fallback onto another pane's Controller.
     pub(crate) fn note_registry_client_loss(&mut self, handle: u64) {
         let panes: Vec<PaneId> = self
             .pane_client_raws
@@ -335,7 +338,7 @@ impl ApplicationRoot {
             .map(|(pane, _)| *pane)
             .collect();
         for pane in panes {
-            self.clear_authority_for_pane(pane);
+            self.unregister_extra_pane_client(pane);
             if self
                 .client_handle
                 .as_ref()
@@ -345,6 +348,11 @@ impl ApplicationRoot {
                 self.pane_client_raws.remove(&pane);
             }
         }
+        crate::ffi::set_focused_display_handle(
+            self.authority
+                .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
+                .unwrap_or(0),
+        );
     }
 
     fn refresh_output_from_pane_client(&mut self, pane: PaneId) {
