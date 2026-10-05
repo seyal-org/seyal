@@ -9,6 +9,7 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
@@ -21,6 +22,8 @@ mod session;
 
 use accessibility::accessibility_nodes;
 
+#[cfg(test)]
+mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
 #[cfg(test)]
@@ -49,7 +52,7 @@ use crate::composer::{
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
-use crate::navigation::ResourceAddress;
+use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
@@ -119,6 +122,8 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
+    NavigationStaleHistoryCursor,
+    NavigationHistoryUnavailable,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
@@ -333,6 +338,16 @@ pub enum AppAction {
         fence: AppFence,
         address: ResourceAddress,
     },
+    /// Focus-history Back (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryBack {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    /// Focus-history Forward (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryForward {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
     ClosePalette {
         fence: AppFence,
     },
@@ -420,6 +435,9 @@ pub struct AppSnapshot {
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
     pub goto: GotoSnapshot,
+    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
+    /// when history is empty.
+    pub focus_history_seq: Option<FocusSeq>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -462,6 +480,8 @@ pub struct ApplicationRoot {
     /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
+    /// Application-scoped focus history (SPEC-022 §6 / N3).
+    focus_history: FocusHistory,
     /// Last canonical alternate-screen evidence. TUI while this is set.
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
@@ -545,6 +565,7 @@ impl ApplicationRoot {
             palette: PaletteState::new(),
             chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
+            focus_history: FocusHistory::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
             explicit_raw: false,
@@ -715,6 +736,7 @@ impl ApplicationRoot {
             chrome,
             palette,
             goto,
+            focus_history_seq: self.focus_history.cursor_seq(),
         }
     }
 
@@ -882,6 +904,14 @@ impl ApplicationRoot {
             AppAction::Navigate { fence, address } => {
                 self.require_fence(fence)?;
                 self.navigate_address(address)
+            }
+            AppAction::HistoryBack { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_back(observed)
+            }
+            AppAction::HistoryForward { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_forward(observed)
             }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),

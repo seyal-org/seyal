@@ -51,11 +51,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 989
-issue = 1175
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 queues overlapping live-attach work and wakeup-drive flags beside off-thread pending attach, needs_provisioning_drive, and per-pane maps."
+ceiling_loc = 1019
+issue = 1117
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1117 adds FocusHistory ownership, HistoryBack/HistoryForward actions, focus_history_seq on the snapshot, and StaleHistoryCursor/HistoryUnavailable errors. History store, destroy hook, and Back/Forward apply live in navigation/ and focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 737
-issue = 1175
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch without splitting the cold control path."
+acknowledged_loc = 777
+issue = 1117
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1117 hooks the authoritative Pane/Tab destroy path for focus-history R6.7/R6.7a purge→reposition→successor without splitting the cold control path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -220,9 +220,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1194 adds
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1143
-issue = 1101
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
+ceiling_loc = 1162
+issue = 1117
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1117 threads NavigateHistory::ApplyOnly through N2 regressions; N3 history coverage lives in sibling history test modules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"

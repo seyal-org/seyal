@@ -152,7 +152,15 @@ enum SeyalAppActionKind {
      * while open. Error codes 47-49.
      */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
-    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
+    /**
+     * Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq as
+     * little-endian u64. reserved = 0. Observed cursor must match the current
+     * history seq or the action rejects with StaleHistoryCursor (51).
+     * Numbers 63/64 leave 61/62 for N4 OpenGoto/SetGotoScope.
+     */
+    SEYAL_APP_ACTION_HISTORY_BACK = 63,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 64
 };
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */

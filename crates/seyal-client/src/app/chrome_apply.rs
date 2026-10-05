@@ -4,6 +4,7 @@ use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
+use crate::navigation::ResourceAddress;
 use crate::pane_layout::{self, SplitPosition};
 use crate::shell::{ShellAction, ShellError, SplitAxis};
 
@@ -12,6 +13,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::SplitFocused { axis })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
+        // Split focuses the new leaf; record as a user-initiated commit (R6.3).
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -88,6 +91,9 @@ impl ApplicationRoot {
                 .apply(ShellAction::SelectTab { id: tab })
                 .map_err(|_| AppError::UnknownChromeTab)?;
         }
+        if effect.select_workspace.is_some() || effect.select_tab.is_some() {
+            self.record_focused_pane_commit();
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -98,6 +104,7 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::SelectWorkspace { id })
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -110,6 +117,7 @@ impl ApplicationRoot {
             .map_err(|_| AppError::UnknownChromeTab)?;
         #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -120,10 +128,22 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    /// Record the focused Pane after a user focus transition (ADR-019 §6 / R6.3).
+    fn record_focused_pane_commit(&mut self) {
+        let focus = self.shell.focus_checkpoint();
+        self.focus_history
+            .record_user_commit(ResourceAddress::Pane {
+                workspace: focus.active_workspace,
+                tab: focus.active_tab,
+                pane: focus.focused_pane,
+            });
     }
 
     /// Active Tab's Split dividers (#928), pre-order.
