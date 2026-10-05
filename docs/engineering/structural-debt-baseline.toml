@@ -254,9 +254,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 869
-issue = 1131
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1131 adds identity-preserving SwapPanes/MovePaneBeside with ADR-018 containment fencing beside master’s Tab zoom, focus succession, and production SplitFocused, without splitting tree/workspace ownership. Move/swap algorithms live in pane_ops.rs."
+acknowledged_loc = 881
+issue = 1142
+reason = "Shell composition reducer remains one Workspace/Tab/Pane façade; #1131 owns identity-preserving swaps/moves, while #1142 adds FocusDirection dispatch and NoDirectionalNeighbor without splitting tree/workspace ownership. Neighbor selection lives in focus_direction.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
