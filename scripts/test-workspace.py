@@ -20,6 +20,7 @@ EXPECTED_CRATES = {
     "seyal-agent-core": "crates/seyal-agent-core",
     "seyal-agent-protocol": "crates/seyal-agent-protocol",
     "seyal-agent-store": "crates/seyal-agent-store",
+    "seyal-agent-context": "crates/seyal-agent-context",
     "seyal-agent-backend": "crates/seyal-agent-backend",
     "seyal-agent-client": "crates/seyal-agent-client",
 }
@@ -90,6 +91,7 @@ expected_portable_dependencies = {
     "seyal-agent-core": set(),
     "seyal-agent-protocol": {"seyal-agent-core"},
     "seyal-agent-store": {"rusqlite", "seyal-agent-core"},
+    "seyal-agent-context": {"seyal-agent-core", "seyal-agent-store"},
     "seyal-agent-backend": {
         "seyal-agent-core", "seyal-agent-protocol", "seyal-agent-store"
     },
