@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 8;
+pub(super) const SCHEMA_VERSION: i32 = 9;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -88,9 +88,18 @@ CREATE TABLE IF NOT EXISTS work_scope_binding (
     bound_root TEXT NOT NULL
 );
 ";
+/// Durable `admin.adapters` grant (SPEC-027 §5.2 / SPEC-017 §5). Principal
+/// capability for first-party catalog install/enable — not a ClientScope
+/// opened on the wire, and not a client Command. Loaded into in-memory auth
+/// on `IntegrationService::open`.
+pub(super) const ADMIN_ADAPTERS_GRANT_TABLE_V8: &str = "
+CREATE TABLE IF NOT EXISTS admin_adapters_grant (
+    principal_id BLOB PRIMARY KEY
+);
+";
 /// Rebuildable Local Context Engine index/cache (SPEC-013 §18 / #1271).
 /// Derived state only — never source truth; droppable under pressure.
-pub(super) const CONTEXT_INDEX_CACHE_TABLE_V8: &str = "
+pub(super) const CONTEXT_INDEX_CACHE_TABLE_V9: &str = "
 CREATE TABLE IF NOT EXISTS context_index_cache (
     work_scope_id BLOB PRIMARY KEY,
     producer_id TEXT NOT NULL,
@@ -154,7 +163,11 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
             .map_err(|_| StoreError::WriteFailed)?;
     }
     if from < 8 {
-        tx.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V8)
+        tx.execute_batch(ADMIN_ADAPTERS_GRANT_TABLE_V8)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 9 {
+        tx.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
             .map_err(|_| StoreError::WriteFailed)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -236,7 +249,9 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(WORK_SCOPE_BINDING_TABLE_V7)
         .map_err(|_| StoreError::WriteFailed)?;
-    conn.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V8)
+    conn.execute_batch(ADMIN_ADAPTERS_GRANT_TABLE_V8)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
         .map_err(|_| StoreError::WriteFailed)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;

@@ -355,6 +355,34 @@ impl AgentStore {
         Ok(generation as u64)
     }
 
+    /// Durable `admin.adapters` grant (SPEC-027 §5.2). Written only by a
+    /// trusted first-party path — never from a client-reachable command.
+    /// Idempotent.
+    pub fn grant_admin_adapters(&self, principal_id: ClientPrincipalId) -> Result<(), StoreError> {
+        self.gate_write()?;
+        let conn = self.conn.lock().expect("agent store lock");
+        conn.execute(
+            "INSERT OR IGNORE INTO admin_adapters_grant (principal_id) VALUES (?1)",
+            params![principal_id.to_bytes().to_vec()],
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+        Ok(())
+    }
+
+    /// Whether `principal_id` holds a durable `admin.adapters` grant.
+    pub fn has_admin_adapters(&self, principal_id: ClientPrincipalId) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM admin_adapters_grant WHERE principal_id = ?1",
+                params![principal_id.to_bytes().to_vec()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::Corrupt)?;
+        Ok(found.is_some())
+    }
+
     /// Durable `adapter.execute` grant (SPEC-027 §7 step 5 / D3), written by
     /// the same trusted admin path as catalog install (§5.2) — never from a
     /// client-reachable command. Idempotent: granting twice is not an error.
@@ -562,6 +590,18 @@ mod tests {
             store.adapter_execute_grants(other_principal).unwrap(),
             Vec::new()
         );
+    }
+
+    #[test]
+    fn admin_adapters_grant_is_durable_and_idempotent() {
+        let store = temp_store();
+        let principal = ClientPrincipalId::new();
+        let other = ClientPrincipalId::new();
+        assert!(!store.has_admin_adapters(principal).unwrap());
+        store.grant_admin_adapters(principal).unwrap();
+        store.grant_admin_adapters(principal).unwrap();
+        assert!(store.has_admin_adapters(principal).unwrap());
+        assert!(!store.has_admin_adapters(other).unwrap());
     }
 
     #[test]
