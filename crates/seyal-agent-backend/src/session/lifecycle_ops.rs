@@ -9,6 +9,7 @@ use seyal_agent_core::{
 use seyal_agent_protocol::{CommandError, CommandResult};
 use seyal_agent_store::{AggregateId, AggregateSequence, StoreError};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::{ClientScope, HostStartOutcome};
 
@@ -340,39 +341,48 @@ impl IntegrationService {
             .agent_run(run_id)
             .map(|run| run.lifecycle());
         if lifecycle == Some(AgentRunLifecycle::Terminating) {
-            if let Some(&handle) = self.active_hosted_runs.get(&run_id) {
-                if let Some(host) = self.host.as_mut() {
+            if self.active_hosted_runs.contains_key(&run_id) {
+                if let Some(host) = self.host.as_mut()
+                    && let Some(&handle) = self.active_hosted_runs.get(&run_id)
+                {
                     let _ = host.signal_cancel(handle);
                 }
-                if let Err(error) = self.drain_host_observations(run_id) {
-                    return CommandResult::Error(error);
-                }
-                // If observe had not yet seen exit evidence, reap (bounded)
-                // then observe once more before confirming cancel.
-                if self
-                    .authority
-                    .domain()
-                    .agent_run(run_id)
-                    .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
-                    && let Some(handle) = self.active_hosted_runs.get(&run_id).copied()
-                {
-                    if let Some(host) = self.host.as_mut() {
-                        let _ = host.reap(handle);
+                // Poll observe until terminal evidence lands (reader is async).
+                // Do not reap first — reap drops the observation buffer.
+                let deadline = Instant::now() + Duration::from_secs(2);
+                loop {
+                    if let Err(error) = self.drain_host_observations(run_id) {
+                        return CommandResult::Error(error);
                     }
-                    let _ = self.drain_host_observations(run_id);
+                    if matches!(
+                        self.authority.liveness(run_id),
+                        crate::RunLiveness::KnownTerminated | crate::RunLiveness::UnknownAfterCrash
+                    ) {
+                        break;
+                    }
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
                 }
             }
-            if self.authority.liveness(run_id) == crate::RunLiveness::KnownTerminated
-                && self
-                    .authority
-                    .domain()
-                    .agent_run(run_id)
-                    .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+            if matches!(
+                self.authority.liveness(run_id),
+                crate::RunLiveness::KnownTerminated | crate::RunLiveness::UnknownAfterCrash
+            ) && self
+                .authority
+                .domain()
+                .agent_run(run_id)
+                .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
             {
                 let _ = self
                     .authority
                     .domain_mut()
                     .confirm_cancel_termination(run_id);
+                // Cancelled runs expose KnownTerminated on the wire (fixture 13),
+                // even when the host classified signal death as crash before the
+                // cancel remap landed.
+                self.authority.note_committed_terminal(run_id);
             }
             let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
         }
