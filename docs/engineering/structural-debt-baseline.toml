@@ -197,9 +197,9 @@ reason = "Agent protocol Command encode/decode stays one module; #1255 adds Canc
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/standalone_process_host.rs"
-acknowledged_loc = 936
-issue = 1224
-reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1224 adds process-group cancel, bounded observation backpressure, Drop/shutdown reap, and proofs of those invariants beside spawn/observe rather than a second host type."
+acknowledged_loc = 988
+issue = 1255
+reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1255 keeps cancel terminal evidence (shutdown-path KnownFailure + cancel-classified Failed exit) beside spawn/observe/reap rather than a second host type."
 
 # #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
 [[cohesion_acknowledgement]]
