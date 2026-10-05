@@ -177,7 +177,9 @@ pub fn encode_ack(ack: &HelloAck, max_frame_size: u32) -> Result<Vec<u8>, FrameE
     body.push(u8::from(ack.capabilities.local_session));
     body.extend_from_slice(&ack.max_frame_size.to_le_bytes());
     body.extend_from_slice(&ack.event_window.to_le_bytes());
-    body.push(execution_host_kind_code(ack.capabilities.execution_host_kind));
+    body.push(execution_host_kind_code(
+        ack.capabilities.execution_host_kind,
+    ));
     match ack.capabilities.adapter_catalog_generation {
         Some(generation) => {
             body.push(1);
@@ -322,7 +324,10 @@ mod tests {
         assert_eq!(ack.selected_version, ProtocolVersion::V1);
         assert_eq!(ack.backend_instance_id, backend);
         assert!(ack.capabilities.local_session);
-        assert_eq!(ack.capabilities.execution_host_kind, ExecutionHostKind::None);
+        assert_eq!(
+            ack.capabilities.execution_host_kind,
+            ExecutionHostKind::None
+        );
         assert_eq!(ack.capabilities.adapter_catalog_generation, None);
         assert_eq!(ack.max_frame_size, 512);
         assert_eq!(ack.event_window, 64);

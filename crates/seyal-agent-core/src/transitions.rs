@@ -115,7 +115,10 @@ impl AgentDomain {
         agent_run_id: AgentRunId,
         routing: RoutingDecision,
     ) -> Result<(), DomainError> {
-        Self::require_lifecycle(self.run_mut(agent_run_id)?.lifecycle, &[AgentRunLifecycle::Created])?;
+        Self::require_lifecycle(
+            self.run_mut(agent_run_id)?.lifecycle,
+            &[AgentRunLifecycle::Created],
+        )?;
         let reference = self.record_routing_decision(routing);
         let run = self.run_mut(agent_run_id)?;
         run.lifecycle = AgentRunLifecycle::Prepared;

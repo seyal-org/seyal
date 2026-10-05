@@ -95,7 +95,10 @@ fn spec_027_command_error_wire_codes_are_stable() {
     assert_eq!(error_code(CommandError::ExecutionTargetUnavailable), 8);
     assert_eq!(error_code(CommandError::AdapterNotEnabled), 9);
     assert_eq!(error_code(CommandError::AdapterExecuteDenied), 10);
-    assert_eq!(decode_error(8), Ok(CommandError::ExecutionTargetUnavailable));
+    assert_eq!(
+        decode_error(8),
+        Ok(CommandError::ExecutionTargetUnavailable)
+    );
     assert_eq!(decode_error(9), Ok(CommandError::AdapterNotEnabled));
     assert_eq!(decode_error(10), Ok(CommandError::AdapterExecuteDenied));
 }

@@ -52,7 +52,10 @@ impl AgentStore {
             )
             .optional()
             .map_err(|_| StoreError::Corrupt)?;
-        let generation = previous.unwrap_or(0).checked_add(1).ok_or(StoreError::Corrupt)?;
+        let generation = previous
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(StoreError::Corrupt)?;
         tx.execute(
             "INSERT INTO adapter_manifest (adapter_id, generation, enabled, execution_host_kind)
              VALUES (?1, ?2, ?3, ?4)
@@ -317,8 +320,13 @@ mod tests {
     fn install_enable_and_offering_round_trip() {
         let store = temp_store();
         let adapter_id = AdapterId::new();
-        let generation =
-            store.install_or_update_adapter(adapter_id, host_kind_code(ExecutionHostKind::StandaloneProcess), true).unwrap();
+        let generation = store
+            .install_or_update_adapter(
+                adapter_id,
+                host_kind_code(ExecutionHostKind::StandaloneProcess),
+                true,
+            )
+            .unwrap();
         assert_eq!(generation, 1);
 
         let offering_id = RouteOfferingId::new();
@@ -353,11 +361,15 @@ mod tests {
     fn frozen_generation_lookup_fails_closed_after_edit_never_substitutes_latest() {
         let store = temp_store();
         let adapter_id = AdapterId::new();
-        let frozen_generation = store.install_or_update_adapter(adapter_id, 1, true).unwrap();
+        let frozen_generation = store
+            .install_or_update_adapter(adapter_id, 1, true)
+            .unwrap();
         assert_eq!(frozen_generation, 1);
 
         // A later catalog edit bumps the generation in place.
-        let latest_generation = store.install_or_update_adapter(adapter_id, 1, true).unwrap();
+        let latest_generation = store
+            .install_or_update_adapter(adapter_id, 1, true)
+            .unwrap();
         assert_eq!(latest_generation, 2);
 
         // The exact generation a RoutingDecision would have frozen is gone.
@@ -378,7 +390,9 @@ mod tests {
     fn removed_adapter_fails_closed_at_any_generation() {
         let store = temp_store();
         let adapter_id = AdapterId::new();
-        let generation = store.install_or_update_adapter(adapter_id, 1, true).unwrap();
+        let generation = store
+            .install_or_update_adapter(adapter_id, 1, true)
+            .unwrap();
         store.remove_adapter(adapter_id).unwrap();
         assert_eq!(store.get_adapter_manifest(adapter_id).unwrap(), None);
         assert_eq!(
@@ -394,7 +408,9 @@ mod tests {
         let store = temp_store();
         let before = store.adapter_catalog_generation().unwrap();
         let adapter_id = AdapterId::new();
-        store.install_or_update_adapter(adapter_id, 1, true).unwrap();
+        store
+            .install_or_update_adapter(adapter_id, 1, true)
+            .unwrap();
         let after_install = store.adapter_catalog_generation().unwrap();
         assert!(after_install > before);
         store.set_adapter_enabled(adapter_id, false).unwrap();
@@ -411,12 +427,20 @@ mod tests {
         store.install_or_update_adapter(adapter_b, 1, true).unwrap();
         let offering_a = RouteOfferingId::new();
         let offering_b = RouteOfferingId::new();
-        store.add_route_offering(offering_a, adapter_a, false).unwrap();
-        store.add_route_offering(offering_b, adapter_b, true).unwrap();
+        store
+            .add_route_offering(offering_a, adapter_a, false)
+            .unwrap();
+        store
+            .add_route_offering(offering_b, adapter_b, true)
+            .unwrap();
 
         let offerings = store.list_route_offerings().unwrap();
         assert_eq!(offerings.len(), 2);
-        assert!(offerings.iter().any(|o| o.route_offering_id == offering_a && !o.requires_tty));
-        assert!(offerings.iter().any(|o| o.route_offering_id == offering_b && o.requires_tty));
+        assert!(offerings
+            .iter()
+            .any(|o| o.route_offering_id == offering_a && !o.requires_tty));
+        assert!(offerings
+            .iter()
+            .any(|o| o.route_offering_id == offering_b && o.requires_tty));
     }
 }

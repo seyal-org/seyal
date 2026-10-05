@@ -163,7 +163,8 @@ mod tests {
     fn pin_of_enabled_offering_is_pinned_even_with_other_eligible_offerings() {
         let pinned = candidate(true, true);
         let candidates = [pinned, candidate(true, true), candidate(true, true)];
-        let resolved = resolve_execution_target(Some(pinned.route_offering_id), &candidates).unwrap();
+        let resolved =
+            resolve_execution_target(Some(pinned.route_offering_id), &candidates).unwrap();
         assert_eq!(resolved.selection_kind, SelectionKind::Pinned);
         assert_eq!(resolved.route_offering_id, pinned.route_offering_id);
     }

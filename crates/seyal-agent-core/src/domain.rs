@@ -383,7 +383,10 @@ impl AgentDomain {
 
     /// Append one immutable RoutingDecision and return its reference
     /// (SPEC-027 §4.2). Never overwrites or mutates an existing entry.
-    pub(crate) fn record_routing_decision(&mut self, decision: RoutingDecision) -> RoutingDecisionRef {
+    pub(crate) fn record_routing_decision(
+        &mut self,
+        decision: RoutingDecision,
+    ) -> RoutingDecisionRef {
         self.next_routing_decision = self.next_routing_decision.saturating_add(1);
         let reference = RoutingDecisionRef::new(self.next_routing_decision);
         self.routing_decisions.insert(reference, decision);

@@ -68,9 +68,7 @@ fn fixture_01_start_active_harness_completes_same_run_no_work_item_outcome() {
 #[test]
 fn fixture_02_cancel_in_created_or_prepared_terminates_cancelled() {
     let (mut domain, _item, attempt, run) = seeded();
-    domain
-        .prepare_agent_run(run, routing_decision(1))
-        .unwrap();
+    domain.prepare_agent_run(run, routing_decision(1)).unwrap();
     let control = domain.agent_run(run).unwrap().control_generation();
     domain.cancel_agent_run(run, control, None, false).unwrap();
     assert_eq!(
@@ -360,7 +358,10 @@ fn fixture_16_rate_limit_not_started_dispatching_to_prepared() {
     assert_eq!(agent.lifecycle(), AgentRunLifecycle::Prepared);
     let new_ref = agent.routing_decision_ref().unwrap();
     assert_eq!(
-        domain.routing_decision(new_ref).unwrap().adapter_manifest_generation,
+        domain
+            .routing_decision(new_ref)
+            .unwrap()
+            .adapter_manifest_generation,
         2
     );
     assert_eq!(agent.id(), run);
