@@ -11,6 +11,7 @@ use seyal_agent_core::{
     decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, RetentionPolicyRef, StreamKind,
 };
 
+mod bindings;
 mod catalog;
 mod lifecycle_columns;
 mod schema;

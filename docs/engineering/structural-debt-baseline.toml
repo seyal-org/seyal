@@ -164,9 +164,9 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # materialize_output_ref beside append_output_event.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 888
-issue = 1224
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #1224 adds schema-v6 adapter catalog / adapter.execute grant load beside existing identity and lifecycle open paths without a second store façade."
+acknowledged_loc = 889
+issue = 1226
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #1226 adds schema-v7 WorkScope.bindings lookup beside existing identity and catalog open paths without a second store façade."
 
 # #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
 # generation sit on the daemon handshake façade; session façade grows
@@ -185,9 +185,9 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 809
-issue = 1224
-reason = "IntegrationService remains the Agent Backend session façade; #1224 adds server_capabilities and live host-handle bookkeeping for SPEC-027 StartAgentRun without a second session authority."
+acknowledged_loc = 831
+issue = 1226
+reason = "IntegrationService remains the Agent Backend session façade; #1226 adds the trusted WorkScope.bindings write beside existing catalog install and StartAgentRun without a second session authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/standalone_process_host.rs"

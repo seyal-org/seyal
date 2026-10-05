@@ -8,6 +8,7 @@ use seyal_agent_core::{
 };
 use seyal_agent_protocol::{CommandError, CommandResult};
 use seyal_agent_store::{AggregateId, AggregateSequence, StoreError};
+use std::path::PathBuf;
 
 use crate::{ClientScope, HostStartOutcome};
 
@@ -102,13 +103,13 @@ impl IntegrationService {
         // actual mint is the store write + domain restore at step 7 below.
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
-        let Some(work_scope_kind) = self
+        let Some((work_scope_id, work_scope_kind)) = self
             .authority
             .domain()
             .attempt(attempt_id)
             .and_then(|attempt| self.authority.domain().work_item(attempt.work_item_id()))
             .and_then(|item| self.authority.domain().work_scope(item.work_scope_id()))
-            .map(|scope| scope.kind())
+            .map(|scope| (scope.id(), scope.kind()))
         else {
             return CommandResult::Error(CommandError::Failed);
         };
@@ -118,6 +119,10 @@ impl IntegrationService {
         ) else {
             return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
         };
+        let bound_root = match self.store.work_scope_bound_root(work_scope_id) {
+            Ok(path) => path.map(PathBuf::from),
+            Err(_) => return CommandResult::Error(CommandError::Failed),
+        };
         let launch_descriptor = match resolve_launch_descriptor(
             &manifest.launch,
             work_scope_kind,
@@ -125,14 +130,16 @@ impl IntegrationService {
             resolved.adapter_id,
             run_id,
             binding,
+            bound_root.as_deref(),
         ) {
             Ok(descriptor) => descriptor,
-            // §6 Repository/Project missing-root (no WorkScope.bindings
-            // subsystem) and an unresolved `{work_scope_root}` argv token
-            // both fail exactly like any other unavailable target — no
-            // mint, no fallback cwd.
+            // §6 missing-root, escaped `{work_scope_root}`, unresolved token.
             Err(_) => return CommandResult::Error(CommandError::ExecutionTargetUnavailable),
         };
+        #[cfg(test)]
+        {
+            self.last_resolved_launch = Some(launch_descriptor.clone());
+        }
 
         // §7 step 7: only now mint, persist, Created -> Prepared -> Dispatching.
         let control = ControlGeneration::FIRST;
