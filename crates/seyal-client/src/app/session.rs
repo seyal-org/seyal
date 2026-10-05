@@ -248,8 +248,7 @@ impl ApplicationRoot {
 fn registry_client_is_gone(handle: u64) -> bool {
     matches!(
         crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare),
-        None
-            | Some(Err(crate::local::ClientError::Disconnected))
+        None | Some(Err(crate::local::ClientError::Disconnected))
             | Some(Err(crate::local::ClientError::Io))
             | Some(Err(crate::local::ClientError::NoRunningExecution))
     )
