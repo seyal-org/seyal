@@ -185,9 +185,9 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 831
-issue = 1226
-reason = "IntegrationService remains the Agent Backend session façade; #1226 adds the trusted WorkScope.bindings write beside existing catalog install and StartAgentRun without a second session authority."
+acknowledged_loc = 845
+issue = 1253
+reason = "IntegrationService remains the Agent Backend session façade; #1253 adds the fixture-11 test hook for post-mint frozen-generation invalidation beside existing catalog and StartAgentRun paths without a second session authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/standalone_process_host.rs"
