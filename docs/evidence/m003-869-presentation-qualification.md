@@ -10,7 +10,7 @@
 |---|---|
 | Baseline | `f0a91d9604742272d619d5c4e2a0e7e5cd8a242c` (`origin/master` at Ready freeze) |
 | Candidate start | `1e001f4e178f9c7f8ed5803edc8bb2289057643b` (#868 VERIFIED tip) |
-| Candidate (this PR tip) | `3dd322f98b60bfcea79b673044fbc2e51b86941a` |
+| Candidate (this PR tip) | `4d7d451693fb3629981262aa751268c075bcc70c` |
 | Host | Apple M5 Pro (`Mac17,9`), arm64, macOS 27.0 (Build 26A428) |
 | Toolchain | `rustc 1.98.0 (88d9e12ae 2026-08-18)` |
 | Build | `cargo bench` Release |
