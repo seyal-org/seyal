@@ -94,10 +94,11 @@ fn new_root_is_one_unbound_pane() {
 }
 
 #[test]
-fn split_focused_fails_closed_while_create_tab_is_enabled() {
-    // C2b / #1175: production CreateTab is enabled; splits stay fail-closed until C3.
+fn split_focused_begins_provisioning_under_production_policy() {
+    // C3 / #1217: production SplitFocused uses the same C1 create intent path.
     let mut root = ApplicationRoot::new();
     assert!(root.snapshot().shell.allows_tab_creation);
+    assert!(root.snapshot().shell.allows_pane_splitting);
     root.apply(AppAction::CreateTab)
         .expect("production root allows tab creation");
     assert_eq!(root.snapshot().shell.tabs.len(), 2);
@@ -105,12 +106,15 @@ fn split_focused_fails_closed_while_create_tab_is_enabled() {
         .provisioning()
         .pending_intent(root.snapshot().shell.focused_pane)
         .is_some());
-    assert_eq!(
-        root.apply(AppAction::SplitFocused {
-            axis: SplitAxis::Right,
-        }),
-        Err(AppError::PaneSplitUnavailable)
-    );
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("production root allows pane splitting");
+    assert_eq!(root.snapshot().shell.panes.len(), 2);
+    assert!(root
+        .provisioning()
+        .pending_intent(root.snapshot().shell.focused_pane)
+        .is_some());
 }
 
 #[test]
@@ -507,12 +511,12 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     );
     let opened = production;
     assert!(
-        !opened
+        opened
             .palette
             .rows
             .iter()
             .any(|row| row.label.starts_with("Split Pane")),
-        "splits stay omitted until C3"
+        "production composition lists Split Pane commands after C3 enablement"
     );
     assert!(!opened.palette.rows.is_empty());
 

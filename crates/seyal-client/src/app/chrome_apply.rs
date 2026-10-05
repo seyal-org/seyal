@@ -5,19 +5,9 @@ use seyal_core::{PaneId, TabId, WorkspaceId};
 use super::*;
 use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
 use crate::pane_layout::{self, SplitPosition};
-use crate::shell::{ShellAction, ShellError, SplitAxis};
+use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
-    pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::SplitFocused { axis })
-            .map_err(|_| AppError::PaneSplitUnavailable)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
         self.close_pane_with_disposition(id)
     }
