@@ -377,6 +377,66 @@ fn fixture_11_post_mint_frozen_generation_removal_fails_closed_no_latest_substit
         .get_adapter_manifest(adapter_id)
         .unwrap()
         .is_some());
+
+/// Fixture 13 / AC13: CancelRun of an Active standalone (fixture) child
+/// yields Terminating then evidenced Terminated(Cancelled).
+#[test]
+fn fixture_13_cancel_active_run_terminates_cancelled_via_signal_cancel() {
+    let (dir, mut service) = open_bare();
+    let (adapter_id, _offering_id) = install_adapter(&mut service, true);
+    service
+        .auth
+        .grant_adapter_execute(service.owner_principal_id, adapter_id)
+        .expect("grant");
+    let principal = service.begin_connection(b"cli").unwrap();
+    let (session_id, attempt_id) = seed_attempt(&mut service, principal);
+    let CommandResult::Started {
+        run_id,
+        control_generation,
+        ..
+    } = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+            route_offering_id: None,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    )
+    else {
+        panic!("start");
+    };
+    assert_eq!(
+        service
+            .authority
+            .domain()
+            .agent_run(run_id)
+            .unwrap()
+            .lifecycle(),
+        AgentRunLifecycle::Active
+    );
+
+    let cancelled = service.dispatch(
+        principal,
+        Command::CancelRun {
+            session_id,
+            run_id,
+            control_generation,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    let CommandResult::Run { liveness, .. } = cancelled else {
+        panic!("cancel: {cancelled:?}");
+    };
+    assert_eq!(liveness, 2, "KnownTerminated wire liveness");
+    let run = service.authority.domain().agent_run(run_id).unwrap();
+    assert_eq!(run.lifecycle(), AgentRunLifecycle::Terminated);
+    assert_eq!(
+        run.termination().map(|t| t.kind),
+        Some(seyal_agent_core::TerminationKind::Cancelled)
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

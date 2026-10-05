@@ -306,6 +306,88 @@ impl IntegrationService {
         }
     }
 
+    /// SPEC-026 §9.2 / SPEC-027 §9.4 fixture 13: wire `CancelRun` → Terminating
+    /// → evidenced `Terminated(Cancelled)` via `signal_cancel` + observe/reap.
+    pub(crate) fn cancel_agent_run_command(
+        &mut self,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
+        run_id: AgentRunId,
+        control_generation: u64,
+    ) -> CommandResult {
+        if let Err(error) =
+            self.authorized_run(principal_id, session_id, ClientScope::RunsControl, run_id)
+        {
+            return CommandResult::Error(error);
+        }
+        let Some(control) = ControlGeneration::from_raw(control_generation) else {
+            return CommandResult::Error(CommandError::Malformed);
+        };
+        if let Err(error) = self
+            .authority
+            .domain_mut()
+            .cancel_agent_run(run_id, control, None, false)
+        {
+            return CommandResult::Error(super::wire::map_domain(error));
+        }
+        if persist_run_lifecycle(&self.store, &self.authority, run_id).is_err() {
+            return CommandResult::Error(CommandError::Failed);
+        }
+
+        let lifecycle = self
+            .authority
+            .domain()
+            .agent_run(run_id)
+            .map(|run| run.lifecycle());
+        if lifecycle == Some(AgentRunLifecycle::Terminating) {
+            if let Some(&handle) = self.active_hosted_runs.get(&run_id) {
+                if let Some(host) = self.host.as_mut() {
+                    let _ = host.signal_cancel(handle);
+                }
+                if let Err(error) = self.drain_host_observations(run_id) {
+                    return CommandResult::Error(error);
+                }
+                // If observe had not yet seen exit evidence, reap (bounded)
+                // then observe once more before confirming cancel.
+                if self
+                    .authority
+                    .domain()
+                    .agent_run(run_id)
+                    .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+                {
+                    if let Some(handle) = self.active_hosted_runs.get(&run_id).copied() {
+                        if let Some(host) = self.host.as_mut() {
+                            let _ = host.reap(handle);
+                        }
+                        let _ = self.drain_host_observations(run_id);
+                    }
+                }
+            }
+            if self.authority.liveness(run_id) == crate::RunLiveness::KnownTerminated
+                && self
+                    .authority
+                    .domain()
+                    .agent_run(run_id)
+                    .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+            {
+                let _ = self
+                    .authority
+                    .domain_mut()
+                    .confirm_cancel_termination(run_id);
+            }
+            let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
+        }
+
+        let Some(run) = self.authority.domain().agent_run(run_id) else {
+            return CommandResult::Error(CommandError::NotFound);
+        };
+        CommandResult::Run {
+            binding_generation: run.binding_generation().get(),
+            control_generation: run.control_generation().get(),
+            liveness: super::wire::liveness_code(self.authority.liveness(run_id)),
+        }
+    }
+
     /// Daemon shutdown: signal-and-reap every live hosted child (AGENTS.md
     /// termination invariant / SPEC-027 §9.4).
     pub(crate) fn shutdown_hosted_runs(&mut self) {

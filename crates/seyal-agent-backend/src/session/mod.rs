@@ -24,8 +24,8 @@ pub(crate) use frame_io::{read_session_frame, SessionRead};
 use std::path::{Path, PathBuf};
 
 use seyal_agent_core::{
-    AgentRunId, AttemptId, BindingGeneration, ClientPrincipalId, ClientSessionId,
-    ControlGeneration, DomainError, WorkItemId, WorkScopeId, WorkScopeKind,
+    AgentRunId, AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId,
+    ClientSessionId, ControlGeneration, DomainError, WorkItemId, WorkScopeId, WorkScopeKind,
 };
 use seyal_agent_protocol::{
     decode_command, encode_result, AggregateRef, Command, CommandError, CommandResult, Frame,
@@ -329,6 +329,13 @@ impl IntegrationService {
             ),
             Command::ReadRun { session_id, run_id } => {
                 self.read_run(principal_id, session_id, run_id)
+            }
+            Command::CancelRun {
+                session_id,
+                run_id,
+                control_generation,
+            } => {
+                self.cancel_agent_run_command(principal_id, session_id, run_id, control_generation)
             }
         }
     }
@@ -714,10 +721,25 @@ impl IntegrationService {
         if matches!(
             self.authority.liveness(run_id),
             RunLiveness::KnownTerminated | RunLiveness::UnknownAfterCrash
-        ) && let Some(handle) = self.active_hosted_runs.remove(&run_id)
-            && let Some(host) = self.host.as_mut()
-        {
-            let _ = host.reap(handle);
+        ) {
+            // SPEC-026 §9.2: terminal host evidence completes a cancel that
+            // was waiting in Terminating.
+            if self
+                .authority
+                .domain()
+                .agent_run(run_id)
+                .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+            {
+                let _ = self
+                    .authority
+                    .domain_mut()
+                    .confirm_cancel_termination(run_id);
+            }
+            if let Some(handle) = self.active_hosted_runs.remove(&run_id)
+                && let Some(host) = self.host.as_mut()
+            {
+                let _ = host.reap(handle);
+            }
         }
         Ok(())
     }

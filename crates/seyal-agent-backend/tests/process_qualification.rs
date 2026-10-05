@@ -723,6 +723,38 @@ fn production_binary_dispatches_a_real_child_process_through_standalone_host() {
     let _ = fs::remove_dir_all(dir);
 }
 
+/// SPEC-027 §9.4 / §11 fixture 13: wire CancelRun against a live production
+/// StandaloneProcessHost child → KnownTerminated (Cancelled evidence path).
+#[test]
+fn production_cancel_run_terminates_live_standalone_child() {
+    let dir = temp_dir("prod-fixture13-cancel");
+    seed_standalone_catalog(&dir, "/bin/sleep", &["5"]);
+
+    let mut child = spawn_production(&dir);
+    let socket = dir.join("agent.sock");
+    wait_ready(&socket);
+    assert_child_alive(&mut child.0, "production startup for fixture 13");
+
+    let mut client = TestClient::connect(&socket);
+    let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+    let item = client.create_work_item(scope);
+    let attempt = client.create_attempt(item);
+    let started = client.start_agent_run(attempt);
+    let (_, _, live) = client.read_run(started.run_id);
+    assert_eq!(live, 1, "child must still be live before cancel");
+
+    let (_, _, liveness) = client.cancel_run(started.run_id, started.control_generation);
+    assert_eq!(
+        liveness, 2,
+        "CancelRun must evidence KnownTerminated for fixture 13"
+    );
+
+    assert_child_alive(&mut child.0, "daemon remains up after cancel");
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let _ = fs::remove_dir_all(dir);
+}
+
 /// SPEC-027 §9.2/§11 fixture 12: `start` must hold no service mutex across
 /// child I/O. The composed `StandaloneProcessHost` never blocks on child
 /// I/O internally (its background reader does that), so the service mutex
