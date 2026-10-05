@@ -77,6 +77,11 @@ pub struct IntegrationService {
     active_hosted_runs: std::collections::HashMap<AgentRunId, crate::HostHandle>,
     #[cfg(test)]
     last_resolved_launch: Option<seyal_agent_core::LaunchDescriptor>,
+    /// Test-only: after mint/Prepared→Dispatching, bump the adapter catalog
+    /// so the frozen generation is unreachable before `host.start` (SPEC-027
+    /// fixture 11 / AC11). Production always leaves this false.
+    #[cfg(test)]
+    invalidate_frozen_manifest_after_mint: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,11 +133,20 @@ impl IntegrationService {
             active_hosted_runs: std::collections::HashMap::new(),
             #[cfg(test)]
             last_resolved_launch: None,
+            #[cfg(test)]
+            invalidate_frozen_manifest_after_mint: false,
         })
     }
 
     pub fn install_execution_host(&mut self, host: Box<dyn SessionExecutionHost>) {
         self.host = Some(host);
+    }
+
+    /// Test-only: next `StartAgentRun` removes the frozen generation after
+    /// mint so fixture 11 can prove post-Prepared fail-closed.
+    #[cfg(test)]
+    pub fn invalidate_frozen_manifest_after_mint_for_tests(&mut self) {
+        self.invalidate_frozen_manifest_after_mint = true;
     }
 
     /// Trusted first-party bind of a WorkScope root (SPEC-027 §6). Not a
