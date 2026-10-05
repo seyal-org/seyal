@@ -802,7 +802,11 @@ fn admin_adapters_grant_required_for_install_and_set_enabled() {
         "install without admin.adapters must fail closed"
     );
     assert!(
-        service.store.get_adapter_manifest(adapter_id).unwrap().is_none(),
+        service
+            .store
+            .get_adapter_manifest(adapter_id)
+            .unwrap()
+            .is_none(),
         "catalog must be unchanged without grant"
     );
 
@@ -811,12 +815,26 @@ fn admin_adapters_grant_required_for_install_and_set_enabled() {
         .install_or_update_adapter(owner, adapter_id, 0, true, &launch)
         .expect("install with grant");
     assert_eq!(generation, 1);
-    assert!(service.store.get_adapter_manifest(adapter_id).unwrap().unwrap().enabled);
+    assert!(
+        service
+            .store
+            .get_adapter_manifest(adapter_id)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
 
     service
         .set_adapter_enabled(owner, adapter_id, false)
         .expect("set-enabled with grant");
-    assert!(!service.store.get_adapter_manifest(adapter_id).unwrap().unwrap().enabled);
+    assert!(
+        !service
+            .store
+            .get_adapter_manifest(adapter_id)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
 
     // Revoke in-memory only: durable row remains, but authorize fails until
     // re-applied. Clear by opening a fresh service without re-granting the
@@ -832,6 +850,13 @@ fn admin_adapters_grant_required_for_install_and_set_enabled() {
     assert!(service
         .set_adapter_enabled(stranger, adapter_id, true)
         .is_err());
-    assert!(!service.store.get_adapter_manifest(adapter_id).unwrap().unwrap().enabled);
+    assert!(
+        !service
+            .store
+            .get_adapter_manifest(adapter_id)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
     let _ = std::fs::remove_dir_all(dir);
 }

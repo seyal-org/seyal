@@ -358,10 +358,7 @@ impl AgentStore {
     /// Durable `admin.adapters` grant (SPEC-027 §5.2). Written only by a
     /// trusted first-party path — never from a client-reachable command.
     /// Idempotent.
-    pub fn grant_admin_adapters(
-        &self,
-        principal_id: ClientPrincipalId,
-    ) -> Result<(), StoreError> {
+    pub fn grant_admin_adapters(&self, principal_id: ClientPrincipalId) -> Result<(), StoreError> {
         self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
         conn.execute(
@@ -373,10 +370,7 @@ impl AgentStore {
     }
 
     /// Whether `principal_id` holds a durable `admin.adapters` grant.
-    pub fn has_admin_adapters(
-        &self,
-        principal_id: ClientPrincipalId,
-    ) -> Result<bool, StoreError> {
+    pub fn has_admin_adapters(&self, principal_id: ClientPrincipalId) -> Result<bool, StoreError> {
         let conn = self.conn.lock().expect("agent store lock");
         let found: Option<i64> = conn
             .query_row(
