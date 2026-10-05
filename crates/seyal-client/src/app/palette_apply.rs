@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::navigation::{
-    navigate, EmptyExecutionInventory, NavigationPrincipal, NavigationRejection, ResourceAddress,
+    navigate, EmptyExecutionInventory, NavigateHistory, NavigationPrincipal, NavigationRejection,
+    ResourceAddress,
 };
 use crate::palette::{PaletteAction, PaletteCommand, PaletteRunTarget};
 
@@ -111,6 +112,7 @@ impl ApplicationRoot {
             &mut self.shell,
             &EmptyExecutionInventory,
             NavigationPrincipal::local_user(),
+            NavigateHistory::Record(&mut self.focus_history),
         )
         .map_err(navigation_error)?;
         self.drain_shell_effects();
@@ -154,5 +156,7 @@ pub(super) fn navigation_error(error: NavigationRejection) -> AppError {
         NavigationRejection::TargetTerminated => AppError::NavigationTargetTerminated,
         NavigationRejection::TargetUnbound => AppError::NavigationTargetUnbound,
         NavigationRejection::AmbiguousTarget => AppError::NavigationAmbiguousTarget,
+        NavigationRejection::StaleHistoryCursor => AppError::NavigationStaleHistoryCursor,
+        NavigationRejection::HistoryUnavailable => AppError::NavigationHistoryUnavailable,
     }
 }

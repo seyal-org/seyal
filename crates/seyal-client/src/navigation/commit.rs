@@ -1,28 +1,41 @@
-//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5).
+//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5) with optional history.
 //!
 //! Resolve with the N1 resolver, then apply workspace/tab/pane focus in one
 //! transition. When the hosting window is not product-active, emit exactly one
-//! [`crate::shell::ShellNativeEffect::WindowActivation`]. Rejection leaves
-//! focus unchanged. No presentation, binding, or PTY mutation.
+//! [`crate::shell::ShellNativeEffect::WindowActivation`]. User-initiated
+//! commits record Pane-granularity history (R4.1 / R6.5); traversal apply-only
+//! does not. Rejection leaves focus unchanged. No presentation, binding, or
+//! PTY mutation.
 
 use crate::shell::{ShellNativeEffect, ShellState};
 
+use super::history::FocusHistory;
 use super::{
     resolve, ExecutionInventory, NavigationPrincipal, NavigationRejection, ResolvedTarget,
     ResourceAddress,
 };
 
+/// Whether a successful Navigate should record focus history (SPEC-022 R6.5).
+pub enum NavigateHistory<'a> {
+    /// User-initiated commit: truncate/append per R6.4–R6.5 after focus apply.
+    Record(&'a mut FocusHistory),
+    /// Back/Forward apply step: focus/activation only; no history append.
+    ApplyOnly,
+}
+
 /// Atomically navigate to `address`.
 ///
 /// On success: activate owning Workspace, select owning Tab, set focused Pane
-/// (SPEC-022 R4.1). On any failure: no focus fields change (R4.2). Already-active
-/// targets succeed as a no-op (R4.4). Never mutates presentation, bindings, or
-/// PTY state (R4.3).
+/// (SPEC-022 R4.1), then optionally record history. On any failure: no focus
+/// fields change (R4.2). Already-active targets succeed as a no-op for focus
+/// and still run cursor-equality history dedup (R4.4 / R6.4). Never mutates
+/// presentation, bindings, or PTY state (R4.3).
 pub fn navigate(
     address: ResourceAddress,
     shell: &mut ShellState,
     inventory: &impl ExecutionInventory,
     principal: NavigationPrincipal<'_>,
+    history: NavigateHistory<'_>,
 ) -> Result<ResolvedTarget, NavigationRejection> {
     let target = resolve(address, shell, inventory, principal)?;
     let (workspace, tab, pane) = match target {
@@ -39,12 +52,21 @@ pub fn navigate(
     };
 
     let previous_window = shell.product_window_id().ok();
+    let pane_address = ResourceAddress::Pane {
+        workspace,
+        tab,
+        pane,
+    };
+
     let before = shell.focus_checkpoint();
     if before.active_workspace == workspace
         && before.active_tab == tab
         && before.focused_pane == pane
     {
-        // Already active: success no-op (R4.4). No extra activation (R5.2).
+        // Already active: success no-op for focus (R4.4); no extra activation
+        // (R5.2). History still sees the commit so cursor-equality dedup
+        // applies (R6.4).
+        record_if_needed(history, pane_address);
         return Ok(target);
     }
 
@@ -75,7 +97,62 @@ pub fn navigate(
     {
         shell.push_effect(ShellNativeEffect::WindowActivation { window });
     }
+    record_if_needed(history, pane_address);
     Ok(target)
+}
+
+/// Back one history entry, then apply-only Navigate (R6.5 / R6.8 / R6.9).
+pub fn history_back(
+    observed: super::history::FocusSeq,
+    history: &mut FocusHistory,
+    shell: &mut ShellState,
+    inventory: &impl ExecutionInventory,
+    principal: NavigationPrincipal<'_>,
+) -> Result<ResolvedTarget, NavigationRejection> {
+    let (idx, target) = history.peek_back(observed)?;
+    match navigate(
+        target,
+        shell,
+        inventory,
+        principal,
+        NavigateHistory::ApplyOnly,
+    ) {
+        Ok(resolved) => {
+            history.set_cursor(idx);
+            Ok(resolved)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Forward one history entry, then apply-only Navigate (R6.5 / R6.8 / R6.9).
+pub fn history_forward(
+    observed: super::history::FocusSeq,
+    history: &mut FocusHistory,
+    shell: &mut ShellState,
+    inventory: &impl ExecutionInventory,
+    principal: NavigationPrincipal<'_>,
+) -> Result<ResolvedTarget, NavigationRejection> {
+    let (idx, target) = history.peek_forward(observed)?;
+    match navigate(
+        target,
+        shell,
+        inventory,
+        principal,
+        NavigateHistory::ApplyOnly,
+    ) {
+        Ok(resolved) => {
+            history.set_cursor(idx);
+            Ok(resolved)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn record_if_needed(history: NavigateHistory<'_>, pane_address: ResourceAddress) {
+    if let NavigateHistory::Record(store) = history {
+        store.record_user_commit(pane_address);
+    }
 }
 
 fn focus_triple_for_workspace(

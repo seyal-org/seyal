@@ -335,6 +335,17 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             event: decode_window_event(action.reserved)?,
         }),
+        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
+        // as little-endian u64; empty payload is invalid. Numbers 67/68 follow
+        // W4a 63–66. Error codes 54/55 follow WindowActivationFailed (53).
+        67 => Ok(AppAction::HistoryBack {
+            fence,
+            observed: decode_focus_seq(action.payload, action.payload_len)?,
+        }),
+        68 => Ok(AppAction::HistoryForward {
+            fence,
+            observed: decode_focus_seq(action.payload, action.payload_len)?,
+        }),
         _ => Err(-6),
     }
 }
@@ -359,6 +370,22 @@ fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i
 
 fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
     crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
+}
+
+fn decode_focus_seq(
+    payload: *const u8,
+    payload_len: u32,
+) -> Result<crate::navigation::FocusSeq, i32> {
+    if payload_len != 8 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — payload_len bytes are readable.
+    let bytes = unsafe { slice::from_raw_parts(payload, 8) };
+    let mut raw = [0_u8; 8];
+    raw.copy_from_slice(bytes);
+    Ok(crate::navigation::FocusSeq::from_raw(u64::from_le_bytes(
+        raw,
+    )))
 }
 
 /// Payload layout for an optional address: empty → None; otherwise

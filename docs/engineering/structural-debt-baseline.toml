@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1052
-issue = 1144
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1144 adds WindowActivationFailed and ActivationFailed beside the W4a window actions without splitting the apply table."
+ceiling_loc = 1084
+issue = 1156
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1156 stacks N3 HistoryBack/HistoryForward and focus_history_seq onto the N5 WindowActivationFailed apply table without splitting it."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 738
-issue = 1108
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1108 drains shell native effects after CreateTab/rollback CloseTab so Realize/OrderFront effects reach the host queue."
+acknowledged_loc = 778
+issue = 1156
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1156 keeps the N3 Pane/Tab destroy history purge beside W3 drain of Realize/OrderFront after CreateTab."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -220,9 +220,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1194 adds
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1132
-issue = 1123
-responsibility = "Navigation fixture shells pass allows_window_creation=false for W4a admission defaults (#1123); no behavior change beyond the from_workspaces arity."
+ceiling_loc = 1151
+issue = 1117
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1117 threads NavigateHistory::ApplyOnly through N2 regressions; N3 history coverage lives in sibling history test modules. W4a fixture shells pass allows_window_creation=false."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -251,9 +251,9 @@ reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one key
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 701
-issue = 1144
-reason = "ABI action decode stays one match surface; #1144 adds WindowNativeEvent::ActivationFailed (reserved 10) on ReportWindowEvent without splitting the versioned kind table."
+acknowledged_loc = 728
+issue = 1156
+reason = "ABI action decode stays one match surface; #1156 stacks HistoryBack/HistoryForward kinds 67/68 after W4a window intents 63–66 without splitting the versioned kind table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
