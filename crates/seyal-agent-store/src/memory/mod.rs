@@ -3,7 +3,7 @@
 mod codec;
 mod ops;
 mod persist;
-pub(crate) mod schema_v8;
+pub(crate) mod schema_v9;
 mod working_set_ops;
 
 #[cfg(test)]
