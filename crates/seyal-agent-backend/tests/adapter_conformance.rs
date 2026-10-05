@@ -141,10 +141,11 @@ fn adapter_conformance_replay_production_binary_excludes_fixture_host() {
         "production main must compose StandaloneProcessHost"
     );
     assert!(
-        !main_rs.contains("use ") || !main_rs.lines().any(|l| {
-            let t = l.trim();
-            t.starts_with("use ") && t.contains("FakeExecutionHost")
-        }),
+        !main_rs.contains("use ")
+            || !main_rs.lines().any(|l| {
+                let t = l.trim();
+                t.starts_with("use ") && t.contains("FakeExecutionHost")
+            }),
         "production main must not import FakeExecutionHost"
     );
     assert!(

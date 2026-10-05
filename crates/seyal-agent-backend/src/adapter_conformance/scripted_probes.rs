@@ -259,9 +259,7 @@ pub fn probe_launch_enabled_manifest_descriptor_only() -> ConformanceVerdict {
     let _ = host.start(run, generation, descriptor.clone());
     match host.last_descriptor() {
         Some(last) if last == &descriptor => ConformanceVerdict::pass(),
-        Some(last) => {
-            ConformanceVerdict::fail(format!("host saw unexpected descriptor: {last:?}"))
-        }
+        Some(last) => ConformanceVerdict::fail(format!("host saw unexpected descriptor: {last:?}")),
         None => ConformanceVerdict::fail("host did not record launch descriptor"),
     }
 }
