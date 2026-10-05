@@ -185,15 +185,21 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 845
-issue = 1253
-reason = "IntegrationService remains the Agent Backend session façade; #1253 adds the fixture-11 test hook for post-mint frozen-generation invalidation beside existing catalog and StartAgentRun paths without a second session authority."
+acknowledged_loc = 870
+issue = 1255
+reason = "IntegrationService remains the Agent Backend session façade; #1255 wires CancelRun dispatch and Terminating→Terminated confirm beside StartAgentRun/ReadRun and the #1253 fixture-11 test hook without a second session authority."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-protocol/src/command/mod.rs"
+acknowledged_loc = 716
+issue = 1255
+reason = "Agent protocol Command encode/decode stays one module; #1255 adds CancelRun (tag 11) beside the existing ten commands without a second codec façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/standalone_process_host.rs"
-acknowledged_loc = 936
-issue = 1224
-reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1224 adds process-group cancel, bounded observation backpressure, Drop/shutdown reap, and proofs of those invariants beside spawn/observe rather than a second host type."
+acknowledged_loc = 988
+issue = 1255
+reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1255 keeps cancel terminal evidence (shutdown-path KnownFailure + cancel-classified Failed exit) beside spawn/observe/reap rather than a second host type."
 
 # #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
 [[cohesion_acknowledgement]]
@@ -210,11 +216,12 @@ reason = "ObservationAuthority stays one writer-facing bridge; #678 adds domain_
 # session/mod.rs is below review_loc and needs no [[cohesion_acknowledgement]].
 
 # #1194 nine-command byte-identity regression lives with the other session façade tests.
+# #1255 extends that matrix with CancelRun (ten session-bearing commands).
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/tests.rs"
-acknowledged_loc = 767
-issue = 1194
-reason = "Session façade regressions stay beside IntegrationService; #1194 adds the nine-command foreign-session frame comparison, which crosses review_loc without a second session test authority."
+acknowledged_loc = 777
+issue = 1255
+reason = "Session façade regressions stay beside IntegrationService; #1255 extends the foreign-session frame comparison with CancelRun without a second session test authority."
 
 # #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc as one cohesive navigation
 # test module (resolver rejections beside the Navigate commits they feed).
