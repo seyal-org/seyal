@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1091
-issue = 1220
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1220 adds Hidden delivery sync after successful apply without splitting the façade."
+ceiling_loc = 1093
+issue = 1221
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1221 re-exports the quit-cleanup deadline constant and registers the W7 adversarial test module without splitting the façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -232,9 +232,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 892
-issue = 1220
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1220 registers W5 tier tests beside the existing W2a/W4b action table."
+acknowledged_loc = 894
+issue = 1221
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1221 registers the W7 orthogonal matrix test module beside the existing W2a/W4b/W5 action table."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

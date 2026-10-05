@@ -23,7 +23,7 @@ mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
 
-pub use native_effect::NativeEffect;
+pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
 mod keybinding_apply_tests;
@@ -37,6 +37,8 @@ mod tab_provisioning_tests;
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
+#[cfg(test)]
+mod w7_adversarial_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
