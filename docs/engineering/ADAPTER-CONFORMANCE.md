@@ -55,9 +55,21 @@ fn assert_conformance(driver: &mut dyn AdapterConformanceDriver) {
 
 Coverage claims cannot shrink the catalog: unknown registration IDs fail closed, and the harness still executes every catalog case the driver implements. There is **no skip-as-pass** — unsupported behavior must return `ConformanceVerdict::Fail` with an explicit detail.
 
+## Codex CLI adapter (#1280)
+
+`CodexAdapterConformanceDriver` registers as `ConformanceDriverKind::StandaloneProcessAdapter` and covers every catalog case ID on production `StandaloneProcessHost` (never `FakeExecutionHost`). See [CODEX-ADAPTER.md](./CODEX-ADAPTER.md).
+
+```sh
+cargo test -p seyal-agent-backend --offline --test codex_adapter -- adapter_conformance_codex
+```
+
+### Claude Code (#1279)
+
+Sibling first-party StandaloneProcessHost adapter (additive `adapters::claude_code` module). Lands independently; both must pass this same catalog.
+
 ## Fixture-host proof path
 
-Until replay/CLI adapters land, `FixtureHostConformanceDriver` (`--features fixture-host`) runs the full catalog against `FakeExecutionHost` + `ObservationAuthority` + the durable adapter store. Production binaries never embed `FakeExecutionHost`.
+`FixtureHostConformanceDriver` (`--features fixture-host`) runs the full catalog against `FakeExecutionHost` + `ObservationAuthority` + the durable adapter store. Production binaries never embed `FakeExecutionHost`.
 
 ```sh
 cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance
@@ -73,10 +85,10 @@ Suggested test filter names (retained):
 
 ## Enforcement-class honesty
 
-ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are exercised through fixture vocabulary in `adapter_conformance::enforcement` until presence production types (#1276) land. Soft-consume of #1276 must not introduce a second honesty authority — replace the fixture enum, keep the same catalog case ID.
+ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are exercised through fixture vocabulary in `adapter_conformance::enforcement` and the production presence plane (#1276 / #1287). Soft-consume must not introduce a second honesty authority — keep the same catalog case ID.
 
 ## Explicit non-goals
 
-- Implementing Claude Code, Codex, or the offline replay adapter (siblings).
+- Implementing Claude Code (#1279) or the offline replay adapter (#1278) inside this catalog Issue.
 - Inventing `SeyalTerminalExecutionHost` for M005 exit.
 - ADR create/amend inside an implementation PR.
