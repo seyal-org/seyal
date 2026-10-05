@@ -6,7 +6,7 @@ use crate::domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem};
 use crate::lifecycle::{
     AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,
     AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness, ExecutionRef,
-    ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecisionRef, RunTermination,
+    ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecision, RunTermination,
     TerminationKind, TerminationSource, WorkItemLifecycle, WorkItemOutcome,
 };
 use crate::{AgentRunId, AttemptId, BindingGeneration, ControlGeneration, WorkItemId, WorkScopeId};
@@ -107,15 +107,19 @@ impl AgentDomain {
     }
 
     /// Prepare: bind route/context/permission prerequisites (Created → Prepared).
+    ///
+    /// `routing` is committed atomically with the lifecycle transition
+    /// (SPEC-027 §4.2); this mints and stores the immutable history entry.
     pub fn prepare_agent_run(
         &mut self,
         agent_run_id: AgentRunId,
-        routing: RoutingDecisionRef,
+        routing: RoutingDecision,
     ) -> Result<(), DomainError> {
+        Self::require_lifecycle(self.run_mut(agent_run_id)?.lifecycle, &[AgentRunLifecycle::Created])?;
+        let reference = self.record_routing_decision(routing);
         let run = self.run_mut(agent_run_id)?;
-        Self::require_lifecycle(run.lifecycle, &[AgentRunLifecycle::Created])?;
         run.lifecycle = AgentRunLifecycle::Prepared;
-        run.routing_decision_ref = Some(routing);
+        run.routing_decision_ref = Some(reference);
         run.bump_revision();
         Ok(())
     }
@@ -148,7 +152,7 @@ impl AgentDomain {
     pub fn start_prepare_and_dispatch(
         &mut self,
         agent_run_id: AgentRunId,
-        routing: RoutingDecisionRef,
+        routing: RoutingDecision,
     ) -> Result<(), DomainError> {
         self.prepare_agent_run(agent_run_id, routing)?;
         self.dispatch_agent_run(agent_run_id)
@@ -429,21 +433,25 @@ impl AgentDomain {
     pub fn pre_start_fallback(
         &mut self,
         agent_run_id: AgentRunId,
-        new_routing: RoutingDecisionRef,
+        new_routing: RoutingDecision,
         proof_not_started: bool,
     ) -> Result<(), DomainError> {
+        {
+            let run = self.run_mut(agent_run_id)?;
+            Self::require_lifecycle(run.lifecycle, &[AgentRunLifecycle::Dispatching])?;
+            if run.execution_liveness != ExecutionLiveness::NotStarted {
+                return Err(DomainError::InvalidTransition);
+            }
+            if !proof_not_started {
+                run.resumability = ResumabilityFact::ReconciliationRequired;
+                run.bump_revision();
+                return Err(DomainError::ReconciliationRequired);
+            }
+        }
+        let reference = self.record_routing_decision(new_routing);
         let run = self.run_mut(agent_run_id)?;
-        Self::require_lifecycle(run.lifecycle, &[AgentRunLifecycle::Dispatching])?;
-        if run.execution_liveness != ExecutionLiveness::NotStarted {
-            return Err(DomainError::InvalidTransition);
-        }
-        if !proof_not_started {
-            run.resumability = ResumabilityFact::ReconciliationRequired;
-            run.bump_revision();
-            return Err(DomainError::ReconciliationRequired);
-        }
         run.lifecycle = AgentRunLifecycle::Prepared;
-        run.routing_decision_ref = Some(new_routing);
+        run.routing_decision_ref = Some(reference);
         run.bump_revision();
         Ok(())
     }

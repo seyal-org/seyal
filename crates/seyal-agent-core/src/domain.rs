@@ -4,8 +4,8 @@ use crate::client_control::LoggedObservation;
 use crate::lifecycle::{
     AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage, AttachmentAccess,
     AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness, ExecutionRef,
-    ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecisionRef, RunTermination,
-    WorkItemLifecycle, WorkItemOutcome,
+    ExternalIdentityKey, ObservationFact, ResumabilityFact, RoutingDecision, RoutingDecisionRef,
+    RunTermination, WorkItemLifecycle, WorkItemOutcome,
 };
 use crate::{
     AgentRunId, AttemptId, BindingGeneration, ClientSessionId, ControlGeneration, WorkItemId,
@@ -270,6 +270,10 @@ pub struct AgentDomain {
     pub(crate) retired_executions: HashSet<ExecutionRef>,
     pub(crate) observation_keys: HashSet<(u64, u64, u64)>,
     pub(crate) observation_log: Vec<LoggedObservation>,
+    /// Immutable RoutingDecision history (SPEC-027 §4.2). Never rewritten;
+    /// pre-start fallback and retry mint a new entry on the same or a new run.
+    pub(crate) routing_decisions: HashMap<RoutingDecisionRef, RoutingDecision>,
+    pub(crate) next_routing_decision: u64,
 }
 
 impl AgentDomain {
@@ -375,6 +379,19 @@ impl AgentDomain {
 
     pub fn agent_run(&self, id: AgentRunId) -> Option<&AgentRun> {
         self.agent_runs.get(&id)
+    }
+
+    /// Append one immutable RoutingDecision and return its reference
+    /// (SPEC-027 §4.2). Never overwrites or mutates an existing entry.
+    pub(crate) fn record_routing_decision(&mut self, decision: RoutingDecision) -> RoutingDecisionRef {
+        self.next_routing_decision = self.next_routing_decision.saturating_add(1);
+        let reference = RoutingDecisionRef::new(self.next_routing_decision);
+        self.routing_decisions.insert(reference, decision);
+        reference
+    }
+
+    pub fn routing_decision(&self, reference: RoutingDecisionRef) -> Option<&RoutingDecision> {
+        self.routing_decisions.get(&reference)
     }
 
     pub fn run_for_attempt(&self, attempt_id: AttemptId) -> Option<AgentRunId> {
