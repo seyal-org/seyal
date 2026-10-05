@@ -421,9 +421,9 @@ fn spec020_18_17_same_prompt_different_bound_evidence() {
 
     // Same offering set; different bound evidence → different requirement masks
     // recorded on the decision explanation profile path (request frozen).
-    let d = resolve_with_v1_ranking(None, &[base.clone()], &diagnostic).unwrap();
-    let e = resolve_with_v1_ranking(None, &[base.clone()], &deploy).unwrap();
-    let s = resolve_with_v1_ranking(None, &[base], &screenshot).unwrap();
+    let d = resolve_with_v1_ranking(None, std::slice::from_ref(&base), &diagnostic).unwrap();
+    let e = resolve_with_v1_ranking(None, std::slice::from_ref(&base), &deploy).unwrap();
+    let s = resolve_with_v1_ranking(None, std::slice::from_ref(&base), &screenshot).unwrap();
     assert_eq!(d.target.selection_kind, SelectionKind::Singleton);
     assert_eq!(e.target.selection_kind, SelectionKind::Singleton);
     assert_eq!(s.target.selection_kind, SelectionKind::Singleton);
