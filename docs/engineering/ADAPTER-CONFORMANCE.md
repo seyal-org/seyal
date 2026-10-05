@@ -1,6 +1,6 @@
 # Adapter conformance catalog
 
-**Owning Issues:** #1277 (catalog + harness), consumed by #1278 (replay), #1279 (Claude Code), #1280 (Codex) under parent #679 / epic #667.
+**Owning Issues:** #1277 (catalog + harness), consumed by #1278 (replay), #1279 (Claude Code — Done path [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md)), #1280 (Codex) under parent #679 / epic #667.
 
 **Authority:** Accepted [SPEC-018](../specs/SPEC-018-M005-HARNESS-REQUEST-ASSEMBLY.md) §16, [SPEC-027](../specs/SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) §9/§11, [ADR-012](../architecture/ADR-012-AGENT-RUN-IDENTITY-LIFECYCLE.md) §12–§13.
 
@@ -55,6 +55,14 @@ fn assert_conformance(driver: &mut dyn AdapterConformanceDriver) {
 
 Coverage claims cannot shrink the catalog: unknown registration IDs fail closed, and the harness still executes every catalog case the driver implements. There is **no skip-as-pass** — unsupported behavior must return `ConformanceVerdict::Fail` with an explicit detail.
 
+### Claude Code (#1279)
+
+First-party StandaloneProcessHost adapter: see [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md). Registration constant `CLAUDE_CODE_REGISTRATION`; driver `ClaudeCodeConformanceDriver`.
+
+```sh
+cargo test -p seyal-agent-backend --features fixture-host --offline -- claude_code
+```
+
 ## Fixture-host proof path
 
 Until replay/CLI adapters land, `FixtureHostConformanceDriver` (`--features fixture-host`) runs the full catalog against `FakeExecutionHost` + `ObservationAuthority` + the durable adapter store. Production binaries never embed `FakeExecutionHost`.
@@ -77,6 +85,6 @@ ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are 
 
 ## Explicit non-goals
 
-- Implementing Claude Code, Codex, or the offline replay adapter (siblings).
+- Implementing Codex or the offline replay adapter (siblings).
 - Inventing `SeyalTerminalExecutionHost` for M005 exit.
 - ADR create/amend inside an implementation PR.

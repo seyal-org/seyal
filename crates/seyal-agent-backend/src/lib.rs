@@ -14,6 +14,7 @@
 //! remains the only lifecycle transition authority.
 
 pub mod adapter_conformance;
+pub mod adapters;
 mod auth;
 #[cfg(unix)]
 mod daemon;
@@ -36,6 +37,15 @@ mod session;
 #[allow(unsafe_code)]
 mod standalone_process_host;
 
+pub use adapters::{
+    claude_code_adapter_id, claude_code_capability_sheet, claude_code_launch_template,
+    install_enabled_claude_code_adapter, resolve_claude_code_program,
+    resolve_claude_code_program_from, validate_claude_code_sheet, ClaudeCodeInstallError,
+    CLAUDE_CODE_ADAPTER_LABEL, CLAUDE_CODE_DEFAULT_PROGRAM, CLAUDE_CODE_ENV_BIN,
+    CLAUDE_CODE_PROTOCOL_VERSION,
+};
+#[cfg(unix)]
+pub use adapters::{ClaudeCodeConformanceDriver, CLAUDE_CODE_REGISTRATION};
 pub use auth::{
     AuthorizationError, AuthorizationRepository, ClientScope, DurablePrincipal, PairingCredential,
     PrincipalKind, PrincipalStatus,
