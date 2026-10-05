@@ -5,8 +5,8 @@
 //! control” class. Agent Backend remains the sole AgentRun transition writer.
 
 use seyal_agent_core::{
-    CapabilityId, CapabilitySupport, EnforcementClass, NegotiatedCapability,
-    PresenceCapabilityProjection, PresenceObservation, PresenceSourceTier,
+    reject_duplicate_capability_ids, CapabilityId, CapabilitySupport, EnforcementClass,
+    NegotiatedCapability, PresenceCapabilityProjection, PresenceObservation, PresenceSourceTier,
 };
 
 use crate::FrameError;
@@ -35,6 +35,7 @@ pub fn encode_capability_advertisement(
     if capabilities.len() > MAX_NEGOTIATED_CAPABILITIES {
         return Err(FrameError::Malformed);
     }
+    reject_duplicate_capability_ids(capabilities).map_err(|_| FrameError::Malformed)?;
     let mut out = Vec::with_capacity(2 + capabilities.len() * 3);
     out.extend_from_slice(&(capabilities.len() as u16).to_le_bytes());
     for cap in capabilities {
@@ -44,6 +45,8 @@ pub fn encode_capability_advertisement(
 }
 
 /// Decode a capability advertisement produced by [`encode_capability_advertisement`].
+///
+/// Duplicate [`CapabilityId`]s are rejected (no first-wins / order-dependent merge).
 pub fn decode_capability_advertisement(
     body: &[u8],
 ) -> Result<Vec<NegotiatedCapability>, FrameError> {
@@ -64,6 +67,7 @@ pub fn decode_capability_advertisement(
         let chunk = [body[start], body[start + 1], body[start + 2]];
         caps.push(decode_negotiated_capability(chunk)?);
     }
+    reject_duplicate_capability_ids(&caps).map_err(|_| FrameError::Malformed)?;
     Ok(caps)
 }
 
@@ -106,7 +110,11 @@ pub fn encode_presence_capability_projection(
     Ok(out)
 }
 
-/// Decode a presence/capability projection.
+/// Decode a presence/capability projection (structural only).
+///
+/// Callers must install via [`PresenceCapabilityProjection::install_capabilities`]
+/// under an explicit [`seyal_agent_core::CapabilityInstallTrust`] binding before
+/// treating `BackendEnforced` as authoritative.
 pub fn decode_presence_capability_projection(
     body: &[u8],
 ) -> Result<PresenceCapabilityProjection, FrameError> {
@@ -208,6 +216,22 @@ mod tests {
         ];
         assert_eq!(
             decode_presence_observation(bytes),
+            Err(FrameError::Malformed)
+        );
+    }
+
+    #[test]
+    fn presence_decode_rejects_duplicate_capability_ids() {
+        let pause = encode_negotiated_capability(NegotiatedCapability::supported(
+            CapabilityId::Pause,
+            EnforcementClass::Observed,
+        ));
+        let mut body = Vec::new();
+        body.extend_from_slice(&2u16.to_le_bytes());
+        body.extend_from_slice(&pause);
+        body.extend_from_slice(&pause);
+        assert_eq!(
+            decode_capability_advertisement(&body),
             Err(FrameError::Malformed)
         );
     }

@@ -56,8 +56,9 @@ pub use script::parse_script;
 pub use session::{IntegrationConfig, IntegrationService};
 pub use seyal_agent_core::{AgentDomain, DomainError, ExecutionHost, ExecutionHostKind};
 pub use seyal_agent_core::{
-    CapabilityId, CapabilitySupport, ClaimMode, EnforcementClass, NegotiatedCapability,
-    PresenceCapabilityProjection, PresenceError, PresenceObservation, PresenceSourceTier,
+    CapabilityId, CapabilityInstallTrust, CapabilitySupport, ClaimMode, EnforcementClass,
+    NegotiatedCapability, PresenceCapabilityProjection, PresenceError, PresenceObservation,
+    PresenceSourceTier,
 };
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
