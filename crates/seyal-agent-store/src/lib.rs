@@ -7,8 +7,12 @@
 use std::num::NonZeroU64;
 
 mod identity;
+pub mod memory;
 mod sqlite;
 
+pub use memory::{
+    MemoryAuthority, MemoryError, ProposeInput, ProposeResult, RevocationBundle, WorkingSetError,
+};
 pub use seyal_agent_core::{
     decode_output_ref, encode_output_ref, AdapterId, AgentRunId, AttemptId, FingerprintRef,
     OutputRef, OutputRefError, RetentionPolicyRef, RouteOfferingId, StreamKind, WorkItemId,
