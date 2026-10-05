@@ -73,7 +73,7 @@ fn two_live_peers_owner_and_observer_share_authoritative_run() {
         let mut client = TestClient::connect(&owner_socket);
         owner_live.send("owner").unwrap();
         recv_barrier(&go_owner_rx, BARRIER, "two-live-release-owner");
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -143,7 +143,7 @@ fn observer_cannot_escalate_while_owner_is_live() {
     let owner = thread::spawn(move || {
         thread::sleep(Duration::from_millis(20));
         let mut client = TestClient::connect(&owner_socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -214,7 +214,7 @@ fn peer_disconnect_variant(label: &str, response_in_flight: bool) {
         owner_live.send("owner").unwrap();
         recv_barrier(&go_owner_rx, BARRIER, "disconnect-release-owner");
         recv_barrier(&dropped_rx, BARRIER, "dropper-closed");
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -349,7 +349,7 @@ fn dual_slow_subscribers_both_receive_history_gap_under_accept_and_spawn() {
         let socket = socket.clone();
         move || {
             let mut client = TestClient::connect_window(&socket, 1);
-            let scope = client.create_work_scope(WorkScopeKind::Project);
+            let scope = client.create_work_scope(WorkScopeKind::AdHoc);
             let item = client.create_work_item(scope);
             let attempt = client.create_attempt(item);
             let started = client.start_agent_run(attempt);
@@ -467,7 +467,7 @@ fn stalled_reader_does_not_stall_other_peer() {
     let setup_socket = socket.clone();
     let setup = thread::spawn(move || {
         let mut client = TestClient::connect(&setup_socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         client.start_agent_run(attempt).run_id

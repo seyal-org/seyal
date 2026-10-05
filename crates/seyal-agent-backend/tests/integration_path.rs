@@ -46,7 +46,7 @@ fn standalone_path_survives_disconnect_and_restart() {
     let socket_for_client = socket.clone();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket_for_client);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -273,7 +273,7 @@ fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
         );
         let bad_scope = client.command(&Command::OpenSession { scopes: vec![9] });
         let widened = client.command(&Command::OpenSession { scopes: vec![3] });
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let foreign = AggregateRef::AgentRun(AgentRunId::new());
         let snapshot = client.command(&Command::GetSnapshot {
             session_id: client.session_id,
@@ -315,7 +315,7 @@ fn malformed_input_and_narrow_sessions_do_not_disturb_authority() {
         let mut client = TestClient::connect_with(&socket, vec![2]);
         let create = client.command(&Command::CreateWorkScope {
             session_id: client.session_id,
-            kind: WorkScopeKind::Repository,
+            kind: WorkScopeKind::AdHoc,
         });
         let control = client.check_generation(AgentRunId::new(), 1, 1);
         (create, control)
@@ -385,7 +385,7 @@ fn observers_keep_independent_sequences_and_ignore_duplicate_observations() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -478,7 +478,7 @@ fn observer_principal_cannot_escalate_or_resume_owner_session() {
     let socket = daemon.socket_path();
     let owner = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -547,7 +547,7 @@ fn replay_window_is_bounded_and_truncation_is_a_history_gap() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect_window(&socket, 1);
-        let scope = client.create_work_scope(WorkScopeKind::Project);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -672,7 +672,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         client.command(&Command::StartAgentRun {
@@ -717,7 +717,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         let mut client = TestClient::connect(&socket);
         client.command(&Command::CreateWorkScope {
             session_id: client.session_id,
-            kind: WorkScopeKind::Repository,
+            kind: WorkScopeKind::AdHoc,
         })
     });
     daemon.serve_one().unwrap();
@@ -747,7 +747,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         client.command(&Command::StartAgentRun {
@@ -827,7 +827,7 @@ fn high_volume_subscribe_fits_frame_and_continues() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect_limits(&socket, ABSOLUTE_MAX_FRAME_SIZE, 1024);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -885,7 +885,7 @@ fn high_volume_output_uses_segments_end_to_end() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -960,7 +960,7 @@ fn high_volume_output_uses_segments_end_to_end() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -1011,7 +1011,7 @@ fn records_session_startup_throughput_reconnect_and_storage_growth() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect_limits(&socket, ABSOLUTE_MAX_FRAME_SIZE, 64);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let append_started = Instant::now();

@@ -68,7 +68,7 @@ fn persistent_peer_faults_do_not_stall_owner_and_release_resources() {
     let owner_socket = socket.clone();
     let owner = thread::spawn(move || {
         let mut client = TestClient::connect(&owner_socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
