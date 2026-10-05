@@ -158,9 +158,30 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module after
 # materialize_output_ref beside append_output_event.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 885
-issue = 678
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #678 adds schema-v5 AgentRun lifecycle column reads beside mutate_agent_run_and_append while lifecycle_columns.rs owns the column writers."
+acknowledged_loc = 888
+issue = 1224
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #1224 adds schema-v6 adapter catalog / adapter.execute grant load beside existing identity and lifecycle open paths without a second store façade."
+
+# #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
+# generation sit on the daemon handshake façade; session façade grows
+# ServerCapabilities projection. Tests stay beside those façades.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/daemon/mod.rs"
+acknowledged_loc = 708
+issue = 1224
+reason = "Daemon bind/listen/handshake stay one process façade; #1224 threads composed ExecutionHostKind and adapter_catalog_generation into HelloAck without splitting listen from handshake."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/daemon/tests.rs"
+acknowledged_loc = 714
+issue = 1224
+reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds HelloAck host-kind and catalog-generation cases for hostless vs StandaloneProcess composition."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-backend/src/session/mod.rs"
+acknowledged_loc = 807
+issue = 1224
+reason = "IntegrationService remains the Agent Backend session façade; #1224 adds server_capabilities and live host-handle bookkeeping for SPEC-027 StartAgentRun without a second session authority."
 
 # #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
 [[cohesion_acknowledgement]]
