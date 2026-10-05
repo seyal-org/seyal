@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 737
-issue = 1175
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch without splitting the cold control path."
+acknowledged_loc = 738
+issue = 1108
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1108 drains shell native effects after CreateTab/rollback CloseTab so Realize/OrderFront effects reach the host queue."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -77,15 +77,15 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1023
-issue = 1003
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1175 updates production CreateTab enablement assertions here. C2 acceptance cases stay in tab_provisioning_tests.rs."
+ceiling_loc = 1053
+issue = 1108
+responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1108 adds OrderFrontMakeKey coalescing evidence beside quit native-effect proofs. C2 acceptance cases stay in tab_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 980
-issue = 1175
-reason = "Published C ABI entry points stay one thin façade. #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding."
+acknowledged_loc = 962
+issue = 1108
+reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -220,7 +220,7 @@ reason = "Session façade regressions stay beside IntegrationService; #1194 adds
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1143
+ceiling_loc = 1131
 issue = 1101
 responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
 
@@ -232,9 +232,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 731
-issue = 1175
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 enables production allows_tab_creation and documents the macOS-only test helper for force policy flips without splitting tree/workspace ownership."
+acknowledged_loc = 849
+issue = 1108
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1108 adds pending native-effect drain hooks and multi-window snapshot fields while snapshot encoding stays in shell/snapshot.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
