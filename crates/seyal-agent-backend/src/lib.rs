@@ -13,6 +13,7 @@
 //! tests, and is never reachable from the production binary. `AgentDomain`
 //! remains the only lifecycle transition authority.
 
+pub mod adapter_conformance;
 mod auth;
 #[cfg(unix)]
 mod daemon;
