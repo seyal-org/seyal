@@ -24,7 +24,7 @@ This document defines **Seyal Agent Sessions** only. It refines the existing OSS
 A user may install and run coding/operations agents as ordinary terminal programs, including examples such as:
 
 - Claude Code;
-- Codex CLI;
+- Codex CLI (first-party OSS adapter on `StandaloneProcessHost` — see `docs/engineering/CODEX-ADAPTER.md`);
 - Cursor Agent CLI;
 - OpenCode;
 - Gemini CLI;

@@ -63,6 +63,7 @@ pub fn scope_for(root: &Path, worktree_id: &str) -> DiscoveryScope {
     )
 }
 
+#[allow(dead_code)] // used by discovery integration tests; shared support module
 pub fn open_store(dir: &Path) -> seyal_agent_store::AgentStore {
     seyal_agent_store::AgentStore::open(dir.join("agent.db")).unwrap()
 }

@@ -1,9 +1,11 @@
-//! Public Local Context Engine discovery/index API (SPEC-013 discovery slice).
+//! Public Local Context Engine discovery/index + bundle assembly API.
 
 use seyal_agent_store::AgentStore;
 
+use crate::assemble::{assemble_bundle, BundleBuildOutcome, BundleBuildSlots};
 use crate::budget::DiscoveryBudget;
 use crate::index::{probe_cache, store_index, CacheLookup, IndexCacheEntry};
+use crate::request::BuildRequest;
 use crate::scope::DiscoveryScope;
 use crate::source::{DiscoveryHealth, ExclusionReason};
 use crate::walk::{discover, DiscoveryReport};
@@ -97,5 +99,30 @@ impl ContextDiscoveryEngine {
     /// Inject a persistent failure into the retry/deadline budget.
     pub fn inject_persistent_failure(&self) -> DiscoveryHealth {
         self.budget.record_failure()
+    }
+}
+
+/// Permanent production ContextBundle / SelectionTrace assembly surface (#1272).
+///
+/// Consumes #1271 discovery. Does not own MemoryStore, eval, or ranking.
+#[derive(Debug, Default)]
+pub struct ContextBundleEngine {
+    pub slots: BundleBuildSlots,
+}
+
+impl ContextBundleEngine {
+    pub fn new() -> Self {
+        Self {
+            slots: BundleBuildSlots::new(),
+        }
+    }
+
+    /// Build an immutable ContextBundle + policy-safe SelectionTrace.
+    pub fn build(&self, request: &BuildRequest) -> Result<BundleBuildOutcome, ExclusionReason> {
+        assemble_bundle(request, &self.slots)
+    }
+
+    pub fn active_builds(&self) -> usize {
+        self.slots.active()
     }
 }

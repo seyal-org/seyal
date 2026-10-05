@@ -244,6 +244,28 @@ pub struct ExternalIdentityKey {
     pub external_identity: u64,
 }
 
+/// Opaque adapter-scoped upstream session/thread/conversation reference
+/// (ADR-012). Never a Seyal `WorkItem` / `Attempt` / `AgentRun` identity.
+///
+/// Adapters may store vendor thread/session IDs here as resumability metadata
+/// only. Core lifecycle authorities remain Seyal-owned.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HarnessSessionRef {
+    /// First-party adapter label (e.g. `codex-cli`), not a vendor product ID.
+    pub adapter_label: String,
+    /// Opaque upstream token (Codex thread id, Claude session id, …).
+    pub upstream_ref: String,
+}
+
+impl HarnessSessionRef {
+    pub fn new(adapter_label: impl Into<String>, upstream_ref: impl Into<String>) -> Self {
+        Self {
+            adapter_label: adapter_label.into(),
+            upstream_ref: upstream_ref.into(),
+        }
+    }
+}
+
 /// Ephemeral client attachment access (SPEC-026 §8). Not durable identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentAccess {

@@ -4,7 +4,6 @@
 //! Conformance uses the shared #1277 catalog via [`AdapterConformanceDriver`].
 
 mod capabilities;
-#[cfg(unix)]
 mod driver;
 mod manifest;
 
@@ -12,7 +11,6 @@ pub use capabilities::{
     claude_code_capability_sheet, claude_code_presence_observation, validate_claude_code_sheet,
     ClaudeCodeCapabilityEntry,
 };
-#[cfg(unix)]
 pub use driver::{ClaudeCodeConformanceDriver, CLAUDE_CODE_REGISTRATION};
 pub use manifest::{
     claude_code_adapter_id, claude_code_launch_template, install_enabled_claude_code_adapter,

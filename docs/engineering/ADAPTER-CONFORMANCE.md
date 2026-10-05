@@ -1,6 +1,6 @@
 # Adapter conformance catalog
 
-**Owning Issues:** #1277 (catalog + harness), consumed by #1278 (replay), #1279 (Claude Code — Done path [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md)), #1280 (Codex) under parent #679 / epic #667.
+**Owning Issues:** #1277 (catalog + harness), consumed by #1278 (replay), #1279 (Claude Code — [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md)), #1280 (Codex — [`CODEX-ADAPTER.md`](CODEX-ADAPTER.md)) under parent #679 / epic #667.
 
 **Authority:** Accepted [SPEC-018](../specs/SPEC-018-M005-HARNESS-REQUEST-ASSEMBLY.md) §16, [SPEC-027](../specs/SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) §9/§11, [ADR-012](../architecture/ADR-012-AGENT-RUN-IDENTITY-LIFECYCLE.md) §12–§13.
 
@@ -63,9 +63,17 @@ First-party StandaloneProcessHost adapter: see [`CLAUDE-CODE-ADAPTER.md`](CLAUDE
 cargo test -p seyal-agent-backend --features fixture-host --offline -- claude_code
 ```
 
+### Codex CLI adapter (#1280)
+
+`CodexAdapterConformanceDriver` registers as `ConformanceDriverKind::StandaloneProcessAdapter` and covers every catalog case ID on production `StandaloneProcessHost` (never `FakeExecutionHost`). See [CODEX-ADAPTER.md](./CODEX-ADAPTER.md).
+
+```sh
+cargo test -p seyal-agent-backend --offline --test codex_adapter -- adapter_conformance_codex
+```
+
 ## Fixture-host proof path
 
-Until replay/CLI adapters land, `FixtureHostConformanceDriver` (`--features fixture-host`) runs the full catalog against `FakeExecutionHost` + `ObservationAuthority` + the durable adapter store. Production binaries never embed `FakeExecutionHost`.
+`FixtureHostConformanceDriver` (`--features fixture-host`) runs the full catalog against `FakeExecutionHost` + `ObservationAuthority` + the durable adapter store. Production binaries never embed `FakeExecutionHost`.
 
 ```sh
 cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance
@@ -81,10 +89,10 @@ Suggested test filter names (retained):
 
 ## Enforcement-class honesty
 
-ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are exercised through fixture vocabulary in `adapter_conformance::enforcement` until presence production types (#1276) land. Soft-consume of #1276 must not introduce a second honesty authority — replace the fixture enum, keep the same catalog case ID.
+ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are exercised through fixture vocabulary in `adapter_conformance::enforcement` and the production presence plane (#1276 / #1287). Soft-consume must not introduce a second honesty authority — keep the same catalog case ID.
 
 ## Explicit non-goals
 
-- Implementing Codex or the offline replay adapter (siblings).
+- Implementing the offline replay adapter (#1278) inside this catalog Issue.
 - Inventing `SeyalTerminalExecutionHost` for M005 exit.
 - ADR create/amend inside an implementation PR.

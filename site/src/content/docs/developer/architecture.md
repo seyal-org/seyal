@@ -37,7 +37,7 @@ GUI detach and runtime survival are separate from crash recovery, scrollback per
 
 ## Local Context Engine
 
-M005 source discovery and rebuildable index/cache live in `seyal-agent-context` (agent domain), not on the terminal hot path. See the [Local Context Engine](./local-context-engine.md) developer page and ADR-013 / SPEC-013 for authority.
+M005 Local Context Engine discovery/index and ContextBundle/SelectionTrace assembly live in `seyal-agent-context` (agent domain), not on the terminal hot path. See the [Local Context Engine](./local-context-engine.md) developer page and ADR-013 / SPEC-013 for authority.
 
 ## OSS and commercial boundary
 
