@@ -155,6 +155,34 @@ impl ApplicationRoot {
                 Err(AppError::ActionUnavailable)
             }
             WorkspaceCommandId::AppQuit => self.quit(),
+            WorkspaceCommandId::AppCloseFocused => {
+                let id = self.shell.snapshot().focused_pane;
+                self.close_pane(id)
+            }
+            WorkspaceCommandId::WindowNew => self.create_window(),
+            WorkspaceCommandId::WindowClose => {
+                let id = self
+                    .shell
+                    .snapshot()
+                    .active_window
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.close_window(id)
+            }
+            WorkspaceCommandId::WindowCycleNext => {
+                self.cycle_window(crate::shell::CycleDirection::Next)
+            }
+            WorkspaceCommandId::WindowCyclePrevious => {
+                self.cycle_window(crate::shell::CycleDirection::Previous)
+            }
+            WorkspaceCommandId::WindowSelectOrdinal => {
+                let windows = self.shell.snapshot().windows;
+                let ordinal = command.ordinal.ok_or(AppError::ActionUnavailable)?.get();
+                let id = windows
+                    .get((ordinal as usize).saturating_sub(1))
+                    .map(|window| window.id)
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.select_window(id)
+            }
         }
     }
 

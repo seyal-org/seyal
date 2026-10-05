@@ -19,7 +19,7 @@ use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
 use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
-use crate::shell::ShellAction;
+use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
     /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
@@ -101,12 +101,14 @@ impl ApplicationRoot {
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
     pub(super) fn close_window(&mut self, id: seyal_core::WindowId) -> Result<(), AppError> {
         let generation = self.shell.containment_generation();
-        self.shell
-            .apply(ShellAction::CloseWindow {
-                id,
-                containment_generation: generation,
-            })
-            .map_err(|_| AppError::UnknownChromeTab)?;
+        self.apply_shell(ShellAction::CloseWindow {
+            id,
+            containment_generation: generation,
+        })
+        .map_err(|error| match error {
+            ShellError::StaleContainment => AppError::StalePane,
+            _ => AppError::UnknownWindow,
+        })?;
         let removed = self.shell.take_removed_tab_panes();
         let mut effects = Vec::new();
         for pane in removed {
@@ -137,12 +139,11 @@ impl ApplicationRoot {
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
         let generation = self.shell.containment_generation();
-        self.shell
-            .apply(ShellAction::CloseTab {
-                id,
-                containment_generation: generation,
-            })
-            .map_err(close_tab_error)?;
+        self.apply_shell(ShellAction::CloseTab {
+            id,
+            containment_generation: generation,
+        })
+        .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
         let mut effects = Vec::new();
         for pane in removed {
@@ -174,12 +175,11 @@ impl ApplicationRoot {
     /// terminated as a side effect of presentation close.
     pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
         let generation = self.shell.containment_generation();
-        self.shell
-            .apply(ShellAction::ClosePane {
-                id,
-                containment_generation: generation,
-            })
-            .map_err(close_pane_error)?;
+        self.apply_shell(ShellAction::ClosePane {
+            id,
+            containment_generation: generation,
+        })
+        .map_err(close_pane_error)?;
         let removed = self.shell.take_removed_tab_panes();
         if !removed.is_empty() {
             // Hierarchical sole-pane close cascaded through tab/window removal.

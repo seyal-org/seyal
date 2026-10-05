@@ -207,7 +207,7 @@ ordinal = 1
 
 [[keybindings]]
 keys = "cmd+w"
-action = "window.new"
+action = "window.explode"
 
 [[keybindings]]
 keys = "cmd+opt+left"
@@ -404,10 +404,11 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
     assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
 
-    assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
-    assert!(contexts_for(&table, "cmd+w").is_empty());
+    assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::AppCloseFocused).is_some());
     assert!(binding_for(&table, "cmd+w", WorkspaceCommandId::TabCloseFocused).is_none());
+    assert!(binding_for(&table, "cmd+n", WorkspaceCommandId::TabCreate).is_some());
+    assert!(binding_for(&table, "cmd+shift+n", WorkspaceCommandId::WindowNew).is_some());
 }
 
 #[test]

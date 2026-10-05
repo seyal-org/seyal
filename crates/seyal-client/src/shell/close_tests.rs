@@ -70,6 +70,7 @@ fn seed_two_workspaces() -> ShellState {
         workspace_a(),
         true,
         true,
+        true,
     )
     .expect("fixture")
 }
@@ -109,6 +110,7 @@ fn seed_single_window() -> (ShellState, WindowId, TabId, PaneId) {
             }],
         }],
         workspace_a(),
+        true,
         true,
         true,
     )
@@ -173,6 +175,7 @@ fn seed_two_windows() -> (ShellState, WindowId, WindowId, TabId, TabId, TabId) {
             ],
         }],
         workspace_a(),
+        true,
         true,
         true,
     )
@@ -467,6 +470,7 @@ fn close_active_window_prefers_same_workspace_mru_then_any() {
             },
         ],
         workspace_a(),
+        true,
         true,
         true,
     )

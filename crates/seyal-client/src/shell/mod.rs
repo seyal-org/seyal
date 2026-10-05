@@ -23,6 +23,8 @@ mod tests;
 mod unpresented_tests;
 #[cfg(test)]
 mod w2a_tests;
+#[cfg(test)]
+mod window_admission_tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -78,6 +80,8 @@ pub enum ShellError {
     CrossWorkspaceAdopt,
     /// Adopt/terminate of an execution that is not live-unpresented here.
     ExecutionNotUnpresented,
+    /// Extra Window create rejected when headed admission is off.
+    WindowCreationUnavailable,
 }
 
 impl ShellError {
@@ -109,6 +113,9 @@ impl ShellError {
             Self::CrossWorkspaceAdopt => "An execution cannot be adopted across Workspaces.",
             Self::ExecutionNotUnpresented => {
                 "This execution is not a live-unpresented execution in this Workspace."
+            }
+            Self::WindowCreationUnavailable => {
+                "Creating another Window is unavailable until window close exists."
             }
         }
     }
@@ -257,6 +264,7 @@ pub struct ShellSnapshot {
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
+    pub allows_window_creation: bool,
     pub allows_pane_splitting: bool,
     /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused Pane
     /// would currently be accepted. Hierarchical close always admits the active
@@ -301,6 +309,7 @@ pub struct ShellState {
     focus_history: FocusHistory,
     allows_pane_splitting: bool,
     allows_tab_creation: bool,
+    allows_window_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
     /// Execution released by the most recent successful `ClosePane`, if any.
@@ -346,6 +355,7 @@ impl ShellState {
             focus_history: FocusHistory::default(),
             allows_pane_splitting: false,
             allows_tab_creation: true,
+            allows_window_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
             last_released_execution: None,
@@ -363,6 +373,7 @@ impl ShellState {
         active_workspace: WorkspaceId,
         allows_pane_splitting: bool,
         allows_tab_creation: bool,
+        allows_window_creation: bool,
     ) -> Result<Self, ShellError> {
         if workspaces.is_empty() {
             return Err(ShellError::EmptyShell);
@@ -382,6 +393,7 @@ impl ShellState {
             focus_history: FocusHistory::default(),
             allows_pane_splitting,
             allows_tab_creation,
+            allows_window_creation,
             last_error: None,
             next_tab_ordinal: 2,
             last_released_execution: None,
@@ -481,10 +493,20 @@ impl ShellState {
         self.allows_tab_creation
     }
 
-    /// Test/C2 harness: flip the production gate without rebuilding the shell.
+    pub fn allows_window_creation(&self) -> bool {
+        self.allows_window_creation
+    }
+
+    /// Test harness: flip CreateWindow admission without rebuilding the shell.
     #[cfg(test)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn set_allows_window_creation_for_test(&mut self, allowed: bool) {
+        self.allows_window_creation = allowed;
+    }
+
     /// Test-only policy flip. Called from macOS C2 harness suites via
     /// `ApplicationRoot::enable_tab_creation_for_test`.
+    #[cfg(test)]
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn set_allows_tab_creation_for_test(&mut self, allowed: bool) {
         self.allows_tab_creation = allowed;

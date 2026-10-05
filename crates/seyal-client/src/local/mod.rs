@@ -160,6 +160,19 @@ pub struct LocalDisplayClient {
 }
 
 impl LocalDisplayClient {
+    /// One nonblocking `Detach` write. Does not wait for `Detached` (SPEC-009 §6)
+    /// and does not retry. The caller drops the client immediately after.
+    pub fn request_bounded_detach(&mut self) {
+        use std::io::Write;
+        let payload = seyal_runtime::local_ipc::framing::Detach {
+            attachment_id: self.attachment_id,
+        }
+        .encode();
+        let frame = encode_frame(MessageType::Detach, &payload);
+        let _ = self.stream.set_nonblocking(true);
+        let _ = self.stream.write_all(&frame);
+    }
+
     pub fn socket_fd(&self) -> i32 {
         self.stream.as_raw_fd()
     }
@@ -617,7 +630,29 @@ pub(crate) fn validate_composer_status(
 
 /// In-process client for reconstruction-fact tests. Rows and columns are the
 /// same gate `finish_attach` uses for a committed snapshot (`> 0`).
-#[cfg(test)]
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) fn try_reconstruction_probe_client(
+    role: Role,
+    rows: u16,
+    columns: u16,
+    runtime_id: u128,
+    execution_id: ExecutionId,
+    attachment_id: AttachmentId,
+) -> Result<LocalDisplayClient, ()> {
+    let (stream, _peer) = UnixStream::pair().map_err(|_| ())?;
+    Ok(reconstruction_probe_client_with_stream(
+        stream,
+        role,
+        rows,
+        columns,
+        runtime_id,
+        execution_id,
+        attachment_id,
+    ))
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[allow(dead_code)] // fallible path is preferred; keep expect wrapper for call sites.
 pub(crate) fn reconstruction_probe_client(
     role: Role,
     rows: u16,
@@ -626,7 +661,20 @@ pub(crate) fn reconstruction_probe_client(
     execution_id: ExecutionId,
     attachment_id: AttachmentId,
 ) -> LocalDisplayClient {
-    let (stream, _peer) = UnixStream::pair().expect("probe socket");
+    try_reconstruction_probe_client(role, rows, columns, runtime_id, execution_id, attachment_id)
+        .expect("probe socket")
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn reconstruction_probe_client_with_stream(
+    stream: UnixStream,
+    role: Role,
+    rows: u16,
+    columns: u16,
+    runtime_id: u128,
+    execution_id: ExecutionId,
+    attachment_id: AttachmentId,
+) -> LocalDisplayClient {
     let mut cache = seyal_runtime::display::empty_cache();
     cache.rows = rows;
     cache.columns = columns;

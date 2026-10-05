@@ -45,6 +45,7 @@ fn closing_bound_authority_pane_clears_presentation_for_rebind() {
         workspace,
         true,
         false,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);

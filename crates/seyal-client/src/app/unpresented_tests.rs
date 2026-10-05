@@ -15,6 +15,19 @@ fn evidence(execution: ExecutionId, attachment: AttachmentId) -> BindingEvidence
     }
 }
 
+fn product_effects(root: &ApplicationRoot) -> Vec<NativeEffect> {
+    root.snapshot()
+        .pending_effects
+        .into_iter()
+        .filter(|effect| {
+            !matches!(
+                effect,
+                NativeEffect::RealizeWindow { .. } | NativeEffect::OrderFrontMakeKey { .. }
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn adopt_keeps_execution_id_and_uses_fresh_attachment() {
     let mut root = ApplicationRoot::new();
@@ -64,7 +77,7 @@ fn terminate_queues_adr005_effect_not_from_close() {
     root.apply(AppAction::TerminateUnpresented { execution })
         .unwrap();
     assert_eq!(
-        root.snapshot().pending_effects,
+        product_effects(&root),
         vec![NativeEffect::TerminateExecution { execution }]
     );
 }
@@ -122,7 +135,7 @@ fn palette_terminate_dispatches_typed_action() {
     })
     .unwrap();
     assert_eq!(
-        root.snapshot().pending_effects,
+        product_effects(&root),
         vec![NativeEffect::TerminateExecution { execution }]
     );
 }
@@ -218,7 +231,7 @@ fn palette_adopt_emits_attach_intent_without_binding() {
     .unwrap();
 
     assert_eq!(
-        root.snapshot().pending_effects,
+        product_effects(&root),
         vec![NativeEffect::RequestAdoptAttach { pane, execution }]
     );
     // Catalog and leaf binding unchanged — Adopt with evidence still works.
@@ -272,4 +285,35 @@ fn adopt_rejects_cross_workspace_and_retired() {
         Err(AppError::ExecutionNotUnpresented)
     );
     let _ = local;
+}
+
+#[test]
+fn close_window_keeps_bound_execution_enumerable_without_terminate() {
+    let mut root = ApplicationRoot::new();
+    let execution = ExecutionId::from_bytes([0x44; 16]);
+    let window = root
+        .snapshot()
+        .shell
+        .active_window
+        .expect("bootstrap window");
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x45; 16])),
+    })
+    .unwrap();
+    root.apply(AppAction::CloseWindow { id: window })
+        .expect("W4b CloseWindow");
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert!(root.snapshot().shell.active_window.is_none());
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::DestroyWindowRealization { .. })));
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }

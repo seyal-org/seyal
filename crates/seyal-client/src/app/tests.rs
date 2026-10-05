@@ -353,18 +353,29 @@ fn tui_controller_without_client_is_authorized_but_has_no_second_pty() {
 #[test]
 fn quit_freezes_and_emits_one_native_effect() {
     let mut root = ApplicationRoot::new();
+    // Drain bootstrap RealizeWindow / OrderFrontMakeKey from with_shell.
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
     root.apply(AppAction::Quit).unwrap();
     let snap = root.snapshot();
     assert!(snap.frozen);
     assert_eq!(
         snap.pending_effects.as_slice(),
-        &[NativeEffect::BoundedDetachThenTerminate]
+        &[NativeEffect::BoundedDetachThenTerminate {
+            deadline_ms: crate::app::native_effect::QUIT_CLEANUP_DEADLINE_MS
+        }]
     );
     assert_eq!(
         root.apply(AppAction::Focus {
             fence: root.fence()
         }),
         Err(AppError::Frozen)
+    );
+    root.apply(AppAction::AckEffect).unwrap();
+    assert_eq!(
+        root.snapshot().pending_effects.as_slice(),
+        &[NativeEffect::QuitCleanupComplete]
     );
     root.apply(AppAction::AckEffect).unwrap();
     assert!(root.snapshot().pending_effects.is_empty());
@@ -392,7 +403,7 @@ fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     assert!(
         snap.pending_effects
             .iter()
-            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
         "quit effect must remain present after prior selections"
     );
     while !root.snapshot().pending_effects.is_empty() {
@@ -659,6 +670,7 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -754,6 +766,7 @@ fn palette_run_by_address_not_rebinding_ordinal() {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -1042,4 +1055,18 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
         }),
         Err(AppError::UnknownAttention)
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn install_quit_fixture_attaches_probe_clients() {
+    let mut root = ApplicationRoot::new();
+    root.install_quit_fixture(3).expect("fixture");
+    assert_eq!(root.live_attachment_count(), 3);
+    assert_eq!(root.snapshot().shell.windows.len(), 3);
+    root.apply(AppAction::Quit).unwrap();
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    assert_eq!(root.live_attachment_count(), 0);
 }

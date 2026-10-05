@@ -168,8 +168,9 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (window.*, ADR-021 pane verbs) stay out until their typed actions
-/// land (R5.0.1 / R5.1.3). `goto.open` and focus-history Back/Forward are admitted.
+/// Remaining gated ids (ADR-021 pane verbs still without typed actions) stay
+/// `UnknownAction` at load (R5.0.1 / R5.1.3). `goto.open` and focus-history
+/// Back/Forward remain parseable. W4b admits §5.0 window and hierarchical-close ids.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -194,6 +195,12 @@ pub enum WorkspaceCommandId {
     FocusHistoryBack,
     FocusHistoryForward,
     AppQuit,
+    AppCloseFocused,
+    WindowNew,
+    WindowClose,
+    WindowCycleNext,
+    WindowCyclePrevious,
+    WindowSelectOrdinal,
 }
 
 impl WorkspaceCommandId {
@@ -221,6 +228,12 @@ impl WorkspaceCommandId {
             Self::FocusHistoryBack => "focus_history.back",
             Self::FocusHistoryForward => "focus_history.forward",
             Self::AppQuit => "app.quit",
+            Self::AppCloseFocused => "app.close_focused",
+            Self::WindowNew => "window.new",
+            Self::WindowClose => "window.close",
+            Self::WindowCycleNext => "window.cycle_next",
+            Self::WindowCyclePrevious => "window.cycle_previous",
+            Self::WindowSelectOrdinal => "window.select_ordinal",
         }
     }
 
@@ -248,6 +261,12 @@ impl WorkspaceCommandId {
             "focus_history.back" => Self::FocusHistoryBack,
             "focus_history.forward" => Self::FocusHistoryForward,
             "app.quit" => Self::AppQuit,
+            "app.close_focused" => Self::AppCloseFocused,
+            "window.new" => Self::WindowNew,
+            "window.close" => Self::WindowClose,
+            "window.cycle_next" => Self::WindowCycleNext,
+            "window.cycle_previous" => Self::WindowCyclePrevious,
+            "window.select_ordinal" => Self::WindowSelectOrdinal,
             _ => return None,
         })
     }

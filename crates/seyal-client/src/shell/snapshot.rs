@@ -125,6 +125,7 @@ impl ShellState {
             layout,
             last_error: self.last_error,
             allows_tab_creation: self.allows_tab_creation && product_window.is_some(),
+            allows_window_creation: self.allows_window_creation,
             allows_pane_splitting: self.allows_pane_splitting && product_window.is_some(),
             allows_tab_close,
             allows_pane_close,
@@ -255,6 +256,7 @@ impl ShellError {
             Self::CrossWorkspaceMove => 16,
             Self::CrossWorkspaceAdopt => 18,
             Self::ExecutionNotUnpresented => 19,
+            Self::WindowCreationUnavailable => 20,
         }
     }
 }
