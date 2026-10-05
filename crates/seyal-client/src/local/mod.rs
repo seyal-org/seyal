@@ -48,9 +48,8 @@ pub(crate) const MAX_UNRESOLVED_RESIZES: usize = 1_024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientError {
     Discovery(DiscoveryFailure),
-    /// The caller's absolute startup/recovery deadline elapsed while the
-    /// disposable connection was still discovering, handshaking, attaching,
-    /// or collecting its initial authoritative snapshot.
+    /// Absolute startup/recovery deadline elapsed during discover, handshake,
+    /// attach, or the initial authoritative snapshot.
     StartupDeadlineExceeded,
     Io,
     Protocol,
@@ -156,8 +155,6 @@ pub struct LocalDisplayClient {
     pub(crate) pending_terminate_requests: std::collections::HashSet<u64>,
     pub(crate) last_create_result: VecDeque<CreateExecutionResult>,
     pub(crate) last_terminate_result: Option<TerminateExecutionResult>,
-    /// Primary viewport LineIds for the latest accepted `ViewportLineIds`
-    /// generation. Cleared on disconnect/resync; empty until Runtime publishes.
     pub(crate) viewport_line_ids: Vec<u64>,
     pub(crate) viewport_line_ids_generation: u64,
 }
@@ -167,7 +164,6 @@ impl LocalDisplayClient {
         self.stream.as_raw_fd()
     }
 
-    /// Test/diagnostic: shut down the Controller socket so the next poll sees EOF.
     #[doc(hidden)]
     pub fn force_eof_for_test(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);

@@ -7,6 +7,7 @@ mod block_projection;
 mod decode;
 mod encode;
 mod error_code;
+mod loss;
 mod pane_region;
 mod shortcut;
 mod visual;
@@ -37,6 +38,7 @@ use encode::{
 };
 
 pub use block_projection::seyal_app_block_projection;
+pub(crate) use loss::note_application_roots_client_loss;
 pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
@@ -293,10 +295,7 @@ thread_local! {
     static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
-/// Drive ApplicationRoot wire create/attach from the production poll path.
-/// Only when CreateTab / dispose / pending second-Controller work needs it —
-/// not on every frame (that re-derived presentation against every poll and
-/// stalled live connect / TUI evidence).
+/// Drive ApplicationRoot create/attach only while provisioning work is outstanding.
 pub(crate) fn drive_application_roots() {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
@@ -306,19 +305,6 @@ pub(crate) fn drive_application_roots() {
             }
             let fence = state.root.fence();
             let _ = state.root.poll_client(fence);
-        }
-    });
-}
-
-/// Clear ApplicationRoot pane authority/maps for a disconnected registry client.
-pub(crate) fn note_application_roots_client_loss(handle: u64) {
-    if handle == 0 {
-        return;
-    }
-    APPS.with(|apps| {
-        let mut apps = apps.borrow_mut();
-        for state in apps.values_mut() {
-            state.root.note_registry_client_loss(handle);
         }
     });
 }

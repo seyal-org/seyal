@@ -446,10 +446,9 @@ impl ApplicationRoot {
                 .presentation
                 .apply(crate::presentation::PresentationAction::ClearIdentity);
             self.sync_composer_presentation();
-            // ADR-017 §6.1 detach-only: keep the shared create LocalDisplayClient /
-            // client_handle registered so remaining tabs can still admit
-            // create on the same connection. Extra per-pane Controllers are
-            // unregistered above; create-client unregister is quit / replace / drop.
+            // ADR-017 §6.1: keep the create Controller registered so remaining
+            // tabs can still admit create. Extra per-pane Controllers are
+            // unregistered above; create-client unregister is quit/replace/drop.
             #[cfg(target_os = "macos")]
             self.activate_focused_pane_authority();
         }
