@@ -45,6 +45,10 @@ define_id!(AgentRunId, 0x4147_5255_4e00_0001);
 define_id!(BackendInstanceId, 0x4147_4241_434b_4501);
 define_id!(ClientPrincipalId, 0x4147_5052_494e_4301);
 define_id!(ClientSessionId, 0x4147_5345_5353_4901);
+// Durable adapter catalog identity (SPEC-027 §5.2).
+define_id!(AdapterId, 0x4147_4144_4150_5401);
+// RouteOffering identity within an adapter manifest (SPEC-027 §4).
+define_id!(RouteOfferingId, 0x4147_524f_4646_4501);
 
 fn unique_id(domain: u64) -> u128 {
     let sequence = NEXT_ID
@@ -125,6 +129,8 @@ mod tests {
             BackendInstanceId::new().to_bytes(),
             ClientPrincipalId::new().to_bytes(),
             ClientSessionId::new().to_bytes(),
+            AdapterId::new().to_bytes(),
+            RouteOfferingId::new().to_bytes(),
         ];
         for left in 0..values.len() {
             for right in (left + 1)..values.len() {

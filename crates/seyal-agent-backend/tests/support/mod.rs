@@ -208,6 +208,7 @@ impl TestClient {
             &Command::StartAgentRun {
                 session_id: self.session_id,
                 attempt_id,
+                route_offering_id: None,
             },
         ) {
             CommandResult::Started {

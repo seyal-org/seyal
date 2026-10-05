@@ -1,8 +1,10 @@
 //! Process-level crash, restart, and idle evidence for the standalone daemon.
 //!
 //! Run-success, replay, and SIGKILL cases spawn the qualification binary
-//! (`fixture-host` Fake host). Production-binary cases cover hostless
-//! StartAgentRun fail-closed and rejection of `--output-bytes` (AB-1.9).
+//! (`fixture-host` Fake host). Production-binary cases cover the real
+//! composed `StandaloneProcessHost` (#1224), `StartAgentRun` fail-closed
+//! with no installed adapter catalog, and rejection of `--output-bytes`
+//! (AB-1.9/SPEC-027).
 
 mod support;
 
@@ -210,7 +212,7 @@ fn sigkill_restart_recovers_identities_and_fences_old_session() {
     let socket_for_client = socket.clone();
     let creator = thread::spawn(move || {
         let mut client = TestClient::connect(&socket_for_client);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -331,12 +333,13 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
         let socket_for_client = socket.clone();
         let writer = thread::spawn(move || {
             let mut client = TestClient::connect(&socket_for_client);
-            let scope = client.create_work_scope(WorkScopeKind::Repository);
+            let scope = client.create_work_scope(WorkScopeKind::AdHoc);
             let item = client.create_work_item(scope);
             let attempt = client.create_attempt(item);
             let _ = client.command(&Command::StartAgentRun {
                 session_id: client.session_id,
                 attempt_id: attempt,
+                route_offering_id: None,
             });
         });
         thread::sleep(Duration::from_millis(5 * (iteration + 1)));
@@ -427,7 +430,7 @@ fn campaign_high_volume_session_workload() {
         let worker = thread::spawn(move || {
             let mut client =
                 TestClient::connect_limits(&socket_for_client, ABSOLUTE_MAX_FRAME_SIZE, 256);
-            let scope = client.create_work_scope(WorkScopeKind::Repository);
+            let scope = client.create_work_scope(WorkScopeKind::AdHoc);
             let item = client.create_work_item(scope);
             let attempt = client.create_attempt(item);
             let append_started = Instant::now();
@@ -537,8 +540,8 @@ fn campaign_high_volume_session_workload() {
 }
 
 #[test]
-fn production_start_agent_run_fails_closed_without_agent_run() {
-    let dir = temp_dir("prod-hostless");
+fn production_start_agent_run_fails_closed_without_an_installed_catalog() {
+    let dir = temp_dir("prod-empty-catalog");
     let mut child = spawn_production(&dir);
     let socket = dir.join("agent.sock");
     wait_ready(&socket);
@@ -547,22 +550,30 @@ fn production_start_agent_run_fails_closed_without_agent_run() {
     let socket_for_client = socket.clone();
     let worker = thread::spawn(move || {
         let mut client = TestClient::connect(&socket_for_client);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         })
     });
     let started = worker.join().unwrap();
-    assert_eq!(started, CommandResult::Error(CommandError::Failed));
-    assert_child_alive(&mut child.0, "after hostless StartAgentRun");
+    // SPEC-027 §4.3/§7 step 4: production composes a real host (#1224), but
+    // this daemon instance's durable adapter catalog is empty, so there is
+    // no eligible target. Same typed `ExecutionTargetUnavailable` either
+    // way — no mint, no durable AgentRun.
+    assert_eq!(
+        started,
+        CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+    );
+    assert_child_alive(&mut child.0, "after StartAgentRun with no catalog");
 
     let store = AgentStore::open(dir.join("agent.db")).unwrap();
     assert!(
         store.agent_runs().unwrap().is_empty(),
-        "production Failed must leave no AgentRun"
+        "no eligible target must leave no AgentRun"
     );
     drop(store);
 
@@ -575,6 +586,273 @@ fn production_start_agent_run_fails_closed_without_agent_run() {
     assert!(store.agent_runs().unwrap().is_empty());
     drop(store);
     drop(restarted);
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Trusted pre-provisioning for a real-production-binary E2E test: a
+/// private (0o700) directory, one enabled non-TTY adapter whose
+/// manifest-owned LaunchDescriptorV1 (SPEC-027 §5.1) names `program`/`argv`,
+/// and a durable `adapter.execute` grant (SPEC-027 §7 step 5 / D3) to the
+/// first-party CLI owner — all written directly against the durable store
+/// the production daemon will open, exactly as a trusted `admin.adapters`
+/// tool would (no wire command exists for this install path yet). The
+/// seeded owner/observer principals mirror `load_or_seed_principals`'s own
+/// seeding exactly (same evidence key, scopes, principal kind) so the real
+/// daemon's first `open()` call loads this identity instead of seeding a
+/// fresh, different one.
+fn seed_standalone_catalog(
+    dir: &Path,
+    program: &str,
+    argv: &[&str],
+) -> seyal_agent_core::AdapterId {
+    fs::create_dir_all(dir).unwrap();
+    fs::set_permissions(
+        dir,
+        <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
+    )
+    .unwrap();
+    let store = AgentStore::open(dir.join("agent.db")).unwrap();
+    let adapter_id = seyal_agent_core::AdapterId::new();
+    let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+        program,
+        seyal_agent_store::CwdPolicy::AdapterWorkDir,
+    )
+    .with_argv(argv.iter().copied());
+    store
+        .install_or_update_adapter(adapter_id, 1, true, &launch)
+        .expect("install adapter");
+    store
+        .add_route_offering(seyal_agent_core::RouteOfferingId::new(), adapter_id, false)
+        .expect("add offering");
+    let mut seed_auth = seyal_agent_backend::AuthorizationRepository::default();
+    let owner_principal_id = seed_auth.register_principal_with_evidence(
+        seyal_agent_backend::PrincipalKind::FirstPartyCli,
+        [
+            seyal_agent_backend::ClientScope::RunsCreate,
+            seyal_agent_backend::ClientScope::RunsObserve,
+            seyal_agent_backend::ClientScope::RunsControl,
+        ],
+        b"cli".to_vec(),
+    );
+    let observer_principal_id = seed_auth.register_principal_with_evidence(
+        seyal_agent_backend::PrincipalKind::ManagedClient,
+        [seyal_agent_backend::ClientScope::RunsObserve],
+        b"observer".to_vec(),
+    );
+    for principal_id in [owner_principal_id, observer_principal_id] {
+        let durable = seed_auth.durable_principal(principal_id).unwrap();
+        let mut scopes: Vec<u8> = durable.scopes.iter().map(|scope| scope.code()).collect();
+        scopes.sort_unstable();
+        store
+            .upsert_principal(&seyal_agent_store::PersistedPrincipal {
+                id: durable.id,
+                kind: durable.kind.code(),
+                status: durable.status.code(),
+                scopes,
+                evidence_key: durable.evidence_key,
+            })
+            .expect("seed principal");
+    }
+    store
+        .grant_adapter_execute(owner_principal_id, adapter_id)
+        .expect("durably grant adapter.execute");
+    adapter_id
+}
+
+/// SPEC-027 §9.5/§12 (delivered by #1224): the real production binary,
+/// built without `fixture-host`, dispatches through a real composed
+/// `StandaloneProcessHost` end to end against a durable catalog pre-seeded
+/// the way a trusted `admin.adapters` tool would (no wire command exists for
+/// this install path yet) — never a `FakeExecutionHost`.
+#[test]
+fn production_binary_dispatches_a_real_child_process_through_standalone_host() {
+    const MARKER: &str = "seyal-standalone-host-e2e-marker";
+    let dir = temp_dir("prod-standalone-e2e");
+    seed_standalone_catalog(&dir, "/bin/echo", &[MARKER]);
+
+    let mut child = spawn_production(&dir);
+    let socket = dir.join("agent.sock");
+    wait_ready(&socket);
+    assert_child_alive(&mut child.0, "production startup with pre-seeded catalog");
+
+    let socket_for_client = socket.clone();
+    let worker = thread::spawn(move || {
+        let mut client = TestClient::connect(&socket_for_client);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+        let item = client.create_work_item(scope);
+        let attempt = client.create_attempt(item);
+        let started = client.start_agent_run(attempt);
+        // `start` only guarantees spawn evidence has returned, not that the
+        // real child has exited yet (SPEC-027 §9.1 never blocks on child
+        // I/O) — poll `ReadRun` for `KnownTerminated` with a bounded wait.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let (_, _, liveness) = client.read_run(started.run_id);
+            if liveness == 2 {
+                break;
+            }
+            if Instant::now() >= deadline {
+                panic!("real child did not reach KnownTerminated in time: liveness={liveness}");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        started.run_id
+    });
+    let run_id = worker.join().unwrap();
+    assert_child_alive(&mut child.0, "after real StandaloneProcessHost dispatch");
+
+    let store = AgentStore::open(dir.join("agent.db")).unwrap();
+    let events = store
+        .replay_after(AggregateId::AgentRun(run_id), None)
+        .unwrap();
+    let mut output = Vec::new();
+    for event in &events {
+        if let Ok(output_ref) = seyal_agent_store::decode_output_ref(&event.payload) {
+            output.extend(store.materialize_output_ref(run_id, &output_ref).unwrap());
+        }
+    }
+    let text = String::from_utf8_lossy(&output);
+    assert!(
+        text.contains(MARKER),
+        "expected the real /bin/echo child's stdout to carry {MARKER:?}, got {text:?}"
+    );
+    drop(store);
+
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// SPEC-027 §9.2/§11 fixture 12: `start` must hold no service mutex across
+/// child I/O. The composed `StandaloneProcessHost` never blocks on child
+/// I/O internally (its background reader does that), so the service mutex
+/// is only ever held for one bounded `Command::spawn` plus a non-blocking
+/// channel drain — never for the child's full lifetime. This is observable
+/// from outside the daemon: a long-lived real child (`sleep`) must not stall
+/// a *second*, independent connection's concurrent `ReadRun`, and that
+/// `ReadRun` must see the run still live (not fabricated as terminated).
+#[test]
+fn production_concurrent_read_run_completes_promptly_while_the_real_child_is_still_live() {
+    let dir = temp_dir("prod-fixture12-concurrent");
+    seed_standalone_catalog(&dir, "/bin/sleep", &["5"]);
+
+    let mut child = spawn_production(&dir);
+    let socket = dir.join("agent.sock");
+    wait_ready(&socket);
+    assert_child_alive(&mut child.0, "production startup for fixture 12");
+
+    let mut starter = TestClient::connect(&socket);
+    let scope = starter.create_work_scope(WorkScopeKind::AdHoc);
+    let item = starter.create_work_item(scope);
+    let attempt = starter.create_attempt(item);
+    let started = starter.start_agent_run(attempt);
+
+    // A wholly independent connection's ReadRun, issued immediately after
+    // `start_agent_run` returns while the 5-second `sleep` child is still
+    // running, must return promptly rather than blocking for anything close
+    // to the child's lifetime.
+    let mut reader = TestClient::connect(&socket);
+    let before = Instant::now();
+    let (_, _, liveness) = reader.read_run(started.run_id);
+    let elapsed = before.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "concurrent ReadRun took {elapsed:?}, which indicates the service \
+         mutex was held across child I/O instead of a bounded spawn+drain"
+    );
+    assert_eq!(
+        liveness, 1,
+        "ReadRun observed liveness {liveness} immediately after start; the \
+         real sleep child cannot have genuinely terminated yet, so anything \
+         but ScriptedLive(1) would be fabricated"
+    );
+
+    assert_child_alive(&mut child.0, "after concurrent ReadRun during fixture 12");
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn children_of(pid: u32) -> Vec<u32> {
+    let output = ProcessCommand::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .output()
+        .expect("pgrep -P");
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect()
+}
+
+#[allow(unsafe_code)]
+fn send_sigterm(pid: u32) {
+    let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    assert_eq!(rc, 0, "SIGTERM daemon pid {pid}");
+}
+
+#[allow(unsafe_code)]
+fn pid_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// SPEC-027 §11 fixture 13: SIGTERM on the production daemon must reap the
+/// live `StandaloneProcessHost` child (process-group kill), not leave it.
+#[test]
+fn production_sigterm_reaps_live_standalone_child() {
+    let dir = temp_dir("prod-fixture13-sigterm");
+    seed_standalone_catalog(&dir, "/bin/sleep", &["30"]);
+
+    let mut child = spawn_production(&dir);
+    let socket = dir.join("agent.sock");
+    wait_ready(&socket);
+    let daemon_pid = child.0.id();
+    assert!(pid_alive(daemon_pid), "production daemon must be running");
+
+    let mut client = TestClient::connect(&socket);
+    let scope = client.create_work_scope(WorkScopeKind::AdHoc);
+    let item = client.create_work_item(scope);
+    let attempt = client.create_attempt(item);
+    let _started = client.start_agent_run(attempt);
+
+    let descendants = children_of(daemon_pid);
+    assert!(
+        !descendants.is_empty(),
+        "StartAgentRun must leave a live sleep child under the daemon"
+    );
+
+    send_sigterm(daemon_pid);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let status = loop {
+        match child.0.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                panic!("production daemon did not exit within 3s of SIGTERM")
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Err(error) => panic!("wait daemon after SIGTERM: {error}"),
+        }
+    };
+    assert!(
+        status.success(),
+        "SIGTERM should exit 0 after host reap; status={status:?}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let still_live: Vec<u32> = loop {
+        let live: Vec<u32> = descendants
+            .iter()
+            .copied()
+            .filter(|pid| pid_alive(*pid))
+            .collect();
+        if live.is_empty() || Instant::now() >= deadline {
+            break live;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        still_live.is_empty(),
+        "live sleep descendants survived daemon SIGTERM: {still_live:?}"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 

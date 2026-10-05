@@ -139,7 +139,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
         principal,
         Command::CreateWorkScope {
             session_id,
-            kind: WorkScopeKind::Repository,
+            kind: WorkScopeKind::AdHoc,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -175,6 +175,7 @@ fn start_agent_run_event_count_does_not_load_full_replay_payloads() {
         Command::StartAgentRun {
             session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -293,6 +294,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         Command::StartAgentRun {
             session_id: session,
             attempt_id: attempt,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -372,6 +374,7 @@ fn recovery_matrix_honors_terminal_and_keeps_live_unknown() {
         Command::StartAgentRun {
             session_id: session,
             attempt_id: attempt,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -525,10 +528,12 @@ fn foreign_connection_session_bearing_commands_are_rejected_identically() {
             Command::StartAgentRun {
                 session_id: session,
                 attempt_id: attempt,
+                route_offering_id: None,
             },
             Command::StartAgentRun {
                 session_id: unknown,
                 attempt_id: attempt,
+                route_offering_id: None,
             },
         ),
         (
@@ -670,7 +675,7 @@ fn expect_scope(
         principal,
         Command::CreateWorkScope {
             session_id,
-            kind: WorkScopeKind::Repository,
+            kind: WorkScopeKind::AdHoc,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -731,6 +736,7 @@ fn expect_run(
         Command::StartAgentRun {
             session_id,
             attempt_id,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,

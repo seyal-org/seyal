@@ -31,5 +31,5 @@ fn main() {
         ScriptStep::Emit(HostObservationKind::Started),
         ScriptStep::Emit(HostObservationKind::Output(vec![5; output_bytes])),
     ]);
-    launch::serve(options, Some(Box::new(host)));
+    launch::serve(options, Some(Box::new(host)), true);
 }

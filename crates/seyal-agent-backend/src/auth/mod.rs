@@ -3,7 +3,9 @@ use std::{
     fmt,
 };
 
-use seyal_agent_core::{AgentRunId, BackendInstanceId, ClientPrincipalId, ClientSessionId};
+use seyal_agent_core::{
+    AdapterId, AgentRunId, BackendInstanceId, ClientPrincipalId, ClientSessionId,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ClientScope {
@@ -66,6 +68,10 @@ struct Principal {
     status: PrincipalStatus,
     scopes: BTreeSet<ClientScope>,
     allowed_runs: BTreeSet<AgentRunId>,
+    /// Per-adapter `adapter.execute` grants (SPEC-027 §7 step 5 / D3). Until
+    /// #1191 pairing lands, only `FirstPartyCli`/`FirstPartySeyal` principals
+    /// may hold any entry here; `grant_adapter_execute` enforces that.
+    executable_adapters: BTreeSet<AdapterId>,
     /// Hello evidence token that selects this principal (`cli`, `observer`, …).
     evidence_key: Vec<u8>,
 }
@@ -208,6 +214,7 @@ impl AuthorizationRepository {
                 status: PrincipalStatus::Active,
                 scopes: scopes.into_iter().collect(),
                 allowed_runs: BTreeSet::new(),
+                executable_adapters: BTreeSet::new(),
                 evidence_key: evidence_key.clone(),
             },
         );
@@ -228,6 +235,7 @@ impl AuthorizationRepository {
                 status: row.status,
                 scopes: row.scopes,
                 allowed_runs: BTreeSet::new(),
+                executable_adapters: BTreeSet::new(),
                 evidence_key: row.evidence_key.clone(),
             },
         );
@@ -302,6 +310,50 @@ impl AuthorizationRepository {
                 principal.allowed_runs.insert(run_id);
             }
         }
+    }
+
+    /// Grant `adapter.execute` for one adapter (D3 / SPEC-027 §7 step 5).
+    /// Until #1191 pairing is Done, only first-party principal kinds are
+    /// eligible; this never relaxes for `UserApprovedLocalClient` or
+    /// `ManagedClient` regardless of caller intent.
+    pub fn grant_adapter_execute(
+        &mut self,
+        id: ClientPrincipalId,
+        adapter_id: AdapterId,
+    ) -> Result<(), AuthorizationError> {
+        let principal = self
+            .principals
+            .get_mut(&id)
+            .ok_or(AuthorizationError::UnknownPrincipal)?;
+        match principal.kind {
+            PrincipalKind::FirstPartyCli | PrincipalKind::FirstPartySeyal => {
+                principal.executable_adapters.insert(adapter_id);
+                Ok(())
+            }
+            PrincipalKind::UserApprovedLocalClient | PrincipalKind::ManagedClient => {
+                Err(AuthorizationError::ScopeEscalation)
+            }
+        }
+    }
+
+    /// `runs.create` and `adapter.execute` are independent grants (D3): a
+    /// session with the former but not the latter must still be rejected.
+    pub fn authorize_adapter_execute(
+        &self,
+        session_id: ClientSessionId,
+        backend_instance_id: BackendInstanceId,
+        adapter_id: AdapterId,
+        caller: ClientPrincipalId,
+    ) -> Result<(), AuthorizationError> {
+        let session = self.session(session_id, backend_instance_id, caller)?;
+        let principal = self
+            .principals
+            .get(&session.principal_id)
+            .ok_or(AuthorizationError::UnknownPrincipal)?;
+        if !principal.executable_adapters.contains(&adapter_id) {
+            return Err(AuthorizationError::TargetDenied);
+        }
+        Ok(())
     }
 
     /// Recognized Hello principal evidence tokens.

@@ -7,7 +7,8 @@ use seyal_agent_core::WorkScopeKind;
 
 use crate::{
     frame::{encode_frame, FrameError, FrameKind},
-    AgentRunId, AttemptId, ClientSessionId, WorkItemId, WorkScopeId, MAX_EVENT_WINDOW,
+    AgentRunId, AttemptId, ClientSessionId, RouteOfferingId, WorkItemId, WorkScopeId,
+    MAX_EVENT_WINDOW,
 };
 
 const MAX_SCOPES: usize = 8;
@@ -50,6 +51,9 @@ pub enum Command {
     StartAgentRun {
         session_id: ClientSessionId,
         attempt_id: AttemptId,
+        /// Optional execution-target pin (SPEC-027 §4.1). Never program,
+        /// argv, environment, cwd, or raw launch bytes.
+        route_offering_id: Option<RouteOfferingId>,
     },
     GetSnapshot {
         session_id: ClientSessionId,
@@ -81,6 +85,15 @@ pub enum CommandError {
     NotFound,
     Malformed,
     Failed,
+    /// SPEC-027 §8/§10: no composed host, unknown/uninstalled pin, hard
+    /// constraint miss, unpinned zero/many offerings, or frozen descriptor
+    /// missing. Never a substitute for `Denied`/`NotFound`/the two codes below.
+    ExecutionTargetUnavailable,
+    /// SPEC-027 §10: pin names a present, otherwise-eligible offering whose
+    /// adapter is disabled.
+    AdapterNotEnabled,
+    /// SPEC-027 §10: principal lacks `adapter.execute` for the resolved adapter.
+    AdapterExecuteDenied,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,10 +189,18 @@ pub fn encode_command(command: &Command, max_frame_size: u32) -> Result<Vec<u8>,
         Command::StartAgentRun {
             session_id,
             attempt_id,
+            route_offering_id,
         } => {
             body.extend_from_slice(&6_u16.to_le_bytes());
             body.extend_from_slice(&session_id.to_bytes());
             body.extend_from_slice(&attempt_id.to_bytes());
+            match route_offering_id {
+                Some(id) => {
+                    body.push(1);
+                    body.extend_from_slice(&id.to_bytes());
+                }
+                None => body.push(0),
+            }
         }
         Command::GetSnapshot {
             session_id,
@@ -259,10 +280,20 @@ pub fn decode_command(body: &[u8]) -> Result<Command, FrameError> {
             session_id: reader.session()?,
             work_item_id: reader.item()?,
         },
-        6 => Command::StartAgentRun {
-            session_id: reader.session()?,
-            attempt_id: reader.attempt()?,
-        },
+        6 => {
+            let session_id = reader.session()?;
+            let attempt_id = reader.attempt()?;
+            let route_offering_id = match reader.u8()? {
+                0 => None,
+                1 => Some(reader.route_offering()?),
+                _ => return Err(FrameError::Malformed),
+            };
+            Command::StartAgentRun {
+                session_id,
+                attempt_id,
+                route_offering_id,
+            }
+        }
         7 => Command::GetSnapshot {
             session_id: reader.session()?,
             aggregate: reader.aggregate()?,
@@ -525,6 +556,9 @@ fn error_code(error: CommandError) -> u16 {
         CommandError::NotFound => 5,
         CommandError::Malformed => 6,
         CommandError::Failed => 7,
+        CommandError::ExecutionTargetUnavailable => 8,
+        CommandError::AdapterNotEnabled => 9,
+        CommandError::AdapterExecuteDenied => 10,
     }
 }
 
@@ -537,6 +571,9 @@ fn decode_error(code: u16) -> Result<CommandError, FrameError> {
         5 => Ok(CommandError::NotFound),
         6 => Ok(CommandError::Malformed),
         7 => Ok(CommandError::Failed),
+        8 => Ok(CommandError::ExecutionTargetUnavailable),
+        9 => Ok(CommandError::AdapterNotEnabled),
+        10 => Ok(CommandError::AdapterExecuteDenied),
         _ => Err(FrameError::Malformed),
     }
 }
@@ -608,6 +645,10 @@ impl<'a> Reader<'a> {
 
     fn run(&mut self) -> Result<AgentRunId, FrameError> {
         Ok(AgentRunId::from_bytes(self.id()?))
+    }
+
+    fn route_offering(&mut self) -> Result<RouteOfferingId, FrameError> {
+        Ok(RouteOfferingId::from_bytes(self.id()?))
     }
 
     fn aggregate(&mut self) -> Result<AggregateRef, FrameError> {

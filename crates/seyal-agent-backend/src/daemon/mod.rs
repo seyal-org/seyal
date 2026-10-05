@@ -16,8 +16,8 @@ use std::{
 
 use seyal_agent_core::BackendInstanceId;
 use seyal_agent_protocol::{
-    accepted_body_len, decode_frame, decode_handshake_error, FrameError, FrameKind, HandshakeError,
-    Hello, HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
+    accepted_body_len, decode_frame, decode_handshake_error, ExecutionHostKind, FrameError,
+    FrameKind, HandshakeError, Hello, HelloAck, ABSOLUTE_MAX_FRAME_SIZE,
 };
 
 use crate::endpoint::{decide, EndpointDecision, EndpointFacts, EndpointFault};
@@ -277,12 +277,24 @@ impl AgentDaemon {
     }
 
     fn handshake(&self) -> serve::Handshake {
+        let (execution_host_kind, adapter_catalog_generation) = self
+            .integration
+            .as_ref()
+            .map(|service| {
+                service
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .server_capabilities()
+            })
+            .unwrap_or((ExecutionHostKind::None, None));
         serve::Handshake {
             instance_id: self.instance_id,
             max_frame_size: self.config.max_frame_size,
             event_window: self.config.event_window,
             session_idle_timeout: self.config.session_idle_timeout,
             session_write_timeout: self.config.session_write_timeout,
+            execution_host_kind,
+            adapter_catalog_generation,
         }
     }
 
@@ -328,6 +340,7 @@ impl AgentDaemon {
 
 impl Drop for AgentDaemon {
     fn drop(&mut self) {
+        self.shutdown_execution_host();
         if !self.cleanup {
             return;
         }

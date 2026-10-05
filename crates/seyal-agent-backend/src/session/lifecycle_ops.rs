@@ -1,31 +1,61 @@
-//! SPEC-026 §9.1 StartAgentRun lifecycle drive through the domain writer.
+//! SPEC-026 §9.1 / SPEC-027 §7 StartAgentRun lifecycle drive through the
+//! domain writer.
 
 use seyal_agent_core::{
-    codes, AgentRunId, AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ControlGeneration, RoutingDecisionRef,
+    codes, resolve_execution_target, AdapterCandidate, AgentRunId, AgentRunLifecycle, AttemptId,
+    BindingGeneration, ClientPrincipalId, ClientSessionId, ControlGeneration, LaunchDescriptorRef,
+    ResolveFailure, RouteOfferingId, RoutingDecision,
 };
 use seyal_agent_protocol::{CommandError, CommandResult};
 use seyal_agent_store::{AggregateId, AggregateSequence, StoreError};
 
-use crate::ClientScope;
+use crate::{ClientScope, HostStartOutcome};
 
+use super::launch_resolution::resolve_launch_descriptor;
 use super::wire::snapshot_payload;
 use super::IntegrationService;
 
 const EVENT_RUN_CREATED: u16 = 1;
 
 impl IntegrationService {
+    /// Live eligibility candidates built from the durable adapter catalog
+    /// (SPEC-027 §4.3). TTY-requiring offerings never satisfy the hard
+    /// constraint: no composed host in this codebase owns a shared PTY
+    /// (§9.5, §12 non-goals).
+    fn build_adapter_candidates(&self) -> Vec<AdapterCandidate> {
+        let Ok(offerings) = self.store.list_route_offerings() else {
+            return Vec::new();
+        };
+        let mut candidates = Vec::with_capacity(offerings.len());
+        for offering in offerings {
+            let Ok(Some(manifest)) = self.store.get_adapter_manifest(offering.adapter_id) else {
+                continue;
+            };
+            candidates.push(AdapterCandidate {
+                adapter_id: offering.adapter_id,
+                route_offering_id: offering.route_offering_id,
+                adapter_enabled: manifest.enabled,
+                adapter_manifest_generation: manifest.generation,
+                hard_constraint_satisfied: !offering.requires_tty,
+            });
+        }
+        candidates
+    }
+
     pub(super) fn start_agent_run(
         &mut self,
         principal_id: ClientPrincipalId,
         session_id: ClientSessionId,
         attempt_id: AttemptId,
+        route_offering_id: Option<RouteOfferingId>,
     ) -> CommandResult {
+        // SPEC-027 §7 step 1-2.
         let principal =
             match self.authorized_session(principal_id, session_id, ClientScope::RunsCreate) {
                 Ok(principal) => principal,
                 Err(error) => return CommandResult::Error(error),
             };
+        // §7 step 3.
         if self.authority.domain().attempt(attempt_id).is_none() {
             return CommandResult::Error(CommandError::NotFound);
         }
@@ -37,13 +67,74 @@ impl IntegrationService {
         {
             return CommandResult::Error(CommandError::Failed);
         }
-        // AB-1.9: hostless production fails closed before any AgentRun mint.
-        if self.host.is_none() {
-            return CommandResult::Error(CommandError::Failed);
+
+        // §7 step 4 / §4.3: resolve the execution target before any mint.
+        let candidates = self.build_adapter_candidates();
+        let resolved = match resolve_execution_target(route_offering_id, &candidates) {
+            Ok(resolved) => resolved,
+            Err(ResolveFailure::AdapterDisabled { .. }) => {
+                return CommandResult::Error(CommandError::AdapterNotEnabled)
+            }
+            Err(ResolveFailure::TargetUnavailable | ResolveFailure::AmbiguousOrNoTarget) => {
+                return CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+            }
+        };
+
+        // §7 step 5: adapter.execute is independent of runs.create (D3).
+        if self
+            .auth
+            .authorize_adapter_execute(session_id, self.instance_id, resolved.adapter_id, principal)
+            .is_err()
+        {
+            return CommandResult::Error(CommandError::AdapterExecuteDenied);
         }
 
+        // §7 step 6: a host of the required kind must be composed. Hostless
+        // composition (`self.host == None`) fails closed here with the typed
+        // code instead of generic `Failed` (§8.1).
+        let Some(host_kind) = self.host.as_ref().map(|host| host.kind()) else {
+            return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+        };
+
+        // §5/§6: resolve the launch descriptor from the frozen manifest and
+        // this run's WorkScope kind before any mint. `run_id`/`binding` here
+        // are pure in-memory values (SEYAL_RUN_ID env identity only); the
+        // actual mint is the store write + domain restore at step 7 below.
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
+        let Some(work_scope_kind) = self
+            .authority
+            .domain()
+            .attempt(attempt_id)
+            .and_then(|attempt| self.authority.domain().work_item(attempt.work_item_id()))
+            .and_then(|item| self.authority.domain().work_scope(item.work_scope_id()))
+            .map(|scope| scope.kind())
+        else {
+            return CommandResult::Error(CommandError::Failed);
+        };
+        let Ok(Some(manifest)) = self.store.get_adapter_manifest_at_generation(
+            resolved.adapter_id,
+            resolved.adapter_manifest_generation,
+        ) else {
+            return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+        };
+        let launch_descriptor = match resolve_launch_descriptor(
+            &manifest.launch,
+            work_scope_kind,
+            &self.adapter_work_root,
+            resolved.adapter_id,
+            run_id,
+            binding,
+        ) {
+            Ok(descriptor) => descriptor,
+            // §6 Repository/Project missing-root (no WorkScope.bindings
+            // subsystem) and an unresolved `{work_scope_root}` argv token
+            // both fail exactly like any other unavailable target — no
+            // mint, no fallback cwd.
+            Err(_) => return CommandResult::Error(CommandError::ExecutionTargetUnavailable),
+        };
+
+        // §7 step 7: only now mint, persist, Created -> Prepared -> Dispatching.
         let control = ControlGeneration::FIRST;
         if self
             .store
@@ -72,8 +163,14 @@ impl IntegrationService {
         }
         self.auth.allow_run_for_observers(run_id);
 
-        // §9.1: Created → Prepared → Dispatching before host invocation.
-        let routing = RoutingDecisionRef::new(1);
+        let routing = RoutingDecision {
+            adapter_id: resolved.adapter_id,
+            adapter_manifest_generation: resolved.adapter_manifest_generation,
+            route_offering_id: resolved.route_offering_id,
+            execution_host_kind: host_kind,
+            launch_descriptor_ref: LaunchDescriptorRef::new(resolved.adapter_manifest_generation),
+            selection_kind: resolved.selection_kind,
+        };
         if self
             .authority
             .domain_mut()
@@ -86,10 +183,50 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
 
-        let host = self.host.as_mut().expect("host checked present");
-        let observations = match host.collect_observations(run_id, binding) {
-            Ok(observations) => observations,
-            Err(()) => return CommandResult::Error(CommandError::Failed),
+        // SPEC-027 §9.2 fixture 12 ("`start` holds no service mutex across
+        // child I/O" / "Concurrent ReadRun completes while child live"):
+        // `host.start`/`host.observe` below still run while this method's
+        // caller (daemon::serve::serve_session_locked) holds the
+        // IntegrationService mutex, because `host` is a field behind that
+        // same mutex, not an independently-lockable seam. What satisfies the
+        // fixture is that the composed hosts no longer block on child I/O
+        // internally (`start` spawns a background reader and returns
+        // immediately; `observe` only drains an already-filled queue — see
+        // `standalone_process_host.rs`): the hold is bounded to one
+        // `Command::spawn` syscall plus one non-blocking channel drain, not
+        // the child's full lifetime, so a second connection's concurrent
+        // `ReadRun` is never stalled for anything close to that lifetime
+        // (verified end-to-end against the real production binary and a
+        // multi-second real child in
+        // `production_concurrent_read_run_completes_promptly_while_the_real_child_is_still_live`,
+        // crates/seyal-agent-backend/tests/process_qualification.rs).
+        // Further decoupling `host` onto its own mutex so this is literally
+        // zero-overlap rather than bounded-overlap is a possible future
+        // hardening, not required to satisfy this fixture.
+        let host = self.host.as_mut().expect("host checked present above");
+        let observations = match host.start(run_id, binding, launch_descriptor) {
+            HostStartOutcome::Started(handle) => {
+                // Tracked so a later `ReadRun` can drain whatever the host's
+                // background reader buffers after this synchronous observe
+                // call returns (SPEC-027 §9.1/§9.4) — see
+                // `active_hosted_runs` doc comment.
+                self.active_hosted_runs.insert(run_id, handle);
+                match host.observe(handle) {
+                    Ok(observations) => observations,
+                    Err(()) => return CommandResult::Error(CommandError::Failed),
+                }
+            }
+            HostStartOutcome::NotStarted(_reason) => {
+                // §9.3 typed not-started: Dispatching -> Prepared, same
+                // AgentRun, a freshly minted RoutingDecision (content may be
+                // identical absent a second eligible target to fall back to).
+                let _ = self
+                    .authority
+                    .domain_mut()
+                    .pre_start_fallback(run_id, routing, true);
+                let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
+                return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+            }
         };
         if let Err(error) = self.commit_observation_batch(observations) {
             return CommandResult::Error(error);
@@ -128,6 +265,24 @@ impl IntegrationService {
             control_generation: control.get(),
             event_count,
         }
+    }
+
+    /// Daemon shutdown: signal-and-reap every live hosted child (AGENTS.md
+    /// termination invariant / SPEC-027 §9.4).
+    pub(crate) fn shutdown_hosted_runs(&mut self) {
+        let handles: Vec<_> = self
+            .active_hosted_runs
+            .drain()
+            .map(|(_, handle)| handle)
+            .collect();
+        let Some(host) = self.host.as_mut() else {
+            return;
+        };
+        for handle in handles {
+            let _ = host.signal_cancel(handle);
+            let _ = host.reap(handle);
+        }
+        host.shutdown_all();
     }
 }
 

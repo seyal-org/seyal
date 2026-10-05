@@ -10,12 +10,14 @@ mod identity;
 mod sqlite;
 
 pub use seyal_agent_core::{
-    decode_output_ref, encode_output_ref, AgentRunId, AttemptId, FingerprintRef, OutputRef,
-    OutputRefError, RetentionPolicyRef, StreamKind, WorkItemId, WorkScopeId, OUTPUT_REF_KIND,
-    OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN, RETENTION_POLICY_RETAINED_STREAM,
+    decode_output_ref, encode_output_ref, AdapterId, AgentRunId, AttemptId, FingerprintRef,
+    OutputRef, OutputRefError, RetentionPolicyRef, RouteOfferingId, StreamKind, WorkItemId,
+    WorkScopeId, OUTPUT_REF_KIND, OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN,
+    RETENTION_POLICY_RETAINED_STREAM,
 };
 pub use sqlite::{
-    AgentStore, OutputAppend, PersistedAgentRun, PersistedLiveness, PersistedPrincipal, StoreError,
+    AdapterManifestRow, AgentStore, CwdPolicy, LaunchDescriptorTemplate, OutputAppend,
+    PersistedAgentRun, PersistedLiveness, PersistedPrincipal, RouteOfferingRow, StoreError,
     OUTPUT_SEGMENT_LEN,
 };
 

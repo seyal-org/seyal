@@ -4,13 +4,25 @@
 //! same AgentRun / new AgentRun / new Attempt / reconciliation-required.
 
 use seyal_agent_core::{
-    AcceptanceContractMode, AccountingValue, AgentDomain, AgentRunLifecycle, AgentRunLineage,
-    AttachmentAccess, AttemptDisposition, AttemptLifecycle, AttemptOrigin, BindingGeneration,
-    ClientSessionId, ControlGeneration, DomainError, ExecutionLiveness, ExecutionRef,
-    ExternalIdentityKey, ObservationFact, ObservationKind, ObservationRecordResult,
-    ResumabilityFact, RoutingDecisionRef, TerminationKind, TerminationSource, WorkItemLifecycle,
-    WorkItemOutcome, WorkScopeKind,
+    AcceptanceContractMode, AccountingValue, AdapterId, AgentDomain, AgentRunLifecycle,
+    AgentRunLineage, AttachmentAccess, AttemptDisposition, AttemptLifecycle, AttemptOrigin,
+    BindingGeneration, ClientSessionId, ControlGeneration, DomainError, ExecutionHostKind,
+    ExecutionLiveness, ExecutionRef, ExternalIdentityKey, LaunchDescriptorRef, ObservationFact,
+    ObservationKind, ObservationRecordResult, ResumabilityFact, RouteOfferingId, RoutingDecision,
+    SelectionKind, TerminationKind, TerminationSource, WorkItemLifecycle, WorkItemOutcome,
+    WorkScopeKind,
 };
+
+fn routing_decision(manifest_generation: u64) -> RoutingDecision {
+    RoutingDecision {
+        adapter_id: AdapterId::new(),
+        adapter_manifest_generation: manifest_generation,
+        route_offering_id: RouteOfferingId::new(),
+        execution_host_kind: ExecutionHostKind::StandaloneProcess,
+        launch_descriptor_ref: LaunchDescriptorRef::new(manifest_generation),
+        selection_kind: SelectionKind::Singleton,
+    }
+}
 
 fn seeded() -> (
     AgentDomain,
@@ -28,7 +40,7 @@ fn seeded() -> (
 
 fn start_to_active(domain: &mut AgentDomain, run: seyal_agent_core::AgentRunId) {
     domain
-        .start_prepare_and_dispatch(run, RoutingDecisionRef::new(1))
+        .start_prepare_and_dispatch(run, routing_decision(1))
         .unwrap();
     domain.activate_agent_run(run).unwrap();
 }
@@ -56,9 +68,7 @@ fn fixture_01_start_active_harness_completes_same_run_no_work_item_outcome() {
 #[test]
 fn fixture_02_cancel_in_created_or_prepared_terminates_cancelled() {
     let (mut domain, _item, attempt, run) = seeded();
-    domain
-        .prepare_agent_run(run, RoutingDecisionRef::new(1))
-        .unwrap();
+    domain.prepare_agent_run(run, routing_decision(1)).unwrap();
     let control = domain.agent_run(run).unwrap().control_generation();
     domain.cancel_agent_run(run, control, None, false).unwrap();
     assert_eq!(
@@ -335,20 +345,24 @@ fn fixture_15_second_agent_run_multiple_runs_not_permitted() {
 fn fixture_16_rate_limit_not_started_dispatching_to_prepared() {
     let (mut domain, _item, _attempt, run) = seeded();
     domain
-        .start_prepare_and_dispatch(run, RoutingDecisionRef::new(1))
+        .start_prepare_and_dispatch(run, routing_decision(1))
         .unwrap();
     assert_eq!(
         domain.agent_run(run).unwrap().lifecycle(),
         AgentRunLifecycle::Dispatching
     );
     domain
-        .pre_start_fallback(run, RoutingDecisionRef::new(2), true)
+        .pre_start_fallback(run, routing_decision(2), true)
         .unwrap();
     let agent = domain.agent_run(run).unwrap();
     assert_eq!(agent.lifecycle(), AgentRunLifecycle::Prepared);
+    let new_ref = agent.routing_decision_ref().unwrap();
     assert_eq!(
-        agent.routing_decision_ref(),
-        Some(RoutingDecisionRef::new(2))
+        domain
+            .routing_decision(new_ref)
+            .unwrap()
+            .adapter_manifest_generation,
+        2
     );
     assert_eq!(agent.id(), run);
 }
@@ -357,10 +371,10 @@ fn fixture_16_rate_limit_not_started_dispatching_to_prepared() {
 fn fixture_17_dispatch_failure_without_proof_reconciliation() {
     let (mut domain, _item, _attempt, run) = seeded();
     domain
-        .start_prepare_and_dispatch(run, RoutingDecisionRef::new(1))
+        .start_prepare_and_dispatch(run, routing_decision(1))
         .unwrap();
     assert_eq!(
-        domain.pre_start_fallback(run, RoutingDecisionRef::new(2), false),
+        domain.pre_start_fallback(run, routing_decision(2), false),
         Err(DomainError::ReconciliationRequired)
     );
     assert_eq!(
@@ -399,7 +413,7 @@ fn fixture_18_backend_restart_active_reconciliation() {
 fn fixture_19_backend_restart_dispatching_no_blind_redispatch() {
     let (mut domain, _item, _attempt, run) = seeded();
     domain
-        .start_prepare_and_dispatch(run, RoutingDecisionRef::new(1))
+        .start_prepare_and_dispatch(run, routing_decision(1))
         .unwrap();
     domain.backend_restart_recovery(run).unwrap();
     assert_eq!(
@@ -488,7 +502,7 @@ fn fixture_22_duplicate_observation_acknowledged_no_new_event() {
 fn fixture_23_exited_before_started_retained_order_respected() {
     let (mut domain, _item, _attempt, run) = seeded();
     domain
-        .start_prepare_and_dispatch(run, RoutingDecisionRef::new(1))
+        .start_prepare_and_dispatch(run, routing_decision(1))
         .unwrap();
     let binding = domain.agent_run(run).unwrap().binding_generation();
     // Out-of-order: exited while still Dispatching / NotStarted — retained.

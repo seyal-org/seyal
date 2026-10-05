@@ -95,9 +95,20 @@ impl SessionClient {
     }
 
     pub fn start_agent_run(&mut self, attempt_id: AttemptId) -> Result<StartedRun, ClientError> {
+        self.start_agent_run_with_pin(attempt_id, None)
+    }
+
+    /// SPEC-027 §4.1: pin a specific RouteOffering instead of relying on
+    /// singleton resolution.
+    pub fn start_agent_run_with_pin(
+        &mut self,
+        attempt_id: AttemptId,
+        route_offering_id: Option<seyal_agent_protocol::RouteOfferingId>,
+    ) -> Result<StartedRun, ClientError> {
         match self.round_trip(&Command::StartAgentRun {
             session_id: self.session_id,
             attempt_id,
+            route_offering_id,
         })? {
             CommandResult::Started {
                 run_id,
