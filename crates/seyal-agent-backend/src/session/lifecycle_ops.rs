@@ -354,13 +354,12 @@ impl IntegrationService {
                     .domain()
                     .agent_run(run_id)
                     .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+                    && let Some(handle) = self.active_hosted_runs.get(&run_id).copied()
                 {
-                    if let Some(handle) = self.active_hosted_runs.get(&run_id).copied() {
-                        if let Some(host) = self.host.as_mut() {
-                            let _ = host.reap(handle);
-                        }
-                        let _ = self.drain_host_observations(run_id);
+                    if let Some(host) = self.host.as_mut() {
+                        let _ = host.reap(handle);
                     }
+                    let _ = self.drain_host_observations(run_id);
                 }
             }
             if self.authority.liveness(run_id) == crate::RunLiveness::KnownTerminated
