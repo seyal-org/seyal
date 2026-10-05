@@ -168,6 +168,12 @@ acknowledged_loc = 889
 issue = 1226
 reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #1226 adds schema-v7 WorkScope.bindings lookup beside existing identity and catalog open paths without a second store façade."
 
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-store/src/sqlite/catalog.rs"
+acknowledged_loc = 716
+issue = 1252
+reason = "Adapter catalog remain one durable store module; #1252 adds schema-v8 admin.adapters grant lookup beside existing install/enable and adapter.execute grant paths without a second catalog façade."
+
 # #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
 # generation sit on the daemon handshake façade; session façade grows
 # ServerCapabilities projection. Tests stay beside those façades.
@@ -185,9 +191,9 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 870
-issue = 1255
-reason = "IntegrationService remains the Agent Backend session façade; #1255 wires CancelRun dispatch and Terminating→Terminated confirm beside StartAgentRun/ReadRun and the #1253 fixture-11 test hook without a second session authority."
+acknowledged_loc = 920
+issue = 1252
+reason = "IntegrationService remains the Agent Backend session façade; #1252 adds grant-gated admin.adapters install/enable beside CancelRun (#1255), WorkScope.bindings, StartAgentRun, and the #1253 fixture-11 hook without a second session authority or client Command."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-protocol/src/command/mod.rs"
