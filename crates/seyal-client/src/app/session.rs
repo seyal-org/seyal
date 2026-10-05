@@ -212,15 +212,7 @@ impl ApplicationRoot {
         if display_handle == Some(create_handle) {
             return Ok(());
         }
-        let lost = match crate::ffi::with_client_mut(create_handle, LocalDisplayClient::poll_prepare)
-        {
-            None => true,
-            Some(Err(crate::local::ClientError::Disconnected))
-            | Some(Err(crate::local::ClientError::Io))
-            | Some(Err(crate::local::ClientError::NoRunningExecution)) => true,
-            Some(_) => false,
-        };
-        if lost {
+        if registry_client_is_gone(create_handle) {
             self.note_registry_client_loss(create_handle);
             let _ = crate::ffi::unregister_client(create_handle);
         }
@@ -241,14 +233,7 @@ impl ApplicationRoot {
             .map(|(pane, raw)| (*pane, *raw))
             .collect();
         for (_pane, raw) in handles {
-            let lost = match crate::ffi::with_client_mut(raw, LocalDisplayClient::poll_prepare) {
-                None => true,
-                Some(Err(crate::local::ClientError::Disconnected))
-                | Some(Err(crate::local::ClientError::Io))
-                | Some(Err(crate::local::ClientError::NoRunningExecution)) => true,
-                Some(_) => false,
-            };
-            if lost {
+            if registry_client_is_gone(raw) {
                 self.note_registry_client_loss(raw);
                 let _ = crate::ffi::unregister_client(raw);
             }
@@ -257,6 +242,17 @@ impl ApplicationRoot {
 
     #[cfg(not(target_os = "macos"))]
     fn poll_unfocused_pane_clients(&mut self) {}
+}
+
+#[cfg(target_os = "macos")]
+fn registry_client_is_gone(handle: u64) -> bool {
+    matches!(
+        crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare),
+        None
+            | Some(Err(crate::local::ClientError::Disconnected))
+            | Some(Err(crate::local::ClientError::Io))
+            | Some(Err(crate::local::ClientError::NoRunningExecution))
+    )
 }
 
 impl ApplicationRoot {
