@@ -55,6 +55,18 @@ fn assert_conformance(driver: &mut dyn AdapterConformanceDriver) {
 
 Coverage claims cannot shrink the catalog: unknown registration IDs fail closed, and the harness still executes every catalog case the driver implements. There is **no skip-as-pass** — unsupported behavior must return `ConformanceVerdict::Fail` with an explicit detail.
 
+## Codex CLI adapter (#1280)
+
+`CodexAdapterConformanceDriver` registers as `ConformanceDriverKind::StandaloneProcessAdapter` and covers every catalog case ID on production `StandaloneProcessHost` (never `FakeExecutionHost`). See [CODEX-ADAPTER.md](./CODEX-ADAPTER.md).
+
+```sh
+cargo test -p seyal-agent-backend --offline --test codex_adapter -- adapter_conformance_codex
+```
+
+### Claude Code (#1279)
+
+Sibling first-party StandaloneProcessHost adapter (additive `adapters::claude_code` module). Lands independently; both must pass this same catalog.
+
 ## Offline replay adapter (#1278)
 
 `ReplayAdapterConformanceDriver` (`--features fixture-host`) is the permanent offline replay / fake adapter. It registers as `ConformanceDriverKind::ReplayAdapter`, covers every catalog case ID, and needs no network and no live Claude/Codex binary.
@@ -89,11 +101,11 @@ Suggested fixture-host filter names (retained from #1277):
 
 ## Enforcement-class honesty
 
-ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are exercised through fixture vocabulary in `adapter_conformance::enforcement` until presence production types (#1276) land. Soft-consume of #1276 must not introduce a second honesty authority — replace the fixture enum, keep the same catalog case ID.
+ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are exercised through fixture vocabulary in `adapter_conformance::enforcement` and the production presence plane (#1276 / #1287). Soft-consume must not introduce a second honesty authority — keep the same catalog case ID.
 
 ## Explicit non-goals
 
-- Implementing Claude Code or Codex production adapters (siblings #1279 / #1280).
+- Implementing Claude Code (#1279) production adapter (sibling Issue; lands independently).
 - Inventing `SeyalTerminalExecutionHost` for M005 exit.
 - Composing `FakeExecutionHost` / replay into the production daemon.
 - ADR create/amend inside an implementation PR.

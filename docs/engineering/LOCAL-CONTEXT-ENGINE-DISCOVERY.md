@@ -11,7 +11,7 @@
 | Source discovery, provenance, rebuildable index/cache, freshness fencing | `seyal-agent-context` |
 | Durable rebuildable index metadata | `seyal-agent-store` (`context_index_cache`) |
 | WorkScope / bound root identity | existing agent-domain types (`WorkScopeId`, `work_scope_binding`) |
-| `ContextBundle` / `SelectionTrace` | **not** this crate — sibling #1272 |
+| `ContextBundle` / `SelectionTrace` | `seyal-agent-context` — see [LOCAL-CONTEXT-ENGINE-BUNDLE.md](LOCAL-CONTEXT-ENGINE-BUNDLE.md) (#1272) |
 | `MemoryStore` | sibling #1273 |
 | Ranking / second router | out of scope (#1275 / SPEC-020) |
 

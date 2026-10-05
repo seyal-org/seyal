@@ -35,9 +35,9 @@ pub use identity::{
 pub use lifecycle::{
     codes, AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,
     AttachmentAccess, AttemptDisposition, AttemptLifecycle, AttemptOrigin, ExecutionLiveness,
-    ExecutionRef, ExternalIdentityKey, LaunchDescriptorRef, ObservationFact, ResumabilityFact,
-    RoutingDecision, RoutingDecisionRef, RunTermination, SelectionKind, TerminationKind,
-    TerminationSource, WorkItemLifecycle, WorkItemOutcome,
+    ExecutionRef, ExternalIdentityKey, HarnessSessionRef, LaunchDescriptorRef, ObservationFact,
+    ResumabilityFact, RoutingDecision, RoutingDecisionRef, RunTermination, SelectionKind,
+    TerminationKind, TerminationSource, WorkItemLifecycle, WorkItemOutcome,
 };
 pub use memory::{
     allowed_transition, classify_resume, forgetting_transition, is_safety_maintenance,
