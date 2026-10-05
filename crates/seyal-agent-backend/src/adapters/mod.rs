@@ -7,10 +7,16 @@
 //! Sibling adapters live in additive modules (`claude_code`, `codex`) so
 //! #1279 / #1280 can land independently.
 
-#[cfg(unix)]
+pub mod claude_code;
 pub mod codex;
 
-#[cfg(unix)]
+pub use claude_code::{
+    claude_code_adapter_id, claude_code_capability_sheet, claude_code_launch_template,
+    install_enabled_claude_code_adapter, resolve_claude_code_program,
+    resolve_claude_code_program_from, validate_claude_code_sheet, ClaudeCodeConformanceDriver,
+    ClaudeCodeInstallError, CLAUDE_CODE_ADAPTER_LABEL, CLAUDE_CODE_DEFAULT_PROGRAM,
+    CLAUDE_CODE_ENV_BIN, CLAUDE_CODE_PROTOCOL_VERSION, CLAUDE_CODE_REGISTRATION,
+};
 pub use codex::{
     codex_adapter_id, install_enabled_codex_adapter, resolve_codex_program,
     CodexAdapterConformanceDriver, CodexCapabilitySheet, CodexInstallError, CodexInstallRequest,

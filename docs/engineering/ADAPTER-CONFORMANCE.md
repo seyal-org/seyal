@@ -65,7 +65,11 @@ cargo test -p seyal-agent-backend --offline --test codex_adapter -- adapter_conf
 
 ### Claude Code (#1279)
 
-Sibling first-party StandaloneProcessHost adapter (additive `adapters::claude_code` module). Lands independently; both must pass this same catalog.
+First-party StandaloneProcessHost adapter: see [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md). Registration constant `CLAUDE_CODE_REGISTRATION`; driver `ClaudeCodeConformanceDriver`.
+
+```sh
+cargo test -p seyal-agent-backend --features fixture-host --offline -- claude_code
+```
 
 ## Offline replay adapter (#1278)
 
@@ -105,7 +109,6 @@ ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are 
 
 ## Explicit non-goals
 
-- Implementing Claude Code (#1279) production adapter (sibling Issue; lands independently).
 - Inventing `SeyalTerminalExecutionHost` for M005 exit.
 - Composing `FakeExecutionHost` / replay into the production daemon.
 - ADR create/amend inside an implementation PR.
