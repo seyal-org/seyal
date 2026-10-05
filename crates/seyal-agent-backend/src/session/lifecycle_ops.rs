@@ -1,13 +1,15 @@
-//! SPEC-026 §9.1 StartAgentRun lifecycle drive through the domain writer.
+//! SPEC-026 §9.1 / SPEC-027 §7 StartAgentRun lifecycle drive through the
+//! domain writer.
 
 use seyal_agent_core::{
-    codes, AgentRunId, AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ControlGeneration, RoutingDecisionRef,
+    codes, resolve_execution_target, AdapterCandidate, AgentRunId, AgentRunLifecycle, AttemptId,
+    BindingGeneration, ClientPrincipalId, ClientSessionId, ControlGeneration, LaunchDescriptorRef,
+    ResolveFailure, RouteOfferingId, RoutingDecision,
 };
 use seyal_agent_protocol::{CommandError, CommandResult};
 use seyal_agent_store::{AggregateId, AggregateSequence, StoreError};
 
-use crate::ClientScope;
+use crate::{ClientScope, HostStartOutcome};
 
 use super::wire::snapshot_payload;
 use super::IntegrationService;
@@ -15,17 +17,44 @@ use super::IntegrationService;
 const EVENT_RUN_CREATED: u16 = 1;
 
 impl IntegrationService {
+    /// Live eligibility candidates built from the durable adapter catalog
+    /// (SPEC-027 §4.3). TTY-requiring offerings never satisfy the hard
+    /// constraint: no composed host in this codebase owns a shared PTY
+    /// (§9.5, §12 non-goals).
+    fn build_adapter_candidates(&self) -> Vec<AdapterCandidate> {
+        let Ok(offerings) = self.store.list_route_offerings() else {
+            return Vec::new();
+        };
+        let mut candidates = Vec::with_capacity(offerings.len());
+        for offering in offerings {
+            let Ok(Some(manifest)) = self.store.get_adapter_manifest(offering.adapter_id) else {
+                continue;
+            };
+            candidates.push(AdapterCandidate {
+                adapter_id: offering.adapter_id,
+                route_offering_id: offering.route_offering_id,
+                adapter_enabled: manifest.enabled,
+                adapter_manifest_generation: manifest.generation,
+                hard_constraint_satisfied: !offering.requires_tty,
+            });
+        }
+        candidates
+    }
+
     pub(super) fn start_agent_run(
         &mut self,
         principal_id: ClientPrincipalId,
         session_id: ClientSessionId,
         attempt_id: AttemptId,
+        route_offering_id: Option<RouteOfferingId>,
     ) -> CommandResult {
+        // SPEC-027 §7 step 1-2.
         let principal =
             match self.authorized_session(principal_id, session_id, ClientScope::RunsCreate) {
                 Ok(principal) => principal,
                 Err(error) => return CommandResult::Error(error),
             };
+        // §7 step 3.
         if self.authority.domain().attempt(attempt_id).is_none() {
             return CommandResult::Error(CommandError::NotFound);
         }
@@ -37,11 +66,37 @@ impl IntegrationService {
         {
             return CommandResult::Error(CommandError::Failed);
         }
-        // AB-1.9: hostless production fails closed before any AgentRun mint.
-        if self.host.is_none() {
-            return CommandResult::Error(CommandError::Failed);
+
+        // §7 step 4 / §4.3: resolve the execution target before any mint.
+        let candidates = self.build_adapter_candidates();
+        let resolved = match resolve_execution_target(route_offering_id, &candidates) {
+            Ok(resolved) => resolved,
+            Err(ResolveFailure::AdapterDisabled { .. }) => {
+                return CommandResult::Error(CommandError::AdapterNotEnabled)
+            }
+            Err(ResolveFailure::TargetUnavailable | ResolveFailure::AmbiguousOrNoTarget) => {
+                return CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+            }
+        };
+
+        // §7 step 5: adapter.execute is independent of runs.create (D3).
+        if self
+            .auth
+            .authorize_adapter_execute(session_id, self.instance_id, resolved.adapter_id, principal)
+            .is_err()
+        {
+            return CommandResult::Error(CommandError::AdapterExecuteDenied);
         }
 
+        // §7 step 6: a host of the required kind must be composed. AB-1.9's
+        // hostless production fails closed here with the typed code instead
+        // of generic `Failed` (§8.1); SPEC-027 §12 defers actually composing
+        // StandaloneProcessHost into the production binary to #679.
+        let Some(host_kind) = self.host.as_ref().map(|host| host.kind()) else {
+            return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+        };
+
+        // §7 step 7: only now mint, persist, Created -> Prepared -> Dispatching.
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
         let control = ControlGeneration::FIRST;
@@ -72,8 +127,14 @@ impl IntegrationService {
         }
         self.auth.allow_run_for_observers(run_id);
 
-        // §9.1: Created → Prepared → Dispatching before host invocation.
-        let routing = RoutingDecisionRef::new(1);
+        let routing = RoutingDecision {
+            adapter_id: resolved.adapter_id,
+            adapter_manifest_generation: resolved.adapter_manifest_generation,
+            route_offering_id: resolved.route_offering_id,
+            execution_host_kind: host_kind,
+            launch_descriptor_ref: LaunchDescriptorRef::new(resolved.adapter_manifest_generation),
+            selection_kind: resolved.selection_kind,
+        };
         if self
             .authority
             .domain_mut()
@@ -86,10 +147,32 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
 
-        let host = self.host.as_mut().expect("host checked present");
-        let observations = match host.collect_observations(run_id, binding) {
-            Ok(observations) => observations,
-            Err(()) => return CommandResult::Error(CommandError::Failed),
+        // NOTE (residual risk, SPEC-027 §9.2): `host.start`/`host.observe`
+        // below still run while this method's caller (daemon::serve) holds
+        // the IntegrationService service mutex. The composed hosts
+        // themselves no longer block on child I/O internally (start spawns
+        // a background reader and returns immediately; observe only drains
+        // an already-filled queue), so the window is now bounded by spawn
+        // latency rather than full child lifetime, but the two-phase
+        // lock-release split required to make this fully off-lock
+        // (SPEC-027 §9.2, fixture 12) is not implemented in this change.
+        let host = self.host.as_mut().expect("host checked present above");
+        let observations = match host.start(run_id, binding) {
+            HostStartOutcome::Started(handle) => match host.observe(handle) {
+                Ok(observations) => observations,
+                Err(()) => return CommandResult::Error(CommandError::Failed),
+            },
+            HostStartOutcome::NotStarted(_reason) => {
+                // §9.3 typed not-started: Dispatching -> Prepared, same
+                // AgentRun, a freshly minted RoutingDecision (content may be
+                // identical absent a second eligible target to fall back to).
+                let _ = self
+                    .authority
+                    .domain_mut()
+                    .pre_start_fallback(run_id, routing, true);
+                let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
+                return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+            }
         };
         if let Err(error) = self.commit_observation_batch(observations) {
             return CommandResult::Error(error);

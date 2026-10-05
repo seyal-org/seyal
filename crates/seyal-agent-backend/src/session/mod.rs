@@ -14,6 +14,8 @@ mod fixture_support;
 #[cfg(test)]
 mod hostless_tests;
 #[cfg(all(test, feature = "fixture-host"))]
+mod spec027_catalog_tests;
+#[cfg(all(test, feature = "fixture-host"))]
 mod tests;
 
 pub(crate) use frame_io::{read_session_frame, SessionRead};
@@ -91,6 +93,27 @@ impl IntegrationService {
 
     pub fn install_execution_host(&mut self, host: Box<dyn SessionExecutionHost>) {
         self.host = Some(host);
+    }
+
+    /// Install one enabled, non-TTY adapter + RouteOffering so SPEC-027
+    /// §4.3 unpinned resolution has exactly one eligible target
+    /// (`Singleton`), and grant `adapter.execute` to the owner principal so
+    /// §7 step 5 passes. Qualification/test composition only — SPEC-027
+    /// §5.2 install/enable is a first-party `admin.adapters` action, never a
+    /// client-reachable command, and this helper models that trusted path.
+    #[cfg(feature = "fixture-host")]
+    pub fn install_default_adapter_catalog_for_tests(&mut self) -> seyal_agent_core::AdapterId {
+        let adapter_id = seyal_agent_core::AdapterId::new();
+        self.store
+            .install_or_update_adapter(adapter_id, 0, true)
+            .expect("install adapter");
+        self.store
+            .add_route_offering(seyal_agent_core::RouteOfferingId::new(), adapter_id, false)
+            .expect("add offering");
+        self.auth
+            .grant_adapter_execute(self.owner_principal_id, adapter_id)
+            .expect("grant adapter.execute");
+        adapter_id
     }
 
     pub fn set_principal_status(
@@ -179,7 +202,8 @@ impl IntegrationService {
             Command::StartAgentRun {
                 session_id,
                 attempt_id,
-            } => self.start_agent_run(principal_id, session_id, attempt_id),
+                route_offering_id,
+            } => self.start_agent_run(principal_id, session_id, attempt_id, route_offering_id),
             Command::GetSnapshot {
                 session_id,
                 aggregate,

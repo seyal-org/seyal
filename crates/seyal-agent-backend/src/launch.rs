@@ -153,6 +153,13 @@ pub fn serve(options: LaunchOptions, host: Option<Box<dyn SessionExecutionHost>>
     };
     if let Some(host) = host {
         daemon.install_execution_host(host);
+        // Qualification-only: seed one enabled, non-TTY adapter + offering so
+        // SPEC-027 §4.3 unpinned resolution has a Singleton target and
+        // §7 step 5's `adapter.execute` grant is satisfied. Production never
+        // reaches this branch (`host` is always `None`), so it stays hostless
+        // per SPEC-027 §12/§13 with no adapter catalog installed.
+        #[cfg(feature = "fixture-host")]
+        daemon.seed_default_adapter_catalog_for_tests();
     }
 
     let exits = daemon.install_exit_report();

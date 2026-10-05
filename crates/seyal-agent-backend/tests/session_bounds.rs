@@ -196,6 +196,7 @@ fn unreplayable_observation_is_never_persisted() {
         let started = client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         });
         (client.session_id, started)
     });

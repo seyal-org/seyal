@@ -81,6 +81,9 @@ fn seed_attempt(service: &mut IntegrationService, principal: ClientPrincipalId) 
     session_id
 }
 
+/// AB-1.9's hostless path (no composed host, no mint) is unchanged by
+/// SPEC-027; only the wire error code changes from generic `Failed` to the
+/// typed `ExecutionTargetUnavailable` (§8.1, §13, fixture 1).
 #[test]
 fn start_agent_run_without_host_fails_closed_with_no_agent_run() {
     let (dir, mut service, principal) = open_hostless();
@@ -92,14 +95,18 @@ fn start_agent_run_without_host_fails_closed_with_no_agent_run() {
         Command::StartAgentRun {
             session_id,
             attempt_id,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
     );
-    assert_eq!(started, CommandResult::Error(CommandError::Failed));
+    assert_eq!(
+        started,
+        CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+    );
     assert!(
         service.store.agent_runs().unwrap().is_empty(),
-        "hostless Failed must not mint AgentRun"
+        "hostless ExecutionTargetUnavailable must not mint AgentRun"
     );
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -114,6 +121,7 @@ fn missing_attempt_is_not_found_not_failed_when_hostless() {
         Command::StartAgentRun {
             session_id,
             attempt_id: missing,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -134,6 +142,7 @@ fn foreign_session_is_rejected_not_failed_when_hostless() {
         Command::StartAgentRun {
             session_id: foreign,
             attempt_id,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
@@ -162,6 +171,7 @@ fn start_agent_run_uses_injected_host_script_via_collect_observations() {
         ScriptStep::Emit(HostObservationKind::KnownSuccess),
     ]);
     service.install_execution_host(Box::new(host));
+    service.install_default_adapter_catalog_for_tests();
     let principal = service.begin_connection(b"cli").unwrap();
     let session_id = seed_attempt(&mut service, principal);
     let attempt_id = service.store.attempts().unwrap()[0].0;
@@ -170,6 +180,7 @@ fn start_agent_run_uses_injected_host_script_via_collect_observations() {
         Command::StartAgentRun {
             session_id,
             attempt_id,
+            route_offering_id: None,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,

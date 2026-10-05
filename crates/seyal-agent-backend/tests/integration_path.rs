@@ -609,6 +609,7 @@ fn out_of_order_and_lost_observations_do_not_fabricate_termination() {
         client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         })
     });
     daemon.serve_one().unwrap();
@@ -677,6 +678,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         })
     });
     daemon.serve_one().unwrap();
@@ -751,6 +753,7 @@ fn persistence_fault_before_commit_does_not_publish_success() {
         client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         })
     });
     daemon.serve_one().unwrap();

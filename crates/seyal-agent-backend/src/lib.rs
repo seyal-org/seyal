@@ -36,7 +36,10 @@ pub use auth::{
 pub use daemon::{connect_hello, AgentDaemon, DaemonConfig, DaemonError, DaemonSample, ServeExit};
 #[cfg(feature = "fixture-host")]
 pub use execution_host::{FakeExecutionHost, ScriptError, ScriptStep};
-pub use execution_host::{HostObservation, HostObservationKind, SessionExecutionHost};
+pub use execution_host::{
+    HostExitEvidence, HostExitKind, HostHandle, HostNotStartedReason, HostObservation,
+    HostObservationKind, HostStartOutcome, SessionExecutionHost,
+};
 pub use observation::{ObservationAuthority, ObserveError, RunLiveness, WorkItemOutcome};
 #[cfg(feature = "fixture-host")]
 pub use script::parse_script;

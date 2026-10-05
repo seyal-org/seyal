@@ -337,6 +337,7 @@ fn repeated_sigkill_during_writes_reopens_deterministically() {
             let _ = client.command(&Command::StartAgentRun {
                 session_id: client.session_id,
                 attempt_id: attempt,
+                route_offering_id: None,
             });
         });
         thread::sleep(Duration::from_millis(5 * (iteration + 1)));
@@ -553,10 +554,16 @@ fn production_start_agent_run_fails_closed_without_agent_run() {
         client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         })
     });
     let started = worker.join().unwrap();
-    assert_eq!(started, CommandResult::Error(CommandError::Failed));
+    // SPEC-027 §8.1/§13: production stays hostless; the wire error upgrades
+    // from generic `Failed` to typed `ExecutionTargetUnavailable`.
+    assert_eq!(
+        started,
+        CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+    );
     assert_child_alive(&mut child.0, "after hostless StartAgentRun");
 
     let store = AgentStore::open(dir.join("agent.db")).unwrap();

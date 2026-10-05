@@ -1,6 +1,6 @@
-use seyal_agent_core::{AgentRunId, BindingGeneration};
 #[cfg(feature = "fixture-host")]
-use seyal_agent_core::{ExecutionHost, ExecutionHostKind};
+use seyal_agent_core::ExecutionHost;
+use seyal_agent_core::{AgentRunId, BindingGeneration, ExecutionHostKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostObservationKind {
@@ -26,21 +26,89 @@ pub struct HostObservation {
     pub kind: HostObservationKind,
 }
 
-/// Object-safe host seam for [`crate::IntegrationService`] (AB-1.9).
+/// Opaque, per-host-instance identifier for one supervised child (SPEC-027
+/// §9.1). Never a recycled OS pid; implementors bind it to spawn-time
+/// identity internally (§9.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct HostHandle(u64);
+
+impl HostHandle {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Why `start` produced no spawn evidence (SPEC-027 §9.3 typed not-started).
+/// Distinct from a successful `start` that later crashes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostNotStartedReason {
+    TtyRequired,
+    SpawnFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostStartOutcome {
+    Started(HostHandle),
+    NotStarted(HostNotStartedReason),
+}
+
+/// Typed child-exit evidence (SPEC-027 §9.3). Never fabricated from I/O loss;
+/// a closed observation pipe with a live child is `ObservationDisconnected`,
+/// not an exit evidence variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostExitKind {
+    Completed,
+    Failed,
+    Crashed,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostExitEvidence {
+    pub kind: HostExitKind,
+}
+
+/// Object-safe host seam for [`crate::IntegrationService`] (AB-1.9, SPEC-027
+/// §9.1).
 ///
-/// Distinct from the associated-type [`ExecutionHost`] in `seyal-agent-core` so
-/// the session path can hold `Option<Box<dyn SessionExecutionHost>>`. Concrete
-/// hosts map their errors to `Err(())`; the session path reports
-/// [`seyal_agent_protocol::CommandError::Failed`].
+/// Distinct from the associated-type [`ExecutionHost`] in `seyal-agent-core`
+/// so the session path can hold `Option<Box<dyn SessionExecutionHost>>`.
+///
+/// Replaces the AB-1.9 blocking `collect_observations`-until-exit contract:
+/// `start` MUST return as soon as the child is spawned/admitted (never
+/// waiting for exit), `observe` MUST NOT block on child I/O (it drains
+/// whatever a background reader has already buffered), and `reap` is a
+/// bounded wait honoring the AGENTS.md termination invariant. None of these
+/// methods may be called while holding the `IntegrationService` service
+/// mutex across process I/O (SPEC-027 §9.2) — callers are responsible for
+/// releasing that lock before invoking a host method that can touch the
+/// child.
 pub trait SessionExecutionHost: Send {
-    // Unit error keeps the object-safe seam free of host-specific error types;
-    // IntegrationService maps `Err(())` to CommandError::Failed (#1196).
-    #[allow(clippy::result_unit_err)]
-    fn collect_observations(
+    /// HelloAck advertisement (SPEC-027 §8.2); not authorization.
+    fn kind(&self) -> ExecutionHostKind;
+
+    fn start(
         &mut self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
-    ) -> Result<Vec<HostObservation>, ()>;
+    ) -> HostStartOutcome;
+
+    // Unit error keeps the object-safe seam free of host-specific error types;
+    // IntegrationService maps `Err(())` to CommandError::Failed (#1196).
+    #[allow(clippy::result_unit_err)]
+    fn observe(&mut self, handle: HostHandle) -> Result<Vec<HostObservation>, ()>;
+
+    /// Best-effort; not proof of termination (SPEC-027 §9.4).
+    #[allow(clippy::result_unit_err)]
+    fn signal_cancel(&mut self, handle: HostHandle) -> Result<(), ()>;
+
+    /// Bounded wait for exit evidence (AGENTS.md termination invariant).
+    #[allow(clippy::result_unit_err)]
+    fn reap(&mut self, handle: HostHandle) -> Result<HostExitEvidence, ()>;
 }
 
 #[cfg(feature = "fixture-host")]
@@ -76,6 +144,12 @@ pub enum ScriptError {
 pub struct FakeExecutionHost {
     max_output_chunk: usize,
     script: Vec<ScriptStep>,
+    next_handle: u64,
+    /// Scripted outcome of `start`; defaults to immediate spawn evidence.
+    start_outcome: Option<HostStartOutcome>,
+    /// Observations already materialized for a live handle, drained in order
+    /// by `observe` to model off-lock, non-blocking delivery.
+    pending: std::collections::HashMap<u64, std::collections::VecDeque<HostObservation>>,
 }
 
 #[cfg(feature = "fixture-host")]
@@ -87,6 +161,9 @@ impl FakeExecutionHost {
         Ok(Self {
             max_output_chunk,
             script: Vec::new(),
+            next_handle: 1,
+            start_outcome: None,
+            pending: std::collections::HashMap::new(),
         })
     }
 
@@ -96,6 +173,12 @@ impl FakeExecutionHost {
 
     pub fn script(&self) -> &[ScriptStep] {
         &self.script
+    }
+
+    /// Force the next `start` to report typed not-started instead of
+    /// spawning (SPEC-027 §9.3 fixture support).
+    pub fn force_not_started(&mut self, reason: HostNotStartedReason) {
+        self.start_outcome = Some(HostStartOutcome::NotStarted(reason));
     }
 
     pub fn execute(
@@ -166,19 +249,11 @@ impl FakeExecutionHost {
 
         Ok(observations)
     }
-}
 
-#[cfg(feature = "fixture-host")]
-impl ExecutionHost for FakeExecutionHost {
-    type Observation = HostObservation;
-    type Error = ScriptError;
-
-    fn kind(&self) -> ExecutionHostKind {
-        ExecutionHostKind::Fake
-    }
-
-    fn collect_observations(
-        &mut self,
+    /// Legacy synchronous accessor retained for direct-script tests that
+    /// predate the start/observe split.
+    pub fn collect_observations(
+        &self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
     ) -> Result<Vec<HostObservation>, ScriptError> {
@@ -190,13 +265,82 @@ impl ExecutionHost for FakeExecutionHost {
 }
 
 #[cfg(feature = "fixture-host")]
+impl ExecutionHost for FakeExecutionHost {
+    type Observation = HostObservation;
+    type Error = ScriptError;
+    type Handle = HostHandle;
+
+    fn kind(&self) -> ExecutionHostKind {
+        ExecutionHostKind::Fake
+    }
+
+    fn start(
+        &self,
+        _run_id: AgentRunId,
+        _binding_generation: BindingGeneration,
+        _descriptor: seyal_agent_core::LaunchDescriptor,
+    ) -> Result<Self::Handle, seyal_agent_core::HostStartFailure> {
+        Ok(HostHandle::new(1))
+    }
+
+    fn observe(&self, _handle: &Self::Handle) -> Result<Vec<HostObservation>, ScriptError> {
+        if self.script.is_empty() {
+            return Err(ScriptError::EmptyScript);
+        }
+        self.execute(AgentRunId::new(), BindingGeneration::FIRST, &self.script)
+    }
+
+    fn signal_cancel(&self, _handle: &Self::Handle) -> Result<(), ScriptError> {
+        Ok(())
+    }
+
+    fn reap(
+        &self,
+        _handle: &Self::Handle,
+    ) -> Result<seyal_agent_core::HostExitEvidence, ScriptError> {
+        Ok(seyal_agent_core::HostExitEvidence {
+            kind: seyal_agent_core::HostExitKind::Completed,
+        })
+    }
+}
+
+#[cfg(feature = "fixture-host")]
 impl SessionExecutionHost for FakeExecutionHost {
-    fn collect_observations(
+    fn kind(&self) -> ExecutionHostKind {
+        ExecutionHostKind::Fake
+    }
+
+    fn start(
         &mut self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
-    ) -> Result<Vec<HostObservation>, ()> {
-        ExecutionHost::collect_observations(self, run_id, binding_generation).map_err(|_| ())
+    ) -> HostStartOutcome {
+        if let Some(outcome) = self.start_outcome.take() {
+            return outcome;
+        }
+        let handle = self.next_handle;
+        self.next_handle = self.next_handle.saturating_add(1);
+        let observations = self
+            .execute(run_id, binding_generation, &self.script)
+            .unwrap_or_default();
+        self.pending
+            .insert(handle, observations.into_iter().collect());
+        HostStartOutcome::Started(HostHandle::new(handle))
+    }
+
+    fn observe(&mut self, handle: HostHandle) -> Result<Vec<HostObservation>, ()> {
+        let queue = self.pending.get_mut(&handle.get()).ok_or(())?;
+        Ok(queue.drain(..).collect())
+    }
+
+    fn signal_cancel(&mut self, _handle: HostHandle) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn reap(&mut self, _handle: HostHandle) -> Result<HostExitEvidence, ()> {
+        Ok(HostExitEvidence {
+            kind: HostExitKind::Completed,
+        })
     }
 }
 
@@ -212,14 +356,6 @@ mod tests {
         let attempt = domain.create_attempt(item).unwrap();
         let run = domain.create_agent_run(attempt).unwrap();
         (run, domain.agent_run(run).unwrap().binding_generation())
-    }
-
-    fn collect_via_trait<H: ExecutionHost>(
-        host: &mut H,
-        run_id: AgentRunId,
-        binding_generation: BindingGeneration,
-    ) -> Result<Vec<H::Observation>, H::Error> {
-        host.collect_observations(run_id, binding_generation)
     }
 
     #[test]
@@ -301,15 +437,16 @@ mod tests {
     #[test]
     fn fake_implements_execution_host_trait_deterministically() {
         let (run, generation) = run_with_generation();
-        let mut host = FakeExecutionHost::new(1024).unwrap();
-        assert_eq!(host.kind(), ExecutionHostKind::Fake);
+        let host = FakeExecutionHost::new(1024).unwrap();
+        assert_eq!(ExecutionHost::kind(&host), ExecutionHostKind::Fake);
+        let mut host = host;
         host.set_script(vec![
             ScriptStep::Emit(HostObservationKind::Started),
             ScriptStep::Emit(HostObservationKind::KnownSuccess),
         ]);
 
-        let first = collect_via_trait(&mut host, run, generation).unwrap();
-        let second = collect_via_trait(&mut host, run, generation).unwrap();
+        let first = host.collect_observations(run, generation).unwrap();
+        let second = host.collect_observations(run, generation).unwrap();
         assert_eq!(first, second);
         assert_eq!(first.len(), 2);
     }
@@ -320,6 +457,42 @@ mod tests {
         assert_eq!(
             <FakeExecutionHost as ExecutionHost>::kind(&host),
             ExecutionHostKind::Fake
+        );
+    }
+
+    #[test]
+    fn session_execution_host_start_observe_is_off_lock_shaped() {
+        let (run, generation) = run_with_generation();
+        let mut host = FakeExecutionHost::new(1024).unwrap();
+        host.set_script(vec![
+            ScriptStep::Emit(HostObservationKind::Started),
+            ScriptStep::Emit(HostObservationKind::KnownSuccess),
+        ]);
+
+        let HostStartOutcome::Started(handle) =
+            SessionExecutionHost::start(&mut host, run, generation)
+        else {
+            panic!("expected Started");
+        };
+        let observations = SessionExecutionHost::observe(&mut host, handle).unwrap();
+        assert_eq!(observations.len(), 2);
+        // A second observe drains nothing new (already delivered).
+        assert_eq!(
+            SessionExecutionHost::observe(&mut host, handle).unwrap(),
+            Vec::new()
+        );
+        let evidence = SessionExecutionHost::reap(&mut host, handle).unwrap();
+        assert_eq!(evidence.kind, HostExitKind::Completed);
+    }
+
+    #[test]
+    fn session_execution_host_force_not_started_reports_typed_reason() {
+        let (run, generation) = run_with_generation();
+        let mut host = FakeExecutionHost::new(8).unwrap();
+        host.force_not_started(HostNotStartedReason::TtyRequired);
+        assert_eq!(
+            SessionExecutionHost::start(&mut host, run, generation),
+            HostStartOutcome::NotStarted(HostNotStartedReason::TtyRequired)
         );
     }
 }
