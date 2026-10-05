@@ -17,7 +17,9 @@ use seyal_runtime::{
     local_ipc::framing::{
         encode_frame, Attach, Attached, ClientHello, ErrorCode, ErrorMessage, FrameHeader,
         InputRef, MessageType, Resize as WireResize, ResumeDelivery, Role, ServerHello,
-        SuspendDelivery, CAP_ATTACHMENT_DELIVERY_CONTROL, HEADER_LEN,
+        SuspendDelivery, TerminateExecutionRequest, TerminateExecutionResult,
+        TerminateExecutionResultCode, CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_EXECUTION_PROVISIONING,
+        HEADER_LEN,
     },
     ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
 };
@@ -654,5 +656,86 @@ fn child_exit_while_hidden_still_finalizes() {
     assert!(
         saw_final,
         "SPEC-009 §11.3 final drain must still reach a Hidden attachment"
+    );
+}
+
+/// Termination invariant across Hidden delivery: explicit terminate while
+/// Suspended still signals/reaps the live primary child (W7 / ADR-005).
+#[test]
+fn terminate_while_delivery_suspended_still_reaps() {
+    let mut harness = Harness::new("w7-term-hidden");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(
+        &mut client,
+        CAP_ATTACHMENT_DELIVERY_CONTROL | CAP_EXECUTION_PROVISIONING,
+    );
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Controller);
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.send(
+        &mut client,
+        MessageType::TerminateExecutionRequest,
+        &TerminateExecutionRequest {
+            attachment_id: attached.attachment_id,
+            execution_id,
+            request_id: 7,
+        }
+        .encode(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut saw_terminate_result = false;
+    let mut saw_finalized = false;
+    while Instant::now() < deadline {
+        harness.pump();
+        let mut chunk = [0u8; 8192];
+        match client.stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => {
+                client.buffered.extend_from_slice(&chunk[..count]);
+                while client.buffered.len() >= HEADER_LEN {
+                    let header =
+                        FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                    let total = HEADER_LEN + header.payload_len as usize;
+                    if client.buffered.len() < total {
+                        break;
+                    }
+                    let kind = header.message_type;
+                    let payload = client.buffered[HEADER_LEN..total].to_vec();
+                    let _ = client.buffered.drain(..total);
+                    if kind == MessageType::TerminateExecutionResult as u16 {
+                        let result =
+                            TerminateExecutionResult::decode(&payload).expect("terminate result");
+                        assert_eq!(
+                            result.result_code,
+                            TerminateExecutionResultCode::TerminationRequested
+                        );
+                        saw_terminate_result = true;
+                    }
+                    if kind == MessageType::Lifecycle as u16 {
+                        saw_finalized = true;
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("{error}"),
+        }
+        if saw_terminate_result && saw_finalized {
+            break;
+        }
+    }
+    assert!(
+        saw_terminate_result,
+        "terminate while Hidden must still accept TerminateExecutionRequest"
+    );
+    assert!(
+        saw_finalized,
+        "terminate while Hidden must still finalize/reap the primary child"
     );
 }
