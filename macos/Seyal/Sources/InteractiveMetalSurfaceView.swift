@@ -26,8 +26,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         super.init(frame: frameRect, paneID: "m001-pane")
         wantsLayer = true
         setAccessibilityIdentifier("terminal-input")
-        setAccessibilityRole(.textArea)
-        // Flow/unbound: composer owns IME/AX. Raw/TUI enables this surface.
+        // Flow/unbound: composer owns IME. Raw/TUI uses a textArea role.
+        // The identifier stays in the AX tree so attach diagnostics remain
+        // observable (`connection=usable`) without becoming an IME target.
         syncInputRoutePresentation()
     }
 
@@ -63,7 +64,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     /// Raw/TUI direct route. Flow and unbound keep the Pane composer exclusive.
     func syncInputRoutePresentation() {
         let direct = allowsDirectTerminalInput
-        setAccessibilityElement(direct)
+        setAccessibilityElement(true)
+        setAccessibilityRole(direct ? .textArea : .group)
         if !direct {
             discardUncommittedMark()
             if window?.firstResponder === self {

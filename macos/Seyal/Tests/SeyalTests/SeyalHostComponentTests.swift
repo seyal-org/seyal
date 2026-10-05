@@ -161,9 +161,14 @@ final class SeyalHostComponentTests: XCTestCase {
             surface.acceptsFirstResponder,
             "Flow/unbound IME belongs to the composer, not the Metal surface"
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             surface.isAccessibilityElement(),
-            "Flow/unbound must not expose a competing terminal AX text target"
+            "attach diagnostics stay on terminal-input without making it an IME target"
+        )
+        XCTAssertEqual(
+            surface.accessibilityRole() as? NSAccessibility.Role,
+            .group,
+            "Flow/unbound must not expose a competing terminal AX textArea"
         )
         XCTAssertFalse(surface.becomeFirstResponder())
     }
@@ -193,7 +198,7 @@ final class SeyalHostComponentTests: XCTestCase {
             frame: NSRect(x: 0, y: 0, width: 320, height: 200), appHandle: handle)
         surface.syncInputRoutePresentation()
         XCTAssertFalse(surface.acceptsFirstResponder)
-        XCTAssertFalse(surface.isAccessibilityElement())
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .group)
         surface.setMarkedText(
             "preedit", selectedRange: NSRange(location: 7, length: 0),
             replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -236,6 +241,7 @@ final class SeyalHostComponentTests: XCTestCase {
         surface.syncInputRoutePresentation()
         XCTAssertTrue(surface.acceptsFirstResponder)
         XCTAssertTrue(surface.isAccessibilityElement())
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
     }
 
     @MainActor
