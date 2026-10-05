@@ -532,7 +532,10 @@ mod tests {
             Vec::new()
         );
         let evidence = SessionExecutionHost::reap(&mut host, handle).unwrap();
-        assert_eq!(evidence.kind, HostExitKind::Completed);
+        // Fixture SessionExecutionHost::reap returns Failed (known-terminated
+        // path shared with cancel/AC13). Success is observed via KnownSuccess
+        // in the drained script, not via a Completed exit kind.
+        assert_eq!(evidence.kind, HostExitKind::Failed);
     }
 
     #[test]

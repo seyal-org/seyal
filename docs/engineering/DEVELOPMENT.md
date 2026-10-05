@@ -163,8 +163,23 @@ make docs-check    # run Starlight/Astro documentation validation
 - Qualification: `seyal-agent-backend-qualification` (requires `--features fixture-host`) —
   injects the scripted `FakeExecutionHost` fixture through the same typed seam for
   process/qualification tests. Prefer this binary for fabricated-run scenarios.
+- Adapter conformance catalog (#1277): one retained contract for replay + real CLI
+  adapters. See `docs/engineering/ADAPTER-CONFORMANCE.md`. Prove the harness with:
+
+```sh
+cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance
+```
+
 - Developer stores created by the pre-AB-1.9 production binary may contain fabricated
   runs; discard them. There is no migration.
+
+### Agent evaluation / outcome / cost (SPEC-019)
+
+- Domain APIs: `seyal-agent-core::evaluation` (`EvaluationPlane`, observations,
+  contracts, usage/cost/time, routing-quality export schema).
+- Developer guide: [`AGENT-EVALUATION.md`](AGENT-EVALUATION.md).
+- Fixtures: `cargo test -p seyal-agent-core --locked --test spec019_evaluation_fixtures`.
+- Does not implement SPEC-020 ranking, Context Engine, or MemoryStore.
 
 Current behavior after Passes 1–10 (M001 **Done / closed**; Pass 10 #727 and parent #5 closed on freeze `c536c54`):
 

@@ -13,6 +13,7 @@
 //! tests, and is never reachable from the production binary. `AgentDomain`
 //! remains the only lifecycle transition authority.
 
+pub mod adapter_conformance;
 mod auth;
 #[cfg(unix)]
 mod daemon;
@@ -26,6 +27,7 @@ mod observation;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 mod peer;
+mod presence;
 #[cfg(feature = "fixture-host")]
 mod script;
 #[cfg(unix)]
@@ -47,11 +49,16 @@ pub use execution_host::{
     HostObservationKind, HostStartOutcome, SessionExecutionHost,
 };
 pub use observation::{ObservationAuthority, ObserveError, RunLiveness, WorkItemOutcome};
+pub use presence::PresenceEnforcementPlane;
 #[cfg(feature = "fixture-host")]
 pub use script::parse_script;
 #[cfg(unix)]
 pub use session::{IntegrationConfig, IntegrationService};
 pub use seyal_agent_core::{AgentDomain, DomainError, ExecutionHost, ExecutionHostKind};
+pub use seyal_agent_core::{
+    CapabilityId, CapabilitySupport, ClaimMode, EnforcementClass, NegotiatedCapability,
+    PresenceCapabilityProjection, PresenceError, PresenceObservation, PresenceSourceTier,
+};
 pub use seyal_agent_protocol::ProtocolVersion;
 pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
 pub use standalone_process_host::{HostError, StandaloneProcessConfig, StandaloneProcessHost};

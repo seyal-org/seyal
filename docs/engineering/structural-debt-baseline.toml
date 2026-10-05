@@ -162,11 +162,12 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # #1178 adds PersistedPrincipal type collocated with other store row types.
 # #1181 adds §10 output-ref encode consumers, partial-segment merge, and
 # materialize_output_ref beside append_output_event.
+# #1271 adds rebuildable context_index_cache re-export beside existing open paths.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 889
-issue = 1226
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #1226 adds schema-v7 WorkScope.bindings lookup beside existing identity and catalog open paths without a second store façade."
+acknowledged_loc = 891
+issue = 1271
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1271 adds a one-line ContextIndexRecord re-export for the rebuildable SPEC-013 index table without a second store façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/catalog.rs"

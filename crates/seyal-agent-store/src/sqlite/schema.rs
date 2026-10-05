@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 9;
+pub(super) const SCHEMA_VERSION: i32 = 10;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -97,6 +97,22 @@ CREATE TABLE IF NOT EXISTS admin_adapters_grant (
     principal_id BLOB PRIMARY KEY
 );
 ";
+/// Rebuildable Local Context Engine index/cache (SPEC-013 §18 / #1271).
+/// Derived state only — never source truth; droppable under pressure.
+pub(super) const CONTEXT_INDEX_CACHE_TABLE_V9: &str = "
+CREATE TABLE IF NOT EXISTS context_index_cache (
+    work_scope_id BLOB PRIMARY KEY,
+    producer_id TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    policy_generation INTEGER NOT NULL,
+    privacy_generation INTEGER NOT NULL,
+    source_generation INTEGER NOT NULL,
+    catalog_digest_hex TEXT NOT NULL,
+    integrity_hex TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    bytes INTEGER NOT NULL
+);
+";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
     if from >= SCHEMA_VERSION {
@@ -151,7 +167,11 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
             .map_err(|_| StoreError::WriteFailed)?;
     }
     if from < 9 {
-        tx.execute_batch(crate::memory::schema_v9::MEMORY_TABLES_V9)
+        tx.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 10 {
+        tx.execute_batch(crate::memory::schema_v10::MEMORY_TABLES_V10)
             .map_err(|_| StoreError::WriteFailed)?;
         let mut key = [0u8; 32];
         getrandom_fallback(&mut key);
@@ -259,7 +279,9 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(ADMIN_ADAPTERS_GRANT_TABLE_V8)
         .map_err(|_| StoreError::WriteFailed)?;
-    conn.execute_batch(crate::memory::schema_v9::MEMORY_TABLES_V9)
+    conn.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(crate::memory::schema_v10::MEMORY_TABLES_V10)
         .map_err(|_| StoreError::WriteFailed)?;
     let mut key = [0u8; 32];
     getrandom_fallback(&mut key);

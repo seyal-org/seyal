@@ -13,11 +13,13 @@ use seyal_agent_core::{
 
 mod bindings;
 mod catalog;
+mod context_index;
 mod lifecycle_columns;
 mod schema;
 use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
 
 pub use catalog::{AdapterManifestRow, CwdPolicy, LaunchDescriptorTemplate, RouteOfferingRow};
+pub use context_index::ContextIndexRecord;
 
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;

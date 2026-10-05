@@ -133,6 +133,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "seyal-agent-context"
+version = "0.0.0"
+dependencies = [
+ "seyal-agent-core",
+ "seyal-agent-store",
+]
+
+[[package]]
 name = "seyal-agent-core"
 version = "0.0.0"
 

@@ -20,9 +20,9 @@ pub use seyal_agent_core::{
     RETENTION_POLICY_RETAINED_STREAM,
 };
 pub use sqlite::{
-    AdapterManifestRow, AgentStore, CwdPolicy, LaunchDescriptorTemplate, OutputAppend,
-    PersistedAgentRun, PersistedLiveness, PersistedPrincipal, RouteOfferingRow, StoreError,
-    OUTPUT_SEGMENT_LEN,
+    AdapterManifestRow, AgentStore, ContextIndexRecord, CwdPolicy, LaunchDescriptorTemplate,
+    OutputAppend, PersistedAgentRun, PersistedLiveness, PersistedPrincipal, RouteOfferingRow,
+    StoreError, OUTPUT_SEGMENT_LEN,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

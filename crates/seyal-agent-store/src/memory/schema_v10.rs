@@ -1,6 +1,6 @@
-//! Schema v9 — MemoryStore / RunWorkingSet / revocation tables (ADR-013 / SPEC-012/014/015).
+//! Schema v10 — MemoryStore / RunWorkingSet / revocation tables (ADR-013 / SPEC-012/014/015).
 
-pub(crate) const MEMORY_TABLES_V9: &str = "
+pub(crate) const MEMORY_TABLES_V10: &str = "
 CREATE TABLE IF NOT EXISTS memory_store_meta (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     suppression_key BLOB NOT NULL,
