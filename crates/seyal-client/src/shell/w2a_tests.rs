@@ -97,6 +97,7 @@ fn seed_two_workspaces() -> ShellState {
         first,
         false,
         true,
+        true,
     )
     .expect("fixture")
 }
@@ -162,6 +163,7 @@ fn activate_workspace_create_path_is_generation_fenced() {
         ],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .expect("empty workspace fixture");
@@ -289,6 +291,7 @@ fn move_tab_before_uses_anchor_not_index() {
         WorkspaceId::m001_default(),
         false,
         true,
+        true,
     )
     .unwrap();
     let generation = shell.containment_generation();
@@ -325,6 +328,7 @@ fn same_window_order_noop_does_not_bump_generation() {
         }],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .unwrap();
@@ -369,6 +373,7 @@ fn last_tab_move_destroys_source_window_atomically() {
         }],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .unwrap();
@@ -541,6 +546,7 @@ fn reorder_and_move_never_yield_zero_tab_window() {
         }],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .unwrap();

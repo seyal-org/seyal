@@ -421,6 +421,7 @@ mod tests {
             workspace_id,
             false,
             false,
+            false,
         )
         .expect("two windows");
         let titles: Vec<_> = shell

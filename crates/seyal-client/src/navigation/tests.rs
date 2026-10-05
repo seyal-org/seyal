@@ -124,6 +124,7 @@ fn seed_shell() -> (
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     (shell, w1, w2, t1, t2, p1, p2)
