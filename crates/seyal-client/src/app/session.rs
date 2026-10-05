@@ -51,6 +51,7 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
+        crate::ffi::set_focused_display_handle(handle);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
@@ -76,6 +77,9 @@ impl ApplicationRoot {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
+        if self.shell.snapshot().focused_pane == fence.pane {
+            crate::ffi::set_focused_display_handle(handle);
+        }
         self.clear_chord_prefix();
         self.seed_provisioning_request_floor_from_wire();
         Ok(())
@@ -116,6 +120,7 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
+        crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
@@ -146,30 +151,29 @@ impl ApplicationRoot {
         let Some(handle) = display_handle else {
             return self.fail(AppError::NoLiveClient);
         };
-        let Some(result) = crate::ffi::with_client_mut(handle, |client| {
-            client.poll_prepare().map_err(|_| AppError::NoLiveClient)?;
-            let alternate = client.cache().alternate_screen;
-            let generation = client.cache().generation.max(1);
-            let output = project_cache_text(client.cache());
-            Ok::<_, AppError>((alternate, generation, output))
-        }) else {
+        let Some(result) = crate::ffi::with_client_mut(handle, |client| client.poll_prepare())
+        else {
             // External bridge disconnect can remove the shared-handle entry
             // while the root still caches the id; clear the stale name (N2).
-            if self
-                .client_handle
-                .as_ref()
-                .is_some_and(|owned| owned.raw() == handle)
-            {
-                self.client_handle = None;
-            }
-            self.pane_client_raws.retain(|_, raw| *raw != handle);
-            self.extra_pane_clients
-                .retain(|_, owned| owned.raw() != handle);
+            self.note_registry_client_loss(handle);
             return self.fail(AppError::NoLiveClient);
         };
-        let (alternate, generation, output) = match result {
-            Ok(value) => value,
-            Err(error) => return self.fail(error),
+        let result = match result {
+            Ok(_) => crate::ffi::with_client_mut(handle, |client| {
+                let alternate = client.cache().alternate_screen;
+                let generation = client.cache().generation.max(1);
+                let output = project_cache_text(client.cache());
+                (alternate, generation, output)
+            }),
+            Err(_) => {
+                self.note_registry_client_loss(handle);
+                let _ = crate::ffi::unregister_client(handle);
+                return self.fail(AppError::NoLiveClient);
+            }
+        };
+        let Some((alternate, generation, output)) = result else {
+            self.note_registry_client_loss(handle);
+            return self.fail(AppError::NoLiveClient);
         };
         self.output_utf8 = output;
         if let Some(bound) = self.authority.as_mut() {
@@ -216,19 +220,25 @@ impl ApplicationRoot {
 
     /// Drain unfocused second-tab Controllers so type-39/control frames do not
     /// stall until the tab is focused again. Display output stays focused-pane.
+    /// Terminal poll errors clear that pane's authority (same loss path as
+    /// `seyal_bridge_poll_for`) so a dead fd cannot spin forever.
     #[cfg(target_os = "macos")]
     fn poll_unfocused_pane_clients(&mut self) {
-        let focused = self.authority.map(|bound| bound.pane);
-        let handles: Vec<u64> = self
+        let focused = self.shell.snapshot().focused_pane;
+        let handles: Vec<(PaneId, u64)> = self
             .pane_client_raws
             .iter()
-            .filter(|(pane, _)| focused != Some(**pane))
-            .map(|(_, raw)| *raw)
+            .filter(|(pane, _)| **pane != focused)
+            .map(|(pane, raw)| (*pane, *raw))
             .collect();
-        for raw in handles {
-            let _ = crate::ffi::with_client_mut(raw, |client| {
-                let _ = client.poll_prepare();
-            });
+        for (_pane, raw) in handles {
+            match crate::ffi::with_client_mut(raw, |client| client.poll_prepare()) {
+                Some(Ok(_)) => {}
+                Some(Err(_)) | None => {
+                    self.note_registry_client_loss(raw);
+                    let _ = crate::ffi::unregister_client(raw);
+                }
+            }
         }
     }
 

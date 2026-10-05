@@ -193,6 +193,9 @@ uint64_t seyal_bridge_attachment_id_low(void);
 uint64_t seyal_bridge_attachment_id_high(void);
 SeyalExecutionBlockMetadata seyal_bridge_execution_block_metadata(void);
 int32_t seyal_bridge_poll(void);
+/// Poll one adopted handle without changing the selected readiness client.
+/// On terminal disconnect, unregisters that client (level-trigger progress).
+int32_t seyal_bridge_poll_for(uint64_t handle);
 /// Ensure the initial PreparedSurface exists after attach snapshot commit.
 /// Returns 0 on success, negative on failure. Idempotent.
 int32_t seyal_bridge_ensure_prepared(void);

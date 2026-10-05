@@ -422,8 +422,19 @@ final class RustDisplayBridge {
       source.setEventHandler { [weak self] in
         seyalRunAsMainActorFromMainQueue {
           guard let self, self.isConnected else { return }
-          _ = seyal_bridge_select(handle)
-          _ = seyal_bridge_poll()
+          let result = seyal_bridge_poll_for(handle)
+          if result < 0 {
+            // Level-trigger progress: EOF/disconnect must disarm this fd's
+            // sources and drop the dead client. Tab 1 stays up (do not stop()).
+            self.cancelAuxiliarySources(for: handle)
+            seyal_bridge_disconnect_handle(handle)
+            _ = self.selectClient()
+            self.publishCurrentFrame()
+            self.synchronizeWriteReadinessSource()
+            self.armAuxiliaryReadSources()
+            self.onStatusChanged()
+            return
+          }
           _ = self.selectClient()
           self.publishCurrentFrame()
           self.synchronizeWriteReadinessSource()
@@ -463,6 +474,15 @@ final class RustDisplayBridge {
     teardown.sourceCreated()
     provisioningWakeupSource = source
     source.resume()
+  }
+
+  func cancelAuxiliarySources(for handle: UInt64) {
+    if let source = auxiliaryReadSources.removeValue(forKey: handle) {
+      source.cancel()
+    }
+    if let source = auxiliaryWriteSources.removeValue(forKey: handle) {
+      source.cancel()
+    }
   }
 
   func cancelAuxiliaryReadSources() {

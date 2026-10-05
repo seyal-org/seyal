@@ -85,7 +85,7 @@ impl ApplicationRoot {
         let gate = self.live_attach_gate.take();
         let mut wakeup = crate::ffi::clone_attach_wakeup_writer();
         let (tx, rx) = mpsc::channel();
-        thread::Builder::new()
+        if thread::Builder::new()
             .name("seyal-live-attach".into())
             .spawn(move || {
                 if let Some(gate) = gate {
@@ -99,7 +99,19 @@ impl ApplicationRoot {
                     crate::ffi::signal_attach_wakeup_on(writer);
                 }
             })
-            .map_err(|_| AppError::NoLiveClient)?;
+            .is_err()
+        {
+            // Spawn failure is synchronous: fail the intent and drain the queue
+            // so needs_provisioning_drive() cannot stall forever.
+            let failed = self.fail_live_controller_attach(
+                owner,
+                request_id,
+                pane,
+                ClientError::Discovery(crate::DiscoveryFailure::ConnectionRefused),
+            );
+            let next = self.start_next_queued_live_attach();
+            return if failed.is_err() { failed } else { next };
+        }
         self.pending_live_attach = Some(PendingLiveAttach {
             owner,
             request_id,
@@ -270,12 +282,23 @@ impl ApplicationRoot {
     }
 
     /// Switch active authority/presentation to the focused tab's bound pane.
+    /// When the focused pane has no live authority (attach in flight or failed),
+    /// fail closed: clear prior authority/display handle so input cannot reach
+    /// another tab's execution while chrome shows the unbound tab.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
         let Some(authority) = self.pane_authorities.get(&focused).copied() else {
+            self.authority = None;
+            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+            self.sync_composer_presentation();
+            self.output_utf8.clear();
+            crate::ffi::set_focused_display_handle(0);
             return;
         };
         if self.authority == Some(authority) {
+            if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
+                crate::ffi::set_focused_display_handle(raw);
+            }
             return;
         }
         let Some(identity) =
@@ -300,6 +323,27 @@ impl ApplicationRoot {
         self.refresh_output_from_pane_client(focused);
         if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
             crate::ffi::set_focused_display_handle(raw);
+        }
+    }
+
+    /// Registry client lost its socket: clear maps/authority for that handle.
+    pub(crate) fn note_registry_client_loss(&mut self, handle: u64) {
+        let panes: Vec<PaneId> = self
+            .pane_client_raws
+            .iter()
+            .filter(|(_, raw)| **raw == handle)
+            .map(|(pane, _)| *pane)
+            .collect();
+        for pane in panes {
+            self.clear_authority_for_pane(pane);
+            if self
+                .client_handle
+                .as_ref()
+                .is_some_and(|owned| owned.raw() == handle)
+            {
+                self.client_handle = None;
+                self.pane_client_raws.remove(&pane);
+            }
         }
     }
 

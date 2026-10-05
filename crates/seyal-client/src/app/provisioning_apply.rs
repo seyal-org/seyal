@@ -83,6 +83,8 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        #[cfg(target_os = "macos")]
+        self.activate_focused_pane_authority();
         Ok(())
     }
 
@@ -430,7 +432,7 @@ impl ApplicationRoot {
         Err(AppError::NoLiveClient)
     }
 
-    fn clear_authority_for_pane(&mut self, pane: PaneId) {
+    pub(super) fn clear_authority_for_pane(&mut self, pane: PaneId) {
         self.pane_authorities.remove(&pane);
         #[cfg(target_os = "macos")]
         self.unregister_extra_pane_client(pane);

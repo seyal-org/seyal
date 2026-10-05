@@ -1,5 +1,6 @@
 use seyal_runtime::local_ipc::framing::{ComposerEligibility, ComposerResultCode};
 
+use crate::local::ClientError;
 use crate::LocalDisplayClient;
 
 use super::{
@@ -232,6 +233,7 @@ pub extern "C" fn seyal_bridge_execution_block_metadata() -> SeyalExecutionBlock
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_poll() -> i32 {
     super::drain_attach_wakeup();
+    let handle = super::active_handle();
     let Some(result) = with_active_client_mut(|client| client.poll_prepare()) else {
         super::app::drive_application_roots();
         return -1;
@@ -239,10 +241,56 @@ pub extern "C" fn seyal_bridge_poll() -> i32 {
     let code = match result {
         Ok(Some(_)) => 1,
         Ok(None) => 0,
-        Err(error) => error_code(error),
+        Err(error) => {
+            let code = error_code(error);
+            if is_terminal_client_loss(&error) && handle != 0 {
+                super::app::note_application_roots_client_loss(handle);
+                let _ = super::unregister_client(handle);
+            }
+            code
+        }
     };
     super::app::drive_application_roots();
     code
+}
+
+/// Poll one registry handle without changing the selected readiness client.
+///
+/// On terminal disconnect/IO loss, unregisters that client and clears the
+/// matching ApplicationRoot pane authority so level-triggered DispatchSources
+/// stop refiring (AGENTS.md level-trigger progress invariant).
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_poll_for(handle: u64) -> i32 {
+    super::drain_attach_wakeup();
+    if handle == 0 {
+        super::app::drive_application_roots();
+        return -1;
+    }
+    let Some(result) = super::with_client_mut(handle, |client| client.poll_prepare()) else {
+        super::app::drive_application_roots();
+        return -1;
+    };
+    let code = match result {
+        Ok(Some(_)) => 1,
+        Ok(None) => 0,
+        Err(error) => {
+            let code = error_code(error);
+            if is_terminal_client_loss(&error) {
+                super::app::note_application_roots_client_loss(handle);
+                let _ = super::unregister_client(handle);
+            }
+            code
+        }
+    };
+    super::app::drive_application_roots();
+    code
+}
+
+fn is_terminal_client_loss(error: &ClientError) -> bool {
+    matches!(
+        error,
+        ClientError::Disconnected | ClientError::Io | ClientError::NoRunningExecution
+    )
 }
 
 /// Ensure the initial PreparedSurface after attach snapshot commit. Idempotent.

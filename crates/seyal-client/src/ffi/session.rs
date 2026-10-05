@@ -376,6 +376,9 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
         clients.borrow_mut().insert(handle, pending.client);
     });
     ACTIVE_HANDLE.with(|active| active.set(handle));
+    // Bootstrap/recovery: display/input follow the adopted Controller until
+    // ApplicationRoot CreateTab/select fails closed or rebinds focus.
+    FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
     0
 }
 

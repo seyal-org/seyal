@@ -167,6 +167,12 @@ impl LocalDisplayClient {
         self.stream.as_raw_fd()
     }
 
+    /// Test/diagnostic: shut down the Controller socket so the next poll sees EOF.
+    #[doc(hidden)]
+    pub fn force_eof_for_test(&mut self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+    }
+
     pub fn execution_id(&self) -> ExecutionId {
         self.execution_id
     }

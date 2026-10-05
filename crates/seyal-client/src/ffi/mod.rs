@@ -97,8 +97,8 @@ pub use display::{
     seyal_bridge_flush_writable_for, seyal_bridge_frame, seyal_bridge_history_range_consume,
     seyal_bridge_history_range_peek_for, seyal_bridge_history_range_row_for,
     seyal_bridge_history_range_sidecar_for, seyal_bridge_next_composer_request_id,
-    seyal_bridge_next_history_request_id, seyal_bridge_poll, seyal_bridge_request_history_range,
-    seyal_bridge_wants_write, seyal_bridge_wants_write_for,
+    seyal_bridge_next_history_request_id, seyal_bridge_poll, seyal_bridge_poll_for,
+    seyal_bridge_request_history_range, seyal_bridge_wants_write, seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]
@@ -168,13 +168,30 @@ fn focused_display_handle_if_live() -> u64 {
     }
 }
 
+/// Display/input handle for the focused Pane only. Never falls back to the
+/// last readiness-selected (`ACTIVE_HANDLE`) client — an unbound focused tab
+/// must fail closed rather than route keys/frames to another execution.
 fn display_handle() -> u64 {
-    let focused = focused_display_handle_if_live();
-    if focused != 0 {
-        focused
-    } else {
-        active_handle()
-    }
+    focused_display_handle_if_live()
+}
+
+/// Test/diagnostic: focused display handle when its registry entry is live.
+#[doc(hidden)]
+pub fn focused_registry_handle() -> u64 {
+    focused_display_handle_if_live()
+}
+
+/// Test/diagnostic: shut down `handle`'s socket so the next poll observes EOF.
+#[doc(hidden)]
+pub fn force_registry_client_eof(handle: u64) -> bool {
+    with_client_mut(handle, LocalDisplayClient::force_eof_for_test).is_some()
+}
+
+/// Test/diagnostic: submit UTF-8 through the focused display client (fail-closed).
+#[doc(hidden)]
+pub fn submit_utf8_for_test(text: &str) -> i32 {
+    with_display_client_mut(|client| client.submit_committed_text(text))
+        .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
 pub(crate) fn with_display_client<R>(

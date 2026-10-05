@@ -13,11 +13,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_client::app::{AppAction, ApplicationRoot};
+use seyal_client::app::{AppAction, AppError, ApplicationRoot, PresentationEligibility};
 use seyal_client::provisioning::IntentPhase;
 use seyal_client::{
-    ffi_test_drain_attach_wakeup, ffi_test_try_read_attach_wakeup,
-    seyal_bridge_provisioning_wakeup_fd, seyal_bridge_wants_write_for, LocalDisplayClient,
+    ffi_test_client_registry_contains, ffi_test_drain_attach_wakeup,
+    ffi_test_focused_registry_handle, ffi_test_force_registry_client_eof, ffi_test_submit_utf8,
+    ffi_test_try_read_attach_wakeup, seyal_bridge_poll_for, seyal_bridge_provisioning_wakeup_fd,
+    seyal_bridge_wants_write_for, LocalDisplayClient,
 };
 use seyal_core::{AttachmentId, PaneId};
 use seyal_protocol::runtime_dir::{
@@ -675,6 +677,176 @@ fn create_tab_close_unattached_tab_while_attach_in_flight_disposes() {
     assert!(root.provisioning().recorded_execution(third_pane).is_none());
     assert_eq!(root.extra_pane_client_count(), 1);
     assert_eq!(root.provisioning().automatic_retries(), 0);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_second_controller_eof_disarms_without_spinning_first() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
+    let second_handle = root.pane_client_raw(second_pane).expect("second handle");
+    assert!(ffi_test_force_registry_client_eof(second_handle));
+
+    let first_loss = seyal_bridge_poll_for(second_handle);
+    assert!(
+        first_loss < 0,
+        "EOF must surface as a negative poll_for result, got {first_loss}"
+    );
+    assert!(
+        !ffi_test_client_registry_contains(second_handle),
+        "dead second Controller must leave the registry"
+    );
+    // ApplicationRoot is not always in the FFI APPS map; the focused poll path
+    // must still observe the missing registry entry and clear pane maps.
+    let _ = root.poll_client(root.fence());
+    assert!(
+        root.pane_client_raw(second_pane).is_none(),
+        "ApplicationRoot must clear the lost pane's client map"
+    );
+    for _ in 0..8 {
+        assert_eq!(
+            seyal_bridge_poll_for(second_handle),
+            -1,
+            "after unregister, poll_for must not keep returning a live disconnect code"
+        );
+    }
+    assert!(
+        root.pane_client_poll_ok(first_pane),
+        "first Controller must keep working after second-tab EOF"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_unbound_focus_fails_closed_for_input() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+    let first_handle = root.pane_client_raw(first_pane).expect("first handle");
+    assert_eq!(ffi_test_focused_registry_handle(), first_handle);
+
+    let (release_tx, release_rx) = mpsc::channel();
+    root.gate_next_live_attach(release_rx);
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    assert_ne!(first_pane, second_pane);
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound,
+        "focused unbound tab must clear prior authority"
+    );
+    assert_eq!(
+        ffi_test_focused_registry_handle(),
+        0,
+        "display/input handle must fail closed while attach is in flight"
+    );
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must-not-reach-tab-1\n".into(),
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
+    assert_eq!(
+        ffi_test_submit_utf8("must-not-reach-tab-1\n"),
+        -1,
+        "FFI input must not fall back to ACTIVE_HANDLE"
+    );
+
+    // Inverse: first Controller still healthy and still owns its execution.
+    assert!(root.pane_client_poll_ok(first_pane));
+    assert_eq!(seyal_client::seyal_bridge_select(first_handle), 0);
+    assert_eq!(
+        seyal_client::ffi_test_active_registry_execution(),
+        Some(first_execution)
+    );
+
+    release_tx.send(()).expect("release attach");
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
+    assert_ne!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound
+    );
+    assert_ne!(ffi_test_focused_registry_handle(), 0);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_attach_failure_fails_closed_for_input() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+    root.inject_live_attach_failures(1);
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning().last_failure().is_some() && root.extra_pane_client_count() == 0
+    });
+    assert_eq!(root.snapshot().shell.focused_pane, second_pane);
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound
+    );
+    assert_eq!(ffi_test_focused_registry_handle(), 0);
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "nope\n".into(),
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
+    assert_eq!(ffi_test_submit_utf8("nope\n"), -1);
+    assert!(root.pane_client_poll_ok(first_pane));
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
