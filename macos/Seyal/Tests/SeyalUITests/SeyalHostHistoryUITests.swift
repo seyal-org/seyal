@@ -86,6 +86,70 @@ final class SeyalHostHistoryUITests: XCTestCase {
         attachScreenshot(app, name: "865-live-tail-after-seq")
     }
 
+    /// #865 / SPEC-008 §3.1: Flow transcript scroll must leave prepared-frame
+    /// PTY size and cursor tokens unchanged on the terminal AX probe.
+    /// Hosted CI without a zsh `pw_shell` is ENVIRONMENT_UNSUPPORTED (this
+    /// case `XCTSkip`s); local zsh evidence must still prove clip motion.
+    func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() throws {
+        guard loginShellIsZsh() else {
+            throw XCTSkip(
+                "Flow scroll→PTY/cursor invariant requires a zsh pw_shell (OSC 133 Blocks). ENVIRONMENT_UNSUPPORTED on hosted CI without zsh."
+            )
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+
+        submitComposerCommand(app, "printf '%s\\n' $(seq 1 120)")
+        waitBriefly(1.2)
+        assertFlowBlocksOrFail(in: app)
+
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        let beforeValue = terminal.value as? String ?? ""
+        let beforeGeom = try XCTUnwrap(
+            parseTerminalGeometryProbe(beforeValue),
+            "terminal AX must expose rows/columns/cursor before scroll; value=\(beforeValue)"
+        )
+        XCTAssertGreaterThan(beforeGeom.rows, 0)
+        XCTAssertGreaterThan(beforeGeom.columns, 0)
+
+        let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"].firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 5))
+        let content = transcript.children(matching: .any).element(boundBy: 0)
+        XCTAssertTrue(content.exists, "transcript must expose scrollable content")
+        let yBefore = content.frame.origin.y
+        transcript.scroll(byDeltaX: 0, deltaY: -320)
+        waitBriefly(0.6)
+        let yAfter = content.frame.origin.y
+        XCTAssertNotEqual(
+            yBefore,
+            yAfter,
+            "visible transcript region must move after scroll(byDeltaX:deltaY:)"
+        )
+
+        XCTAssertEqual(app.state, .runningForeground, "Seyal.app must stay up after Flow scroll")
+        assertFlowBlocksOrFail(in: app)
+        let afterValue = terminal.value as? String ?? ""
+        let afterGeom = try XCTUnwrap(
+            parseTerminalGeometryProbe(afterValue),
+            "terminal AX must expose rows/columns/cursor after scroll; value=\(afterValue)"
+        )
+        XCTAssertEqual(afterGeom.rows, beforeGeom.rows, "Flow scroll must not change PTY rows")
+        XCTAssertEqual(afterGeom.columns, beforeGeom.columns, "Flow scroll must not change PTY columns")
+        XCTAssertEqual(afterGeom.cursorRow, beforeGeom.cursorRow, "Flow scroll must not change cursor row")
+        XCTAssertEqual(
+            afterGeom.cursorColumn,
+            beforeGeom.cursorColumn,
+            "Flow scroll must not change cursor column"
+        )
+        XCTAssertEqual(
+            afterGeom.cursorVisible,
+            beforeGeom.cursorVisible,
+            "Flow scroll must not change cursor visibility"
+        )
+        attachScreenshot(app, name: "865-flow-scroll-pty-cursor-invariant")
+    }
+
     /// #865: a second running command must keep Flow Blocks (preceding output
     /// stays owned by earlier Block chrome, not a Pane-wide live grid).
     func testSequentialCommandsKeepFlowLiveTailOnBlocks() throws {
@@ -203,5 +267,46 @@ final class SeyalHostHistoryUITests: XCTestCase {
             return false
         }
         return URL(fileURLWithPath: String(cString: shell)).lastPathComponent == "zsh"
+    }
+
+    private struct TerminalGeometryProbe: Equatable {
+        var rows: Int
+        var columns: Int
+        var cursorRow: Int
+        var cursorColumn: Int
+        var cursorVisible: Bool
+    }
+
+    private func parseTerminalGeometryProbe(_ value: String) -> TerminalGeometryProbe? {
+        func intToken(_ name: String) -> Int? {
+            guard let range = value.range(of: "\(name)=") else { return nil }
+            let rest = value[range.upperBound...]
+            let digits = rest.prefix(while: { $0.isNumber || $0 == "-" })
+            return Int(digits)
+        }
+        guard let rows = intToken("rows"),
+            let columns = intToken("columns"),
+            let cursorRange = value.range(of: "cursor=")
+        else { return nil }
+        let cursorRest = value[cursorRange.upperBound...]
+        let parts = cursorRest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard let pair = parts.first?.split(separator: ","), pair.count == 2,
+            let cursorRow = Int(pair[0]),
+            let cursorColumn = Int(pair[1])
+        else { return nil }
+        let visible: Bool
+        if let visRange = value.range(of: "cursor-visible=") {
+            let token = value[visRange.upperBound...].prefix(while: { $0 != " " })
+            visible = token == "true"
+        } else {
+            return nil
+        }
+        return TerminalGeometryProbe(
+            rows: rows,
+            columns: columns,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: visible
+        )
     }
 }

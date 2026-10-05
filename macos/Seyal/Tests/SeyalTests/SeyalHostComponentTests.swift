@@ -1690,6 +1690,171 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(renderer.inspectPresentation().drawsLiveGrid)
     }
 
+    /// #865 / SPEC-008 §3.1: Flow transcript scroll handling republishes Block
+    /// clips only. It must not change prepared-frame PTY size, cursor, or the
+    /// last geometry proposal. Headed overflow scroll is covered by XCUI.
+    @MainActor
+    func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() async throws {
+        let window = try XCTUnwrap(NSApp.windows.first {
+            $0.contentView is ProductChromeHostView
+        })
+        let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
+        let pane = host.pane
+        let view = pane.inputSurface
+        let originalProductChanged = pane.onProductChanged
+        var observeProductChange: (() -> Void)?
+        pane.onProductChanged = {
+            originalProductChanged?()
+            observeProductChange?()
+        }
+        defer { pane.onProductChanged = originalProductChanged }
+
+        let connected = expectation(description: "Flow projection connected for scroll invariant")
+        var connectedOnce = false
+        var didRetryExhaustedRecovery = false
+        let checkConnected = {
+            let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
+            if !connectedOnce, view.terminalBridgeIsConnected,
+                view.terminalCurrentFrame() != nil,
+                eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+            {
+                connectedOnce = true
+                connected.fulfill()
+                return
+            }
+            if !connectedOnce, !didRetryExhaustedRecovery,
+                seyal_app_snapshot(pane.appHandle).recovery_stage
+                    == UInt16(SEYAL_APP_RECOVERY_EXHAUSTED.rawValue)
+            {
+                didRetryExhaustedRecovery = true
+                _ = view.retryRuntimeConnection()
+            }
+        }
+        observeProductChange = checkConnected
+        let connectPoll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+            checkConnected()
+        }
+        defer { connectPoll.invalidate() }
+        window.makeKeyAndOrderFront(nil)
+        host.activateAfterWindowPresentation()
+        checkConnected()
+        await fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce else { return }
+        connectPoll.invalidate()
+
+        // Wait until prepared geometry/cursor stop moving so a later PTY
+        // frame cannot be mistaken for scroll mutation.
+        var before = try XCTUnwrap(view.terminalCurrentFrame())
+        var stableCount = 0
+        for _ in 0..<60 {
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let sample = try XCTUnwrap(view.terminalCurrentFrame())
+            if sample.rows == before.rows,
+                sample.columns == before.columns,
+                sample.cursor_row == before.cursor_row,
+                sample.cursor_column == before.cursor_column,
+                sample.cursor_visible == before.cursor_visible
+            {
+                stableCount += 1
+                if stableCount >= 3 { break }
+            } else {
+                stableCount = 0
+            }
+            before = sample
+        }
+        XCTAssertGreaterThanOrEqual(stableCount, 3, "prepared frame must settle before scroll probe")
+        view.refreshRecoveryAccessibilityValue()
+        XCTAssertGreaterThan(before.rows, 0)
+        XCTAssertGreaterThan(before.columns, 0)
+        let eligibility = seyal_app_snapshot(pane.appHandle).eligibility
+        guard eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) else {
+            throw XCTSkip(
+                "Flow scroll invariant requires Flow eligibility immediately before transcriptDidScroll (ENVIRONMENT_UNSUPPORTED when hosted CI has already left Flow)."
+            )
+        }
+        let beforeGeometry = view.lastProposedGeometry
+        let beforeBounds = view.bounds.integral
+        let beforeRevision = host.transcriptFrameRevision
+
+        // Exercise the same handler path as NSScrollView bounds changes:
+        // clip republish + AX refresh, never proposeGeometry/resize.
+        host.isProgrammaticTranscriptScroll = false
+        host.transcriptDidScroll()
+        host.transcriptDidScroll()
+        // Immediate re-read: do not wait for unrelated PTY frames.
+        let after = try XCTUnwrap(view.terminalCurrentFrame())
+
+        XCTAssertGreaterThan(
+            host.transcriptFrameRevision,
+            beforeRevision,
+            "scroll handler must republish Block clip frames"
+        )
+        XCTAssertEqual(view.bounds.integral, beforeBounds, "scroll handler must not resize Metal surface")
+        XCTAssertEqual(
+            view.lastProposedGeometry,
+            beforeGeometry,
+            "Flow transcript scroll must not propose a new PTY geometry"
+        )
+        XCTAssertEqual(after.rows, before.rows, "PTY rows must be unchanged after Flow scroll")
+        XCTAssertEqual(after.columns, before.columns, "PTY columns must be unchanged after Flow scroll")
+        XCTAssertEqual(after.cursor_row, before.cursor_row, "cursor row must be unchanged after Flow scroll")
+        XCTAssertEqual(
+            after.cursor_column,
+            before.cursor_column,
+            "cursor column must be unchanged after Flow scroll"
+        )
+        XCTAssertEqual(
+            after.cursor_visible,
+            before.cursor_visible,
+            "cursor visibility must be unchanged after Flow scroll"
+        )
+
+        let ax = view.accessibilityValue() as? String ?? ""
+        XCTAssertTrue(ax.contains("rows=\(before.rows)"), "AX probe must mirror unchanged rows")
+        XCTAssertTrue(ax.contains("columns=\(before.columns)"), "AX probe must mirror unchanged columns")
+        XCTAssertTrue(
+            ax.contains("cursor=\(before.cursor_row),\(before.cursor_column)"),
+            "AX probe must mirror unchanged cursor"
+        )
+    }
+
+    /// Hygiene: Flow scroll handler must not call the resize/geometry path.
+    @MainActor
+    func testFlowTranscriptScrollSourceDoesNotProposeGeometry() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources", isDirectory: true)
+        let chrome = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView.swift"),
+            encoding: .utf8
+        )
+        let blocks = try String(
+            contentsOf: sourceRoot.appendingPathComponent("ProductChromeHostView+Blocks.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(chrome.contains("func transcriptDidScroll()"))
+        XCTAssertTrue(chrome.contains("publishBlockOutputFrame()"))
+        XCTAssertFalse(
+            chrome.contains("proposeGeometry"),
+            "ProductChromeHostView scroll path must not propose PTY geometry"
+        )
+        XCTAssertFalse(
+            chrome.contains("proposeCurrentGeometry"),
+            "ProductChromeHostView scroll path must not propose PTY geometry"
+        )
+        XCTAssertTrue(blocks.contains("refreshRecoveryAccessibilityValue()"))
+        XCTAssertFalse(
+            blocks.contains("proposeGeometry"),
+            "Block clip republish must not propose PTY geometry"
+        )
+        XCTAssertFalse(
+            blocks.contains("proposeCurrentGeometry"),
+            "Block clip republish must not propose PTY geometry"
+        )
+    }
+
     func testBlockProjectionABIRejectsInventedRunningHistoryEnd() {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }

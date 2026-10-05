@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration amendment proposed by #686; superseded predecessor PR #991; accepted on merge of PR #1022; prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration amendment proposed 2026-09-19; accepted on merge of PR #1022; prompt-anchor amendment proposed 2026-09-24
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -734,9 +734,10 @@ mechanism approved by product authority on 2026-09-16 under #968.
 
 ## 2026-09-19 amendment — M003 shell metadata boundary (#686)
 
-**Status:** Proposed originally in superseded PR #991; accepted and normative only when PR #1022
-merges. Before merge, this section is not normative. Product code and SPEC-008
-changes remain out of scope for #686.
+**Status:** Accepted on merge of PR #1022 under #686 (superseded predecessor PR #991).
+This section is normative. Product duration/wire implementation remains a
+separate production Issue after SPEC-008 alignment; this ADR does not ship that
+code.
 
 ### Decision
 
@@ -830,8 +831,10 @@ without retry; if these bounded retries are exhausted, return the final error.
 Never append a field under the existing schema and assume older decoders ignore
 it.
 
-SPEC-008 and the implementation Issue must define the exact byte layout and
-display rounding after this ADR is accepted.
+SPEC-008 §§5.4–5.5 record the observable duration and shell/CWD contract,
+including the duration-capable `BlockTimeline` record layout and display
+rounding. A separate production Issue owns Runtime/protocol/client
+implementation of that layout after this alignment lands.
 
 Before product implementation, the implementation Issue must also require:
 
@@ -938,10 +941,10 @@ The following remain evidence limits rather than reasons to broaden M003:
   requirement needs an explicit trust source and a separate architecture/spec
   decision before production work.
 
-After this amendment is accepted, update SPEC-008 and refine the separate
-implementation Issue before adding duration to Runtime, the wire protocol, or
-the client. Reopen #686 if a concrete M003 requirement appears for live CWD,
-Bash/fish integration, or trusted remote-shell Blocks.
+After this amendment was accepted (PR #1022), SPEC-008 was aligned under #686.
+Refine and implement duration only through a separate production Issue. Reopen
+#686 only if a concrete M003 requirement appears for live CWD, Bash/fish
+integration, or trusted remote-shell Blocks that would expand this boundary.
 
 ## 2026-09-24 amendment — Block prompt anchor and terminal-truth context line (#1041)
 
