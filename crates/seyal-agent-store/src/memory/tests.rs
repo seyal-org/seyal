@@ -532,6 +532,63 @@ fn spec015_22_handoff_fence_fail_closed_without_enforceable_adapter() {
 }
 
 #[test]
+fn spec015_22_scope_revocation_denies_use_time_without_subject() {
+    let store = temp_store();
+    let mem = store.memory();
+    let owning = scope(ScopeKind::Workspace, 21);
+    let created = match mem
+        .propose(propose_input(
+            "still accepted after fence advance",
+            owning,
+            MemoryMode::Curated,
+            [21; 16],
+        ))
+        .unwrap()
+    {
+        ProposeResult::Created(r) => r,
+        other => panic!("{other:?}"),
+    };
+    let pg = policy(&[(owning, MemoryMode::Curated)]);
+    let accepted = mem
+        .transition(
+            created.id,
+            created.record_generation,
+            MemoryState::Accepted,
+            TransitionReason::Accept,
+            &pg,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        mem.use_time_eligibility(accepted.id, &pg).unwrap(),
+        Eligibility::Eligible
+    );
+    let (bundle, revoked) = mem
+        .advance_revocation(&[owning], None, TransitionReason::PrivacyRevocation)
+        .unwrap();
+    assert!(revoked.is_none());
+    assert_eq!(accepted.state, MemoryState::Accepted);
+    // Stale captured policy must not remain Eligible once the store vector advanced.
+    assert_eq!(
+        mem.use_time_eligibility(accepted.id, &pg).unwrap(),
+        Eligibility::DeniedPendingRevalidation
+    );
+    let advanced = PolicyGeneration::new(vec![PolicyScopeMember {
+        scope: owning,
+        policy_generation: ScopePolicyGeneration::FIRST,
+        revocation_generation: bundle.fence.members()[0].generation,
+        mode: MemoryMode::Curated,
+    }])
+    .unwrap();
+    assert_eq!(
+        mem.use_time_eligibility(accepted.id, &advanced).unwrap(),
+        Eligibility::DeniedPendingRevalidation
+    );
+    let still = mem.get(accepted.id).unwrap().unwrap();
+    assert_eq!(still.state, MemoryState::Accepted);
+}
+
+#[test]
 fn spec015_22_revocation_invalidates_stale_cache() {
     let store = temp_store();
     let mem = store.memory();

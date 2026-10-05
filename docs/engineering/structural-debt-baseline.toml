@@ -175,6 +175,12 @@ acknowledged_loc = 716
 issue = 1252
 reason = "Adapter catalog remain one durable store module; #1252 adds schema-v8 admin.adapters grant lookup beside existing install/enable and adapter.execute grant paths without a second catalog façade."
 
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-store/src/memory/tests.rs"
+acknowledged_loc = 711
+issue = 1300
+reason = "MemoryStore SPEC-012/014/015 fixtures stay one suite beside MemoryAuthority; #1300 adds the scope-wide revocation use-time denial regression without a second test façade or partN split."
+
 # #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
 # generation sit on the daemon handshake façade; session façade grows
 # ServerCapabilities projection. Tests stay beside those façades.

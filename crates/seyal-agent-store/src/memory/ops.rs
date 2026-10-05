@@ -349,6 +349,21 @@ impl<'a> MemoryAuthority<'a> {
         current_policy: &PolicyGeneration,
     ) -> Result<Eligibility, MemoryError> {
         let record = self.get(id)?.ok_or(MemoryError::NotFound)?;
+        // Defense in depth: reject caller fences behind the durable store vector
+        // even if they byte-match the record's captured policy_generation.
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|_| StoreError::WriteFailed)?;
+        if validate_policy_fence(&tx, current_policy).is_err() {
+            return Ok(Eligibility::DeniedPendingRevalidation);
+        }
+        drop(tx);
+        drop(conn);
         let mode = current_policy.effective_mode();
         Ok(
             record.use_time_eligibility(
