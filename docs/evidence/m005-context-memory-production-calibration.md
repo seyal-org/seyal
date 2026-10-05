@@ -5,7 +5,7 @@
 - **Parent epic:** #667
 - **Architecture:** ADR-013
 - **Behavioral authority:** SPEC-012 §19; SPEC-013 §22; SPEC-014 §18
-- **Baseline (evidence branch tip at authoring):** record the merge commit of the landing PR; do not treat this paragraph as a frozen SHA across later docs-only edits
+- **Landing PR:** #1248 (`issue/1244`); record the merge commit SHA on `master` after merge — do not treat this paragraph as a frozen SHA across later docs-only edits
 - **Purpose:** freeze finite, versioned production resource budgets and a reproducible measurement procedure required before #681 becomes Ready. This pack does **not** implement the Local Context Engine, `MemoryStore`, or `RunWorkingSet`.
 
 ## Decision summary
