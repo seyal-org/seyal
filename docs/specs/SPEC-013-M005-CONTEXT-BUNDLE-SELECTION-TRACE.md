@@ -6,6 +6,7 @@
 - **Parent refinement:** #838
 - **Implementation consumer:** #681
 - **Related:** #847 / SPEC-012 MemoryRecord lifecycle
+- **Production calibration:** [`../evidence/m005-context-memory-production-calibration.md`](../evidence/m005-context-memory-production-calibration.md) (#1244; SPEC-013 §22 budgets + measurement procedure frozen before #681 Ready)
 
 ## 1. Purpose and scope
 
