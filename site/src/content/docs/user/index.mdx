@@ -21,7 +21,11 @@ The User Guide is task-oriented. It will grow with the product and should descri
 
 ## Flow, Raw, and full-screen programs
 
-A Pane starts in **Flow**: command Blocks and the composer. **Use Raw Terminal** in the command palette replaces that with the live terminal in the same Pane. A full-screen program, such as an editor, takes that same terminal. Leaving the program returns to Flow or Raw, whichever was in use, without opening a second terminal. **Return to Flow** in the command palette leaves an explicit Raw choice and shows Blocks again.
+A Pane starts in **Flow**: command Blocks and the composer. Each trusted shell command becomes one Block; long output stays inside that Block under the Pane scroll area. Clicking empty Flow canvas does not type into a hidden terminal.
+
+**Use Raw Terminal** in the command palette replaces Flow with the live terminal in the same Pane. Shells without trusted integration (for example bash today) open in Raw so Seyal never guesses Blocks from scraped output.
+
+A full-screen program such as Vim, Neovim, or htop takes that same terminal. Leaving the program returns to Flow or Raw, whichever was resting, without opening a second terminal. Nested shells and SSH stay part of the outer command in M003 — Seyal does not invent remote Blocks or live working directories from them. **Return to Flow** in the command palette leaves an explicit Raw choice and shows Blocks again.
 
 ## Documentation rule
 

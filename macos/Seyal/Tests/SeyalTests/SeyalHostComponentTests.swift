@@ -208,6 +208,38 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(surface.terminalBridgeIsConnected)
     }
 
+    /// #868: empty Flow canvas / Metal under Flow must not become first responder
+    /// or expose a competing terminal AX textArea for hidden direct input.
+    @MainActor
+    func testFlowEmptyCanvasMetalRejectsFirstResponderAndTerminalAX() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        )
+        let surface = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 400), appHandle: handle)
+        surface.syncInputRoutePresentation()
+        XCTAssertFalse(surface.acceptsFirstResponder)
+        XCTAssertFalse(surface.becomeFirstResponder())
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .group)
+        XCTAssertNotEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
+    }
+
     @MainActor
     func testTuiEligibilityAcceptsMetalFirstResponderAndAX() {
         let handle = seyal_app_create()
