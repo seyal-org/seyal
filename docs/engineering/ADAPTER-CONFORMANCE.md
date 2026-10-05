@@ -1,6 +1,6 @@
 # Adapter conformance catalog
 
-**Owning Issues:** #1277 (catalog + harness), consumed by #1278 (replay), #1279 (Claude Code — [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md)), #1280 (Codex — [`CODEX-ADAPTER.md`](CODEX-ADAPTER.md)) under parent #679 / epic #667.
+**Owning Issues:** #1277 (catalog + harness), #1278 (replay / fake adapter), consumed by #1279 (Claude Code), #1280 (Codex) under parent #679 / epic #667.
 
 **Authority:** Accepted [SPEC-018](../specs/SPEC-018-M005-HARNESS-REQUEST-ASSEMBLY.md) §16, [SPEC-027](../specs/SPEC-027-M005-EXECUTION-TARGET-HOST-LIFECYCLE.md) §9/§11, [ADR-012](../architecture/ADR-012-AGENT-RUN-IDENTITY-LIFECYCLE.md) §12–§13.
 
@@ -55,6 +55,14 @@ fn assert_conformance(driver: &mut dyn AdapterConformanceDriver) {
 
 Coverage claims cannot shrink the catalog: unknown registration IDs fail closed, and the harness still executes every catalog case the driver implements. There is **no skip-as-pass** — unsupported behavior must return `ConformanceVerdict::Fail` with an explicit detail.
 
+## Codex CLI adapter (#1280)
+
+`CodexAdapterConformanceDriver` registers as `ConformanceDriverKind::StandaloneProcessAdapter` and covers every catalog case ID on production `StandaloneProcessHost` (never `FakeExecutionHost`). See [CODEX-ADAPTER.md](./CODEX-ADAPTER.md).
+
+```sh
+cargo test -p seyal-agent-backend --offline --test codex_adapter -- adapter_conformance_codex
+```
+
 ### Claude Code (#1279)
 
 First-party StandaloneProcessHost adapter: see [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md). Registration constant `CLAUDE_CODE_REGISTRATION`; driver `ClaudeCodeConformanceDriver`.
@@ -63,23 +71,31 @@ First-party StandaloneProcessHost adapter: see [`CLAUDE-CODE-ADAPTER.md`](CLAUDE
 cargo test -p seyal-agent-backend --features fixture-host --offline -- claude_code
 ```
 
-### Codex CLI adapter (#1280)
+## Offline replay adapter (#1278)
 
-`CodexAdapterConformanceDriver` registers as `ConformanceDriverKind::StandaloneProcessAdapter` and covers every catalog case ID on production `StandaloneProcessHost` (never `FakeExecutionHost`). See [CODEX-ADAPTER.md](./CODEX-ADAPTER.md).
+`ReplayAdapterConformanceDriver` (`--features fixture-host`) is the permanent offline replay / fake adapter. It registers as `ConformanceDriverKind::ReplayAdapter`, covers every catalog case ID, and needs no network and no live Claude/Codex binary.
 
 ```sh
-cargo test -p seyal-agent-backend --offline --test codex_adapter -- adapter_conformance_codex
+cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance_replay
 ```
 
-## Fixture-host proof path
+Retained replay filters:
 
-`FixtureHostConformanceDriver` (`--features fixture-host`) runs the full catalog against `FakeExecutionHost` + `ObservationAuthority` + the durable adapter store. Production binaries never embed `FakeExecutionHost`.
+- `adapter_conformance_replay_full_catalog`
+- `adapter_conformance_replay_crash_and_stale_binding`
+- `adapter_conformance_replay_production_binary_excludes_fixture_host`
+
+Replay remains qualification/test evidence only. The production `seyal-agent-backend` binary composes `StandaloneProcessHost` and never embeds `FakeExecutionHost` or the replay adapter.
+
+## Fixture-host harness proof
+
+`FixtureHostConformanceDriver` (`--features fixture-host`) remains the harness proof path against the same scripted substrate. Prefer the **replay** filters above when proving #1278 / #667 offline exit evidence.
 
 ```sh
 cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance
 ```
 
-Suggested test filter names (retained):
+Suggested fixture-host filter names (retained from #1277):
 
 - `adapter_conformance_catalog_ids_stable`
 - `adapter_conformance_fixture_host_smoke`
@@ -93,6 +109,6 @@ ADR-012 §12 classes `Observed` / `UpstreamRequestable` / `BackendEnforced` are 
 
 ## Explicit non-goals
 
-- Implementing the offline replay adapter (#1278) inside this catalog Issue.
 - Inventing `SeyalTerminalExecutionHost` for M005 exit.
+- Composing `FakeExecutionHost` / replay into the production daemon.
 - ADR create/amend inside an implementation PR.
