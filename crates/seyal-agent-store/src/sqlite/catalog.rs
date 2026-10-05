@@ -9,16 +9,124 @@
 
 use rusqlite::{params, OptionalExtension};
 
-use seyal_agent_core::{AdapterId, RouteOfferingId};
+use seyal_agent_core::{AdapterId, ClientPrincipalId, RouteOfferingId};
 
 use super::{AgentStore, StoreError};
 
+/// SPEC-027 §6: which cwd the backend resolves for an adapter's manifest,
+/// independent of the WorkScope-kind table in §6 (that table decides cwd
+/// from WorkScope kind; this policy only gates whether `{work_scope_root}`
+/// is a valid argv token for this adapter, §5.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CwdPolicy {
+    WorkScopeRoot,
+    AdapterWorkDir,
+}
+
+impl CwdPolicy {
+    const fn code(self) -> u8 {
+        match self {
+            Self::WorkScopeRoot => 0,
+            Self::AdapterWorkDir => 1,
+        }
+    }
+
+    const fn from_code(code: u8) -> Self {
+        match code {
+            0 => Self::WorkScopeRoot,
+            _ => Self::AdapterWorkDir,
+        }
+    }
+}
+
+/// LaunchDescriptorV1 template owned by the manifest (SPEC-027 §5.1). Resolved
+/// into a concrete [`seyal_agent_core::LaunchDescriptor`] by the Agent Backend
+/// at dispatch; never a client-supplied spawn field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LaunchDescriptorTemplate {
+    pub program: String,
+    pub argv_template: Vec<String>,
+    pub env_allowlist: Vec<String>,
+    pub cwd_policy: CwdPolicy,
+}
+
+impl LaunchDescriptorTemplate {
+    pub fn new(program: impl Into<String>, cwd_policy: CwdPolicy) -> Self {
+        Self {
+            program: program.into(),
+            argv_template: Vec::new(),
+            env_allowlist: Vec::new(),
+            cwd_policy,
+        }
+    }
+
+    pub fn with_argv(mut self, argv: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.argv_template = argv.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn with_env_allowlist(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.env_allowlist = names.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdapterManifestRow {
     pub adapter_id: AdapterId,
     pub generation: u64,
     pub enabled: bool,
     pub execution_host_kind: u8,
+    pub launch: LaunchDescriptorTemplate,
+}
+
+/// Length-prefixed `Vec<String>` encoding for the catalog's small, trusted
+/// (first-party-installed, never client-supplied) string lists. 4-byte LE
+/// count, then per item a 4-byte LE byte length and the UTF-8 bytes.
+fn encode_strings(items: &[String]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + items.len() * 8);
+    out.extend_from_slice(&(items.len() as u32).to_le_bytes());
+    for item in items {
+        let bytes = item.as_bytes();
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes);
+    }
+    out
+}
+
+/// Decodes [`encode_strings`]. Malformed/truncated bytes fail closed to an
+/// empty list rather than panicking: a corrupt row must not crash dispatch.
+fn decode_strings(bytes: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    if bytes.len() < 4 {
+        return out;
+    }
+    let count = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let mut offset = 4;
+    for _ in 0..count {
+        if offset + 4 > bytes.len() {
+            return Vec::new();
+        }
+        let len = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]) as usize;
+        offset += 4;
+        if offset + len > bytes.len() {
+            return Vec::new();
+        }
+        let Ok(value) = String::from_utf8(bytes[offset..offset + len].to_vec()) else {
+            return Vec::new();
+        };
+        out.push(value);
+        offset += len;
+    }
+    out
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +146,7 @@ impl AgentStore {
         adapter_id: AdapterId,
         execution_host_kind: u8,
         enabled: bool,
+        launch: &LaunchDescriptorTemplate,
     ) -> Result<u64, StoreError> {
         self.gate_write()?;
         let conn = self.conn.lock().expect("agent store lock");
@@ -57,17 +166,28 @@ impl AgentStore {
             .checked_add(1)
             .ok_or(StoreError::Corrupt)?;
         tx.execute(
-            "INSERT INTO adapter_manifest (adapter_id, generation, enabled, execution_host_kind)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO adapter_manifest (
+                adapter_id, generation, enabled, execution_host_kind,
+                launch_program, launch_argv_template, launch_env_allowlist, launch_cwd_policy
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (adapter_id) DO UPDATE SET
                generation = excluded.generation,
                enabled = excluded.enabled,
-               execution_host_kind = excluded.execution_host_kind",
+               execution_host_kind = excluded.execution_host_kind,
+               launch_program = excluded.launch_program,
+               launch_argv_template = excluded.launch_argv_template,
+               launch_env_allowlist = excluded.launch_env_allowlist,
+               launch_cwd_policy = excluded.launch_cwd_policy",
             params![
                 adapter_id.to_bytes().to_vec(),
                 generation,
                 i64::from(enabled),
-                i64::from(execution_host_kind)
+                i64::from(execution_host_kind),
+                launch.program,
+                encode_strings(&launch.argv_template),
+                encode_strings(&launch.env_allowlist),
+                i64::from(launch.cwd_policy.code())
             ],
         )
         .map_err(|_| StoreError::WriteFailed)?;
@@ -234,6 +354,58 @@ impl AgentStore {
             .map_err(|_| StoreError::Corrupt)?;
         Ok(generation as u64)
     }
+
+    /// Durable `adapter.execute` grant (SPEC-027 §7 step 5 / D3), written by
+    /// the same trusted admin path as catalog install (§5.2) — never from a
+    /// client-reachable command. Idempotent: granting twice is not an error.
+    pub fn grant_adapter_execute(
+        &self,
+        principal_id: ClientPrincipalId,
+        adapter_id: AdapterId,
+    ) -> Result<(), StoreError> {
+        self.gate_write()?;
+        let conn = self.conn.lock().expect("agent store lock");
+        conn.execute(
+            "INSERT OR IGNORE INTO adapter_execute_grant (principal_id, adapter_id)
+             VALUES (?1, ?2)",
+            params![
+                principal_id.to_bytes().to_vec(),
+                adapter_id.to_bytes().to_vec()
+            ],
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+        Ok(())
+    }
+
+    /// Every adapter durably granted to `principal_id`, loaded once at
+    /// `IntegrationService::open` and re-applied to the in-memory
+    /// authorization repository (grants themselves are never re-checked
+    /// against this table per call — SPEC-027 §7 step 5 stays in-memory,
+    /// consistent with every other session/principal fact).
+    pub fn adapter_execute_grants(
+        &self,
+        principal_id: ClientPrincipalId,
+    ) -> Result<Vec<AdapterId>, StoreError> {
+        let conn = self.conn.lock().expect("agent store lock");
+        let mut statement = conn
+            .prepare("SELECT adapter_id FROM adapter_execute_grant WHERE principal_id = ?1")
+            .map_err(|_| StoreError::Corrupt)?;
+        let rows = statement
+            .query_map(params![principal_id.to_bytes().to_vec()], |row| {
+                row.get::<_, Vec<u8>>(0)
+            })
+            .map_err(|_| StoreError::Corrupt)?;
+        let mut grants = Vec::new();
+        for row in rows {
+            let bytes = row.map_err(|_| StoreError::Corrupt)?;
+            let mut id = [0_u8; 16];
+            if bytes.len() == 16 {
+                id.copy_from_slice(&bytes);
+            }
+            grants.push(AdapterId::from_bytes(id));
+        }
+        Ok(grants)
+    }
 }
 
 fn read_adapter_manifest(
@@ -241,7 +413,8 @@ fn read_adapter_manifest(
     adapter_id: AdapterId,
 ) -> Result<Option<AdapterManifestRow>, StoreError> {
     conn.query_row(
-        "SELECT adapter_id, generation, enabled, execution_host_kind
+        "SELECT adapter_id, generation, enabled, execution_host_kind,
+                launch_program, launch_argv_template, launch_env_allowlist, launch_cwd_policy
          FROM adapter_manifest WHERE adapter_id = ?1",
         params![adapter_id.to_bytes().to_vec()],
         map_adapter_manifest_row,
@@ -256,11 +429,19 @@ fn map_adapter_manifest_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Adapter
     if id_bytes.len() == 16 {
         id.copy_from_slice(&id_bytes);
     }
+    let argv_bytes: Vec<u8> = row.get(5)?;
+    let env_bytes: Vec<u8> = row.get(6)?;
     Ok(AdapterManifestRow {
         adapter_id: AdapterId::from_bytes(id),
         generation: row.get::<_, i64>(1)? as u64,
         enabled: row.get::<_, i64>(2)? != 0,
         execution_host_kind: row.get::<_, i64>(3)? as u8,
+        launch: LaunchDescriptorTemplate {
+            program: row.get::<_, String>(4)?,
+            argv_template: decode_strings(&argv_bytes),
+            env_allowlist: decode_strings(&env_bytes),
+            cwd_policy: CwdPolicy::from_code(row.get::<_, i64>(7)? as u8),
+        },
     })
 }
 
@@ -316,6 +497,11 @@ mod tests {
         }
     }
 
+    fn echo_launch() -> LaunchDescriptorTemplate {
+        LaunchDescriptorTemplate::new("/bin/echo", CwdPolicy::AdapterWorkDir)
+            .with_argv(["catalog-smoke"])
+    }
+
     #[test]
     fn install_enable_and_offering_round_trip() {
         let store = temp_store();
@@ -325,6 +511,7 @@ mod tests {
                 adapter_id,
                 host_kind_code(ExecutionHostKind::StandaloneProcess),
                 true,
+                &echo_launch(),
             )
             .unwrap();
         assert_eq!(generation, 1);
@@ -345,11 +532,44 @@ mod tests {
     }
 
     #[test]
+    fn launch_descriptor_template_round_trips_program_argv_env_and_cwd_policy() {
+        let store = temp_store();
+        let adapter_id = AdapterId::new();
+        let launch = LaunchDescriptorTemplate::new("/usr/bin/adapter", CwdPolicy::WorkScopeRoot)
+            .with_argv(["--flag", "{work_scope_root}"])
+            .with_env_allowlist(["PATH", "SEYAL_RUN_ID"]);
+        store
+            .install_or_update_adapter(adapter_id, 1, true, &launch)
+            .unwrap();
+        let manifest = store.get_adapter_manifest(adapter_id).unwrap().unwrap();
+        assert_eq!(manifest.launch, launch);
+    }
+
+    #[test]
+    fn adapter_execute_grant_is_durable_and_scoped_to_the_granted_principal() {
+        let store = temp_store();
+        let principal = ClientPrincipalId::new();
+        let other_principal = ClientPrincipalId::new();
+        let adapter_id = AdapterId::new();
+        store.grant_adapter_execute(principal, adapter_id).unwrap();
+        // Granting twice is not an error (idempotent).
+        store.grant_adapter_execute(principal, adapter_id).unwrap();
+        assert_eq!(
+            store.adapter_execute_grants(principal).unwrap(),
+            vec![adapter_id]
+        );
+        assert_eq!(
+            store.adapter_execute_grants(other_principal).unwrap(),
+            Vec::new()
+        );
+    }
+
+    #[test]
     fn disabling_an_adapter_is_visible_without_changing_generation() {
         let store = temp_store();
         let adapter_id = AdapterId::new();
         store
-            .install_or_update_adapter(adapter_id, 1, true)
+            .install_or_update_adapter(adapter_id, 1, true, &echo_launch())
             .unwrap();
         store.set_adapter_enabled(adapter_id, false).unwrap();
         let manifest = store.get_adapter_manifest(adapter_id).unwrap().unwrap();
@@ -362,13 +582,13 @@ mod tests {
         let store = temp_store();
         let adapter_id = AdapterId::new();
         let frozen_generation = store
-            .install_or_update_adapter(adapter_id, 1, true)
+            .install_or_update_adapter(adapter_id, 1, true, &echo_launch())
             .unwrap();
         assert_eq!(frozen_generation, 1);
 
         // A later catalog edit bumps the generation in place.
         let latest_generation = store
-            .install_or_update_adapter(adapter_id, 1, true)
+            .install_or_update_adapter(adapter_id, 1, true, &echo_launch())
             .unwrap();
         assert_eq!(latest_generation, 2);
 
@@ -391,7 +611,7 @@ mod tests {
         let store = temp_store();
         let adapter_id = AdapterId::new();
         let generation = store
-            .install_or_update_adapter(adapter_id, 1, true)
+            .install_or_update_adapter(adapter_id, 1, true, &echo_launch())
             .unwrap();
         store.remove_adapter(adapter_id).unwrap();
         assert_eq!(store.get_adapter_manifest(adapter_id).unwrap(), None);
@@ -409,7 +629,7 @@ mod tests {
         let before = store.adapter_catalog_generation().unwrap();
         let adapter_id = AdapterId::new();
         store
-            .install_or_update_adapter(adapter_id, 1, true)
+            .install_or_update_adapter(adapter_id, 1, true, &echo_launch())
             .unwrap();
         let after_install = store.adapter_catalog_generation().unwrap();
         assert!(after_install > before);
@@ -423,8 +643,12 @@ mod tests {
         let store = temp_store();
         let adapter_a = AdapterId::new();
         let adapter_b = AdapterId::new();
-        store.install_or_update_adapter(adapter_a, 1, true).unwrap();
-        store.install_or_update_adapter(adapter_b, 1, true).unwrap();
+        store
+            .install_or_update_adapter(adapter_a, 1, true, &echo_launch())
+            .unwrap();
+        store
+            .install_or_update_adapter(adapter_b, 1, true, &echo_launch())
+            .unwrap();
         let offering_a = RouteOfferingId::new();
         let offering_b = RouteOfferingId::new();
         store

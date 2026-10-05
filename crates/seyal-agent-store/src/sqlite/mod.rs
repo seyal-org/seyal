@@ -16,7 +16,7 @@ mod lifecycle_columns;
 mod schema;
 use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
 
-pub use catalog::{AdapterManifestRow, RouteOfferingRow};
+pub use catalog::{AdapterManifestRow, CwdPolicy, LaunchDescriptorTemplate, RouteOfferingRow};
 
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;

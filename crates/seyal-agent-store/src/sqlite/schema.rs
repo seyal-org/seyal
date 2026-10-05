@@ -49,7 +49,11 @@ CREATE TABLE IF NOT EXISTS adapter_manifest (
     adapter_id BLOB PRIMARY KEY,
     generation INTEGER NOT NULL,
     enabled INTEGER NOT NULL,
-    execution_host_kind INTEGER NOT NULL
+    execution_host_kind INTEGER NOT NULL,
+    launch_program TEXT NOT NULL DEFAULT '',
+    launch_argv_template BLOB NOT NULL DEFAULT X'00000000',
+    launch_env_allowlist BLOB NOT NULL DEFAULT X'00000000',
+    launch_cwd_policy INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS route_offering (
     route_offering_id BLOB PRIMARY KEY,
@@ -62,6 +66,17 @@ CREATE TABLE IF NOT EXISTS adapter_catalog_meta (
     generation INTEGER NOT NULL
 );
 INSERT OR IGNORE INTO adapter_catalog_meta (singleton, generation) VALUES (1, 0);
+-- `adapter.execute` grants (SPEC-027 §7 step 5 / D3), durable for the same
+-- reason the catalog is: a trusted admin tool writes directly against this
+-- store with no wire command, and a restarted daemon must not forget a
+-- grant it already made. In-memory enforcement in `auth::grant_adapter_execute`
+-- still refuses non-first-party principal kinds regardless of this table's
+-- contents.
+CREATE TABLE IF NOT EXISTS adapter_execute_grant (
+    principal_id BLOB NOT NULL,
+    adapter_id BLOB NOT NULL,
+    PRIMARY KEY (principal_id, adapter_id)
+);
 ";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
