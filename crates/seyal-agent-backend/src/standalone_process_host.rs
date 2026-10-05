@@ -870,18 +870,39 @@ mod tests {
                 [
                     "python3",
                     "-c",
-                    "import os,sys,time; sys.stdout.close(); os.close(1); time.sleep(0.4)",
+                    "import os,sys,time; sys.stdout.close(); os.close(1); time.sleep(0.8)",
                 ],
             ),
         ) else {
             panic!("expected spawn");
         };
+        let pid = host.child_pid(handle).expect("pid");
         let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
         assert!(observations
             .iter()
             .any(|o| matches!(o.kind, HostObservationKind::ObservationDisconnected)));
+        assert!(
+            child_still_running(pid),
+            "inverse case: child must still be alive after observation-pipe EOF"
+        );
+        let wait_exit = Instant::now() + Duration::from_secs(3);
+        while child_still_running(pid) && Instant::now() < wait_exit {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !child_still_running(pid),
+            "child must exit on its own after the delayed sleep"
+        );
         let evidence = host.reap(handle).unwrap();
-        let _ = evidence;
+        assert_eq!(evidence.kind, HostExitKind::Completed);
+        let zombie = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|text| text.trim().starts_with('Z'))
+            .unwrap_or(false);
+        assert!(!zombie, "reap must not leave a zombie");
     }
 
     #[test]

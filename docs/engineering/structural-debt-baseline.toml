@@ -185,7 +185,7 @@ reason = "IntegrationService remains the Agent Backend session façade; #1224 ad
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/standalone_process_host.rs"
-acknowledged_loc = 915
+acknowledged_loc = 936
 issue = 1224
 reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1224 adds process-group cancel, bounded observation backpressure, Drop/shutdown reap, and proofs of those invariants beside spawn/observe rather than a second host type."
 
