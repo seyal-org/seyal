@@ -661,24 +661,16 @@ impl ApplicationRoot {
         &mut self.provisioning
     }
 
-    /// Active Tab's Pane regions (#923). The one live surface belongs to the
-    /// execution-bound Pane, or before any bind to the focused Pane (where
-    /// `Bind` will land); it is shown only while that Pane is focused.
+    /// Active Tab's Pane regions (#923 / #936). Every execution-bound leaf is
+    /// live simultaneously; the focused leaf is also live as the ADR-017 bind
+    /// landing region before its Controller attach completes.
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
-        let focused = shell.focused_pane;
-        let live_pane =
-            if self.pane_authorities.contains_key(&focused) || self.pane_authorities.is_empty() {
-                focused
-            } else {
-                // Unbound focus while another leaf remains bound: no live surface.
-                self.pane_authorities
-                    .keys()
-                    .copied()
-                    .next()
-                    .expect("non-empty pane_authorities")
-            };
-        pane_layout::project(&shell.tree, focused, live_pane)
+        let bound = shell
+            .panes
+            .iter()
+            .filter_map(|pane| pane.execution.map(|_| pane.id));
+        pane_layout::project(&shell.tree, shell.focused_pane, bound)
     }
 
     pub fn fence(&self) -> AppFence {

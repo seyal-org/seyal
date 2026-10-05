@@ -1,18 +1,18 @@
 import AppKit
 
-/// Thin AppKit projection of the active Tab's Pane regions (#923) and split
-/// dividers (#928).
+/// Thin AppKit projection of the active Tab's Pane regions (#923 / #936) and
+/// split dividers (#928).
 ///
 /// Geometry, focus, ratios and live-surface placement come from Rust
 /// (`seyal_app_pane_region` / `seyal_app_pane_divider`); this view only
-/// positions frames. The one live terminal/Metal/composer container
-/// (`liveContent`) sits in the LIVE region and is hidden when no region is
-/// LIVE. Every leaf is a focusable region bound to its real PaneId; focusing
-/// dispatches Rust `FOCUS_PANE` through `onFocusPane`. Dividers sit on the
-/// Rust-projected line; dragging one forwards the raw pointer position in Tab
-/// unit space as `MOVE_SPLIT_DIVIDER`, and Rust derives and clamps the ratio.
-/// This view re-reads only the Pane projection, so a drag never rebuilds
-/// Blocks on every mouse move.
+/// positions frames. The focused chrome container (`liveContent`) hosts
+/// composer/transcript/primary Metal. Additional LIVE leaves host secondary
+/// Metal surfaces via `installSecondaryLive`. Every leaf is a focusable region
+/// bound to its real PaneId; focusing dispatches Rust `FOCUS_PANE` through
+/// `onFocusPane`. Dividers sit on the Rust-projected line; dragging one
+/// forwards the raw pointer position in Tab unit space as `MOVE_SPLIT_DIVIDER`,
+/// and Rust derives and clamps the ratio. This view re-reads only the Pane
+/// projection, so a drag never rebuilds Blocks on every mouse move.
 @MainActor
 final class PaneLayoutView: NSView {
     struct Region: Equatable {
@@ -49,8 +49,7 @@ final class PaneLayoutView: NSView {
         }
     }
 
-    /// Container for the single live Pane surface; owned by the caller's
-    /// constraints internally, positioned here by frame.
+    /// Container for the focused Pane's chrome (transcript/composer/primary Metal).
     let liveContent = NSView()
     var onFocusPane: ((UInt64, UInt64) -> Void)?
     /// Rust application root the projection is read from; 0 until wired.
@@ -59,7 +58,13 @@ final class PaneLayoutView: NSView {
     private(set) var dividers: [Divider] = []
     private var regionViews: [PaneRegionView] = []
     private var dividerViews: [PaneDividerView] = []
+    private var secondaryLiveHosts: [PaneKey: SecondaryLivePaneHost] = [:]
     private var theme: NativeTheme?
+
+    private struct PaneKey: Hashable {
+        let lo: UInt64
+        let hi: UInt64
+    }
 
     override var isFlipped: Bool { true }
 
@@ -69,6 +74,43 @@ final class PaneLayoutView: NSView {
         // Track the Tab's bounds until the first projection sets a region frame.
         liveContent.autoresizingMask = [.width, .height]
         addSubview(liveContent)
+    }
+
+    /// Registry handle → secondary host lookup for shared bridge poll routing.
+    func secondaryHost(displayHandle: UInt64) -> SecondaryLivePaneHost? {
+        secondaryLiveHosts.values.first { $0.displayHandle == displayHandle }
+    }
+
+    /// Ensure non-focused LIVE leaves with a display handle have Metal hosts.
+    func reconcileSecondaryLiveHosts(
+        bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool)]
+    ) {
+        var keep = Set<PaneKey>()
+        for binding in bindings {
+            let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
+            guard binding.live, !binding.focused, binding.displayHandle != 0 else {
+                if let host = secondaryLiveHosts.removeValue(forKey: key) {
+                    host.removeFromSuperview()
+                }
+                continue
+            }
+            keep.insert(key)
+            if let existing = secondaryLiveHosts[key] {
+                existing.updateDisplayHandle(binding.displayHandle)
+            } else {
+                let host = SecondaryLivePaneHost(
+                    paneLo: binding.paneLo,
+                    paneHi: binding.paneHi,
+                    displayHandle: binding.displayHandle
+                )
+                secondaryLiveHosts[key] = host
+                addSubview(host, positioned: .above, relativeTo: liveContent)
+            }
+        }
+        for key in secondaryLiveHosts.keys where !keep.contains(key) {
+            secondaryLiveHosts.removeValue(forKey: key)?.removeFromSuperview()
+        }
+        needsLayout = true
     }
 
     @available(*, unavailable)
@@ -179,6 +221,8 @@ final class PaneLayoutView: NSView {
             addSubview(view, positioned: .below, relativeTo: liveContent)
             return view
         }
+        // Focused chrome container stays visible while any leaf is LIVE; it is
+        // positioned on the focused LIVE region (or the sole LIVE region).
         liveContent.isHidden = !next.contains(where: \.live)
         dividerViews.forEach { $0.removeFromSuperview() }
         dividerViews = nextDividers.enumerated().map { index, divider in
@@ -187,9 +231,12 @@ final class PaneLayoutView: NSView {
                 self?.moveDivider(divider, to: point)
             }
             if let theme { view.apply(theme: theme) }
-            // Dividers sit above the live container so its edge stays draggable.
+            // Dividers sit above live hosts so edges stay draggable.
             addSubview(view, positioned: .above, relativeTo: liveContent)
             return view
+        }
+        for host in secondaryLiveHosts.values {
+            addSubview(host, positioned: .above, relativeTo: liveContent)
         }
     }
 
@@ -204,11 +251,17 @@ final class PaneLayoutView: NSView {
         for (view, region) in zip(regionViews, regions) {
             view.frame = scaled(region.rect)
         }
-        // Before the first projection the live container fills the Tab so the
-        // single production Pane can present and bind.
-        let live = regions.first(where: \.live)?.rect ?? CGRect(x: 0, y: 0, width: 1, height: 1)
         let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
-        liveContent.frame = scaled(live).insetBy(dx: inset, dy: inset)
+        // Focused chrome (composer/transcript/primary Metal) follows the
+        // focused LIVE region; fall back to the first LIVE region, then full Tab.
+        let focusedLive = regions.first(where: { $0.live && $0.focused })?.rect
+            ?? regions.first(where: \.live)?.rect
+            ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+        liveContent.frame = scaled(focusedLive).insetBy(dx: inset, dy: inset)
+        for region in regions where region.live && !region.focused {
+            let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
+            secondaryLiveHosts[key]?.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
+        }
         for (view, divider) in zip(dividerViews, dividers) {
             // Centre a fixed-thickness hit zone on the Rust-projected line.
             let area = scaled(divider.area)
@@ -255,6 +308,7 @@ private final class PaneRegionView: NSView {
         setAccessibilityValue(region.focused ? "focused" : "")
         title.stringValue = region.title
         title.translatesAutoresizingMaskIntoConstraints = false
+        // Title placeholder only when the leaf has no live Metal host yet.
         title.isHidden = !split || region.live
         addSubview(title)
         NSLayoutConstraint.activate([

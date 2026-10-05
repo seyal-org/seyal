@@ -305,6 +305,19 @@ pub extern "C" fn seyal_bridge_ensure_prepared() -> i32 {
     }
 }
 
+/// Ensure prepared surface for one registry handle without changing focus.
+///
+/// Used by non-focused live Metal leaves (#936) so sibling Controllers can
+/// present without stealing [`super::display_handle`].
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_ensure_prepared_for(handle: u64) -> i32 {
+    match super::with_client_mut(handle, |client| client.ensure_prepared_surface()) {
+        Some(Ok(_)) => 0,
+        Some(Err(error)) => error_code(error),
+        None => -1,
+    }
+}
+
 /// Returns 1 only while bounded nonblocking client→Runtime bytes remain.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_wants_write() -> i32 {
@@ -375,44 +388,55 @@ pub extern "C" fn seyal_bridge_request_history_range(
 /// Panics abort the process; they never unwind into Swift.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_frame() -> SeyalPreparedFrame {
-    with_display_client_mut(|client| {
-        if client.ensure_prepared_surface().is_err() {
-            return SeyalPreparedFrame::empty();
-        }
-        let prepared = client.prepared_surface();
-        let cells = prepared.prepared_cells();
-        let Ok(cell_count) = u32::try_from(cells.len()) else {
-            return SeyalPreparedFrame::empty();
-        };
-        let result = client.last_preparation();
-        let cursor = prepared.cursor();
-        let damage = result.rebuilt_rows.words();
-        let grapheme = prepared.grapheme_bytes();
-        let Ok(grapheme_utf8_len) = u32::try_from(grapheme.len()) else {
-            return SeyalPreparedFrame::empty();
-        };
-        SeyalPreparedFrame {
-            cells: cells.as_ptr(),
-            cell_count,
-            generation: prepared.generation().unwrap_or_default(),
-            rows: prepared.rows(),
-            columns: prepared.columns(),
-            cursor_row: cursor.row,
-            cursor_column: cursor.column,
-            cursor_visible: u8::from(cursor.visible),
-            alternate_screen: u8::from(prepared.alternate_screen()),
-            full_rebuild: u8::from(result.full_rebuild),
-            reserved0: 0,
-            rebuilt_row_count: u16::try_from(result.rebuilt_row_count).unwrap_or(u16::MAX),
-            reserved1: 0,
-            damage_word0: damage[0],
-            damage_word1: damage[1],
-            damage_word2: damage[2],
-            damage_word3: damage[3],
-            grapheme_utf8: grapheme.as_ptr(),
-            grapheme_utf8_len,
-            reserved2: 0,
-        }
-    })
-    .unwrap_or_else(SeyalPreparedFrame::empty)
+    with_display_client_mut(prepared_frame_from_client).unwrap_or_else(SeyalPreparedFrame::empty)
+}
+
+/// Borrow the prepared surface for one registry handle (#936 multi-live Metal).
+///
+/// Does not change the focused display/input client. Pointer borrow rules match
+/// [`seyal_bridge_frame`]: copy cells before returning to the run loop.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_frame_for(handle: u64) -> SeyalPreparedFrame {
+    super::with_client_mut(handle, prepared_frame_from_client)
+        .unwrap_or_else(SeyalPreparedFrame::empty)
+}
+
+fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
+    if client.ensure_prepared_surface().is_err() {
+        return SeyalPreparedFrame::empty();
+    }
+    let prepared = client.prepared_surface();
+    let cells = prepared.prepared_cells();
+    let Ok(cell_count) = u32::try_from(cells.len()) else {
+        return SeyalPreparedFrame::empty();
+    };
+    let result = client.last_preparation();
+    let cursor = prepared.cursor();
+    let damage = result.rebuilt_rows.words();
+    let grapheme = prepared.grapheme_bytes();
+    let Ok(grapheme_utf8_len) = u32::try_from(grapheme.len()) else {
+        return SeyalPreparedFrame::empty();
+    };
+    SeyalPreparedFrame {
+        cells: cells.as_ptr(),
+        cell_count,
+        generation: prepared.generation().unwrap_or_default(),
+        rows: prepared.rows(),
+        columns: prepared.columns(),
+        cursor_row: cursor.row,
+        cursor_column: cursor.column,
+        cursor_visible: u8::from(cursor.visible),
+        alternate_screen: u8::from(prepared.alternate_screen()),
+        full_rebuild: u8::from(result.full_rebuild),
+        reserved0: 0,
+        rebuilt_row_count: u16::try_from(result.rebuilt_row_count).unwrap_or(u16::MAX),
+        reserved1: 0,
+        damage_word0: damage[0],
+        damage_word1: damage[1],
+        damage_word2: damage[2],
+        damage_word3: damage[3],
+        grapheme_utf8: grapheme.as_ptr(),
+        grapheme_utf8_len,
+        reserved2: 0,
+    }
 }

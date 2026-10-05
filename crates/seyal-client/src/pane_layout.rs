@@ -122,8 +122,10 @@ pub struct PaneRegion {
     pub pane: PaneId,
     pub rect: PaneRect,
     pub focused: bool,
-    /// This region hosts the single live terminal/Metal/composer surface.
-    /// At most one region is live, and only when it is also focused.
+    /// This region hosts a live terminal/Metal surface (#936).
+    ///
+    /// Every execution-bound leaf is live simultaneously. The focused leaf is
+    /// also live before bind so the ADR-017 landing surface has a host region.
     pub live: bool,
 }
 
@@ -158,14 +160,22 @@ impl PaneDivider {
 }
 
 /// Regions in tree (depth-first, first-before-second) order, matching
-/// [`crate::shell::ShellSnapshot::panes`]. `live_pane` is the Pane the one
-/// live execution surface belongs to; it is shown only while focused.
-pub fn project(tree: &PaneTree, focused: PaneId, live_pane: PaneId) -> Vec<PaneRegion> {
+/// [`crate::shell::ShellSnapshot::panes`].
+///
+/// `bound_panes` are leaves with a Runtime-owned execution binding. Every bound
+/// leaf is live; the focused leaf is also live so an unbound focus still has a
+/// bind-landing host region (#936 multi-live Metal).
+pub fn project(
+    tree: &PaneTree,
+    focused: PaneId,
+    bound_panes: impl IntoIterator<Item = PaneId>,
+) -> Vec<PaneRegion> {
+    let bound: std::collections::HashSet<PaneId> = bound_panes.into_iter().collect();
     let mut regions = Vec::new();
     collect(tree, PaneRect::FULL, &mut regions, &mut Vec::new());
     for region in &mut regions {
         region.focused = region.pane == focused;
-        region.live = region.focused && region.pane == live_pane;
+        region.live = region.focused || bound.contains(&region.pane);
     }
     regions
 }
@@ -234,7 +244,7 @@ mod tests {
     #[test]
     fn single_leaf_fills_the_tab_and_is_live_when_focused() {
         let pane = PaneId::new();
-        let regions = project(&PaneTree::Leaf(pane), pane, pane);
+        let regions = project(&PaneTree::Leaf(pane), pane, [pane]);
         assert_eq!(
             regions,
             vec![PaneRegion {
@@ -255,7 +265,7 @@ mod tests {
             second: leaf(b),
             ratio: SplitRatio::HALF,
         };
-        let regions = project(&right, a, a);
+        let regions = project(&right, a, [a]);
         assert_eq!(regions[0].rect, rect(0.0, 0.0, 0.5, 1.0));
         assert_eq!(regions[1].rect, rect(0.5, 0.0, 0.5, 1.0));
 
@@ -265,7 +275,7 @@ mod tests {
             second: leaf(b),
             ratio: SplitRatio::HALF,
         };
-        let regions = project(&down, a, a);
+        let regions = project(&down, a, [a]);
         assert_eq!(regions[0].rect, rect(0.0, 0.0, 1.0, 0.5));
         assert_eq!(regions[1].rect, rect(0.0, 0.5, 1.0, 0.5));
     }
@@ -284,7 +294,7 @@ mod tests {
             }),
             ratio: SplitRatio::HALF,
         };
-        let regions = project(&tree, c, a);
+        let regions = project(&tree, c, [a]);
         let ids: Vec<_> = regions.iter().map(|region| region.pane).collect();
         assert_eq!(ids, vec![a, b, c]);
         assert_eq!(regions[1].rect, rect(0.5, 0.0, 0.5, 0.5));
@@ -317,7 +327,7 @@ mod tests {
             second: leaf(b),
             ratio,
         };
-        let regions = project(&tree, a, a);
+        let regions = project(&tree, a, [a]);
         assert_eq!(regions[0].rect, rect(0.0, 0.0, 0.25, 1.0));
         assert_eq!(regions[1].rect, rect(0.25, 0.0, 0.75, 1.0));
         assert_eq!(
@@ -417,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn live_surface_is_shown_only_on_the_focused_live_pane() {
+    fn bound_leaves_stay_live_while_unbound_focus_is_also_live() {
         let (a, b) = (PaneId::new(), PaneId::new());
         let tree = PaneTree::Split {
             axis: SplitAxis::Right,
@@ -425,15 +435,19 @@ mod tests {
             second: leaf(b),
             ratio: SplitRatio::HALF,
         };
-        let focused_live = project(&tree, a, a);
-        assert!(focused_live[0].focused && focused_live[0].live);
-        assert!(!focused_live[1].focused && !focused_live[1].live);
+        let both_bound = project(&tree, a, [a, b]);
+        assert!(both_bound[0].focused && both_bound[0].live);
+        assert!(!both_bound[1].focused && both_bound[1].live);
 
-        // Focus moved away from the live Pane: no region hosts the surface,
-        // so the live terminal is never drawn inside another Pane's region.
-        let focused_other = project(&tree, b, a);
-        assert!(focused_other.iter().all(|region| !region.live));
-        assert!(focused_other[1].focused);
+        // Bound sibling stays live while focus lands on an unbound leaf.
+        let focus_unbound = project(&tree, b, [a]);
+        assert!(focus_unbound[0].live, "bound leaf stays live");
+        assert!(focus_unbound[1].focused && focus_unbound[1].live);
+
+        // Unbound unfocused leaf is not live.
+        let only_focus = project(&tree, a, std::iter::empty());
+        assert!(only_focus[0].focused && only_focus[0].live);
+        assert!(!only_focus[1].live);
     }
 }
 
@@ -574,7 +588,7 @@ mod root_tests {
     }
 
     #[test]
-    fn split_focus_close_projection_keeps_one_live_bound_pane() {
+    fn split_focus_close_projection_keeps_bound_and_focused_live() {
         let mut root = split_enabled_root();
         let bound_evidence = evidence(3, true, false);
         root.apply(AppAction::Bind {
@@ -595,8 +609,8 @@ mod root_tests {
         let created = regions[1].pane;
         assert!(regions[1].focused, "split focuses the new leaf");
         assert!(
-            regions.iter().all(|r| !r.live),
-            "unbound focus hosts no surface"
+            regions[0].live && regions[1].live,
+            "bound sibling and focused landing leaf are both live (#936)"
         );
 
         // Fail-closed: the new leaf is focused and has no execution, so fenced
@@ -624,11 +638,15 @@ mod root_tests {
         })
         .unwrap();
 
-        // Host click on the bound region refocuses it and restores the surface.
+        // Host click on the bound region refocuses it; unbound sibling stays
+        // non-live until it receives an execution binding.
         root.apply(AppAction::FocusPane { id: bound }).unwrap();
         let regions = root.pane_regions();
         assert!(regions[0].focused && regions[0].live);
-        assert!(!regions[1].live);
+        assert!(
+            !regions[1].live,
+            "unbound unfocused leaf is not a Metal host"
+        );
         assert_eq!(root.snapshot().shell.focused_pane, bound);
 
         // Bound Pane close is detach-only: execution stays unreferenced/live.

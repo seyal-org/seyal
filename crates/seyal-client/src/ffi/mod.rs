@@ -78,11 +78,11 @@ pub use app::{
     seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer,
     seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_invoke_workspace_command,
     seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row,
-    seyal_app_pane_divider, seyal_app_pane_region, seyal_app_recovery_param,
-    seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row, seyal_app_shortcut_count,
-    seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_snapshot,
-    seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
-    seyal_app_visual_warning,
+    seyal_app_pane_binding, seyal_app_pane_divider, seyal_app_pane_region,
+    seyal_app_recovery_param, seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row,
+    seyal_app_shortcut_count, seyal_app_shortcut_enabled, seyal_app_shortcut_item,
+    seyal_app_snapshot, seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
+    seyal_app_visual_warning, SeyalAppPaneBinding,
 };
 #[allow(unused_imports)]
 pub(crate) use attach_wakeup::{clone_attach_wakeup_writer, signal_attach_wakeup_on};
@@ -92,13 +92,14 @@ pub use attach_wakeup::{
 #[allow(unused_imports)]
 pub use display::{
     seyal_bridge_block_count, seyal_bridge_block_record, seyal_bridge_block_timeline_revision,
-    seyal_bridge_composer_result, seyal_bridge_ensure_prepared,
+    seyal_bridge_composer_result, seyal_bridge_ensure_prepared, seyal_bridge_ensure_prepared_for,
     seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable,
-    seyal_bridge_flush_writable_for, seyal_bridge_frame, seyal_bridge_history_range_consume,
-    seyal_bridge_history_range_peek_for, seyal_bridge_history_range_row_for,
-    seyal_bridge_history_range_sidecar_for, seyal_bridge_next_composer_request_id,
-    seyal_bridge_next_history_request_id, seyal_bridge_poll, seyal_bridge_poll_for,
-    seyal_bridge_request_history_range, seyal_bridge_wants_write, seyal_bridge_wants_write_for,
+    seyal_bridge_flush_writable_for, seyal_bridge_frame, seyal_bridge_frame_for,
+    seyal_bridge_history_range_consume, seyal_bridge_history_range_peek_for,
+    seyal_bridge_history_range_row_for, seyal_bridge_history_range_sidecar_for,
+    seyal_bridge_next_composer_request_id, seyal_bridge_next_history_request_id, seyal_bridge_poll,
+    seyal_bridge_poll_for, seyal_bridge_request_history_range, seyal_bridge_wants_write,
+    seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]

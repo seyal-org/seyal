@@ -178,6 +178,20 @@ fn split_live_two_by_two_binds_four_distinct_executions() {
     assert!(executions.contains(&first_execution));
     assert_eq!(root.provisioning().automatic_retries(), 0);
 
+    // #936: every bound leaf is LIVE simultaneously (not only the focused one).
+    let regions = root.pane_regions();
+    assert_eq!(regions.len(), 4);
+    assert!(
+        regions.iter().all(|region| region.live),
+        "2×2 bound leaves must all project LIVE for multi-live Metal"
+    );
+    for pane in [a, b, c, d] {
+        assert!(
+            root.pane_client_raw(pane).is_some(),
+            "each live leaf keeps a distinct Controller registry handle"
+        );
+    }
+
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
 }

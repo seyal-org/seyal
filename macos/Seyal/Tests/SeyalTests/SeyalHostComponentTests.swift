@@ -443,6 +443,7 @@ final class SeyalHostComponentTests: XCTestCase {
     @MainActor
     func testProductionPaneTreeProjectsOneLiveFocusedRegion() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneRegion>.size, 40)
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneBinding>.size, 48)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
@@ -453,6 +454,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(region.pane_hi, shell.focused_pane_hi)
         XCTAssertEqual(region.flags, UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE))
         XCTAssertEqual(seyal_app_pane_region(view.pane.appHandle, 1).size, 0, "out of range fails closed")
+        let binding = seyal_app_pane_binding(view.pane.appHandle, 0)
+        XCTAssertEqual(binding.pane_lo, region.pane_lo)
+        XCTAssertEqual(binding.pane_hi, region.pane_hi)
+        XCTAssertEqual(seyal_app_pane_binding(view.pane.appHandle, 1).size, 0)
 
         let regionView = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0"))
         XCTAssertEqual(regionView.accessibilityValue() as? String, "focused")
@@ -463,6 +468,51 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(live.isHidden)
         XCTAssertEqual(live.frame, regionView.frame)
         XCTAssertGreaterThan(live.frame.width, 0)
+    }
+
+    @MainActor
+    func testBoundAndFocusedLeavesAreSimultaneouslyLive() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.pane_count, 2)
+        let first = seyal_app_pane_region(handle, 0)
+        let second = seyal_app_pane_region(handle, 1)
+        XCTAssertNotEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0, "bound sibling stays live")
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0, "focused landing leaf is live")
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
+        XCTAssertEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-0"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        // Focused chrome container follows the focused LIVE region.
+        let focusedRegion = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        let live = try XCTUnwrap(view.pane.superview)
+        XCTAssertFalse(live.isHidden)
+        XCTAssertEqual(live.frame, focusedRegion.frame.insetBy(dx: 1, dy: 1))
     }
 
     @MainActor
