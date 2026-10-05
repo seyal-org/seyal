@@ -160,6 +160,11 @@ case "$cmd" in
         # retirement/idle-resource gates against the exact production value,
         # client-cache and Runtime-timeline implementations.
         cargo_pinned bench -p seyal-client --bench pass8_block_metadata --features benchmark-instrumentation --locked
+
+        # M003 #869 Flow/Raw/TUI presentation qualification: transition latency,
+        # live-tail projection scaling, retained Block RSS, and transition RSS
+        # return. Absolute gates are only those frozen on Issue #869.
+        cargo_pinned bench -p seyal-client --bench m003_presentation_qualification --features benchmark-instrumentation --locked
       else
         echo "[seyal Pass-5 benchmark coverage] measured Candidate-D validation skipped: production benchmark is macOS-only; validator self-test is enforced by make check."
         echo "[seyal Pass-6 renderer benchmark] native Metal measurement skipped: macOS-only."
@@ -167,6 +172,7 @@ case "$cmd" in
         echo "[seyal Pass-7 validation matrix] native measurement skipped: macOS-only."
         echo "[seyal Pass-8 Block metadata benchmark] native measurement skipped: macOS-only."
         echo "[seyal Pass-9 renderer lifecycle] native measurement skipped: macOS-only."
+        echo "[seyal M003 presentation qualification] native measurement skipped: macOS-only."
       fi
     else
       echo "[seyal task] bench: harness metadata recorder passed; no production benchmark target exists yet and no performance result is claimed."

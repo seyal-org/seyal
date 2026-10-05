@@ -1,0 +1,12 @@
+m003_presentation_qualification architecture=PresentationSession_live_tail_BlockTimeline issue=869 percentile_method=nearest_rank latency_samples=120 transition_cycles=50 performance_claim=false
+m003_host macos_version=27.0 macos_build=26A428 model="Mac17,9" hardware="Apple M5 Pro" arch=aarch64 rust="rustc 1.98.0 (88d9e12ae 2026-08-18)" build_mode=release commit=1e001f4e178f9c7f8ed5803edc8bb2289057643b evidence_class=controlled-host performance_claim=false
+m003_latency boundary=idle_flow_snapshot classification=MEASURED sample_count=120 p50_us=0.000 p95_us=0.042 p99_us=0.042 max_us=0.042 performance_claim=false
+m003_latency boundary=flow_raw_tui_transition_cycle classification=MEASURED sample_count=120 p50_us=0.000 p95_us=0.042 p99_us=0.042 max_us=0.042 performance_claim=false
+m003_latency boundary=live_tail_project_blocks_8 classification=MEASURED sample_count=120 p50_us=0.041 p95_us=0.042 p99_us=0.084 max_us=0.125 performance_claim=false
+m003_latency boundary=live_tail_project_blocks_32 classification=MEASURED sample_count=120 p50_us=0.083 p95_us=0.125 p99_us=0.125 max_us=0.167 performance_claim=false
+m003_latency boundary=live_tail_project_blocks_128 classification=MEASURED sample_count=120 p50_us=0.333 p95_us=0.334 p99_us=0.375 max_us=0.416 performance_claim=false
+m003_block_rss classification=MEASURED live_records=8 attributable_rss_kib_median=16 rss_samples=[16, 0, 16, 16, 0] scaled_gate_kib=128 rss_gate_kib=1024 performance_claim=false
+m003_block_rss classification=MEASURED live_records=32 attributable_rss_kib_median=0 rss_samples=[0, 48, 48, 0, 0] scaled_gate_kib=128 rss_gate_kib=1024 performance_claim=false
+m003_block_rss classification=MEASURED live_records=128 attributable_rss_kib_median=0 rss_samples=[48, 0, 0, 16, 0] scaled_gate_kib=256 rss_gate_kib=1024 performance_claim=false
+m003_transition_rss classification=MEASURED cycles=50 rss_pre_median_kib=2352 rss_post_median_kib=2352 rss_pre_samples=[2352, 2352, 2352, 2352, 2352] rss_post_samples=[2352, 2352, 2352, 2352, 2352] allowed_post_kib=2608 performance_claim=false
+m003_renderer_plan classification=MEASURED flow_pane_scoped=true raw_full_pane=true tui_full_pane=true paint_inspection_gate=true performance_claim=false

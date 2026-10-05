@@ -111,3 +111,19 @@ The architecture target remains practical 500+ pane/presentation/domain objects;
 This harness establishes headroom for the existing execution/PTY/terminal-state foundation only. It cannot prove the future Runtime reactor, registry overhead, kqueue fairness, or bounded control/input scheduling.
 
 Do not claim latency, CPU, RSS, throughput superiority or zero-copy results from the harness smoke. Real measurements must identify workload, hardware/OS/build mode, commit, terminal dimensions, font/scale, shell, run count and percentile method as required by `docs/engineering/PERFORMANCE.md` and M001.
+
+## M003 #869 Flow/Raw/TUI presentation qualification
+
+`crates/seyal-client/benches/m003_presentation_qualification.rs` measures
+PresentationSession Flow↔Raw↔TUI transition latency, live-tail projection
+scaling for retained Block counts, Pass-8-style metadata RSS, and transition
+RSS return-to-baseline. Absolute gates are only those frozen on Issue #869.
+Retained paired evidence lives under
+`docs/evidence/m003-869-presentation-qualification.md`. Every harness line is
+`performance_claim=false`.
+
+```sh
+cargo bench -p seyal-client --bench m003_presentation_qualification \
+  --features benchmark-instrumentation --locked
+```
+
