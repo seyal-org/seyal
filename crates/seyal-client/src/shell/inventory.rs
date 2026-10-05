@@ -73,7 +73,7 @@ pub(super) fn build(
     let mut seen_executions = HashSet::new();
 
     for workspace in workspaces {
-        let active_tab = workspace.active_tab_id();
+        let active_tab = workspace.active_tab_id().ok();
         out_workspaces.push(WorkspaceNavItem {
             id: workspace.id,
             name: workspace.name.clone(),
@@ -90,15 +90,16 @@ pub(super) fn build(
                 id: tab.id,
                 title: tab.title.clone(),
                 attention: tab.attention,
-                active: workspace.id == active_workspace && tab.id == active_tab,
+                active: workspace.id == active_workspace && Some(tab.id) == active_tab,
                 pane_count: tab.panes.len(),
             });
             for pane_id in tab.root.pane_ids() {
                 let Some(pane) = tab.panes.get(&pane_id) else {
                     continue;
                 };
-                let focused_here =
-                    workspace.id == active_workspace && tab.id == active_tab && pane.id == focused;
+                let focused_here = workspace.id == active_workspace
+                    && Some(tab.id) == active_tab
+                    && pane.id == focused;
                 panes.push(PaneNavItem {
                     workspace: workspace.id,
                     workspace_name: workspace.name.clone(),
