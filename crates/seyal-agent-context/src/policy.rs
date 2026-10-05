@@ -58,7 +58,8 @@ pub fn apply_eligibility(scope: &DiscoveryScope, mut source: DiscoveredSource) -
     source
 }
 
-fn assumed_sensitivity(source: &DiscoveredSource) -> SensitivityClass {
+/// Assumed sensitivity for discovery/selection (deny-by-default heuristics).
+pub fn assumed_sensitivity(source: &DiscoveredSource) -> SensitivityClass {
     let name = source
         .provenance
         .relative_path

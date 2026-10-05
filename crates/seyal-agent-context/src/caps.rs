@@ -25,3 +25,12 @@ pub const DURABLE_INDEX_MIB_AGGREGATE: u64 = 1024;
 pub const INDEX_PRODUCER_ID: &str = "seyal-agent-context/discovery-index";
 /// Cache schema version for integrity/producer fencing.
 pub const INDEX_SCHEMA_VERSION: u32 = 1;
+
+/// Concurrent independent ContextBundle builds per workspace (calibration).
+pub const MAX_CONCURRENT_BUNDLE_BUILDS: usize = 8;
+/// Optional semantic enhancement timeout then deterministic fallback (ms).
+pub const SEMANTIC_ENHANCEMENT_TIMEOUT_MS: u64 = 2_000;
+/// Builder/version fencing for ContextBundle / SelectionTrace.
+pub const BUNDLE_BUILDER_VERSION: &str = "seyal-agent-context/bundle-v1";
+/// Selection configuration version for deterministic baseline.
+pub const SELECTION_CONFIG_VERSION: &str = "deterministic-baseline-v1";
