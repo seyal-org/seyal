@@ -464,6 +464,7 @@ final class ProductChromeHostView: NSView {
             routeFocus()
         }
         applyTheme()
+        applyPresentationTierFromSnapshot()
     }
 
     /// Global keyboard-first command palette (#932): the menu action target.

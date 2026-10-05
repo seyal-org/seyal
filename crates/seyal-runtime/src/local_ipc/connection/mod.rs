@@ -134,6 +134,8 @@ impl ConnectionState {
                         | Resync
                         | Detach
                         | CreateExecutionRequest
+                        | SuspendDelivery
+                        | ResumeDelivery
                         | Goodbye
                 )
         );

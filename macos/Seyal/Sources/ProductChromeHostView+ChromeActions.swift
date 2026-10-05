@@ -190,4 +190,32 @@ extension ProductChromeHostView {
         view.setAccessibilityRole(.group)
         view.setAccessibilityIdentifier(identifier)
     }
+
+    /// Host GPU follows Rust-authored tier; never invents Hidden/Visible.
+    func applyPresentationTierFromSnapshot() {
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        let shell = seyal_app_shell(pane.appHandle)
+        var matched = false
+        for windowIndex in 0..<Int(shell.window_count) {
+            let window = seyal_app_window(pane.appHandle, UInt32(windowIndex))
+            for tabIndex in 0..<Int(window.tab_count) {
+                let tab = seyal_app_tab(pane.appHandle, UInt32(windowIndex), UInt32(tabIndex))
+                for paneIndex in 0..<Int(tab.pane_count) {
+                    let leaf = seyal_app_pane_leaf(
+                        pane.appHandle,
+                        UInt32(windowIndex),
+                        UInt32(tabIndex),
+                        UInt32(paneIndex)
+                    )
+                    if leaf.pane_lo == snapshot.pane_lo, leaf.pane_hi == snapshot.pane_hi {
+                        pane.inputSurface.applyProductPresentationTier(leaf.presentation_tier)
+                        matched = true
+                    }
+                }
+            }
+        }
+        if !matched {
+            pane.inputSurface.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        }
+    }
 }

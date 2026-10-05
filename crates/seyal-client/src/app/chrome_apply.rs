@@ -236,6 +236,7 @@ impl ApplicationRoot {
         &mut self,
         window: WindowId,
         event: WindowNativeEvent,
+        occluded: bool,
     ) -> Result<(), AppError> {
         if !self
             .shell
@@ -246,7 +247,24 @@ impl ApplicationRoot {
         {
             return Err(AppError::UnknownWindow);
         }
-        // Disposable presentation input only — never mutates window/tab/pane product state.
+        match event {
+            WindowNativeEvent::Miniaturized => {
+                self.shell
+                    .set_window_miniaturized(window, true)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::Deminiaturized => {
+                self.shell
+                    .set_window_miniaturized(window, false)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::OcclusionChanged => {
+                self.shell
+                    .set_window_occluded(window, occluded)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            _ => {}
+        }
         self.last_window_event = Some((window, event));
         Ok(())
     }
@@ -254,5 +272,55 @@ impl ApplicationRoot {
     /// Last forwarded window event (W4a tests / host observability).
     pub fn last_window_event(&self) -> Option<(WindowId, WindowNativeEvent)> {
         self.last_window_event
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl ApplicationRoot {
+    pub(super) fn sync_attachment_delivery(&mut self) {
+        use crate::shell::PresentationTier;
+        let snap = self.shell.snapshot();
+        let mut hidden = std::collections::HashMap::new();
+        for window in &snap.windows {
+            for tab in &window.tabs {
+                for pane in &tab.panes {
+                    hidden.insert(
+                        pane.id,
+                        matches!(
+                            pane.presentation_tier,
+                            PresentationTier::Hidden | PresentationTier::Unpresented
+                        ),
+                    );
+                }
+            }
+        }
+        let handles: Vec<_> = self
+            .pane_client_raws
+            .iter()
+            .map(|(pane, raw)| (*pane, *raw))
+            .collect();
+        for (pane, handle) in handles {
+            let suspend = hidden.get(&pane).copied().unwrap_or(true);
+            let _ = crate::ffi::with_client_mut(handle, |client| {
+                client.set_delivery_suspended(suspend)
+            });
+        }
+        if let Some(client) = self.wire_client.as_mut() {
+            let execution = client.execution_id();
+            let suspend = snap
+                .windows
+                .iter()
+                .flat_map(|window| window.tabs.iter())
+                .flat_map(|tab| tab.panes.iter())
+                .find(|pane| pane.execution == Some(execution))
+                .map(|pane| {
+                    matches!(
+                        pane.presentation_tier,
+                        PresentationTier::Hidden | PresentationTier::Unpresented
+                    )
+                })
+                .unwrap_or(false);
+            let _ = client.set_delivery_suspended(suspend);
+        }
     }
 }

@@ -710,3 +710,88 @@ fn palette_lists_new_tab_under_production_policy() {
         "production composition enables CreateTab in the palette"
     );
 }
+
+#[test]
+fn tab_switch_retains_attachment_ids_and_hides_inactive_leaf() {
+    use crate::shell::PresentationTier;
+    let mut root = ApplicationRoot::new();
+    root.enable_tab_creation_for_test();
+    root.install_wire_client(negotiated_provisioning_client())
+        .unwrap();
+    drive_create_tab_to_bound(&mut root, exec(3));
+    let tab_a = root.snapshot().shell.active_tab;
+    let attachment_a = attachment(3);
+
+    drive_create_tab_to_bound(&mut root, exec(4));
+    let tab_b = root.snapshot().shell.active_tab;
+    let attachment_b = attachment(4);
+    assert_ne!(attachment_a, attachment_b);
+    assert_ne!(tab_a, tab_b);
+
+    root.apply(AppAction::SelectTab { id: tab_a }).unwrap();
+    let snap = root.snapshot().shell;
+    assert_eq!(
+        snap.windows[0]
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_a)
+            .unwrap()
+            .panes[0]
+            .execution,
+        Some(exec(3)),
+        "tab switch must not re-provision or drop the Hidden leaf execution"
+    );
+    assert_eq!(
+        snap.windows[0]
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_b)
+            .unwrap()
+            .panes[0]
+            .execution,
+        Some(exec(4))
+    );
+    let leaf_a = snap.windows[0]
+        .tabs
+        .iter()
+        .find(|tab| tab.id == tab_a)
+        .unwrap()
+        .panes[0]
+        .presentation_tier;
+    let leaf_b = snap.windows[0]
+        .tabs
+        .iter()
+        .find(|tab| tab.id == tab_b)
+        .unwrap()
+        .panes[0]
+        .presentation_tier;
+    assert_eq!(leaf_a, PresentationTier::Focused);
+    assert_eq!(leaf_b, PresentationTier::Hidden);
+}
+
+#[test]
+fn miniaturize_hides_focused_leaf() {
+    use crate::shell::PresentationTier;
+    let mut root = ApplicationRoot::new();
+    let window = root.snapshot().shell.active_window.expect("window");
+    root.apply(AppAction::ReportWindowEvent {
+        window,
+        event: crate::app::WindowNativeEvent::Miniaturized,
+        occluded: false,
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().shell.windows[0].tabs[0].panes[0].presentation_tier,
+        PresentationTier::Hidden
+    );
+    root.apply(AppAction::ReportWindowEvent {
+        window,
+        event: crate::app::WindowNativeEvent::Deminiaturized,
+        occluded: false,
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().shell.windows[0].tabs[0].panes[0].presentation_tier,
+        PresentationTier::Focused
+    );
+}

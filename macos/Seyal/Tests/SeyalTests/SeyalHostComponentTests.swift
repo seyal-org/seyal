@@ -877,6 +877,33 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
     }
 
+    @MainActor
+    func testHiddenProductTierReleasesDedicatedGpu() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 40, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_HIDDEN))
+        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertFalse(view.shouldRender)
+    }
+
     /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
     /// once recovery presentation is no longer pending (#1065).
     ///

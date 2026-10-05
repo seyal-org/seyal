@@ -16,7 +16,8 @@ use seyal_runtime::{
     display::{decode_chunk, empty_cache, DecodedDisplayChunk, DisplayCache},
     local_ipc::framing::{
         encode_frame, Attach, Attached, ClientHello, ErrorCode, ErrorMessage, FrameHeader,
-        InputRef, MessageType, Resize as WireResize, Role, ServerHello, HEADER_LEN,
+        InputRef, MessageType, Resize as WireResize, ResumeDelivery, Role, ServerHello,
+        SuspendDelivery, CAP_ATTACHMENT_DELIVERY_CONTROL, HEADER_LEN,
     },
     ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
 };
@@ -139,11 +140,15 @@ impl Harness {
     }
 
     fn hello(&mut self, client: &mut Client) {
+        self.hello_caps(client, 0);
+    }
+
+    fn hello_caps(&mut self, client: &mut Client, client_capabilities: u32) {
         self.send(
             client,
             MessageType::ClientHello,
             &ClientHello {
-                client_capabilities: 0,
+                client_capabilities,
             }
             .encode(),
         );
@@ -515,5 +520,139 @@ fn finalized_execution_cannot_be_attached() {
     assert_eq!(
         ErrorMessage::decode(&payload).unwrap().error_code,
         ErrorCode::InvalidExecution as u16
+    );
+}
+
+#[test]
+fn suspend_delivery_drops_deltas_keeps_attachment_and_pty_progress() {
+    let mut harness = Harness::new("w5-suspend");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, mut cache) = harness.attach(&mut client, execution_id, Role::Controller);
+    let attachment = attached.attachment_id;
+
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attachment,
+        }
+        .encode(),
+    );
+
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: attachment,
+            bytes: b"HID",
+        }
+        .encode(),
+    );
+    let quiet_until = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < quiet_until {
+        harness.pump();
+        let mut chunk = [0u8; 4096];
+        match client.stream.read(&mut chunk) {
+            Ok(0) => panic!("connection closed while Hidden"),
+            Ok(count) => {
+                client.buffered.extend_from_slice(&chunk[..count]);
+                while client.buffered.len() >= HEADER_LEN {
+                    let header =
+                        FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                    let total = HEADER_LEN + header.payload_len as usize;
+                    if client.buffered.len() < total {
+                        break;
+                    }
+                    let kind = header.message_type;
+                    let _ = client.buffered.drain(..total);
+                    assert_ne!(
+                        kind,
+                        MessageType::DisplayDelta as u16,
+                        "Runtime must not write DisplayDelta for a suspended attachment"
+                    );
+                    assert_ne!(
+                        kind,
+                        MessageType::DisplaySnapshot as u16,
+                        "Runtime must not write DisplaySnapshot for a suspended attachment"
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("client read failed: {error}"),
+        }
+    }
+
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attachment,
+        }
+        .encode(),
+    );
+    let chunks = harness.expect_display_batch(
+        &mut client,
+        MessageType::DisplaySnapshot,
+        Instant::now() + Duration::from_secs(3),
+    );
+    cache.apply_chunks(&chunks).unwrap();
+    assert!(
+        first_row_text(&cache).contains("HID"),
+        "reveal resync must include PTY progress accumulated while Hidden"
+    );
+    assert_eq!(attached.attachment_id, attachment);
+}
+
+#[test]
+fn child_exit_while_hidden_still_finalizes() {
+    let mut harness = Harness::new("w5-exit-hidden");
+    let execution_id =
+        harness.spawn(CommandSpec::new("/bin/sh").args(["-c", "printf bye; exit 0"]));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Controller);
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut saw_final = false;
+    while Instant::now() < deadline {
+        harness.pump();
+        let mut chunk = [0u8; 8192];
+        match client.stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => {
+                client.buffered.extend_from_slice(&chunk[..count]);
+                while client.buffered.len() >= HEADER_LEN {
+                    let header =
+                        FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                    let total = HEADER_LEN + header.payload_len as usize;
+                    if client.buffered.len() < total {
+                        break;
+                    }
+                    let kind = header.message_type;
+                    let _ = client.buffered.drain(..total);
+                    if kind == MessageType::Lifecycle as u16 {
+                        saw_final = true;
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("{error}"),
+        }
+        if saw_final {
+            break;
+        }
+    }
+    assert!(
+        saw_final,
+        "SPEC-009 §11.3 final drain must still reach a Hidden attachment"
     );
 }

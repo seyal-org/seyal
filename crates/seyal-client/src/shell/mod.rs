@@ -24,6 +24,8 @@ mod unpresented_tests;
 #[cfg(test)]
 mod w2a_tests;
 #[cfg(test)]
+mod w5_tests;
+#[cfg(test)]
 mod window_admission_tests;
 
 use std::collections::BTreeMap;

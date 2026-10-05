@@ -254,6 +254,42 @@ impl_attachment_payload!(Detach);
 impl_attachment_payload!(Detached);
 impl_attachment_payload!(Resync);
 
+/// SPEC-004 §19 types 40/41: 24-byte attachment delivery control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SuspendDelivery {
+    pub attachment_id: AttachmentId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResumeDelivery {
+    pub attachment_id: AttachmentId,
+}
+
+macro_rules! impl_delivery_payload {
+    ($type:ty) => {
+        impl $type {
+            pub const WIRE_LEN: usize = 24;
+            pub fn encode(&self) -> Vec<u8> {
+                let mut out = Vec::with_capacity(Self::WIRE_LEN);
+                out.extend_from_slice(&self.attachment_id.to_bytes());
+                out.extend_from_slice(&[0u8; 8]);
+                out
+            }
+            pub fn decode(bytes: &[u8]) -> Result<Self, FramingError> {
+                exact_len(bytes, Self::WIRE_LEN)?;
+                if bytes[16..24].iter().any(|byte| *byte != 0) {
+                    return Err(FramingError::MalformedPayload);
+                }
+                Ok(Self {
+                    attachment_id: attachment_id_from(&bytes[..16]),
+                })
+            }
+        }
+    };
+}
+impl_delivery_payload!(SuspendDelivery);
+impl_delivery_payload!(ResumeDelivery);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InputRef<'a> {
     pub attachment_id: AttachmentId,
