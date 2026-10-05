@@ -73,9 +73,17 @@ impl ApplicationRoot {
             );
         }
         if self.pending_live_attach.is_some() {
+            if !self
+                .queued_live_attaches
+                .iter()
+                .any(|(_, queued)| *queued == execution)
+            {
+                self.queued_live_attaches.push_back((owner, execution));
+            }
             return Ok(());
         }
         let gate = self.live_attach_gate.take();
+        let mut wakeup = crate::ffi::clone_attach_wakeup_writer();
         let (tx, rx) = mpsc::channel();
         thread::Builder::new()
             .name("seyal-live-attach".into())
@@ -87,6 +95,9 @@ impl ApplicationRoot {
                     execution,
                     Role::Controller,
                 ));
+                if let Some(writer) = wakeup.as_mut() {
+                    crate::ffi::signal_attach_wakeup_on(writer);
+                }
             })
             .map_err(|_| AppError::NoLiveClient)?;
         self.pending_live_attach = Some(PendingLiveAttach {
@@ -110,7 +121,7 @@ impl ApplicationRoot {
             )),
         };
         let pending = self.pending_live_attach.take().expect("pending attach");
-        match result {
+        let completed = match result {
             Ok(client) => {
                 self.complete_live_controller_attach(pending.pane, pending.request_id, client)
             }
@@ -120,7 +131,20 @@ impl ApplicationRoot {
                 pending.pane,
                 error,
             ),
+        };
+        let next = self.start_next_queued_live_attach();
+        if completed.is_err() {
+            completed
+        } else {
+            next
         }
+    }
+
+    fn start_next_queued_live_attach(&mut self) -> Result<(), AppError> {
+        let Some((owner, execution)) = self.queued_live_attaches.pop_front() else {
+            return Ok(());
+        };
+        self.drive_attach_controller(owner, execution)
     }
 
     fn complete_live_controller_attach(

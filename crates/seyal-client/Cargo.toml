@@ -21,6 +21,7 @@ seyal-protocol = { path = "../seyal-protocol" }
 seyal-render = { path = "../seyal-render" }
 
 [dev-dependencies]
+libc = "=0.2.189"
 seyal-exec = { path = "../seyal-exec" }
 seyal-runtime = { path = "../seyal-runtime", features = ["benchmark-instrumentation"] }
 

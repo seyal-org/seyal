@@ -181,6 +181,8 @@ int32_t seyal_bridge_adopt_handle(uint64_t handle);
 int32_t seyal_bridge_select(uint64_t handle);
 uint64_t seyal_bridge_next_handle(uint64_t after);
 int32_t seyal_bridge_socket_fd_for(uint64_t handle);
+/// Readable when an off-thread CreateTab Controller connect completes.
+int32_t seyal_bridge_provisioning_wakeup_fd(void);
 void seyal_bridge_disconnect_handle(uint64_t handle);
 int32_t seyal_bridge_socket_fd(void);
 uint64_t seyal_bridge_execution_id_low(void);

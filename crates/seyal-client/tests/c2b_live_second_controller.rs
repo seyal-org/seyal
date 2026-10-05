@@ -2,6 +2,7 @@
 //! Controller connection with a real Runtime `AttachmentId` (no fabrication).
 
 #![cfg(target_os = "macos")]
+#![allow(unsafe_code)]
 
 use std::{
     path::PathBuf,
@@ -14,8 +15,9 @@ use std::{
 };
 
 use seyal_client::app::{AppAction, ApplicationRoot};
-use seyal_client::LocalDisplayClient;
-use seyal_core::AttachmentId;
+use seyal_client::provisioning::IntentPhase;
+use seyal_client::{seyal_bridge_provisioning_wakeup_fd, LocalDisplayClient};
+use seyal_core::{AttachmentId, PaneId};
 use seyal_protocol::runtime_dir::{
     override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
 };
@@ -525,6 +527,198 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
         "gated attach must not complete before release"
     );
     release_tx.send(()).expect("release attach");
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+    });
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+fn pane_awaiting_attach(root: &ApplicationRoot, pane: PaneId) -> bool {
+    matches!(
+        root.provisioning()
+            .pending_intent(pane)
+            .map(|intent| intent.phase),
+        Some(
+            IntentPhase::Attaching { .. }
+                | IntentPhase::Created { .. }
+                | IntentPhase::Disposing { .. }
+        )
+    )
+}
+
+fn drain_wakeup_fd(fd: i32) {
+    let mut buf = [0u8; 64];
+    loop {
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+        if n <= 0 {
+            break;
+        }
+    }
+}
+
+fn wait_wakeup_readable(fd: i32, deadline: Instant) -> bool {
+    while Instant::now() < deadline {
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let n = unsafe { libc::poll(&mut pfd, 1, 50) };
+        if n > 0 && pfd.revents & libc::POLLIN != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+fn create_tab_overlapping_attach_binds_both() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), first).expect("bind first");
+    let (release_tx, release_rx) = mpsc::channel();
+    root.gate_next_live_attach(release_rx);
+
+    root.apply(AppAction::CreateTab).expect("CreateTab A");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        pane_awaiting_attach(root, second_pane)
+    });
+    root.apply(AppAction::CreateTab)
+        .expect("CreateTab B while A attaches");
+    let third_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        pane_awaiting_attach(root, third_pane) && root.queued_live_attach_count() >= 1
+    });
+    assert!(
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_none(),
+        "gated first attach must still be in flight"
+    );
+
+    release_tx.send(()).expect("release first attach");
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+            && root.provisioning().recorded_execution(third_pane).is_some()
+    });
+    let second = root
+        .provisioning()
+        .recorded_execution(second_pane)
+        .expect("second");
+    let third = root
+        .provisioning()
+        .recorded_execution(third_pane)
+        .expect("third");
+    assert_ne!(first_execution, second);
+    assert_ne!(first_execution, third);
+    assert_ne!(second, third);
+    assert_eq!(root.extra_pane_client_count(), 2);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_close_unattached_tab_while_attach_in_flight_disposes() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+    let (release_tx, release_rx) = mpsc::channel();
+    root.gate_next_live_attach(release_rx);
+
+    root.apply(AppAction::CreateTab).expect("CreateTab A");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        pane_awaiting_attach(root, second_pane)
+    });
+    root.apply(AppAction::CreateTab).expect("CreateTab B");
+    let third_pane = root.snapshot().shell.focused_pane;
+    let third_tab = root.snapshot().shell.active_tab;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        pane_awaiting_attach(root, third_pane) && root.queued_live_attach_count() >= 1
+    });
+    root.apply(AppAction::CloseTab { id: third_tab })
+        .expect("close unattached B");
+
+    release_tx.send(()).expect("release A");
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        root.provisioning()
+            .recorded_execution(second_pane)
+            .is_some()
+            && !root.provisioning().has_outstanding_intent()
+    });
+    assert_eq!(
+        root.provisioning().recorded_execution(first_pane),
+        Some(first_execution)
+    );
+    assert!(root.provisioning().recorded_execution(third_pane).is_none());
+    assert_eq!(root.extra_pane_client_count(), 1);
+    assert_eq!(root.provisioning().automatic_retries(), 0);
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn create_tab_attach_wakeup_fd_becomes_readable() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), first).expect("bind first");
+    let wakeup = seyal_bridge_provisioning_wakeup_fd();
+    assert!(wakeup >= 0, "wakeup fd must exist for the host");
+    drain_wakeup_fd(wakeup);
+
+    let (release_tx, release_rx) = mpsc::channel();
+    root.gate_next_live_attach(release_rx);
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
+        pane_awaiting_attach(root, second_pane)
+    });
+    drain_wakeup_fd(wakeup);
+    release_tx.send(()).expect("release attach");
+    assert!(
+        wait_wakeup_readable(wakeup, Instant::now() + Duration::from_secs(8)),
+        "connect completion must signal the wakeup fd without waiting on the first Controller"
+    );
+    let _ = root.poll_client(root.fence());
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         root.provisioning()
             .recorded_execution(second_pane)

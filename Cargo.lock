@@ -115,6 +115,7 @@ dependencies = [
 name = "seyal-client"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "seyal-core",
  "seyal-exec",
  "seyal-protocol",

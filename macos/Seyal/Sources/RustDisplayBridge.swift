@@ -74,6 +74,7 @@ final class RustDisplayBridge {
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
   var auxiliaryReadSources: [UInt64: DispatchSourceRead] = [:]
+  var provisioningWakeupSource: DispatchSourceRead?
   var socketFileDescriptor: Int32 = -1
   let handleBox = RustBridgeHandleBox()
   var teardown: RustBridgeTeardownCoordinator!
@@ -256,6 +257,7 @@ final class RustDisplayBridge {
     publishCurrentFrame()
     synchronizeWriteReadinessSource()
     armAuxiliaryReadSources()
+    armProvisioningWakeupSource()
     onStatusChanged()
     return true
   }
@@ -318,6 +320,7 @@ final class RustDisplayBridge {
       self.writeSource = nil
       writeSource.cancel()
     }
+    cancelAuxiliaryReadSources()
     socketFileDescriptor = -1
     if clientHandle != 0 {
       let handle = clientHandle
@@ -363,6 +366,7 @@ final class RustDisplayBridge {
       self.writeSource = nil
       writeSource.cancel()
     }
+    cancelAuxiliaryReadSources()
     socketFileDescriptor = -1
 
     // Disconnect CLIENT on this MainActor turn (same ownership hand-off as
@@ -416,7 +420,7 @@ final class RustDisplayBridge {
       let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
       source.setEventHandler { [weak self] in
         seyalRunAsMainActorFromMainQueue {
-          guard let self else { return }
+          guard let self, self.isConnected else { return }
           _ = seyal_bridge_select(handle)
           _ = seyal_bridge_poll()
           _ = self.selectClient()
@@ -437,6 +441,40 @@ final class RustDisplayBridge {
     }
   }
 
+  /// Wake `seyal_bridge_poll` when an off-thread second-Controller connect finishes.
+  func armProvisioningWakeupSource() {
+    guard isConnected, provisioningWakeupSource == nil else { return }
+    let fd = seyal_bridge_provisioning_wakeup_fd()
+    guard fd >= 0 else { return }
+    let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+    source.setEventHandler { [weak self] in
+      seyalRunAsMainActorFromMainQueue {
+        guard let self, self.isConnected else { return }
+        _ = seyal_bridge_poll()
+        self.armAuxiliaryReadSources()
+        self.publishCurrentFrame()
+        self.synchronizeWriteReadinessSource()
+      }
+    }
+    source.setCancelHandler { [teardown = teardown!] in
+      teardown.sourceCancelled()
+    }
+    teardown.sourceCreated()
+    provisioningWakeupSource = source
+    source.resume()
+  }
+
+  func cancelAuxiliaryReadSources() {
+    for source in auxiliaryReadSources.values {
+      source.cancel()
+    }
+    auxiliaryReadSources.removeAll()
+    if let wakeup = provisioningWakeupSource {
+      provisioningWakeupSource = nil
+      wakeup.cancel()
+    }
+  }
+
   deinit {
     // The coordinator is retained by cancellation handlers, so teardown
     // completes even if the owning surface destroys this bridge first.
@@ -446,5 +484,6 @@ final class RustDisplayBridge {
     for source in auxiliaryReadSources.values {
       source.cancel()
     }
+    provisioningWakeupSource?.cancel()
   }
 }

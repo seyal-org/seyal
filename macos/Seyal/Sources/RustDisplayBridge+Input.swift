@@ -260,10 +260,12 @@ extension RustDisplayBridge {
       if result == 1 {
         publishCurrentFrame()
         armAuxiliaryReadSources()
+        armProvisioningWakeupSource()
         continue
       }
       if result == 0 {
         armAuxiliaryReadSources()
+        armProvisioningWakeupSource()
         return
       }
 

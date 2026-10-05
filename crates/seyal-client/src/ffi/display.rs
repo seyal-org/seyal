@@ -231,6 +231,7 @@ pub extern "C" fn seyal_bridge_execution_block_metadata() -> SeyalExecutionBlock
 /// new display state, and a stable negative diagnostic code on failure.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_poll() -> i32 {
+    super::drain_attach_wakeup();
     let Some(result) = with_active_client_mut(|client| client.poll_prepare()) else {
         super::app::drive_application_roots();
         return -1;

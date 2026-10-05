@@ -33,6 +33,8 @@ mod tab_provisioning_tests;
 mod tests;
 
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
@@ -485,6 +487,9 @@ pub struct ApplicationRoot {
     /// In-flight second-Controller connect (off the host poll thread).
     #[cfg(target_os = "macos")]
     pending_live_attach: Option<live_attach_apply::PendingLiveAttach>,
+    /// Created executions waiting for a free live-attach worker (ADR-017 §6.3).
+    #[cfg(target_os = "macos")]
+    queued_live_attaches: VecDeque<(crate::provisioning::ConnectionOwner, ExecutionId)>,
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
@@ -555,6 +560,8 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             pending_live_attach: None,
             #[cfg(target_os = "macos")]
+            queued_live_attaches: VecDeque::new(),
+            #[cfg(target_os = "macos")]
             live_attach_gate: None,
         }
     }
@@ -580,6 +587,13 @@ impl ApplicationRoot {
         self.extra_pane_clients.len()
     }
 
+    /// Queued `AttachController` work waiting for the in-flight worker.
+    #[doc(hidden)]
+    #[cfg(target_os = "macos")]
+    pub fn queued_live_attach_count(&self) -> usize {
+        self.queued_live_attaches.len()
+    }
+
     /// True when the production poll path must run [`Self::poll_client`] for
     /// create/attach/terminate progress (not every Candidate-D frame).
     #[cfg(target_os = "macos")]
@@ -588,6 +602,7 @@ impl ApplicationRoot {
             return false;
         }
         self.pending_live_attach.is_some()
+            || !self.queued_live_attaches.is_empty()
             || self.provisioning.has_outstanding_intent()
             || !self.pending_wire_effects.is_empty()
     }
