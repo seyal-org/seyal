@@ -1,14 +1,17 @@
 //! Independent Agent Backend process/domain composition boundary.
 //!
-//! The `seyal-agent-backend` binary is the production daemon entry and composes
-//! no execution host until an execution-target decision lands (AB-1.9).
-//! `StartAgentRun` therefore fails closed with no durable AgentRun mutation.
-//! Library code owns the per-user Unix-domain daemon, Hello/HelloAck handshake,
-//! principal/session authorization fencing, the object-safe
-//! [`SessionExecutionHost`] seam, and StandaloneProcessHost (SPEC-018 §2).
-//! The scripted `FakeExecutionHost` fixture is available only behind
-//! `fixture-host` for qualification and tests. `AgentDomain` remains the only
-//! lifecycle transition authority.
+//! The `seyal-agent-backend` binary is the production daemon entry and
+//! composes the real `StandaloneProcessHost` (SPEC-027 §9.5/§12, delivered
+//! by #1224). `StartAgentRun` still fails closed with no durable AgentRun
+//! mutation whenever no eligible, enabled, non-TTY adapter is installed in
+//! the durable catalog (SPEC-027 §4/§7) — composing a host does not by
+//! itself create dispatch targets. Library code owns the per-user
+//! Unix-domain daemon, Hello/HelloAck handshake, principal/session
+//! authorization fencing, the object-safe [`SessionExecutionHost`] seam, and
+//! `StandaloneProcessHost` (SPEC-018 §2). The scripted `FakeExecutionHost`
+//! fixture is available only behind `fixture-host` for qualification and
+//! tests, and is never reachable from the production binary. `AgentDomain`
+//! remains the only lifecycle transition authority.
 
 mod auth;
 #[cfg(unix)]

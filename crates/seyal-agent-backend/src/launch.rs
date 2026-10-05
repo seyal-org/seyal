@@ -128,7 +128,19 @@ where
 /// Bind the daemon, optionally install a host, and run the accept/supervisor loop.
 ///
 /// Never returns on the success path (process exit).
-pub fn serve(options: LaunchOptions, host: Option<Box<dyn SessionExecutionHost>>) -> ! {
+///
+/// `seed_test_catalog` is an explicit, caller-driven choice — never implied
+/// by the `fixture-host` *build* feature alone, which the production binary
+/// can incidentally inherit when compiled as part of an all-features test
+/// run (`cargo test --all-features` builds every workspace bin target with
+/// the same feature set). Only the qualification binary passes `true`;
+/// SPEC-027 §5.2 install/enable is a first-party `admin.adapters` action,
+/// never an automatic side effect of production daemon startup.
+pub fn serve(
+    options: LaunchOptions,
+    host: Option<Box<dyn SessionExecutionHost>>,
+    seed_test_catalog: bool,
+) -> ! {
     if let Some(deadline) = options.deadline_secs {
         thread::spawn(move || {
             thread::sleep(Duration::from_secs(deadline));
@@ -153,14 +165,22 @@ pub fn serve(options: LaunchOptions, host: Option<Box<dyn SessionExecutionHost>>
     };
     if let Some(host) = host {
         daemon.install_execution_host(host);
-        // Qualification-only: seed one enabled, non-TTY adapter + offering so
-        // SPEC-027 §4.3 unpinned resolution has a Singleton target and
-        // §7 step 5's `adapter.execute` grant is satisfied. Production never
-        // reaches this branch (`host` is always `None`), so it stays hostless
-        // per SPEC-027 §12/§13 with no adapter catalog installed.
-        #[cfg(feature = "fixture-host")]
+    }
+    // Qualification-only, and only when the caller explicitly asks: seed one
+    // enabled, non-TTY adapter + offering so SPEC-027 §4.3 unpinned
+    // resolution has a Singleton target and §7 step 5's `adapter.execute`
+    // grant is satisfied. The production binary always passes `false` —
+    // SPEC-027 §5.2 install/enable is a first-party `admin.adapters` action
+    // against the durable store, never an automatic side effect of daemon
+    // startup — so production never seeds a catalog even when it happens to
+    // be built with `fixture-host` active (e.g. `cargo test --all-features`
+    // builds every workspace bin target with the same feature set).
+    #[cfg(feature = "fixture-host")]
+    if seed_test_catalog {
         daemon.seed_default_adapter_catalog_for_tests();
     }
+    #[cfg(not(feature = "fixture-host"))]
+    let _ = seed_test_catalog;
 
     let exits = daemon.install_exit_report();
     let limit = options.max_connections;
