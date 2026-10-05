@@ -637,6 +637,10 @@ impl ApplicationRoot {
                 self.pending_effects
                     .retain(|pending| !matches!(pending, NativeEffect::OrderFrontMakeKey { .. }));
             }
+            if matches!(native, NativeEffect::WindowActivation { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::WindowActivation { .. }));
+            }
             self.pending_effects.push(native);
         }
     }

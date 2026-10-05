@@ -58,5 +58,6 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::ActionUnavailable => 50,
         AppError::UnknownWindow => 51,
         AppError::WindowCreationUnavailable => 52,
+        AppError::WindowActivationFailed => 53,
     }
 }

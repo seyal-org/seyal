@@ -327,8 +327,13 @@ impl ShellState {
         std::mem::take(&mut self.pending_effects)
     }
 
-    pub(super) fn push_effect(&mut self, effect: ShellNativeEffect) {
+    pub(crate) fn push_effect(&mut self, effect: ShellNativeEffect) {
         self.pending_effects.push(effect);
+    }
+
+    /// Hosting window of `tab` from the Tab → Window placement map (SPEC-022 R5.1).
+    pub fn window_of_tab(&self, tab: TabId) -> Option<WindowId> {
+        self.find_tab_location(tab).map(|(_, window, _)| window)
     }
 
     pub fn last_active_workspace(&self) -> WorkspaceId {
