@@ -8,6 +8,13 @@ use crate::pane_layout::{self, SplitPosition};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
+    pub(crate) fn apply_shell(&mut self, action: ShellAction) -> Result<(), ShellError> {
+        let result = self.shell.apply(action);
+        if result.is_ok() {
+            self.drain_shell_effects();
+        }
+        result
+    }
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
         self.close_pane_with_disposition(id)
     }
@@ -87,13 +94,10 @@ impl ApplicationRoot {
             self.shell
                 .apply_activate_workspace(workspace)
                 .map_err(|_| AppError::UnknownChromeWorkspace)?;
+            self.drain_shell_effects();
         }
         if let Some(tab) = effect.select_tab {
-            self.shell
-                .apply(ShellAction::SelectTab {
-                    id: tab,
-                    containment_generation: self.shell.containment_generation(),
-                })
+            self.apply_shell(ShellAction::SelectTab { id: tab })
                 .map_err(|_| AppError::UnknownChromeTab)?;
         }
         let _ = self
@@ -106,6 +110,7 @@ impl ApplicationRoot {
         self.shell
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.drain_shell_effects();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -113,11 +118,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::SelectTab {
-                id,
-                containment_generation: self.shell.containment_generation(),
-            })
+        self.apply_shell(ShellAction::SelectTab { id })
             .map_err(|_| AppError::UnknownChromeTab)?;
         #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
@@ -128,8 +129,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn focus_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::FocusPane { id })
+        self.apply_shell(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
         let _ = self
             .chrome
@@ -162,8 +162,7 @@ impl ApplicationRoot {
             });
         };
         let ratio = divider.ratio_at(position).ok_or(AppError::NoSplitDivider)?;
-        self.shell
-            .apply(ShellAction::SetSplitRatio { pane, ratio })
+        self.apply_shell(ShellAction::SetSplitRatio { pane, ratio })
             .map_err(|error| match error {
                 ShellError::NoSplitDivider => AppError::NoSplitDivider,
                 _ => AppError::UnknownPane,

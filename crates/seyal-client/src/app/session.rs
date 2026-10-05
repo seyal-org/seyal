@@ -427,7 +427,8 @@ impl ApplicationRoot {
 
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
-        self.pending_effect = NativeEffect::BoundedDetachThenTerminate;
+        self.pending_effects
+            .push(NativeEffect::BoundedDetachThenTerminate);
         self.clear_chord_prefix();
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
@@ -436,8 +437,23 @@ impl ApplicationRoot {
     }
 
     pub(super) fn ack_effect(&mut self) -> Result<(), AppError> {
-        self.pending_effect = NativeEffect::None;
+        if !self.pending_effects.is_empty() {
+            self.pending_effects.remove(0);
+        }
         Ok(())
+    }
+
+    pub(super) fn drain_shell_effects(&mut self) {
+        for effect in self.shell.take_effects() {
+            let native = NativeEffect::from(effect);
+            // Coalesce activation raises: the shipping host generally does
+            // not ack OrderFrontMakeKey, so keep at most one pending raise.
+            if matches!(native, NativeEffect::OrderFrontMakeKey { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::OrderFrontMakeKey { .. }));
+            }
+            self.pending_effects.push(native);
+        }
     }
 }
 
