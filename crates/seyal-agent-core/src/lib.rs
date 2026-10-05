@@ -42,9 +42,10 @@ pub use output_ref::{
     RETENTION_POLICY_RETAINED_STREAM,
 };
 pub use presence::{
-    classify_external_cli_effect_evidence, terminal_text_authorizes_approval, CapabilityId,
-    CapabilitySupport, ClaimMode, EnforcementClass, NegotiatedCapability,
-    PresenceCapabilityProjection, PresenceError, PresenceObservation, PresenceSourceTier,
+    classify_external_cli_effect_evidence, reject_duplicate_capability_ids,
+    terminal_text_authorizes_approval, CapabilityId, CapabilityInstallTrust, CapabilitySupport,
+    ClaimMode, EnforcementClass, NegotiatedCapability, PresenceCapabilityProjection, PresenceError,
+    PresenceObservation, PresenceSourceTier,
 };
 pub use routing::{resolve_execution_target, AdapterCandidate, ResolveFailure, ResolvedTarget};
 pub use transitions::TransitionIds;

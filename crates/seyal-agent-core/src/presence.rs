@@ -300,11 +300,19 @@ pub enum PresenceError {
         have: EnforcementClass,
         mode: ClaimMode,
     },
+    /// Privileged claim modes require a recorded presence observation.
+    PresenceEvidenceRequired { mode: ClaimMode },
     /// Terminal text / heuristic evidence cannot authorize privileged claims.
     TerminalTextNotAuthority,
     /// External CLI effect observed only via heuristic/text cannot be
     /// `BackendEnforced` Action evidence (SPEC-016 / ADR-014).
     ExternalCliEffectNotBackendEnforced,
+    /// Untrusted wire/peer install attempted to introduce `BackendEnforced`
+    /// without adapter-policy trust binding.
+    UntrustedBackendEnforcedCapability { id: CapabilityId },
+    /// Duplicate `CapabilityId` in an advertisement (order-dependent first-wins
+    /// is forbidden).
+    DuplicateCapabilityId { id: CapabilityId },
 }
 
 /// SY-006 presence observation: source tier + enforcement class + typed-boundary flag.
@@ -377,12 +385,30 @@ pub struct PresenceCapabilityProjection {
     pub presence: Option<PresenceObservation>,
 }
 
+/// Trust binding required to install a capability advertisement into the
+/// presence plane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CapabilityInstallTrust {
+    /// Peer/wire advertisement. Must not introduce `BackendEnforced` caps.
+    UntrustedPeer,
+    /// Backend-owned install after verified adapter-policy trust binding.
+    BackendPolicyTrusted,
+}
+
 impl PresenceCapabilityProjection {
     pub fn new(capabilities: Vec<NegotiatedCapability>) -> Self {
         Self {
             capabilities,
             presence: None,
         }
+    }
+
+    /// Construct a projection from a capability list, rejecting duplicates.
+    pub fn try_from_capabilities(
+        capabilities: Vec<NegotiatedCapability>,
+    ) -> Result<Self, PresenceError> {
+        reject_duplicate_capability_ids(&capabilities)?;
+        Ok(Self::new(capabilities))
     }
 
     pub fn capability(&self, id: CapabilityId) -> Option<NegotiatedCapability> {
@@ -398,58 +424,130 @@ impl PresenceCapabilityProjection {
         Ok(())
     }
 
-    /// Authorize a privileged claim against the negotiated capability set.
+    /// Install capabilities under an explicit trust binding.
     ///
-    /// - `Observe` requires at least `Observed` support.
-    /// - `UpstreamRequest` requires `UpstreamRequestable` or `BackendEnforced`.
-    /// - `LocalEnforcement` requires `BackendEnforced` only.
+    /// Untrusted peer installs reject any `BackendEnforced` support class.
+    /// Trusted backend installs accept the full ADR-012 class set after
+    /// adapter-policy binding.
+    pub fn install_capabilities(
+        &mut self,
+        capabilities: Vec<NegotiatedCapability>,
+        trust: CapabilityInstallTrust,
+    ) -> Result<(), PresenceError> {
+        reject_duplicate_capability_ids(&capabilities)?;
+        if trust == CapabilityInstallTrust::UntrustedPeer {
+            for cap in &capabilities {
+                if cap.enforcement() == Some(EnforcementClass::BackendEnforced) {
+                    return Err(PresenceError::UntrustedBackendEnforcedCapability { id: cap.id });
+                }
+            }
+        }
+        let presence = self.presence;
+        *self = Self::new(capabilities);
+        self.presence = presence;
+        Ok(())
+    }
+
+    /// Authorize a claim against the negotiated capability set and presence.
+    ///
+    /// - `Observe` requires at least `Observed` support (caps alone OK).
+    /// - `UpstreamRequest` / `LocalEnforcement` require presence evidence.
+    /// - Effective class = min(capability, source.max_enforcement(),
+    ///   presence.enforcement).
+    /// - `LocalEnforcement` additionally requires a typed backend boundary.
     ///
     /// Low-authority presence (heuristic / process signals) and raw terminal
-    /// text never authorize privileged local claims.
+    /// text never authorize privileged claims.
     pub fn authorize_claim(
         &self,
         id: CapabilityId,
         mode: ClaimMode,
     ) -> Result<EnforcementClass, PresenceError> {
-        if matches!(
+        let privileged = matches!(
             mode,
             ClaimMode::LocalEnforcement | ClaimMode::UpstreamRequest
-        ) && let Some(presence) = self.presence
-            && presence.source.is_low_authority()
-        {
-            return Err(PresenceError::TerminalTextNotAuthority);
-        }
+        );
 
         let Some(cap) = self.capability(id) else {
             return Err(PresenceError::CapabilityNotSupported { id });
         };
-        let Some(have) = cap.enforcement() else {
+        let Some(cap_class) = cap.enforcement() else {
             return Err(PresenceError::CapabilityNotSupported { id });
         };
 
+        if !privileged {
+            return if cap_class >= EnforcementClass::Observed {
+                Ok(cap_class)
+            } else {
+                Err(PresenceError::EnforcementInsufficient {
+                    id,
+                    have: cap_class,
+                    mode,
+                })
+            };
+        }
+
+        let Some(presence) = self.presence else {
+            return Err(PresenceError::PresenceEvidenceRequired { mode });
+        };
+        if presence.source.is_low_authority() {
+            return Err(PresenceError::TerminalTextNotAuthority);
+        }
+
+        let effective = min_enforcement(
+            cap_class,
+            min_enforcement(presence.source.max_enforcement(), presence.enforcement),
+        );
+
         match mode {
-            ClaimMode::Observe => {
-                if have >= EnforcementClass::Observed {
-                    Ok(have)
-                } else {
-                    Err(PresenceError::EnforcementInsufficient { id, have, mode })
-                }
-            }
+            ClaimMode::Observe => unreachable!("observe handled above"),
             ClaimMode::UpstreamRequest => {
-                if have >= EnforcementClass::UpstreamRequestable {
-                    Ok(have)
+                if effective >= EnforcementClass::UpstreamRequestable {
+                    Ok(effective)
                 } else {
-                    Err(PresenceError::EnforcementInsufficient { id, have, mode })
+                    Err(PresenceError::EnforcementInsufficient {
+                        id,
+                        have: effective,
+                        mode,
+                    })
                 }
             }
             ClaimMode::LocalEnforcement => {
-                if have == EnforcementClass::BackendEnforced {
-                    Ok(have)
+                if effective != EnforcementClass::BackendEnforced {
+                    Err(PresenceError::EnforcementInsufficient {
+                        id,
+                        have: effective,
+                        mode,
+                    })
+                } else if !presence.typed_backend_boundary {
+                    // Defense in depth: BackendEnforced observations must carry
+                    // typed-boundary evidence (also enforced by validate()).
+                    Err(PresenceError::BackendEnforcedRequiresTypedBoundary)
                 } else {
-                    Err(PresenceError::EnforcementInsufficient { id, have, mode })
+                    Ok(effective)
                 }
             }
         }
+    }
+}
+
+/// Reject duplicate capability IDs (no first-wins / order-dependent merge).
+pub fn reject_duplicate_capability_ids(
+    capabilities: &[NegotiatedCapability],
+) -> Result<(), PresenceError> {
+    for (i, cap) in capabilities.iter().enumerate() {
+        if capabilities[..i].iter().any(|prior| prior.id == cap.id) {
+            return Err(PresenceError::DuplicateCapabilityId { id: cap.id });
+        }
+    }
+    Ok(())
+}
+
+fn min_enforcement(a: EnforcementClass, b: EnforcementClass) -> EnforcementClass {
+    if a <= b {
+        a
+    } else {
+        b
     }
 }
 
