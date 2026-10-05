@@ -73,6 +73,7 @@ final class RustDisplayBridge {
   var onCopiedText: ((String) -> Void)?
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
+  var auxiliaryWriteSources: [UInt64: DispatchSourceWrite] = [:]
   var auxiliaryReadSources: [UInt64: DispatchSourceRead] = [:]
   var provisioningWakeupSource: DispatchSourceRead?
   var socketFileDescriptor: Int32 = -1
@@ -469,6 +470,10 @@ final class RustDisplayBridge {
       source.cancel()
     }
     auxiliaryReadSources.removeAll()
+    for source in auxiliaryWriteSources.values {
+      source.cancel()
+    }
+    auxiliaryWriteSources.removeAll()
     if let wakeup = provisioningWakeupSource {
       provisioningWakeupSource = nil
       wakeup.cancel()
@@ -482,6 +487,9 @@ final class RustDisplayBridge {
     readSource?.cancel()
     writeSource?.cancel()
     for source in auxiliaryReadSources.values {
+      source.cancel()
+    }
+    for source in auxiliaryWriteSources.values {
       source.cancel()
     }
     provisioningWakeupSource?.cancel()

@@ -264,11 +264,30 @@ pub extern "C" fn seyal_bridge_wants_write() -> i32 {
     with_active_client(|client| i32::from(client.wants_write())).unwrap_or(0)
 }
 
+/// Write-readiness for `handle` without changing the selected poll client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_wants_write_for(handle: u64) -> i32 {
+    super::with_client(handle, |client| i32::from(client.wants_write())).unwrap_or(0)
+}
+
 /// Advance one pending write after writable readiness. A partial write or
 /// `WouldBlock` remains queued and is not treated as a disconnect.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_flush_writable() -> i32 {
     let Some(result) = with_active_client_mut(LocalDisplayClient::flush_control_write) else {
+        return -1;
+    };
+    match result {
+        Ok(()) => 0,
+        Err(error) => error_code(error),
+    }
+}
+
+/// Flush `handle`'s outbound queue without changing the selected poll client.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_flush_writable_for(handle: u64) -> i32 {
+    let Some(result) = super::with_client_mut(handle, LocalDisplayClient::flush_control_write)
+    else {
         return -1;
     };
     match result {

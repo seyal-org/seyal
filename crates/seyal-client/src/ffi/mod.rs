@@ -93,11 +93,12 @@ pub use attach_wakeup::{
 pub use display::{
     seyal_bridge_block_count, seyal_bridge_block_record, seyal_bridge_block_timeline_revision,
     seyal_bridge_composer_result, seyal_bridge_ensure_prepared,
-    seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable, seyal_bridge_frame,
-    seyal_bridge_history_range_consume, seyal_bridge_history_range_peek_for,
-    seyal_bridge_history_range_row_for, seyal_bridge_history_range_sidecar_for,
-    seyal_bridge_next_composer_request_id, seyal_bridge_next_history_request_id, seyal_bridge_poll,
-    seyal_bridge_request_history_range, seyal_bridge_wants_write,
+    seyal_bridge_execution_block_metadata, seyal_bridge_flush_writable,
+    seyal_bridge_flush_writable_for, seyal_bridge_frame, seyal_bridge_history_range_consume,
+    seyal_bridge_history_range_peek_for, seyal_bridge_history_range_row_for,
+    seyal_bridge_history_range_sidecar_for, seyal_bridge_next_composer_request_id,
+    seyal_bridge_next_history_request_id, seyal_bridge_poll, seyal_bridge_request_history_range,
+    seyal_bridge_wants_write, seyal_bridge_wants_write_for,
 };
 pub(crate) use errors::error_code;
 #[allow(unused_imports)]

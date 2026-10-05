@@ -17,7 +17,7 @@ use seyal_client::app::{AppAction, ApplicationRoot};
 use seyal_client::provisioning::IntentPhase;
 use seyal_client::{
     ffi_test_drain_attach_wakeup, ffi_test_try_read_attach_wakeup,
-    seyal_bridge_provisioning_wakeup_fd, LocalDisplayClient,
+    seyal_bridge_provisioning_wakeup_fd, seyal_bridge_wants_write_for, LocalDisplayClient,
 };
 use seyal_core::{AttachmentId, PaneId};
 use seyal_protocol::runtime_dir::{
@@ -482,6 +482,12 @@ fn create_tab_select_does_not_steal_first_controller_poll() {
         seyal_client::ffi_test_active_registry_execution(),
         Some(first_execution),
         "select of the first fd must poll that Controller, not the focused tab"
+    );
+    let _ = seyal_bridge_wants_write_for(second_handle);
+    assert_eq!(
+        seyal_client::ffi_test_active_registry_execution(),
+        Some(first_execution),
+        "write-readiness of the second Controller must not steal ACTIVE_HANDLE"
     );
     assert_eq!(seyal_client::seyal_bridge_select(second_handle), 0);
     assert_eq!(
