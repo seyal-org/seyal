@@ -66,6 +66,6 @@ explicit trust binding.
 
 ## Out of scope here
 
-Conformance catalog (#1277), replay/fake adapter (#1278), and real Claude/Codex
-adapters (#1279–#1280) consume these types; they are not implemented in this
-plane.
+Conformance catalog (#1277) and Codex (#1280) / replay (#1278) adapters consume
+these types. Claude Code (#1279) installs its capability sheet through this
+plane — see [`CLAUDE-CODE-ADAPTER.md`](CLAUDE-CODE-ADAPTER.md).

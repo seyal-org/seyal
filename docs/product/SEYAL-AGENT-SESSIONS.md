@@ -67,6 +67,11 @@ external agent process / harness session
                  AttentionItem(s)
 ```
 
+**Local first-party adapter (M005):** Claude Code is the first supported local CLI
+adapter on `StandaloneProcessHost` (pipe-safe stream-json). Install/enable is a
+trusted `admin.adapters` path; repository content never auto-enables it. See
+`docs/engineering/CLAUDE-CODE-ADAPTER.md`. Codex remains a sibling adapter.
+
 The upstream session/thread identifier remains an opaque adapter-scoped reference. It never replaces Seyal identity or becomes terminal authority.
 
 ## Agent Sessions experience
