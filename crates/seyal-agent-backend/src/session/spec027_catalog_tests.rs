@@ -206,13 +206,14 @@ fn fixture_02_pin_of_enabled_offering_starts_with_pinned_selection() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Fixture 3: unpinned start with two eligible offerings has no ranking
-/// (SPEC-027 §4.3) and must fail closed without minting an AgentRun.
+/// Fixture 3: unpinned start with two eligible offerings uses SPEC-020 V1
+/// soft ranking inside the same envelope (`selection_kind = RouterV1`).
+/// Pin/singleton remain valid; there is no second router authority.
 #[test]
-fn fixture_03_two_eligible_offerings_unpinned_is_unavailable_no_mint() {
+fn fixture_03_two_eligible_offerings_unpinned_is_router_v1() {
     let (dir, mut service) = open_bare();
-    let (adapter_a, _offering_a) = install_adapter(&mut service, true);
-    let (adapter_b, _offering_b) = install_adapter(&mut service, true);
+    let (adapter_a, offering_a) = install_adapter(&mut service, true);
+    let (adapter_b, offering_b) = install_adapter(&mut service, true);
     service
         .auth
         .grant_adapter_execute(service.owner_principal_id, adapter_a)
@@ -234,11 +235,22 @@ fn fixture_03_two_eligible_offerings_unpinned_is_unavailable_no_mint() {
         32,
         ABSOLUTE_MAX_FRAME_SIZE,
     );
-    assert_eq!(
-        started,
-        CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+    assert!(matches!(started, CommandResult::Started { .. }));
+    let runs = service.store.agent_runs().unwrap();
+    assert_eq!(runs.len(), 1);
+    let run_id = runs[0].0;
+    let routing = service
+        .authority
+        .domain()
+        .agent_run(run_id)
+        .and_then(|run| run.routing_decision_ref())
+        .and_then(|reference| service.authority.domain().routing_decision(reference))
+        .expect("routing decision recorded");
+    assert_eq!(routing.selection_kind, SelectionKind::RouterV1);
+    assert!(
+        routing.route_offering_id == offering_a || routing.route_offering_id == offering_b,
+        "winner must be one of the eligible offerings"
     );
-    assert!(service.store.agent_runs().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 

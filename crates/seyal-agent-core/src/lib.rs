@@ -16,7 +16,7 @@ pub mod memory;
 mod output_ref;
 mod presence;
 mod restore;
-mod routing;
+pub mod routing;
 mod transitions;
 
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
@@ -67,5 +67,16 @@ pub use presence::{
     ClaimMode, EnforcementClass, NegotiatedCapability, PresenceCapabilityProjection, PresenceError,
     PresenceObservation, PresenceSourceTier,
 };
-pub use routing::{resolve_execution_target, AdapterCandidate, ResolveFailure, ResolvedTarget};
+pub use routing::{
+    admit_fallback, baseline_artifact_toml, cold_start_baseline_matches,
+    expected_total_cost_micros, fallback_action, load_verified_baseline,
+    may_replay_external_mutation, policy_denial_may_select, profile_weights, rank_v1,
+    resolve_execution_target, resolve_pin_or_singleton, resolve_with_v1_ranking, AdapterCandidate,
+    AdequacyFloors, BaselineCalibration, BaselineError, BudgetDecision, BudgetScope,
+    CandidateExplanation, DesirabilityBands, EvidenceValue, FactorBreakdown, FactorEvidence,
+    FailureClass, FallbackAction, Micros, PolicyProfile, ProfileWeights, RankedResolution,
+    RankingCandidate, RankingExplanation, RankingRequest, ResolveFailure, ResolvedTarget,
+    SoftFactor, BASELINE_ARTIFACT_ID, BASELINE_ARTIFACT_SHA256, FORBIDDEN_SYNTHETIC_POC_SHA256,
+    SCORE_EPSILON, SCORE_ONE, UNKNOWN_SOFT_MID,
+};
 pub use transitions::TransitionIds;

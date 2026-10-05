@@ -45,6 +45,6 @@ cargo test -p seyal-agent-core --locked --test spec019_evaluation_fixtures
 
 ## Out of scope here
 
-- SPEC-020 V1 ranking / BaselineCalibrationArtifact scoring
+- SPEC-020 V1 ranking (see [`AGENT-ROUTING.md`](AGENT-ROUTING.md))
 - Context Engine / MemoryStore implementation
 - Second router / commercial LEAP

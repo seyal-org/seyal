@@ -181,6 +181,16 @@ cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_c
 - Fixtures: `cargo test -p seyal-agent-core --locked --test spec019_evaluation_fixtures`.
 - Does not implement SPEC-020 ranking, Context Engine, or MemoryStore.
 
+### Agent routing envelope (SPEC-020)
+
+- Domain APIs: `seyal-agent-core::routing` (pin/singleton, V1 soft rank, baseline
+  bind, budget admission, failure-class fallback). Soft ranking is a replaceable
+  stage under SPEC-020 §19 — not a second router.
+- Cold-start / learning-disabled baseline: artifact SHA-256
+  `9d31ee776b06d288d914b2c55a8d2354459fa46894d237592ffc4508041b7ecf`.
+- Developer guide: [`AGENT-ROUTING.md`](AGENT-ROUTING.md).
+- Fixtures: `cargo test -p seyal-agent-core --locked --test spec020_18_ranking_fixtures`.
+
 Current behavior after Passes 1–10 (M001 **Done / closed**; Pass 10 #727 and parent #5 closed on freeze `c536c54`):
 
 - `make bootstrap` provisions/verifies the pinned Rust toolchain and, on macOS, validates full Xcode + Swift + macOS SDK + Metal tooling when that host tree exists;
