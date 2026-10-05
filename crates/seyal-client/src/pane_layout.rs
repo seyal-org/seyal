@@ -628,10 +628,9 @@ mod root_tests {
             root.apply(AppAction::FocusPane { id: bound }),
             Err(AppError::UnknownPane)
         );
-        assert_eq!(
-            root.apply(AppAction::ClosePane { id: created }),
-            Err(AppError::CannotCloseLastPane)
-        );
-        assert_eq!(root.pane_regions(), regions);
+        // Sole remaining Pane closes the Tab/Window hierarchically.
+        root.apply(AppAction::ClosePane { id: created })
+            .expect("sole pane removes window");
+        assert!(root.snapshot().shell.windows.is_empty());
     }
 }

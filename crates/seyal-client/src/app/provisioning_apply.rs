@@ -57,7 +57,11 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.apply_shell(ShellAction::CloseTab { id: tab });
+                let generation = self.shell.containment_generation();
+                let _ = self.apply_shell(ShellAction::CloseTab {
+                    id: tab,
+                    containment_generation: generation,
+                });
                 let _ = self.shell.take_removed_tab_panes();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
@@ -70,7 +74,11 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.apply_shell(ShellAction::CloseTab { id: tab });
+            let generation = self.shell.containment_generation();
+            let _ = self.apply_shell(ShellAction::CloseTab {
+                id: tab,
+                containment_generation: generation,
+            });
             let _ = self.shell.take_removed_tab_panes();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
@@ -89,11 +97,51 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Remove a Window's chrome. Bound panes detach only; executions stay live
+    /// and enumerable. Outstanding create intents are marked dead for §6.3.
+    pub(super) fn close_window(&mut self, id: seyal_core::WindowId) -> Result<(), AppError> {
+        let generation = self.shell.containment_generation();
+        self.shell
+            .apply(ShellAction::CloseWindow {
+                id,
+                containment_generation: generation,
+            })
+            .map_err(|_| AppError::UnknownChromeTab)?;
+        let removed = self.shell.take_removed_tab_panes();
+        let mut effects = Vec::new();
+        for pane in removed {
+            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
+            debug_assert!(
+                !pane_effects
+                    .iter()
+                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
+                "removing a window must not terminate a bound execution"
+            );
+            effects.extend(pane_effects);
+            self.clear_authority_for_pane(pane);
+        }
+        let _ = self.dispatch_wire_effects(
+            effects,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        );
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
     /// Remove a Tab's chrome. Bound panes detach only; executions stay live
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
+        let generation = self.shell.containment_generation();
         self.shell
-            .apply(ShellAction::CloseTab { id })
+            .apply(ShellAction::CloseTab {
+                id,
+                containment_generation: generation,
+            })
             .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
         let mut effects = Vec::new();
@@ -125,10 +173,37 @@ impl ApplicationRoot {
     /// unreferenced live record (ADR-017 §6.1 detach-only); it is never
     /// terminated as a side effect of presentation close.
     pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
+        let generation = self.shell.containment_generation();
         self.shell
-            .apply(ShellAction::ClosePane { id })
+            .apply(ShellAction::ClosePane {
+                id,
+                containment_generation: generation,
+            })
             .map_err(close_pane_error)?;
-        if let Some((pane, execution)) = self.shell.take_released_execution() {
+        let removed = self.shell.take_removed_tab_panes();
+        if !removed.is_empty() {
+            // Hierarchical sole-pane close cascaded through tab/window removal.
+            let mut effects = Vec::new();
+            for pane in removed {
+                let pane_effects = self.provisioning.on_bound_pane_closed(pane);
+                debug_assert!(
+                    !pane_effects
+                        .iter()
+                        .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
+                    "removing presentation must not terminate a bound execution"
+                );
+                effects.extend(pane_effects);
+                self.clear_authority_for_pane(pane);
+            }
+            let _ = self.shell.take_released_execution();
+            let _ = self.dispatch_wire_effects(
+                effects,
+                WireDispatchContext {
+                    workspace_id: 0,
+                    launch_profile: 0,
+                },
+            );
+        } else if let Some((pane, execution)) = self.shell.take_released_execution() {
             let effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
                 self.provisioning.is_unreferenced(execution),

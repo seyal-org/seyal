@@ -1,4 +1,4 @@
-//! ADR-018 §2.2 / §6 window and tab actions (W2a: no close).
+//! ADR-018 §2.2 / §6 window and tab actions (W2a create/move/select).
 
 use seyal_core::{TabId, WindowId, WorkspaceId};
 
@@ -74,7 +74,7 @@ impl ShellState {
         None
     }
 
-    fn window_of_pane(&self, pane: seyal_core::PaneId) -> Option<WindowId> {
+    pub(super) fn window_of_pane(&self, pane: seyal_core::PaneId) -> Option<WindowId> {
         for workspace in &self.workspaces {
             for window in &workspace.windows {
                 if window.tabs.iter().any(|tab| tab.panes.contains_key(&pane)) {
