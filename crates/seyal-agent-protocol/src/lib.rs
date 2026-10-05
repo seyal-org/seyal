@@ -39,8 +39,9 @@ pub use seyal_agent_core::{
     OUTPUT_REF_LEN, RETENTION_POLICY_RETAINED_STREAM,
 };
 pub use seyal_agent_core::{
-    CapabilityId, CapabilitySupport, ClaimMode, EnforcementClass, NegotiatedCapability,
-    PresenceCapabilityProjection, PresenceError, PresenceObservation, PresenceSourceTier,
+    CapabilityId, CapabilityInstallTrust, CapabilitySupport, ClaimMode, EnforcementClass,
+    NegotiatedCapability, PresenceCapabilityProjection, PresenceError, PresenceObservation,
+    PresenceSourceTier,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

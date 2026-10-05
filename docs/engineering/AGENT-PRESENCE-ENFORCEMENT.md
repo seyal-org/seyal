@@ -32,14 +32,37 @@ Raw terminal text is never approval/control truth (ADR-012 §13). External CLI
 effects observed only via terminal text / heuristic never become
 `BackendEnforced` Action evidence (SPEC-016 / ADR-014).
 
+Source-tier ceilings also cap claim authorization:
+
+| Source | Max enforcement |
+| --- | --- |
+| `StructuredAdapter` | `BackendEnforced` (typed boundary required) |
+| `OfficialHooks` | `UpstreamRequestable` |
+| `ProcessShellSignals` / `LowConfidenceHeuristic` | `Observed` |
+
 ## Claim modes
 
-- `Observe` — requires at least `Observed`
-- `UpstreamRequest` — requires `UpstreamRequestable` or `BackendEnforced`
-- `LocalEnforcement` — requires `BackendEnforced` only
+- `Observe` — requires at least `Observed` (caps alone OK)
+- `UpstreamRequest` — requires presence evidence and effective class
+  `UpstreamRequestable` or `BackendEnforced`
+- `LocalEnforcement` — requires presence evidence, typed backend boundary, and
+  effective class `BackendEnforced`
+
+**Effective enforcement** for privileged modes is
+`min(capability, source.max_enforcement(), presence.enforcement)`.
 
 Unsupported and unknown capabilities remain explicit; there is no implicit
-“full control”.
+“full control”. Duplicate `CapabilityId`s are rejected at decode/install.
+
+## Install trust binding
+
+| Path | Trust | `BackendEnforced` caps |
+| --- | --- | --- |
+| `apply_handshake_payload` / untrusted peer | `UntrustedPeer` | Rejected |
+| `install_trusted_handshake_payload` / `set_capabilities` | `BackendPolicyTrusted` | Allowed after adapter-policy binding |
+
+Wire decode alone is structural; installing into the live plane requires an
+explicit trust binding.
 
 ## Out of scope here
 
