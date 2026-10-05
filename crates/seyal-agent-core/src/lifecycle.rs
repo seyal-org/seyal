@@ -177,9 +177,9 @@ impl RoutingDecisionRef {
 
 /// How the bound RouteOffering was selected (SPEC-027 §4.2–§4.3).
 ///
-/// `RouterV1` is accepted as a future discriminant but MUST be unreachable
-/// until SPEC-020 V1 ranking (#681) exists. No code in this repository may
-/// construct it; [`crate::resolve_execution_target`] never returns it.
+/// `RouterV1` is produced only by the replaceable SPEC-020 V1 soft-ranking
+/// stage inside the existing routing envelope ([`crate::resolve_with_v1_ranking`]).
+/// Pin/singleton remain valid hard/selection kinds. There is no second router.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionKind {
     /// Client presented `route_offering_id` and it resolved to an enabled,
@@ -188,7 +188,7 @@ pub enum SelectionKind {
     /// No pin; exactly one enabled, hard-constraint-satisfying offering
     /// existed (SPEC-027 §4.3 step 2).
     Singleton,
-    /// Forbidden before #681. See module doc.
+    /// Soft-ranked among multiple hard-eligible offerings (SPEC-020 V1).
     RouterV1,
 }
 
