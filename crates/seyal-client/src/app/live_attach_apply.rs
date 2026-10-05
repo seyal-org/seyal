@@ -292,7 +292,7 @@ impl ApplicationRoot {
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);
             self.sync_composer_presentation();
             self.output_utf8.clear();
-            crate::ffi::set_focused_display_handle(0);
+            self.clear_focused_display_handle_if_owned();
             return;
         };
         if self.authority == Some(authority) {
@@ -323,6 +323,24 @@ impl ApplicationRoot {
         self.refresh_output_from_pane_client(focused);
         if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
             crate::ffi::set_focused_display_handle(raw);
+        }
+    }
+
+    /// Fail-closed input is process-wide TLS. Only the root that owns the
+    /// current display handle may clear it — a second XCTest `ApplicationRoot`
+    /// CreateTab must not blank the launched surface's frame/eligibility.
+    fn clear_focused_display_handle_if_owned(&self) {
+        let focused = crate::ffi::focused_registry_handle();
+        if focused == 0 {
+            return;
+        }
+        let owned = self.pane_client_raws.values().any(|raw| *raw == focused)
+            || self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == focused);
+        if owned {
+            crate::ffi::set_focused_display_handle(0);
         }
     }
 

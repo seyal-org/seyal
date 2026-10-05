@@ -893,3 +893,41 @@ fn create_tab_attach_wakeup_fd_becomes_readable() {
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
 }
+
+#[test]
+fn foreign_root_create_tab_does_not_clear_live_focus() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut live = ApplicationRoot::new();
+    live.attach_client(live.fence(), first).expect("bind live");
+    let live_handle = live
+        .pane_client_raw(live.snapshot().shell.focused_pane)
+        .expect("live handle");
+    assert_eq!(ffi_test_focused_registry_handle(), live_handle);
+
+    let mut foreign = ApplicationRoot::new();
+    foreign
+        .apply(AppAction::CreateTab)
+        .expect("unbound-root CreateTab is chrome-only");
+    assert_eq!(
+        ffi_test_focused_registry_handle(),
+        live_handle,
+        "a second ApplicationRoot must not blank the live display handle"
+    );
+    assert_eq!(
+        ffi_test_submit_utf8("still-on-live-surface\n"),
+        0,
+        "live surface input must survive foreign CreateTab"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}

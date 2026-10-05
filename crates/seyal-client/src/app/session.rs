@@ -165,11 +165,16 @@ impl ApplicationRoot {
                 let output = project_cache_text(client.cache());
                 (alternate, generation, output)
             }),
-            Err(_) => {
+            // Transient prepare/protocol errors must not drop the live
+            // Controller: `seyal_bridge_poll` already ran poll_prepare, and
+            // XCTest/Seyal.app retry the same fd. Unregister only on terminal
+            // socket loss (same set as `seyal_bridge_poll_for`).
+            Err(error) if is_terminal_registry_loss(&error) => {
                 self.note_registry_client_loss(handle);
                 let _ = crate::ffi::unregister_client(handle);
                 return self.fail(AppError::NoLiveClient);
             }
+            Err(_) => return self.fail(AppError::NoLiveClient),
         };
         let Some((alternate, generation, output)) = result else {
             self.note_registry_client_loss(handle);
@@ -245,13 +250,22 @@ impl ApplicationRoot {
 }
 
 #[cfg(target_os = "macos")]
-fn registry_client_is_gone(handle: u64) -> bool {
+fn is_terminal_registry_loss(error: &crate::local::ClientError) -> bool {
     matches!(
-        crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare),
-        None | Some(Err(crate::local::ClientError::Disconnected))
-            | Some(Err(crate::local::ClientError::Io))
-            | Some(Err(crate::local::ClientError::NoRunningExecution))
+        error,
+        crate::local::ClientError::Disconnected
+            | crate::local::ClientError::Io
+            | crate::local::ClientError::NoRunningExecution
     )
+}
+
+#[cfg(target_os = "macos")]
+fn registry_client_is_gone(handle: u64) -> bool {
+    match crate::ffi::with_client_mut(handle, LocalDisplayClient::poll_prepare) {
+        None => true,
+        Some(Err(error)) => is_terminal_registry_loss(&error),
+        Some(Ok(_)) => false,
+    }
 }
 
 impl ApplicationRoot {
