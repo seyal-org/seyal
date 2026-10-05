@@ -51,11 +51,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 989
-issue = 1175
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 queues overlapping live-attach work and wakeup-drive flags beside off-thread pending attach, needs_provisioning_drive, and per-pane maps."
+ceiling_loc = 1019
+issue = 1143
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 live-attach queues and #1143 Adopt/TerminateUnpresented/RecordUnpresented/SyncLiveUnpresented actions share this dispatch table. Further splitting would separate AppAction from the apply match that owns it."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -226,15 +226,15 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 854
-issue = 1105
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows, #1090 threads window identity, and #867 adds bound-Pane explicit Raw / Return to Flow beside those commands; splitting would separate the row model from the command it runs."
+acknowledged_loc = 880
+issue = 1143
+reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows; #1143 adds deterministic Adopt/Terminate Unpresented commands for ADR-018 §3.3 beside those rows."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 849
-issue = 1108
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1108 adds pending native-effect drain hooks and multi-window snapshot fields while snapshot encoding stays in shell/snapshot.rs."
+acknowledged_loc = 893
+issue = 1143
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1108 native-effect drain and #1143 live-unpresented catalog field share this façade while §3.3 predicates live in shell/unpresented.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -248,3 +248,4 @@ path = "crates/seyal-client/src/keybinding/tests.rs"
 acknowledged_loc = 701
 issue = 1106
 reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
+

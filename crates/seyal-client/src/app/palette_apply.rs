@@ -63,12 +63,14 @@ impl ApplicationRoot {
     fn rebuild_palette(&mut self) {
         let shell = self.shell.snapshot();
         let chrome = self.chrome.snapshot(&shell, &self.focused_blocks());
+        let unpresented = self.shell.live_unpresented(shell.active_workspace);
         self.palette.rebuild(
             &shell,
             &chrome,
             self.shell.allows_tab_creation(),
             self.shell.allows_pane_splitting(),
             self.resting_palette_choice(),
+            &unpresented,
         );
     }
 
@@ -137,6 +139,14 @@ impl ApplicationRoot {
             PaletteCommand::OpenAttention(id) => self.open_attention(fence, id),
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
             PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
+            PaletteCommand::AdoptUnpresented(execution) => {
+                let _ = fence;
+                self.adopt_unpresented_command(execution)
+            }
+            PaletteCommand::TerminateUnpresented(execution) => {
+                let _ = fence;
+                self.terminate_unpresented(execution)
+            }
         }
     }
 }

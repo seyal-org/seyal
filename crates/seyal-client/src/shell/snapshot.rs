@@ -221,6 +221,8 @@ impl ShellError {
             Self::StaleContainment => 14,
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
+            Self::CrossWorkspaceAdopt => 18,
+            Self::ExecutionNotUnpresented => 19,
         }
     }
 }
