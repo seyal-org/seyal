@@ -307,6 +307,79 @@ fn fixture_07_runs_create_without_adapter_execute_is_denied_no_mint() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Fixture 11 / AC11: after mint, removing the frozen manifest generation
+/// fails closed before spawn — no latest substitution, Dispatching→Prepared,
+/// never fabricate Active/Completed.
+#[test]
+fn fixture_11_post_mint_frozen_generation_removal_fails_closed_no_latest_substitution() {
+    let (dir, mut service) = open_bare();
+    let (adapter_id, _offering_id) = install_adapter(&mut service, true);
+    let frozen = service
+        .store
+        .get_adapter_manifest(adapter_id)
+        .unwrap()
+        .unwrap()
+        .generation;
+    service
+        .auth
+        .grant_adapter_execute(service.owner_principal_id, adapter_id)
+        .expect("grant");
+    service.invalidate_frozen_manifest_after_mint_for_tests();
+    let principal = service.begin_connection(b"cli").unwrap();
+    let (session_id, attempt_id) = seed_attempt(&mut service, principal);
+
+    let started = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+            route_offering_id: None,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    assert_eq!(
+        started,
+        CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+    );
+    let runs = service.store.agent_runs().unwrap();
+    assert_eq!(
+        runs.len(),
+        1,
+        "AgentRun stays minted (post-mint fail-closed)"
+    );
+    let run_id = runs[0].0;
+    let run = service
+        .authority
+        .domain()
+        .agent_run(run_id)
+        .expect("run present");
+    assert_eq!(run.lifecycle(), AgentRunLifecycle::Prepared);
+    assert_ne!(
+        run.lifecycle(),
+        AgentRunLifecycle::Active,
+        "must not fabricate Active"
+    );
+    assert_ne!(
+        run.lifecycle(),
+        AgentRunLifecycle::Terminated,
+        "must not fabricate Terminated/Completed"
+    );
+    // Frozen generation is gone; latest exists but must not have been used
+    // for a successful start (we already asserted Prepared + unavailable).
+    assert!(service
+        .store
+        .get_adapter_manifest_at_generation(adapter_id, frozen)
+        .unwrap()
+        .is_none());
+    assert!(service
+        .store
+        .get_adapter_manifest(adapter_id)
+        .unwrap()
+        .is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Fixture 19: a host that proves it never started (typed not-started, no
 /// side effects) demotes the same AgentRun `Dispatching -> Prepared` with a
 /// freshly minted RoutingDecision instead of leaving it stuck or fabricating

@@ -190,6 +190,38 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
 
+        // SPEC-027 §5.2 / fixture 11: after mint the RoutingDecision has
+        // frozen `adapter_manifest_generation`. A concurrent catalog edit
+        // (or test injection) can make that generation unreachable before
+        // `host.start`. Re-validate the frozen generation here — never
+        // substitute the latest manifest, and never fabricate Active/
+        // Completed. Align with §9.3 typed not-started: Dispatching → Prepared.
+        #[cfg(test)]
+        if self.invalidate_frozen_manifest_after_mint {
+            self.invalidate_frozen_manifest_after_mint = false;
+            let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+                "/bin/false",
+                seyal_agent_store::CwdPolicy::AdapterWorkDir,
+            );
+            let _ = self
+                .store
+                .install_or_update_adapter(routing.adapter_id, 0, true, &launch);
+        }
+        if !matches!(
+            self.store.get_adapter_manifest_at_generation(
+                routing.adapter_id,
+                routing.adapter_manifest_generation,
+            ),
+            Ok(Some(_))
+        ) {
+            let _ = self
+                .authority
+                .domain_mut()
+                .pre_start_fallback(run_id, routing, true);
+            let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
+            return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+        }
+
         // SPEC-027 §9.2 fixture 12 ("`start` holds no service mutex across
         // child I/O" / "Concurrent ReadRun completes while child live"):
         // `host.start`/`host.observe` below still run while this method's
