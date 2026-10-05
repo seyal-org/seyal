@@ -32,7 +32,8 @@ pub(crate) fn clone_attach_wakeup_writer() -> Option<UnixStream> {
     with_pair(|pair| pair.write.try_clone().ok()).flatten()
 }
 
-pub(crate) fn drain_attach_wakeup() {
+#[doc(hidden)]
+pub fn drain_attach_wakeup() {
     let _ = with_pair(|pair| {
         let mut buf = [0u8; 64];
         loop {
@@ -55,4 +56,18 @@ pub extern "C" fn seyal_bridge_provisioning_wakeup_fd() -> i32 {
 
 pub(crate) fn signal_attach_wakeup_on(writer: &mut UnixStream) {
     let _ = writer.write(&[1u8]);
+}
+
+/// Nonblocking one-byte read for tests. Does not change socket flags.
+#[doc(hidden)]
+pub fn try_read_attach_wakeup() -> bool {
+    with_pair(|pair| {
+        let mut clone = match pair.read.try_clone() {
+            Ok(clone) => clone,
+            Err(_) => return false,
+        };
+        let mut buf = [0u8; 1];
+        matches!(clone.read(&mut buf), Ok(n) if n > 0)
+    })
+    .unwrap_or(false)
 }

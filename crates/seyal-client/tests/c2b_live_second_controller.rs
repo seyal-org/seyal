@@ -2,7 +2,6 @@
 //! Controller connection with a real Runtime `AttachmentId` (no fabrication).
 
 #![cfg(target_os = "macos")]
-#![allow(unsafe_code)]
 
 use std::{
     path::PathBuf,
@@ -16,7 +15,10 @@ use std::{
 
 use seyal_client::app::{AppAction, ApplicationRoot};
 use seyal_client::provisioning::IntentPhase;
-use seyal_client::{seyal_bridge_provisioning_wakeup_fd, LocalDisplayClient};
+use seyal_client::{
+    ffi_test_drain_attach_wakeup, ffi_test_try_read_attach_wakeup,
+    seyal_bridge_provisioning_wakeup_fd, LocalDisplayClient,
+};
 use seyal_core::{AttachmentId, PaneId};
 use seyal_protocol::runtime_dir::{
     override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
@@ -550,27 +552,12 @@ fn pane_awaiting_attach(root: &ApplicationRoot, pane: PaneId) -> bool {
     )
 }
 
-fn drain_wakeup_fd(fd: i32) {
-    let mut buf = [0u8; 64];
-    loop {
-        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
-        if n <= 0 {
-            break;
-        }
-    }
-}
-
-fn wait_wakeup_readable(fd: i32, deadline: Instant) -> bool {
+fn wait_wakeup_readable(deadline: Instant) -> bool {
     while Instant::now() < deadline {
-        let mut pfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let n = unsafe { libc::poll(&mut pfd, 1, 50) };
-        if n > 0 && pfd.revents & libc::POLLIN != 0 {
+        if ffi_test_try_read_attach_wakeup() {
             return true;
         }
+        thread::sleep(Duration::from_millis(10));
     }
     false
 }
@@ -703,7 +690,7 @@ fn create_tab_attach_wakeup_fd_becomes_readable() {
     root.attach_client(root.fence(), first).expect("bind first");
     let wakeup = seyal_bridge_provisioning_wakeup_fd();
     assert!(wakeup >= 0, "wakeup fd must exist for the host");
-    drain_wakeup_fd(wakeup);
+    ffi_test_drain_attach_wakeup();
 
     let (release_tx, release_rx) = mpsc::channel();
     root.gate_next_live_attach(release_rx);
@@ -712,10 +699,10 @@ fn create_tab_attach_wakeup_fd_becomes_readable() {
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         pane_awaiting_attach(root, second_pane)
     });
-    drain_wakeup_fd(wakeup);
+    ffi_test_drain_attach_wakeup();
     release_tx.send(()).expect("release attach");
     assert!(
-        wait_wakeup_readable(wakeup, Instant::now() + Duration::from_secs(8)),
+        wait_wakeup_readable(Instant::now() + Duration::from_secs(8)),
         "connect completion must signal the wakeup fd without waiting on the first Controller"
     );
     let _ = root.poll_client(root.fence());

@@ -89,3 +89,11 @@ pub use ffi::client_registry_contains as ffi_test_client_registry_contains;
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use ffi::client_registry_has_execution as ffi_test_client_registry_has_execution;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::drain_attach_wakeup as ffi_test_drain_attach_wakeup;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::try_read_attach_wakeup as ffi_test_try_read_attach_wakeup;

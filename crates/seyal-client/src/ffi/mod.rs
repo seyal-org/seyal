@@ -84,10 +84,10 @@ pub use app::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
 };
-pub use attach_wakeup::seyal_bridge_provisioning_wakeup_fd;
 #[allow(unused_imports)]
-pub(crate) use attach_wakeup::{
-    clone_attach_wakeup_writer, drain_attach_wakeup, signal_attach_wakeup_on,
+pub(crate) use attach_wakeup::{clone_attach_wakeup_writer, signal_attach_wakeup_on};
+pub use attach_wakeup::{
+    drain_attach_wakeup, seyal_bridge_provisioning_wakeup_fd, try_read_attach_wakeup,
 };
 #[allow(unused_imports)]
 pub use display::{
