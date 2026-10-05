@@ -39,7 +39,7 @@
 | Working-set persistence retry budget | **8 attempts** or **30 s** deadline, whichever first; then `WorkingSetDegraded` | SPEC-014 §15 / §18 |
 | Compaction cooperative time slice | **≤ 50 ms** before yield/cancel check | SPEC-014 §18 |
 | Consumer ContextBundle token/byte budget | **not frozen here** — supplied by harness/adapter/capability contract; engine must partition per SPEC-013 §15 | SPEC-013 §15 |
-| SPEC-020 V1 ranking weights / priors | **not production defaults** — synthetic reference-POC values remain non-authoritative | SPEC-020; #681 handoff |
+| SPEC-020 V1 ranking weights / priors | **not frozen by this pack** — see #1294 / [`m005-spec020-baseline-calibration.md`](m005-spec020-baseline-calibration.md); synthetic reference-POC values remain non-defaults | SPEC-020; #1294 |
 | Terminal isolation ceiling during context/memory/working-set load | **must not regress accepted Pass 9 / M002 terminal budgets**; product case SPEC-013 §23.40 remains unqualified until a Seyal Runtime harness measures it | SPEC-013 §21–§22; SPEC-014 §17–§18 |
 
 These values are M005 production contracts for #681 children. Changing them after implementation starts requires a specification/resource review with reproducible evidence; they are not opportunistic tuning knobs inside Context Engine / MemoryStore / RunWorkingSet PRs.
@@ -58,7 +58,7 @@ These values are M005 production contracts for #681 children. Changing them afte
 - Isolated reference POCs used **synthetic** policy classes, token costs, ranking weights, retry/queue caps, and in-memory models. Their assertion counts prove mechanics, not production latency, RSS, disk, or quality.
 - The host PTY/index contention diagnostic is **not** Seyal Runtime / renderer / Context Engine isolation evidence. SPEC-013 §23 case 40 remains unqualified.
 - Case-sensitive APFS identity (SPEC-013 §23 case 36) remains only partially evidenced (case-insensitive APFS Data volume probe only).
-- SPEC-020 V1 ranking weights are **not** frozen as production defaults by this pack.
+- SPEC-020 V1 ranking weights are **not** frozen as production defaults by this pack; ranking baseline authority is #1294 / [`m005-spec020-baseline-calibration.md`](m005-spec020-baseline-calibration.md).
 
 ## Provenance from prior reference probes
 
@@ -186,7 +186,7 @@ Retain machine-readable logs/JSON under `docs/evidence/` (or link exact CI artif
 1. Resource caps in the decision summary are normative for #681 implementation children.
 2. A PR that needs a larger cap must update this evidence document (or a superseding dated calibration) with methodology and independent review — not bury the change inside feature code.
 3. Caps may be tightened without ceremony when measurements show headroom is unused and tests are updated; silent weakening is forbidden.
-4. Consumer token budgets and SPEC-020 V1 weights remain outside this freeze until their owning Issues record calibrated production values.
+4. Consumer token budgets remain outside this freeze. SPEC-020 V1 baseline weights/cohorts are owned by #1294 / [`m005-spec020-baseline-calibration.md`](m005-spec020-baseline-calibration.md), not by this pack.
 
 ## Relationship to #681 Ready
 
