@@ -5,19 +5,19 @@
 //! background reader thread, then returns immediately; `observe` only
 //! drains what that thread has already buffered (never blocks on child
 //! I/O); `signal_cancel` is a best-effort kill; `reap` is a bounded wait for
-//! exit evidence. None of this is composed into the production binary by
-//! this issue — SPEC-027 §12 defers that composition to #679 — but the
-//! trait contract still has to be correct so #679 can compose it directly.
+//! exit evidence. Composed into the production binary by #1224 (the "#679
+//! child" SPEC-027 §12 names); program/argv/env/cwd come from the
+//! per-dispatch `LaunchDescriptor` the Agent Backend resolves (§5/§6),
+//! never from host construction-time config.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Read;
-use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use seyal_agent_core::{AgentRunId, BindingGeneration};
+use seyal_agent_core::{AgentRunId, BindingGeneration, LaunchDescriptor};
 
 use seyal_agent_core::ExecutionHostKind;
 
@@ -29,42 +29,32 @@ use crate::execution_host::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostError {
     ZeroOutputChunk,
-    EmptyProgram,
     SpawnFailed,
     Io,
     OrdinalExhausted,
     UnknownHandle,
 }
 
-/// Configuration for one StandaloneProcessHost supervision turn.
+/// Host-level supervision tuning, shared across every child this host
+/// spawns. Per-run spawn input (program/argv/env/cwd) is never part of this
+/// — it arrives fresh with each `start` call as a [`LaunchDescriptor`].
 #[derive(Clone, Debug)]
 pub struct StandaloneProcessConfig {
-    program: PathBuf,
-    args: Vec<String>,
     max_output_chunk: usize,
     /// Bound how long we wait for exit after stdout EOF while the child is live.
     disconnect_grace: Duration,
     /// SPEC-027 §9.5: TTY-required offerings stay `ExecutionTargetUnavailable`
-    /// on this host until a shared PTY primitive exists.
+    /// on this host until a shared PTY primitive exists. Fixed per host
+    /// instance since this is a pipe-safe-only host, not per-offering.
     requires_tty: bool,
 }
 
 impl StandaloneProcessConfig {
-    pub fn new(
-        program: impl Into<PathBuf>,
-        args: impl IntoIterator<Item = impl Into<String>>,
-        max_output_chunk: usize,
-    ) -> Result<Self, HostError> {
+    pub fn new(max_output_chunk: usize) -> Result<Self, HostError> {
         if max_output_chunk == 0 {
             return Err(HostError::ZeroOutputChunk);
         }
-        let program = program.into();
-        if program.as_os_str().is_empty() {
-            return Err(HostError::EmptyProgram);
-        }
         Ok(Self {
-            program,
-            args: args.into_iter().map(Into::into).collect(),
             max_output_chunk,
             disconnect_grace: Duration::from_millis(50),
             requires_tty: false,
@@ -79,10 +69,6 @@ impl StandaloneProcessConfig {
     pub fn with_tty_required(mut self, requires_tty: bool) -> Self {
         self.requires_tty = requires_tty;
         self
-    }
-
-    pub fn program(&self) -> &Path {
-        &self.program
     }
 
     pub fn requires_tty(&self) -> bool {
@@ -141,14 +127,18 @@ impl StandaloneProcessHost {
         &self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
+        descriptor: &LaunchDescriptor,
     ) -> Result<SupervisedChild, HostError> {
-        let mut child = Command::new(&self.config.program)
-            .args(&self.config.args)
+        let mut command = Command::new(&descriptor.program);
+        command
+            .args(&descriptor.argv)
+            .current_dir(&descriptor.cwd)
+            .env_clear()
+            .envs(descriptor.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| HostError::SpawnFailed)?;
+            .stderr(Stdio::null());
+        let mut child = command.spawn().map_err(|_| HostError::SpawnFailed)?;
         let stdout = child.stdout.take().ok_or(HostError::SpawnFailed)?;
 
         let observations = Arc::new(Mutex::new(VecDeque::new()));
@@ -291,11 +281,12 @@ impl SessionExecutionHost for StandaloneProcessHost {
         &mut self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
+        descriptor: LaunchDescriptor,
     ) -> HostStartOutcome {
         if self.config.requires_tty {
             return HostStartOutcome::NotStarted(HostNotStartedReason::TtyRequired);
         }
-        match self.spawn(run_id, binding_generation) {
+        match self.spawn(run_id, binding_generation, &descriptor) {
             Ok(supervised) => {
                 let raw = self.next_handle.fetch_add(1, Ordering::Relaxed);
                 self.children.insert(raw, supervised);
@@ -370,6 +361,18 @@ mod tests {
         (ObservationAuthority::new(domain), run, generation)
     }
 
+    fn descriptor(
+        program: impl Into<String>,
+        argv: impl IntoIterator<Item = impl Into<String>>,
+    ) -> LaunchDescriptor {
+        LaunchDescriptor {
+            program: program.into(),
+            argv: argv.into_iter().map(Into::into).collect(),
+            env: Vec::new(),
+            cwd: std::env::temp_dir(),
+        }
+    }
+
     /// Bounded poll for `observe` to see the terminal observation, modeling
     /// the caller re-polling off-lock rather than the host blocking.
     fn observe_until_terminal(
@@ -402,10 +405,12 @@ mod tests {
     #[test]
     fn successful_echo_terminates_with_known_success() {
         let (mut authority, run, generation) = seeded_run();
-        let config = StandaloneProcessConfig::new("/bin/echo", ["host-ok"], 64).unwrap();
+        let config = StandaloneProcessConfig::new(64).unwrap();
         let mut host = StandaloneProcessHost::new(config);
 
-        let HostStartOutcome::Started(handle) = host.start(run, generation) else {
+        let HostStartOutcome::Started(handle) =
+            host.start(run, generation, descriptor("/bin/echo", ["host-ok"]))
+        else {
             panic!("expected spawn evidence");
         };
         let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
@@ -433,10 +438,12 @@ mod tests {
     #[test]
     fn signal_death_is_crash_not_fabricated_termination() {
         let (mut authority, run, generation) = seeded_run();
-        let config = StandaloneProcessConfig::new("/bin/sh", ["-c", "kill -9 $$"], 32).unwrap();
+        let config = StandaloneProcessConfig::new(32).unwrap();
         let mut host = StandaloneProcessHost::new(config);
 
-        let HostStartOutcome::Started(handle) = host.start(run, generation) else {
+        let HostStartOutcome::Started(handle) =
+            host.start(run, generation, descriptor("/bin/sh", ["-c", "kill -9 $$"]))
+        else {
             panic!("expected spawn evidence");
         };
         let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
@@ -461,11 +468,15 @@ mod tests {
         let (mut authority, run, generation) = seeded_run();
 
         // Close stdout, then keep the process alive long enough for EOF-with-live-child.
-        let config = StandaloneProcessConfig::new("/bin/sh", ["-c", "exec 1>&-; sleep 30"], 32)
+        let config = StandaloneProcessConfig::new(32)
             .unwrap()
             .with_disconnect_grace(Duration::from_millis(20));
         let mut host = StandaloneProcessHost::new(config);
-        let HostStartOutcome::Started(handle) = host.start(run, generation) else {
+        let HostStartOutcome::Started(handle) = host.start(
+            run,
+            generation,
+            descriptor("/bin/sh", ["-c", "exec 1>&-; sleep 30"]),
+        ) else {
             panic!("expected spawn evidence");
         };
         let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
@@ -489,12 +500,12 @@ mod tests {
     #[test]
     fn tty_required_offering_reports_typed_not_started_without_spawning() {
         let (_, run, generation) = seeded_run();
-        let config = StandaloneProcessConfig::new("/bin/echo", ["unused"], 16)
+        let config = StandaloneProcessConfig::new(16)
             .unwrap()
             .with_tty_required(true);
         let mut host = StandaloneProcessHost::new(config);
         assert_eq!(
-            host.start(run, generation),
+            host.start(run, generation, descriptor("/bin/echo", ["unused"])),
             HostStartOutcome::NotStarted(HostNotStartedReason::TtyRequired)
         );
         assert!(host.children.is_empty());
@@ -509,9 +520,11 @@ mod tests {
     #[test]
     fn cancel_of_live_child_signals_and_reaps_without_fabricating_completion() {
         let (_, run, generation) = seeded_run();
-        let config = StandaloneProcessConfig::new("/bin/sh", ["-c", "sleep 30"], 32).unwrap();
+        let config = StandaloneProcessConfig::new(32).unwrap();
         let mut host = StandaloneProcessHost::new(config);
-        let HostStartOutcome::Started(handle) = host.start(run, generation) else {
+        let HostStartOutcome::Started(handle) =
+            host.start(run, generation, descriptor("/bin/sh", ["-c", "sleep 30"]))
+        else {
             panic!("expected spawn evidence");
         };
 
@@ -530,7 +543,7 @@ mod tests {
 
     #[test]
     fn observe_on_unknown_handle_fails_closed() {
-        let config = StandaloneProcessConfig::new("/bin/echo", ["x"], 16).unwrap();
+        let config = StandaloneProcessConfig::new(16).unwrap();
         let mut host = StandaloneProcessHost::new(config);
         assert_eq!(host.observe(HostHandle::new(999)), Err(()));
         assert_eq!(host.signal_cancel(HostHandle::new(999)), Err(()));
@@ -558,14 +571,16 @@ mod tests {
         let (_, run, generation) = seeded_run();
 
         // ~48 KiB of stdout in small host chunks → multiple append batches.
-        let config = StandaloneProcessConfig::new(
-            "/usr/bin/python3",
-            ["-c", "import sys; sys.stdout.write('x' * (48 * 1024))"],
-            700,
-        )
-        .unwrap();
+        let config = StandaloneProcessConfig::new(700).unwrap();
         let mut host = StandaloneProcessHost::new(config);
-        let HostStartOutcome::Started(handle) = host.start(run, generation) else {
+        let HostStartOutcome::Started(handle) = host.start(
+            run,
+            generation,
+            descriptor(
+                "/usr/bin/python3",
+                ["-c", "import sys; sys.stdout.write('x' * (48 * 1024))"],
+            ),
+        ) else {
             panic!("expected spawn evidence");
         };
         let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(5));

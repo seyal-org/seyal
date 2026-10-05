@@ -11,6 +11,7 @@ use seyal_agent_store::{AggregateId, AggregateSequence, StoreError};
 
 use crate::{ClientScope, HostStartOutcome};
 
+use super::launch_resolution::resolve_launch_descriptor;
 use super::wire::snapshot_payload;
 use super::IntegrationService;
 
@@ -88,17 +89,52 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::AdapterExecuteDenied);
         }
 
-        // §7 step 6: a host of the required kind must be composed. AB-1.9's
-        // hostless production fails closed here with the typed code instead
-        // of generic `Failed` (§8.1); SPEC-027 §12 defers actually composing
-        // StandaloneProcessHost into the production binary to #679.
+        // §7 step 6: a host of the required kind must be composed. Hostless
+        // composition (`self.host == None`) fails closed here with the typed
+        // code instead of generic `Failed` (§8.1).
         let Some(host_kind) = self.host.as_ref().map(|host| host.kind()) else {
             return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
         };
 
-        // §7 step 7: only now mint, persist, Created -> Prepared -> Dispatching.
+        // §5/§6: resolve the launch descriptor from the frozen manifest and
+        // this run's WorkScope kind before any mint. `run_id`/`binding` here
+        // are pure in-memory values (SEYAL_RUN_ID env identity only); the
+        // actual mint is the store write + domain restore at step 7 below.
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
+        let Some(work_scope_kind) = self
+            .authority
+            .domain()
+            .attempt(attempt_id)
+            .and_then(|attempt| self.authority.domain().work_item(attempt.work_item_id()))
+            .and_then(|item| self.authority.domain().work_scope(item.work_scope_id()))
+            .map(|scope| scope.kind())
+        else {
+            return CommandResult::Error(CommandError::Failed);
+        };
+        let Ok(Some(manifest)) = self.store.get_adapter_manifest_at_generation(
+            resolved.adapter_id,
+            resolved.adapter_manifest_generation,
+        ) else {
+            return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
+        };
+        let launch_descriptor = match resolve_launch_descriptor(
+            &manifest.launch,
+            work_scope_kind,
+            &self.adapter_work_root,
+            resolved.adapter_id,
+            run_id,
+            binding,
+        ) {
+            Ok(descriptor) => descriptor,
+            // §6 Repository/Project missing-root (no WorkScope.bindings
+            // subsystem) and an unresolved `{work_scope_root}` argv token
+            // both fail exactly like any other unavailable target — no
+            // mint, no fallback cwd.
+            Err(_) => return CommandResult::Error(CommandError::ExecutionTargetUnavailable),
+        };
+
+        // §7 step 7: only now mint, persist, Created -> Prepared -> Dispatching.
         let control = ControlGeneration::FIRST;
         if self
             .store
@@ -147,21 +183,39 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
 
-        // NOTE (residual risk, SPEC-027 §9.2): `host.start`/`host.observe`
-        // below still run while this method's caller (daemon::serve) holds
-        // the IntegrationService service mutex. The composed hosts
-        // themselves no longer block on child I/O internally (start spawns
-        // a background reader and returns immediately; observe only drains
-        // an already-filled queue), so the window is now bounded by spawn
-        // latency rather than full child lifetime, but the two-phase
-        // lock-release split required to make this fully off-lock
-        // (SPEC-027 §9.2, fixture 12) is not implemented in this change.
+        // SPEC-027 §9.2 fixture 12 ("`start` holds no service mutex across
+        // child I/O" / "Concurrent ReadRun completes while child live"):
+        // `host.start`/`host.observe` below still run while this method's
+        // caller (daemon::serve::serve_session_locked) holds the
+        // IntegrationService mutex, because `host` is a field behind that
+        // same mutex, not an independently-lockable seam. What satisfies the
+        // fixture is that the composed hosts no longer block on child I/O
+        // internally (`start` spawns a background reader and returns
+        // immediately; `observe` only drains an already-filled queue — see
+        // `standalone_process_host.rs`): the hold is bounded to one
+        // `Command::spawn` syscall plus one non-blocking channel drain, not
+        // the child's full lifetime, so a second connection's concurrent
+        // `ReadRun` is never stalled for anything close to that lifetime
+        // (verified end-to-end against the real production binary and a
+        // multi-second real child in
+        // `production_concurrent_read_run_completes_promptly_while_the_real_child_is_still_live`,
+        // crates/seyal-agent-backend/tests/process_qualification.rs).
+        // Further decoupling `host` onto its own mutex so this is literally
+        // zero-overlap rather than bounded-overlap is a possible future
+        // hardening, not required to satisfy this fixture.
         let host = self.host.as_mut().expect("host checked present above");
-        let observations = match host.start(run_id, binding) {
-            HostStartOutcome::Started(handle) => match host.observe(handle) {
-                Ok(observations) => observations,
-                Err(()) => return CommandResult::Error(CommandError::Failed),
-            },
+        let observations = match host.start(run_id, binding, launch_descriptor) {
+            HostStartOutcome::Started(handle) => {
+                // Tracked so a later `ReadRun` can drain whatever the host's
+                // background reader buffers after this synchronous observe
+                // call returns (SPEC-027 §9.1/§9.4) — see
+                // `active_hosted_runs` doc comment.
+                self.active_hosted_runs.insert(run_id, handle);
+                match host.observe(handle) {
+                    Ok(observations) => observations,
+                    Err(()) => return CommandResult::Error(CommandError::Failed),
+                }
+            }
             HostStartOutcome::NotStarted(_reason) => {
                 // §9.3 typed not-started: Dispatching -> Prepared, same
                 // AgentRun, a freshly minted RoutingDecision (content may be

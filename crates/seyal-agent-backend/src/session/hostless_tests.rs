@@ -45,11 +45,14 @@ fn seed_attempt(service: &mut IntegrationService, principal: ClientPrincipalId) 
     let CommandResult::Opened { session_id } = opened else {
         panic!("open session: {opened:?}");
     };
+    // AdHoc: these tests exercise hostless/host-dispatch gating (AB-1.9
+    // AC2/AC4), not cwd (§6, fixtures 17/18). Repository/Project cwd fails
+    // closed without a `WorkScope.bindings` root.
     let CommandResult::WorkScope { id: scope } = service.dispatch(
         principal,
         Command::CreateWorkScope {
             session_id,
-            kind: WorkScopeKind::Repository,
+            kind: WorkScopeKind::AdHoc,
         },
         32,
         ABSOLUTE_MAX_FRAME_SIZE,

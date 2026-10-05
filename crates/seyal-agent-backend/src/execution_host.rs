@@ -1,6 +1,6 @@
 #[cfg(feature = "fixture-host")]
 use seyal_agent_core::ExecutionHost;
-use seyal_agent_core::{AgentRunId, BindingGeneration, ExecutionHostKind};
+use seyal_agent_core::{AgentRunId, BindingGeneration, ExecutionHostKind, LaunchDescriptor};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostObservationKind {
@@ -95,6 +95,7 @@ pub trait SessionExecutionHost: Send {
         &mut self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
+        descriptor: LaunchDescriptor,
     ) -> HostStartOutcome;
 
     // Unit error keeps the object-safe seam free of host-specific error types;
@@ -150,6 +151,9 @@ pub struct FakeExecutionHost {
     /// Observations already materialized for a live handle, drained in order
     /// by `observe` to model off-lock, non-blocking delivery.
     pending: std::collections::HashMap<u64, std::collections::VecDeque<HostObservation>>,
+    /// Last descriptor passed to `start`, for tests asserting the backend
+    /// resolved program/argv/env/cwd correctly before calling the host.
+    last_descriptor: Option<LaunchDescriptor>,
 }
 
 #[cfg(feature = "fixture-host")]
@@ -164,7 +168,12 @@ impl FakeExecutionHost {
             next_handle: 1,
             start_outcome: None,
             pending: std::collections::HashMap::new(),
+            last_descriptor: None,
         })
+    }
+
+    pub fn last_descriptor(&self) -> Option<&LaunchDescriptor> {
+        self.last_descriptor.as_ref()
     }
 
     pub fn set_script(&mut self, script: Vec<ScriptStep>) {
@@ -314,7 +323,9 @@ impl SessionExecutionHost for FakeExecutionHost {
         &mut self,
         run_id: AgentRunId,
         binding_generation: BindingGeneration,
+        descriptor: LaunchDescriptor,
     ) -> HostStartOutcome {
+        self.last_descriptor = Some(descriptor);
         if let Some(outcome) = self.start_outcome.take() {
             return outcome;
         }
@@ -356,6 +367,15 @@ mod tests {
         let attempt = domain.create_attempt(item).unwrap();
         let run = domain.create_agent_run(attempt).unwrap();
         (run, domain.agent_run(run).unwrap().binding_generation())
+    }
+
+    fn sample_descriptor() -> LaunchDescriptor {
+        LaunchDescriptor {
+            program: "/bin/echo".to_string(),
+            argv: vec!["test".to_string()],
+            env: Vec::new(),
+            cwd: std::env::temp_dir(),
+        }
     }
 
     #[test]
@@ -469,11 +489,13 @@ mod tests {
             ScriptStep::Emit(HostObservationKind::KnownSuccess),
         ]);
 
+        let descriptor = sample_descriptor();
         let HostStartOutcome::Started(handle) =
-            SessionExecutionHost::start(&mut host, run, generation)
+            SessionExecutionHost::start(&mut host, run, generation, descriptor.clone())
         else {
             panic!("expected Started");
         };
+        assert_eq!(host.last_descriptor(), Some(&descriptor));
         let observations = SessionExecutionHost::observe(&mut host, handle).unwrap();
         assert_eq!(observations.len(), 2);
         // A second observe drains nothing new (already delivered).
@@ -491,7 +513,7 @@ mod tests {
         let mut host = FakeExecutionHost::new(8).unwrap();
         host.force_not_started(HostNotStartedReason::TtyRequired);
         assert_eq!(
-            SessionExecutionHost::start(&mut host, run, generation),
+            SessionExecutionHost::start(&mut host, run, generation, sample_descriptor()),
             HostStartOutcome::NotStarted(HostNotStartedReason::TtyRequired)
         );
     }
