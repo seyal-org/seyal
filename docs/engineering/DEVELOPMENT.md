@@ -163,6 +163,13 @@ make docs-check    # run Starlight/Astro documentation validation
 - Qualification: `seyal-agent-backend-qualification` (requires `--features fixture-host`) —
   injects the scripted `FakeExecutionHost` fixture through the same typed seam for
   process/qualification tests. Prefer this binary for fabricated-run scenarios.
+- Adapter conformance catalog (#1277): one retained contract for replay + real CLI
+  adapters. See `docs/engineering/ADAPTER-CONFORMANCE.md`. Prove the harness with:
+
+```sh
+cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance
+```
+
 - Developer stores created by the pre-AB-1.9 production binary may contain fabricated
   runs; discard them. There is no migration.
 

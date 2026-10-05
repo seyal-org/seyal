@@ -59,5 +59,9 @@ required-features = ["fixture-host"]
 name = "process_qualification"
 required-features = ["fixture-host"]
 
+[[test]]
+name = "adapter_conformance"
+required-features = ["fixture-host"]
+
 [lints.rust]
 unsafe_code = "deny"
