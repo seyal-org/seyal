@@ -1,6 +1,6 @@
 # SPEC-028 — M005 Attention, Approval binding, Artifact presentation and exact-target UX
 
-- **Status:** Accepted on merge of this PR by a non-author maintainer under #1239 / ADR-014. An author or agent comment is not that acceptance. Not an implemented-behavior claim.
+- **Status:** Accepted on merge of PR #1267 by a non-author maintainer under #1239 / ADR-014. An author or agent comment is not that acceptance. Not an implemented-behavior claim.
 - **Issue:** #1239 (Owning); parent refinement #838; implementation consumers #680 (primary), #841 (approval consumption at dispatch)
 - **Architecture:** ADR-012, ADR-014, ADR-015, ADR-016; Foundation §8 / R-037–R-040; UI architecture §6–§7
 - **Consumes:** SPEC-016 §5 (exact approval binding/consumption), SPEC-015 (RevocationFence at authorization), SPEC-017 (`attention.read` / `approval.decide` / `artifacts.read`), SPEC-022 (ResourceAddress / reveal-and-focus), SPEC-026 (AgentRun identity/lifecycle)
@@ -380,7 +380,7 @@ Hard rule: terminal I/O/rendering never waits on Attention persistence, user res
 
 ## 15. Status / acceptance instruction
 
-**Accepted** on merge of this PR by a non-author maintainer under #1239 / ADR-014. Merge by the proposing author or an agent does **not** count as Accepted.
+**Accepted** on merge of PR #1267 by a non-author maintainer under #1239 / ADR-014. Merge by the proposing author or an agent does **not** count as Accepted.
 
 After Accepted:
 
