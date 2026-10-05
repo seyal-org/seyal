@@ -52,9 +52,8 @@ fn seed_attempt(
     };
     // AdHoc, not Repository: these fixtures exercise adapter-catalog
     // resolution/authorization (SPEC-027 §4/§7), not cwd (§6, fixtures
-    // 17/18). Repository/Project cwd fails closed without a
-    // `WorkScope.bindings` root (see `launch_resolution`), which would
-    // mask the resolution/authorization behavior under test here.
+    // 17/18). Repository/Project cwd still fails closed without a bound
+    // root unless the trusted `bind_work_scope_root` path is used.
     let CommandResult::WorkScope { id: scope } = service.dispatch(
         principal,
         Command::CreateWorkScope {
@@ -392,11 +391,8 @@ fn fixture_10_pin_of_disabled_adapter_is_adapter_not_enabled_no_mint() {
 }
 
 /// Fixture 17 (dispatch-level): a `Repository` WorkScope has no bound root
-/// (no `WorkScope.bindings` subsystem exists), so SPEC-027 §6's own
-/// prescribed failure mode applies — cwd resolution fails closed before any
-/// mint, exactly like any other unavailable target. This exercises the real
-/// `StartAgentRun` dispatch path, not just `launch_resolution`'s pure
-/// function in isolation.
+/// so SPEC-027 §6's missing-root arm applies — cwd resolution fails closed
+/// before any mint.
 #[test]
 fn fixture_17_repository_work_scope_has_no_bound_root_fails_closed_no_mint() {
     let (dir, mut service) = open_bare();
@@ -427,6 +423,180 @@ fn fixture_17_repository_work_scope_has_no_bound_root_fails_closed_no_mint() {
         service.store.agent_runs().unwrap().is_empty(),
         "cwd resolution fails before any AgentRun mint"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Fixture 17 happy path: bound Repository root becomes launch cwd.
+#[test]
+fn fixture_17_repository_bound_root_is_launch_cwd() {
+    let (dir, mut service) = open_bare();
+    let (adapter_id, _offering_id) = install_adapter(&mut service, true);
+    service
+        .auth
+        .grant_adapter_execute(service.owner_principal_id, adapter_id)
+        .expect("grant");
+    let principal = service.begin_connection(b"cli").unwrap();
+    let CommandResult::Opened { session_id } = service.dispatch(
+        principal,
+        Command::OpenSession {
+            scopes: vec![1, 2, 4],
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("open session");
+    };
+    let CommandResult::WorkScope { id: scope } = service.dispatch(
+        principal,
+        Command::CreateWorkScope {
+            session_id,
+            kind: WorkScopeKind::Repository,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("scope");
+    };
+    let bound = dir.join("repo-root");
+    std::fs::create_dir_all(&bound).unwrap();
+    service
+        .bind_work_scope_root(scope, &bound)
+        .expect("bind root");
+    let CommandResult::WorkItem { id: item } = service.dispatch(
+        principal,
+        Command::CreateWorkItem {
+            session_id,
+            work_scope_id: scope,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("item");
+    };
+    let CommandResult::Attempt { id: attempt_id } = service.dispatch(
+        principal,
+        Command::CreateAttempt {
+            session_id,
+            work_item_id: item,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("attempt");
+    };
+
+    let started = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+            route_offering_id: None,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    assert!(
+        matches!(started, CommandResult::Started { .. }),
+        "bound repository start: {started:?}"
+    );
+    let expected = bound.canonicalize().unwrap();
+    assert_eq!(
+        service.last_resolved_launch.as_ref().map(|d| &d.cwd),
+        Some(&expected)
+    );
+    let adapter_cwd =
+        super::launch_resolution::adapter_work_dir(&service.adapter_work_root, adapter_id);
+    assert_ne!(expected, adapter_cwd);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Fixture 17 traversal: `{work_scope_root}/..` fails closed with no mint.
+#[test]
+fn fixture_17_repository_bound_root_traversal_is_rejected_no_mint() {
+    let (dir, mut service) = open_bare();
+    let adapter_id = AdapterId::new();
+    let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+        "/bin/echo",
+        seyal_agent_store::CwdPolicy::WorkScopeRoot,
+    )
+    .with_argv(["{work_scope_root}/../escape"]);
+    service
+        .store
+        .install_or_update_adapter(adapter_id, 0, true, &launch)
+        .expect("install adapter");
+    service
+        .store
+        .add_route_offering(RouteOfferingId::new(), adapter_id, false)
+        .expect("add offering");
+    service
+        .auth
+        .grant_adapter_execute(service.owner_principal_id, adapter_id)
+        .expect("grant");
+    let principal = service.begin_connection(b"cli").unwrap();
+    let CommandResult::Opened { session_id } = service.dispatch(
+        principal,
+        Command::OpenSession {
+            scopes: vec![1, 2, 4],
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("open session");
+    };
+    let CommandResult::WorkScope { id: scope } = service.dispatch(
+        principal,
+        Command::CreateWorkScope {
+            session_id,
+            kind: WorkScopeKind::Repository,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("scope");
+    };
+    let bound = dir.join("repo-root");
+    std::fs::create_dir_all(&bound).unwrap();
+    service
+        .bind_work_scope_root(scope, &bound)
+        .expect("bind root");
+    let CommandResult::WorkItem { id: item } = service.dispatch(
+        principal,
+        Command::CreateWorkItem {
+            session_id,
+            work_scope_id: scope,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("item");
+    };
+    let CommandResult::Attempt { id: attempt_id } = service.dispatch(
+        principal,
+        Command::CreateAttempt {
+            session_id,
+            work_item_id: item,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    ) else {
+        panic!("attempt");
+    };
+
+    let started = service.dispatch(
+        principal,
+        Command::StartAgentRun {
+            session_id,
+            attempt_id,
+            route_offering_id: None,
+        },
+        32,
+        ABSOLUTE_MAX_FRAME_SIZE,
+    );
+    assert_eq!(
+        started,
+        CommandResult::Error(CommandError::ExecutionTargetUnavailable)
+    );
+    assert!(service.store.agent_runs().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 

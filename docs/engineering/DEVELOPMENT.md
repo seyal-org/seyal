@@ -145,9 +145,11 @@ make docs-check    # run Starlight/Astro documentation validation
 
 - Production: `seyal-agent-backend --directory <path>` — builds without Cargo features
   and composes `StandaloneProcessHost`. `StartAgentRun` requires a trusted adapter
-  catalog (fail-closed with no durable AgentRun when none is installed). SIGTERM,
-  SIGINT, and process `Drop` reap live children by process group. `--output-bytes`
-  is unknown (exit 2).
+  catalog (fail-closed with no durable AgentRun when none is installed). Repository
+  and Project WorkScope cwd comes from durable `WorkScope.bindings` written through
+  the first-party store/`IntegrationService` bind path, never from the client.
+  SIGTERM, SIGINT, and process `Drop` reap live children by process group.
+  `--output-bytes` is unknown (exit 2).
 - Qualification: `seyal-agent-backend-qualification` (requires `--features fixture-host`) —
   injects the scripted `FakeExecutionHost` fixture through the same typed seam for
   process/qualification tests. Prefer this binary for fabricated-run scenarios.

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 6;
+pub(super) const SCHEMA_VERSION: i32 = 7;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS adapter_execute_grant (
     PRIMARY KEY (principal_id, adapter_id)
 );
 ";
+/// Durable `WorkScope.bindings` (SPEC-027 §6). One canonical root path per
+/// WorkScope. Not a column on `work_scope` so the `Copy` domain `WorkScope`
+/// type stays path-free. Written only by a trusted first-party store API
+/// (no client spawn field).
+pub(super) const WORK_SCOPE_BINDING_TABLE_V7: &str = "
+CREATE TABLE IF NOT EXISTS work_scope_binding (
+    work_scope_id BLOB PRIMARY KEY,
+    bound_root TEXT NOT NULL
+);
+";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
     if from >= SCHEMA_VERSION {
@@ -121,6 +131,10 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
     }
     if from < 6 {
         tx.execute_batch(ADAPTER_CATALOG_TABLES_V6)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 7 {
+        tx.execute_batch(WORK_SCOPE_BINDING_TABLE_V7)
             .map_err(|_| StoreError::WriteFailed)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -199,6 +213,8 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
     )
     .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(ADAPTER_CATALOG_TABLES_V6)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(WORK_SCOPE_BINDING_TABLE_V7)
         .map_err(|_| StoreError::WriteFailed)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
