@@ -506,7 +506,7 @@ fn shell_header_refreshes_after_rejected_and_successful_actions() {
 }
 
 #[test]
-fn navigate_to_other_window_tab_drains_order_front() {
+fn navigate_to_other_window_tab_emits_window_activation() {
     use crate::app::AppAction;
     use crate::navigation::ResourceAddress;
 
@@ -515,6 +515,9 @@ fn navigate_to_other_window_tab_drains_order_front() {
     let other_tab = shell.snapshot().windows[1].tabs[0].id;
     let other_window = shell.snapshot().windows[1].id;
     let mut root = ApplicationRoot::with_shell(shell);
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Tab {
@@ -524,17 +527,16 @@ fn navigate_to_other_window_tab_drains_order_front() {
     })
     .expect("navigate");
     assert_eq!(root.snapshot().shell.active_window, other_window);
-    assert!(
-        root.snapshot()
-            .pending_effects
-            .iter()
-            .any(|effect| matches!(
-                effect,
-                crate::app::NativeEffect::OrderFrontMakeKey { window } if *window == other_window
-            )),
-        "Navigate must drain OrderFrontMakeKey, got {:?}",
-        root.snapshot().pending_effects
+    assert_eq!(
+        root.snapshot().pending_effects,
+        [crate::app::NativeEffect::WindowActivation {
+            window: other_window,
+        }],
+        "Navigate must emit exactly one typed WindowActivation"
     );
+}
+
+#[test]
 fn navigate_encodes_one_window_activation_effect() {
     use crate::app::{AppAction, NativeEffect};
     use crate::navigation::ResourceAddress;
