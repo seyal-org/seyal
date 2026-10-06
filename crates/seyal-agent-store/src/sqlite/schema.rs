@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 10;
+pub(super) const SCHEMA_VERSION: i32 = 11;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -182,6 +182,10 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
         )
         .map_err(|_| StoreError::WriteFailed)?;
     }
+    if from < 11 {
+        tx.execute_batch(crate::action::schema_v11::ACTION_INTENT_TABLES_V11)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     tx.commit().map_err(|_| StoreError::WriteFailed)?;
@@ -282,6 +286,8 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
         .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(crate::memory::schema_v10::MEMORY_TABLES_V10)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(crate::action::schema_v11::ACTION_INTENT_TABLES_V11)
         .map_err(|_| StoreError::WriteFailed)?;
     let mut key = [0u8; 32];
     getrandom_fallback(&mut key);

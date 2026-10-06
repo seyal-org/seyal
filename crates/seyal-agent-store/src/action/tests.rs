@@ -1,0 +1,175 @@
+use super::*;
+use crate::{AgentStore, AttemptId, WorkItemId, WorkScopeId};
+use seyal_agent_core::{
+    ActionId, ActionIntent, AgentRunId, ArgumentFingerprint, AuthorizationClass, CapabilityRef,
+    EffectClass, PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
+    RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT: AtomicU64 = AtomicU64::new(1);
+
+fn temp_store() -> (std::path::PathBuf, AgentStore) {
+    let dir = std::env::temp_dir().join(format!(
+        "seyal-agent-store-action-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("agent.db");
+    (path.clone(), AgentStore::open(&path).unwrap())
+}
+
+fn seed_run(store: &AgentStore) -> AgentRunId {
+    let scope = WorkScopeId::new();
+    store.commit_work_scope(scope, 2).unwrap();
+    let item = WorkItemId::new();
+    store.commit_work_item(item, scope).unwrap();
+    let attempt = AttemptId::new();
+    store.commit_attempt(attempt, item).unwrap();
+    let run = AgentRunId::new();
+    store
+        .mutate_agent_run_and_append(run, attempt, 1, 1, 1, b"run")
+        .unwrap();
+    run
+}
+
+fn fence() -> RevocationFence {
+    RevocationFence::new(vec![RevocationFenceMember {
+        scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+        generation: RevocationGeneration::FIRST,
+    }])
+    .unwrap()
+}
+
+fn intent(run: AgentRunId, action_id: ActionId, args: &[u8]) -> ActionIntent {
+    ActionIntent::prepare(
+        action_id,
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(args),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([8; 16]),
+        fence(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        50_000,
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+#[test]
+fn persist_before_dispatch_survives_reopen_as_prepared() {
+    let (path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    let prepared = intent(run, action_id, b"mkdir x");
+    assert_eq!(
+        store.actions().prepare(&prepared).unwrap(),
+        PrepareOutcome::NewlyPrepared
+    );
+    drop(store);
+    let store = AgentStore::open(&path).unwrap();
+    let loaded = store.actions().get(action_id).unwrap().unwrap();
+    assert_eq!(loaded, prepared);
+    assert_eq!(
+        loaded.lifecycle(),
+        seyal_agent_core::ActionLifecycle::Prepared
+    );
+}
+
+#[test]
+fn crash_before_prepare_commit_leaves_no_durable_action() {
+    let (path, store) = temp_store();
+    let run = seed_run(&store);
+    store.fail_after_writes(0);
+    let action_id = ActionId::new();
+    assert_eq!(
+        store.actions().prepare(&intent(run, action_id, b"touch y")),
+        Err(ActionError::Store(crate::StoreError::WriteFailed))
+    );
+    drop(store);
+    let store = AgentStore::open(&path).unwrap();
+    assert!(store.actions().get(action_id).unwrap().is_none());
+}
+
+#[test]
+fn duplicate_same_id_and_digest_does_not_create_a_second_row() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    let prepared = intent(run, action_id, b"same");
+    assert_eq!(
+        store.actions().prepare(&prepared).unwrap(),
+        PrepareOutcome::NewlyPrepared
+    );
+    assert_eq!(
+        store.actions().prepare(&prepared).unwrap(),
+        PrepareOutcome::Duplicate
+    );
+    assert_eq!(store.actions().list_for_run(run).unwrap().len(), 1);
+}
+
+#[test]
+fn mismatched_intent_for_existing_action_id_is_rejected_and_stored_row_is_unchanged() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    let stored = intent(run, action_id, b"v1");
+    store.actions().prepare(&stored).unwrap();
+    let mismatched = intent(run, action_id, b"v2");
+    assert_eq!(
+        store.actions().prepare(&mismatched),
+        Err(ActionError::IdentityMismatch)
+    );
+    let loaded = store.actions().get(action_id).unwrap().unwrap();
+    assert_eq!(loaded, stored);
+}
+
+#[test]
+fn material_change_inserts_a_new_row_and_never_edits_the_old_intent() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let original = intent(run, ActionId::new(), b"old-args");
+    store.actions().prepare(&original).unwrap();
+    let successor = original
+        .material_successor(
+            original.capability().clone(),
+            original.resource().clone(),
+            ArgumentFingerprint::of(b"new-args"),
+            original.effect_class(),
+            original.policy_generation(),
+            original.privacy_dependency(),
+            original.revocation_fence().clone(),
+            original.authorization_class(),
+            60_000,
+            None,
+            None,
+        )
+        .unwrap();
+    store.actions().prepare(&successor).unwrap();
+    let old = store.actions().get(original.action_id()).unwrap().unwrap();
+    let new = store.actions().get(successor.action_id()).unwrap().unwrap();
+    assert_eq!(old, original);
+    assert_eq!(new, successor);
+    assert_ne!(old.action_id(), new.action_id());
+    assert_eq!(store.actions().list_for_run(run).unwrap().len(), 2);
+}
+
+#[test]
+fn prepare_without_agent_run_fails_closed() {
+    let (_path, store) = temp_store();
+    let action_id = ActionId::new();
+    let missing_run = AgentRunId::new();
+    assert_eq!(
+        store
+            .actions()
+            .prepare(&intent(missing_run, action_id, b"no-run")),
+        Err(ActionError::UnknownAgentRun)
+    );
+    assert!(store.actions().get(action_id).unwrap().is_none());
+}
