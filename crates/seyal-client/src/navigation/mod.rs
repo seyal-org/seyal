@@ -36,8 +36,8 @@ pub use encode::{
     RESOURCE_ADDRESS_MAX_PAYLOAD,
 };
 pub use history::{
-    matches_destroyed_pane, matches_destroyed_tab, FocusHistory,
-    FocusHistoryEntry, FocusSeq, FOCUS_HISTORY_CAPACITY,
+    matches_destroyed_pane, matches_destroyed_tab, FocusHistory, FocusHistoryEntry, FocusSeq,
+    FOCUS_HISTORY_CAPACITY,
 };
 pub use resolve::{
     resolve, EmptyExecutionInventory, ExecutionInventory, ExecutionPresence, NavigationPrincipal,
