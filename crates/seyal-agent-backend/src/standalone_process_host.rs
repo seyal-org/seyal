@@ -862,22 +862,18 @@ mod tests {
             .unwrap()
             .with_disconnect_grace(Duration::from_millis(20));
         let mut host = StandaloneProcessHost::new(config);
+        // Close stdout with the shell (same as the live-disconnect fixture).
+        // `python3` + `os.close(1)` after `sys.stdout.close()` can exit
+        // immediately on some runners, collapsing this into KnownFailure.
         let HostStartOutcome::Started(handle) = host.start(
             run,
             generation,
-            descriptor(
-                "/usr/bin/env",
-                [
-                    "python3",
-                    "-c",
-                    "import os,time; os.close(1); time.sleep(0.8)",
-                ],
-            ),
+            descriptor("/bin/sh", ["-c", "exec 1>&-; sleep 1"]),
         ) else {
             panic!("expected spawn");
         };
         let pid = host.child_pid(handle).expect("pid");
-        let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
+        let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(5));
         assert!(observations
             .iter()
             .any(|o| matches!(o.kind, HostObservationKind::ObservationDisconnected)));
