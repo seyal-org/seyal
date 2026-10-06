@@ -5,9 +5,9 @@
 
 use std::time::Instant;
 
-use seyal_core::{PaneId, TabId};
 #[cfg(test)]
 use seyal_core::WorkspaceId;
+use seyal_core::{PaneId, TabId};
 
 use super::{NavigationRejection, ResourceAddress};
 
