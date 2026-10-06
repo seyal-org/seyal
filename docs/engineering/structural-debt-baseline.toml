@@ -59,21 +59,21 @@ responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one p
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 808
-issue = 1175
-reason = "Portable provisioning reducer stays one cold-path authority; #1175 adds pending_attach_by_request_id so dispose-attach after Created can correlate without fabricating AttachmentId."
+acknowledged_loc = 884
+issue = 1143
+reason = "Portable provisioning reducer stays one cold-path authority; #1143 adds begin_unpresented_adopt/dispose so W6 catalog work uses AttachController rather than a host NativeEffect."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 738
-issue = 1108
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1108 drains shell native effects after CreateTab/rollback CloseTab so Realize/OrderFront effects reach the host queue."
+acknowledged_loc = 771
+issue = 1143
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1143 forgets the live-unpresented catalog on TerminationRequested and dispatches palette dispose/adopt through the same effect queue."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
-acknowledged_loc = 813
-issue = 1149
-reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id and bootstrap floor seeding coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
+acknowledged_loc = 860
+issue = 1143
+reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented adopt/dispose attach-then-terminate proofs; production reducer stays in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
