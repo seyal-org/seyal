@@ -3,8 +3,8 @@
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{
-    ShellAction, ShellError, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
+    ShellAction, ShellError, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
+    ShellWorkspaceSeed, SplitAxis,
 };
 
 fn workspace_a() -> WorkspaceId {

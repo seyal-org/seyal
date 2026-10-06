@@ -3,13 +3,14 @@
 //! Enumeration is deterministic (`BTreeMap` by `ExecutionId`) and never
 //! auto-selects (SPEC-009 §8.2). Adoption rebinds the same `ExecutionId` into a
 //! Pane leaf; Runtime supplies a fresh `AttachmentId` on the attach path.
-//! `TerminateExecution` only queues the existing ADR-005 termination effect.
+//! `TerminateExecution` drops the catalog entry only; Runtime dispose is
+//! `ProvisioningEffect::AttachController` plus type 38, not a host native effect.
 
 use std::collections::BTreeMap;
 
 use seyal_core::{ExecutionId, PaneId, WorkspaceId};
 
-use super::{ShellAction, ShellError, ShellNativeEffect, ShellState};
+use super::{ShellAction, ShellError, ShellState};
 
 impl ShellState {
     /// Deterministic live-unpresented ids for one Workspace (ADR-018 §3.3).
