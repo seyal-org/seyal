@@ -260,9 +260,9 @@ reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 770
-issue = 1106
-reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+acknowledged_loc = 776
+issue = 866
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and projects failed composer admission as a native announcement without moving draft/admission policy into Swift."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
