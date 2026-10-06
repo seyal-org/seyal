@@ -79,9 +79,14 @@ fn inverse_execution_terminate_without_window_close() {
         .snapshot()
         .pending_effects
         .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert!(root
+        .pending_wire_effects()
+        .iter()
         .any(|effect| matches!(
             effect,
-            NativeEffect::TerminateExecution { execution: id } if *id == execution
+            crate::provisioning::ProvisioningEffect::AttachController { execution: id, .. }
+                if *id == execution
         )));
     assert_eq!(root.snapshot().shell.active_window, Some(window));
     assert!(!root.snapshot().shell.windows.is_empty());
@@ -202,9 +207,14 @@ fn terminate_path_survives_hidden_then_unpresented() {
         .snapshot()
         .pending_effects
         .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert!(root
+        .pending_wire_effects()
+        .iter()
         .any(|effect| matches!(
             effect,
-            NativeEffect::TerminateExecution { execution: id } if *id == execution
+            crate::provisioning::ProvisioningEffect::AttachController { execution: id, .. }
+                if *id == execution
         )));
 }
 
