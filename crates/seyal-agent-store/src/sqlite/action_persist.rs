@@ -4,7 +4,9 @@ use std::sync::atomic::Ordering;
 
 use seyal_agent_core::{PersistAdmitError, PersistHealth};
 
-use super::{AgentStore, StoreError};
+use super::AgentStore;
+#[cfg(any(test, feature = "test-fault-injection"))]
+use super::StoreError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ActionPersistGate {
