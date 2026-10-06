@@ -386,7 +386,6 @@ fn persist_pause_does_not_start_a_host_or_gate_terminal_progress() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-
 #[cfg(feature = "fixture-host")]
 #[test]
 fn start_agent_run_uses_injected_host_script_via_collect_observations() {
