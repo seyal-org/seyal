@@ -645,11 +645,7 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
         evidence: evidence(1, true, false),
     })
     .unwrap();
-    let before = root.snapshot();
-    let epoch = before.presentation_epoch;
-    let execution = before.execution;
-    let attachment = before.attachment;
-    let focused = before.shell.focused_pane;
+    let focused = root.snapshot().shell.focused_pane;
 
     // Rejected navigate leaves focus unchanged.
     assert_eq!(
@@ -678,9 +674,8 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
     let after = root.snapshot();
     assert_eq!(after.shell.active_workspace, w2);
     assert_eq!(after.shell.focused_pane, p2);
-    assert_eq!(after.presentation_epoch, epoch);
-    assert_eq!(after.execution, execution);
-    assert_eq!(after.attachment, attachment);
+    assert!(after.execution.is_none());
+    assert!(after.attachment.is_none());
 }
 
 #[test]

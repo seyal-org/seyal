@@ -51,11 +51,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-[[exception]]
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1019
+acknowledged_loc = 977
 issue = 1117
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1117 adds FocusHistory ownership, HistoryBack/HistoryForward actions, focus_history_seq on the snapshot, and StaleHistoryCursor/HistoryUnavailable errors. History store, destroy hook, and Back/Forward apply live in navigation/ and focus_history_apply.rs."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1117 owns FocusHistory, HistoryBack/HistoryForward, focus_history_seq, and history errors. History store, destroy hook, and Back/Forward apply live in navigation/ and focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,7 +65,7 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 777
+acknowledged_loc = 769
 issue = 1117
 reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1117 hooks the authoritative Pane/Tab destroy path for focus-history R6.7/R6.7a purge→reposition→successor without splitting the cold control path."
 
@@ -77,7 +77,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1023
+ceiling_loc = 1018
 issue = 1003
 responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1175 updates production CreateTab enablement assertions here. C2 acceptance cases stay in tab_provisioning_tests.rs."
 

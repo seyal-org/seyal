@@ -43,17 +43,17 @@ use std::time::Duration;
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
 
 use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
+    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode,
     LeftPanelMode,
 };
 use crate::composer::{
-    ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
+    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
     RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
 use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
-use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
+use crate::palette::{PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
@@ -63,7 +63,7 @@ use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::local::LocalDisplayClient;
@@ -972,48 +972,6 @@ impl ApplicationRoot {
     }
 }
 
-pub(super) fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub(super) fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub(super) fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub(super) fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub(super) fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
-        }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
-    }
-}
+pub(super) use chrome_apply::{
+    chrome_error, close_pane_error, close_tab_error, composer_error, palette_error,
+};

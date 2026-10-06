@@ -202,12 +202,15 @@ impl FocusHistory {
     }
 
     /// Commit the history cursor after a successful ApplyOnly navigate (R6.9).
-    pub fn set_cursor(&mut self, idx: usize) {
+    pub(super) fn set_cursor(&mut self, idx: usize) {
         debug_assert!(idx < self.entries.len());
-        self.cursor = Some(idx);
+        if idx < self.entries.len() {
+            self.cursor = Some(idx);
+        }
     }
 
     /// Validate `observed`, move the cursor one step back, return the target (R6.5 / R6.8).
+    #[cfg(test)]
     pub fn prepare_back(
         &mut self,
         observed: FocusSeq,
@@ -218,6 +221,7 @@ impl FocusHistory {
     }
 
     /// Validate `observed`, move the cursor one step forward, return the target.
+    #[cfg(test)]
     pub fn prepare_forward(
         &mut self,
         observed: FocusSeq,
@@ -250,6 +254,7 @@ pub fn matches_destroyed_tab(target: &ResourceAddress, tab: TabId) -> bool {
 }
 
 /// Predicate: entry addresses any Pane of a destroyed Workspace.
+/// No M003 workspace-destroy product path exists yet; tests and R6.7 keep this helper.
 pub fn matches_destroyed_workspace(target: &ResourceAddress, workspace: WorkspaceId) -> bool {
     match target {
         ResourceAddress::Pane { workspace: w, .. }
@@ -536,10 +541,9 @@ mod tests {
         let head = h.cursor_seq().unwrap();
         h.prepare_back(head).unwrap();
         let oldest_before = h.entries()[0].target;
-        let len_before = h.len();
         h.record_user_commit(pane(251));
         // Truncate removed the old head; append does not need eviction.
-        assert!(h.len() < len_before || h.len() == FOCUS_HISTORY_CAPACITY);
+        assert_eq!(h.len(), FOCUS_HISTORY_CAPACITY);
         assert_eq!(h.entries()[0].target, oldest_before);
         assert_eq!(h.cursor_target(), Some(pane(251)));
         assert!(!h.can_go_forward());

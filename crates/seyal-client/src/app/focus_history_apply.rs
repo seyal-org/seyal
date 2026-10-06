@@ -16,9 +16,7 @@ impl ApplicationRoot {
             NavigationPrincipal::local_user(),
         )
         .map_err(super::palette_apply::navigation_error)?;
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        self.after_history_focus_applied();
         Ok(())
     }
 
@@ -31,9 +29,14 @@ impl ApplicationRoot {
             NavigationPrincipal::local_user(),
         )
         .map_err(super::palette_apply::navigation_error)?;
+        self.after_history_focus_applied();
+        Ok(())
+    }
+
+    fn after_history_focus_applied(&mut self) {
+        self.activate_focused_pane_authority();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
     }
 }

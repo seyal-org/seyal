@@ -3,6 +3,7 @@
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
+use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
 use crate::navigation::{FocusSeq, ResourceAddress};
 use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
@@ -188,4 +189,210 @@ fn close_focused_pane_purges_then_commits_successor() {
         Err(AppError::NavigationHistoryUnavailable)
     );
     assert_eq!(root.snapshot().shell.focused_pane, p1);
+}
+
+fn evidence_exec(tag: u8) -> BindingEvidence {
+    BindingEvidence {
+        execution: ExecutionId::from_bytes([tag; 16]),
+        attachment: AttachmentId::from_bytes([tag.wrapping_add(1); 16]),
+        controller: true,
+        pty_generation: 1,
+        alternate_screen: false,
+    }
+}
+
+fn two_tab_bound_root() -> (
+    ApplicationRoot,
+    TabId,
+    TabId,
+    PaneId,
+    PaneId,
+    ExecutionId,
+    ExecutionId,
+) {
+    let w1 = WorkspaceId::m001_default();
+    let t1 = TabId::from_bytes([0x01; 16]);
+    let t2 = TabId::from_bytes([0x11; 16]);
+    let p1 = PaneId::from_bytes([0x03; 16]);
+    let p2 = PaneId::from_bytes([0x13; 16]);
+    let win1 = WindowId::from_bytes([0x02; 16]);
+    let exec1 = ExecutionId::from_bytes([0x21; 16]);
+    let exec2 = ExecutionId::from_bytes([0x22; 16]);
+    let shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: w1,
+            name: "A".into(),
+            detail: None,
+            attention: false,
+            active_window: win1,
+            windows: vec![ShellWindowSeed {
+                id: win1,
+                active_tab: t1,
+                tabs: vec![
+                    ShellTabSeed {
+                        id: t1,
+                        title: "T1".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "P1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                    ShellTabSeed {
+                        id: t2,
+                        title: "T2".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "P2".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                ],
+            }],
+        }],
+        w1,
+        true,
+        true,
+    )
+    .expect("fixture");
+    let mut root = ApplicationRoot::with_shell(shell);
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: exec1,
+            attachment: AttachmentId::from_bytes([0x31; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::SelectTab { id: t2 }).unwrap();
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: exec2,
+            attachment: AttachmentId::from_bytes([0x32; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::SelectTab { id: t1 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().execution, Some(exec1));
+    (root, t1, t2, p1, p2, exec1, exec2)
+}
+
+#[test]
+fn history_back_and_forward_move_input_authority_with_tab_focus() {
+    let (mut root, _t1, _t2, p1, p2, exec1, exec2) = two_tab_bound_root();
+    let seq = root.snapshot().focus_history_seq.expect("cursor seq");
+    root.apply(AppAction::HistoryBack {
+        fence: root.fence(),
+        observed: seq,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().execution, Some(exec2));
+    let seq = root.snapshot().focus_history_seq.expect("after back");
+    root.apply(AppAction::HistoryForward {
+        fence: root.fence(),
+        observed: seq,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().execution, Some(exec1));
+}
+
+#[test]
+fn history_back_onto_unbound_pane_clears_authority() {
+    let w1 = WorkspaceId::m001_default();
+    let t1 = TabId::from_bytes([0x01; 16]);
+    let t2 = TabId::from_bytes([0x11; 16]);
+    let p1 = PaneId::from_bytes([0x03; 16]);
+    let p2 = PaneId::from_bytes([0x13; 16]);
+    let win1 = WindowId::from_bytes([0x02; 16]);
+    let shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: w1,
+            name: "A".into(),
+            detail: None,
+            attention: false,
+            active_window: win1,
+            windows: vec![ShellWindowSeed {
+                id: win1,
+                active_tab: t1,
+                tabs: vec![
+                    ShellTabSeed {
+                        id: t1,
+                        title: "T1".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p1,
+                            title: "P1".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                    ShellTabSeed {
+                        id: t2,
+                        title: "T2".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: p2,
+                            title: "P2".into(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                ],
+            }],
+        }],
+        w1,
+        true,
+        true,
+    )
+    .expect("fixture");
+    let mut root = ApplicationRoot::with_shell(shell);
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence_exec(0x21),
+    })
+    .unwrap();
+    root.apply(AppAction::SelectTab { id: t2 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert!(root.snapshot().execution.is_none());
+    root.apply(AppAction::SelectTab { id: t1 }).unwrap();
+    assert_eq!(
+        root.snapshot().execution,
+        Some(ExecutionId::from_bytes([0x21; 16]))
+    );
+    let seq = root.snapshot().focus_history_seq.expect("cursor seq");
+    root.apply(AppAction::HistoryBack {
+        fence: root.fence(),
+        observed: seq,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert!(root.snapshot().execution.is_none());
+}
+
+#[test]
+fn workspace_command_history_back_uses_committed_cursor_seq() {
+    let (mut root, _t1, _t2, _p1, p2, _exec1, exec2) = two_tab_bound_root();
+    let observed = root.snapshot().focus_history_seq.expect("cursor seq");
+    let route = root.keybinding_route_context(false);
+    root.invoke_workspace_command(
+        WorkspaceCommand {
+            id: WorkspaceCommandId::FocusHistoryBack,
+            ordinal: None,
+        },
+        route,
+    )
+    .expect("focus_history.back");
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().execution, Some(exec2));
+    assert_ne!(root.snapshot().focus_history_seq, Some(observed));
 }

@@ -157,7 +157,7 @@ enum SeyalAppActionKind {
      * Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq as
      * little-endian u64. reserved = 0. Observed cursor must match the current
      * history seq or the action rejects with StaleHistoryCursor (51).
-     * Numbers 63/64 leave 61/62 for N4 OpenGoto/SetGotoScope.
+     * Numbers 63/64 follow N4 OpenGoto/SetGotoScope (61/62).
      */
     SEYAL_APP_ACTION_HISTORY_BACK = 63,
     SEYAL_APP_ACTION_HISTORY_FORWARD = 64

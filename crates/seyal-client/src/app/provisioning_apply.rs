@@ -84,16 +84,9 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
         // CreateTab focuses the new leaf; record as a user-initiated commit.
-        let focus = self.shell.focus_checkpoint();
-        self.focus_history
-            .record_user_commit(crate::navigation::ResourceAddress::Pane {
-                workspace: focus.active_workspace,
-                tab: focus.active_tab,
-                pane: focus.focused_pane,
-            });
+        self.record_focused_pane_commit();
         Ok(())
     }
 
@@ -489,7 +482,6 @@ impl ApplicationRoot {
             // ADR-017 §6.1: keep the create Controller registered so remaining
             // tabs can still admit create. Extra per-pane Controllers are
             // unregistered above; create-client unregister is quit/replace/drop.
-            #[cfg(target_os = "macos")]
             self.activate_focused_pane_authority();
         }
     }
