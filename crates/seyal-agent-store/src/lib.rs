@@ -7,11 +7,16 @@
 use std::num::NonZeroU64;
 
 mod action;
+pub mod attention;
 mod identity;
 pub mod memory;
 mod sqlite;
 
 pub use action::{ActionAuthority, ActionError, PrepareOutcome};
+pub use attention::{
+    AttentionAuthority, AttentionError, AttentionProtocolView, MarkAllReadResult, MintTrustedInput,
+    ProtocolClientKind,
+};
 pub use memory::{
     MemoryAuthority, MemoryError, ProposeInput, ProposeResult, RevocationBundle, WorkingSetError,
 };
