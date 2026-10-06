@@ -4,6 +4,7 @@ use seyal_core::{AttachmentId, ExecutionId, WorkspaceId};
 
 use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, NativeEffect};
 use crate::palette::PaletteCommand;
+use crate::provisioning::ProvisioningEffect;
 
 fn evidence(execution: ExecutionId, attachment: AttachmentId) -> BindingEvidence {
     BindingEvidence {
@@ -53,6 +54,11 @@ fn adopt_keeps_execution_id_and_uses_fresh_attachment() {
     assert_eq!(snap.execution, Some(execution));
     assert_eq!(snap.attachment, Some(first_attachment));
     assert!(root.live_unpresented().is_empty());
+    assert_eq!(
+        root.provisioning().recorded_execution(snap.pane),
+        Some(execution),
+        "adopt must record the binding for P4 terminate / bound close"
+    );
 
     // Already bound: reject with typed AlreadyBound (invariant 4).
     assert_eq!(
@@ -76,10 +82,21 @@ fn terminate_queues_adr005_effect_not_from_close() {
     .unwrap();
     root.apply(AppAction::TerminateUnpresented { execution })
         .unwrap();
-    assert_eq!(
-        product_effects(&root),
-        vec![NativeEffect::TerminateExecution { execution }]
+    assert!(
+        !product_effects(&root)
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
+        "dispose must not emit NativeEffect TerminateExecution"
     );
+    assert!(
+        matches!(
+            root.pending_wire_effects(),
+            [ProvisioningEffect::AttachController { execution: parked, .. }]
+                if *parked == execution
+        ),
+        "§6.3 dispose parks AttachController, not a host NativeEffect"
+    );
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
 #[test]
@@ -134,10 +151,17 @@ fn palette_terminate_dispatches_typed_action() {
         address: None,
     })
     .unwrap();
-    assert_eq!(
-        product_effects(&root),
-        vec![NativeEffect::TerminateExecution { execution }]
+    assert!(
+        !product_effects(&root)
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. }))
     );
+    assert!(matches!(
+        root.pending_wire_effects(),
+        [ProvisioningEffect::AttachController { execution: parked, .. }]
+            if *parked == execution
+    ));
+    assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
 #[test]
@@ -230,11 +254,18 @@ fn palette_adopt_emits_attach_intent_without_binding() {
     })
     .unwrap();
 
-    assert_eq!(
-        product_effects(&root),
-        vec![NativeEffect::RequestAdoptAttach { pane, execution }]
+    assert!(
+        !product_effects(&root)
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::RequestAdoptAttach { .. })),
+        "adopt must not emit NativeEffect RequestAdoptAttach"
     );
-    // Catalog and leaf binding unchanged — Adopt with evidence still works.
+    assert!(matches!(
+        root.pending_wire_effects(),
+        [ProvisioningEffect::AttachController { execution: parked, .. }]
+            if *parked == execution
+    ));
+    // Catalog and leaf binding unchanged until BindPane after a real AttachmentId.
     assert_eq!(root.live_unpresented(), vec![execution]);
     assert!(root
         .snapshot()
@@ -245,15 +276,6 @@ fn palette_adopt_emits_attach_intent_without_binding() {
         .unwrap()
         .execution
         .is_none());
-
-    root.apply(AppAction::AckEffect).unwrap();
-    root.apply(AppAction::Adopt {
-        fence: root.fence(),
-        evidence: evidence(execution, AttachmentId::from_bytes([0x44; 16])),
-    })
-    .expect("fenced adopt after attach intent");
-    assert!(root.live_unpresented().is_empty());
-    assert_eq!(root.snapshot().execution, Some(execution));
 }
 
 #[test]

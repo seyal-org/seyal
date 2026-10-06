@@ -18,7 +18,7 @@ use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
-use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
+use crate::provisioning::{CreateOutcome, IntentPhase, ProvisioningEffect, ProvisioningFailure};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
@@ -145,8 +145,10 @@ impl ApplicationRoot {
         })
         .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
+        let workspace = self.shell.snapshot().active_workspace;
         let mut effects = Vec::new();
         for pane in removed {
+            let released = self.provisioning.recorded_execution(pane);
             let pane_effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
                 !pane_effects
@@ -156,6 +158,9 @@ impl ApplicationRoot {
             );
             effects.extend(pane_effects);
             self.clear_authority_for_pane(pane);
+            if let Some(execution) = released {
+                let _ = self.record_unpresented(execution, workspace);
+            }
         }
         let _ = self.dispatch_wire_effects(
             effects,
@@ -180,6 +185,7 @@ impl ApplicationRoot {
             containment_generation: generation,
         })
         .map_err(close_pane_error)?;
+        let workspace = self.shell.snapshot().active_workspace;
         let removed = self.shell.take_removed_tab_panes();
         if !removed.is_empty() {
             // Hierarchical sole-pane close cascaded through tab/window removal.
@@ -195,7 +201,9 @@ impl ApplicationRoot {
                 effects.extend(pane_effects);
                 self.clear_authority_for_pane(pane);
             }
-            let _ = self.shell.take_released_execution();
+            if let Some((_, execution)) = self.shell.take_released_execution() {
+                let _ = self.record_unpresented(execution, workspace);
+            }
             let _ = self.dispatch_wire_effects(
                 effects,
                 WireDispatchContext {
@@ -216,6 +224,7 @@ impl ApplicationRoot {
                 "closing a pane must not terminate a bound execution"
             );
             self.clear_authority_for_pane(pane);
+            let _ = self.record_unpresented(execution, workspace);
             let _ = self.dispatch_wire_effects(
                 effects,
                 WireDispatchContext {
@@ -437,6 +446,14 @@ impl ApplicationRoot {
             return Ok(Some(()));
         };
         let pane = intent.pane;
+        let disposed_execution = match intent.phase {
+            IntentPhase::Disposing { execution, .. }
+            | IntentPhase::Created { execution }
+            | IntentPhase::Attaching { execution }
+            | IntentPhase::Attached { execution, .. }
+            | IntentPhase::Bound { execution } => Some(execution),
+            IntentPhase::AwaitingCreate => None,
+        };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
@@ -454,6 +471,11 @@ impl ApplicationRoot {
                 ProvisioningEffect::Detach { .. } => {
                     let _ = self.shell.release_execution(pane);
                     self.clear_authority_for_pane(pane);
+                    if matches!(outcome, TerminateOutcome::TerminationRequested) {
+                        if let Some(execution) = disposed_execution {
+                            let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
+                        }
+                    }
                 }
                 other => {
                     self.dispatch_wire_effects(
@@ -535,6 +557,19 @@ impl ApplicationRoot {
         let pending = std::mem::take(&mut self.pending_wire_effects);
         self.dispatch_wire_effects(
             pending,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )
+    }
+
+    pub(crate) fn dispatch_provisioning_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+    ) -> Result<(), AppError> {
+        self.dispatch_wire_effects(
+            effects,
             WireDispatchContext {
                 workspace_id: 0,
                 launch_profile: 0,
