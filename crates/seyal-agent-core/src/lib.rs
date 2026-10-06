@@ -6,6 +6,7 @@
 //!
 //! `ControlGeneration` is the client control epoch (SPEC-026 O1 / §8.3).
 
+pub mod attention;
 mod client_control;
 mod domain;
 mod evaluation;
@@ -19,6 +20,13 @@ mod restore;
 pub mod routing;
 mod transitions;
 
+pub use attention::{
+    allowed_attention_transition, coalesce_key, mint_from_trusted_source,
+    mint_from_untrusted_terminal, reject_untrusted_privileged, ArtifactKind, ArtifactRef,
+    AttentionItem, AttentionKind, AttentionPriority, AttentionState, AttentionTarget,
+    AttentionTransitionError, MintError, MintSource, PresentationText, ATTENTION_SCHEMA_VERSION,
+    MAX_OPEN_ATTENTION_PER_RUN, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
+};
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
 pub use evaluation::*;
@@ -27,10 +35,11 @@ pub use execution_host::{
     LaunchDescriptor,
 };
 pub use identity::{
-    AdapterId, AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ContextBundleId, ContinuationPlanId, ControlGeneration, MemoryId,
-    PlanGeneration, RecordGeneration, RevocationEventId, RevocationGeneration, RouteOfferingId,
-    RunWorkingSetId, ScopePolicyGeneration, WorkItemId, WorkScopeId, WorkingSetGeneration,
+    ActionId, AdapterId, AgentRunId, ApprovalId, ArtifactId, AttemptId, AttentionId,
+    BackendInstanceId, BindingGeneration, ClientPrincipalId, ClientSessionId, ContextBundleId,
+    ContinuationPlanId, ControlGeneration, MemoryId, PlanGeneration, RecordGeneration,
+    RevocationEventId, RevocationGeneration, RouteOfferingId, RunWorkingSetId,
+    ScopePolicyGeneration, WorkItemId, WorkScopeId, WorkingSetGeneration,
 };
 pub use lifecycle::{
     codes, AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,

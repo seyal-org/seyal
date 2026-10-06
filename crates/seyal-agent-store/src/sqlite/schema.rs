@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 10;
+pub(super) const SCHEMA_VERSION: i32 = 11;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -182,6 +182,10 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
         )
         .map_err(|_| StoreError::WriteFailed)?;
     }
+    if from < 11 {
+        tx.execute_batch(crate::attention::schema_v11::ATTENTION_TABLES_V11)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     tx.commit().map_err(|_| StoreError::WriteFailed)?;
@@ -291,6 +295,8 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         rusqlite::params![key.as_slice()],
     )
     .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(crate::attention::schema_v11::ATTENTION_TABLES_V11)
+        .map_err(|_| StoreError::WriteFailed)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     Ok(())

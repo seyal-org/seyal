@@ -54,6 +54,11 @@ define_id!(RunWorkingSetId, 0x4147_5257_5345_5401);
 define_id!(ContinuationPlanId, 0x4147_4350_4c41_4e01);
 define_id!(RevocationEventId, 0x4147_5256_4b45_5601);
 define_id!(ContextBundleId, 0x4147_4358_424e_4401);
+// SPEC-028 Attention / Approval / Artifact identities (and ActionId shared with SPEC-016).
+define_id!(AttentionId, 0x4147_4154_544e_0101);
+define_id!(ApprovalId, 0x4147_4150_5052_0101);
+define_id!(ArtifactId, 0x4147_4152_5446_0101);
+define_id!(ActionId, 0x4147_4143_544e_0101);
 
 fn unique_id(domain: u64) -> u128 {
     let sequence = NEXT_ID

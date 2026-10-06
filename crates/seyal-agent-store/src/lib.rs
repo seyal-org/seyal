@@ -6,10 +6,15 @@
 
 use std::num::NonZeroU64;
 
+pub mod attention;
 mod identity;
 pub mod memory;
 mod sqlite;
 
+pub use attention::{
+    AttentionAuthority, AttentionError, AttentionProtocolView, MarkAllReadResult, MintTrustedInput,
+    ProtocolClientKind,
+};
 pub use memory::{
     MemoryAuthority, MemoryError, ProposeInput, ProposeResult, RevocationBundle, WorkingSetError,
 };
