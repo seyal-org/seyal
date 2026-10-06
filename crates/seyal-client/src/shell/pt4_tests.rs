@@ -153,7 +153,7 @@ fn equalize_tab_normalizes_nested_ratios_and_preserves_topology() {
     assert_eq!(ratios(&after.tree), vec![SplitRatio::HALF; 3]);
     assert_eq!(topology_fingerprint(&after.tree), topo_before);
     assert_eq!(after.focused_pane, focused);
-    assert_eq!(after.containment_generation, generation + 1);
+    assert_eq!(after.containment_generation, generation);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn equalize_focused_scopes_to_nearest_ancestor_split() {
     assert_eq!(after_ratios[2], SplitRatio::HALF); // inner equalized
     assert_eq!(topology_fingerprint(&after.tree), topo_before);
     assert_eq!(after.focused_pane, focused);
-    assert_eq!(after.containment_generation, generation + 1);
+    assert_eq!(after.containment_generation, generation);
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn equalize_focused_on_single_leaf_tab_is_success_noop() {
     let after = shell.snapshot();
     assert_eq!(after.tree, before.tree);
     assert_eq!(after.focused_pane, before.focused_pane);
-    assert_eq!(after.containment_generation, generation + 1);
+    assert_eq!(after.containment_generation, generation);
     assert!(ratios(&after.tree).is_empty());
 }
 
@@ -217,7 +217,7 @@ fn equalize_tab_on_single_leaf_tab_is_success_noop() {
 
     let after = shell.snapshot();
     assert_eq!(after.tree, before.tree);
-    assert_eq!(after.containment_generation, generation + 1);
+    assert_eq!(after.containment_generation, generation);
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn equalize_rejects_stale_containment_generation() {
 }
 
 #[test]
-fn equalize_tab_when_ratios_already_half_is_ratio_noop_that_still_bumps() {
+fn equalize_tab_when_ratios_already_half_does_not_bump_containment_generation() {
     let mut shell = shell_with_nested_splits();
     let generation = shell.containment_generation();
     shell
@@ -265,7 +265,7 @@ fn equalize_tab_when_ratios_already_half_is_ratio_noop_that_still_bumps() {
         .expect("second equalize");
     let after = shell.snapshot();
     assert_eq!(ratios(&after.tree), vec![SplitRatio::HALF; 3]);
-    assert_eq!(after.containment_generation, mid.containment_generation + 1);
+    assert_eq!(after.containment_generation, mid.containment_generation);
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn equalize_tab_clears_zoom_including_ratio_noop() {
     let after = shell.snapshot();
     assert_eq!(after.zoomed, None);
     assert_eq!(after.focused_pane, zoomed);
-    assert_eq!(after.containment_generation, generation + 1);
+    assert_eq!(after.containment_generation, generation);
 
     shell
         .apply(ShellAction::ZoomPane { id: zoomed })
@@ -318,7 +318,7 @@ fn equalize_focused_clears_zoom_on_single_leaf_noop() {
     assert_eq!(after.zoomed, None);
     assert_eq!(after.focused_pane, pane);
     assert_eq!(after.tree, PaneTree::Leaf(pane));
-    assert_eq!(after.containment_generation, generation + 1);
+    assert_eq!(after.containment_generation, generation);
 }
 
 #[test]

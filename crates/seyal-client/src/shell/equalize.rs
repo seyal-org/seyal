@@ -10,7 +10,7 @@ impl ShellState {
         tab.root.equalize_all();
         // SPEC-025 §5.6 / ADR-021 §3: success clears zoom, including ratio no-ops.
         tab.zoomed = None;
-        self.bump_containment_generation();
+        // Ratio and zoom-overlay changes preserve containment/topology.
         Ok(())
     }
 
@@ -24,7 +24,6 @@ impl ShellState {
             return Err(ShellError::UnknownPane);
         }
         tab.zoomed = None;
-        self.bump_containment_generation();
         Ok(())
     }
 }
