@@ -389,6 +389,67 @@ fn last_tab_move_destroys_source_window_atomically() {
 }
 
 #[test]
+fn moving_last_tab_preserves_recency_for_its_live_panes() {
+    let workspace = WorkspaceId::m001_default();
+    let source = WindowId::new();
+    let target = WindowId::new();
+    let moving = TabId::new();
+    let staying = TabId::new();
+    let mut shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Local".to_owned(),
+            detail: None,
+            attention: false,
+            active_window: source,
+            windows: vec![
+                ShellWindowSeed {
+                    id: source,
+                    active_tab: moving,
+                    tabs: vec![tab_seed(moving, "Move")],
+                },
+                ShellWindowSeed {
+                    id: target,
+                    active_tab: staying,
+                    tabs: vec![tab_seed(staying, "Stay")],
+                },
+            ],
+        }],
+        workspace,
+        true,
+        true,
+    )
+    .expect("fixture");
+    let first_pane = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+        })
+        .expect("split the moved Tab");
+    let most_recent_pane = shell.snapshot().focused_pane;
+
+    // Seed both live Pane identities in recency order; moving their Tab must
+    // not purge either identity merely because its source Window disappears.
+    shell.focus_history.record(first_pane);
+    shell.focus_history.record(most_recent_pane);
+    assert_eq!(shell.focus_history.panes(), &[most_recent_pane, first_pane]);
+
+    shell
+        .apply(ShellAction::MoveTabToWindow {
+            tab: moving,
+            window: target,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("move the Tab and destroy its empty source Window");
+
+    assert_eq!(
+        shell.focus_history.panes(),
+        &[most_recent_pane, first_pane],
+        "live Pane identities retain their recency when only containment moves"
+    );
+}
+
+#[test]
 fn move_only_tab_to_new_window_is_rejected() {
     let mut shell = seed_two_workspaces();
     let tab = shell.snapshot().active_tab;
