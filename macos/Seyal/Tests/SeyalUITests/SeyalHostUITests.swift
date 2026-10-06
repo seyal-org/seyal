@@ -201,9 +201,8 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
-    /// #923: the Tab's Rust PaneTree is projected into Pane regions. M001
-    /// policy keeps one Pane, so exactly one focused region hosts the live
-    /// composer/transcript surface, and no second region is invented.
+    /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a
+    /// Split, exactly one focused region hosts the live composer/transcript.
     func testSinglePaneTreeProjectsOneFocusedRegionHostingTheLiveSurface() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -225,6 +224,30 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(composer.isHittable, "live composer stays interactive inside the region")
         XCTAssertTrue(region.frame.contains(composer.frame), "composer sits in the live region")
         XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
+    }
+
+    /// #936: C3 SplitFocused provisions a second leaf; both bound leaves stay
+    /// LIVE and the unfocused sibling presents through SecondaryLivePaneHost.
+    func testSplitProjectsSecondLiveRegionAndSecondaryMetalHost() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8), "C3 production composition shows Split Right")
+        XCTAssertTrue(split.isHittable, "Split Right must be interactive once splitting is enabled")
+        split.click()
+        let second = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 12), "SplitFocused must project a second Pane region")
+        XCTAssertEqual(app.state, .runningForeground, "split must not crash Seyal.app")
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch.exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-pane-divider-0"].firstMatch.waitForExistence(timeout: 5),
+            "a two-leaf tree projects the Rust divider"
+        )
+        let secondary = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+        XCTAssertTrue(
+            secondary.waitForExistence(timeout: 12),
+            "unfocused bound sibling must keep a live Metal host"
+        )
     }
 
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {
