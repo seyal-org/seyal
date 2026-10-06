@@ -44,18 +44,22 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         waitForUsablePty(in: app, timeout: 12)
     }
 
-    func testTerminateExecutionPaletteVerbKeepsHostAlive() throws {
+    func testTerminateExecutionPaletteVerbKeepsHostAndTabChromeAlive() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         clickNewTab(in: app)
-        waitForRunLoop(5)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12),
+            "second tab must be projected before the palette terminate verb"
+        )
+        waitForUsablePty(in: app, timeout: 12)
         runPaletteCommand(in: app, query: "Terminate Execution")
         waitForRunLoop(1)
         XCTAssertEqual(app.state, .runningForeground)
         showTabs(in: app)
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 8),
-            "terminate does not close tab chrome"
+            "terminate does not close tab chrome; wire TerminationRequested is proven in the portable harness"
         )
     }
 
