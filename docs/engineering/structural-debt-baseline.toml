@@ -220,7 +220,7 @@ reason = "Session façade regressions stay beside IntegrationService; #1194 adds
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1143
+ceiling_loc = 1131
 issue = 1101
 responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
 
@@ -232,9 +232,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 731
-issue = 1175
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 enables production allows_tab_creation and documents the macOS-only test helper for force policy flips without splitting tree/workspace ownership."
+acknowledged_loc = 869
+issue = 1092
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1092 adds window/tab actions and containment fencing without splitting tree/workspace ownership from the CreateTab enablement surface."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
