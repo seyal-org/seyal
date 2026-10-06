@@ -2,7 +2,7 @@
 
 use seyal_core::{AttachmentId, ExecutionId, WorkspaceId};
 
-use super::{AppAction, AppError, ApplicationRoot, BindingEvidence};
+use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, NativeEffect};
 use crate::palette::PaletteCommand;
 use crate::provisioning::ProvisioningEffect;
 
