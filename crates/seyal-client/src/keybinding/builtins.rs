@@ -1,8 +1,8 @@
 //! SPEC-024 §4.1 builtin default rows for K2 / K7 pane verbs / K8 `goto.open`.
 //!
 //! Includes §5.1 `cmd+shift+enter` → `pane.zoom_toggle` (#1145) and
-//! `cmd+opt+arrows` → `pane.focus_*` (#1150). Excludes equalize (#928/PT4) and
-//! ADR-018 `window.new` (R5.0.1). Swap/move have no §5.1 builtins.
+//! `cmd+opt+arrows` → `pane.focus_*` (#1150). Equalize (#1263) and swap/move
+//! have no §5.1 builtins. Excludes ADR-018 `window.new` (R5.0.1).
 //! Includes §5.4 `ctrl+r` and §5.5 `goto.open` (K8/N4).
 //! Focus-history Back/Forward builtins wait for N3 / tip B (no dead catalog rows).
 

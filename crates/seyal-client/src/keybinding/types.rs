@@ -168,8 +168,8 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (window.*, equalize) stay out until their typed actions land
-/// (R5.0.1 / R5.1.3). K7 pane verbs and `goto.open` are admitted.
+/// Gated ids (`window.*`) stay out until their typed actions land (R5.0.1).
+/// K7 pane verbs (including equalize) and `goto.open` are admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -199,6 +199,9 @@ pub enum WorkspaceCommandId {
     PaneMoveRight,
     PaneMoveUp,
     PaneMoveDown,
+    /// SPEC-024 §5.1 / K7 (#1263): equalize (PT4 reducers). No M003 builtin.
+    PaneEqualizeFocused,
+    PaneEqualizeTab,
     PresentationSetFlow,
     PresentationSetRaw,
     PresentationSetTui,
@@ -239,6 +242,8 @@ impl WorkspaceCommandId {
             Self::PaneMoveRight => "pane.move_right",
             Self::PaneMoveUp => "pane.move_up",
             Self::PaneMoveDown => "pane.move_down",
+            Self::PaneEqualizeFocused => "pane.equalize_focused",
+            Self::PaneEqualizeTab => "pane.equalize_tab",
             Self::PresentationSetFlow => "presentation.set_flow",
             Self::PresentationSetRaw => "presentation.set_raw",
             Self::PresentationSetTui => "presentation.set_tui",
@@ -279,6 +284,8 @@ impl WorkspaceCommandId {
             "pane.move_right" => Self::PaneMoveRight,
             "pane.move_up" => Self::PaneMoveUp,
             "pane.move_down" => Self::PaneMoveDown,
+            "pane.equalize_focused" => Self::PaneEqualizeFocused,
+            "pane.equalize_tab" => Self::PaneEqualizeTab,
             "presentation.set_flow" => Self::PresentationSetFlow,
             "presentation.set_raw" => Self::PresentationSetRaw,
             "presentation.set_tui" => Self::PresentationSetTui,

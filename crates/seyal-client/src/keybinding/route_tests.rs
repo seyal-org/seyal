@@ -419,10 +419,53 @@ fn item18_cmd_opt_arrows_match_focus_ids_zero_pty() {
 }
 
 #[test]
-fn item18_equalize_catalog_waits_for_pt4() {
-    // R5.1.3: no dead equalize ids before PT4/#928.
-    assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
-    assert!(WorkspaceCommandId::parse("pane.equalize_tab").is_none());
+fn item18_equalize_ids_parse_without_builtins_user_bind_zero_pty() {
+    let table = load_keybinding_table(None);
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.equalize_focused"),
+        Some(WorkspaceCommandId::PaneEqualizeFocused)
+    );
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.equalize_tab"),
+        Some(WorkspaceCommandId::PaneEqualizeTab)
+    );
+    // SPEC-024 §5.1: no M003 builtin chords for equalize.
+    assert!(binding_for_any(&table, "pane.equalize_focused").is_none());
+    assert!(binding_for_any(&table, "pane.equalize_tab").is_none());
+
+    let user = load_keybinding_table(Some(
+        r#"
+[[keybindings]]
+keys = "cmd+shift+e"
+action = "pane.equalize_focused"
+
+[[keybindings]]
+keys = "cmd+shift+u"
+action = "pane.equalize_tab"
+"#,
+    ));
+    let focused = route(&user, "cmd+shift+e", raw_ctx(), false);
+    assert!(matches!(
+        focused,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::PaneEqualizeFocused,
+                ordinal: None,
+            }
+        }
+    ));
+    assert!(!focused.writes_pty_bytes());
+    let tab = route(&user, "cmd+shift+u", raw_ctx(), false);
+    assert!(matches!(
+        tab,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::PaneEqualizeTab,
+                ordinal: None,
+            }
+        }
+    ));
+    assert!(!tab.writes_pty_bytes());
 }
 
 #[test]

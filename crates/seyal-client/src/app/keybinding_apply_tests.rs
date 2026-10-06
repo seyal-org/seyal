@@ -1,12 +1,11 @@
-//! SPEC-024 §14 item 18 / K7 (#1145): zoom, swap, and move dispatch.
-//!
-//! Directional focus (#1150) and equalize (PT4/#928) are out of scope.
+//! SPEC-024 §14 item 18 / K7: zoom, swap, move, focus, and equalize dispatch.
 
 use crate::goto::GotoScope;
 use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
+use crate::pane_layout::SplitRatio;
 use crate::shell::{
-    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
-    SplitAxis,
+    PaneTree, ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
+    ShellWorkspaceSeed, SplitAxis,
 };
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
@@ -185,12 +184,112 @@ fn item18_focus_right_calls_focus_direction_and_miss_rejects() {
     assert_eq!(root.snapshot().shell.zoomed, Some(a));
 }
 
+fn ratios(tree: &PaneTree) -> Vec<SplitRatio> {
+    match tree {
+        PaneTree::Leaf(_) => Vec::new(),
+        PaneTree::Split {
+            first,
+            second,
+            ratio,
+            ..
+        } => {
+            let mut out = vec![*ratio];
+            out.extend(ratios(first));
+            out.extend(ratios(second));
+            out
+        }
+    }
+}
+
+fn topology_fingerprint(tree: &PaneTree) -> (Vec<PaneId>, Vec<SplitAxis>) {
+    match tree {
+        PaneTree::Leaf(id) => (vec![*id], Vec::new()),
+        PaneTree::Split {
+            axis,
+            first,
+            second,
+            ..
+        } => {
+            let (mut panes, mut axes) = topology_fingerprint(first);
+            let (right_panes, right_axes) = topology_fingerprint(second);
+            panes.extend(right_panes);
+            axes.push(*axis);
+            axes.extend(right_axes);
+            (panes, axes)
+        }
+    }
+}
+
+fn seed_nested_uneven(root: &mut ApplicationRoot) {
+    root.split_focused(SplitAxis::Right).expect("root right");
+    root.split_focused(SplitAxis::Down).expect("mid down");
+    root.split_focused(SplitAxis::Right).expect("inner right");
+    let leaves = topology_fingerprint(&root.snapshot().shell.tree).0;
+    assert_eq!(leaves.len(), 4);
+    let uneven = |value| SplitRatio::from_fraction(value).expect("fixture ratio");
+    root.shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: leaves[0],
+            ratio: uneven(0.3),
+        })
+        .expect("root ratio");
+    root.shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: leaves[1],
+            ratio: uneven(0.7),
+        })
+        .expect("mid ratio");
+    root.shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: leaves[2],
+            ratio: uneven(0.25),
+        })
+        .expect("inner ratio");
+    root.focus_pane(leaves[3]).expect("focus deepest");
+}
+
 #[test]
-fn item18_focus_does_not_add_equalize_catalog() {
-    // This Issue owns only the four focus ids; equalize waits for PT4/#928.
-    assert_eq!(
-        WorkspaceCommandId::parse("pane.focus_left"),
-        Some(WorkspaceCommandId::PaneFocusLeft)
-    );
-    assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
+fn item18_equalize_focused_calls_pt4_reducer() {
+    let mut root = split_enabled_root();
+    seed_nested_uneven(&mut root);
+    let before = root.snapshot().shell;
+    let topo_before = topology_fingerprint(&before.tree);
+    let before_ratios = ratios(&before.tree);
+    assert_eq!(before_ratios.len(), 3);
+
+    invoke(&mut root, WorkspaceCommandId::PaneEqualizeFocused).expect("equalize focused");
+
+    let after = root.snapshot().shell;
+    let after_ratios = ratios(&after.tree);
+    assert_eq!(after_ratios[0], before_ratios[0]);
+    assert_eq!(after_ratios[1], before_ratios[1]);
+    assert_eq!(after_ratios[2], SplitRatio::HALF);
+    assert_eq!(topology_fingerprint(&after.tree), topo_before);
+    assert_eq!(after.focused_pane, before.focused_pane);
+    assert_eq!(after.last_error, None);
+}
+
+#[test]
+fn item18_equalize_tab_calls_pt4_reducer_and_single_leaf_is_noop() {
+    let mut nested = split_enabled_root();
+    seed_nested_uneven(&mut nested);
+    let before = nested.snapshot().shell;
+    let topo_before = topology_fingerprint(&before.tree);
+    assert_ne!(ratios(&before.tree), vec![SplitRatio::HALF; 3]);
+
+    invoke(&mut nested, WorkspaceCommandId::PaneEqualizeTab).expect("equalize tab");
+
+    let after = nested.snapshot().shell;
+    assert_eq!(ratios(&after.tree), vec![SplitRatio::HALF; 3]);
+    assert_eq!(topology_fingerprint(&after.tree), topo_before);
+    assert_eq!(after.focused_pane, before.focused_pane);
+
+    let mut single = split_enabled_root();
+    let leaf_before = single.snapshot().shell;
+    invoke(&mut single, WorkspaceCommandId::PaneEqualizeFocused).expect("single-leaf focused");
+    invoke(&mut single, WorkspaceCommandId::PaneEqualizeTab).expect("single-leaf tab");
+    let leaf_after = single.snapshot().shell;
+    assert_eq!(leaf_after.tree, leaf_before.tree);
+    assert_eq!(leaf_after.focused_pane, leaf_before.focused_pane);
+    assert!(ratios(&leaf_after.tree).is_empty());
 }

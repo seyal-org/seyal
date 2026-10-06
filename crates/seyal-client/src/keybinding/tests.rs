@@ -211,7 +211,7 @@ action = "window.new"
 
 [[keybindings]]
 keys = "cmd+opt+left"
-action = "pane.equalize_focused"
+action = "window.close"
 
 [[keybindings]]
 keys = "cmd+["
@@ -400,7 +400,7 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
-    // §5.1 / K7: zoom + directional focus builtins; equalize waits for PT4/#928.
+    // §5.1 / K7: zoom + directional focus builtins; equalize has catalog ids, no builtins.
     let zoom = binding_for(
         &table,
         "cmd+shift+enter",
@@ -411,9 +411,20 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     let focus_left = binding_for(&table, "cmd+opt+left", WorkspaceCommandId::PaneFocusLeft)
         .expect("cmd+opt+left pane.focus_left");
     assert_eq!(focus_left.context, BindingContext::APP);
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.equalize_focused"),
+        Some(WorkspaceCommandId::PaneEqualizeFocused)
+    );
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.equalize_tab"),
+        Some(WorkspaceCommandId::PaneEqualizeTab)
+    );
     assert!(
-        WorkspaceCommandId::parse("pane.equalize_focused").is_none(),
-        "no dead equalize catalog id before PT4/#928"
+        table
+            .bindings
+            .iter()
+            .all(|b| b.action.id != WorkspaceCommandId::PaneEqualizeFocused),
+        "no equalize builtin"
     );
 
     assert!(contexts_for(&table, "cmd+n").is_empty());

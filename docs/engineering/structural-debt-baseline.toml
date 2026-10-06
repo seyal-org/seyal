@@ -257,6 +257,6 @@ reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/keybinding/tests.rs"
-acknowledged_loc = 713
-issue = 1150
-reason = "SPEC-024 §14 K2 matrix plus #1150 directional pane-focus verb binding proofs stay one keybinding table-load test module beside the builtins they assert; keep under one authority rather than inventing partN splits."
+acknowledged_loc = 724
+issue = 1263
+reason = "SPEC-024 §14 K2 matrix plus #1263 pane-equalize verb binding proofs stay one keybinding table-load test module beside the builtins they assert; keep under one authority rather than inventing partN splits."
