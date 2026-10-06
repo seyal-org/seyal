@@ -43,12 +43,10 @@ use std::time::Duration;
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
 
 use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode,
-    LeftPanelMode,
+    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
 use crate::composer::{
-    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
-    RuntimeComposerEligibility,
+    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord, RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;

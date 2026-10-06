@@ -8,8 +8,8 @@ use crate::chrome::{
 };
 use crate::composer::ComposerError;
 use crate::navigation::ResourceAddress;
-use crate::pane_layout::{self, SplitPosition};
 use crate::palette::PaletteError;
+use crate::pane_layout::{self, SplitPosition};
 use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::shell::{ShellAction, ShellError, SplitAxis};
 
