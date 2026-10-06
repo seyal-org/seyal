@@ -227,6 +227,9 @@ impl<'a> ActionAuthority<'a> {
         let record = self
             .get_record(action_id)?
             .ok_or(ActionError::Store(StoreError::Corrupt))?;
+        if matches!(boundary, CrashBoundary::BeforeIntentPersist) {
+            return Err(ActionError::IllegalLifecycle);
+        }
         let decision = recover(
             record.intent.action_id(),
             record.intent.agent_run_id(),
@@ -249,6 +252,7 @@ impl<'a> ActionAuthority<'a> {
         let decision = reconcile(
             record.intent.action_id(),
             record.intent.agent_run_id(),
+            record.intent.effect_class(),
             &record.runtime,
             evidence,
         )?;
@@ -310,27 +314,38 @@ impl<'a> ActionAuthority<'a> {
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
         let encoded = evidence.encode();
-        tx.execute(
-            "UPDATE action_intent
+        let expected_generation = record.runtime.dispatch_generation.map(|g| g as i64);
+        let updated = tx
+            .execute(
+                "UPDATE action_intent
              SET lifecycle = ?1,
                  dispatch_generation = ?2,
                  authorization_invalidated = ?3,
                  cancel_requested = ?4,
                  reconciliation_attempts = ?5,
                  last_evidence = ?6
-             WHERE action_id = ?7 AND digest = ?8",
-            params![
-                decision.runtime.lifecycle.code() as i64,
-                decision.runtime.dispatch_generation.map(|g| g as i64),
-                i64::from(decision.runtime.authorization_invalidated),
-                i64::from(decision.runtime.cancel_requested),
-                decision.runtime.reconciliation_attempts as i64,
-                encoded,
-                record.intent.action_id().to_bytes().to_vec(),
-                record.intent.digest().to_vec()
-            ],
-        )
-        .map_err(|_| StoreError::WriteFailed)?;
+             WHERE action_id = ?7 AND digest = ?8 AND lifecycle = ?9
+               AND (
+                    (?10 IS NULL AND dispatch_generation IS NULL)
+                    OR dispatch_generation = ?10
+               )",
+                params![
+                    decision.runtime.lifecycle.code() as i64,
+                    decision.runtime.dispatch_generation.map(|g| g as i64),
+                    i64::from(decision.runtime.authorization_invalidated),
+                    i64::from(decision.runtime.cancel_requested),
+                    decision.runtime.reconciliation_attempts as i64,
+                    encoded,
+                    record.intent.action_id().to_bytes().to_vec(),
+                    record.intent.digest().to_vec(),
+                    from.code() as i64,
+                    expected_generation,
+                ],
+            )
+            .map_err(|_| StoreError::WriteFailed)?;
+        if updated != 1 {
+            return Err(ActionError::IllegalLifecycle);
+        }
         self.append_history(
             &tx,
             record.intent.action_id(),

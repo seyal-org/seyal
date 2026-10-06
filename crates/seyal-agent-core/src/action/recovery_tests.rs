@@ -119,6 +119,7 @@ fn causal_success_may_resolve_unknown_effect() {
     let decision = reconcile(
         action,
         run,
+        EffectClass::NonReplayable,
         &unknown,
         &RecoveryEvidence::causal_success(7, marker),
     )
@@ -135,6 +136,7 @@ fn observed_state_without_causal_marker_stays_unknown() {
     let decision = reconcile(
         action,
         run,
+        EffectClass::NonReplayable,
         &unknown,
         &RecoveryEvidence::observed_state_without_causal_marker(),
     )
@@ -213,6 +215,7 @@ fn completion_races_cancel_and_remains_admissible() {
     let decision = reconcile(
         action,
         run,
+        EffectClass::NonReplayable,
         &cancelled,
         &RecoveryEvidence::causal_success(7, marker),
     )
@@ -229,6 +232,7 @@ fn operator_ack_cannot_fabricate_known_outcome() {
     let decision = reconcile(
         action,
         run,
+        EffectClass::NonReplayable,
         &unknown,
         &RecoveryEvidence::operator_ack_without_causal_evidence(),
     )
@@ -257,7 +261,14 @@ fn budget_exhaustion_stops_automatic_reschedule() {
     let mut runtime = dispatching();
     runtime.lifecycle = ActionLifecycle::EffectUnknown;
     runtime.reconciliation_attempts = DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET - 1;
-    let decision = reconcile(action, run, &runtime, &RecoveryEvidence::none()).unwrap();
+    let decision = reconcile(
+        action,
+        run,
+        EffectClass::NonReplayable,
+        &runtime,
+        &RecoveryEvidence::none(),
+    )
+    .unwrap();
     assert!(decision.automatic_reschedule_stopped);
     assert_eq!(decision.runtime.lifecycle, ActionLifecycle::EffectUnknown);
     assert!(decision.attention.is_some());
@@ -278,4 +289,143 @@ fn recovery_is_pure_control_plane_and_does_not_touch_terminal_state() {
     .unwrap();
     assert!(!decision.may_retry_effect);
     assert!(decision.attention.is_none());
+}
+
+fn cancelled_after_dispatch() -> ActionRuntime {
+    let mut runtime = dispatching();
+    runtime.lifecycle = ActionLifecycle::CancelledAfterDispatch;
+    runtime.cancel_requested = true;
+    runtime
+}
+
+fn marker() -> CausalMarker {
+    CausalMarker {
+        kind: CausalMarkerKind::OperationId,
+        bytes: [3; 16],
+    }
+}
+
+#[test]
+fn post_dispatch_authorized_boundary_cannot_return_to_prepared() {
+    let (action, run) = ids();
+    for lifecycle in [
+        ActionLifecycle::Dispatching,
+        ActionLifecycle::EffectUnknown,
+        ActionLifecycle::CancelledAfterDispatch,
+    ] {
+        let mut runtime = dispatching();
+        runtime.lifecycle = lifecycle;
+        if lifecycle == ActionLifecycle::CancelledAfterDispatch {
+            runtime.cancel_requested = true;
+        }
+        let decision = recover(
+            action,
+            run,
+            EffectClass::NonReplayable,
+            &runtime,
+            CrashBoundary::AuthorizedBeforeDispatchCommit,
+            &RecoveryEvidence::none(),
+        )
+        .unwrap();
+        assert_ne!(
+            decision.runtime.lifecycle,
+            ActionLifecycle::Prepared,
+            "{lifecycle:?} must not become Prepared"
+        );
+        assert!(!decision.may_retry_effect);
+        if lifecycle == ActionLifecycle::CancelledAfterDispatch {
+            assert_eq!(
+                decision.runtime.lifecycle,
+                ActionLifecycle::CancelledAfterDispatch
+            );
+        } else {
+            assert_eq!(decision.runtime.lifecycle, ActionLifecycle::EffectUnknown);
+        }
+    }
+}
+
+#[test]
+fn post_dispatch_before_intent_persist_is_illegal() {
+    let (action, run) = ids();
+    for lifecycle in [
+        ActionLifecycle::Dispatching,
+        ActionLifecycle::EffectUnknown,
+        ActionLifecycle::CancelledAfterDispatch,
+    ] {
+        let mut runtime = dispatching();
+        runtime.lifecycle = lifecycle;
+        let err = recover(
+            action,
+            run,
+            EffectClass::NonReplayable,
+            &runtime,
+            CrashBoundary::BeforeIntentPersist,
+            &RecoveryEvidence::none(),
+        )
+        .unwrap_err();
+        assert_eq!(err, RecoveryError::IllegalCrashBoundary);
+    }
+}
+
+#[test]
+fn dispatching_after_prepared_fail_closes_to_effect_unknown() {
+    let (action, run) = ids();
+    let decision = recover(
+        action,
+        run,
+        EffectClass::NonReplayable,
+        &dispatching(),
+        CrashBoundary::AfterPrepared,
+        &RecoveryEvidence::none(),
+    )
+    .unwrap();
+    assert_eq!(decision.runtime.lifecycle, ActionLifecycle::EffectUnknown);
+    assert!(!decision.may_retry_effect);
+}
+
+#[test]
+fn reconcile_cannot_mint_success_from_prepared_or_authorized() {
+    let (action, run) = ids();
+    for lifecycle in [ActionLifecycle::Prepared, ActionLifecycle::Authorized] {
+        let mut runtime = ActionRuntime::prepared();
+        runtime.lifecycle = lifecycle;
+        let err = reconcile(
+            action,
+            run,
+            EffectClass::NonReplayable,
+            &runtime,
+            &RecoveryEvidence::causal_success(1, marker()),
+        )
+        .unwrap_err();
+        assert_eq!(err, RecoveryError::IllegalReconcile);
+    }
+}
+
+#[test]
+fn cancelled_after_dispatch_known_not_dispatched_cannot_return_to_prepared() {
+    let (action, run) = ids();
+    let err = reconcile(
+        action,
+        run,
+        EffectClass::NonReplayable,
+        &cancelled_after_dispatch(),
+        &RecoveryEvidence::known_not_dispatched(7),
+    )
+    .unwrap_err();
+    assert_eq!(err, RecoveryError::IllegalReconcile);
+}
+
+#[test]
+fn prepared_plus_post_dispatch_boundary_is_illegal() {
+    let (action, run) = ids();
+    let err = recover(
+        action,
+        run,
+        EffectClass::NonReplayable,
+        &ActionRuntime::prepared(),
+        CrashBoundary::DuringExecutor,
+        &RecoveryEvidence::causal_success(1, marker()),
+    )
+    .unwrap_err();
+    assert_eq!(err, RecoveryError::IllegalCrashBoundary);
 }

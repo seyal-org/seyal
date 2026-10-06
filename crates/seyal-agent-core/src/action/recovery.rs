@@ -327,6 +327,8 @@ pub enum RecoveryError {
     StaleDispatchGeneration,
     MissingCausalMarker,
     UnauthenticatedAuthoritativeClaim,
+    IllegalCrashBoundary,
+    IllegalReconcile,
 }
 
 pub fn recover(
@@ -349,64 +351,116 @@ pub fn recover(
     }
 
     match boundary {
-        CrashBoundary::BeforeIntentPersist => Ok(RecoveryDecision {
-            runtime: ActionRuntime::prepared(),
-            may_retry_effect: false,
-            may_query_status: false,
-            may_reconsider_intent: false,
-            claims_rollback: false,
-            fresh_authorization_required: false,
-            automatic_reschedule_stopped: true,
-            attention: None,
-        }),
-        CrashBoundary::AfterPrepared => Ok(RecoveryDecision {
-            runtime: runtime.clone(),
-            may_retry_effect: false,
-            may_query_status: false,
-            may_reconsider_intent: runtime.lifecycle == ActionLifecycle::Prepared,
-            claims_rollback: false,
-            fresh_authorization_required: false,
-            automatic_reschedule_stopped: false,
-            attention: None,
-        }),
-        CrashBoundary::AuthorizedBeforeDispatchCommit => {
-            let mut next = runtime.clone();
-            next.lifecycle = ActionLifecycle::Prepared;
-            next.authorization_invalidated = true;
-            next.dispatch_generation = None;
-            Ok(RecoveryDecision {
-                runtime: next,
+        CrashBoundary::BeforeIntentPersist => {
+            // Store recover already loaded a row. Only the in-memory
+            // Prepared stand-in (no generation) may claim "nothing persisted".
+            if runtime.lifecycle == ActionLifecycle::Prepared
+                && runtime.dispatch_generation.is_none()
+            {
+                return Ok(RecoveryDecision {
+                    runtime: runtime.clone(),
+                    may_retry_effect: false,
+                    may_query_status: false,
+                    may_reconsider_intent: false,
+                    claims_rollback: false,
+                    fresh_authorization_required: false,
+                    automatic_reschedule_stopped: true,
+                    attention: None,
+                });
+            }
+            Err(RecoveryError::IllegalCrashBoundary)
+        }
+        CrashBoundary::AfterPrepared => match runtime.lifecycle {
+            ActionLifecycle::Prepared => Ok(RecoveryDecision {
+                runtime: runtime.clone(),
                 may_retry_effect: false,
                 may_query_status: false,
                 may_reconsider_intent: true,
                 claims_rollback: false,
-                fresh_authorization_required: true,
+                fresh_authorization_required: false,
                 automatic_reschedule_stopped: false,
                 attention: None,
-            })
-        }
+            }),
+            ActionLifecycle::Authorized => Ok(RecoveryDecision {
+                runtime: runtime.clone(),
+                may_retry_effect: false,
+                may_query_status: false,
+                may_reconsider_intent: false,
+                claims_rollback: false,
+                fresh_authorization_required: false,
+                automatic_reschedule_stopped: false,
+                attention: None,
+            }),
+            ActionLifecycle::Dispatching | ActionLifecycle::EffectUnknown => {
+                recover_after_dispatch(
+                    action_id,
+                    agent_run_id,
+                    effect_class,
+                    runtime,
+                    &RecoveryEvidence::none(),
+                )
+            }
+            ActionLifecycle::CancelledAfterDispatch => Ok(stay_cancelled_after_dispatch(runtime)),
+            _ => Err(RecoveryError::IllegalCrashBoundary),
+        },
+        CrashBoundary::AuthorizedBeforeDispatchCommit => match runtime.lifecycle {
+            ActionLifecycle::Authorized => {
+                let mut next = runtime.clone();
+                next.lifecycle = ActionLifecycle::Prepared;
+                next.authorization_invalidated = true;
+                next.dispatch_generation = None;
+                Ok(RecoveryDecision {
+                    runtime: next,
+                    may_retry_effect: false,
+                    may_query_status: false,
+                    may_reconsider_intent: true,
+                    claims_rollback: false,
+                    fresh_authorization_required: true,
+                    automatic_reschedule_stopped: false,
+                    attention: None,
+                })
+            }
+            ActionLifecycle::Dispatching | ActionLifecycle::EffectUnknown => {
+                recover_after_dispatch(
+                    action_id,
+                    agent_run_id,
+                    effect_class,
+                    runtime,
+                    &RecoveryEvidence::none(),
+                )
+            }
+            ActionLifecycle::CancelledAfterDispatch => Ok(stay_cancelled_after_dispatch(runtime)),
+            _ => Err(RecoveryError::IllegalCrashBoundary),
+        },
         CrashBoundary::DispatchingBeforeInvocation
         | CrashBoundary::DuringExecutor
         | CrashBoundary::AfterEffectBeforeResultPersist
-        | CrashBoundary::AfterResultPersist => {
-            recover_after_dispatch(action_id, agent_run_id, effect_class, runtime, evidence)
-        }
+        | CrashBoundary::AfterResultPersist => match runtime.lifecycle {
+            ActionLifecycle::Dispatching
+            | ActionLifecycle::EffectUnknown
+            | ActionLifecycle::CancelledAfterDispatch => {
+                recover_after_dispatch(action_id, agent_run_id, effect_class, runtime, evidence)
+            }
+            _ => Err(RecoveryError::IllegalCrashBoundary),
+        },
     }
 }
 
 pub fn reconcile(
     action_id: ActionId,
     agent_run_id: AgentRunId,
+    effect_class: EffectClass,
     runtime: &ActionRuntime,
     evidence: &RecoveryEvidence,
 ) -> Result<RecoveryDecision, RecoveryError> {
-    recover_after_dispatch(
-        action_id,
-        agent_run_id,
-        EffectClass::NonReplayable,
-        runtime,
-        evidence,
-    )
+    match runtime.lifecycle {
+        ActionLifecycle::Dispatching
+        | ActionLifecycle::EffectUnknown
+        | ActionLifecycle::CancelledAfterDispatch => {
+            recover_after_dispatch(action_id, agent_run_id, effect_class, runtime, evidence)
+        }
+        _ => Err(RecoveryError::IllegalReconcile),
+    }
 }
 
 /// SPEC-016 §16: cancellation linearizes against durable Dispatching.
@@ -490,6 +544,16 @@ fn recover_after_dispatch(
 
     match evidence.kind {
         EvidenceKind::KnownNotDispatched => {
+            if !matches!(
+                runtime.lifecycle,
+                ActionLifecycle::Dispatching | ActionLifecycle::EffectUnknown
+            ) {
+                return Err(RecoveryError::IllegalReconcile);
+            }
+            match (runtime.dispatch_generation, evidence.dispatch_generation) {
+                (Some(stored), Some(claimed)) if stored == claimed => {}
+                _ => return Err(RecoveryError::StaleDispatchGeneration),
+            }
             next.lifecycle = ActionLifecycle::Prepared;
             next.dispatch_generation = None;
             next.authorization_invalidated = true;
@@ -566,6 +630,21 @@ fn recover_after_dispatch(
         automatic_reschedule_stopped,
         attention,
     })
+}
+
+fn stay_cancelled_after_dispatch(runtime: &ActionRuntime) -> RecoveryDecision {
+    let mut next = runtime.clone();
+    next.lifecycle = ActionLifecycle::CancelledAfterDispatch;
+    RecoveryDecision {
+        runtime: next,
+        may_retry_effect: false,
+        may_query_status: true,
+        may_reconsider_intent: false,
+        claims_rollback: false,
+        fresh_authorization_required: false,
+        automatic_reschedule_stopped: true,
+        attention: None,
+    }
 }
 
 fn terminal_decision(runtime: ActionRuntime, claims_rollback: bool) -> RecoveryDecision {

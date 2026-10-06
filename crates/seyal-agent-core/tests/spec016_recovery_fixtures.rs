@@ -85,6 +85,7 @@ fn late_known_not_dispatched_after_unknown_returns_to_prepared() {
     let decision = reconcile(
         ActionId::new(),
         AgentRunId::new(),
+        EffectClass::NonReplayable,
         &unknown,
         &RecoveryEvidence::known_not_dispatched(1),
     )
@@ -110,6 +111,7 @@ fn cancelled_after_dispatch_is_reconciliation_only() {
     let resolved = reconcile(
         ActionId::new(),
         AgentRunId::new(),
+        EffectClass::NonReplayable,
         &decision.runtime,
         &RecoveryEvidence::causal_failed_known(1, marker),
     )
@@ -124,6 +126,7 @@ fn untrusted_terminal_narration_cannot_mint_success() {
     let decision = reconcile(
         ActionId::new(),
         AgentRunId::new(),
+        EffectClass::NonReplayable,
         &unknown,
         &RecoveryEvidence::untrusted_narration(),
     )
