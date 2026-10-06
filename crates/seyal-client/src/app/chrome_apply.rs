@@ -225,13 +225,11 @@ impl ApplicationRoot {
     }
 
     /// Switch active authority/presentation to the focused pane.
-    /// Unbound focus keeps the last bound fence (terminal actions stay there)
-    /// and clears presentation so that leaf hosts no live surface.
+    /// Unbound focus fails closed so input cannot reach another pane's execution.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
         let Some(authority) = self.pane_authorities.get(&focused).copied() else {
-            // Keep the last bound fence so terminal actions stay on the
-            // bound Pane while an unbound leaf is focused (no live surface).
+            self.authority = None;
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);
             self.sync_composer_presentation();
             self.output_utf8.clear();

@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 977
+acknowledged_loc = 987
 issue = 1117
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction; #1117 owns FocusHistory, HistoryBack/HistoryForward, focus_history_seq, and history errors. History store, destroy hook, and Back/Forward apply live in navigation/ and focus_history_apply.rs."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction. #1117 keeps Back/Forward apply in focus_history_apply.rs and uses the existing authority activation path to fail closed on unbound focus; pane projection suppresses a live surface until its focused pane has a binding. The 987-line façade remains below the 1000-line hard limit."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"

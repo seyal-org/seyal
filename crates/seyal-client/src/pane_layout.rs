@@ -594,11 +594,12 @@ mod root_tests {
             "unbound focus hosts no surface"
         );
 
-        // The snapshot fence stays on the bound execution while another leaf
-        // is focused, so fenced terminal actions keep landing.
+        // Fail-closed: the new leaf is focused and has no execution, so fenced
+        // terminal actions cannot reach the other leaf's bound execution.
         let snap = root.snapshot();
-        assert_eq!(snap.pane, bound);
         assert_eq!(snap.shell.focused_pane, created);
+        assert!(snap.execution.is_none());
+        assert_eq!(snap.pane, created);
         root.apply(AppAction::Refresh {
             fence: root.fence(),
             alternate_screen: false,

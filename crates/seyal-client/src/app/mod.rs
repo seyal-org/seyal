@@ -664,7 +664,19 @@ impl ApplicationRoot {
     /// `Bind` will land); it is shown only while that Pane is focused.
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
-        pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+        let focused = shell.focused_pane;
+        let live_pane =
+            if self.pane_authorities.contains_key(&focused) || self.pane_authorities.is_empty() {
+                focused
+            } else {
+                // Unbound focus while another leaf remains bound: no live surface.
+                self.pane_authorities
+                    .keys()
+                    .copied()
+                    .next()
+                    .expect("non-empty pane_authorities")
+            };
+        pane_layout::project(&shell.tree, focused, live_pane)
     }
 
     pub fn fence(&self) -> AppFence {
@@ -705,9 +717,8 @@ impl ApplicationRoot {
         let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
             generation: self.snapshot_generation,
-            // The fence Pane, not the focused one: host actions fenced from
-            // this snapshot must keep reaching the bound execution while
-            // another split leaf is focused.
+            // The fence Pane when bound; the focused Pane when fail-closed
+            // unbound (N3). Hosts must not send input to another Pane's execution.
             pane: self.fence().pane,
             execution: self.authority.map(|bound| bound.execution),
             attachment: self.authority.map(|bound| bound.attachment),
