@@ -70,6 +70,8 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneMoveRight
         | WorkspaceCommandId::PaneMoveUp
         | WorkspaceCommandId::PaneMoveDown
+        | WorkspaceCommandId::PaneEqualizeFocused
+        | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
         | WorkspaceCommandId::PresentationSetFlow
@@ -264,6 +266,8 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::PaneFocusRight => 32,
         WorkspaceCommandId::PaneFocusUp => 33,
         WorkspaceCommandId::PaneFocusDown => 34,
+        WorkspaceCommandId::PaneEqualizeFocused => 35,
+        WorkspaceCommandId::PaneEqualizeTab => 36,
     }
 }
 
@@ -304,6 +308,8 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         32 => WorkspaceCommandId::PaneFocusRight,
         33 => WorkspaceCommandId::PaneFocusUp,
         34 => WorkspaceCommandId::PaneFocusDown,
+        35 => WorkspaceCommandId::PaneEqualizeFocused,
+        36 => WorkspaceCommandId::PaneEqualizeTab,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

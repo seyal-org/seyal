@@ -370,6 +370,8 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         | WorkspaceCommandId::PaneMoveRight
         | WorkspaceCommandId::PaneMoveUp
         | WorkspaceCommandId::PaneMoveDown
+        | WorkspaceCommandId::PaneEqualizeFocused
+        | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::PresentationSetFlow
         | WorkspaceCommandId::PresentationSetRaw
         | WorkspaceCommandId::PresentationSetTui

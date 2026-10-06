@@ -139,6 +139,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneMoveDown => {
                 self.move_focused_beside(FocusDirection::Down, MoveSide::Below)
             }
+            WorkspaceCommandId::PaneEqualizeFocused => self.equalize_focused(),
+            WorkspaceCommandId::PaneEqualizeTab => self.equalize_tab(),
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
             }
