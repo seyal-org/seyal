@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 13;
+pub(super) const SCHEMA_VERSION: i32 = 14;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -194,6 +194,10 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
         tx.execute_batch(crate::action::schema_v13::ACTION_RECOVERY_V13)
             .map_err(|_| StoreError::WriteFailed)?;
     }
+    if from < 14 {
+        tx.execute_batch(crate::approval::schema_v14::APPROVAL_TABLES_V14)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     tx.commit().map_err(|_| StoreError::WriteFailed)?;
@@ -300,6 +304,8 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(crate::attention::schema_v12::ATTENTION_TABLES_V12)
         .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(crate::action::schema_v13::ACTION_RECOVERY_V13)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(crate::approval::schema_v14::APPROVAL_TABLES_V14)
         .map_err(|_| StoreError::WriteFailed)?;
     let mut key = [0u8; 32];
     getrandom_fallback(&mut key);

@@ -45,7 +45,7 @@ Durable `ActionId` / immutable `ActionIntent` preparation lives in agent-domain 
 
 ## Attention chrome
 
-Exact-target Attention stack, badges, and OS-notification **eligibility** live in `seyal-agent-core` and project the Attention store (#1306). Reveal-and-focus uses SPEC-022 `ResourceAddress` in `seyal-client`. The macOS host only adapts OS notification APIs (ADR-015). See [ATTENTION-CHROME.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ATTENTION-CHROME.md). Approval decision recording is sibling #1308.
+Exact-target Attention stack, badges, and OS-notification **eligibility** live in `seyal-agent-core` and project the Attention store (#1306). Reveal-and-focus uses SPEC-022 `ResourceAddress` in `seyal-client`. The macOS host only adapts OS notification APIs (ADR-015). See [ATTENTION-CHROME.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ATTENTION-CHROME.md). Typed Approve/Reject recording is [APPROVAL-BINDING.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/APPROVAL-BINDING.md) (#1308).
 
 ## OSS and commercial boundary
 

@@ -3,8 +3,9 @@
 //! Agent Backend owns durable AttentionItem state. UI/CLI project the same
 //! authority. OSC/raw terminal text may create informational Attention only —
 //! never privileged `ApprovalRequired`. ApprovalRequest/Decision recording is
-//! owned by the #1308 sibling; this module exposes Attention lifecycle hooks.
+//! in [`approval`].
 
+mod approval;
 mod chrome;
 mod lifecycle;
 mod mint;
@@ -13,6 +14,11 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use approval::{
+    authorize_decide, auto_approve_reconciliation, evaluate_consume,
+    request_from_untrusted_terminal, ApprovalDecision, ApprovalError, ApprovalRequest,
+    ApprovalRequestSpec, ApprovalVerdict, ConsumptionWitness, ControlMode, DecisionAuthority,
+};
 pub use chrome::{
     activate, badges, in_stack_approve_allowed, next_attention, note_os_delivery_failure,
     notification_preview, os_banner_dismiss, preserve_navigation_order, stack_for_run,

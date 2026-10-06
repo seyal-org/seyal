@@ -21,7 +21,7 @@ Chrome and OS notifications **project** store items. They are not a second mailb
 - `requires_spatial_focus = true` → exact-target Navigate; **no** in-stack Approve.
 - Packed `resource_address` bytes are SPEC-022 identities (`pack_resource_address`).
 - Missing/rejected targets → retain Attention/details; never fabricate Execution/AgentRun.
-- `requires_spatial_focus = false` with ApprovalRequired + `action_id`/`agent_run_id`/`approval_id` → in-stack Approve/Reject **projection only** (recording the decision is #1308).
+- `requires_spatial_focus = false` with ApprovalRequired + `action_id`/`agent_run_id`/`approval_id` → in-stack Approve/Reject **projection**. Recording the decision is [`APPROVAL-BINDING.md`](APPROVAL-BINDING.md) (#1308).
 
 ## Badges and OS
 
