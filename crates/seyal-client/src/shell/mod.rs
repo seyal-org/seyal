@@ -503,7 +503,6 @@ impl ShellState {
 
     /// Test harness: flip CreateWindow admission without rebuilding the shell.
     #[cfg(test)]
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn set_allows_window_creation_for_test(&mut self, allowed: bool) {
         self.allows_window_creation = allowed;
     }
