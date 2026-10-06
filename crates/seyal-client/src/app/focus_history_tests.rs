@@ -396,3 +396,13 @@ fn workspace_command_history_back_uses_committed_cursor_seq() {
     assert_eq!(root.snapshot().execution, Some(exec2));
     assert_ne!(root.snapshot().focus_history_seq, Some(observed));
 }
+
+#[test]
+fn focus_pane_onto_unbound_leaf_clears_authority() {
+    let (mut root, _w1, _t1, p1, p2) = two_pane_root();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert!(root.snapshot().execution.is_some());
+    root.apply(AppAction::FocusPane { id: p2 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert!(root.snapshot().execution.is_none());
+}

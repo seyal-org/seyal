@@ -19,6 +19,7 @@ impl ApplicationRoot {
             .apply(ShellAction::SplitFocused { axis })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         // Split focuses the new leaf; record as a user-initiated commit (R6.3).
+        self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
             .chrome
@@ -109,6 +110,7 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::SelectWorkspace { id })
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
             .chrome
@@ -132,6 +134,7 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
+        self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
             .chrome
