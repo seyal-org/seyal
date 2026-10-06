@@ -4,6 +4,7 @@
 //! and exposes single-use consume for the SPEC-016 fixture consumer.
 
 mod ops;
+pub(crate) use ops::{consume_in_tx, load_decision, load_request};
 pub(crate) mod schema_v14;
 
 #[cfg(test)]

@@ -254,6 +254,7 @@ pub struct ConsumptionWitness {
 }
 
 impl ConsumptionWitness {
+    /// Fixture helper. Production dispatch must use [`Self::from_live_intent`].
     pub fn from_request(request: &ApprovalRequest) -> Self {
         Self {
             action_id: request.action_id,
@@ -265,6 +266,26 @@ impl ConsumptionWitness {
             effect_class: request.effect_class,
             policy_generation: request.policy_generation,
             revocation_fence: request.revocation_fence.clone(),
+        }
+    }
+
+    /// SPEC-016 §5 live witness: immutable ActionIntent identity plus current
+    /// policy generation and the complete current RevocationFence.
+    pub fn from_live_intent(
+        intent: &crate::action::ActionIntent,
+        current_policy_generation: u64,
+        current_fence: RevocationFence,
+    ) -> Self {
+        Self {
+            action_id: intent.action_id(),
+            action_intent_digest: intent.digest(),
+            agent_run_id: intent.agent_run_id(),
+            capability: intent.capability().clone(),
+            resource: intent.resource().clone(),
+            argument_fingerprint: intent.argument_fingerprint(),
+            effect_class: intent.effect_class(),
+            policy_generation: current_policy_generation,
+            revocation_fence: current_fence,
         }
     }
 }
@@ -307,6 +328,9 @@ pub fn evaluate_consume(
     }
     if decision.consumed {
         return Err(ApprovalError::AlreadyConsumed);
+    }
+    if request.control_mode != ControlMode::SeyalControlled {
+        return Err(ApprovalError::ExternalObservedForbidden);
     }
     if request.is_expired(now_unix_ms) {
         return Err(ApprovalError::Expired);
@@ -396,6 +420,29 @@ mod tests {
         assert_eq!(
             auto_approve_reconciliation(),
             Err(ApprovalError::ReconciliationDoesNotAuthorize)
+        );
+    }
+
+    #[test]
+    fn consume_rejects_external_observed_even_if_row_exists() {
+        let request = ApprovalRequest::try_build(spec()).unwrap();
+        let mut observed = request.clone();
+        observed.control_mode = ControlMode::ExternalObserved;
+        let decision = ApprovalDecision {
+            approval_id: request.approval_id,
+            action_id: request.action_id,
+            agent_run_id: request.agent_run_id,
+            decision: ApprovalVerdict::Approved,
+            authority: DecisionAuthority::User,
+            decided_at_unix_ms: 1_100,
+            decision_policy_generation: 1,
+            decision_principal_id: None,
+            consumed: false,
+        };
+        let witness = ConsumptionWitness::from_request(&request);
+        assert_eq!(
+            evaluate_consume(&observed, &decision, &witness, 1_200),
+            Err(ApprovalError::ExternalObservedForbidden)
         );
     }
 }

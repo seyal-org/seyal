@@ -26,7 +26,7 @@ As implementation lands, this section will expand into guides for:
 - configuration and themes (local TOML at `SEYAL_CONFIG` or `~/.config/seyal/config.toml` sets appearance, font sizes, padding, and material preference at cold startup; font family is not applied yet; there is no settings UI or Lua runtime yet),
 - SSH and remote execution,
 - persistent/detached execution,
-- agent workflows and approvals (typed Approve/Reject records an exact ActionId/AgentRunId/capability/resource binding in the Agent Backend; raw terminal text cannot mint or consume an approval; dispatch consumption is still expanding),
+- agent workflows and approvals (typed Approve/Reject records an exact ActionId/AgentRunId/capability/resource binding in the Agent Backend; raw terminal text cannot mint or consume an approval; dispatch consumes that decision once at `Dispatching` — headed approval chrome is still expanding),
 - Attention Stack / badges (Agent Backend Attention store is canonical; opening an item jumps to its ResourceAddress when present, otherwise the item is retained; OS banners do not approve or dismiss canonical Attention; workspace badges do not reorder workspaces; richer headed stack chrome is still expanding),
 - accessibility and keyboard control,
 - troubleshooting and diagnostics.

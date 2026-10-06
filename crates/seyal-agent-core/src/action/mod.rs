@@ -1,14 +1,18 @@
-//! Durable ActionId / ActionIntent identity, EffectUnknown recovery, and
-//! persistence-failure pause (ADR-014 / SPEC-016 §§3–4, 9–16, 21–22).
+//! Durable ActionId / ActionIntent identity, dispatch fencing, EffectUnknown
+//! recovery, and persistence-failure pause (ADR-014 / SPEC-016).
 //!
-//! Dispatch fencing and approval consumption belong to #1310. Mutable
-//! lifecycle is stored beside immutable intent bytes so the identity digest
-//! stays frozen.
+//! Mutable lifecycle is stored beside immutable intent bytes so the identity
+//! digest stays frozen (`CANONICAL_INTENT_LAYOUT`).
 
+mod dispatch;
 mod intent;
 mod persist_pause;
 mod recovery;
 
+pub use dispatch::{
+    evaluate_dispatch, human_approval_required, next_dispatch_generation, DispatchError,
+    DispatchEval, CANONICAL_INTENT_LAYOUT,
+};
 pub use intent::{
     action_intent_digest, material_fields_changed, ActionIntent, ActionIntentError,
     ActionLifecycle, ArgumentFingerprint, AuthorizationClass, CapabilityRef, EffectClass,

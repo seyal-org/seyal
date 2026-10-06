@@ -13,7 +13,10 @@ mod identity;
 pub mod memory;
 mod sqlite;
 
-pub use action::{ActionAuthority, ActionError, PersistResume, PersistedAction, PrepareOutcome};
+pub use action::{
+    ActionAuthority, ActionError, DispatchInput, DispatchOutcome, PersistResume, PersistedAction,
+    PrepareOutcome,
+};
 pub use approval::{ApprovalAuthority, ApprovalStoreError, DecideInput, RecordedApproval};
 pub use attention::{
     AttentionAuthority, AttentionError, AttentionProtocolView, MarkAllReadResult, MintTrustedInput,
