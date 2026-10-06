@@ -213,3 +213,76 @@ fn spec028_12_22_persistence_fault_is_typed_not_terminal() {
     // Canonical item still readable — fault does not erase prior durable state.
     assert!(att.get(item.attention_id).is_ok());
 }
+
+#[test]
+fn spec028_12_14_store_spatial_item_forbids_in_stack_approve() {
+    use seyal_agent_core::{activate, in_stack_approve_allowed, AttentionActivation};
+    let store = open_store();
+    let att = store.attention();
+    let run = AgentRunId::new();
+    let mut input = trusted(
+        AttentionKind::ApprovalRequired,
+        run,
+        Some(ActionId::new()),
+        Some(ApprovalId::new()),
+    );
+    input.target.requires_spatial_focus = true;
+    input.target.resource_address = Some(b"packed-address".to_vec());
+    let item = att.mint_trusted(input).expect("mint");
+    let loaded = att.get(item.attention_id).expect("store");
+    assert!(!in_stack_approve_allowed(&loaded));
+    assert_eq!(activate(&loaded), AttentionActivation::RevealAndFocus);
+}
+
+#[test]
+fn spec028_12_17_os_dismiss_does_not_mutate_store() {
+    use seyal_agent_core::{note_os_delivery_failure, os_banner_dismiss, OsBannerDismiss};
+    let store = open_store();
+    let att = store.attention();
+    let run = AgentRunId::new();
+    let item = att
+        .mint_trusted(trusted(AttentionKind::Warning, run, None, None))
+        .expect("mint");
+    assert_eq!(os_banner_dismiss(), OsBannerDismiss::PresentationOnly);
+    note_os_delivery_failure(&item);
+    let loaded = att.get(item.attention_id).expect("still there");
+    assert_eq!(loaded.state, AttentionState::Open);
+}
+
+#[test]
+fn spec028_12_22_chrome_storm_and_persist_fault_leave_terminal_untouched() {
+    use seyal_agent_core::{stack_overlay, OsDeliveryContext, OsNotificationController};
+    let store = open_store();
+    let att = store.attention();
+    let run = AgentRunId::new();
+    let first = att
+        .mint_trusted(trusted(AttentionKind::Warning, run, None, None))
+        .expect("mint");
+    assert_eq!(
+        att.persist_with_fault_injection(&first, true),
+        Err(AttentionError::PersistenceFault)
+    );
+    let listed = att.list_for_run(run).expect("list");
+    let mut terminal_progress = 0u32;
+    let overlay = stack_overlay(&listed);
+    terminal_progress += 1;
+    let mut os = OsNotificationController::new();
+    for item in &listed {
+        let _ = os.plan(
+            item,
+            OsDeliveryContext {
+                now_unix_ms: 1,
+                foreground_resource_address: None,
+                in_app_stack_foreground: false,
+                secret_bearing: false,
+            },
+        );
+        terminal_progress += 1;
+    }
+    assert_eq!(overlay.len(), 1);
+    assert_eq!(
+        att.get(first.attention_id).unwrap().state,
+        AttentionState::Open
+    );
+    assert_eq!(terminal_progress, 2);
+}

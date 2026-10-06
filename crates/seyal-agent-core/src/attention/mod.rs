@@ -5,6 +5,7 @@
 //! never privileged `ApprovalRequired`. ApprovalRequest/Decision recording is
 //! owned by the #1308 sibling; this module exposes Attention lifecycle hooks.
 
+mod chrome;
 mod lifecycle;
 mod mint;
 mod types;
@@ -12,6 +13,13 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use chrome::{
+    activate, badges, in_stack_approve_allowed, next_attention, note_os_delivery_failure,
+    notification_preview, os_banner_dismiss, preserve_navigation_order, stack_for_run,
+    stack_overlay, AttentionActivation, AttentionBadge, OsBannerDismiss, OsDeliveryContext,
+    OsDeliveryDecision, OsNotificationController, MAX_OS_DELIVERIES_PER_SOURCE,
+    MAX_OS_DELIVERIES_PER_WINDOW, OS_RATE_WINDOW_MS,
+};
 pub use lifecycle::{allowed_attention_transition, AttentionTransitionError};
 pub use mint::{
     coalesce_key, mint_from_trusted_source, mint_from_untrusted_terminal,

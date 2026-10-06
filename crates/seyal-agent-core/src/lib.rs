@@ -27,11 +27,16 @@ pub use action::{
     ExecutorCapabilityRef, PrivacyDependencyId, RequestProvenance, ResourceIdentity,
 };
 pub use attention::{
-    allowed_attention_transition, coalesce_key, mint_from_trusted_source,
-    mint_from_untrusted_terminal, reject_untrusted_privileged, ArtifactKind, ArtifactRef,
-    AttentionItem, AttentionKind, AttentionPriority, AttentionState, AttentionTarget,
-    AttentionTransitionError, MintError, MintSource, PresentationText, TrustedMintSpec,
-    ATTENTION_SCHEMA_VERSION, MAX_OPEN_ATTENTION_PER_RUN, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
+    activate, allowed_attention_transition, badges, coalesce_key, in_stack_approve_allowed,
+    mint_from_trusted_source, mint_from_untrusted_terminal, next_attention,
+    note_os_delivery_failure, notification_preview, os_banner_dismiss, preserve_navigation_order,
+    reject_untrusted_privileged, stack_for_run, stack_overlay, ArtifactKind, ArtifactRef,
+    AttentionActivation, AttentionBadge, AttentionItem, AttentionKind, AttentionPriority,
+    AttentionState, AttentionTarget, AttentionTransitionError, MintError, MintSource,
+    OsBannerDismiss, OsDeliveryContext, OsDeliveryDecision, OsNotificationController,
+    PresentationText, TrustedMintSpec, ATTENTION_SCHEMA_VERSION, MAX_OPEN_ATTENTION_PER_RUN,
+    MAX_OS_DELIVERIES_PER_SOURCE, MAX_OS_DELIVERIES_PER_WINDOW,
+    MAX_TERMINAL_INFORMATIONAL_PER_WINDOW, OS_RATE_WINDOW_MS,
 };
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
