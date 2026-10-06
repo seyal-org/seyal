@@ -583,6 +583,12 @@ impl ApplicationRoot {
         self.shell.set_allows_tab_creation_for_test(true);
     }
 
+    /// Test-only: admit `CreateWindow` so coalescing tests can use two windows.
+    #[cfg(test)]
+    pub(crate) fn enable_window_creation_for_test(&mut self) {
+        self.shell.set_allows_window_creation_for_test(true);
+    }
+
     pub(crate) fn with_shell(shell: ShellState) -> Self {
         let snap = shell.snapshot();
         let pane = snap.focused_pane;
