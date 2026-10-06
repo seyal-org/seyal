@@ -163,7 +163,15 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_WINDOW = 63,
     SEYAL_APP_ACTION_CYCLE_WINDOW = 64,
     SEYAL_APP_ACTION_CREATE_WINDOW = 65,
-    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 66
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 66,
+    /**
+     * Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq as
+     * little-endian u64. reserved = 0. Observed cursor must match the current
+     * history seq or the action rejects with StaleHistoryCursor (54).
+     * Numbers 67/68 follow W4a 63–66 so N3 can stack on N5 without colliding.
+     */
+    SEYAL_APP_ACTION_HISTORY_BACK = 67,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 68
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u

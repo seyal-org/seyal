@@ -75,6 +75,7 @@
 		A1000000000000000000008C /* ApplicationQuitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000008C /* ApplicationQuitCoordinator.swift */; };
 		A1000000000000000000008D /* MultiWindowHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000008D /* MultiWindowHostController.swift */; };
 		C1000000000000000000000A /* MultiWindowHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* MultiWindowHostTests.swift */; };
+		C1000000000000000000000B /* NavigationEvidenceHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B /* NavigationEvidenceHostTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -169,6 +170,7 @@
 		A2000000000000000000008C /* ApplicationQuitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationQuitCoordinator.swift; sourceTree = "<group>"; };
 		A2000000000000000000008D /* MultiWindowHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowHostController.swift; sourceTree = "<group>"; };
 		C2000000000000000000000A /* MultiWindowHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowHostTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000B /* NavigationEvidenceHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationEvidenceHostTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -313,6 +315,7 @@
 			children = (
 				C20000000000000000000003 /* SeyalHostComponentTests.swift */,
 				C2000000000000000000000A /* MultiWindowHostTests.swift */,
+				C2000000000000000000000B /* NavigationEvidenceHostTests.swift */,
 				C20000000000000000000008 /* KeybindingEvidenceTests.swift */,
 			);
 			path = SeyalTests;
@@ -523,6 +526,7 @@
 			files = (
 				C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */,
 				C1000000000000000000000A /* MultiWindowHostTests.swift in Sources */,
+				C1000000000000000000000B /* NavigationEvidenceHostTests.swift in Sources */,
 				C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

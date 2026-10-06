@@ -8,7 +8,10 @@ use crate::shell::{
     ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
 };
 
-use super::{navigate, ExecutionPresence, NavigationPrincipal, ResolvedTarget, ResourceAddress};
+use super::{
+    navigate, ExecutionPresence, NavigateHistory, NavigationPrincipal, ResolvedTarget,
+    ResourceAddress,
+};
 
 struct MapInventory {
     records: HashMap<seyal_core::ExecutionId, ExecutionPresence>,
@@ -122,7 +125,8 @@ fn navigate_other_window_emits_one_window_activation_without_reparenting() {
             },
             &mut shell,
             &MapInventory::new(),
-            NavigationPrincipal::local_user()
+            NavigationPrincipal::local_user(),
+            NavigateHistory::ApplyOnly,
         ),
         Ok(ResolvedTarget::Pane {
             workspace,
@@ -225,6 +229,7 @@ fn navigate_same_window_emits_no_window_activation() {
         &mut shell,
         &MapInventory::new(),
         NavigationPrincipal::local_user(),
+        NavigateHistory::ApplyOnly,
     )
     .expect("same-window tab");
     assert!(
