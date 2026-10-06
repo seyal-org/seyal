@@ -401,6 +401,108 @@ pub extern "C" fn seyal_app_create() -> u64 {
     handle
 }
 
+/// Test harness: install N windows and N live attachments for quit evidence.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_quit_case(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        // Take the root out of APPS before mutating. The headed host's Metal /
+        // chrome callbacks also borrow APPS; nesting install work under
+        // borrow_mut aborts (panic=abort + RefCell BorrowMutError).
+        let extracted = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle)?;
+            Some(std::mem::take(&mut state.root))
+        });
+        let Some(mut root) = extracted else {
+            return -2;
+        };
+        let installed = root.install_quit_fixture(windows as usize);
+        let put_back = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            state.root = root;
+            0
+        });
+        if put_back != 0 {
+            return put_back;
+        }
+        match installed {
+            Ok(()) => 0,
+            Err(()) => -3,
+        }
+    }
+}
+
+/// Test harness: live display attachments still registered for `handle`.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_live_attachment_count(handle: u64) -> u32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handle;
+        0
+    }
+    #[cfg(target_os = "macos")]
+    {
+        APPS.with(|apps| {
+            apps.borrow()
+                .get(&handle)
+                .map(|state| state.root.live_attachment_count() as u32)
+                .unwrap_or(0)
+        })
+    }
+}
+
+/// Test harness: install N windows without probe attachments.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_windows_only(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        let extracted = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle)?;
+            Some(std::mem::take(&mut state.root))
+        });
+        let Some(mut root) = extracted else {
+            return -2;
+        };
+        let installed = root.install_quit_fixture_windows_only(windows as usize);
+        let put_back = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            state.root = root;
+            0
+        });
+        if put_back != 0 {
+            return put_back;
+        }
+        match installed {
+            Ok(()) => 0,
+            Err(()) => -3,
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_destroy(handle: u64) -> i32 {
     APPS.with(|apps| {
@@ -958,5 +1060,17 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(Some(id16(lo, hi)?))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod seed_quit_ffi_tests {
+    #[test]
+    fn ffi_seed_quit_case_roundtrip() {
+        let handle = super::seyal_app_create();
+        assert_ne!(handle, 0);
+        assert_eq!(super::seyal_app_test_seed_quit_case(handle, 3), 0);
+        assert_eq!(super::seyal_app_test_live_attachment_count(handle), 3);
+        assert_eq!(super::seyal_app_destroy(handle), 0);
     }
 }

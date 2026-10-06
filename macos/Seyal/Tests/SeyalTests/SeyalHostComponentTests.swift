@@ -159,9 +159,9 @@ final class SeyalHostComponentTests: XCTestCase {
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // C2b enables production tab creation; pane splitting stays off. W2b
-        // hierarchical close is admitted while a product window exists (last
-        // tab/pane peels to CloseWindow), so close chrome must be shown.
+        // W4b: CreateTab stays on; splits stay fail-closed. Hierarchical close
+        // is admitted while a product window exists (last tab/pane peels to
+        // CloseWindow), so close chrome must be shown.
         let shell = seyal_app_shell(view.pane.appHandle)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)

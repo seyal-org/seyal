@@ -58,5 +58,7 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::ActionUnavailable => 50,
         AppError::CrossWorkspaceAdopt => 51,
         AppError::ExecutionNotUnpresented => 52,
+        AppError::UnknownWindow => 53,
+        AppError::WindowCreationUnavailable => 54,
     }
 }

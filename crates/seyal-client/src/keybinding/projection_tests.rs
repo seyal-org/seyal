@@ -56,6 +56,10 @@ keys = "cmd+t"
 action = "none"
 
 [[keybindings]]
+keys = "cmd+n"
+action = "none"
+
+[[keybindings]]
 keys = "cmd+shift+t>n"
 action = "tab.create"
 "#;
@@ -190,6 +194,10 @@ fn unbind_projected_command_keeps_title_and_route_enablement() {
     let toml = r#"
 [[keybindings]]
 keys = "cmd+t"
+action = "none"
+
+[[keybindings]]
+keys = "cmd+n"
 action = "none"
 "#;
     let table = load_keybinding_table(Some(toml));
