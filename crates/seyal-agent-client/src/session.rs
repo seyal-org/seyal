@@ -172,6 +172,30 @@ impl SessionClient {
         }
     }
 
+    /// SPEC-026 §9.2 CancelRun intent against an AgentRun.
+    pub fn cancel_run(
+        &mut self,
+        run_id: AgentRunId,
+        control_generation: u64,
+    ) -> Result<RunView, ClientError> {
+        match self.round_trip(&Command::CancelRun {
+            session_id: self.session_id,
+            run_id,
+            control_generation,
+        })? {
+            CommandResult::Run {
+                binding_generation,
+                control_generation,
+                liveness,
+            } => Ok(RunView {
+                binding_generation,
+                control_generation,
+                liveness,
+            }),
+            other => Err(map_result(other)),
+        }
+    }
+
     pub fn check_generation(
         &mut self,
         run_id: AgentRunId,

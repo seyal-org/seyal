@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "3250c4bcd0a8e91ad86ca5bcc9cb28c1a50cd55b"
+          "fingerprint": "8f6470f4c96b3edbe24c6dbd96746fb5910bb026"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "3250c4bcd0a8e91ad86ca5bcc9cb28c1a50cd55b"
+          "fingerprint": "8f6470f4c96b3edbe24c6dbd96746fb5910bb026"
         }
       ],
       "relationships": [
@@ -281,7 +281,7 @@
       "sources": [
         {
           "path": "docs/engineering/REPOSITORY-STRUCTURE.md",
-          "fingerprint": "0d3369703727d1fc82403ded8ed95cb1c1dcd770"
+          "fingerprint": "4e71416e6c8de07eefd52d037d570b4bbd188757"
         }
       ],
       "relationships": [
