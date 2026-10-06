@@ -11,8 +11,10 @@ publish = false
 test-fault-injection = []
 
 [dependencies]
+blake3 = "1.8.2"
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 seyal-agent-core = { path = "../seyal-agent-core" }
+unicode-normalization = "0.1.24"
 
 [lints.rust]
 unsafe_code = "deny"

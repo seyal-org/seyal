@@ -72,6 +72,10 @@ struct Principal {
     /// #1191 pairing lands, only `FirstPartyCli`/`FirstPartySeyal` principals
     /// may hold any entry here; `grant_adapter_execute` enforces that.
     executable_adapters: BTreeSet<AdapterId>,
+    /// Durable `admin.adapters` grant (SPEC-027 §5.2 / SPEC-017 §5). Required
+    /// for first-party catalog install/enable through `IntegrationService`.
+    /// Until #1191 pairing lands, only first-party principal kinds may hold it.
+    admin_adapters: bool,
     /// Hello evidence token that selects this principal (`cli`, `observer`, …).
     evidence_key: Vec<u8>,
 }
@@ -215,6 +219,7 @@ impl AuthorizationRepository {
                 scopes: scopes.into_iter().collect(),
                 allowed_runs: BTreeSet::new(),
                 executable_adapters: BTreeSet::new(),
+                admin_adapters: false,
                 evidence_key: evidence_key.clone(),
             },
         );
@@ -236,6 +241,7 @@ impl AuthorizationRepository {
                 scopes: row.scopes,
                 allowed_runs: BTreeSet::new(),
                 executable_adapters: BTreeSet::new(),
+                admin_adapters: false,
                 evidence_key: row.evidence_key.clone(),
             },
         );
@@ -334,6 +340,42 @@ impl AuthorizationRepository {
                 Err(AuthorizationError::ScopeEscalation)
             }
         }
+    }
+
+    /// Grant durable `admin.adapters` (SPEC-027 §5.2). First-party only until
+    /// #1191 pairing; never a client Command.
+    pub fn grant_admin_adapters(
+        &mut self,
+        id: ClientPrincipalId,
+    ) -> Result<(), AuthorizationError> {
+        let principal = self
+            .principals
+            .get_mut(&id)
+            .ok_or(AuthorizationError::UnknownPrincipal)?;
+        match principal.kind {
+            PrincipalKind::FirstPartyCli | PrincipalKind::FirstPartySeyal => {
+                principal.admin_adapters = true;
+                Ok(())
+            }
+            PrincipalKind::UserApprovedLocalClient | PrincipalKind::ManagedClient => {
+                Err(AuthorizationError::ScopeEscalation)
+            }
+        }
+    }
+
+    /// Require `admin.adapters` for catalog install/enable.
+    pub fn authorize_admin_adapters(
+        &self,
+        id: ClientPrincipalId,
+    ) -> Result<(), AuthorizationError> {
+        let principal = self
+            .principals
+            .get(&id)
+            .ok_or(AuthorizationError::UnknownPrincipal)?;
+        if !principal.admin_adapters {
+            return Err(AuthorizationError::TargetDenied);
+        }
+        Ok(())
     }
 
     /// `runs.create` and `adapter.execute` are independent grants (D3): a

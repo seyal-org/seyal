@@ -111,3 +111,17 @@ The architecture target remains practical 500+ pane/presentation/domain objects;
 This harness establishes headroom for the existing execution/PTY/terminal-state foundation only. It cannot prove the future Runtime reactor, registry overhead, kqueue fairness, or bounded control/input scheduling.
 
 Do not claim latency, CPU, RSS, throughput superiority or zero-copy results from the harness smoke. Real measurements must identify workload, hardware/OS/build mode, commit, terminal dimensions, font/scale, shell, run count and percentile method as required by `docs/engineering/PERFORMANCE.md` and M001.
+
+## M005 SPEC-013 §23.40 Runtime terminal isolation (#1301)
+
+`benches/m005_spec013_terminal_isolation` is a justified composition harness (workspace
+member, not a production crate). It pairs headless Seyal Runtime PTY→`TerminalState`
+progress with concurrent `seyal-agent-context` discovery/index load (active + failure)
+without adding an agent↔runtime production dependency edge.
+
+```sh
+python3 scripts/run-m005-spec013-terminal-isolation.py
+```
+
+Retained evidence: `docs/evidence/m005-1301-spec013-23-40-terminal-isolation.md`.
+This runner is Apple Silicon macOS only and is not part of `make bench` or CI.

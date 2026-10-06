@@ -43,6 +43,7 @@ AGENT_PACKAGES = {
     "seyal-agent-core",
     "seyal-agent-protocol",
     "seyal-agent-store",
+    "seyal-agent-context",
     "seyal-agent-backend",
     "seyal-agent-client",
 }
@@ -76,18 +77,23 @@ RULES = {
         "seyal-exec", "seyal-runtime", "seyal-render", "seyal-client",
     } | AGENT_PACKAGES,
     "seyal-agent-core": AGENT_EXTERNAL_FORBIDDEN | {
-        "seyal-agent-protocol", "seyal-agent-store", "seyal-agent-backend",
-        "seyal-agent-client",
+        "seyal-agent-protocol", "seyal-agent-store", "seyal-agent-context",
+        "seyal-agent-backend", "seyal-agent-client",
     },
     "seyal-agent-protocol": AGENT_EXTERNAL_FORBIDDEN | {
-        "seyal-agent-store", "seyal-agent-backend", "seyal-agent-client",
+        "seyal-agent-store", "seyal-agent-context", "seyal-agent-backend",
+        "seyal-agent-client",
     },
     "seyal-agent-store": AGENT_EXTERNAL_FORBIDDEN | {
+        "seyal-agent-protocol", "seyal-agent-context", "seyal-agent-backend",
+        "seyal-agent-client",
+    },
+    "seyal-agent-context": AGENT_EXTERNAL_FORBIDDEN | {
         "seyal-agent-protocol", "seyal-agent-backend", "seyal-agent-client",
     },
     "seyal-agent-backend": AGENT_EXTERNAL_FORBIDDEN | {"seyal-agent-client"},
     "seyal-agent-client": AGENT_EXTERNAL_FORBIDDEN | {
-        "seyal-agent-store", "seyal-agent-backend",
+        "seyal-agent-store", "seyal-agent-context", "seyal-agent-backend",
     },
 }
 
