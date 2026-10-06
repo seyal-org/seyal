@@ -471,10 +471,10 @@ impl ApplicationRoot {
                 ProvisioningEffect::Detach { .. } => {
                     let _ = self.shell.release_execution(pane);
                     self.clear_authority_for_pane(pane);
-                    if matches!(outcome, TerminateOutcome::TerminationRequested) {
-                        if let Some(execution) = disposed_execution {
-                            let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
-                        }
+                    if matches!(outcome, TerminateOutcome::TerminationRequested)
+                        && let Some(execution) = disposed_execution
+                    {
+                        let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
                     }
                 }
                 other => {
