@@ -927,4 +927,32 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
+
+    /// W7: inverse last-window-close without process death; splits stay fail-closed.
+    func testLastWindowCloseLeavesAppRunningWithoutEnablingSplits() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+        let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
+        let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        if splitRight.exists {
+            XCTAssertFalse(splitRight.isHittable, "splits stay fail-closed until C3")
+        }
+        app.typeKey("w", modifierFlags: .command)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, app.windows.count != 0 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(
+            app.windows.count,
+            0,
+            "CloseWindow of the sole window must leave zero windows"
+        )
+        XCTAssertEqual(
+            app.state,
+            .runningForeground,
+            "window close must not terminate the process (inverse of quit)"
+        )
+    }
 }
