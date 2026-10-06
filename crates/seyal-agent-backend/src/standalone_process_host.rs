@@ -870,7 +870,7 @@ mod tests {
                 [
                     "python3",
                     "-c",
-                    "import os,sys,time; sys.stdout.close(); os.close(1); time.sleep(0.8)",
+                    "import os,time; os.close(1); time.sleep(0.8)",
                 ],
             ),
         ) else {
