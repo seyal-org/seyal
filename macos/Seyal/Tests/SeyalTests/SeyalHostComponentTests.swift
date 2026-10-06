@@ -159,23 +159,21 @@ final class SeyalHostComponentTests: XCTestCase {
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // C2b enables production tab creation; pane splitting stays off. With a
-        // sole Tab/Pane, close controls remain omitted.
+        // W4b: CreateTab stays on; splits stay fail-closed. Hierarchical close
+        // is admitted while a product window exists (last tab/pane peels to
+        // CloseWindow), so close chrome must be shown.
         let shell = seyal_app_shell(view.pane.appHandle)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
-        for bit in [
-            SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING,
-            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
-            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
-        ] {
-            XCTAssertEqual(shell.flags & UInt16(bit), 0)
-        }
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
+        XCTAssertEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
         let newTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-new-tab"))
         XCTAssertFalse(newTab.isHidden, "seyal-new-tab is shown when Rust allows CreateTab")
-        for identifier in [
-            "seyal-close-tab", "seyal-split-right", "seyal-split-down",
-            "seyal-close-pane",
-        ] {
+        for identifier in ["seyal-close-tab", "seyal-close-pane"] {
+            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
+            XCTAssertFalse(control.isHidden, "\(identifier) is shown when Rust allows hierarchical close")
+        }
+        for identifier in ["seyal-split-right", "seyal-split-down"] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
         }
