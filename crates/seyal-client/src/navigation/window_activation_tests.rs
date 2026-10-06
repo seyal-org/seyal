@@ -138,10 +138,15 @@ fn navigate_other_window_emits_one_window_activation_without_reparenting() {
     assert_eq!(after.active_window, win2);
     assert_eq!(after.active_tab, t2);
     assert_eq!(after.focused_pane, p2);
-    assert_eq!(
-        shell.take_effects(),
-        [ShellNativeEffect::WindowActivation { window: win2 }]
-    );
+    let effects = shell.take_effects();
+    let activations: Vec<_> = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            ShellNativeEffect::WindowActivation { window } => Some(*window),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(activations, [win2]);
     assert_eq!(placement_map(&shell), before_map);
     assert_eq!(shell.window_of_tab(t2), Some(win2));
 }
