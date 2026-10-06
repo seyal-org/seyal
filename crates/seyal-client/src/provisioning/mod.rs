@@ -204,6 +204,17 @@ impl ProvisioningSession {
         pane: PaneId,
         execution: ExecutionId,
     ) -> Result<Vec<ProvisioningEffect>, ProvisioningFailure> {
+        if self.pending_by_key.values().any(|intent| {
+            matches!(
+                intent.phase,
+                IntentPhase::Disposing {
+                    execution: pending,
+                    ..
+                } if pending == execution
+            )
+        }) {
+            return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
+        }
         self.unreferenced.insert(execution);
         let owner = self.claim_connection(pane);
         let request_id = self.allocate_request_id()?;
