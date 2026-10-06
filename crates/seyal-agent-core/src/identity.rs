@@ -54,6 +54,7 @@ define_id!(RunWorkingSetId, 0x4147_5257_5345_5401);
 define_id!(ContinuationPlanId, 0x4147_4350_4c41_4e01);
 define_id!(RevocationEventId, 0x4147_5256_4b45_5601);
 define_id!(ContextBundleId, 0x4147_4358_424e_4401);
+define_id!(ActionId, 0x4147_4143_544e_4901);
 
 fn unique_id(domain: u64) -> u128 {
     let sequence = NEXT_ID

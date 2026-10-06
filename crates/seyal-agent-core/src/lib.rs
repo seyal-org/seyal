@@ -6,6 +6,7 @@
 //!
 //! `ControlGeneration` is the client control epoch (SPEC-026 O1 / §8.3).
 
+pub mod action;
 mod client_control;
 mod domain;
 mod evaluation;
@@ -19,6 +20,11 @@ mod restore;
 pub mod routing;
 mod transitions;
 
+pub use action::{
+    action_intent_digest, material_fields_changed, ActionIntent, ActionIntentError,
+    ActionLifecycle, ArgumentFingerprint, AuthorizationClass, CapabilityRef, EffectClass,
+    ExecutorCapabilityRef, PrivacyDependencyId, RequestProvenance, ResourceIdentity,
+};
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
 pub use evaluation::*;
@@ -27,10 +33,11 @@ pub use execution_host::{
     LaunchDescriptor,
 };
 pub use identity::{
-    AdapterId, AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ContextBundleId, ContinuationPlanId, ControlGeneration, MemoryId,
-    PlanGeneration, RecordGeneration, RevocationEventId, RevocationGeneration, RouteOfferingId,
-    RunWorkingSetId, ScopePolicyGeneration, WorkItemId, WorkScopeId, WorkingSetGeneration,
+    ActionId, AdapterId, AgentRunId, AttemptId, BackendInstanceId, BindingGeneration,
+    ClientPrincipalId, ClientSessionId, ContextBundleId, ContinuationPlanId, ControlGeneration,
+    MemoryId, PlanGeneration, RecordGeneration, RevocationEventId, RevocationGeneration,
+    RouteOfferingId, RunWorkingSetId, ScopePolicyGeneration, WorkItemId, WorkScopeId,
+    WorkingSetGeneration,
 };
 pub use lifecycle::{
     codes, AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,

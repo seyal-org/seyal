@@ -39,6 +39,10 @@ GUI detach and runtime survival are separate from crash recovery, scrollback per
 
 M005 Local Context Engine discovery/index and ContextBundle/SelectionTrace assembly live in `seyal-agent-context` (agent domain), not on the terminal hot path. See the [Local Context Engine](./local-context-engine.md) developer page and ADR-013 / SPEC-013 for authority.
 
+## ActionIntent
+
+Durable `ActionId` / immutable `ActionIntent` preparation lives in agent-domain crates (`seyal-agent-core`, `seyal-agent-store`, `IntegrationService::prepare_action`). See [ACTION-INTENT.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-INTENT.md). Dispatch fencing and approval consumption are sibling slices. This path never gates PTY/VT/Metal.
+
 ## OSS and commercial boundary
 
 ```text
