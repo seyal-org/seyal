@@ -455,6 +455,14 @@ impl ApplicationRoot {
             self.pending_effects.push(native);
         }
     }
+
+    pub(crate) fn window_encode_key(&self) -> (u64, u16, u64) {
+        (
+            self.snapshot_generation,
+            self.pending_effects.len() as u16,
+            self.shell.containment_generation(),
+        )
+    }
 }
 
 #[cfg(target_os = "macos")]
