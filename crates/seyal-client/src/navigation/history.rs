@@ -255,7 +255,8 @@ pub fn matches_destroyed_tab(target: &ResourceAddress, tab: TabId) -> bool {
 
 /// Predicate: entry addresses any Pane of a destroyed Workspace.
 /// No M003 workspace-destroy product path exists yet; tests and R6.7 keep this helper.
-pub fn matches_destroyed_workspace(target: &ResourceAddress, workspace: WorkspaceId) -> bool {
+#[cfg(test)]
+fn matches_destroyed_workspace(target: &ResourceAddress, workspace: WorkspaceId) -> bool {
     match target {
         ResourceAddress::Pane { workspace: w, .. }
         | ResourceAddress::Tab { workspace: w, .. }
