@@ -43,6 +43,10 @@ M005 Local Context Engine discovery/index and ContextBundle/SelectionTrace assem
 
 Durable `ActionId` / immutable `ActionIntent` preparation lives in agent-domain crates (`seyal-agent-core`, `seyal-agent-store`, `IntegrationService::prepare_action`). See [ACTION-INTENT.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-INTENT.md). Repeated Action persist failure pauses affected Action work (`PersistHealth::Paused`) without gating PTY/VT/Metal; see [ACTION-PERSIST-PAUSE.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-PERSIST-PAUSE.md). Dispatch fencing and approval consumption are sibling slices.
 
+## Attention chrome
+
+Exact-target Attention stack, badges, and OS-notification **eligibility** live in `seyal-agent-core` and project the Attention store (#1306). Reveal-and-focus uses SPEC-022 `ResourceAddress` in `seyal-client`. The macOS host only adapts OS notification APIs (ADR-015). See [ATTENTION-CHROME.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ATTENTION-CHROME.md). Approval decision recording is sibling #1308.
+
 ## OSS and commercial boundary
 
 ```text

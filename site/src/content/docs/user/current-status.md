@@ -27,6 +27,7 @@ As implementation lands, this section will expand into guides for:
 - SSH and remote execution,
 - persistent/detached execution,
 - agent workflows and approvals,
+- Attention Stack / badges (Agent Backend Attention store is canonical; opening an item jumps to its ResourceAddress when present, otherwise the item is retained; OS banners do not approve or dismiss canonical Attention; workspace badges do not reorder workspaces; richer headed stack chrome is still expanding),
 - accessibility and keyboard control,
 - troubleshooting and diagnostics.
 
