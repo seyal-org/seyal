@@ -393,18 +393,34 @@ fn item18_cmd_shift_enter_matches_zoom_toggle_zero_pty() {
 }
 
 #[test]
-fn item18_focus_and_equalize_builtins_wait() {
-    // R5.1.3: no dead focus/equalize builtins before their verbs land.
+fn item18_cmd_opt_arrows_match_focus_ids_zero_pty() {
     let table = load_keybinding_table(None);
-    assert_eq!(
-        route(&table, "cmd+opt+left", raw_ctx(), false),
-        RouteOutcome::UnmatchedCommand
-    );
-    assert_eq!(
-        route(&table, "cmd+opt+right", raw_ctx(), false),
-        RouteOutcome::UnmatchedCommand
-    );
-    assert!(WorkspaceCommandId::parse("pane.focus_left").is_none());
+    for (keys, id) in [
+        ("cmd+opt+left", WorkspaceCommandId::PaneFocusLeft),
+        ("cmd+opt+right", WorkspaceCommandId::PaneFocusRight),
+        ("cmd+opt+up", WorkspaceCommandId::PaneFocusUp),
+        ("cmd+opt+down", WorkspaceCommandId::PaneFocusDown),
+    ] {
+        let matched = route(&table, keys, raw_ctx(), false);
+        assert!(
+            matches!(
+                matched,
+                RouteOutcome::Matched {
+                    command: WorkspaceCommand {
+                        id: matched_id,
+                        ordinal: None,
+                    }
+                } if matched_id == id
+            ),
+            "{keys} → {id:?}: {matched:?}"
+        );
+        assert!(!matched.writes_pty_bytes());
+    }
+}
+
+#[test]
+fn item18_equalize_catalog_waits_for_pt4() {
+    // R5.1.3: no dead equalize ids before PT4/#928.
     assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
     assert!(WorkspaceCommandId::parse("pane.equalize_tab").is_none());
 }

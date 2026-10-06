@@ -118,6 +118,10 @@ impl ApplicationRoot {
             }
             WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
             WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),
+            WorkspaceCommandId::PaneFocusLeft => self.focus_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneFocusRight => self.focus_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneFocusUp => self.focus_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneFocusDown => self.focus_direction(FocusDirection::Down),
             WorkspaceCommandId::PaneZoomToggle => self.zoom_toggle_focused(),
             WorkspaceCommandId::PaneSwapLeft => self.swap_focused_direction(FocusDirection::Left),
             WorkspaceCommandId::PaneSwapRight => self.swap_focused_direction(FocusDirection::Right),

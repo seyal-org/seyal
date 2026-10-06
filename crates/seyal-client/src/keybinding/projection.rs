@@ -57,6 +57,10 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneFocusLeft
+        | WorkspaceCommandId::PaneFocusRight
+        | WorkspaceCommandId::PaneFocusUp
+        | WorkspaceCommandId::PaneFocusDown
         | WorkspaceCommandId::PaneZoomToggle
         | WorkspaceCommandId::PaneSwapLeft
         | WorkspaceCommandId::PaneSwapRight
@@ -256,6 +260,10 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::PaneMoveRight => 28,
         WorkspaceCommandId::PaneMoveUp => 29,
         WorkspaceCommandId::PaneMoveDown => 30,
+        WorkspaceCommandId::PaneFocusLeft => 31,
+        WorkspaceCommandId::PaneFocusRight => 32,
+        WorkspaceCommandId::PaneFocusUp => 33,
+        WorkspaceCommandId::PaneFocusDown => 34,
     }
 }
 
@@ -292,6 +300,10 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         28 => WorkspaceCommandId::PaneMoveRight,
         29 => WorkspaceCommandId::PaneMoveUp,
         30 => WorkspaceCommandId::PaneMoveDown,
+        31 => WorkspaceCommandId::PaneFocusLeft,
+        32 => WorkspaceCommandId::PaneFocusRight,
+        33 => WorkspaceCommandId::PaneFocusUp,
+        34 => WorkspaceCommandId::PaneFocusDown,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

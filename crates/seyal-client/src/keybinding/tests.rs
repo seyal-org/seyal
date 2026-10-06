@@ -211,7 +211,7 @@ action = "window.new"
 
 [[keybindings]]
 keys = "cmd+opt+left"
-action = "pane.focus_left"
+action = "pane.equalize_focused"
 
 [[keybindings]]
 keys = "cmd+["
@@ -400,7 +400,7 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
-    // §5.1 / K7 (#1145): zoom builtin admitted; focus waits for #1150; equalize for PT4.
+    // §5.1 / K7: zoom + directional focus builtins; equalize waits for PT4/#928.
     let zoom = binding_for(
         &table,
         "cmd+shift+enter",
@@ -408,7 +408,9 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     )
     .expect("cmd+shift+enter pane.zoom_toggle");
     assert_eq!(zoom.context, BindingContext::APP);
-    assert!(contexts_for(&table, "cmd+opt+left").is_empty());
+    let focus_left = binding_for(&table, "cmd+opt+left", WorkspaceCommandId::PaneFocusLeft)
+        .expect("cmd+opt+left pane.focus_left");
+    assert_eq!(focus_left.context, BindingContext::APP);
     assert!(
         WorkspaceCommandId::parse("pane.equalize_focused").is_none(),
         "no dead equalize catalog id before PT4/#928"
