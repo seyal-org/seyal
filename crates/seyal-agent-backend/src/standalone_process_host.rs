@@ -865,14 +865,7 @@ mod tests {
         let HostStartOutcome::Started(handle) = host.start(
             run,
             generation,
-            descriptor(
-                "/usr/bin/env",
-                [
-                    "python3",
-                    "-c",
-                    "import os,sys,time; sys.stdout.close(); os.close(1); time.sleep(0.8)",
-                ],
-            ),
+            descriptor("/bin/sh", ["-c", "exec 1>&-; sleep 0.8"]),
         ) else {
             panic!("expected spawn");
         };
