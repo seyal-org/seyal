@@ -191,11 +191,11 @@ extension MetalTerminalRenderer {
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         if presentationPlan.drawsFullGridBackground {
-            pass.colorAttachments[0].clearColor = MTLClearColor(
-                red: 0.043,
-                green: 0.051,
-                blue: 0.063,
-                alpha: 1
+            // Raw/TUI full-grid clear must follow Rust Canvas (same uniform as
+            // default cell backgrounds). Hardcoded dark RGB left light chrome
+            // with a black terminal pane (#1062).
+            pass.colorAttachments[0].clearColor = metalClearColor(
+                fromPackedRGBA: defaultTerminalColors.y
             )
         } else {
             pass.colorAttachments[0].clearColor = MTLClearColor(
@@ -445,6 +445,16 @@ func resolveTerminalColor(_ packed: UInt32, defaultRGBA: UInt32) -> UInt32 {
         return indexedColor(UInt8(packed & 0xff))
     }
     return defaultRGBA
+}
+
+/// Unpack Metal little-byte RGBA (`packRGBA` / theme-seeded defaults) for clears.
+func metalClearColor(fromPackedRGBA packed: UInt32) -> MTLClearColor {
+    MTLClearColor(
+        red: Double(packed & 0xff) / 255.0,
+        green: Double((packed >> 8) & 0xff) / 255.0,
+        blue: Double((packed >> 16) & 0xff) / 255.0,
+        alpha: Double((packed >> 24) & 0xff) / 255.0
+    )
 }
 
 func indexedColor(_ index: UInt8) -> UInt32 {

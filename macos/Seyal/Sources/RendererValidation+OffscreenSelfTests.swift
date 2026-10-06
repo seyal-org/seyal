@@ -55,6 +55,63 @@ extension RendererValidation {
         }
     }
 
+    /// #1062: Raw/TUI full-grid clear uses Rust Canvas, not a hardcoded dark RGB.
+    static func fullGridClearFollowsThemeOffscreenSelfTest() -> Bool {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        do {
+            let renderer = try MetalTerminalRenderer(device: device)
+            renderer.setPresentationPlan(.fullPane(.raw))
+            var damage = DamageMask()
+            damage.mark(row: 0)
+            // Empty/default cell so the sample corner is clear-fill, not glyph coverage.
+            let cells = [preparedCell()]
+            guard try cells.withUnsafeBufferPointer({ buffer in
+                try renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: buffer,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        fullRebuild: true,
+                        damage: damage
+                    ),
+                    backingScale: 1
+                ) == .updated
+            }) else { return false }
+            let size = renderer.cellPixelSize(backingScale: 1)
+            let lightBg = packRGBA(red: 252, green: 252, blue: 250)
+            renderer.setDefaultTerminalColors(
+                foreground: packRGBA(red: 28, green: 32, blue: 38),
+                background: lightBg
+            )
+            // Wider than one cell: the right half is only the clear color.
+            guard let light = renderer.renderOffscreenAndWait(
+                width: size.width * 2,
+                height: size.height
+            ) else { return false }
+            let lightClearMatches = pixelMatches(
+                light, x: size.width + size.width / 2, y: size.height / 2,
+                red: 252, green: 252, blue: 250
+            )
+            guard lightClearMatches else { return false }
+
+            renderer.setDefaultTerminalColors(
+                foreground: packRGBA(red: 231, green: 234, blue: 240),
+                background: packRGBA(red: 10, green: 14, blue: 20)
+            )
+            guard let dark = renderer.renderOffscreenAndWait(
+                width: size.width * 2,
+                height: size.height
+            ) else { return false }
+            return pixelMatches(
+                dark, x: size.width + size.width / 2, y: size.height / 2,
+                red: 10, green: 14, blue: 20
+            )
+        } catch {
+            return false
+        }
+    }
+
     static func wideGraphemeOffscreenSelfTest() -> Bool {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
         do {
