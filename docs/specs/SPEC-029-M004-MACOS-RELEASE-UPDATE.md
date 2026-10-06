@@ -264,7 +264,12 @@ Rules:
   `Detached`/`Goodbye` acknowledgement.
 - Every Sparkle install and relaunch path — manual, install on quit, and
   Sparkle's own reminder after a long-staged update — is subject to the Rust
-  decision. No Sparkle path may install or relaunch without it (proved by G3).
+  decision. No Sparkle path may install or relaunch without it.
+- G3 (Apple Development stub): no Sparkle window. `Dismiss` before download
+  held version. `Dismiss` after extraction installed on quit.
+  `willInstallUpdateOnQuit` was not a cancel point after the cycle finished.
+  Required hold replies: refuse-before-download, or Sparkle `Skip`.
+  Production must not use `Dismiss` as the hold.
 
 ## 9. Runtime generation replacement
 
@@ -368,9 +373,9 @@ secrets, private keys or credentials.
 | Network attacker modifies feed | `Failed(feed_signature)`; nothing downloaded |
 | Feed host serves an older validly signed feed (freeze/replay) | no newer item offered; no downgrade (residual risk, ADR-022) |
 | Archive modified, truncated or re-signed by another key | `Failed(archive_signature)` before extraction |
-| Extracted app has different Team, entitlements or broken signature | `Failed(code_identity)`; nothing installed |
+| Extracted app has different Team, entitlements or broken signature | Host `Skip` or `Failed(code_identity)`; nothing installed. G5: Sparkle EdDSA alone installed an ad-hoc foreign archive; Team continuity is the host Skip, not Sparkle. |
 | Item advertises lower/equal sequence | never offered |
-| EdDSA-valid archive signed by a different Team | behavior measured by G5; ADR-022 §2 decides 2-of-2 vs documented 1-of-2 |
+| EdDSA-valid archive signed by a different Team | Sparkle accepts (G5, 1-of-2). Required host `Skip` holds install. Missed Skip is the residual. |
 | Updater attempts writes outside I1 | detected by the I2 check in every G6 case; any violation fails the release |
 | Secrets in artifacts | release record, feed, bundle and logs scanned; any private key material fails the release |
 
@@ -437,7 +442,7 @@ Runtime state is as listed.
 | M11 | Invalid feed signature persisting past 20 simulated days | remains `Failed(feed_signature)`; bounded backoff; no update presented |
 | M12 | Invalid EdDSA archive signature | `Failed(archive_signature)` before extraction |
 | M13 | Truncated download; single flipped DMG byte | `Failed(network)` / `Failed(archive_signature)`; staged file discarded |
-| M14 | EdDSA-valid archive, different Team ID | G5 result recorded; release posture per ADR-022 §2 |
+| M14 | EdDSA-valid archive, different Team ID | Sparkle would install (G5). Host Skip required; version unchanged through quit. |
 | M15 | Disk full (small APFS image) during download and during install | `Failed(disk)`; old app valid |
 | M16 | App in a non-writable location; non-admin user with `/Applications` | `Failed(permission)` or transient authorization prompt; old app valid; no privileged helper installed |
 | M17 | Item with lower or equal sequence | never offered |
@@ -464,19 +469,22 @@ Run on an isolated non-mergeable branch with a throwaway EdDSA key and
 keychain, a test signing identity (Developer ID preferred; Apple Development
 results are labelled as such), and a throwaway HTTPS feed. No production keys.
 
-- **G2 Resident-Runtime survival:** matrix row M1 with a live shell, `vim`
-  and sustained high output; confirm the same Runtime PID, no `CODESIGNING`
-  kill in the unified log, the old bundle deleted, executions healthy for
-  ≥ 2 h including forced cold page-ins; record the new GUI's attach result
-  against current hello behavior.
-- **G3 Rust-gated install:** a custom `SPUUserDriver` and delegate prove that
-  every install and relaunch path (§8) can be deferred or blocked by host
-  policy, that no Sparkle-owned window appears, and that Sparkle-persisted
-  preferences can be driven from Rust state without divergence.
-- **G4 Signed compatibility metadata:** `seyal:` elements (§6) are readable
-  before download, and tampering with them breaks signed-feed validation.
-- **G5 Trust semantics:** matrix row M14; whether any pre-install hook can
-  enforce Team continuity; EdDSA rotation through a Developer ID-signed DMG.
+- **G2 Resident-Runtime survival:** **Pass with soak gap.** Isolated stub,
+  Apple Development, ~15.5 min: same Runtime PID after v100→v101, helper
+  unlinked (`nlink=0`), no `CODESIGNING` kill, current-master hello attached
+  without a second Runtime. The ≥ 2 h cold page-in soak remains an M1/#677
+  gate.
+- **G3 Rust-gated install:** **Pass with required reply.** Custom
+  `SPUUserDriver` + delegate; `windows=none`. Holds: refuse-before-download
+  and `Skip`. `Dismiss` after extraction does not hold quit-install.
+- **G4 Signed compatibility metadata:** **Pass.** `seyal:compatibility`
+  visible before download; 2-byte tamper → signed-feed error 1000, no
+  download.
+- **G5 Trust semantics:** **Pass, Sparkle 1-of-2.** EdDSA-valid ad-hoc
+  foreign archive installed when Team gate off; host Skip held when on.
+  In-place EdDSA rotation while the old key was still held worked (A signs
+  v101 embedding B; B signs v102). Lost-key Developer ID fallback
+  **blocked** (no Developer ID); Apple Development lost-key rejected 4005.
 
 ### 18.2 #677 acceptance gates
 

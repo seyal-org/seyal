@@ -2,10 +2,11 @@
 
 - **Status:** Proposed. Not normative until a docs-only Architecture PR is
   merged by a non-author maintainer under #688. An author or agent comment is
-  not that acceptance. Decision-critical prototype evidence G2–G5
-  ([SPEC-029](../specs/SPEC-029-M004-MACOS-RELEASE-UPDATE.md) §18.1) is
-  pending; a contradicting result triggers the reopen conditions before
-  acceptance.
+  not that acceptance. Decision-critical prototype G2–G5 ran on isolated
+  `spike/688-sparkle-proto` (Apple Development only; evidence
+  `spike/688-sparkle/M004-688-SPARKLE-SPIKE-EVIDENCE.md`). A contradicting
+  Developer ID rerun of G5's lost-key case, or a Sparkle version change,
+  triggers the reopen conditions before acceptance.
 - **Date:** 2026-10-05
 - **Issue:** #688 (spike) — parent epic #666, consumer #677, area owner #648
 - **Numbering:** `master` ends at ADR-021; no open PR claims ADR-022 or
@@ -134,16 +135,17 @@ Linux/Windows; telemetry; bit-for-bit reproducible signed artifacts.
    same Team preserves both.
 2. **Sparkle EdDSA (Ed25519) key**, distinct from the Apple identity. Its
    public half is committed as `SUPublicEDKey`.
-3. **Effective authority is stated honestly.** Sparkle permits an update to
-   change either the Apple signing certificate or the EdDSA key, not both.
-   This ADR therefore claims no more than **1-of-2** authority: either root,
-   alone, may be able to authorize an update. Both roots are **tier-0
-   secrets**. Prototype G5 measures the exact behavior under §4's
-   configuration (signed feed required, failure expiry `0`): whether an
-   EdDSA-valid archive with a different Team ID is accepted, and whether a
-   Developer ID-only update can reach a client at all. If G5 finds a
-   pre-install hook that can enforce Team-ID continuity, Seyal adopts 2-of-2;
-   otherwise the 1-of-2 residual risk is accepted and documented.
+3. **Effective Sparkle authority is 1-of-2.** G5 (Apple Development host,
+   ad-hoc foreign archive, `SUVerifyUpdateBeforeExtraction=YES`) installed
+   an EdDSA-valid archive whose code-signing identity differed from the
+   running app. Sparkle does not require matching Team ID once EdDSA
+   verifies. Both roots remain **tier-0 secrets**. **Seyal's required host
+   check** at `showReady` replies Sparkle `Skip` when Team ID / designated
+   requirement does not match, which held install through quit in G3/G5.
+   That is product-level 2-of-2 only while the host check runs; a missed
+   Skip falls back to Sparkle 1-of-2. Lost-key Developer ID rotation was
+   **not** measured (no Developer ID on the prototype host); the Apple
+   Development lost-key attempt was rejected (`SUSparkleErrorDomain` 4005).
 4. **Tier-1 credentials** cannot authorize code alone: the notary API key and
    GitHub Release / Pages publication rights.
 5. The **signed feed** protects metadata integrity; HTTPS is transport only.
@@ -233,11 +235,18 @@ Seyal.app/
    second launch (Sparkle's default) is realized by Rust-owned UX.
 2. **Verify and download.** Verify the signed feed → filter items by
    compatibility metadata and Rust policy → download to Sparkle's staging
-   cache → EdDSA-verify before extraction → check the Apple code signature and
-   Team of the extracted app.
+   cache → EdDSA-verify before extraction. G4: a `seyal:` appcast element is
+   visible before `willDownloadUpdate`; tampering fails signed-feed
+   validation (`SUSparkleErrorDomain` 1000). Sparkle EdDSA does not by
+   itself reject a different Team ID (G5).
 3. **Install only at a Rust-approved safe point:** explicit "Restart to
    update", or user-opted install on quit. GUI exit for install uses the
-   ADR-018 §4 bounded quit/detach sequence; never `kill`.
+   ADR-018 §4 bounded quit/detach sequence; never `kill`. G3: a custom
+   `SPUUserDriver` showed no Sparkle window. Holding replies are
+   refuse-before-download and Sparkle `Skip`. `Dismiss` after extraction
+   still installs on quit; `willInstallUpdateOnQuit` is not a cancel point
+   once the cycle has finished. Production must never use `Dismiss` as the
+   hold. Team-continuity Skip is mandatory before install.
 4. **Framework-managed swap.** After install either the old valid app or the
    new valid app is selected; never a half-valid bundle.
 5. **Updater write authority** is limited to its staging cache (keyed by the
@@ -251,8 +260,10 @@ Seyal.app/
 - An app update updates the GUI. It never claims to update, hand off or
   resurrect a live Runtime or PTY (ADR-007 P1/P5; SPEC-003 §4).
 - The old resident Runtime keeps running from its own, now unlinked,
-  executable. The new GUI attaches only through negotiated hello
-  compatibility.
+  executable. G2 (Apple Development stub, ~15.5 min soak, not the 2 h
+  target): same Runtime PID after v100→v101, helper `nlink=0`, no
+  `CODESIGNING` kill, current-master hello attached without spawning a
+  second Runtime. This does not claim a live-PTY handoff protocol.
 - **Runtime generation replacement** is the SPEC-003 §16 controlled shutdown,
   after which the new GUI launches the new bundled helper (SPEC-009 §8.1.1).
   It is automatic only with zero live executions and no other attachments;
@@ -403,7 +414,11 @@ below say when it is reconsidered.
 
 ## Residual risks
 
-- **1-of-2 trust roots** (§2 item 3) unless G5 enables 2-of-2.
+- **Sparkle 1-of-2 trust roots** (§2 item 3). Host Team-continuity `Skip`
+  is the only measured 2-of-2 install gate; it is not Sparkle's default.
+- **G2 soak incomplete:** Runtime survival was sampled at ~15.5 min, not
+  ≥ 2 h with forced cold page-ins. G6/M1 on Developer ID still required.
+- **G5 lost-key Developer ID rotation unmeasured.**
 - **Feed freeze/replay** of an older validly signed feed hides newer updates.
 - **Third-party updater surface.** Sparkle has an active advisory history,
   concentrated in delta, XPC and privileged paths that this ADR excludes. The
@@ -417,9 +432,10 @@ below say when it is reconsidered.
 Required test classes, the adversarial state matrix and measurement fields are
 in SPEC-029 §17–§18.
 
-- **Decision-critical (before #688 closes):** G2 resident-Runtime survival
-  across install, G3 Rust-gated install on every install/relaunch path, G4
-  signed `seyal:` metadata readable before download, G5 trust semantics.
+- **Decision-critical G2–G5:** recorded on `spike/688-sparkle-proto`
+  (Apple Development). Gaps: 2 h soak, Developer ID / notarization, HTTPS
+  feed trust without interactive cert prompt. Attach that evidence to the
+  ADR PR; do not treat the stub harness as #677.
 - **#677 acceptance gates:** G6 failure injection, G7 measurements, G8
   notarization dry run, G9 reproducibility probe, and the full RC adversarial
   matrix on the exact RC SHA.
