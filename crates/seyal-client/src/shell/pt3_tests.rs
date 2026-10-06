@@ -2,7 +2,7 @@
 //!
 //! Kept as a `_tests` sibling so the shell suite stays under hard_loc.
 
-use super::focus_direction::is_geometric_neighbor;
+use super::focus_direction::{geometric_neighbor, is_geometric_neighbor};
 use super::*;
 use seyal_core::WindowId;
 
@@ -331,6 +331,96 @@ fn spec025_p7_directional_focus_neighbor_or_reject() {
                     }
                     Err(other) => panic!("unexpected rejection: {other:?}"),
                 }
+            }
+        }
+    }
+}
+
+/// Nested `Split(Right, Split(Right, A, A2), B)` — the f32 shared-edge miss.
+fn seed_nested_right() -> (ShellState, PaneId, PaneId, PaneId) {
+    let mut shell = seed_two_workspaces();
+    let a = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("A | B");
+    let b = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::FocusPane { id: a })
+        .expect("focus A");
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("A | A2 | B");
+    let a2 = shell.snapshot().focused_pane;
+    (shell, a, a2, b)
+}
+
+#[test]
+fn nested_non_dyadic_ratios_share_the_inner_right_edge() {
+    let (mut shell, a, a2, b) = seed_nested_right();
+    let root = SplitRatio::from_fraction(0.10).expect("0.10");
+    let inner = SplitRatio::from_fraction(0.475).expect("0.475");
+    shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: a,
+            ratio: inner,
+        })
+        .expect("inner 0.475");
+    shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: a2,
+            ratio: root,
+        })
+        .expect("root 0.10");
+    shell
+        .apply(ShellAction::FocusPane { id: a2 })
+        .expect("focus A2");
+    shell
+        .apply(ShellAction::FocusDirection {
+            direction: FocusDirection::Right,
+        })
+        .expect("A2 → Right must reach B under nested non-dyadic ratios");
+    assert_eq!(shell.snapshot().focused_pane, b);
+}
+
+#[test]
+fn nested_ratio_sweep_right_from_inner_leaf_never_misses_outer_neighbor() {
+    let ratios: Vec<SplitRatio> = (4..=36)
+        .filter_map(|i| SplitRatio::from_fraction(i as f32 * 0.025))
+        .collect();
+    assert!(ratios.len() >= 30, "0.025 grid over MIN..=MAX");
+
+    for &root in &ratios {
+        for &inner in &ratios {
+            let (mut shell, a, a2, b) = seed_nested_right();
+            shell
+                .apply(ShellAction::SetSplitRatio {
+                    pane: a,
+                    ratio: inner,
+                })
+                .expect("inner");
+            shell
+                .apply(ShellAction::SetSplitRatio {
+                    pane: a2,
+                    ratio: root,
+                })
+                .expect("root");
+            shell
+                .apply(ShellAction::FocusPane { id: a2 })
+                .expect("focus A2");
+            let tree = shell.snapshot().tree.clone();
+            let expected = geometric_neighbor(&tree, a2, FocusDirection::Right);
+            assert_eq!(expected, Some(b), "A2 must share its right edge with B");
+            match shell.apply(ShellAction::FocusDirection {
+                direction: FocusDirection::Right,
+            }) {
+                Ok(()) => assert_eq!(shell.snapshot().focused_pane, b),
+                Err(error) => panic!("geometric neighbor exists but action rejected: {error:?}"),
             }
         }
     }
