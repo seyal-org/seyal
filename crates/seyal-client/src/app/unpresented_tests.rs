@@ -151,11 +151,9 @@ fn palette_terminate_dispatches_typed_action() {
         address: None,
     })
     .unwrap();
-    assert!(
-        !product_effects(&root)
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. }))
-    );
+    assert!(!product_effects(&root)
+        .iter()
+        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
     assert!(matches!(
         root.pending_wire_effects(),
         [ProvisioningEffect::AttachController { execution: parked, .. }]
