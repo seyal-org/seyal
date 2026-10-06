@@ -36,7 +36,7 @@ pub use encode::{
     RESOURCE_ADDRESS_MAX_PAYLOAD,
 };
 pub use history::{
-    matches_destroyed_pane, matches_destroyed_tab, matches_destroyed_workspace, FocusHistory,
+    matches_destroyed_pane, matches_destroyed_tab, FocusHistory,
     FocusHistoryEntry, FocusSeq, FOCUS_HISTORY_CAPACITY,
 };
 pub use resolve::{
