@@ -374,6 +374,66 @@ fn item19_palette_open_rejects_cmd_t_match_and_menu_invoke() {
     ));
 }
 
+// --- §14 item 18: ADR-021 zoom/swap/move bindings (K7 / #1145) ---
+
+#[test]
+fn item18_cmd_shift_enter_matches_zoom_toggle_zero_pty() {
+    let table = load_keybinding_table(None);
+    let matched = route(&table, "cmd+shift+enter", raw_ctx(), false);
+    assert!(matches!(
+        matched,
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::PaneZoomToggle,
+                ordinal: None,
+            }
+        }
+    ));
+    assert!(!matched.writes_pty_bytes());
+}
+
+#[test]
+fn item18_focus_and_equalize_builtins_wait() {
+    // R5.1.3: no dead focus/equalize builtins before their verbs land.
+    let table = load_keybinding_table(None);
+    assert_eq!(
+        route(&table, "cmd+opt+left", raw_ctx(), false),
+        RouteOutcome::UnmatchedCommand
+    );
+    assert_eq!(
+        route(&table, "cmd+opt+right", raw_ctx(), false),
+        RouteOutcome::UnmatchedCommand
+    );
+    assert!(WorkspaceCommandId::parse("pane.focus_left").is_none());
+    assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
+    assert!(WorkspaceCommandId::parse("pane.equalize_tab").is_none());
+}
+
+#[test]
+fn item18_swap_move_ids_parse_without_builtins() {
+    let table = load_keybinding_table(None);
+    for id in [
+        WorkspaceCommandId::PaneSwapLeft,
+        WorkspaceCommandId::PaneSwapRight,
+        WorkspaceCommandId::PaneSwapUp,
+        WorkspaceCommandId::PaneSwapDown,
+        WorkspaceCommandId::PaneMoveLeft,
+        WorkspaceCommandId::PaneMoveRight,
+        WorkspaceCommandId::PaneMoveUp,
+        WorkspaceCommandId::PaneMoveDown,
+    ] {
+        assert_eq!(WorkspaceCommandId::parse(id.as_str()), Some(id));
+    }
+    // §5.1: swap/move have no builtin chords.
+    assert!(binding_for_any(&table, "pane.swap_left").is_none());
+    assert!(binding_for_any(&table, "pane.move_right").is_none());
+}
+
+fn binding_for_any<'a>(table: &'a KeybindingTable, action: &str) -> Option<&'a CompiledBinding> {
+    let id = WorkspaceCommandId::parse(action)?;
+    table.bindings.iter().find(|b| b.action.id == id)
+}
+
 // --- §14 item 21: SPEC-022 navigation (goto.open + focus-history Back/Forward) ---
 
 #[test]

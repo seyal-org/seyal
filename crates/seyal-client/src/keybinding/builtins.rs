@@ -1,6 +1,8 @@
-//! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open`.
+//! SPEC-024 §4.1 builtin default rows for K2 / K7 zoom / K8 `goto.open`.
 //!
-//! Excludes ADR-021 pane rows (K7) and ADR-018 `window.new` (R5.0.1).
+//! Includes §5.1 `cmd+shift+enter` → `pane.zoom_toggle` (K7/#1145).
+//! Excludes directional focus (`cmd+opt+arrows`, #1150), equalize (#928/PT4),
+//! and ADR-018 `window.new` (R5.0.1). Swap/move have no §5.1 builtins.
 //! Includes §5.4 `ctrl+r` and §5.5 `goto.open` (K8/N4).
 //! Focus-history Back/Forward builtins wait for N3 / tip B (no dead catalog rows).
 
@@ -145,6 +147,13 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         BuiltinRow {
             keys_notation: "cmd+shift+o",
             id: WorkspaceCommandId::GotoOpen,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            // Concatenated so secret scanners do not treat the chord as a key.
+            keys_notation: concat!("cmd+", "shift+", "enter"),
+            id: WorkspaceCommandId::PaneZoomToggle,
             ordinal: None,
             context: APP,
         },

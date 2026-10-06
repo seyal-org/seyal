@@ -400,9 +400,19 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
-    // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
+    // §5.1 / K7 (#1145): zoom builtin admitted; focus waits for #1150; equalize for PT4.
+    let zoom = binding_for(
+        &table,
+        "cmd+shift+enter",
+        WorkspaceCommandId::PaneZoomToggle,
+    )
+    .expect("cmd+shift+enter pane.zoom_toggle");
+    assert_eq!(zoom.context, BindingContext::APP);
     assert!(contexts_for(&table, "cmd+opt+left").is_empty());
-    assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
+    assert!(
+        WorkspaceCommandId::parse("pane.equalize_focused").is_none(),
+        "no dead equalize catalog id before PT4/#928"
+    );
 
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());
