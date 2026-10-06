@@ -100,12 +100,7 @@ impl ApplicationRoot {
     /// the catalog entry until `TerminateExecutionResult`.
     pub(super) fn terminate_unpresented(&mut self, execution: ExecutionId) -> Result<(), AppError> {
         let workspace = self.shell.snapshot().active_workspace;
-        if !self
-            .shell
-            .live_unpresented(workspace)
-            .iter()
-            .any(|id| *id == execution)
-        {
+        if !self.shell.live_unpresented(workspace).contains(&execution) {
             return Err(AppError::ExecutionNotUnpresented);
         }
         let pane = self.shell.snapshot().focused_pane;

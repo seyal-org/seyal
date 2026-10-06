@@ -18,7 +18,7 @@ use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
-use crate::provisioning::{CreateOutcome, IntentPhase, ProvisioningEffect, ProvisioningFailure};
+use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
@@ -447,12 +447,12 @@ impl ApplicationRoot {
         };
         let pane = intent.pane;
         let disposed_execution = match intent.phase {
-            IntentPhase::Disposing { execution, .. }
-            | IntentPhase::Created { execution }
-            | IntentPhase::Attaching { execution }
-            | IntentPhase::Attached { execution, .. }
-            | IntentPhase::Bound { execution } => Some(execution),
-            IntentPhase::AwaitingCreate => None,
+            crate::provisioning::IntentPhase::Disposing { execution, .. }
+            | crate::provisioning::IntentPhase::Created { execution }
+            | crate::provisioning::IntentPhase::Attaching { execution }
+            | crate::provisioning::IntentPhase::Attached { execution, .. }
+            | crate::provisioning::IntentPhase::Bound { execution } => Some(execution),
+            crate::provisioning::IntentPhase::AwaitingCreate => None,
         };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
@@ -471,10 +471,10 @@ impl ApplicationRoot {
                 ProvisioningEffect::Detach { .. } => {
                     let _ = self.shell.release_execution(pane);
                     self.clear_authority_for_pane(pane);
-                    if matches!(outcome, TerminateOutcome::TerminationRequested) {
-                        if let Some(execution) = disposed_execution {
-                            let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
-                        }
+                    if matches!(outcome, TerminateOutcome::TerminationRequested)
+                        && let Some(execution) = disposed_execution
+                    {
+                        let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
                     }
                 }
                 other => {
