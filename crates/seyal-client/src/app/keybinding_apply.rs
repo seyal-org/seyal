@@ -149,8 +149,9 @@ impl ApplicationRoot {
             }
             // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
             WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
-            // N3 owns history actions; default catalog chords remain K8 (#1132).
-            // Custom TOML / FFI ids 19–20 dispatch through the Rust cursor seq.
+            // SPEC-024 §5.5 / K8: builtins cmd+[ / cmd+] and catalog ids dispatch
+            // N3 Back/Forward with FocusSeq from the committed cursor (R6.8).
+            // History ABI kinds remain 67/68 on the N6/W4a stack.
             WorkspaceCommandId::FocusHistoryBack => {
                 let observed = self
                     .focus_history

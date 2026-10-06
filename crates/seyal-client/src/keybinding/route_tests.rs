@@ -431,17 +431,27 @@ context = ["app"]
 }
 
 #[test]
-fn item21_cmd_bracket_focus_history_waits_for_n3() {
-    // SPEC-024 §14 item 21 / K8 review risk: no dead catalog entry before N3.
+fn item21_cmd_brackets_match_focus_history_back_and_forward() {
+    // SPEC-024 §14 item 21 / §5.5 history half (K8): cmd+[ / cmd+] match once N3 landed.
     let table = load_keybinding_table(None);
-    assert_eq!(
+    assert!(matches!(
         route(&table, "cmd+[", raw_ctx(), false),
-        RouteOutcome::UnmatchedCommand
-    );
-    assert_eq!(
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryBack,
+                ..
+            }
+        }
+    ));
+    assert!(matches!(
         route(&table, "cmd+]", raw_ctx(), false),
-        RouteOutcome::UnmatchedCommand
-    );
+        RouteOutcome::Matched {
+            command: WorkspaceCommand {
+                id: WorkspaceCommandId::FocusHistoryForward,
+                ..
+            }
+        }
+    ));
 }
 
 // --- §14 item 20: composer history-search ---

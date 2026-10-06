@@ -1,8 +1,7 @@
-//! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open`.
+//! SPEC-024 §4.1 builtin default rows for K2 / K8 navigation.
 //!
 //! Excludes ADR-021 pane rows (K7) and ADR-018 `window.new` (R5.0.1).
-//! Includes §5.4 `ctrl+r` and §5.5 `goto.open` (K8/N4).
-//! Focus-history Back/Forward builtins wait for N3 / tip B (no dead catalog rows).
+//! Includes §5.4 `ctrl+r` and §5.5 `focus_history.back` / `forward` / `goto.open`.
 
 use super::keys::parse_keys;
 use super::types::{
@@ -141,6 +140,18 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             id: WorkspaceCommandId::ComposerHistorySearchOpen,
             ordinal: None,
             context: COMPOSER,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+[",
+            id: WorkspaceCommandId::FocusHistoryBack,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+]",
+            id: WorkspaceCommandId::FocusHistoryForward,
+            ordinal: None,
+            context: APP,
         },
         BuiltinRow {
             keys_notation: "cmd+shift+o",
