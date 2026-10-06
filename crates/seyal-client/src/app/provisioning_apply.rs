@@ -18,7 +18,7 @@ use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
-use crate::provisioning::{CreateOutcome, IntentPhase, ProvisioningEffect, ProvisioningFailure};
+use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
@@ -447,12 +447,12 @@ impl ApplicationRoot {
         };
         let pane = intent.pane;
         let disposed_execution = match intent.phase {
-            IntentPhase::Disposing { execution, .. }
+            crate::provisioning::IntentPhase::Disposing { execution, .. }
             | IntentPhase::Created { execution }
             | IntentPhase::Attaching { execution }
             | IntentPhase::Attached { execution, .. }
             | IntentPhase::Bound { execution } => Some(execution),
-            IntentPhase::AwaitingCreate => None,
+            crate::provisioning::IntentPhase::AwaitingCreate => None,
         };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
