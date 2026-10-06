@@ -3,6 +3,7 @@ import XCTest
 @testable import Seyal
 
 /// SPEC-028 §12.17 / §8: OS adapter dismiss is presentation-only.
+@MainActor
 final class AttentionOsNotificationAdapterTests: XCTestCase {
     override func tearDown() {
         AttentionOsNotificationAdapter.qualificationSink = nil
