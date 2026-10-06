@@ -637,10 +637,6 @@ impl ShellState {
         {
             return Err(ShellError::UnknownPane);
         }
-        let previous_product = self
-            .workspace(self.active_workspace)
-            .ok()
-            .and_then(|item| item.active_window);
         self.active_workspace = workspace;
         self.last_active_workspace = workspace;
         let workspace_mut = self.workspace_mut(workspace)?;
@@ -648,11 +644,6 @@ impl ShellState {
         workspace_mut.active_tab_mut()?.focused = pane;
         self.focus_history.record(pane);
         self.last_error = None;
-        if let Some((_, window, _)) = self.find_tab_location(tab)
-            && previous_product != Some(window)
-        {
-            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
-        }
         Ok(())
     }
 
