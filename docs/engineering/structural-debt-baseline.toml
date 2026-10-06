@@ -77,7 +77,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented a
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1082
+ceiling_loc = 1083
 issue = 1158
 responsibility = "App quit/native-effect proofs stay with window seeds; #1158 keeps W4a QuitCleanupComplete ack ordering beside W3 OrderFront coalescing. C2 cases stay in tab_provisioning_tests.rs."
 
