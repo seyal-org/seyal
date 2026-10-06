@@ -77,7 +77,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1080
+ceiling_loc = 1090
 issue = 1123
 responsibility = "App quit/native-effect proofs stay with window seeds; #1123 drains bootstrap Realize/OrderFront before BoundedDetachThenTerminate and QuitCleanupComplete ack ordering, plus install_quit_fixture probe-detach evidence."
 
@@ -232,9 +232,9 @@ reason = "Palette fixture shells pass allows_window_creation=false for W4a admis
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 872
+acknowledged_loc = 881
 issue = 1123
-reason = "ShellState grows allows_window_creation admission for W4a (#1123) beside tab/pane policy; CreateWindow stays fail-closed until headed close."
+reason = "ShellState grows allows_window_creation admission for W4a (#1123) beside #1108 OrderFront from Navigate/commit_focus; CreateWindow stays fail-closed until headed close."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
