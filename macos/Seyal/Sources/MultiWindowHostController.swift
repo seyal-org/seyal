@@ -74,7 +74,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             {
                 break
             }
-            applyEffect(effect)
+            if !orderFrontIsSupersededByActivation(effect) {
+                applyEffect(effect)
+            }
             ackOneEffect()
             if let failed = pendingActivationFailure {
                 pendingActivationFailure = nil
@@ -82,6 +84,18 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             }
         }
         orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
+    }
+
+    /// Cross-window navigation publishes product focus and an OrderFront
+    /// projection before the retryable activation effect. Defer that raise
+    /// until activation succeeds so a bounded failure leaves AppKit on the
+    /// previous live host while Rust's committed focus remains authoritative.
+    private func orderFrontIsSupersededByActivation(_ effect: SeyalAppNativeEffect) -> Bool {
+        guard effect.kind == UInt16(SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY) else { return false }
+        let next = seyal_app_native_effect(appHandle, 1)
+        return next.kind == UInt16(SEYAL_APP_EFFECT_WINDOW_ACTIVATION)
+            && next.window_lo == effect.window_lo
+            && next.window_hi == effect.window_hi
     }
 
     private func applyEffect(_ effect: SeyalAppNativeEffect) {
