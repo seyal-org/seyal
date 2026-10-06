@@ -397,7 +397,7 @@ fn quit_freezes_and_emits_one_native_effect() {
 #[test]
 fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     let mut root = ApplicationRoot::new();
-    root.enable_window_creation_for_test();
+    root.shell.set_allows_window_creation_for_test(true);
     let workspace = root.snapshot().shell.active_workspace;
     let generation = root.snapshot().shell.containment_generation;
     root.apply_shell(crate::shell::ShellAction::CreateWindow {
