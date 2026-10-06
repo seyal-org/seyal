@@ -96,8 +96,10 @@ impl ApplicationRoot {
             .apply(ShellAction::CloseTab { id })
             .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
+        let workspace = self.shell.snapshot().active_workspace;
         let mut effects = Vec::new();
         for pane in removed {
+            let released = self.provisioning.recorded_execution(pane);
             let pane_effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
                 !pane_effects
@@ -107,6 +109,9 @@ impl ApplicationRoot {
             );
             effects.extend(pane_effects);
             self.clear_authority_for_pane(pane);
+            if let Some(execution) = released {
+                let _ = self.record_unpresented(execution, workspace);
+            }
         }
         let _ = self.dispatch_wire_effects(
             effects,
@@ -129,6 +134,7 @@ impl ApplicationRoot {
             .apply(ShellAction::ClosePane { id })
             .map_err(close_pane_error)?;
         if let Some((pane, execution)) = self.shell.take_released_execution() {
+            let workspace = self.shell.snapshot().active_workspace;
             let effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
                 self.provisioning.is_unreferenced(execution),
@@ -141,6 +147,7 @@ impl ApplicationRoot {
                 "closing a pane must not terminate a bound execution"
             );
             self.clear_authority_for_pane(pane);
+            let _ = self.record_unpresented(execution, workspace);
             let _ = self.dispatch_wire_effects(
                 effects,
                 WireDispatchContext {

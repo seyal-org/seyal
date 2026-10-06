@@ -40,6 +40,11 @@ fn adopt_keeps_execution_id_and_uses_fresh_attachment() {
     assert_eq!(snap.execution, Some(execution));
     assert_eq!(snap.attachment, Some(first_attachment));
     assert!(root.live_unpresented().is_empty());
+    assert_eq!(
+        root.provisioning().recorded_execution(snap.pane),
+        Some(execution),
+        "adopt must record the binding for P4 terminate / bound close"
+    );
 
     // Already bound: reject with typed AlreadyBound (invariant 4).
     assert_eq!(
