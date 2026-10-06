@@ -168,8 +168,8 @@ impl BindingContext {
 }
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
-/// Gated ids (window.*, equalize, directional focus) stay out until their typed
-/// actions land (R5.0.1 / R5.1.3). Zoom/swap/move and `goto.open` are admitted.
+/// Gated ids (window.*, equalize) stay out until their typed actions land
+/// (R5.0.1 / R5.1.3). K7 pane verbs and `goto.open` are admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -184,6 +184,11 @@ pub enum WorkspaceCommandId {
     PaneCloseFocused,
     PaneFocusNext,
     PaneFocusPrevious,
+    /// SPEC-024 §5.1 / K7 (#1150): directional focus (PT3 `FocusDirection`).
+    PaneFocusLeft,
+    PaneFocusRight,
+    PaneFocusUp,
+    PaneFocusDown,
     /// SPEC-024 §5.1 / K7 (#1145): zoom toggle (PT1 reducers).
     PaneZoomToggle,
     PaneSwapLeft,
@@ -221,6 +226,10 @@ impl WorkspaceCommandId {
             Self::PaneCloseFocused => "pane.close_focused",
             Self::PaneFocusNext => "pane.focus_next",
             Self::PaneFocusPrevious => "pane.focus_previous",
+            Self::PaneFocusLeft => "pane.focus_left",
+            Self::PaneFocusRight => "pane.focus_right",
+            Self::PaneFocusUp => "pane.focus_up",
+            Self::PaneFocusDown => "pane.focus_down",
             Self::PaneZoomToggle => "pane.zoom_toggle",
             Self::PaneSwapLeft => "pane.swap_left",
             Self::PaneSwapRight => "pane.swap_right",
@@ -257,6 +266,10 @@ impl WorkspaceCommandId {
             "pane.close_focused" => Self::PaneCloseFocused,
             "pane.focus_next" => Self::PaneFocusNext,
             "pane.focus_previous" => Self::PaneFocusPrevious,
+            "pane.focus_left" => Self::PaneFocusLeft,
+            "pane.focus_right" => Self::PaneFocusRight,
+            "pane.focus_up" => Self::PaneFocusUp,
+            "pane.focus_down" => Self::PaneFocusDown,
             "pane.zoom_toggle" => Self::PaneZoomToggle,
             "pane.swap_left" => Self::PaneSwapLeft,
             "pane.swap_right" => Self::PaneSwapRight,
