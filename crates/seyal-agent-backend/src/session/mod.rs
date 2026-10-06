@@ -5,6 +5,7 @@
 //! therefore rejects every session opened by the previous process.
 
 mod action_ops;
+mod approval_ops;
 mod frame_io;
 mod launch_resolution;
 mod lifecycle_ops;

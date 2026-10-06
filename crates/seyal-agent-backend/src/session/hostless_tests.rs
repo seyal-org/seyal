@@ -274,6 +274,72 @@ fn recover_action_does_not_start_a_host_and_never_retries_unknown_effects() {
 }
 
 #[test]
+fn approval_binding_seam_does_not_start_a_host() {
+    use seyal_agent_core::{
+        ApprovalVerdict, ArgumentFingerprint, CapabilityRef, ConsumptionWitness, ControlMode,
+        DecisionAuthority, EffectClass, ResourceIdentity, RevocationFence, RevocationFenceMember,
+        RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+    use seyal_agent_store::DecideInput;
+
+    let (dir, service, _principal) = open_hostless();
+    let run = AgentRunId::new();
+    let request = service
+        .record_approval_request(
+            seyal_agent_core::ApprovalRequestSpec {
+                approval_id: seyal_agent_core::ApprovalId::new(),
+                action_id: Some(seyal_agent_core::ActionId::new()),
+                action_intent_digest: Some([3; 32]),
+                agent_run_id: Some(run),
+                capability: Some(CapabilityRef::new(b"fs.write").unwrap()),
+                resource: Some(ResourceIdentity::new(b"file", [1; 16], [2; 16], [4; 32]).unwrap()),
+                argument_fingerprint: Some(ArgumentFingerprint::of(b"mkdir")),
+                effect_class: Some(EffectClass::NonReplayable),
+                policy_generation: Some(1),
+                revocation_fence: Some(
+                    RevocationFence::new(vec![RevocationFenceMember {
+                        scope: ScopeIdentity::new(ScopeKind::Workspace, [5; 16]),
+                        generation: RevocationGeneration::FIRST,
+                    }])
+                    .unwrap(),
+                ),
+                expires_at_unix_ms: None,
+                requested_at_unix_ms: 1,
+                attention_id: None,
+                control_mode: ControlMode::SeyalControlled,
+            },
+            "write file",
+        )
+        .unwrap();
+    let decided = service
+        .decide_approval(DecideInput {
+            approval_id: request.approval_id,
+            action_id: request.action_id,
+            agent_run_id: request.agent_run_id,
+            verdict: ApprovalVerdict::Approved,
+            authority: DecisionAuthority::User,
+            decision_policy_generation: 1,
+            decision_principal_id: None,
+            require_session: false,
+            client_session: None,
+            session_valid: true,
+            has_approval_decide_scope: true,
+            now_unix_ms: Some(2),
+        })
+        .unwrap();
+    assert_eq!(decided.decision, ApprovalVerdict::Approved);
+    service
+        .consume_approval_exact(
+            request.approval_id,
+            &ConsumptionWitness::from_request(&request),
+            3,
+        )
+        .unwrap();
+    assert!(service.host.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn persist_pause_does_not_start_a_host_or_gate_terminal_progress() {
     use seyal_agent_core::{
         ActionId, ActionIntent, ArgumentFingerprint, AuthorizationClass, CapabilityRef,

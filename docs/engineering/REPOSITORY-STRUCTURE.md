@@ -48,7 +48,7 @@ crates/
 └─ seyal-agent-client/     # agent client
 ```
 
-`seyal-agent-context` consumes existing WorkScope / bound-root identity; it does not invent a second WorkspaceStore. MemoryStore lifecycle is sibling Issue #1273, not this crate. Durable ActionId/ActionIntent preparation is `docs/engineering/ACTION-INTENT.md` (#1309). Contributor orientation: `docs/engineering/LOCAL-CONTEXT-ENGINE-DISCOVERY.md` and `docs/engineering/LOCAL-CONTEXT-ENGINE-BUNDLE.md`.
+`seyal-agent-context` consumes existing WorkScope / bound-root identity; it does not invent a second WorkspaceStore. MemoryStore lifecycle is sibling Issue #1273, not this crate. Durable ActionId/ActionIntent preparation is `docs/engineering/ACTION-INTENT.md` (#1309). ApprovalRequest/Decision recording is `docs/engineering/APPROVAL-BINDING.md` (#1308). Contributor orientation: `docs/engineering/LOCAL-CONTEXT-ENGINE-DISCOVERY.md` and `docs/engineering/LOCAL-CONTEXT-ENGINE-BUNDLE.md`.
 
 ## Current physical native macOS layout
 

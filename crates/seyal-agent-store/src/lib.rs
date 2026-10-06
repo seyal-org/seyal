@@ -7,12 +7,14 @@
 use std::num::NonZeroU64;
 
 mod action;
+pub mod approval;
 pub mod attention;
 mod identity;
 pub mod memory;
 mod sqlite;
 
 pub use action::{ActionAuthority, ActionError, PersistResume, PersistedAction, PrepareOutcome};
+pub use approval::{ApprovalAuthority, ApprovalStoreError, DecideInput, RecordedApproval};
 pub use attention::{
     AttentionAuthority, AttentionError, AttentionProtocolView, MarkAllReadResult, MintTrustedInput,
     ProtocolClientKind,
