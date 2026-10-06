@@ -35,6 +35,9 @@ Codex and GitHub Copilot CLI both discover project skills directly from `.agents
 | Security review | `security-review` |
 | Current Apple platform docs/HIG | `apple-platform-docs` |
 
+Agent Backend presence / enforcement-class types (SY-006, ADR-012 §12): see
+`docs/engineering/AGENT-PRESENCE-ENFORCEMENT.md`.
+
 Equivalent existing skills are intentionally reused rather than creating duplicate aliases with competing instructions. Seyal does not install generic external design skills; native AppKit/Metal work is governed by the project skills above and current Apple platform evidence.
 
 ## AI-SDLC generic capability boundary
