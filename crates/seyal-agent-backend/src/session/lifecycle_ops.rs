@@ -2,12 +2,16 @@
 //! domain writer.
 
 use seyal_agent_core::{
-    codes, resolve_execution_target, AdapterCandidate, AgentRunId, AgentRunLifecycle, AttemptId,
-    BindingGeneration, ClientPrincipalId, ClientSessionId, ControlGeneration, LaunchDescriptorRef,
-    ResolveFailure, RouteOfferingId, RoutingDecision,
+    codes, resolve_execution_target, resolve_with_v1_ranking, AdapterCandidate, AgentRunId,
+    AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId, ClientSessionId,
+    ControlGeneration, EvidenceValue, FactorEvidence, LaunchDescriptorRef, PolicyProfile,
+    RankingCandidate, RankingRequest, ResolveFailure, RouteOfferingId, RoutingDecision,
+    SelectionKind,
 };
 use seyal_agent_protocol::{CommandError, CommandResult};
 use seyal_agent_store::{AggregateId, AggregateSequence, StoreError};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::{ClientScope, HostStartOutcome};
 
@@ -42,6 +46,61 @@ impl IntegrationService {
         candidates
     }
 
+    /// Cold-start ranking candidates: hard facts from the catalog; soft factors
+    /// Unknown and bound to the integrity-verified BaselineCalibrationArtifact
+    /// (SPEC-020 §16). Not synthetic POC quality constants.
+    fn build_ranking_candidates(&self) -> Vec<RankingCandidate> {
+        self.build_adapter_candidates()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, c)| RankingCandidate {
+                adapter_id: c.adapter_id,
+                route_offering_id: c.route_offering_id,
+                adapter_enabled: c.adapter_enabled,
+                adapter_manifest_generation: c.adapter_manifest_generation,
+                hard_constraint_satisfied: c.hard_constraint_satisfied,
+                stable_key: u64::from(idx as u32)
+                    ^ c.route_offering_id.to_bytes()[0..8]
+                        .try_into()
+                        .map(u64::from_le_bytes)
+                        .unwrap_or(idx as u64),
+                preference_rank: u32::MAX,
+                quality: FactorEvidence::unknown(),
+                context_fit: FactorEvidence::unknown(),
+                tooling_fit: FactorEvidence::unknown(),
+                reliability: FactorEvidence::unknown(),
+                direct_expected_cost: EvidenceValue::Unknown,
+                expected_total_cost: EvidenceValue::Unknown,
+                expected_latency: EvidenceValue::Unknown,
+                locality: FactorEvidence::unknown(),
+                health_reliability: 500_000,
+                model_generation: c.adapter_manifest_generation,
+                network_enforcement_ok: true,
+                no_network_required: false,
+            })
+            .collect()
+    }
+
+    /// SPEC-027 §4.3 / SPEC-020 envelope: pin → singleton → V1 soft rank.
+    fn resolve_target(
+        &self,
+        route_offering_id: Option<RouteOfferingId>,
+    ) -> Result<seyal_agent_core::ResolvedTarget, ResolveFailure> {
+        let pin_candidates = self.build_adapter_candidates();
+        match resolve_execution_target(route_offering_id, &pin_candidates) {
+            Ok(resolved) => Ok(resolved),
+            Err(ResolveFailure::AmbiguousOrNoTarget) if route_offering_id.is_none() => {
+                let ranked = self.build_ranking_candidates();
+                let request = RankingRequest::cold_start(PolicyProfile::Balanced);
+                resolve_with_v1_ranking(None, &ranked, &request).map(|r| {
+                    debug_assert_eq!(r.target.selection_kind, SelectionKind::RouterV1);
+                    r.target
+                })
+            }
+            Err(other) => Err(other),
+        }
+    }
+
     pub(super) fn start_agent_run(
         &mut self,
         principal_id: ClientPrincipalId,
@@ -68,16 +127,18 @@ impl IntegrationService {
             return CommandResult::Error(CommandError::Failed);
         }
 
-        // §7 step 4 / §4.3: resolve the execution target before any mint.
-        let candidates = self.build_adapter_candidates();
-        let resolved = match resolve_execution_target(route_offering_id, &candidates) {
+        // §7 step 4 / §4.3 + SPEC-020 V1 ranking stage: resolve before any mint.
+        let resolved = match self.resolve_target(route_offering_id) {
             Ok(resolved) => resolved,
             Err(ResolveFailure::AdapterDisabled { .. }) => {
                 return CommandResult::Error(CommandError::AdapterNotEnabled)
             }
-            Err(ResolveFailure::TargetUnavailable | ResolveFailure::AmbiguousOrNoTarget) => {
-                return CommandResult::Error(CommandError::ExecutionTargetUnavailable)
-            }
+            Err(
+                ResolveFailure::TargetUnavailable
+                | ResolveFailure::AmbiguousOrNoTarget
+                | ResolveFailure::NoRoute
+                | ResolveFailure::BaselineIntegrity,
+            ) => return CommandResult::Error(CommandError::ExecutionTargetUnavailable),
         };
 
         // §7 step 5: adapter.execute is independent of runs.create (D3).
@@ -102,13 +163,13 @@ impl IntegrationService {
         // actual mint is the store write + domain restore at step 7 below.
         let run_id = AgentRunId::new();
         let binding = BindingGeneration::FIRST;
-        let Some(work_scope_kind) = self
+        let Some((work_scope_id, work_scope_kind)) = self
             .authority
             .domain()
             .attempt(attempt_id)
             .and_then(|attempt| self.authority.domain().work_item(attempt.work_item_id()))
             .and_then(|item| self.authority.domain().work_scope(item.work_scope_id()))
-            .map(|scope| scope.kind())
+            .map(|scope| (scope.id(), scope.kind()))
         else {
             return CommandResult::Error(CommandError::Failed);
         };
@@ -118,6 +179,10 @@ impl IntegrationService {
         ) else {
             return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
         };
+        let bound_root = match self.store.work_scope_bound_root(work_scope_id) {
+            Ok(path) => path.map(PathBuf::from),
+            Err(_) => return CommandResult::Error(CommandError::Failed),
+        };
         let launch_descriptor = match resolve_launch_descriptor(
             &manifest.launch,
             work_scope_kind,
@@ -125,14 +190,16 @@ impl IntegrationService {
             resolved.adapter_id,
             run_id,
             binding,
+            bound_root.as_deref(),
         ) {
             Ok(descriptor) => descriptor,
-            // §6 Repository/Project missing-root (no WorkScope.bindings
-            // subsystem) and an unresolved `{work_scope_root}` argv token
-            // both fail exactly like any other unavailable target — no
-            // mint, no fallback cwd.
+            // §6 missing-root, escaped `{work_scope_root}`, unresolved token.
             Err(_) => return CommandResult::Error(CommandError::ExecutionTargetUnavailable),
         };
+        #[cfg(test)]
+        {
+            self.last_resolved_launch = Some(launch_descriptor.clone());
+        }
 
         // §7 step 7: only now mint, persist, Created -> Prepared -> Dispatching.
         let control = ControlGeneration::FIRST;
@@ -181,6 +248,38 @@ impl IntegrationService {
         }
         if persist_run_lifecycle(&self.store, &self.authority, run_id).is_err() {
             return CommandResult::Error(CommandError::Failed);
+        }
+
+        // SPEC-027 §5.2 / fixture 11: after mint the RoutingDecision has
+        // frozen `adapter_manifest_generation`. A concurrent catalog edit
+        // (or test injection) can make that generation unreachable before
+        // `host.start`. Re-validate the frozen generation here — never
+        // substitute the latest manifest, and never fabricate Active/
+        // Completed. Align with §9.3 typed not-started: Dispatching → Prepared.
+        #[cfg(test)]
+        if self.invalidate_frozen_manifest_after_mint {
+            self.invalidate_frozen_manifest_after_mint = false;
+            let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+                "/bin/false",
+                seyal_agent_store::CwdPolicy::AdapterWorkDir,
+            );
+            let _ = self
+                .store
+                .install_or_update_adapter(routing.adapter_id, 0, true, &launch);
+        }
+        if !matches!(
+            self.store.get_adapter_manifest_at_generation(
+                routing.adapter_id,
+                routing.adapter_manifest_generation,
+            ),
+            Ok(Some(_))
+        ) {
+            let _ = self
+                .authority
+                .domain_mut()
+                .pre_start_fallback(run_id, routing, true);
+            let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
+            return CommandResult::Error(CommandError::ExecutionTargetUnavailable);
         }
 
         // SPEC-027 §9.2 fixture 12 ("`start` holds no service mutex across
@@ -264,6 +363,96 @@ impl IntegrationService {
             binding_generation: binding.get(),
             control_generation: control.get(),
             event_count,
+        }
+    }
+
+    /// SPEC-026 §9.2 / SPEC-027 §9.4 fixture 13: wire `CancelRun` → Terminating
+    /// → evidenced `Terminated(Cancelled)` via `signal_cancel` + observe/reap.
+    pub(crate) fn cancel_agent_run_command(
+        &mut self,
+        principal_id: ClientPrincipalId,
+        session_id: ClientSessionId,
+        run_id: AgentRunId,
+        control_generation: u64,
+    ) -> CommandResult {
+        if let Err(error) =
+            self.authorized_run(principal_id, session_id, ClientScope::RunsControl, run_id)
+        {
+            return CommandResult::Error(error);
+        }
+        let Some(control) = ControlGeneration::from_raw(control_generation) else {
+            return CommandResult::Error(CommandError::Malformed);
+        };
+        if let Err(error) = self
+            .authority
+            .domain_mut()
+            .cancel_agent_run(run_id, control, None, false)
+        {
+            return CommandResult::Error(super::wire::map_domain(error));
+        }
+        if persist_run_lifecycle(&self.store, &self.authority, run_id).is_err() {
+            return CommandResult::Error(CommandError::Failed);
+        }
+
+        let lifecycle = self
+            .authority
+            .domain()
+            .agent_run(run_id)
+            .map(|run| run.lifecycle());
+        if lifecycle == Some(AgentRunLifecycle::Terminating) {
+            if self.active_hosted_runs.contains_key(&run_id) {
+                if let Some(host) = self.host.as_mut()
+                    && let Some(&handle) = self.active_hosted_runs.get(&run_id)
+                {
+                    let _ = host.signal_cancel(handle);
+                }
+                // Poll observe until terminal evidence lands (reader is async).
+                // Do not reap first — reap drops the observation buffer.
+                let deadline = Instant::now() + Duration::from_secs(2);
+                loop {
+                    if let Err(error) = self.drain_host_observations(run_id) {
+                        return CommandResult::Error(error);
+                    }
+                    if matches!(
+                        self.authority.liveness(run_id),
+                        crate::RunLiveness::KnownTerminated | crate::RunLiveness::UnknownAfterCrash
+                    ) {
+                        break;
+                    }
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+            if matches!(
+                self.authority.liveness(run_id),
+                crate::RunLiveness::KnownTerminated | crate::RunLiveness::UnknownAfterCrash
+            ) && self
+                .authority
+                .domain()
+                .agent_run(run_id)
+                .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+            {
+                let _ = self
+                    .authority
+                    .domain_mut()
+                    .confirm_cancel_termination(run_id);
+                // Cancelled runs expose KnownTerminated on the wire (fixture 13),
+                // even when the host classified signal death as crash before the
+                // cancel remap landed.
+                self.authority.note_committed_terminal(run_id);
+            }
+            let _ = persist_run_lifecycle(&self.store, &self.authority, run_id);
+        }
+
+        let Some(run) = self.authority.domain().agent_run(run_id) else {
+            return CommandResult::Error(CommandError::NotFound);
+        };
+        CommandResult::Run {
+            binding_generation: run.binding_generation().get(),
+            control_generation: run.control_generation().get(),
+            liveness: super::wire::liveness_code(self.authority.liveness(run_id)),
         }
     }
 
