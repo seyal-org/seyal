@@ -5,9 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, OptionalExtension};
 use seyal_agent_core::{
     allowed_attention_transition, mint_from_trusted_source, mint_from_untrusted_terminal, ActionId,
-    AgentRunId, ApprovalId, ArtifactId, ArtifactKind, ArtifactRef, AttentionId, AttentionItem,
-    AttentionKind, AttentionPriority, AttentionState, AttentionTarget, AttemptId, ClientSessionId,
-    MintError, PresentationText, WorkItemId, MAX_OPEN_ATTENTION_PER_RUN,
+    AgentRunId, ApprovalId, ArtifactId, ArtifactKind, ArtifactRef, AttemptId, AttentionId,
+    AttentionItem, AttentionKind, AttentionPriority, AttentionState, AttentionTarget,
+    ClientSessionId, MintError, PresentationText, WorkItemId, MAX_OPEN_ATTENTION_PER_RUN,
     MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
 };
 
@@ -136,8 +136,7 @@ impl<'a> AttentionAuthority<'a> {
     ) -> Result<AttentionItem, AttentionError> {
         // Domain mint never produces ApprovalRequired from this path (SPEC-028 §12.12).
         let window = self.terminal_informational_count(agent_run_id)?;
-        let item =
-            mint_from_untrusted_terminal(summary, agent_run_id, Self::now_ms(), window)?;
+        let item = mint_from_untrusted_terminal(summary, agent_run_id, Self::now_ms(), window)?;
         debug_assert!(!item.kind.is_privileged_approval());
         // Coalesce equivalent terminal warnings for the same run.
         if let Some(key) = item.coalesce_key.as_ref() {
@@ -150,12 +149,20 @@ impl<'a> AttentionAuthority<'a> {
     }
 
     pub fn get(&self, id: AttentionId) -> Result<AttentionItem, AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         load_item(&conn, id)?.ok_or(AttentionError::NotFound)
     }
 
     pub fn list_for_run(&self, run: AgentRunId) -> Result<Vec<AttentionItem>, AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         let mut stmt = conn
             .prepare(
                 "SELECT attention_id FROM attention_item
@@ -177,7 +184,9 @@ impl<'a> AttentionAuthority<'a> {
             }
             let mut arr = [0u8; 16];
             arr.copy_from_slice(&bytes);
-            out.push(load_item(&conn, AttentionId::from_bytes(arr))?.ok_or(AttentionError::NotFound)?);
+            out.push(
+                load_item(&conn, AttentionId::from_bytes(arr))?.ok_or(AttentionError::NotFound)?,
+            );
         }
         Ok(out)
     }
@@ -282,7 +291,11 @@ impl<'a> AttentionAuthority<'a> {
     }
 
     pub fn put_artifact(&self, artifact: &ArtifactRef) -> Result<(), AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         conn.execute(
             "INSERT OR REPLACE INTO artifact_ref (
                 artifact_id, producer_agent_run_id, producer_attempt_id, kind,
@@ -307,7 +320,11 @@ impl<'a> AttentionAuthority<'a> {
     }
 
     pub fn get_artifact(&self, id: ArtifactId) -> Result<ArtifactRef, AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         conn.query_row(
             "SELECT producer_agent_run_id, producer_attempt_id, kind,
                     content_address_or_version, sensitivity_class, created_at_unix_ms
@@ -323,8 +340,7 @@ impl<'a> AttentionAuthority<'a> {
                 Ok(ArtifactRef {
                     artifact_id: id,
                     producer_agent_run_id: run.and_then(|b| id16(&b).map(AgentRunId::from_bytes)),
-                    producer_attempt_id: attempt
-                        .and_then(|b| id16(&b).map(AttemptId::from_bytes)),
+                    producer_attempt_id: attempt.and_then(|b| id16(&b).map(AttemptId::from_bytes)),
                     kind: ArtifactKind::from_u8(kind).ok_or(rusqlite::Error::InvalidQuery)?,
                     content_address_or_version: content,
                     sensitivity_class: sensitivity,
@@ -377,7 +393,11 @@ impl<'a> AttentionAuthority<'a> {
         let Some(run) = run else {
             return Ok(0);
         };
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM attention_item
@@ -397,7 +417,11 @@ impl<'a> AttentionAuthority<'a> {
         let Some(run) = run else {
             return Ok(0);
         };
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM attention_item
@@ -411,7 +435,11 @@ impl<'a> AttentionAuthority<'a> {
     }
 
     fn find_open_by_coalesce(&self, key: &[u8]) -> Result<Option<AttentionItem>, AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         let id_bytes: Option<Vec<u8>> = conn
             .query_row(
                 "SELECT attention_id FROM attention_item
@@ -435,7 +463,11 @@ impl<'a> AttentionAuthority<'a> {
     }
 
     fn insert_item(&self, item: &AttentionItem) -> Result<(), AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         conn.execute(
             "INSERT INTO attention_item (
                 attention_id, work_item_id, attempt_id, agent_run_id, action_id, approval_id,
@@ -479,7 +511,11 @@ impl<'a> AttentionAuthority<'a> {
     }
 
     fn update_item(&self, item: &AttentionItem) -> Result<(), AttentionError> {
-        let conn = self.store.conn.lock().map_err(|_| StoreError::WriteFailed)?;
+        let conn = self
+            .store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::WriteFailed)?;
         let changed = conn
             .execute(
                 "UPDATE attention_item SET state = ?1, updated_at_unix_ms = ?2,

@@ -60,11 +60,9 @@ fn spec028_12_02_dismiss_does_not_authorize() {
 #[test]
 fn spec028_12_03_mark_all_read_never_resolves() {
     // Mark-all-read is Ack-only: Open → Acknowledged, never Resolved/Dismissed.
-    assert!(allowed_attention_transition(
-        AttentionState::Open,
-        AttentionState::Acknowledged
-    )
-    .is_ok());
+    assert!(
+        allowed_attention_transition(AttentionState::Open, AttentionState::Acknowledged).is_ok()
+    );
     // Acknowledged is not Resolved.
     assert_ne!(AttentionState::Acknowledged, AttentionState::Resolved);
 }
@@ -90,7 +88,12 @@ fn spec028_12_19_terminal_informational_storm_bounded() {
         assert!(mint_from_untrusted_terminal(format!("line {i}"), Some(run), 1, i).is_ok());
     }
     assert_eq!(
-        mint_from_untrusted_terminal("overflow", Some(run), 1, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW),
+        mint_from_untrusted_terminal(
+            "overflow",
+            Some(run),
+            1,
+            MAX_TERMINAL_INFORMATIONAL_PER_WINDOW
+        ),
         Err(MintError::TerminalInformationalCapExceeded)
     );
 }

@@ -27,7 +27,11 @@ pub enum MintError {
     TerminalInformationalCapExceeded,
 }
 
-pub fn coalesce_key(source: &str, kind: AttentionKind, agent_run_id: Option<AgentRunId>) -> Vec<u8> {
+pub fn coalesce_key(
+    source: &str,
+    kind: AttentionKind,
+    agent_run_id: Option<AgentRunId>,
+) -> Vec<u8> {
     let mut out = Vec::with_capacity(48);
     out.extend_from_slice(source.as_bytes());
     out.push(0);
@@ -114,12 +118,19 @@ pub fn mint_from_untrusted_terminal(
         updated_at_unix_ms: now_unix_ms,
         resolved_at_unix_ms: None,
         expires_at_unix_ms: None,
-        coalesce_key: Some(coalesce_key("terminal", AttentionKind::Warning, agent_run_id)),
+        coalesce_key: Some(coalesce_key(
+            "terminal",
+            AttentionKind::Warning,
+            agent_run_id,
+        )),
     })
 }
 
 /// Helper used by store APIs that receive an explicit kind from an untrusted path.
-pub fn reject_untrusted_privileged(kind: AttentionKind, source: MintSource) -> Result<(), MintError> {
+pub fn reject_untrusted_privileged(
+    kind: AttentionKind,
+    source: MintSource,
+) -> Result<(), MintError> {
     if source == MintSource::UntrustedTerminal && kind.is_privileged_approval() {
         Err(MintError::PrivilegedApprovalFromUntrustedSource)
     } else {

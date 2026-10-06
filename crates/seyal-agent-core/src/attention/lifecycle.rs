@@ -32,39 +32,31 @@ mod tests {
 
     #[test]
     fn unlisted_edges_rejected() {
-        assert!(allowed_attention_transition(
-            AttentionState::Resolved,
-            AttentionState::Open
-        )
-        .is_err());
+        assert!(
+            allowed_attention_transition(AttentionState::Resolved, AttentionState::Open).is_err()
+        );
         assert!(allowed_attention_transition(
             AttentionState::Dismissed,
             AttentionState::Acknowledged
         )
         .is_err());
-        assert!(allowed_attention_transition(
-            AttentionState::Acknowledged,
-            AttentionState::Open
-        )
-        .is_err());
+        assert!(
+            allowed_attention_transition(AttentionState::Acknowledged, AttentionState::Open)
+                .is_err()
+        );
     }
 
     #[test]
     fn open_to_ack_resolve_dismiss_ok() {
-        assert!(allowed_attention_transition(
-            AttentionState::Open,
-            AttentionState::Acknowledged
-        )
-        .is_ok());
-        assert!(allowed_attention_transition(
-            AttentionState::Open,
-            AttentionState::Resolved
-        )
-        .is_ok());
-        assert!(allowed_attention_transition(
-            AttentionState::Open,
-            AttentionState::Dismissed
-        )
-        .is_ok());
+        assert!(
+            allowed_attention_transition(AttentionState::Open, AttentionState::Acknowledged)
+                .is_ok()
+        );
+        assert!(
+            allowed_attention_transition(AttentionState::Open, AttentionState::Resolved).is_ok()
+        );
+        assert!(
+            allowed_attention_transition(AttentionState::Open, AttentionState::Dismissed).is_ok()
+        );
     }
 }

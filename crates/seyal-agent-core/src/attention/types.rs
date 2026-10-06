@@ -72,10 +72,7 @@ impl AttentionState {
     }
 
     pub const fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Resolved | Self::Dismissed | Self::Expired
-        )
+        matches!(self, Self::Resolved | Self::Dismissed | Self::Expired)
     }
 }
 
