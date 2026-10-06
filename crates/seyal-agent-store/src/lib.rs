@@ -7,8 +7,12 @@
 use std::num::NonZeroU64;
 
 mod identity;
+pub mod memory;
 mod sqlite;
 
+pub use memory::{
+    MemoryAuthority, MemoryError, ProposeInput, ProposeResult, RevocationBundle, WorkingSetError,
+};
 pub use seyal_agent_core::{
     decode_output_ref, encode_output_ref, AdapterId, AgentRunId, AttemptId, FingerprintRef,
     OutputRef, OutputRefError, RetentionPolicyRef, RouteOfferingId, StreamKind, WorkItemId,
@@ -16,9 +20,9 @@ pub use seyal_agent_core::{
     RETENTION_POLICY_RETAINED_STREAM,
 };
 pub use sqlite::{
-    AdapterManifestRow, AgentStore, CwdPolicy, LaunchDescriptorTemplate, OutputAppend,
-    PersistedAgentRun, PersistedLiveness, PersistedPrincipal, RouteOfferingRow, StoreError,
-    OUTPUT_SEGMENT_LEN,
+    AdapterManifestRow, AgentStore, ContextIndexRecord, CwdPolicy, LaunchDescriptorTemplate,
+    OutputAppend, PersistedAgentRun, PersistedLiveness, PersistedPrincipal, RouteOfferingRow,
+    StoreError, OUTPUT_SEGMENT_LEN,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

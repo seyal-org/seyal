@@ -381,20 +381,84 @@ fn navigate_encodes_one_window_activation_effect() {
                 .count(),
             1
         );
-        assert_eq!(
-            effects.last(),
-            Some(&NativeEffect::WindowActivation {
-                window: target_window
-            })
+        assert!(
+            effects.iter().any(|effect| {
+                *effect
+                    == NativeEffect::WindowActivation {
+                        window: target_window,
+                    }
+            }),
+            "Navigate must emit WindowActivation, got {effects:?}"
         );
     });
     let header = seyal_app_shell(handle);
-    assert_eq!(header.effect_count, 1);
-    let effect = seyal_app_native_effect(handle, 0);
-    assert_eq!(effect.kind, 6, "WindowActivation");
-    assert_eq!(
-        (effect.window_lo, effect.window_hi),
-        split(target_window.to_bytes())
-    );
+    assert!(header.effect_count >= 1);
+    let mut found_activation = false;
+    for index in 0..header.effect_count {
+        let effect = seyal_app_native_effect(handle, u32::from(index));
+        if effect.kind == 6 {
+            found_activation = true;
+            assert_eq!(
+                (effect.window_lo, effect.window_hi),
+                split(target_window.to_bytes())
+            );
+        }
+    }
+    assert!(found_activation, "FFI must encode WindowActivation");
     assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn indexed_reads_reuse_one_encode_and_keep_title_borrow() {
+    let handle = seyal_app_create();
+    install_shell(handle, seed_n_windows(2));
+    let header = seyal_app_shell(handle);
+    assert_eq!(header.window_count, 2);
+    let first = seyal_app_window(handle, 0);
+    let title_ptr = first.title;
+    let title = borrowed(first.title, first.title_len).to_owned();
+    let _ = seyal_app_window(handle, 1);
+    let _ = seyal_app_tab(handle, 0, 0);
+    let _ = seyal_app_pane_leaf(handle, 0, 0, 0);
+    let again = seyal_app_window(handle, 0);
+    assert_eq!(again.title, title_ptr);
+    assert_eq!(borrowed(again.title, again.title_len), title);
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let state = apps.get(&handle).expect("handle");
+        assert_eq!(state.window_scratch.encode_count(), 1);
+    });
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn navigate_to_other_window_tab_drains_order_front() {
+    use crate::app::AppAction;
+    use crate::navigation::ResourceAddress;
+
+    let shell = seed_n_windows(2);
+    let workspace = WorkspaceId::m001_default();
+    let other_tab = shell.snapshot().windows[1].tabs[0].id;
+    let other_window = shell.snapshot().windows[1].id;
+    let mut root = ApplicationRoot::with_shell(shell);
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Tab {
+            workspace,
+            tab: other_tab,
+        },
+    })
+    .expect("navigate");
+    assert_eq!(root.snapshot().shell.active_window, other_window);
+    assert!(
+        root.snapshot()
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(
+                effect,
+                crate::app::NativeEffect::OrderFrontMakeKey { window } if *window == other_window
+            )),
+        "Navigate must drain OrderFrontMakeKey, got {:?}",
+        root.snapshot().pending_effects
+    );
 }

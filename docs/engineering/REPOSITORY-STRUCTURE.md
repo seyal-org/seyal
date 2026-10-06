@@ -34,6 +34,22 @@ Do not create empty diagram-driven packages. A future physical `seyal-workspace`
 
 ADR-006 keeps the macOS PTY readiness-composition mechanism inside `seyal-exec`; the Runtime consumes safe reactor events and does not receive PTY ownership/raw descriptors.
 
+## Agent-domain crates (M005)
+
+Independent Agent Backend crates are a separate ownership plane from the terminal stack (ADR-016). They must never appear on the PTY → VT → TerminalState → Metal hot path.
+
+```text
+crates/
+├─ seyal-agent-core/       # portable WorkScope/WorkItem/Attempt/AgentRun domain types
+├─ seyal-agent-protocol/   # agent harness framing
+├─ seyal-agent-store/      # durable agent-domain persistence (incl. rebuildable context index metadata)
+├─ seyal-agent-context/    # Local Context Engine discovery/index + ContextBundle/SelectionTrace (SPEC-013 #1271/#1272)
+├─ seyal-agent-backend/    # agent-domain daemon
+└─ seyal-agent-client/     # agent client
+```
+
+`seyal-agent-context` consumes existing WorkScope / bound-root identity; it does not invent a second WorkspaceStore. MemoryStore lifecycle is sibling Issue #1273, not this crate. Contributor orientation: `docs/engineering/LOCAL-CONTEXT-ENGINE-DISCOVERY.md` and `docs/engineering/LOCAL-CONTEXT-ENGINE-BUNDLE.md`.
+
 ## Current physical native macOS layout
 
 `macos/Seyal` is the permanent native application boundary (**Swift + AppKit + Metal**). Pass 1 established the skeleton; Passes 6–9 added the permanent Metal terminal surface, Candidate-D client bridge, native input/resize/focus/IME, minimal Block presentation and detach/reconnect recovery.

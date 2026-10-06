@@ -193,6 +193,10 @@ pub(in crate::ffi) struct WindowEncodeScratch {
     pub panes: Vec<(u16, u16, u16, SeyalAppPaneLeaf)>,
     pub tree_nodes: Vec<(u16, u16, u16, SeyalAppPaneTreeNode)>,
     pub effects: Vec<SeyalAppNativeEffect>,
+    pub header: SeyalAppShell,
+    cache_key: Option<(u64, u16, u64)>,
+    #[cfg(test)]
+    encode_count: u32,
 }
 
 impl WindowEncodeScratch {
@@ -204,6 +208,10 @@ impl WindowEncodeScratch {
             panes: Vec::new(),
             tree_nodes: Vec::new(),
             effects: Vec::new(),
+            header: SeyalAppShell::empty(),
+            cache_key: None,
+            #[cfg(test)]
+            encode_count: 0,
         }
     }
 
@@ -214,11 +222,26 @@ impl WindowEncodeScratch {
         self.panes.clear();
         self.tree_nodes.clear();
         self.effects.clear();
+        self.header = SeyalAppShell::empty();
+        self.cache_key = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encode_count(&self) -> u32 {
+        self.encode_count
     }
 }
 
 pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
+    let key = state.root.window_encode_key();
+    if state.window_scratch.cache_key == Some(key) {
+        return;
+    }
     state.window_scratch.clear();
+    #[cfg(test)]
+    {
+        state.window_scratch.encode_count = state.window_scratch.encode_count.saturating_add(1);
+    }
     let snap = state.root.snapshot();
     let shell = &snap.shell;
     for (wi, window) in shell.windows.iter().enumerate() {
@@ -329,6 +352,8 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
         state.window_scratch.effects.push(encode_effect(*effect));
     }
     relocate_window_pointers(state);
+    state.window_scratch.header = fill_shell_header_from(state, &snap.shell);
+    state.window_scratch.cache_key = Some(key);
 }
 
 fn relocate_window_pointers(state: &mut AppHandle) {
@@ -447,8 +472,10 @@ fn tier_code(tier: PresentationTier) -> u16 {
     }
 }
 
-pub(super) fn fill_shell_header(state: &AppHandle) -> SeyalAppShell {
-    let shell = state.root.snapshot().shell;
+pub(super) fn fill_shell_header_from(
+    state: &AppHandle,
+    shell: &crate::shell::ShellSnapshot,
+) -> SeyalAppShell {
     let workspace = split_id(shell.active_workspace.to_bytes());
     let last_workspace = split_id(shell.last_active_workspace.to_bytes());
     let tab = split_id(shell.active_tab.to_bytes());
@@ -475,7 +502,7 @@ pub(super) fn fill_shell_header(state: &AppHandle) -> SeyalAppShell {
         pane_count: shell.panes.len() as u16,
         flags,
         window_count: shell.windows.len() as u16,
-        effect_count: state.root.snapshot().pending_effects.len() as u16,
+        effect_count: state.window_scratch.effects.len() as u16,
         shell_last_error: shell
             .last_error
             .map(|error| error.error_number())
@@ -502,7 +529,7 @@ pub extern "C" fn seyal_app_shell(handle: u64) -> SeyalAppShell {
             return SeyalAppShell::empty();
         };
         encode_window_snapshot(state);
-        fill_shell_header(state)
+        state.window_scratch.header
     })
 }
 
