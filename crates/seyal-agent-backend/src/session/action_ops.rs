@@ -1,10 +1,12 @@
-//! SPEC-016 ActionIntent prepare and EffectUnknown recovery.
+//! SPEC-016 ActionIntent prepare, EffectUnknown recovery, and persistence-failure pause.
 //!
 //! Control-plane only: these methods do not start a host or wait on
 //! TerminalExecution.
 
-use seyal_agent_core::{ActionId, ActionIntent, CrashBoundary, RecoveryDecision, RecoveryEvidence};
-use seyal_agent_store::{ActionError, PrepareOutcome};
+use seyal_agent_core::{
+    ActionId, ActionIntent, CrashBoundary, PersistHealth, RecoveryDecision, RecoveryEvidence,
+};
+use seyal_agent_store::{ActionError, PersistResume, PrepareOutcome};
 
 use super::IntegrationService;
 
@@ -37,5 +39,15 @@ impl IntegrationService {
 
     pub fn cancel_action(&self, action_id: ActionId) -> Result<RecoveryDecision, ActionError> {
         self.store.actions().cancel(action_id)
+    }
+
+    pub fn action_persist_health(&self) -> PersistHealth {
+        self.store.action_persist_health()
+    }
+
+    /// Resume Action persist after the store is healthy. Revalidates fences
+    /// before recovery. Control-plane only.
+    pub fn resume_action_persist(&self, action_id: ActionId) -> Result<PersistResume, ActionError> {
+        self.store.actions().resume_after_persist_health(action_id)
     }
 }
