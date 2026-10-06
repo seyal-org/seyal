@@ -24,14 +24,22 @@ impl ShellState {
     /// product-active Window actually changes (W3: keep the host effect
     /// queue bounded under same-window selection).
     pub(super) fn activate_window(&mut self, window: WindowId) -> Result<(), ShellError> {
-        let workspace_id = self
-            .find_window(window)
-            .map(|workspace| workspace.id)
-            .ok_or(ShellError::UnknownWindow)?;
         let previous_product = self
             .workspace(self.active_workspace)
             .ok()
             .and_then(|workspace| workspace.active_window);
+        self.activate_window_from(window, previous_product)
+    }
+
+    fn activate_window_from(
+        &mut self,
+        window: WindowId,
+        previous_product: Option<WindowId>,
+    ) -> Result<(), ShellError> {
+        let workspace_id = self
+            .find_window(window)
+            .map(|workspace| workspace.id)
+            .ok_or(ShellError::UnknownWindow)?;
         let workspace = self.workspace_mut(workspace_id)?;
         if workspace.window(window).is_none() {
             return Err(ShellError::UnknownWindow);
@@ -152,8 +160,12 @@ impl ShellState {
     pub(super) fn select_tab_identity(&mut self, id: TabId) -> Result<(), ShellError> {
         let (workspace_id, window_id, _) =
             self.find_tab_location(id).ok_or(ShellError::UnknownTab)?;
+        let previous_product = self
+            .workspace(self.active_workspace)
+            .ok()
+            .and_then(|workspace| workspace.active_window);
         self.workspace_mut(workspace_id)?.select_tab(id)?;
-        self.activate_window(window_id)
+        self.activate_window_from(window_id, previous_product)
     }
 
     pub(super) fn cycle_window(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
