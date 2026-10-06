@@ -1184,4 +1184,27 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
+
+    /// W4a: AppKit realizes the Rust snapshot; CreateWindow admission stays off.
+    func testNewWindowAdmissionStaysFailClosedOnW4aHost() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5), "File → New Window is installed")
+        newWindow.click()
+        waitBriefly(0.4)
+        XCTAssertEqual(
+            app.windows.count,
+            1,
+            "W4a keeps CreateWindow fail-closed; the host must not locally spawn a second window"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+        let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
+        let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        if splitRight.exists {
+            XCTAssertFalse(splitRight.isHittable, "splits stay fail-closed until C3")
+        }
+    }
 }
