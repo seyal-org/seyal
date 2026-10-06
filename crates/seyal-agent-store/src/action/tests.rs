@@ -2,8 +2,9 @@ use super::*;
 use crate::{AgentStore, AttemptId, WorkItemId, WorkScopeId};
 use seyal_agent_core::{
     ActionId, ActionIntent, AgentRunId, ArgumentFingerprint, AuthorizationClass, CapabilityRef,
-    EffectClass, PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
-    RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+    EffectClass, PersistHealth, PersistPauseReason, PrivacyDependencyId, RequestProvenance,
+    ResourceIdentity, RevocationFence, RevocationFenceMember, RevocationGeneration, ScopeIdentity,
+    ScopeKind, TransitionReason,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -413,4 +414,194 @@ fn reconcile_prepared_cannot_persist_succeeded() {
         record.runtime.lifecycle,
         seyal_agent_core::ActionLifecycle::Prepared
     );
+}
+
+#[test]
+fn n_times_action_persist_failure_pauses_and_stops_sqlite_hot_loop() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    store.fail_after_writes(0);
+    let mut last = None;
+    for i in 0..3 {
+        last = Some(store.actions().prepare(&intent(run, ActionId::new(), &[i])));
+    }
+    assert_eq!(
+        last,
+        Some(Err(ActionError::Store(crate::StoreError::WriteFailed)))
+    );
+    assert_eq!(store.action_persist_health(), PersistHealth::Paused);
+    let gates = store.action_sqlite_gates();
+    assert_eq!(gates, 3);
+    assert_eq!(
+        store
+            .actions()
+            .prepare(&intent(run, ActionId::new(), b"paused")),
+        Err(ActionError::PersistencePaused {
+            health: PersistHealth::Paused,
+            reason: PersistPauseReason::ConsecutiveFailureBudgetExhausted,
+        })
+    );
+    assert_eq!(store.action_sqlite_gates(), gates);
+}
+
+#[test]
+fn unrelated_output_append_continues_while_actions_are_paused() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    store.fail_action_writes_after(0);
+    for i in 0..3 {
+        let _ = store.actions().prepare(&intent(run, ActionId::new(), &[i]));
+    }
+    assert_eq!(store.action_persist_health(), PersistHealth::Paused);
+    store
+        .append_output_event(run, 2, b"pty-progress", 1, 1)
+        .unwrap();
+    assert_eq!(store.action_persist_health(), PersistHealth::Paused);
+}
+
+#[test]
+fn disk_full_confine_plus_injected_persist_pauses_actions() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let aggregate = crate::AggregateId::AgentRun(run);
+    let large = vec![0xCD; 4 * 1024];
+    for _ in 0..64 {
+        store.append_event(aggregate, 2, &large).unwrap();
+    }
+    store.confine_database().unwrap();
+    assert_eq!(
+        store.append_event(aggregate, 1, &vec![1; 8192]),
+        Err(crate::StoreError::WriteFailed)
+    );
+    store.fail_after_writes(0);
+    for i in 0..3 {
+        assert_eq!(
+            store.actions().prepare(&intent(run, ActionId::new(), &[i])),
+            Err(ActionError::Store(crate::StoreError::WriteFailed))
+        );
+    }
+    assert_eq!(store.action_persist_health(), PersistHealth::Paused);
+    let gates = store.action_sqlite_gates();
+    assert_eq!(
+        store.actions().prepare(&intent(run, ActionId::new(), b"x")),
+        Err(ActionError::PersistencePaused {
+            health: PersistHealth::Paused,
+            reason: PersistPauseReason::ConsecutiveFailureBudgetExhausted,
+        })
+    );
+    assert_eq!(store.action_sqlite_gates(), gates);
+}
+
+#[test]
+fn resume_revalidates_fences_and_does_not_retry_effects() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    store
+        .actions()
+        .prepare(&intent(run, action_id, b"pay"))
+        .unwrap();
+    store.actions().fixture_mark_authorized(action_id).unwrap();
+    store
+        .actions()
+        .fixture_mark_dispatching(action_id, 9)
+        .unwrap();
+    store.fail_action_writes_after(0);
+    for _ in 0..3 {
+        let _ = store.actions().recover(
+            action_id,
+            seyal_agent_core::CrashBoundary::AfterEffectBeforeResultPersist,
+            &seyal_agent_core::RecoveryEvidence::none(),
+        );
+    }
+    assert_eq!(store.action_persist_health(), PersistHealth::Paused);
+    store.fail_action_writes_after(u64::MAX);
+    store
+        .memory()
+        .advance_revocation(
+            &[ScopeIdentity::new(ScopeKind::Workspace, [4; 16])],
+            None,
+            TransitionReason::PrivacyRevocation,
+        )
+        .unwrap();
+    let resumed = store
+        .actions()
+        .resume_after_persist_health(action_id)
+        .unwrap();
+    assert_eq!(resumed.health, PersistHealth::Healthy);
+    assert!(!resumed.fences_current);
+    assert!(resumed.decision.is_none());
+    let record = store.actions().get_record(action_id).unwrap().unwrap();
+    assert_eq!(
+        record.runtime.lifecycle,
+        seyal_agent_core::ActionLifecycle::Dispatching
+    );
+}
+
+#[test]
+fn resume_when_fences_current_recovers_without_retry() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    store
+        .actions()
+        .prepare(&intent(run, action_id, b"pay2"))
+        .unwrap();
+    store.actions().fixture_mark_authorized(action_id).unwrap();
+    store
+        .actions()
+        .fixture_mark_dispatching(action_id, 5)
+        .unwrap();
+    store.fail_action_writes_after(0);
+    for _ in 0..3 {
+        let _ = store.actions().recover(
+            action_id,
+            seyal_agent_core::CrashBoundary::DuringExecutor,
+            &seyal_agent_core::RecoveryEvidence::none(),
+        );
+    }
+    store.fail_action_writes_after(u64::MAX);
+    let resumed = store
+        .actions()
+        .resume_after_persist_health(action_id)
+        .unwrap();
+    assert!(resumed.fences_current);
+    let decision = resumed.decision.unwrap();
+    assert_eq!(
+        decision.runtime.lifecycle,
+        seyal_agent_core::ActionLifecycle::EffectUnknown
+    );
+    assert!(!decision.may_retry_effect);
+}
+
+#[test]
+fn deadline_pause_does_not_call_sqlite() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    store.pin_clock_ms(1_000);
+    store.fail_action_writes_after(0);
+    assert_eq!(
+        store.actions().prepare(&intent(run, ActionId::new(), b"a")),
+        Err(ActionError::Store(crate::StoreError::WriteFailed))
+    );
+    store.pin_clock_ms(1_000 + 30_000);
+    store.fail_action_writes_after(u64::MAX);
+    let gates = store.action_sqlite_gates();
+    assert!(matches!(
+        store.actions().prepare(&intent(run, ActionId::new(), b"b")),
+        Err(ActionError::PersistencePaused {
+            reason: PersistPauseReason::RetryDeadlineExceeded,
+            ..
+        })
+    ));
+    assert_eq!(store.action_sqlite_gates(), gates);
+}
+
+#[test]
+fn persist_pause_module_has_no_pty_imports() {
+    let src = include_str!("ops.rs");
+    assert!(!src.contains("seyal_terminal"));
+    assert!(!src.contains("seyal_runtime"));
+    assert!(!src.contains("seyal_vt"));
+    assert!(!src.contains("Metal"));
 }

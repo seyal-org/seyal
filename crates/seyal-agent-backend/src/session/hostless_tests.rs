@@ -273,6 +273,53 @@ fn recover_action_does_not_start_a_host_and_never_retries_unknown_effects() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn persist_pause_does_not_start_a_host_or_gate_terminal_progress() {
+    use seyal_agent_core::{
+        ActionId, ActionIntent, ArgumentFingerprint, AuthorizationClass, CapabilityRef,
+        EffectClass, PersistHealth, PrivacyDependencyId, RequestProvenance, ResourceIdentity,
+        RevocationFence, RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let action_id = ActionId::new();
+    let intent = ActionIntent::prepare(
+        action_id,
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"ok"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    service.prepare_action(&intent).unwrap();
+    assert_eq!(service.action_persist_health(), PersistHealth::Healthy);
+    assert!(!service.action_persist_health().may_gate_terminal_progress());
+    let resumed = service.resume_action_persist(action_id).unwrap();
+    assert!(resumed.fences_current);
+    assert!(service.host.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[cfg(feature = "fixture-host")]
 #[test]
 fn start_agent_run_uses_injected_host_script_via_collect_observations() {

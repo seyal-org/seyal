@@ -41,7 +41,7 @@ M005 Local Context Engine discovery/index and ContextBundle/SelectionTrace assem
 
 ## ActionIntent
 
-Durable `ActionId` / immutable `ActionIntent` preparation lives in agent-domain crates (`seyal-agent-core`, `seyal-agent-store`, `IntegrationService::prepare_action`). See [ACTION-INTENT.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-INTENT.md). Dispatch fencing and approval consumption are sibling slices. This path never gates PTY/VT/Metal.
+Durable `ActionId` / immutable `ActionIntent` preparation lives in agent-domain crates (`seyal-agent-core`, `seyal-agent-store`, `IntegrationService::prepare_action`). See [ACTION-INTENT.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-INTENT.md). Repeated Action persist failure pauses affected Action work (`PersistHealth::Paused`) without gating PTY/VT/Metal; see [ACTION-PERSIST-PAUSE.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-PERSIST-PAUSE.md). Dispatch fencing and approval consumption are sibling slices.
 
 ## Attention chrome
 
