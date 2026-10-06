@@ -375,7 +375,7 @@ fn navigate_to_other_window_tab_drains_order_front() {
         },
     })
     .expect("navigate");
-    assert_eq!(root.snapshot().shell.active_window, other_window);
+    assert_eq!(root.snapshot().shell.active_window, Some(other_window));
     assert!(
         root.snapshot()
             .pending_effects
