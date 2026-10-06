@@ -158,8 +158,8 @@ fn foreign_session_is_rejected_not_failed_when_hostless() {
 #[test]
 fn prepare_action_persists_intent_without_starting_a_host() {
     use seyal_agent_core::{
-        ActionId, ArgumentFingerprint, AuthorizationClass, CapabilityRef, EffectClass,
-        PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
+        ActionId, ActionIntent, ArgumentFingerprint, AuthorizationClass, CapabilityRef,
+        EffectClass, PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
         RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
     };
 
@@ -204,6 +204,72 @@ fn prepare_action_persists_intent_without_starting_a_host() {
         .unwrap()
         .unwrap();
     assert_eq!(loaded, intent);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn recover_action_does_not_start_a_host_and_never_retries_unknown_effects() {
+    use seyal_agent_core::{
+        ActionId, ActionIntent, ActionLifecycle, ArgumentFingerprint, AuthorizationClass,
+        CapabilityRef, CrashBoundary, EffectClass, PrivacyDependencyId, RecoveryEvidence,
+        RequestProvenance, ResourceIdentity, RevocationFence, RevocationFenceMember,
+        RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let action_id = ActionId::new();
+    let intent = ActionIntent::prepare(
+        action_id,
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"rm -rf"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    service.prepare_action(&intent).unwrap();
+    service
+        .store
+        .actions()
+        .fixture_mark_authorized(action_id)
+        .unwrap();
+    service
+        .store
+        .actions()
+        .fixture_mark_dispatching(action_id, 3)
+        .unwrap();
+    let decision = service
+        .recover_action(
+            action_id,
+            CrashBoundary::AfterEffectBeforeResultPersist,
+            &RecoveryEvidence::none(),
+        )
+        .unwrap();
+    assert_eq!(decision.runtime.lifecycle, ActionLifecycle::EffectUnknown);
+    assert!(!decision.may_retry_effect);
+    assert!(service.host.is_none());
+    let digest_before = intent.digest();
+    let loaded = service.store.actions().get(action_id).unwrap().unwrap();
+    assert_eq!(loaded.digest(), digest_before);
     let _ = std::fs::remove_dir_all(dir);
 }
 

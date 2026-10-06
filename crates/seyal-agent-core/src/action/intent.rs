@@ -166,11 +166,20 @@ pub struct ExecutorCapabilityRef {
     pub version: u64,
 }
 
-/// Durable Action lifecycle. This slice persists [`Prepared`] only.
+/// Durable Action lifecycle (SPEC-016 §4). Canonical ActionIntent bytes always
+/// encode [`Prepared`]; later states live on the store lifecycle column so the
+/// identity digest cannot drift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ActionLifecycle {
     Prepared = 1,
+    Authorized = 2,
+    Dispatching = 3,
+    Succeeded = 4,
+    FailedKnown = 5,
+    EffectUnknown = 6,
+    CancelledBeforeDispatch = 7,
+    CancelledAfterDispatch = 8,
 }
 
 impl ActionLifecycle {
@@ -181,8 +190,22 @@ impl ActionLifecycle {
     pub const fn from_code(code: u8) -> Option<Self> {
         match code {
             1 => Some(Self::Prepared),
+            2 => Some(Self::Authorized),
+            3 => Some(Self::Dispatching),
+            4 => Some(Self::Succeeded),
+            5 => Some(Self::FailedKnown),
+            6 => Some(Self::EffectUnknown),
+            7 => Some(Self::CancelledBeforeDispatch),
+            8 => Some(Self::CancelledAfterDispatch),
             _ => None,
         }
+    }
+
+    pub const fn is_known_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::FailedKnown | Self::CancelledBeforeDispatch
+        )
     }
 }
 
@@ -399,7 +422,8 @@ impl ActionIntent {
             }
             None => out.push(0),
         }
-        out.push(self.lifecycle.code());
+        // Identity freeze: mutable runtime lifecycle is never part of the digest.
+        out.push(ActionLifecycle::Prepared.code());
         out
     }
 
