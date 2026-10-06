@@ -7,6 +7,7 @@
 //! [`ComposerSnapshot`]. Do not call this from the PTY→VT→damage path. Do not
 //! invent Block completions.
 
+mod block_actions;
 mod history;
 
 use std::collections::HashMap;
@@ -16,6 +17,9 @@ use seyal_core::{BlockId, PaneId};
 
 use crate::presentation::{InputRoute, PresentationMode};
 
+pub use block_actions::{
+    block_actions, BlockActionKind, BlockActionPlacement, BlockActionProjection,
+};
 use history::{HistoryOverlay, PaneHistory};
 pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS};
 
@@ -87,6 +91,16 @@ pub enum BlockPresentationState {
 }
 
 impl BlockPresentationState {
+    /// Accessible name of the Block status icon (#1010 semantic seam).
+    pub fn status_label(self) -> &'static str {
+        match self {
+            Self::Running => "Running",
+            Self::Completed => "Succeeded",
+            Self::Failed => "Failed",
+            Self::Unknown => "Status unknown",
+        }
+    }
+
     /// C07 status copy. Duration is omitted until Runtime publishes it.
     pub fn transcript_status(self) -> &'static str {
         match self {

@@ -3,6 +3,7 @@
 //! C entry points stay here; decode/encode/pane_region/visual siblings keep each
 //! responsibility reviewable without changing published symbols.
 
+mod block_actions;
 mod block_projection;
 mod decode;
 mod encode;
@@ -37,6 +38,9 @@ use encode::{
     encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
 };
 
+pub use block_actions::{
+    seyal_app_block_action_count, seyal_app_block_action_row, seyal_app_request_block_copy,
+};
 pub use block_projection::seyal_app_block_projection;
 pub(crate) use loss::note_application_roots_client_loss;
 pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
@@ -287,6 +291,12 @@ struct AppHandle {
     shell_rows: Vec<SeyalAppRow>,
     chrome_rows: Vec<SeyalAppRow>,
     block_rows: Vec<SeyalAppRow>,
+    /// Quick-action rows for every Block (#1010), flat, with each Block's
+    /// `(first, count)` span; encoded with `block_rows` once per generation.
+    block_action_rows: Vec<SeyalAppRow>,
+    block_action_text: Vec<u8>,
+    block_action_spans: Vec<(u32, u32)>,
+    block_rows_generation: u64,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
 }
@@ -384,6 +394,10 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 shell_rows: Vec::new(),
                 chrome_rows: Vec::new(),
                 block_rows: Vec::new(),
+                block_action_rows: Vec::new(),
+                block_action_text: Vec::new(),
+                block_action_spans: Vec::new(),
+                block_rows_generation: 0,
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
             },

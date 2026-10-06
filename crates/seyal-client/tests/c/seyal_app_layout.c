@@ -24,7 +24,7 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppAccessibility) == 24);
     REQUIRE(sizeof(SeyalAppComposer) == 40);
     REQUIRE(sizeof(SeyalAppChrome) == 24);
-    REQUIRE(sizeof(SeyalAppTheme) == 16);
+    REQUIRE(sizeof(SeyalAppTheme) == 36);
     REQUIRE(sizeof(SeyalAppShell) == 64);
     REQUIRE(sizeof(SeyalAppRow) == 112);
     REQUIRE(offsetof(SeyalAppRow, address_version) == 56);
@@ -32,6 +32,7 @@ int main(void) {
     REQUIRE(SEYAL_APP_ACTION_MOVE_SPLIT_DIVIDER == 58);
     REQUIRE(SEYAL_APP_ACTION_TERMINATE_EXECUTION == 59);
     REQUIRE(SEYAL_APP_ACTION_NAVIGATE == 60);
+    REQUIRE(SEYAL_APP_ACTION_RERUN_BLOCK == 63);
     REQUIRE(sizeof(SeyalAppShortcutItem) == 64);
     REQUIRE(offsetof(SeyalAppShortcutItem, key_base) == 12);
     REQUIRE(sizeof(SeyalAppPaneRegion) == 40);

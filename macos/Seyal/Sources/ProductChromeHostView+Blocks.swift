@@ -58,27 +58,31 @@ extension ProductChromeHostView {
         for index in 0..<count {
             let row = seyal_app_block_row(pane.appHandle, UInt32(index))
             let projection = seyal_app_block_projection(pane.appHandle, UInt32(index))
-            let title = productChromeCopyUTF8(row.title, row.title_len) ?? "command"
-            let detail = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
-            let promptRow = seyal_app_copy(pane.appHandle, UInt16(SEYAL_APP_COPY_BLOCK_PROMPT))
-            let prompt = productChromeCopyUTF8(promptRow.title, promptRow.title_len) ?? "$"
+            // Copy row text before the action calls re-encode the buffers.
+            let title = productChromeCopyUTF8(row.title, row.title_len) ?? ""
+            let statusLabel = productChromeCopyUTF8(row.detail, row.detail_len) ?? ""
             let blockID = row.id_lo
             let lines = outputLineCount(projection: projection)
             let card = CommandBlockView(
-                prompt: prompt,
-                title: title,
-                detail: detail,
-                state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                row: CommandBlockRow(
+                    command: title,
+                    state: row.flags & UInt16(SEYAL_APP_BLOCK_STATE_MASK),
+                    statusLabel: statusLabel,
+                    isSelected: row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0,
+                    actions: blockActions(blockIndex: UInt32(index))
+                ),
                 cellHeight: cellHeight,
                 lines: lines
             )
             card.setAccessibilityIdentifier("seyal-block-\(index)")
             card.body.setAccessibilityIdentifier("seyal-block-\(index)-body")
-            card.isSelected = row.flags & UInt16(SEYAL_APP_BLOCK_SELECTED) != 0
             let idLo = row.id_lo
             let idHi = row.id_hi
             card.onSelect = { [weak self] selected in
                 self?.selectBlock(idLo: idLo, idHi: idHi, deselect: selected)
+            }
+            card.onAction = { [weak self] action in
+                self?.performBlockAction(action, blockIndex: UInt32(index), idLo: idLo, idHi: idHi)
             }
             blocks.addArrangedSubview(card)
             if blockID != 0 {
@@ -95,6 +99,63 @@ extension ProductChromeHostView {
             scrollTranscriptToLiveEnd()
         }
         lastBlockCount = count
+    }
+
+    /// Rust-projected quick actions for one Block row (#1010).
+    private func blockActions(blockIndex: UInt32) -> [CommandBlockActionRow] {
+        let count = seyal_app_block_action_count(pane.appHandle, blockIndex)
+        return (0..<count).compactMap { actionIndex in
+            let row = seyal_app_block_action_row(pane.appHandle, blockIndex, actionIndex)
+            guard row.kind != 0 else { return nil }
+            return CommandBlockActionRow(
+                kind: row.kind,
+                placement: (row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK))
+                    >> UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT),
+                label: productChromeCopyUTF8(row.title, row.title_len) ?? "",
+                shortcut: productChromeCopyUTF8(row.detail, row.detail_len) ?? "",
+                enabled: row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_ENABLED) != 0
+            )
+        }
+    }
+
+    /// Routes a Rust action kind. Availability was already decided by Rust;
+    /// disabled actions are never delivered by the view. Copy output kinds go
+    /// through `seyal_app_request_block_copy` so span/composition stay in Rust.
+    private func performBlockAction(
+        _ kind: UInt16,
+        blockIndex: UInt32,
+        idLo: UInt64,
+        idHi: UInt64
+    ) {
+        switch UInt32(kind) {
+        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND:
+            let row = seyal_app_block_row(pane.appHandle, blockIndex)
+            writePasteboard(productChromeCopyUTF8(row.title, row.title_len) ?? "")
+        case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
+            _ = seyal_app_request_block_copy(pane.appHandle, blockIndex, kind)
+        case SEYAL_APP_BLOCK_ACTION_RERUN:
+            let snapshot = seyal_app_snapshot(pane.appHandle)
+            var rerun = SeyalAppAction()
+            rerun.version = UInt16(SEYAL_APP_ABI_VERSION)
+            rerun.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            rerun.kind = UInt16(SEYAL_APP_ACTION_RERUN_BLOCK.rawValue)
+            rerun.applySnapshotFence(snapshot)
+            rerun.target_execution_lo = idLo
+            rerun.target_execution_hi = idHi
+            rerun.target_pty_generation = seyal_app_composer(pane.appHandle).epoch
+            guard seyal_app_apply(pane.appHandle, &rerun) == 0 else { return }
+            composer.submitRustDraft()
+        case SEYAL_APP_BLOCK_ACTION_INSPECT:
+            selectBlock(idLo: idLo, idHi: idHi, deselect: false)
+        default:
+            break
+        }
+    }
+
+    func writePasteboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     func outputLineCount(projection: SeyalAppBlockProjection) -> Int {

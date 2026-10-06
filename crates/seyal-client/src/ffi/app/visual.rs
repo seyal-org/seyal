@@ -47,8 +47,19 @@ pub struct SeyalAppTheme {
     pub text: u32,
     pub accent: u32,
     pub appearance: u16,
-    pub reserved: u16,
+    /// `THEME_*` flags resolved by Rust (#1010).
+    pub flags: u16,
+    /// Block Component roles (#1010): focus border, rest/hover seam and
+    /// status colors. Resolved here so the host never invents palette values.
+    pub block_focus: u32,
+    pub seam_rest: u32,
+    pub seam_hover: u32,
+    pub success: u32,
+    pub danger: u32,
 }
+
+/// `SeyalAppTheme.flags`: motion is allowed after accessibility resolution.
+pub(crate) const THEME_ALLOWS_MOTION: u16 = 1;
 
 /// Resolved portable visual snapshot for the thin AppKit host (#993).
 /// String pointers are borrowed until the next `seyal_app_visual*` call.
@@ -132,34 +143,57 @@ fn material_code(intent: crate::theme::MaterialIntent) -> u16 {
     }
 }
 
-fn resolve_process_visual(platform_appearance_code: u16) -> crate::theme::ResolvedVisual {
-    use crate::theme::{process_ui_configuration, resolve, AccessibilitySignals};
+fn resolve_process_visual(
+    platform_appearance_code: u16,
+    accessibility: crate::theme::AccessibilitySignals,
+) -> crate::theme::ResolvedVisual {
+    use crate::theme::{process_ui_configuration, resolve};
     let cold = process_ui_configuration();
     resolve(
         cold.settings().clone(),
         platform_appearance(platform_appearance_code),
-        AccessibilitySignals::default(),
+        accessibility,
         cold.diagnostics().clone(),
     )
 }
 
+fn accessibility_from_flags(flags: u16) -> crate::theme::AccessibilitySignals {
+    crate::theme::AccessibilitySignals {
+        reduce_motion: flags & 1 != 0,
+        reduce_transparency: flags & 2 != 0,
+        increase_contrast: flags & 4 != 0,
+    }
+}
+
+/// `accessibility_flags`: bit 0 = reduce_motion, bit 1 = reduce_transparency,
+/// bit 2 = increase_contrast. The host forwards OS signals; Rust resolves
+/// through process UI configuration (ADR-015 / #993), not a Swift palette.
 #[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_theme(appearance: u16) -> SeyalAppTheme {
+pub extern "C" fn seyal_app_theme(appearance: u16, accessibility_flags: u16) -> SeyalAppTheme {
     use crate::theme::ColorRole;
-    let visual = resolve_process_visual(appearance);
+    let visual = resolve_process_visual(appearance, accessibility_from_flags(accessibility_flags));
     SeyalAppTheme {
         canvas: pack_srgb(visual.colors.get(ColorRole::Canvas)),
         text: pack_srgb(visual.colors.get(ColorRole::TextPrimary)),
         accent: pack_srgb(visual.colors.get(ColorRole::Focus)),
         appearance: resolved_appearance_code(visual.appearance),
-        reserved: 0,
+        flags: if visual.motion.allows_motion {
+            THEME_ALLOWS_MOTION
+        } else {
+            0
+        },
+        block_focus: pack_srgb(visual.colors.get(ColorRole::BlockFocus)),
+        seam_rest: pack_srgb(visual.colors.get(ColorRole::SeamRest)),
+        seam_hover: pack_srgb(visual.colors.get(ColorRole::SeamHover)),
+        success: pack_srgb(visual.colors.get(ColorRole::Success)),
+        danger: pack_srgb(visual.colors.get(ColorRole::Danger)),
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_visual(platform_appearance: u16) -> SeyalAppVisual {
-    use crate::theme::{ColorRole, DepthLevel};
-    let visual = resolve_process_visual(platform_appearance);
+    use crate::theme::{AccessibilitySignals, ColorRole, DepthLevel};
+    let visual = resolve_process_visual(platform_appearance, AccessibilitySignals::default());
     let mut scratch = visual_scratch()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -286,6 +320,57 @@ mod tests {
 
     use super::{reset_snapshot_call_count, snapshot_call_count};
     use crate::ffi::app::{seyal_app_create, seyal_app_destroy, seyal_app_snapshot};
+
+    #[test]
+    fn theme_packs_block_component_roles() {
+        use super::{pack_srgb, seyal_app_theme};
+        use crate::theme::{canonical, AccessibilitySignals, ColorRole, ResolvedAppearance};
+        for (appearance, resolved) in [
+            (0, ResolvedAppearance::Dark),
+            (1, ResolvedAppearance::Light),
+        ] {
+            let theme = seyal_app_theme(appearance, 0);
+            let visual = canonical(resolved, AccessibilitySignals::default());
+            assert_eq!(
+                theme.block_focus,
+                pack_srgb(visual.colors.get(ColorRole::BlockFocus))
+            );
+            assert_eq!(
+                theme.seam_rest,
+                pack_srgb(visual.colors.get(ColorRole::SeamRest))
+            );
+            assert_eq!(
+                theme.seam_hover,
+                pack_srgb(visual.colors.get(ColorRole::SeamHover))
+            );
+            assert_eq!(
+                theme.success,
+                pack_srgb(visual.colors.get(ColorRole::Success))
+            );
+            assert_eq!(
+                theme.danger,
+                pack_srgb(visual.colors.get(ColorRole::Danger))
+            );
+            assert_ne!(
+                theme.block_focus, theme.accent,
+                "Block focus is its own role"
+            );
+        }
+    }
+
+    #[test]
+    fn theme_flags_carry_rust_resolved_motion() {
+        use super::{seyal_app_theme, THEME_ALLOWS_MOTION};
+        assert_eq!(
+            seyal_app_theme(0, 0).flags & THEME_ALLOWS_MOTION,
+            THEME_ALLOWS_MOTION
+        );
+        assert_eq!(
+            seyal_app_theme(0, 1).flags & THEME_ALLOWS_MOTION,
+            0,
+            "reduce_motion resolves allows_motion off"
+        );
+    }
 
     #[test]
     fn snapshot_call_counter_tracks_seyal_app_snapshot() {

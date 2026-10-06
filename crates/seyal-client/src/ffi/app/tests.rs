@@ -57,7 +57,7 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(size_of::<SeyalAppShell>(), 64);
     assert_eq!(size_of::<SeyalAppRow>(), 112);
     assert_eq!(size_of::<SeyalAppBlockSpan>(), 16);
-    assert_eq!(size_of::<SeyalAppTheme>(), 16);
+    assert_eq!(size_of::<SeyalAppTheme>(), 36);
     assert_eq!(size_of::<SeyalAppComposerHistory>(), 32);
     assert_eq!(offset_of!(SeyalAppComposerHistory, query_utf8), 16);
 }
@@ -571,7 +571,7 @@ fn palette_ffi_round_trips_open_filter_move_run_and_fails_closed() {
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
-fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
+pub(super) fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
     let mut flags = 0u16;
     if snap.flags & SNAP_HAS_EXECUTION != 0 {
         flags |= FLAG_HAS_EXECUTION;
@@ -692,7 +692,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
-fn copy_text(row: SeyalAppRow) -> String {
+pub(super) fn copy_text(row: SeyalAppRow) -> String {
     if row.title.is_null() || row.title_len == 0 {
         return String::new();
     }

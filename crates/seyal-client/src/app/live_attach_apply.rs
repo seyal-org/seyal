@@ -23,6 +23,58 @@ pub(super) struct PendingLiveAttach {
 }
 
 impl ApplicationRoot {
+    /// Test-only: fail the next `n` live second-Controller connects (ADR-017 §6.3).
+    #[doc(hidden)]
+    pub fn inject_live_attach_failures(&mut self, n: u32) {
+        self.inject_live_attach_failures = n;
+    }
+
+    /// Hold the next live second-Controller connect until `tx.send(())`.
+    #[doc(hidden)]
+    pub fn gate_next_live_attach(&mut self, rx: std::sync::mpsc::Receiver<()>) {
+        self.live_attach_gate = Some(rx);
+    }
+
+    /// Extra per-pane Controller registry entries (second+ tabs).
+    #[doc(hidden)]
+    pub fn extra_pane_client_count(&self) -> usize {
+        self.extra_pane_clients.len()
+    }
+
+    /// Queued `AttachController` work waiting for the in-flight worker.
+    #[doc(hidden)]
+    pub fn queued_live_attach_count(&self) -> usize {
+        self.queued_live_attaches.len()
+    }
+
+    /// True when the production poll path must run [`Self::poll_client`] for
+    /// create/attach/terminate progress (not every Candidate-D frame).
+    pub(crate) fn needs_provisioning_drive(&self) -> bool {
+        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
+            return false;
+        }
+        self.pending_live_attach.is_some()
+            || !self.queued_live_attaches.is_empty()
+            || self.provisioning.has_outstanding_intent()
+            || !self.pending_wire_effects.is_empty()
+    }
+
+    /// Registry handle for a pane's Controller, if attached.
+    #[doc(hidden)]
+    pub fn pane_client_raw(&self, pane: PaneId) -> Option<u64> {
+        self.pane_client_raws.get(&pane).copied()
+    }
+
+    /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
+    /// work continues during CreateTab attach).
+    #[doc(hidden)]
+    pub fn pane_client_poll_ok(&self, pane: PaneId) -> bool {
+        let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
+            return false;
+        };
+        crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
+    }
+
     /// True when the create-admitting client is an in-process probe that must
     /// not call `connect_execution` (unit tests use
     /// [`Self::complete_create_attach_and_bind`] instead).

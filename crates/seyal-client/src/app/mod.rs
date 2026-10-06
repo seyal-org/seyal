@@ -22,6 +22,8 @@ mod session;
 use accessibility::accessibility_nodes;
 
 #[cfg(test)]
+mod block_rerun_tests;
+#[cfg(test)]
 mod keybinding_apply_tests;
 #[cfg(test)]
 mod presentation_tests;
@@ -105,6 +107,12 @@ pub enum AppError {
     CannotCloseLastTab,
     CannotCloseLastPane,
     UnknownBlock,
+    /// Rerun refused: the Block's command is still running.
+    BlockRunning,
+    /// Rerun refused: composer is not Available (same gate as block_actions).
+    ComposerUnavailable,
+    /// Rerun refused: a non-empty draft would be overwritten.
+    ComposerDraftOccupied,
     CannotCloseBoundPane,
     NoSplitDivider,
     ProvisioningRejected,
@@ -372,6 +380,13 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+    /// Load a focused-Pane Block's command as the composer draft so the host
+    /// submits it through the ordinary composer path (#1010 Rerun).
+    RerunBlock {
+        fence: AppFence,
+        id: BlockId,
+        composer_epoch: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -566,65 +581,6 @@ impl ApplicationRoot {
         }
     }
 
-    /// Test-only: fail the next `n` live second-Controller connects (ADR-017 §6.3).
-    #[doc(hidden)]
-    #[cfg(target_os = "macos")]
-    pub fn inject_live_attach_failures(&mut self, n: u32) {
-        self.inject_live_attach_failures = n;
-    }
-
-    /// Hold the next live second-Controller connect until `tx.send(())`.
-    #[doc(hidden)]
-    #[cfg(target_os = "macos")]
-    pub fn gate_next_live_attach(&mut self, rx: std::sync::mpsc::Receiver<()>) {
-        self.live_attach_gate = Some(rx);
-    }
-
-    /// Extra per-pane Controller registry entries (second+ tabs).
-    #[doc(hidden)]
-    #[cfg(target_os = "macos")]
-    pub fn extra_pane_client_count(&self) -> usize {
-        self.extra_pane_clients.len()
-    }
-
-    /// Queued `AttachController` work waiting for the in-flight worker.
-    #[doc(hidden)]
-    #[cfg(target_os = "macos")]
-    pub fn queued_live_attach_count(&self) -> usize {
-        self.queued_live_attaches.len()
-    }
-
-    /// True when the production poll path must run [`Self::poll_client`] for
-    /// create/attach/terminate progress (not every Candidate-D frame).
-    #[cfg(target_os = "macos")]
-    pub(crate) fn needs_provisioning_drive(&self) -> bool {
-        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
-            return false;
-        }
-        self.pending_live_attach.is_some()
-            || !self.queued_live_attaches.is_empty()
-            || self.provisioning.has_outstanding_intent()
-            || !self.pending_wire_effects.is_empty()
-    }
-
-    /// Registry handle for a pane's Controller, if attached.
-    #[doc(hidden)]
-    #[cfg(target_os = "macos")]
-    pub fn pane_client_raw(&self, pane: PaneId) -> Option<u64> {
-        self.pane_client_raws.get(&pane).copied()
-    }
-
-    /// Whether the pane's Controller still accepts a nonblocking poll (unrelated
-    /// work continues during CreateTab attach).
-    #[doc(hidden)]
-    #[cfg(target_os = "macos")]
-    pub fn pane_client_poll_ok(&self, pane: PaneId) -> bool {
-        let Some(raw) = self.pane_client_raws.get(&pane).copied() else {
-            return false;
-        };
-        crate::ffi::with_client_mut(raw, |client| client.poll_prepare().is_ok()).unwrap_or(false)
-    }
-
     /// R8.4: clear chord prefix without dispatch and without PTY bytes.
     pub(crate) fn clear_chord_prefix(&mut self) {
         self.chord_prefix.clear();
@@ -646,6 +602,12 @@ impl ApplicationRoot {
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
         pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+    }
+
+    /// Monotonic product-state generation; every successful transition bumps
+    /// it. FFI encoders use it to skip re-projecting unchanged state.
+    pub fn snapshot_generation(&self) -> u64 {
+        self.snapshot_generation
     }
 
     pub fn fence(&self) -> AppFence {
@@ -834,6 +796,11 @@ impl ApplicationRoot {
                 attention,
             } => self.replace_chrome(fence, agents, attention),
             AppAction::SelectBlock { fence, id } => self.select_block(fence, id),
+            AppAction::RerunBlock {
+                fence,
+                id,
+                composer_epoch,
+            } => self.rerun_block(fence, id, composer_epoch),
             AppAction::ClearBlockSelection { fence } => {
                 self.require_fence(fence)?;
                 let shell = self.shell.snapshot();

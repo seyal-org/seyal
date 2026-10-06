@@ -22,6 +22,10 @@ pub(crate) const ROW_SELECTED: u16 = 1;
 /// the inspector-selected Block. Hosts mask with `BLOCK_STATE_MASK`.
 pub(crate) const BLOCK_STATE_MASK: u16 = 7;
 pub(crate) const BLOCK_SELECTED: u16 = 8;
+/// Block action row flag: the action is currently available (#1010).
+pub(crate) const BLOCK_ACTION_ENABLED: u16 = 1;
+/// Block action placement lives in bits 4..6 of the action row flags.
+pub(crate) const BLOCK_ACTION_PLACEMENT_SHIFT: u16 = 4;
 
 pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnapshot {
     let pane = snap.pane.to_bytes();
@@ -288,14 +292,26 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
     relocate_row_pointers(&mut state.chrome_rows, state.chrome_text.as_ptr());
 }
 
+/// Encode Block rows and their quick-action rows once per root generation:
+/// hosts read every row and action per rebuild, so re-encoding on each call
+/// would be quadratic in the Block count.
 pub(super) fn encode_block_rows(state: &mut AppHandle) {
+    let generation = state.root.snapshot_generation();
+    if state.block_rows_generation == generation {
+        return;
+    }
+    state.block_rows_generation = generation;
     state.block_text.clear();
     state.block_rows.clear();
+    state.block_action_text.clear();
+    state.block_action_rows.clear();
+    state.block_action_spans.clear();
     let snapshot = state.root.snapshot();
     let Some(composer) = snapshot.composer else {
         return;
     };
     let selected = snapshot.chrome.selected_block;
+    let composer_available = composer.mode == crate::composer::ComposerMode::Available;
     for (index, block) in composer.blocks.iter().enumerate() {
         let mut flags: u16 = match block.state {
             crate::composer::BlockPresentationState::Running => 1,
@@ -307,6 +323,28 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
         if selected == Some(block.id) {
             flags |= BLOCK_SELECTED;
         }
+        let first = state.block_action_rows.len() as u32;
+        for action in crate::composer::block_actions(block, composer_available) {
+            let mut action_flags = (action.placement as u16) << BLOCK_ACTION_PLACEMENT_SHIFT;
+            if action.enabled {
+                action_flags |= BLOCK_ACTION_ENABLED;
+            }
+            push_row(
+                &mut state.block_action_rows,
+                &mut state.block_action_text,
+                RowDraft {
+                    kind: action.kind as u16,
+                    index: index as u32,
+                    id: block.id.to_bytes(),
+                    flags: action_flags,
+                    title: action.label,
+                    detail: action.shortcut,
+                    address: None,
+                },
+            );
+        }
+        let count = state.block_action_rows.len() as u32 - first;
+        state.block_action_spans.push((first, count));
         push_row(
             &mut state.block_rows,
             &mut state.block_text,
@@ -316,12 +354,16 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
                 id: block.id.to_bytes(),
                 flags,
                 title: &block.command,
-                detail: block.state.transcript_status(),
+                detail: block.state.status_label(),
                 address: None,
             },
         );
     }
     relocate_row_pointers(&mut state.block_rows, state.block_text.as_ptr());
+    relocate_row_pointers(
+        &mut state.block_action_rows,
+        state.block_action_text.as_ptr(),
+    );
 }
 
 pub(super) fn encode_history_rows(state: &mut AppHandle) {
