@@ -287,3 +287,34 @@ fn adopt_rejects_cross_workspace_and_retired() {
     );
     let _ = local;
 }
+
+#[test]
+fn failed_unpresented_record_does_not_change_provisioning_ledger() {
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let execution = ExecutionId::from_bytes([0xa5; 16]);
+
+    root.apply(AppAction::RecordUnpresented {
+        execution,
+        workspace,
+    })
+    .expect("catalog the live execution");
+    root.apply(AppAction::Adopt {
+        fence: root.fence(),
+        evidence: evidence(execution, AttachmentId::from_bytes([0xb6; 16])),
+    })
+    .expect("bind the same execution");
+
+    assert!(!root.provisioning().is_unreferenced(execution));
+    assert_eq!(
+        root.apply(AppAction::RecordUnpresented {
+            execution,
+            workspace,
+        }),
+        Err(AppError::AlreadyBound)
+    );
+    assert!(
+        !root.provisioning().is_unreferenced(execution),
+        "a rejected catalog update must not leave a phantom unreferenced ledger entry"
+    );
+}
