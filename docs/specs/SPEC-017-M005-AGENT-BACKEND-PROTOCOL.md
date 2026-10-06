@@ -1,6 +1,6 @@
 # SPEC-017 — M005 independent Agent Backend protocol, security and event replay
 
-- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment Proposed under #1191** — not Accepted until a non-author maintainer merges an acceptance PR. An author or agent comment is not that acceptance. The pairing amendment is not an implemented-behavior claim.
+- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment Accepted on merge of PR #1270 by a non-author maintainer under #1191.** An author or agent comment is not that acceptance. The pairing amendment is not an implemented-behavior claim.
 - **Issue:** #838 (base contract); pairing amendment #1191
 - **Architecture:** ADR-012, ADR-013, ADR-014, ADR-015 (pairing approval UX ownership), ADR-016 (no ADR create/amend; §9 boundary unchanged)
 - **Consumers:** #678, #679, #680, #681, #1190, #1191, #1192
@@ -102,18 +102,18 @@ Representative scopes:
 
 A same-UID process is not automatically globally privileged.
 
-### 5.1 Hello evidence resolution (Proposed under #1191)
+### 5.1 Hello evidence resolution (Accepted under #1191)
 
 `Hello.client_principal_evidence` selects at most one `Active` `ClientPrincipal`. Evidence resolution is fail-closed:
 
 1. **Empty evidence is never privileged.** A zero-length `client_principal_evidence` must not mint a `ClientSession` for `FirstPartySeyal`, `FirstPartyCLI`, or any principal holding privileged scopes (`runs.create`, `runs.control`, `approval.decide`, `admin.*`, `adapter.execute`, `actions.request`, `reconciliation.resolve`). Production Hello with empty evidence fails closed (no session).
 2. **Unrecognized, malformed, revoked, or Suspended evidence fails closed.** No fallback principal substitution.
-3. **Fixed public tokens are not production identity evidence.** Tokens such as `cli`, `seyal`, `observer`, or `approved*` (and empty→owner aliasing) are historical AB harness conveniences. They must not remain the production authentication mechanism once this amendment is Accepted and implemented.
+3. **Fixed public tokens are not production identity evidence.** Tokens such as `cli`, `seyal`, `observer`, or `approved*` (and empty→owner aliasing) are historical AB harness conveniences. They must not remain the production authentication mechanism once this amendment is implemented.
 4. Successful resolution binds the new `ClientSession` to exactly one `principal_id` and a scope set that is a subset of that principal's `granted_scopes`.
 
 Transport admission (same-UID Unix socket / named pipe) remains necessary but never sufficient (ADR-016 §9).
 
-### 5.2 First-party identity evidence (Proposed under #1191)
+### 5.2 First-party identity evidence (Accepted under #1191)
 
 `FirstPartySeyal` and `FirstPartyCLI` must present install-bound identity evidence that only the corresponding first-party install can mint or renew:
 
@@ -132,9 +132,9 @@ Requirements:
 - Repository content, environment variables, and world-readable files must not be able to register or forge a first-party principal.
 - A distinct first-party install credential may be rotated/revoked without revoking provider/harness ConnectionProfile credentials.
 
-Until first-party install evidence and pairing are implemented and this amendment is Accepted, production claims that rely on SPEC-017 §15.3–15.5 third-party / UserApprovedLocalClient behavior remain out of scope for M005 exit.
+Until first-party install evidence and pairing are implemented, production claims that rely on SPEC-017 §15.3–15.5 third-party / UserApprovedLocalClient behavior remain out of scope for M005 exit.
 
-### 5.3 Per-principal target grants (Proposed under #1191)
+### 5.3 Per-principal target grants (Accepted under #1191)
 
 Exact resource/run authorization is **per principal**, not broadcast:
 
@@ -145,7 +145,7 @@ Exact resource/run authorization is **per principal**, not broadcast:
 
 `admin.clients` (or an equally privileged first-party admin scope) may mint, suspend, revoke, or retarget grants. Ordinary observe-only sessions cannot self-escalate.
 
-## 6. Pairing (Proposed under #1191)
+## 6. Pairing (Accepted under #1191)
 
 Third-party local clients (`UserApprovedLocalClient`, `ManagedClient`, and any non-first-party principal) require explicit pairing before privileged scopes or durable identity evidence are issued.
 
@@ -219,7 +219,7 @@ Revoking the pairing credential or setting the principal to Suspended/Revoked de
 
 ### 6.5 Wire surface (normative names; codecs in implementation)
 
-Pairing adds typed protocol operations (exact frame codecs are implementation-owned once this amendment is Accepted):
+Pairing adds typed protocol operations (exact frame codecs are implementation-owned):
 
 ```text
 BeginPairing
@@ -235,7 +235,7 @@ PairingRejected
 
 - remote/team identity providers;
 - changing ADR-016 §9 (local IPC remains a security boundary; this amendment supplies the ClientPrincipal evidence/pairing mechanism inside that boundary);
-- shipping production pairing code before this amendment is Accepted and #1191 is Ready.
+- shipping production pairing code before #1191 is Ready.
 
 ## 7. ConnectionProfile and credentials
 
@@ -419,7 +419,7 @@ At minimum:
 14. Critical storage failure fails safe;
 15. agent event load does not materially regress terminal latency.
 
-Pairing / identity-evidence amendment (#1191) additionally requires, once Accepted and implemented:
+Pairing / identity-evidence amendment (#1191) additionally requires, once implemented:
 16. empty Hello evidence never mints a privileged ClientSession;
 17. fixed public tokens (`cli` / `seyal` / `observer` / `approved*`) are rejected on the production authentication path;
 18. expired, replayed, or mismatched pairing challenges fail closed;
