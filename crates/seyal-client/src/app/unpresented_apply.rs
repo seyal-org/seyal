@@ -103,8 +103,7 @@ impl ApplicationRoot {
         if !self
             .shell
             .live_unpresented(workspace)
-            .iter()
-            .any(|id| *id == execution)
+            .contains(&execution)
         {
             return Err(AppError::ExecutionNotUnpresented);
         }
