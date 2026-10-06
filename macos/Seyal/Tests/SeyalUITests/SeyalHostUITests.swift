@@ -903,6 +903,19 @@ final class SeyalHostUITests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
+    private func waitForWindowCount(
+        _ app: XCUIApplication,
+        _ count: Int,
+        message: String,
+        timeout: TimeInterval = 5
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, app.windows.count != count {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(app.windows.count, count, "\(message); count=\(app.windows.count)")
+    }
+
     /// The same predicate as `ShellIntegrationPolicy::supports` applied to the
     /// shell the headed host will spawn (`pw_shell`, never inherited `SHELL`).
     private func loginShellIsZsh() -> Bool {
@@ -951,5 +964,26 @@ final class SeyalHostUITests: XCTestCase {
         }
         XCTAssertEqual(app.windows.count, 2, "W4b+ CreateWindow must realize a second window")
         XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// W4b: production window admission + last-window-close stay-alive.
+    func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5), "File → New Window is installed")
+        XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
+        newWindow.click()
+        waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
+        app.typeKey("w", modifierFlags: .command)
+        waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
+        app.typeKey("w", modifierFlags: .command)
+        waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
+        XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
+        let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        if splitRight.exists {
+            XCTAssertFalse(splitRight.isHittable, "splits stay fail-closed until C3")
+        }
     }
 }

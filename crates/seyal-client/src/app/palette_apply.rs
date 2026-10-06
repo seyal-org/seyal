@@ -140,11 +140,9 @@ impl ApplicationRoot {
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
             PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
             PaletteCommand::AdoptUnpresented(execution) => {
-                let _ = fence;
                 self.adopt_unpresented_command(execution)
             }
             PaletteCommand::TerminateUnpresented(execution) => {
-                let _ = fence;
                 self.terminate_unpresented(execution)
             }
         }
