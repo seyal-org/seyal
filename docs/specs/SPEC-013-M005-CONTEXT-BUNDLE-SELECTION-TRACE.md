@@ -7,6 +7,7 @@
 - **Implementation consumer:** #681
 - **Related:** #847 / SPEC-012 MemoryRecord lifecycle
 - **Production calibration:** [`../evidence/m005-context-memory-production-calibration.md`](../evidence/m005-context-memory-production-calibration.md) (#1244; SPEC-013 §22 budgets + measurement procedure frozen before #681 Ready)
+- **§23.40 Runtime isolation soak:** [`../evidence/m005-1301-spec013-23-40-terminal-isolation.md`](../evidence/m005-1301-spec013-23-40-terminal-isolation.md) (**PASS**, #1301)
 
 ## 1. Purpose and scope
 

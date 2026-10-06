@@ -145,11 +145,14 @@ make docs-check    # run Starlight/Astro documentation validation
 
 - Production: `seyal-agent-backend --directory <path>` — builds without Cargo features
   and composes `StandaloneProcessHost`. `StartAgentRun` requires a trusted adapter
-  catalog (fail-closed with no durable AgentRun when none is installed). Repository
-  and Project WorkScope cwd comes from durable `WorkScope.bindings` written through
-  the first-party store/`IntegrationService` bind path, never from the client.
-  SIGTERM, SIGINT, and process `Drop` reap live children by process group.
-  `--output-bytes` is unknown (exit 2).
+  catalog (fail-closed with no durable AgentRun when none is installed). Adapter
+  catalog install/enable is a first-party `IntegrationService` path that requires
+  durable principal grant `admin.adapters` (SPEC-027 §5.2); there is no client
+  `Command` for install/enable. Repository and Project WorkScope cwd comes from
+  durable `WorkScope.bindings` written through the first-party
+  store/`IntegrationService` bind path, never from the client. SIGTERM, SIGINT,
+  and process `Drop` reap live children by process group. `--output-bytes` is
+  unknown (exit 2).
 - SPEC-027 §9.2 / fixture 12 (Accepted for #1224 closeout): composed hosts must not
   hold the service mutex across child I/O. On master this is satisfied by a
   **bounded** spawn+drain hold (`StandaloneProcessHost` returns immediately with a
@@ -160,8 +163,35 @@ make docs-check    # run Starlight/Astro documentation validation
 - Qualification: `seyal-agent-backend-qualification` (requires `--features fixture-host`) —
   injects the scripted `FakeExecutionHost` fixture through the same typed seam for
   process/qualification tests. Prefer this binary for fabricated-run scenarios.
+- Adapter conformance catalog (#1277) + offline replay adapter (#1278): one retained
+  contract for replay + real CLI adapters. See `docs/engineering/ADAPTER-CONFORMANCE.md`.
+  Prove harness + replay with:
+
+```sh
+cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance
+cargo test -p seyal-agent-backend --features fixture-host --offline -- adapter_conformance_replay
+```
+
 - Developer stores created by the pre-AB-1.9 production binary may contain fabricated
   runs; discard them. There is no migration.
+
+### Agent evaluation / outcome / cost (SPEC-019)
+
+- Domain APIs: `seyal-agent-core::evaluation` (`EvaluationPlane`, observations,
+  contracts, usage/cost/time, routing-quality export schema).
+- Developer guide: [`AGENT-EVALUATION.md`](AGENT-EVALUATION.md).
+- Fixtures: `cargo test -p seyal-agent-core --locked --test spec019_evaluation_fixtures`.
+- Does not implement SPEC-020 ranking, Context Engine, or MemoryStore.
+
+### Agent routing envelope (SPEC-020)
+
+- Domain APIs: `seyal-agent-core::routing` (pin/singleton, V1 soft rank, baseline
+  bind, budget admission, failure-class fallback). Soft ranking is a replaceable
+  stage under SPEC-020 §19 — not a second router.
+- Cold-start / learning-disabled baseline: artifact SHA-256
+  `9d31ee776b06d288d914b2c55a8d2354459fa46894d237592ffc4508041b7ecf`.
+- Developer guide: [`AGENT-ROUTING.md`](AGENT-ROUTING.md).
+- Fixtures: `cargo test -p seyal-agent-core --locked --test spec020_18_ranking_fixtures`.
 
 Current behavior after Passes 1–10 (M001 **Done / closed**; Pass 10 #727 and parent #5 closed on freeze `c536c54`):
 

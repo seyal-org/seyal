@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 7;
+pub(super) const SCHEMA_VERSION: i32 = 10;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -88,6 +88,31 @@ CREATE TABLE IF NOT EXISTS work_scope_binding (
     bound_root TEXT NOT NULL
 );
 ";
+/// Durable `admin.adapters` grant (SPEC-027 §5.2 / SPEC-017 §5). Principal
+/// capability for first-party catalog install/enable — not a ClientScope
+/// opened on the wire, and not a client Command. Loaded into in-memory auth
+/// on `IntegrationService::open`.
+pub(super) const ADMIN_ADAPTERS_GRANT_TABLE_V8: &str = "
+CREATE TABLE IF NOT EXISTS admin_adapters_grant (
+    principal_id BLOB PRIMARY KEY
+);
+";
+/// Rebuildable Local Context Engine index/cache (SPEC-013 §18 / #1271).
+/// Derived state only — never source truth; droppable under pressure.
+pub(super) const CONTEXT_INDEX_CACHE_TABLE_V9: &str = "
+CREATE TABLE IF NOT EXISTS context_index_cache (
+    work_scope_id BLOB PRIMARY KEY,
+    producer_id TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    policy_generation INTEGER NOT NULL,
+    privacy_generation INTEGER NOT NULL,
+    source_generation INTEGER NOT NULL,
+    catalog_digest_hex TEXT NOT NULL,
+    integrity_hex TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    bytes INTEGER NOT NULL
+);
+";
 
 pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), StoreError> {
     if from >= SCHEMA_VERSION {
@@ -137,10 +162,46 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
         tx.execute_batch(WORK_SCOPE_BINDING_TABLE_V7)
             .map_err(|_| StoreError::WriteFailed)?;
     }
+    if from < 8 {
+        tx.execute_batch(ADMIN_ADAPTERS_GRANT_TABLE_V8)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 9 {
+        tx.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 10 {
+        tx.execute_batch(crate::memory::schema_v10::MEMORY_TABLES_V10)
+            .map_err(|_| StoreError::WriteFailed)?;
+        let mut key = [0u8; 32];
+        getrandom_fallback(&mut key);
+        tx.execute(
+            "INSERT OR IGNORE INTO memory_store_meta (singleton, suppression_key, aggregate_working_set_bytes)
+             VALUES (1, ?1, 0)",
+            rusqlite::params![key.as_slice()],
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     tx.commit().map_err(|_| StoreError::WriteFailed)?;
     Ok(())
+}
+
+fn getrandom_fallback(out: &mut [u8; 32]) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut seed = nanos as u64 ^ std::process::id() as u64;
+    for chunk in out.chunks_mut(8) {
+        seed = seed
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(0x6C07_8759_3F43_BCE5);
+        let bytes = seed.to_le_bytes();
+        chunk.copy_from_slice(&bytes[..chunk.len()]);
+    }
 }
 
 pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
@@ -216,6 +277,20 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(WORK_SCOPE_BINDING_TABLE_V7)
         .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(ADMIN_ADAPTERS_GRANT_TABLE_V8)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(CONTEXT_INDEX_CACHE_TABLE_V9)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(crate::memory::schema_v10::MEMORY_TABLES_V10)
+        .map_err(|_| StoreError::WriteFailed)?;
+    let mut key = [0u8; 32];
+    getrandom_fallback(&mut key);
+    conn.execute(
+        "INSERT OR IGNORE INTO memory_store_meta (singleton, suppression_key, aggregate_working_set_bytes)
+         VALUES (1, ?1, 0)",
+        rusqlite::params![key.as_slice()],
+    )
+    .map_err(|_| StoreError::WriteFailed)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|_| StoreError::WriteFailed)?;
     Ok(())

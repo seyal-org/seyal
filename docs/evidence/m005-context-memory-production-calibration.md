@@ -39,8 +39,8 @@
 | Working-set persistence retry budget | **8 attempts** or **30 s** deadline, whichever first; then `WorkingSetDegraded` | SPEC-014 §15 / §18 |
 | Compaction cooperative time slice | **≤ 50 ms** before yield/cancel check | SPEC-014 §18 |
 | Consumer ContextBundle token/byte budget | **not frozen here** — supplied by harness/adapter/capability contract; engine must partition per SPEC-013 §15 | SPEC-013 §15 |
-| SPEC-020 V1 ranking weights / priors | **not production defaults** — synthetic reference-POC values remain non-authoritative | SPEC-020; #681 handoff |
-| Terminal isolation ceiling during context/memory/working-set load | **must not regress accepted Pass 9 / M002 terminal budgets**; product case SPEC-013 §23.40 remains unqualified until a Seyal Runtime harness measures it | SPEC-013 §21–§22; SPEC-014 §17–§18 |
+| SPEC-020 V1 ranking weights / priors | **not frozen by this pack** — see #1294 / [`m005-spec020-baseline-calibration.md`](m005-spec020-baseline-calibration.md); synthetic reference-POC values remain non-defaults | SPEC-020; #1294 |
+| Terminal isolation ceiling during context/memory/working-set load | **must not regress accepted Pass 9 / M002 terminal budgets**; product case SPEC-013 §23.40 measured **PASS** in [`m005-1301-spec013-23-40-terminal-isolation.md`](m005-1301-spec013-23-40-terminal-isolation.md) (#1301; host class `PLATFORM_LIMITED` for absolute µs) | SPEC-013 §21–§22; SPEC-014 §17–§18 |
 
 These values are M005 production contracts for #681 children. Changing them after implementation starts requires a specification/resource review with reproducible evidence; they are not opportunistic tuning knobs inside Context Engine / MemoryStore / RunWorkingSet PRs.
 
@@ -58,7 +58,7 @@ These values are M005 production contracts for #681 children. Changing them afte
 - Isolated reference POCs used **synthetic** policy classes, token costs, ranking weights, retry/queue caps, and in-memory models. Their assertion counts prove mechanics, not production latency, RSS, disk, or quality.
 - The host PTY/index contention diagnostic is **not** Seyal Runtime / renderer / Context Engine isolation evidence. SPEC-013 §23 case 40 remains unqualified.
 - Case-sensitive APFS identity (SPEC-013 §23 case 36) remains only partially evidenced (case-insensitive APFS Data volume probe only).
-- SPEC-020 V1 ranking weights are **not** frozen as production defaults by this pack.
+- SPEC-020 V1 ranking weights are **not** frozen as production defaults by this pack; ranking baseline authority is #1294 / [`m005-spec020-baseline-calibration.md`](m005-spec020-baseline-calibration.md).
 
 ## Provenance from prior reference probes
 
@@ -75,7 +75,7 @@ The following results were recorded during closed OSS Agent foundation R&D and t
 | SPEC-013 retry/deadline/queue/cancellation | 4/4 assertions pass; SHA-256 `2f38c77cecb7f51aa802cedfb35c787a31e6022f6afb12881d0e044bf06e6e8c` | Synchronous fixture; **uncalibrated** caps — production caps frozen in this pack |
 | SPEC-013 malformed/path-traversal identity | 9 explicit reject + 3 accept + 399 generated (117/282); SHA-256 `598c90a77b01fff398c17ac9bc029298b6b987641c49e3544cbf5d7466ba5572` | Lexical only |
 | APFS case/Unicode host probe | 2/2 on case-insensitive APFS Data volume; probe SHA-256 `371b75d5c19a8140c5eccd6936494a3101a1d653c8b2d360b1b2d1b3eb371eec24` | Case-sensitive APFSX unavailable (`Device not configured`); §23.36 partial |
-| Host PTY vs synthetic index contention | 160/160 echoes correct; baseline p50/p95/max 0.0138/0.0474/0.0703 ms; concurrent 0.0242/0.0427/0.0881 ms; SHA-256 `f18a7e5bb39bfd4975177712fd10853229787ed320f200efc1b02b6a9b2049b4` | Harness-only; **not** Seyal terminal isolation; §23.40 unqualified |
+| Host PTY vs synthetic index contention | 160/160 echoes correct; baseline p50/p95/max 0.0138/0.0474/0.0703 ms; concurrent 0.0242/0.0427/0.0881 ms; SHA-256 `f18a7e5bb39bfd4975177712fd10853229787ed320f200efc1b02b6a9b2049b4` | Harness-only; **not** Seyal terminal isolation; superseded for §23.40 by Runtime soak #1301 |
 | SPEC-020 V1 ranking reference | 28/28 fixtures including §18 cases | Synthetic weights/priors/rates — **not** production defaults |
 | SPEC-019 evaluation/cost mechanics | required fixtures #1–#17 covered in isolated probes | Synthetic accounting; no provider/price calibration |
 
@@ -116,7 +116,7 @@ Accepted Pass 9 production reconnect/RSS gates and M002 history/reflow budgets r
 PTY -> byte stream -> VT/parser -> TerminalState -> damage/projection -> Metal
 ```
 
-The host PTY diagnostic above is retained only as a measurement-harness precedent. Product isolation for SPEC-013 §23 case 40 must be re-measured on Seyal Runtime with an active/failure context workload; until then case 40 stays **unqualified**.
+The host PTY diagnostic above is retained only as a measurement-harness precedent. Product isolation for SPEC-013 §23 case 40 is measured on Seyal Runtime with active/failure context workload in [`m005-1301-spec013-23-40-terminal-isolation.md`](m005-1301-spec013-23-40-terminal-isolation.md) (**PASS**, #1301).
 
 ## Reproducible measurement procedure
 
@@ -153,7 +153,7 @@ Label every number `performance_claim=true|false`. Exploratory harness numbers s
 | Queue/backpressure | Fill beyond queue depth; observe reject/defer + release | Depth 64; no unbounded queue |
 | LSP/semantic enhancement cost | Enable optional path; enforce 2,000 ms timeout + fallback | Timeout/cancel → baseline or degraded; excluded candidates stay excluded |
 | Repeated failure/backoff | Inject N persistent source/index failures | Stop at 5 attempts / 60 s; degraded; fresh budget only on defined recovery |
-| Terminal isolation under load | Pair context soak with Seyal Runtime PTY/render bench | No regression of accepted terminal budgets; case 40 needs this product harness |
+| Terminal isolation under load | Pair context soak with Seyal Runtime PTY progress bench (`scripts/run-m005-spec013-terminal-isolation.py`) | No regression of accepted terminal budgets; case 40 measured PASS in #1301 evidence |
 
 ### SPEC-012 §19 dimensions — how to measure
 
@@ -186,7 +186,7 @@ Retain machine-readable logs/JSON under `docs/evidence/` (or link exact CI artif
 1. Resource caps in the decision summary are normative for #681 implementation children.
 2. A PR that needs a larger cap must update this evidence document (or a superseding dated calibration) with methodology and independent review — not bury the change inside feature code.
 3. Caps may be tightened without ceremony when measurements show headroom is unused and tests are updated; silent weakening is forbidden.
-4. Consumer token budgets and SPEC-020 V1 weights remain outside this freeze until their owning Issues record calibrated production values.
+4. Consumer token budgets remain outside this freeze. SPEC-020 V1 baseline weights/cohorts are owned by #1294 / [`m005-spec020-baseline-calibration.md`](m005-spec020-baseline-calibration.md), not by this pack.
 
 ## Relationship to #681 Ready
 
