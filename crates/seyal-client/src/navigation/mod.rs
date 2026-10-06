@@ -18,6 +18,8 @@ mod resolve;
 #[cfg(test)]
 mod history_integration_tests;
 #[cfg(test)]
+mod reveal_tests;
+#[cfg(test)]
 mod tests;
 
 pub use address::{
@@ -25,8 +27,14 @@ pub use address::{
     RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE, RESOURCE_ADDRESS_KIND_TAB,
     RESOURCE_ADDRESS_KIND_WORKSPACE,
 };
-pub use commit::{history_back, history_forward, navigate, NavigateHistory};
-pub use encode::{encode_resource_address, RESOURCE_ADDRESS_MAX_PAYLOAD};
+pub use commit::{
+    history_back, history_forward, navigate, reveal_attention_target, AttentionReveal,
+    NavigateHistory,
+};
+pub use encode::{
+    encode_resource_address, pack_resource_address, unpack_resource_address,
+    RESOURCE_ADDRESS_MAX_PAYLOAD,
+};
 pub use history::{
     matches_destroyed_pane, matches_destroyed_tab, matches_destroyed_workspace, FocusHistory,
     FocusHistoryEntry, FocusSeq, FOCUS_HISTORY_CAPACITY,

@@ -1,0 +1,124 @@
+# SPEC-020 BaselineCalibrationArtifact v1
+#
+# Distributable cold-start / local-learning-disabled baseline for OSS V1 ranking.
+# Authority: SPEC-020 §11 / §16 / §20; Issue #1294.
+# This file is the integrity-bound artifact. Narrative + procedure:
+#   docs/evidence/m005-spec020-baseline-calibration.md
+#
+# Non-claims (normative for consumers):
+# - Values here are NOT the synthetic SPEC-020 V1 reference-POC table
+#   (probe SHA-256 920a4cc064b8bc9c234328938ad5d33575b7c58a8ecc1bfc302e3ca08fd3cb85).
+# - No provider/model/harness task-quality cohort is claimed; all such cohorts are Unknown.
+# - Profile weights are a documented policy-identity conservative freeze, not
+#   corpus-tuned route-superiority evidence.
+# - Commercial Experiment 1 (#63) disposition D (invalid/blocked) — no treatment winner.
+# - Commercial LEAP / Stage B (#73) must not be copied as OSS production defaults.
+
+schema = "seyal.spec020.baseline-calibration-artifact"
+artifact_version = "1"
+artifact_id = "seyal.spec020.baseline-calibration.v1"
+status = "conservative-policy-identity-freeze"
+issue = 1294
+spec = "SPEC-020"
+spec_sections = ["11", "16", "20"]
+factor_order = ["Q", "C", "T", "R", "K", "L", "P"]
+
+[derivation]
+method = "policy-identity-equal-base-plus-named-factor-emphasis"
+description = """
+Start from equal soft weights over Q/C/T/R/K/L/P (Balanced identity).
+For a named profile, multiply only the profile's primary factor numerator by
+emphasis_multiplier, leave other factors at 1, then L1-normalize by the common
+denominator (sum of numerators). No hand-tuning to selected routing examples.
+No rights-cleared provider corpus was used; this is not §20 corpus-tuned ranking.
+"""
+emphasis_multiplier = 2
+base_numerator = 1
+hand_tuned_to_examples = false
+corpus_tuned = false
+synthetic_poc_weights = false
+
+[profiles.Balanced]
+primary_factors = []
+weight_numerators = { Q = 1, C = 1, T = 1, R = 1, K = 1, L = 1, P = 1 }
+weight_denominator = 7
+
+[profiles.QualityFirst]
+primary_factors = ["Q"]
+weight_numerators = { Q = 2, C = 1, T = 1, R = 1, K = 1, L = 1, P = 1 }
+weight_denominator = 8
+
+[profiles.CostAware]
+primary_factors = ["K"]
+weight_numerators = { Q = 1, C = 1, T = 1, R = 1, K = 2, L = 1, P = 1 }
+weight_denominator = 8
+
+[profiles.LatencySensitive]
+primary_factors = ["L"]
+weight_numerators = { Q = 1, C = 1, T = 1, R = 1, K = 1, L = 2, P = 1 }
+weight_denominator = 8
+
+[profiles.LocalFirst]
+primary_factors = ["P"]
+weight_numerators = { Q = 1, C = 1, T = 1, R = 1, K = 1, L = 1, P = 2 }
+weight_denominator = 8
+
+[cohorts]
+# No claimed task-quality / route-quality cohorts in v1.
+# Capability metadata may establish eligibility facts (SPEC-020 §16) but is not
+# a substitute for task-quality evidence.
+claimed_quality_cohorts = []
+unsupported_quality_policy = "Unknown"
+invented_provider_quality_constants = false
+rights_cleared_frozen_corpus = false
+corpus_id = ""
+corpus_rights = "none-claimed"
+
+[shrinkage]
+# While claimed_quality_cohorts is empty, cold-start task-quality evidence is
+# Unknown for every (task_class × offering) cell. Do not invent Beta α/β,
+# sample-confidence k, or numeric quality priors here — a superseding pack that
+# claims a rights-cleared cohort must freeze those constants with evidence.
+beta_prior_alpha = "Unknown"
+beta_prior_beta = "Unknown"
+sample_confidence_k = "Unknown"
+numeric_quality_prior = "Unknown"
+unknown_evidence_is_low_confidence_not_zero = true
+unknown_cost_is_not_zero = true
+incompatible_generations_must_not_mix = true
+
+[cold_start]
+clean_install_uses_this_artifact = true
+local_learning_disabled_uses_this_artifact = true
+parity_required = true
+private_upload_required = false
+mandatory_global_learning_required = false
+
+[section_20_results]
+# Frozen §20 metric results for the corpus that would calibrate soft ranking.
+# With no rights-cleared frozen corpus, every production quality metric is Unknown.
+corpus_status = "absent"
+acceptance_rate = "Unknown"
+first_attempt_acceptance = "Unknown"
+attempts_per_accepted_work_item = "Unknown"
+total_ai_cost_per_accepted_work_item = "Unknown"
+elapsed_time = "Unknown"
+fallback_retry_rate = "Unknown"
+no_route_correctness = "Unknown"
+confidence_calibration = "Unknown"
+explanation_stability = "Unknown"
+performance_claim = false
+
+[forbidden_sources]
+synthetic_poc_script_sha256 = "920a4cc064b8bc9c234328938ad5d33575b7c58a8ecc1bfc302e3ca08fd3cb85"
+commercial_experiment_1_issue = 63
+commercial_experiment_1_disposition = "D-invalid-blocked"
+commercial_leap_issue = 73
+copy_commercial_leap_as_oss_defaults = false
+copy_synthetic_poc_weights_as_defaults = false
+
+[provenance]
+oss_mechanics_poc_citation = "SEYAL-AI-AGENT-ROUTING-SOLUTION-RD-001.md §7.6.8 (seyal-commercial; non-authoritative for weights)"
+oss_closeout_citation = "SEYAL-AGENT-ROUTER-RD-CLOSEOUT-2026-09-28.md (seyal-commercial; handoff only)"
+context_memory_calibration = "docs/evidence/m005-context-memory-production-calibration.md"
+context_memory_explicitly_excluded_v1_weights = true

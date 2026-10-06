@@ -586,6 +586,19 @@ fn foreign_connection_session_bearing_commands_are_rejected_identically() {
                 run_id: run,
             },
         ),
+        (
+            "CancelRun",
+            Command::CancelRun {
+                session_id: session,
+                run_id: run,
+                control_generation: 1,
+            },
+            Command::CancelRun {
+                session_id: unknown,
+                run_id: run,
+                control_generation: 1,
+            },
+        ),
     ];
     for (label, owned, missing) in cases {
         let foreign = handle_bytes(&mut service, observer, &owned);

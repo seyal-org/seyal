@@ -149,6 +149,177 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testFlowSurfaceDoesNotAcceptFirstResponderOrAXWhileUnbound() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_UNBOUND.rawValue)
+        )
+        let surface = InteractiveMetalSurfaceView(frame: .zero, appHandle: handle)
+        XCTAssertFalse(
+            surface.acceptsFirstResponder,
+            "Flow/unbound IME belongs to the composer, not the Metal surface"
+        )
+        XCTAssertTrue(
+            surface.isAccessibilityElement(),
+            "attach diagnostics stay on terminal-input without making it an IME target"
+        )
+        XCTAssertEqual(
+            surface.accessibilityRole() as? NSAccessibility.Role,
+            .group,
+            "Flow/unbound must not expose a competing terminal AX textArea"
+        )
+        XCTAssertFalse(surface.becomeFirstResponder())
+    }
+
+    @MainActor
+    func testFlowBoundSurfaceKeepsComposerExclusiveIMEAndDiscardsMetalPreedit() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        )
+        let surface = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200), appHandle: handle)
+        surface.syncInputRoutePresentation()
+        XCTAssertFalse(surface.acceptsFirstResponder)
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .group)
+        surface.setMarkedText(
+            "preedit", selectedRange: NSRange(location: 7, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertTrue(surface.hasMarkedText())
+        surface.discardUncommittedMark()
+        XCTAssertFalse(surface.hasMarkedText())
+        XCTAssertFalse(surface.terminalBridgeIsConnected)
+    }
+
+    @MainActor
+    func testTuiEligibilityAcceptsMetalFirstResponderAndAX() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        snap = seyal_app_snapshot(handle)
+        var refresh = SeyalAppAction()
+        refresh.version = bind.version
+        refresh.size = bind.size
+        refresh.kind = UInt16(SEYAL_APP_ACTION_REFRESH.rawValue)
+        refresh.applySnapshotFence(snap)
+        refresh.flags |= UInt16(SEYAL_APP_FLAG_ALTERNATE_SCREEN)
+        XCTAssertEqual(seyal_app_apply(handle, &refresh), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        )
+        let surface = InteractiveMetalSurfaceView(frame: .zero, appHandle: handle)
+        surface.syncInputRoutePresentation()
+        XCTAssertTrue(surface.acceptsFirstResponder)
+        XCTAssertTrue(surface.isAccessibilityElement())
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
+    }
+
+    @MainActor
+    func testFailedAdmissionAnnouncesWithoutClearingRustDraft() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(
+            relayComposerStatus(
+                handle,
+                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE.rawValue),
+                revision: 1
+            ),
+            0
+        )
+
+        let draft = Array("echo keep-me".utf8)
+        var setDraft = SeyalAppAction()
+        setDraft.version = bind.version
+        setDraft.size = bind.size
+        setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
+        setDraft.applySnapshotFence(seyal_app_snapshot(handle))
+        setDraft.target_pty_generation = seyal_app_composer(handle).epoch
+        draft.withUnsafeBufferPointer { buffer in
+            setDraft.payload = buffer.baseAddress
+            setDraft.payload_len = UInt32(buffer.count)
+            XCTAssertEqual(seyal_app_apply(handle, &setDraft), 0)
+        }
+        var submit = SeyalAppAction()
+        submit.version = bind.version
+        submit.size = bind.size
+        submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
+        submit.applySnapshotFence(seyal_app_snapshot(handle))
+        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
+        let requestID = seyal_app_composer(handle).request_id
+        XCTAssertNotEqual(requestID, 0)
+
+        let view = ComposerBridgeView(appHandle: handle)
+        var announced: [String] = []
+        SeyalAccessibilityAnnouncement.qualificationSink = { announced.append($0) }
+        defer { SeyalAccessibilityAnnouncement.qualificationSink = nil }
+        view.applyComposerResult(requestID: requestID, accepted: false)
+        view.presentAdmissionFailure(.busy)
+        let after = seyal_app_composer(handle)
+        let draftText: String
+        if after.draft_utf8_len > 0, let bytes = after.draft_utf8 {
+            draftText = String(
+                decoding: UnsafeBufferPointer(start: bytes, count: Int(after.draft_utf8_len)),
+                as: UTF8.self
+            )
+        } else {
+            draftText = ""
+        }
+        XCTAssertEqual(
+            draftText,
+            "echo keep-me",
+            "failed admission must preserve the Rust-authoritative draft"
+        )
+        XCTAssertTrue(
+            announced.contains(where: { $0.contains("busy") }),
+            "native failure presentation must announce without draft/secret text"
+        )
+    }
+
+    @MainActor
     func testProductChromeReconcileIsReentrant() {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
@@ -2022,6 +2193,8 @@ final class SeyalHostComponentTests: XCTestCase {
 
     /// R8.4 via R6.2.1: `performKeyEquivalent` must forward marked-text from the
     /// focused metal surface (not hardcode `compositionActive: false`).
+    /// Metal is first-responder only after Rust selects Raw/TUI (#866); Flow
+    /// keeps exclusive composer IME.
     @MainActor
     func testPerformKeyEquivalentSeesCompositionOnFocusedSurface() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
@@ -2037,6 +2210,35 @@ final class SeyalHostComponentTests: XCTestCase {
             view.removeFromSuperview()
             window.close()
         }
+
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        snap = seyal_app_snapshot(handle)
+        var refresh = SeyalAppAction()
+        refresh.version = bind.version
+        refresh.size = bind.size
+        refresh.kind = UInt16(SEYAL_APP_ACTION_REFRESH.rawValue)
+        refresh.applySnapshotFence(snap)
+        refresh.flags |= UInt16(SEYAL_APP_FLAG_ALTERNATE_SCREEN)
+        XCTAssertEqual(seyal_app_apply(handle, &refresh), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
+        )
+        view.inputSurface.syncInputRoutePresentation()
+        XCTAssertTrue(view.inputSurface.acceptsFirstResponder)
 
         XCTAssertTrue(window.makeFirstResponder(view.inputSurface))
         XCTAssertFalse(

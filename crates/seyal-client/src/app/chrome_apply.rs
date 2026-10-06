@@ -87,6 +87,21 @@ impl ApplicationRoot {
             .chrome
             .apply(ChromeAction::OpenAttention { id }, &shell)
             .map_err(chrome_error)?;
+        if self.chrome.last_retain_details() {
+            return Ok(());
+        }
+        if let Some(packed) = self.chrome.take_pending_reveal() {
+            let _ = crate::navigation::reveal_attention_target(
+                &packed,
+                &mut self.shell,
+                &crate::navigation::EmptyExecutionInventory,
+                crate::navigation::NavigationPrincipal::local_user(),
+            );
+            let _ = self
+                .chrome
+                .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+            return Ok(());
+        }
         if let Some(workspace) = effect.select_workspace {
             self.shell
                 .apply(ShellAction::SelectWorkspace { id: workspace })

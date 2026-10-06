@@ -162,11 +162,26 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # #1178 adds PersistedPrincipal type collocated with other store row types.
 # #1181 adds §10 output-ref encode consumers, partial-segment merge, and
 # materialize_output_ref beside append_output_event.
+# #1271 adds rebuildable context_index_cache re-export beside existing open paths.
+# #1312 collocates Action persist-pause write-fault cells with existing store
+# write-fault instrumentation; pause policy methods live in action_persist.rs.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 888
-issue = 1224
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module with insert_event commit boundaries; #1224 adds schema-v6 adapter catalog / adapter.execute grant load beside existing identity and lifecycle open paths without a second store façade."
+acknowledged_loc = 906
+issue = 1312
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1312 adds Action persist-pause Atomic/Mutex cells beside writes_before_fault without a second store façade."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-store/src/sqlite/catalog.rs"
+acknowledged_loc = 716
+issue = 1252
+reason = "Adapter catalog remain one durable store module; #1252 adds schema-v8 admin.adapters grant lookup beside existing install/enable and adapter.execute grant paths without a second catalog façade."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-store/src/memory/tests.rs"
+acknowledged_loc = 711
+issue = 1300
+reason = "MemoryStore SPEC-012/014/015 fixtures stay one suite beside MemoryAuthority; #1300 adds the scope-wide revocation use-time denial regression without a second test façade or partN split."
 
 # #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
 # generation sit on the daemon handshake façade; session façade grows
@@ -185,15 +200,21 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 809
-issue = 1224
-reason = "IntegrationService remains the Agent Backend session façade; #1224 adds server_capabilities and live host-handle bookkeeping for SPEC-027 StartAgentRun without a second session authority."
+acknowledged_loc = 930
+issue = 1309
+reason = "IntegrationService remains the Agent Backend session façade; #1309 adds hostless prepare_action for immutable ActionIntent persistence beside admin.adapters, CancelRun, and StartAgentRun without a second session authority."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-agent-protocol/src/command/mod.rs"
+acknowledged_loc = 716
+issue = 1255
+reason = "Agent protocol Command encode/decode stays one module; #1255 adds CancelRun (tag 11) beside the existing ten commands without a second codec façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/standalone_process_host.rs"
-acknowledged_loc = 936
-issue = 1224
-reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1224 adds process-group cancel, bounded observation backpressure, Drop/shutdown reap, and proofs of those invariants beside spawn/observe rather than a second host type."
+acknowledged_loc = 988
+issue = 1255
+reason = "StandaloneProcessHost remains the sole real ExecutionHost; #1255 keeps cancel terminal evidence (shutdown-path KnownFailure + cancel-classified Failed exit) beside spawn/observe/reap rather than a second host type."
 
 # #1182/#678 ObservationAuthority remains the sole observation→domain bridge.
 [[cohesion_acknowledgement]]
@@ -210,11 +231,12 @@ reason = "ObservationAuthority stays one writer-facing bridge; #678 adds domain_
 # session/mod.rs is below review_loc and needs no [[cohesion_acknowledgement]].
 
 # #1194 nine-command byte-identity regression lives with the other session façade tests.
+# #1255 extends that matrix with CancelRun (ten session-bearing commands).
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/tests.rs"
-acknowledged_loc = 767
-issue = 1194
-reason = "Session façade regressions stay beside IntegrationService; #1194 adds the nine-command foreign-session frame comparison, which crosses review_loc without a second session test authority."
+acknowledged_loc = 777
+issue = 1255
+reason = "Session façade regressions stay beside IntegrationService; #1255 extends the foreign-session frame comparison with CancelRun without a second session test authority."
 
 # #1101 N1+N2 SPEC-022 §12 suite exceeds hard_loc as one cohesive navigation
 # test module (resolver rejections beside the Navigate commits they feed).
@@ -238,9 +260,9 @@ reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 770
-issue = 1106
-reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+acknowledged_loc = 776
+issue = 866
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and projects failed composer admission as a native announcement without moving draft/admission policy into Swift."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]

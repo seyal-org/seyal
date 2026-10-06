@@ -146,6 +146,35 @@ fn record_if_needed(history: NavigateHistory<'_>, pane_address: ResourceAddress)
     }
 }
 
+/// Exact-target Attention jump (SPEC-028 §4.1 / §12.15). Missing or rejected
+/// targets retain details; this never fabricates an Execution or AgentRun.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttentionReveal {
+    Focused(ResolvedTarget),
+    RetainedDetails,
+}
+
+pub fn reveal_attention_target(
+    packed: &[u8],
+    shell: &mut ShellState,
+    inventory: &impl ExecutionInventory,
+    principal: NavigationPrincipal<'_>,
+) -> AttentionReveal {
+    let Ok(address) = super::unpack_resource_address(packed) else {
+        return AttentionReveal::RetainedDetails;
+    };
+    match navigate(
+        address,
+        shell,
+        inventory,
+        principal,
+        NavigateHistory::ApplyOnly,
+    ) {
+        Ok(target) => AttentionReveal::Focused(target),
+        Err(_) => AttentionReveal::RetainedDetails,
+    }
+}
+
 fn focus_triple_for_workspace(
     shell: &ShellState,
     workspace: seyal_core::WorkspaceId,
