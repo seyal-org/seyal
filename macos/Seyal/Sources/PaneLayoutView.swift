@@ -22,6 +22,8 @@ final class PaneLayoutView: NSView {
         let rect: CGRect
         let focused: Bool
         let live: Bool
+        let zoomed: Bool
+        let occluded: Bool
         let title: String
         let recoveryFlags: UInt16
         let recoveryExecutionLo: UInt64
@@ -35,6 +37,8 @@ final class PaneLayoutView: NSView {
             rect: CGRect,
             focused: Bool,
             live: Bool,
+            zoomed: Bool = false,
+            occluded: Bool = false,
             title: String,
             recoveryFlags: UInt16 = 0,
             recoveryExecutionLo: UInt64 = 0,
@@ -47,6 +51,8 @@ final class PaneLayoutView: NSView {
             self.rect = rect
             self.focused = focused
             self.live = live
+            self.zoomed = zoomed
+            self.occluded = occluded
             self.title = title
             self.recoveryFlags = recoveryFlags
             self.recoveryExecutionLo = recoveryExecutionLo
@@ -63,6 +69,8 @@ final class PaneLayoutView: NSView {
                 rect: .zero,
                 focused: focused,
                 live: live,
+                zoomed: zoomed,
+                occluded: occluded,
                 title: title,
                 recoveryFlags: recoveryFlags,
                 recoveryExecutionLo: recoveryExecutionLo,
@@ -319,6 +327,8 @@ final class PaneLayoutView: NSView {
                     ),
                     focused: raw.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED) != 0,
                     live: raw.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE) != 0,
+                    zoomed: raw.flags & UInt16(SEYAL_APP_PANE_REGION_ZOOMED) != 0,
+                    occluded: raw.flags & UInt16(SEYAL_APP_PANE_REGION_OCCLUDED) != 0,
                     title: title,
                     recoveryFlags: recovery.flags,
                     recoveryExecutionLo: recovery.execution_lo,
@@ -352,9 +362,11 @@ final class PaneLayoutView: NSView {
 
     private func rebuildRegionViews(_ next: [Region]) {
         regionViews.forEach { $0.removeFromSuperview() }
-        let split = next.count > 1
+        let visible = next.filter { !$0.occluded }
+        let split = visible.count > 1
         regionViews = next.enumerated().map { index, region in
             let view = PaneRegionView(region: region, index: index, split: split)
+            view.isHidden = region.occluded
             view.onFocus = { [weak self] in
                 self?.onFocusPane?(region.paneLo, region.paneHi)
             }
@@ -416,7 +428,7 @@ final class PaneLayoutView: NSView {
         for (view, region) in zip(regionViews, regions) {
             view.frame = scaled(region.rect)
         }
-        for region in regions where region.live && !region.focused {
+        for region in regions where region.live && !region.focused && !region.occluded {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
             secondaryLiveHosts[key]?.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
         }

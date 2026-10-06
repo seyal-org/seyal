@@ -47,6 +47,12 @@ issue = 1123
 responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, #1144 adds activation-failure routing beside the existing action table, and #936 moves Pane projection and recovery state to cohesive modules."
 
 [[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/pane_layout.rs"
+acknowledged_loc = 736
+issue = 1219
+reason = "Host Pane region/divider projection stays one layout module; #1219 adds zoom overlay host projection beside #923/#928 geometry without a second layout engine."
+
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
 acknowledged_loc = 808
 issue = 1175
