@@ -1,8 +1,9 @@
 //! Versioned/size-tagged encode for [`ResourceAddress`] (ADR-015 / SPEC-022 R11.2).
 
 use super::{
-    ResourceAddress, RESOURCE_ADDRESS_ABI_VERSION, RESOURCE_ADDRESS_KIND_EXECUTION,
-    RESOURCE_ADDRESS_KIND_PANE, RESOURCE_ADDRESS_KIND_TAB, RESOURCE_ADDRESS_KIND_WORKSPACE,
+    decode_resource_address, NavigationRejection, ResourceAddress, RESOURCE_ADDRESS_ABI_VERSION,
+    RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE, RESOURCE_ADDRESS_KIND_TAB,
+    RESOURCE_ADDRESS_KIND_WORKSPACE,
 };
 
 /// Maximum payload bytes for any M003 address kind (Pane = three UUIDs).
@@ -58,4 +59,29 @@ pub fn encode_resource_address(
             )
         }
     }
+}
+
+/// Pack a ResourceAddress for AttentionTarget.resource_address (opaque store bytes).
+pub fn pack_resource_address(address: ResourceAddress) -> Vec<u8> {
+    let (version, kind, payload, len) = encode_resource_address(address);
+    let mut out = Vec::with_capacity(6 + len as usize);
+    out.extend_from_slice(&version.to_le_bytes());
+    out.extend_from_slice(&kind.to_le_bytes());
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(&payload[..len as usize]);
+    out
+}
+
+/// Unpack AttentionTarget.resource_address. Unknown layout fails closed.
+pub fn unpack_resource_address(bytes: &[u8]) -> Result<ResourceAddress, NavigationRejection> {
+    if bytes.len() < 6 {
+        return Err(NavigationRejection::UnsupportedKind);
+    }
+    let version = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let kind = u16::from_le_bytes([bytes[2], bytes[3]]);
+    let len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    if bytes.len() != 6 + len {
+        return Err(NavigationRejection::UnsupportedKind);
+    }
+    decode_resource_address(version, kind, &bytes[6..])
 }

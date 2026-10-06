@@ -35,6 +35,18 @@ Blocks represent real terminal execution. They do not create another PTY, own an
 
 GUI detach and runtime survival are separate from crash recovery, scrollback persistence, and reboot recovery. Journaling cannot reconstruct a live PTY.
 
+## Local Context Engine
+
+M005 Local Context Engine discovery/index and ContextBundle/SelectionTrace assembly live in `seyal-agent-context` (agent domain), not on the terminal hot path. See the [Local Context Engine](./local-context-engine.md) developer page and ADR-013 / SPEC-013 for authority.
+
+## ActionIntent
+
+Durable `ActionId` / immutable `ActionIntent` preparation lives in agent-domain crates (`seyal-agent-core`, `seyal-agent-store`, `IntegrationService::prepare_action`). See [ACTION-INTENT.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-INTENT.md). Repeated Action persist failure pauses affected Action work (`PersistHealth::Paused`) without gating PTY/VT/Metal; see [ACTION-PERSIST-PAUSE.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-PERSIST-PAUSE.md). Single-owner dispatch fencing and exact approval consumption: [ACTION-DISPATCH.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ACTION-DISPATCH.md).
+
+## Attention chrome
+
+Exact-target Attention stack, badges, and OS-notification **eligibility** live in `seyal-agent-core` and project the Attention store (#1306). Reveal-and-focus uses SPEC-022 `ResourceAddress` in `seyal-client`. The macOS host only adapts OS notification APIs (ADR-015). See [ATTENTION-CHROME.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/ATTENTION-CHROME.md). Typed Approve/Reject recording is [APPROVAL-BINDING.md](https://github.com/seyal-org/seyal/blob/master/docs/engineering/APPROVAL-BINDING.md) (#1308).
+
 ## OSS and commercial boundary
 
 ```text
