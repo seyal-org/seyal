@@ -448,10 +448,10 @@ impl ApplicationRoot {
         let pane = intent.pane;
         let disposed_execution = match intent.phase {
             crate::provisioning::IntentPhase::Disposing { execution, .. }
-            | IntentPhase::Created { execution }
-            | IntentPhase::Attaching { execution }
-            | IntentPhase::Attached { execution, .. }
-            | IntentPhase::Bound { execution } => Some(execution),
+            | crate::provisioning::IntentPhase::Created { execution }
+            | crate::provisioning::IntentPhase::Attaching { execution }
+            | crate::provisioning::IntentPhase::Attached { execution, .. }
+            | crate::provisioning::IntentPhase::Bound { execution } => Some(execution),
             crate::provisioning::IntentPhase::AwaitingCreate => None,
         };
         let outcome = match result.result_code {
