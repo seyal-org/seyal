@@ -3,9 +3,9 @@
 use rusqlite::{params, OptionalExtension};
 use seyal_agent_core::{
     linearize_cancel, reconcile, recover, resume_crash_boundary, ActionId, ActionIntent,
-    ActionIntentError, ActionLifecycle, ActionRuntime, AgentRunId, CrashBoundary,
-    PersistAdmitError, PersistHealth, PersistPauseReason, RecoveryDecision, RecoveryError,
-    RecoveryEvidence, RevocationFence, DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
+    ActionIntentError, ActionLifecycle, ActionRuntime, AgentRunId, ApprovalError, CrashBoundary,
+    DispatchError, PersistAdmitError, PersistHealth, PersistPauseReason, RecoveryDecision,
+    RecoveryError, RecoveryEvidence, RevocationFence, DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
 };
 
 use crate::sqlite::ActionPersistGate;
@@ -24,6 +24,10 @@ pub enum ActionError {
         health: PersistHealth,
         reason: PersistPauseReason,
     },
+    Dispatch(DispatchError),
+    Approval(ApprovalError),
+    StaleRunBinding,
+    CallerRunDenied,
 }
 
 impl From<StoreError> for ActionError {
@@ -41,6 +45,15 @@ impl From<ActionIntentError> for ActionError {
 impl From<RecoveryError> for ActionError {
     fn from(value: RecoveryError) -> Self {
         Self::Recovery(value)
+    }
+}
+
+impl From<crate::ApprovalStoreError> for ActionError {
+    fn from(value: crate::ApprovalStoreError) -> Self {
+        match value {
+            crate::ApprovalStoreError::Domain(error) => Self::Approval(error),
+            crate::ApprovalStoreError::Store(error) => Self::Store(error),
+        }
     }
 }
 
@@ -64,7 +77,7 @@ pub struct PersistResume {
 }
 
 pub struct ActionAuthority<'a> {
-    store: &'a AgentStore,
+    pub(super) store: &'a AgentStore,
 }
 
 impl<'a> ActionAuthority<'a> {
@@ -76,11 +89,21 @@ impl<'a> ActionAuthority<'a> {
     /// existing row. Same ActionId + digest is a duplicate; digest mismatch
     /// fails closed (SPEC-016 §20).
     pub fn prepare(&self, intent: &ActionIntent) -> Result<PrepareOutcome, ActionError> {
+        self.prepare_bound(intent, None)
+    }
+
+    /// RPC/harness prepare: bind caller-expected AgentRun binding generation
+    /// before persist so a stale worker cannot mint a new ActionId.
+    pub fn prepare_bound(
+        &self,
+        intent: &ActionIntent,
+        expected_binding_generation: Option<u64>,
+    ) -> Result<PrepareOutcome, ActionError> {
         if intent.lifecycle() != ActionLifecycle::Prepared {
             return Err(ActionError::Intent(ActionIntentError::InvalidField));
         }
         self.begin_action_write()?;
-        match self.prepare_committed(intent) {
+        match self.prepare_committed(intent, expected_binding_generation) {
             Ok(outcome) => {
                 self.store.note_action_write_ok();
                 Ok(outcome)
@@ -93,23 +116,31 @@ impl<'a> ActionAuthority<'a> {
         }
     }
 
-    fn prepare_committed(&self, intent: &ActionIntent) -> Result<PrepareOutcome, ActionError> {
+    fn prepare_committed(
+        &self,
+        intent: &ActionIntent,
+        expected_binding_generation: Option<u64>,
+    ) -> Result<PrepareOutcome, ActionError> {
         self.store.gate_write()?;
         let conn = self.store.conn.lock().expect("agent store lock");
         let tx = conn
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
         let run_id = intent.agent_run_id().to_bytes().to_vec();
-        let run_exists: Option<i64> = tx
+        let run_row: Option<i64> = tx
             .query_row(
-                "SELECT 1 FROM agent_run WHERE id = ?1",
+                "SELECT binding_generation FROM agent_run WHERE id = ?1",
                 params![run_id],
                 |row| row.get(0),
             )
             .optional()
             .map_err(|_| StoreError::Corrupt)?;
-        if run_exists.is_none() {
+        let Some(binding_generation) = run_row else {
             return Err(ActionError::UnknownAgentRun);
+        };
+        if expected_binding_generation.is_some_and(|expected| expected != binding_generation as u64)
+        {
+            return Err(ActionError::StaleRunBinding);
         }
         let action_id = intent.action_id().to_bytes().to_vec();
         let existing: Option<(Vec<u8>, i64)> = tx
@@ -426,7 +457,7 @@ impl<'a> ActionAuthority<'a> {
         Ok(decision)
     }
 
-    fn append_history(
+    pub(super) fn append_history(
         &self,
         tx: &rusqlite::Transaction<'_>,
         action_id: ActionId,
@@ -462,23 +493,28 @@ impl<'a> ActionAuthority<'a> {
         let conn = self.store.conn.lock().expect("agent store lock");
         let mut statement = conn
             .prepare(
-                "SELECT canonical_intent FROM action_intent WHERE agent_run_id = ?1 ORDER BY created_at, action_id",
+                "SELECT digest, canonical_intent FROM action_intent
+                 WHERE agent_run_id = ?1 ORDER BY created_at, action_id",
             )
             .map_err(|_| StoreError::Corrupt)?;
         let rows = statement
             .query_map(params![run_id.to_bytes().to_vec()], |row| {
-                row.get::<_, Vec<u8>>(0)
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
             })
             .map_err(|_| StoreError::Corrupt)?;
         let mut out = Vec::new();
         for row in rows {
-            let canonical = row.map_err(|_| StoreError::Corrupt)?;
-            out.push(ActionIntent::decode(&canonical)?);
+            let (digest, canonical) = row.map_err(|_| StoreError::Corrupt)?;
+            let intent = ActionIntent::decode(&canonical)?;
+            if intent.digest().as_slice() != digest.as_slice() {
+                return Err(ActionError::Store(StoreError::Corrupt));
+            }
+            out.push(intent);
         }
         Ok(out)
     }
 
-    fn begin_action_write(&self) -> Result<(), ActionError> {
+    pub(super) fn begin_action_write(&self) -> Result<(), ActionError> {
         match self.store.admit_action_write() {
             Ok(()) => Ok(()),
             Err(ActionPersistGate::Paused(PersistAdmitError::Paused(reason))) => {
@@ -527,7 +563,7 @@ impl<'a> ActionAuthority<'a> {
         let Some(record) = self.get_record(action_id)? else {
             return Ok(PersistResume {
                 health: PersistHealth::Healthy,
-                fences_current: true,
+                fences_current: false,
                 decision: None,
             });
         };

@@ -248,23 +248,32 @@ impl<'a> ApprovalAuthority<'a> {
         let tx = conn
             .unchecked_transaction()
             .map_err(|_| StoreError::WriteFailed)?;
-        let request = load_request(&tx, approval_id)?.ok_or(ApprovalError::UnknownApproval)?;
-        let mut decision =
-            load_decision(&tx, approval_id)?.ok_or(ApprovalError::UnknownApproval)?;
-        evaluate_consume(&request, &decision, witness, now_unix_ms)?;
-        let changed = tx
-            .execute(
-                "UPDATE approval_decision SET consumed = 1 WHERE approval_id = ?1 AND consumed = 0",
-                params![approval_id.to_bytes().as_slice()],
-            )
-            .map_err(|_| StoreError::WriteFailed)?;
-        if changed != 1 {
-            return Err(ApprovalError::AlreadyConsumed.into());
-        }
+        let decision = consume_in_tx(&tx, approval_id, witness, now_unix_ms)?;
         tx.commit().map_err(|_| StoreError::WriteFailed)?;
-        decision.consumed = true;
         Ok(decision)
     }
+}
+
+pub(crate) fn consume_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    approval_id: ApprovalId,
+    witness: &ConsumptionWitness,
+    now_unix_ms: u64,
+) -> Result<ApprovalDecision, ApprovalStoreError> {
+    let request = load_request(tx, approval_id)?.ok_or(ApprovalError::UnknownApproval)?;
+    let mut decision = load_decision(tx, approval_id)?.ok_or(ApprovalError::UnknownApproval)?;
+    evaluate_consume(&request, &decision, witness, now_unix_ms)?;
+    let changed = tx
+        .execute(
+            "UPDATE approval_decision SET consumed = 1 WHERE approval_id = ?1 AND consumed = 0",
+            params![approval_id.to_bytes().as_slice()],
+        )
+        .map_err(|_| StoreError::WriteFailed)?;
+    if changed != 1 {
+        return Err(ApprovalError::AlreadyConsumed.into());
+    }
+    decision.consumed = true;
+    Ok(decision)
 }
 
 fn insert_request(
@@ -302,7 +311,7 @@ fn insert_request(
     Ok(())
 }
 
-fn load_request(
+pub(crate) fn load_request(
     conn: &rusqlite::Connection,
     approval_id: ApprovalId,
 ) -> Result<Option<ApprovalRequest>, ApprovalStoreError> {
@@ -384,7 +393,7 @@ fn load_request(
     Ok(Some(request))
 }
 
-fn load_decision(
+pub(crate) fn load_decision(
     conn: &rusqlite::Connection,
     approval_id: ApprovalId,
 ) -> Result<Option<ApprovalDecision>, ApprovalStoreError> {

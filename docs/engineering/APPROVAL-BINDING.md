@@ -21,12 +21,12 @@ An approval is not a bearer token. Dispatch-usable authorization requires every 
 
 ## SPEC-016 consume seam
 
-`consume_exact` is the fixture consumer for #1310 / #841. It verifies ActionId, ActionIntent digest, AgentRunId, capability, resource identity/version/fingerprint, argument fingerprint, effect class, policy generation, and the complete RevocationFence vector, then marks the decision consumed.
+`consume_exact` is a fixture consumer only. Production dispatch consumes the decision inside the same local transaction that enters `Dispatching` (`docs/engineering/ACTION-DISPATCH.md`, #1310).
 
-It does **not** enter `Authorized` / `Dispatching`, acquire dispatch fencing, or start a host.
+It does **not** acquire dispatch fencing by itself.
 
 ## Out of scope here
 
-Action dispatch fencing (#1310), EffectUnknown recovery (#1311), persistence-failure pause (#1312), umbrella Attention package (#680).
+Action dispatch fencing and approval consumption (#1310; see [ACTION-DISPATCH.md](ACTION-DISPATCH.md)), EffectUnknown recovery (#1311), persistence-failure pause (#1312), umbrella Attention package (#680).
 
 Control-plane only: approval recording must not synchronously gate PTY → VT → TerminalState → Metal.

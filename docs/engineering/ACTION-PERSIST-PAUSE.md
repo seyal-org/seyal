@@ -15,10 +15,10 @@ Recovery of durable lifecycle after persist health returns uses the merged Effec
 - Budget or deadline exhaustion → `ActionError::PersistencePaused`. Further Action writes are denied without additional SQLite work (no hot-loop).
 - Degraded/Paused never allows a new effectful dispatch and **never** sets a terminal-progress gate (`PersistHealth::may_gate_terminal_progress() == false`).
 - Unrelated AgentRun output append / PTY work is not paused by Action-scoped persist faults.
-- Resume requires a healthy store probe. Stale fences return `fences_current: false` and do not recover/dispatch. Current fences run conservative `recover` (`may_retry_effect` stays false without causal evidence).
+- Resume requires a healthy store probe. Stale fences return `fences_current: false` and do not recover/dispatch. Missing `action_id` is also `fences_current: false`. Current fences run conservative `recover` (`may_retry_effect` stays false without causal evidence). Dispatch after resume still rebinds the live fence and fails closed ([ACTION-DISPATCH.md](ACTION-DISPATCH.md)).
 
 ## Out of scope
 
-Dispatch fencing / approval consumption (#1310), Attention UX (#680), a second store, and schema v14.
+Dispatch fencing / approval consumption (#1310; landed separately), Attention UX (#680), a second store, and a durable pause schema (pause health stays process-local).
 
 Control-plane only: Action persistence must not synchronously gate PTY → VT → TerminalState → Metal.
