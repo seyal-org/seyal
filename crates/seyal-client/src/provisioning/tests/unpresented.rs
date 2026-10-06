@@ -58,7 +58,10 @@ fn duplicate_unpresented_dispose_does_not_queue_second_attach_or_terminate() {
     let effects = session
         .begin_unpresented_dispose(first_pane, execution)
         .expect("first disposal begins");
-    let [ProvisioningEffect::AttachController { owner, execution: attached }] = effects.as_slice()
+    let [ProvisioningEffect::AttachController {
+        owner,
+        execution: attached,
+    }] = effects.as_slice()
     else {
         panic!("expected exactly one attach effect");
     };
@@ -85,4 +88,3 @@ fn duplicate_unpresented_dispose_does_not_queue_second_attach_or_terminate() {
             if *terminated == execution
     ));
 }
-
