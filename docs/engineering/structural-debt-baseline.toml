@@ -198,9 +198,9 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 920
-issue = 1252
-reason = "IntegrationService remains the Agent Backend session façade; #1252 adds grant-gated admin.adapters install/enable beside CancelRun (#1255), WorkScope.bindings, StartAgentRun, and the #1253 fixture-11 hook without a second session authority or client Command."
+acknowledged_loc = 930
+issue = 1309
+reason = "IntegrationService remains the Agent Backend session façade; #1309 adds hostless prepare_action for immutable ActionIntent persistence beside admin.adapters, CancelRun, and StartAgentRun without a second session authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-protocol/src/command/mod.rs"

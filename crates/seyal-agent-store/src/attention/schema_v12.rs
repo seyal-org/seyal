@@ -1,6 +1,6 @@
-//! Attention / Artifact tables (SPEC-028). Schema version 11.
+//! Attention / Artifact tables (SPEC-028). Schema version 12 (v11 is ActionIntent).
 
-pub(crate) const ATTENTION_TABLES_V11: &str = "
+pub(crate) const ATTENTION_TABLES_V12: &str = "
 CREATE TABLE IF NOT EXISTS attention_item (
     attention_id BLOB PRIMARY KEY,
     work_item_id BLOB,

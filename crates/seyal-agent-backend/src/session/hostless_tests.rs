@@ -155,6 +155,58 @@ fn foreign_session_is_rejected_not_failed_when_hostless() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn prepare_action_persists_intent_without_starting_a_host() {
+    use seyal_agent_core::{
+        ActionId, ArgumentFingerprint, AuthorizationClass, CapabilityRef, EffectClass,
+        PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
+        RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let intent = ActionIntent::prepare(
+        ActionId::new(),
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"mkdir"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        service.prepare_action(&intent).unwrap(),
+        seyal_agent_store::PrepareOutcome::NewlyPrepared
+    );
+    assert!(service.host.is_none());
+    let loaded = service
+        .store
+        .actions()
+        .get(intent.action_id())
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded, intent);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[cfg(feature = "fixture-host")]
 #[test]
 fn start_agent_run_uses_injected_host_script_via_collect_observations() {

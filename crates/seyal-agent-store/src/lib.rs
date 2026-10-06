@@ -6,11 +6,13 @@
 
 use std::num::NonZeroU64;
 
+mod action;
 pub mod attention;
 mod identity;
 pub mod memory;
 mod sqlite;
 
+pub use action::{ActionAuthority, ActionError, PrepareOutcome};
 pub use attention::{
     AttentionAuthority, AttentionError, AttentionProtocolView, MarkAllReadResult, MintTrustedInput,
     ProtocolClientKind,
@@ -19,9 +21,9 @@ pub use memory::{
     MemoryAuthority, MemoryError, ProposeInput, ProposeResult, RevocationBundle, WorkingSetError,
 };
 pub use seyal_agent_core::{
-    decode_output_ref, encode_output_ref, AdapterId, AgentRunId, AttemptId, FingerprintRef,
-    OutputRef, OutputRefError, RetentionPolicyRef, RouteOfferingId, StreamKind, WorkItemId,
-    WorkScopeId, OUTPUT_REF_KIND, OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN,
+    decode_output_ref, encode_output_ref, ActionId, ActionIntent, AdapterId, AgentRunId, AttemptId,
+    FingerprintRef, OutputRef, OutputRefError, RetentionPolicyRef, RouteOfferingId, StreamKind,
+    WorkItemId, WorkScopeId, OUTPUT_REF_KIND, OUTPUT_REF_KIND_LEGACY, OUTPUT_REF_LEN,
     RETENTION_POLICY_RETAINED_STREAM,
 };
 pub use sqlite::{

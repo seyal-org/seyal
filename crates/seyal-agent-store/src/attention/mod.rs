@@ -1,7 +1,7 @@
 //! Durable Attention / Artifact presentation store (SPEC-028 / #1306).
 
 mod ops;
-pub(crate) mod schema_v11;
+pub(crate) mod schema_v12;
 
 #[cfg(test)]
 mod tests;

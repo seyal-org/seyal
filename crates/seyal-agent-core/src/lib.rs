@@ -6,6 +6,7 @@
 //!
 //! `ControlGeneration` is the client control epoch (SPEC-026 O1 / §8.3).
 
+pub mod action;
 pub mod attention;
 mod client_control;
 mod domain;
@@ -20,6 +21,11 @@ mod restore;
 pub mod routing;
 mod transitions;
 
+pub use action::{
+    action_intent_digest, material_fields_changed, ActionIntent, ActionIntentError,
+    ActionLifecycle, ArgumentFingerprint, AuthorizationClass, CapabilityRef, EffectClass,
+    ExecutorCapabilityRef, PrivacyDependencyId, RequestProvenance, ResourceIdentity,
+};
 pub use attention::{
     allowed_attention_transition, coalesce_key, mint_from_trusted_source,
     mint_from_untrusted_terminal, reject_untrusted_privileged, ArtifactKind, ArtifactRef,
