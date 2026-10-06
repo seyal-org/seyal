@@ -50,6 +50,11 @@ final class SecondaryLivePaneHost: NSView {
         publishFrame()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        publishFrame()
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("SecondaryLivePaneHost is programmatic")

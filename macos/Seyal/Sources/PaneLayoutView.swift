@@ -105,6 +105,7 @@ final class PaneLayoutView: NSView {
                 )
                 secondaryLiveHosts[key] = host
                 addSubview(host, positioned: .above, relativeTo: liveContent)
+                host.noteRegistryPolled()
             }
         }
         for key in secondaryLiveHosts.keys where !keep.contains(key) {
