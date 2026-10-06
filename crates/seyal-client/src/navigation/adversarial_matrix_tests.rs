@@ -370,8 +370,16 @@ fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
         },
     })
     .expect("navigate");
-    let pending_after_navigate = root.snapshot().pending_effects.len();
-    assert_eq!(pending_after_navigate, 1);
+    let pending_after_navigate = root.snapshot().pending_effects;
+    let activations: Vec<_> = pending_after_navigate
+        .iter()
+        .filter(|effect| matches!(effect, NativeEffect::WindowActivation { window } if *window == win_b))
+        .copied()
+        .collect();
+    assert_eq!(
+        activations,
+        [NativeEffect::WindowActivation { window: win_b }]
+    );
     for _ in 0..8 {
         assert_eq!(
             root.apply(AppAction::ReportWindowEvent {
@@ -380,10 +388,7 @@ fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
             }),
             Err(crate::app::AppError::WindowActivationFailed)
         );
-        assert_eq!(
-            root.snapshot().pending_effects.len(),
-            pending_after_navigate
-        );
+        assert_eq!(root.snapshot().pending_effects, pending_after_navigate);
         assert_eq!(root.snapshot().shell.focused_pane, pane_b);
         assert_eq!(root.snapshot().shell.active_window, win_b);
     }
