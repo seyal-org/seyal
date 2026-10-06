@@ -108,7 +108,6 @@ impl ShellState {
         if self.unpresented.remove(&execution).is_none() {
             return Err(ShellError::ExecutionNotUnpresented);
         }
-        self.push_effect(ShellNativeEffect::TerminateExecution { execution });
         Ok(())
     }
 
