@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 737
-issue = 1175
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch without splitting the cold control path."
+acknowledged_loc = 740
+issue = 1122
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1122 threads ADR-018 containment_generation on ClosePane without splitting the cold control path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -220,9 +220,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1194 adds
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1131
-issue = 1101
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
+ceiling_loc = 1139
+issue = 1122
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites without inventing a second navigation test authority. Restacking on W2a (#1092) dropped unused SelectWorkspace call sites; ratchet the ceiling to the combined size."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -230,11 +230,11 @@ acknowledged_loc = 854
 issue = 1105
 reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows, #1090 threads window identity, and #867 adds bound-Pane explicit Raw / Return to Flow beside those commands; splitting would separate the row model from the command it runs."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 869
-issue = 1092
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1092 adds window/tab actions and containment fencing without splitting tree/workspace ownership from the CreateTab enablement surface."
+ceiling_loc = 1007
+issue = 1218
+responsibility = "Shell composition reducer stays one Workspace/Tab/Pane façade. Restacking PT1–PT3 zoom/move/focus plus PT4 Equalize dispatch on W2a (#1092) crosses hard_loc; neighbor selection, pane_ops, equalize, and window/tab actions remain in sibling modules. Do not split the typed ShellAction match into partN files."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

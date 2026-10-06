@@ -424,6 +424,7 @@ fn moving_last_tab_preserves_recency_for_its_live_panes() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split the moved Tab");
     let most_recent_pane = shell.snapshot().focused_pane;
