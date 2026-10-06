@@ -23,6 +23,7 @@ impl ApplicationRoot {
         execution: ExecutionId,
         workspace: WorkspaceId,
     ) -> Result<(), AppError> {
+        self.provisioning.note_unreferenced(execution);
         self.apply_shell(ShellAction::RecordUnpresented {
             execution,
             workspace,
@@ -72,10 +73,10 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Palette adopt: validate and emit an attach intent only.
+    /// Palette adopt: validate and start the Rust live-attach path.
     ///
-    /// ADR-018 §6: do not bind the leaf here. Shell binding commits only through
-    /// [`AppAction::Adopt`] after Runtime attachment evidence exists.
+    /// Does not bind the leaf here. [`ProvisioningEffect::BindPane`] / Bind
+    /// commits after a real `AttachmentId` exists.
     pub(super) fn adopt_unpresented_command(
         &mut self,
         execution: ExecutionId,
@@ -85,16 +86,18 @@ impl ApplicationRoot {
         self.shell
             .validate_adopt_execution(pane, execution)
             .map_err(unpresented_shell_error)?;
-        self.pending_effects
-            .push(NativeEffect::RequestAdoptAttach { pane, execution });
-        Ok(())
+        let effects = self
+            .provisioning
+            .begin_unpresented_adopt(pane, execution)
+            .map_err(|_| AppError::ProvisioningRejected)?;
+        self.dispatch_provisioning_effects(effects)
     }
 
     /// Explicit terminate of a live-unpresented execution (ADR-018 §3.3).
     ///
-    /// Distinct from [`Self::terminate_execution`] (P4 Controller dispose of a
-    /// fenced, bound attachment). Queues [`NativeEffect::TerminateExecution`]
-    /// for the existing ADR-005 Runtime path; never emitted by close actions.
+    /// Distinct from [`Self::terminate_execution`] (P4 of a bound attachment).
+    /// Attaches as Controller only to dispose (ADR-017 §6.3 row 1) and keeps
+    /// the catalog entry until `TerminateExecutionResult`.
     pub(super) fn terminate_unpresented(&mut self, execution: ExecutionId) -> Result<(), AppError> {
         let workspace = self.shell.snapshot().active_workspace;
         if !self
@@ -105,8 +108,17 @@ impl ApplicationRoot {
         {
             return Err(AppError::ExecutionNotUnpresented);
         }
-        self.apply_shell(ShellAction::TerminateExecution { execution })
-            .map_err(unpresented_shell_error)
+        let pane = self.shell.snapshot().focused_pane;
+        let effects = self
+            .provisioning
+            .begin_unpresented_dispose(pane, execution)
+            .map_err(|_| AppError::ProvisioningRejected)?;
+        self.dispatch_provisioning_effects(effects)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_wire_effects(&self) -> &[crate::provisioning::ProvisioningEffect] {
+        &self.pending_wire_effects
     }
 }
 

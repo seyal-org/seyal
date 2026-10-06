@@ -138,6 +138,12 @@ impl ApplicationRoot {
             PaletteCommand::OpenAttention(id) => self.open_attention(fence, id),
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
             PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
+            PaletteCommand::AdoptUnpresented(execution) => {
+                self.adopt_unpresented_command(execution)
+            }
+            PaletteCommand::TerminateUnpresented(execution) => {
+                self.terminate_unpresented(execution)
+            }
         }
     }
 }

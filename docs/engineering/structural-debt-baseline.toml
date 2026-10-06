@@ -59,21 +59,21 @@ reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-s
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
-acknowledged_loc = 808
-issue = 1175
-reason = "Portable provisioning reducer stays one cold-path authority; #1175 adds pending_attach_by_request_id so dispose-attach after Created can correlate without fabricating AttachmentId."
+acknowledged_loc = 884
+issue = 1143
+reason = "Portable provisioning reducer stays one cold-path authority; #1143 adds begin_unpresented_adopt/dispose so W6 catalog work uses AttachController rather than a host NativeEffect."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
 acknowledged_loc = 807
-issue = 1092
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, and #1108 drains native window realization effects without adding a second provisioning authority."
+issue = 1143
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, #1108 drains native window realization effects, and #1143 dispatches unpresented adopt/dispose through the same effect queue."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
-acknowledged_loc = 813
-issue = 1149
-reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisioning, plus #1149 connection-scoped request_id and bootstrap floor seeding coverage; production reducer stays under review_loc in provisioning/mod.rs plus intent/disposition/resolution siblings."
+acknowledged_loc = 860
+issue = 1143
+reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented adopt/dispose attach-then-terminate proofs; production reducer stays in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"

@@ -18,7 +18,7 @@ use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
-use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
+use crate::provisioning::{CreateOutcome, IntentPhase, ProvisioningEffect, ProvisioningFailure};
 use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
@@ -438,6 +438,14 @@ impl ApplicationRoot {
             return Ok(Some(()));
         };
         let pane = intent.pane;
+        let disposed_execution = match intent.phase {
+            IntentPhase::Disposing { execution, .. }
+            | IntentPhase::Created { execution }
+            | IntentPhase::Attaching { execution }
+            | IntentPhase::Attached { execution, .. }
+            | IntentPhase::Bound { execution } => Some(execution),
+            IntentPhase::AwaitingCreate => None,
+        };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
@@ -455,6 +463,11 @@ impl ApplicationRoot {
                 ProvisioningEffect::Detach { .. } => {
                     let _ = self.shell.release_execution(pane);
                     self.clear_authority_for_pane(pane);
+                    if matches!(outcome, TerminateOutcome::TerminationRequested) {
+                        if let Some(execution) = disposed_execution {
+                            let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
+                        }
+                    }
                 }
                 other => {
                     self.dispatch_wire_effects(
@@ -536,6 +549,19 @@ impl ApplicationRoot {
         let pending = std::mem::take(&mut self.pending_wire_effects);
         self.dispatch_wire_effects(
             pending,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )
+    }
+
+    pub(crate) fn dispatch_provisioning_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+    ) -> Result<(), AppError> {
+        self.dispatch_wire_effects(
+            effects,
             WireDispatchContext {
                 workspace_id: 0,
                 launch_profile: 0,
