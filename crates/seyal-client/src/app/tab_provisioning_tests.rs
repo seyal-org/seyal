@@ -300,6 +300,11 @@ fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
     assert_eq!(root.provisioning().recorded_execution(pane_a), Some(exec_a));
     assert_eq!(root.provisioning().recorded_execution(pane_b), None);
     assert_eq!(root.provisioning().automatic_retries(), 0);
+    assert_eq!(
+        root.live_unpresented(),
+        vec![exec_b],
+        "detach-only close must populate the W6 catalog from the provisioning record"
+    );
     assert!(
         root.wire_client().is_some(),
         "detach-only close must keep the shared wire client for remaining tabs"
