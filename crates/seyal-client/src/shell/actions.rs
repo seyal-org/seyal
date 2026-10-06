@@ -244,10 +244,11 @@ impl ShellState {
             }
         }
 
-        let (removed, destroyed) = self.workspace_mut(source_workspace)?.take_tab(tab)?;
-        if destroyed.is_some() {
-            self.purge_missing_panes();
-        }
+        // Moving a Tab can destroy its now-empty source Window, but the Tab's
+        // Pane identities remain live. Focus history is Pane-addressed and
+        // derives Window placement at use time, so containment moves must not
+        // purge those entries.
+        let (removed, _) = self.workspace_mut(source_workspace)?.take_tab(tab)?;
         self.workspace_mut(source_workspace)?
             .insert_tab_before(window, removed, before)?;
         self.activate_window(window)?;
