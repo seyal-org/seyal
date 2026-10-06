@@ -1226,3 +1226,31 @@ fn rejected_structural_actions_preserve_full_state() {
         "disabled CreateTab rejection changed state"
     );
 }
+
+#[test]
+fn cross_window_select_tab_emits_order_front() {
+    let mut shell = seed_two_workspaces();
+    let original_window = shell.product_window_id().unwrap();
+    shell.apply_product_create_tab().unwrap();
+    let created = shell.snapshot().active_tab;
+    shell
+        .apply(ShellAction::MoveTabToNewWindow {
+            tab: created,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let new_window = shell.product_window_id().unwrap();
+    assert_ne!(new_window, original_window);
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: original_window,
+        })
+        .unwrap();
+    let _ = shell.take_effects();
+    shell.apply(ShellAction::SelectTab { id: created }).unwrap();
+    assert_eq!(shell.product_window_id().unwrap(), new_window);
+    assert_eq!(
+        shell.take_effects(),
+        vec![ShellNativeEffect::OrderFrontMakeKey { window: new_window }]
+    );
+}

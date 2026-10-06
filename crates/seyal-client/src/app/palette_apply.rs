@@ -113,6 +113,7 @@ impl ApplicationRoot {
             NavigationPrincipal::local_user(),
         )
         .map_err(navigation_error)?;
+        self.drain_shell_effects();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
