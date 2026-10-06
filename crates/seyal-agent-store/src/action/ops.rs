@@ -2,11 +2,13 @@
 
 use rusqlite::{params, OptionalExtension};
 use seyal_agent_core::{
-    linearize_cancel, reconcile, recover, ActionId, ActionIntent, ActionIntentError,
-    ActionLifecycle, ActionRuntime, AgentRunId, CrashBoundary, RecoveryDecision, RecoveryError,
-    RecoveryEvidence, DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
+    linearize_cancel, reconcile, recover, resume_crash_boundary, ActionId, ActionIntent,
+    ActionIntentError, ActionLifecycle, ActionRuntime, AgentRunId, CrashBoundary,
+    PersistAdmitError, PersistHealth, PersistPauseReason, RecoveryDecision, RecoveryError,
+    RecoveryEvidence, RevocationFence, DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
 };
 
+use crate::sqlite::ActionPersistGate;
 use crate::sqlite::AgentStore;
 use crate::StoreError;
 
@@ -18,6 +20,10 @@ pub enum ActionError {
     IdentityMismatch,
     Recovery(RecoveryError),
     IllegalLifecycle,
+    PersistencePaused {
+        health: PersistHealth,
+        reason: PersistPauseReason,
+    },
 }
 
 impl From<StoreError> for ActionError {
@@ -50,6 +56,13 @@ pub struct PersistedAction {
     pub runtime: ActionRuntime,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersistResume {
+    pub health: PersistHealth,
+    pub fences_current: bool,
+    pub decision: Option<RecoveryDecision>,
+}
+
 pub struct ActionAuthority<'a> {
     store: &'a AgentStore,
 }
@@ -66,6 +79,21 @@ impl<'a> ActionAuthority<'a> {
         if intent.lifecycle() != ActionLifecycle::Prepared {
             return Err(ActionError::Intent(ActionIntentError::InvalidField));
         }
+        self.begin_action_write()?;
+        match self.prepare_committed(intent) {
+            Ok(outcome) => {
+                self.store.note_action_write_ok();
+                Ok(outcome)
+            }
+            Err(ActionError::Store(StoreError::WriteFailed)) => {
+                self.store.note_action_write_failed();
+                Err(ActionError::Store(StoreError::WriteFailed))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn prepare_committed(&self, intent: &ActionIntent) -> Result<PrepareOutcome, ActionError> {
         self.store.gate_write()?;
         let conn = self.store.conn.lock().expect("agent store lock");
         let tx = conn
@@ -274,6 +302,27 @@ impl<'a> ActionAuthority<'a> {
         next: ActionLifecycle,
         dispatch_generation: Option<u64>,
     ) -> Result<(), ActionError> {
+        self.begin_action_write()?;
+        match self.transition_fixture_committed(action_id, expected, next, dispatch_generation) {
+            Ok(()) => {
+                self.store.note_action_write_ok();
+                Ok(())
+            }
+            Err(ActionError::Store(StoreError::WriteFailed)) => {
+                self.store.note_action_write_failed();
+                Err(ActionError::Store(StoreError::WriteFailed))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn transition_fixture_committed(
+        &self,
+        action_id: ActionId,
+        expected: ActionLifecycle,
+        next: ActionLifecycle,
+        dispatch_generation: Option<u64>,
+    ) -> Result<(), ActionError> {
         self.store.gate_write()?;
         let record = self
             .get_record(action_id)?
@@ -302,6 +351,26 @@ impl<'a> ActionAuthority<'a> {
     }
 
     fn persist_decision(
+        &self,
+        record: &PersistedAction,
+        decision: RecoveryDecision,
+        evidence: &RecoveryEvidence,
+    ) -> Result<RecoveryDecision, ActionError> {
+        self.begin_action_write()?;
+        match self.persist_decision_committed(record, decision, evidence) {
+            Ok(decision) => {
+                self.store.note_action_write_ok();
+                Ok(decision)
+            }
+            Err(ActionError::Store(StoreError::WriteFailed)) => {
+                self.store.note_action_write_failed();
+                Err(ActionError::Store(StoreError::WriteFailed))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn persist_decision_committed(
         &self,
         record: &PersistedAction,
         decision: RecoveryDecision,
@@ -407,5 +476,82 @@ impl<'a> ActionAuthority<'a> {
             out.push(ActionIntent::decode(&canonical)?);
         }
         Ok(out)
+    }
+
+    fn begin_action_write(&self) -> Result<(), ActionError> {
+        match self.store.admit_action_write() {
+            Ok(()) => Ok(()),
+            Err(ActionPersistGate::Paused(PersistAdmitError::Paused(reason))) => {
+                Err(ActionError::PersistencePaused {
+                    health: PersistHealth::Paused,
+                    reason,
+                })
+            }
+            Err(ActionPersistGate::WriteFailed) => Err(ActionError::Store(StoreError::WriteFailed)),
+        }
+    }
+
+    fn fences_current(&self, fence: &RevocationFence) -> Result<bool, ActionError> {
+        let conn = self.store.conn.lock().expect("agent store lock");
+        for member in fence.members() {
+            let current: i64 = conn
+                .query_row(
+                    "SELECT generation FROM revocation_scope_generation
+                     WHERE scope_kind = ?1 AND scope_id = ?2",
+                    params![member.scope.kind.code() as i64, member.scope.id.as_slice()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| StoreError::Corrupt)?
+                .unwrap_or(1);
+            if member.generation.get() < current as u64 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Resume Action persist work after the store is healthy. Revalidates
+    /// SPEC-015 fences before recovery may proceed (SPEC-016 §22).
+    pub fn resume_after_persist_health(
+        &self,
+        action_id: ActionId,
+    ) -> Result<PersistResume, ActionError> {
+        if !self.store.resume_action_persist() {
+            let health = self.store.action_persist_health();
+            return Err(ActionError::PersistencePaused {
+                health,
+                reason: PersistPauseReason::ConsecutiveFailureBudgetExhausted,
+            });
+        }
+        let Some(record) = self.get_record(action_id)? else {
+            return Ok(PersistResume {
+                health: PersistHealth::Healthy,
+                fences_current: true,
+                decision: None,
+            });
+        };
+        let fences_current = self.fences_current(record.intent.revocation_fence())?;
+        if !fences_current {
+            return Ok(PersistResume {
+                health: PersistHealth::Healthy,
+                fences_current: false,
+                decision: None,
+            });
+        }
+        if record.runtime.lifecycle.is_known_terminal() {
+            return Ok(PersistResume {
+                health: PersistHealth::Healthy,
+                fences_current: true,
+                decision: None,
+            });
+        }
+        let boundary = resume_crash_boundary(record.runtime.lifecycle);
+        let decision = self.recover(action_id, boundary, &RecoveryEvidence::none())?;
+        Ok(PersistResume {
+            health: PersistHealth::Healthy,
+            fences_current: true,
+            decision: Some(decision),
+        })
     }
 }

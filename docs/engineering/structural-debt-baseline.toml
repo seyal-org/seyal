@@ -163,11 +163,13 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # #1181 adds §10 output-ref encode consumers, partial-segment merge, and
 # materialize_output_ref beside append_output_event.
 # #1271 adds rebuildable context_index_cache re-export beside existing open paths.
+# #1312 collocates Action persist-pause write-fault cells with existing store
+# write-fault instrumentation; pause policy methods live in action_persist.rs.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 891
-issue = 1271
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1271 adds a one-line ContextIndexRecord re-export for the rebuildable SPEC-013 index table without a second store façade."
+acknowledged_loc = 906
+issue = 1312
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1312 adds Action persist-pause Atomic/Mutex cells beside writes_before_fault without a second store façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/catalog.rs"

@@ -20,6 +20,6 @@ Preparation-time `policy_generation` and `RevocationFence` are immutable provena
 
 ## Out of scope here
 
-Dispatch fencing and approval consumption (#1310), EffectUnknown / reconciliation (#1311), persistence-failure pause (#1312). ApprovalRequest/Decision recording is [`APPROVAL-BINDING.md`](APPROVAL-BINDING.md) (#1308).
+Dispatch fencing and approval consumption (#1310), EffectUnknown / reconciliation (#1311; landed), persistence-failure pause (#1312; see [ACTION-PERSIST-PAUSE.md](ACTION-PERSIST-PAUSE.md)), and Attention UX (#680). ApprovalRequest/Decision recording is [`APPROVAL-BINDING.md`](APPROVAL-BINDING.md) (#1308).
 
 Control-plane only: Action persistence must not synchronously gate PTY → VT → TerminalState → Metal.

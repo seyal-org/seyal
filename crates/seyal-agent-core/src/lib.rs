@@ -23,11 +23,13 @@ mod transitions;
 
 pub use action::{
     action_intent_digest, linearize_cancel, material_fields_changed, reconcile, recover,
-    ActionIntent, ActionIntentError, ActionLifecycle, ActionRuntime, ArgumentFingerprint,
-    AuthorizationClass, CapabilityRef, CausalMarker, CausalMarkerKind, CrashBoundary, EffectClass,
-    EvidenceKind, ExecutorCapabilityRef, PrivacyDependencyId, ReconciliationRequiredHook,
-    RecoveryDecision, RecoveryError, RecoveryEvidence, RequestProvenance, ResourceIdentity,
-    DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
+    resume_crash_boundary, ActionIntent, ActionIntentError, ActionLifecycle, ActionRuntime,
+    ArgumentFingerprint, AuthorizationClass, CapabilityRef, CausalMarker, CausalMarkerKind,
+    CrashBoundary, EffectClass, EvidenceKind, ExecutorCapabilityRef, PersistAdmitError,
+    PersistFailurePolicy, PersistHealth, PersistPauseReason, PrivacyDependencyId,
+    ReconciliationRequiredHook, RecoveryDecision, RecoveryError, RecoveryEvidence,
+    RequestProvenance, ResourceIdentity, DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
+    DEFAULT_PERSIST_FAILURE_BUDGET, DEFAULT_PERSIST_RETRY_DEADLINE_MS,
 };
 pub use attention::{
     activate, allowed_attention_transition, authorize_decide, auto_approve_reconciliation, badges,
