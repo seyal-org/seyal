@@ -357,6 +357,15 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneZoomToggle
+        | WorkspaceCommandId::PaneSwapLeft
+        | WorkspaceCommandId::PaneSwapRight
+        | WorkspaceCommandId::PaneSwapUp
+        | WorkspaceCommandId::PaneSwapDown
+        | WorkspaceCommandId::PaneMoveLeft
+        | WorkspaceCommandId::PaneMoveRight
+        | WorkspaceCommandId::PaneMoveUp
+        | WorkspaceCommandId::PaneMoveDown
         | WorkspaceCommandId::PresentationSetFlow
         | WorkspaceCommandId::PresentationSetRaw
         | WorkspaceCommandId::PresentationSetTui

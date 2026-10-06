@@ -57,6 +57,15 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneZoomToggle
+        | WorkspaceCommandId::PaneSwapLeft
+        | WorkspaceCommandId::PaneSwapRight
+        | WorkspaceCommandId::PaneSwapUp
+        | WorkspaceCommandId::PaneSwapDown
+        | WorkspaceCommandId::PaneMoveLeft
+        | WorkspaceCommandId::PaneMoveRight
+        | WorkspaceCommandId::PaneMoveUp
+        | WorkspaceCommandId::PaneMoveDown
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
         | WorkspaceCommandId::PresentationSetFlow
@@ -238,6 +247,15 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::FocusHistoryBack => 19,
         WorkspaceCommandId::FocusHistoryForward => 20,
         WorkspaceCommandId::GotoOpen => 21,
+        WorkspaceCommandId::PaneZoomToggle => 22,
+        WorkspaceCommandId::PaneSwapLeft => 23,
+        WorkspaceCommandId::PaneSwapRight => 24,
+        WorkspaceCommandId::PaneSwapUp => 25,
+        WorkspaceCommandId::PaneSwapDown => 26,
+        WorkspaceCommandId::PaneMoveLeft => 27,
+        WorkspaceCommandId::PaneMoveRight => 28,
+        WorkspaceCommandId::PaneMoveUp => 29,
+        WorkspaceCommandId::PaneMoveDown => 30,
     }
 }
 
@@ -265,6 +283,15 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         19 => WorkspaceCommandId::FocusHistoryBack,
         20 => WorkspaceCommandId::FocusHistoryForward,
         21 => WorkspaceCommandId::GotoOpen,
+        22 => WorkspaceCommandId::PaneZoomToggle,
+        23 => WorkspaceCommandId::PaneSwapLeft,
+        24 => WorkspaceCommandId::PaneSwapRight,
+        25 => WorkspaceCommandId::PaneSwapUp,
+        26 => WorkspaceCommandId::PaneSwapDown,
+        27 => WorkspaceCommandId::PaneMoveLeft,
+        28 => WorkspaceCommandId::PaneMoveRight,
+        29 => WorkspaceCommandId::PaneMoveUp,
+        30 => WorkspaceCommandId::PaneMoveDown,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {
