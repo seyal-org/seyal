@@ -24,8 +24,8 @@ pub use attention::{
     allowed_attention_transition, coalesce_key, mint_from_trusted_source,
     mint_from_untrusted_terminal, reject_untrusted_privileged, ArtifactKind, ArtifactRef,
     AttentionItem, AttentionKind, AttentionPriority, AttentionState, AttentionTarget,
-    AttentionTransitionError, MintError, MintSource, PresentationText, ATTENTION_SCHEMA_VERSION,
-    MAX_OPEN_ATTENTION_PER_RUN, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
+    AttentionTransitionError, MintError, MintSource, PresentationText, TrustedMintSpec,
+    ATTENTION_SCHEMA_VERSION, MAX_OPEN_ATTENTION_PER_RUN, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
 };
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};

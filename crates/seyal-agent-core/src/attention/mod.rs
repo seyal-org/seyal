@@ -15,8 +15,8 @@ mod tests;
 pub use lifecycle::{allowed_attention_transition, AttentionTransitionError};
 pub use mint::{
     coalesce_key, mint_from_trusted_source, mint_from_untrusted_terminal,
-    reject_untrusted_privileged, MintError, MintSource, MAX_OPEN_ATTENTION_PER_RUN,
-    MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
+    reject_untrusted_privileged, MintError, MintSource, TrustedMintSpec,
+    MAX_OPEN_ATTENTION_PER_RUN, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
 };
 pub use types::{
     ArtifactKind, ArtifactRef, AttentionItem, AttentionKind, AttentionPriority, AttentionState,

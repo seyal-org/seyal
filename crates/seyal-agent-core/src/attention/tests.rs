@@ -16,16 +16,16 @@ fn target_for_run(run: AgentRunId) -> AttentionTarget {
 #[test]
 fn spec028_12_01_open_ack_resolve_without_authorizing() {
     let run = AgentRunId::new();
-    let mut item = mint_from_trusted_source(
-        AttentionKind::Completion,
-        "done",
-        target_for_run(run),
-        Some(run),
-        None,
-        None,
-        1_000,
-        0,
-    )
+    let mut item = mint_from_trusted_source(TrustedMintSpec {
+        kind: AttentionKind::Completion,
+        summary: "done".into(),
+        target: target_for_run(run),
+        agent_run_id: Some(run),
+        action_id: None,
+        approval_id: None,
+        now_unix_ms: 1_000,
+        open_count_for_run: 0,
+    })
     .expect("mint");
     assert_eq!(item.state, AttentionState::Open);
     assert!(allowed_attention_transition(item.state, AttentionState::Acknowledged).is_ok());
@@ -41,16 +41,16 @@ fn spec028_12_01_open_ack_resolve_without_authorizing() {
 #[test]
 fn spec028_12_02_dismiss_does_not_authorize() {
     let run = AgentRunId::new();
-    let mut item = mint_from_trusted_source(
-        AttentionKind::NeedsInput,
-        "input?",
-        target_for_run(run),
-        Some(run),
-        None,
-        None,
-        1_000,
-        0,
-    )
+    let mut item = mint_from_trusted_source(TrustedMintSpec {
+        kind: AttentionKind::NeedsInput,
+        summary: "input?".into(),
+        target: target_for_run(run),
+        agent_run_id: Some(run),
+        action_id: None,
+        approval_id: None,
+        now_unix_ms: 1_000,
+        open_count_for_run: 0,
+    })
     .expect("mint");
     item.state = AttentionState::Dismissed;
     assert!(item.approval_id.is_none());
@@ -101,33 +101,33 @@ fn spec028_12_19_terminal_informational_storm_bounded() {
 #[test]
 fn privileged_approval_requires_binding_fields() {
     let run = AgentRunId::new();
-    let err = mint_from_trusted_source(
-        AttentionKind::ApprovalRequired,
-        "approve",
-        target_for_run(run),
-        Some(run),
-        None,
-        Some(ApprovalId::new()),
-        1,
-        0,
-    );
+    let err = mint_from_trusted_source(TrustedMintSpec {
+        kind: AttentionKind::ApprovalRequired,
+        summary: "approve".into(),
+        target: target_for_run(run),
+        agent_run_id: Some(run),
+        action_id: None,
+        approval_id: Some(ApprovalId::new()),
+        now_unix_ms: 1,
+        open_count_for_run: 0,
+    });
     assert_eq!(err, Err(MintError::MissingApprovalBinding));
-    let ok = mint_from_trusted_source(
-        AttentionKind::ApprovalRequired,
-        "approve",
-        AttentionTarget {
+    let ok = mint_from_trusted_source(TrustedMintSpec {
+        kind: AttentionKind::ApprovalRequired,
+        summary: "approve".into(),
+        target: AttentionTarget {
             resource_address: None,
             agent_run_id: Some(run),
             action_id: Some(ActionId::new()),
             artifact_id: None,
             requires_spatial_focus: false,
         },
-        Some(run),
-        Some(ActionId::new()),
-        Some(ApprovalId::new()),
-        1,
-        0,
-    );
+        agent_run_id: Some(run),
+        action_id: Some(ActionId::new()),
+        approval_id: Some(ApprovalId::new()),
+        now_unix_ms: 1,
+        open_count_for_run: 0,
+    });
     assert!(ok.is_ok());
 }
 

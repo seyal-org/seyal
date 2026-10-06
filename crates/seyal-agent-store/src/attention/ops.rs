@@ -7,8 +7,8 @@ use seyal_agent_core::{
     allowed_attention_transition, mint_from_trusted_source, mint_from_untrusted_terminal, ActionId,
     AgentRunId, ApprovalId, ArtifactId, ArtifactKind, ArtifactRef, AttemptId, AttentionId,
     AttentionItem, AttentionKind, AttentionPriority, AttentionState, AttentionTarget,
-    ClientSessionId, MintError, PresentationText, WorkItemId, MAX_OPEN_ATTENTION_PER_RUN,
-    MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
+    ClientSessionId, MintError, PresentationText, TrustedMintSpec, WorkItemId,
+    MAX_OPEN_ATTENTION_PER_RUN, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW,
 };
 
 use crate::sqlite::AgentStore;
@@ -115,16 +115,16 @@ impl<'a> AttentionAuthority<'a> {
             input.has_attention_scope,
         )?;
         let open = self.open_count(input.agent_run_id)?;
-        let item = mint_from_trusted_source(
-            input.kind,
-            input.summary,
-            input.target,
-            input.agent_run_id,
-            input.action_id,
-            input.approval_id,
-            Self::now_ms(),
-            open,
-        )?;
+        let item = mint_from_trusted_source(TrustedMintSpec {
+            kind: input.kind,
+            summary: input.summary,
+            target: input.target,
+            agent_run_id: input.agent_run_id,
+            action_id: input.action_id,
+            approval_id: input.approval_id,
+            now_unix_ms: Self::now_ms(),
+            open_count_for_run: open,
+        })?;
         self.insert_item(&item)?;
         Ok(item)
     }
@@ -139,10 +139,10 @@ impl<'a> AttentionAuthority<'a> {
         let item = mint_from_untrusted_terminal(summary, agent_run_id, Self::now_ms(), window)?;
         debug_assert!(!item.kind.is_privileged_approval());
         // Coalesce equivalent terminal warnings for the same run.
-        if let Some(key) = item.coalesce_key.as_ref() {
-            if let Some(existing) = self.find_open_by_coalesce(key)? {
-                return Ok(existing);
-            }
+        if let Some(key) = item.coalesce_key.as_ref()
+            && let Some(existing) = self.find_open_by_coalesce(key)?
+        {
+            return Ok(existing);
         }
         self.insert_item(&item)?;
         Ok(item)

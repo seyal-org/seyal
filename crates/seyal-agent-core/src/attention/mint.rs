@@ -42,22 +42,26 @@ pub fn coalesce_key(
     out
 }
 
+/// Inputs for a trusted-backend Attention mint (keeps the public function under clippy's arity cap).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrustedMintSpec {
+    pub kind: AttentionKind,
+    pub summary: String,
+    pub target: AttentionTarget,
+    pub agent_run_id: Option<AgentRunId>,
+    pub action_id: Option<ActionId>,
+    pub approval_id: Option<ApprovalId>,
+    pub now_unix_ms: u64,
+    pub open_count_for_run: usize,
+}
+
 /// Mint Attention from a trusted backend/agent/policy source.
-pub fn mint_from_trusted_source(
-    kind: AttentionKind,
-    summary: impl Into<String>,
-    target: AttentionTarget,
-    agent_run_id: Option<AgentRunId>,
-    action_id: Option<ActionId>,
-    approval_id: Option<ApprovalId>,
-    now_unix_ms: u64,
-    open_count_for_run: usize,
-) -> Result<AttentionItem, MintError> {
-    if open_count_for_run >= MAX_OPEN_ATTENTION_PER_RUN {
+pub fn mint_from_trusted_source(spec: TrustedMintSpec) -> Result<AttentionItem, MintError> {
+    if spec.open_count_for_run >= MAX_OPEN_ATTENTION_PER_RUN {
         return Err(MintError::OpenCapExceeded);
     }
-    if kind.is_privileged_approval()
-        && (action_id.is_none() || agent_run_id.is_none() || approval_id.is_none())
+    if spec.kind.is_privileged_approval()
+        && (spec.action_id.is_none() || spec.agent_run_id.is_none() || spec.approval_id.is_none())
     {
         return Err(MintError::MissingApprovalBinding);
     }
@@ -65,20 +69,20 @@ pub fn mint_from_trusted_source(
         attention_id: AttentionId::new(),
         work_item_id: None,
         attempt_id: None,
-        agent_run_id,
-        action_id,
-        approval_id,
+        agent_run_id: spec.agent_run_id,
+        action_id: spec.action_id,
+        approval_id: spec.approval_id,
         artifact_ids: Vec::new(),
-        kind,
-        target,
+        kind: spec.kind,
+        target: spec.target,
         state: AttentionState::Open,
         priority: AttentionPriority::Normal,
-        summary: PresentationText::new(summary),
-        created_at_unix_ms: now_unix_ms,
-        updated_at_unix_ms: now_unix_ms,
+        summary: PresentationText::new(spec.summary),
+        created_at_unix_ms: spec.now_unix_ms,
+        updated_at_unix_ms: spec.now_unix_ms,
         resolved_at_unix_ms: None,
         expires_at_unix_ms: None,
-        coalesce_key: Some(coalesce_key("trusted", kind, agent_run_id)),
+        coalesce_key: Some(coalesce_key("trusted", spec.kind, spec.agent_run_id)),
     })
 }
 
