@@ -1,6 +1,9 @@
-//! Action recovery columns (SPEC-016 EffectUnknown). Schema version 12.
+//! Action recovery columns (SPEC-016 EffectUnknown). Schema version 13.
+//!
+//! Attention tables occupy schema v12 on master (#1313). Recovery columns are
+//! additive on `action_intent` plus history.
 
-pub(crate) const ACTION_RECOVERY_V12: &str = "
+pub(crate) const ACTION_RECOVERY_V13: &str = "
 ALTER TABLE action_intent ADD COLUMN dispatch_generation INTEGER;
 ALTER TABLE action_intent ADD COLUMN authorization_invalidated INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE action_intent ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;

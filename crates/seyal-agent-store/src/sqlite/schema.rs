@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
-pub(super) const SCHEMA_VERSION: i32 = 12;
+pub(super) const SCHEMA_VERSION: i32 = 13;
 pub(super) const IDENTITY_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS work_scope (
     id BLOB PRIMARY KEY,
@@ -187,7 +187,11 @@ pub(super) fn migrate_to_current(conn: &Connection, from: i32) -> Result<(), Sto
             .map_err(|_| StoreError::WriteFailed)?;
     }
     if from < 12 {
-        tx.execute_batch(crate::action::schema_v12::ACTION_RECOVERY_V12)
+        tx.execute_batch(crate::attention::schema_v12::ATTENTION_TABLES_V12)
+            .map_err(|_| StoreError::WriteFailed)?;
+    }
+    if from < 13 {
+        tx.execute_batch(crate::action::schema_v13::ACTION_RECOVERY_V13)
             .map_err(|_| StoreError::WriteFailed)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -293,7 +297,9 @@ pub(super) fn initialize(conn: &Connection) -> Result<(), StoreError> {
         .map_err(|_| StoreError::WriteFailed)?;
     conn.execute_batch(crate::action::schema_v11::ACTION_INTENT_TABLES_V11)
         .map_err(|_| StoreError::WriteFailed)?;
-    conn.execute_batch(crate::action::schema_v12::ACTION_RECOVERY_V12)
+    conn.execute_batch(crate::attention::schema_v12::ATTENTION_TABLES_V12)
+        .map_err(|_| StoreError::WriteFailed)?;
+    conn.execute_batch(crate::action::schema_v13::ACTION_RECOVERY_V13)
         .map_err(|_| StoreError::WriteFailed)?;
     let mut key = [0u8; 32];
     getrandom_fallback(&mut key);
