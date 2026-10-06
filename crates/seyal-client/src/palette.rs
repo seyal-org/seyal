@@ -764,14 +764,14 @@ mod tests {
         chrome
             .apply(
                 ChromeAction::ReplaceAttention {
-                    items: vec![AttentionItem {
-                        id: AttentionId::new("att-1"),
-                        title: "Build failed".into(),
-                        detail: "exit 1".into(),
-                        workspace: None,
-                        tab: None,
-                        agent: None,
-                    }],
+                    items: vec![AttentionItem::projection(
+                        AttentionId::new("att-1"),
+                        "Build failed",
+                        "exit 1",
+                        None,
+                        None,
+                        None,
+                    )],
                 },
                 &shell,
             )

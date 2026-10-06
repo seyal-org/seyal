@@ -127,3 +127,16 @@ cargo bench -p seyal-client --bench m003_presentation_qualification \
   --features benchmark-instrumentation --locked
 ```
 
+## M005 SPEC-013 §23.40 Runtime terminal isolation (#1301)
+
+`benches/m005_spec013_terminal_isolation` is a justified composition harness (workspace
+member, not a production crate). It pairs headless Seyal Runtime PTY→`TerminalState`
+progress with concurrent `seyal-agent-context` discovery/index load (active + failure)
+without adding an agent↔runtime production dependency edge.
+
+```sh
+python3 scripts/run-m005-spec013-terminal-isolation.py
+```
+
+Retained evidence: `docs/evidence/m005-1301-spec013-23-40-terminal-isolation.md`.
+This runner is Apple Silicon macOS only and is not part of `make bench` or CI.
