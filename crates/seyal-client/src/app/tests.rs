@@ -384,9 +384,19 @@ fn quit_freezes_and_emits_one_native_effect() {
 #[test]
 fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     let mut root = ApplicationRoot::new();
-    let tab = root.snapshot().shell.active_tab;
-    for _ in 0..32 {
-        root.apply(AppAction::SelectTab { id: tab }).unwrap();
+    let workspace = root.snapshot().shell.active_workspace;
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply_shell(crate::shell::ShellAction::CreateWindow {
+        workspace,
+        containment_generation: generation,
+    })
+    .unwrap();
+    let first = root.snapshot().shell.windows[0].id;
+    let second = root.snapshot().shell.windows[1].id;
+    for i in 0..32 {
+        let window = if i % 2 == 0 { first } else { second };
+        root.apply_shell(crate::shell::ShellAction::SelectWindow { id: window })
+            .unwrap();
     }
     let effects = root.snapshot().pending_effects;
     assert!(
