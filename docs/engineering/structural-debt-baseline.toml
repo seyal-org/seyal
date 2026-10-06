@@ -244,9 +244,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[exception]]
 path = "crates/seyal-client/src/shell/mod.rs"
-ceiling_loc = 1007
-issue = 1218
-responsibility = "Shell composition reducer stays one Workspace/Tab/Pane façade. Restacking PT1–PT3 zoom/move/focus plus PT4 Equalize dispatch on W2a (#1092) crosses hard_loc; neighbor selection, pane_ops, equalize, and window/tab actions remain in sibling modules. Do not split the typed ShellAction match into partN files."
+ceiling_loc = 1009
+issue = 1167
+responsibility = "Shell composition reducer stays one Workspace/Tab/Pane façade. PT4 #1218 already crossed hard_loc; #1167 only adds `mod pt6_tests` (+2 LOC). Neighbor selection, pane_ops, equalize, and window/tab actions remain in sibling modules. Do not split the typed ShellAction match into partN files."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
