@@ -48,7 +48,9 @@ impl ApplicationRoot {
         owner: ConnectionOwner,
         execution: ExecutionId,
     ) -> Result<(), AppError> {
-        if self.create_client_is_harness_probe() {
+        if self.create_client_is_harness_probe()
+            || (self.wire_client.is_none() && self.client_handle.is_none())
+        {
             self.pending_wire_effects
                 .push(ProvisioningEffect::AttachController { owner, execution });
             return Ok(());
