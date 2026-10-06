@@ -1,0 +1,14 @@
+# Isolated, non-mergeable M004 persistence prototype for issue #687.
+# This workspace is intentionally NOT a member of the repository root workspace.
+# Nothing here is production Runtime, GUI, or M004 behavior.
+
+[workspace]
+members = ["crates/persistence-proto"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+rust-version = "1.98"
