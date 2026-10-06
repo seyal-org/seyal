@@ -11,7 +11,7 @@ mod identity;
 pub mod memory;
 mod sqlite;
 
-pub use action::{ActionAuthority, ActionError, PrepareOutcome};
+pub use action::{ActionAuthority, ActionError, PersistedAction, PrepareOutcome};
 pub use memory::{
     MemoryAuthority, MemoryError, ProposeInput, ProposeResult, RevocationBundle, WorkingSetError,
 };

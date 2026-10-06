@@ -161,6 +161,100 @@ fn material_change_inserts_a_new_row_and_never_edits_the_old_intent() {
 }
 
 #[test]
+fn effect_unknown_after_dispatch_crash_does_not_rewrite_intent_digest() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    let prepared = intent(run, action_id, b"pay invoice");
+    let digest = prepared.digest();
+    store.actions().prepare(&prepared).unwrap();
+    store.actions().fixture_mark_authorized(action_id).unwrap();
+    store
+        .actions()
+        .fixture_mark_dispatching(action_id, 11)
+        .unwrap();
+    let decision = store
+        .actions()
+        .recover(
+            action_id,
+            seyal_agent_core::CrashBoundary::DuringExecutor,
+            &seyal_agent_core::RecoveryEvidence::none(),
+        )
+        .unwrap();
+    assert_eq!(
+        decision.runtime.lifecycle,
+        seyal_agent_core::ActionLifecycle::EffectUnknown
+    );
+    assert!(!decision.may_retry_effect);
+    let loaded = store.actions().get(action_id).unwrap().unwrap();
+    assert_eq!(loaded.digest(), digest);
+    assert_eq!(
+        loaded.lifecycle(),
+        seyal_agent_core::ActionLifecycle::Prepared
+    );
+    let record = store.actions().get_record(action_id).unwrap().unwrap();
+    assert_eq!(
+        record.runtime.lifecycle,
+        seyal_agent_core::ActionLifecycle::EffectUnknown
+    );
+}
+
+#[test]
+fn persist_failure_of_recovery_leaves_prior_runtime_and_does_not_retry() {
+    let (path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    store
+        .actions()
+        .prepare(&intent(run, action_id, b"transfer"))
+        .unwrap();
+    store.actions().fixture_mark_authorized(action_id).unwrap();
+    store
+        .actions()
+        .fixture_mark_dispatching(action_id, 4)
+        .unwrap();
+    store.fail_after_writes(0);
+    assert_eq!(
+        store.actions().recover(
+            action_id,
+            seyal_agent_core::CrashBoundary::AfterEffectBeforeResultPersist,
+            &seyal_agent_core::RecoveryEvidence::none(),
+        ),
+        Err(ActionError::Store(crate::StoreError::WriteFailed))
+    );
+    drop(store);
+    let store = AgentStore::open(&path).unwrap();
+    let record = store.actions().get_record(action_id).unwrap().unwrap();
+    assert_eq!(
+        record.runtime.lifecycle,
+        seyal_agent_core::ActionLifecycle::Dispatching
+    );
+}
+
+#[test]
+fn cancel_after_dispatching_does_not_claim_rollback() {
+    let (_path, store) = temp_store();
+    let run = seed_run(&store);
+    let action_id = ActionId::new();
+    store
+        .actions()
+        .prepare(&intent(run, action_id, b"post tweet"))
+        .unwrap();
+    store.actions().fixture_mark_authorized(action_id).unwrap();
+    store
+        .actions()
+        .fixture_mark_dispatching(action_id, 2)
+        .unwrap();
+    let decision = store.actions().cancel(action_id).unwrap();
+    assert_eq!(
+        decision.runtime.lifecycle,
+        seyal_agent_core::ActionLifecycle::CancelledAfterDispatch
+    );
+    assert!(!decision.claims_rollback);
+    assert!(!decision.may_retry_effect);
+}
+
+#[test]
 fn prepare_without_agent_run_fails_closed() {
     let (_path, store) = temp_store();
     let action_id = ActionId::new();

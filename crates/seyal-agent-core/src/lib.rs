@@ -21,9 +21,12 @@ pub mod routing;
 mod transitions;
 
 pub use action::{
-    action_intent_digest, material_fields_changed, ActionIntent, ActionIntentError,
-    ActionLifecycle, ArgumentFingerprint, AuthorizationClass, CapabilityRef, EffectClass,
-    ExecutorCapabilityRef, PrivacyDependencyId, RequestProvenance, ResourceIdentity,
+    action_intent_digest, linearize_cancel, material_fields_changed, reconcile, recover,
+    ActionIntent, ActionIntentError, ActionLifecycle, ActionRuntime, ArgumentFingerprint,
+    AuthorizationClass, CapabilityRef, CausalMarker, CausalMarkerKind, CrashBoundary, EffectClass,
+    EvidenceKind, ExecutorCapabilityRef, PrivacyDependencyId, ReconciliationRequiredHook,
+    RecoveryDecision, RecoveryError, RecoveryEvidence, RequestProvenance, ResourceIdentity,
+    DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET,
 };
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};

@@ -1,15 +1,18 @@
-//! Durable ActionIntent authority (ADR-014 / SPEC-016 §3).
+//! Durable ActionIntent authority and EffectUnknown recovery
+//! (ADR-014 / SPEC-016 §§3, 9–16).
 //!
-//! Insert-only intent rows. Material change always mints a new ActionId.
-//! Dispatch fencing and approval consumption are sibling Issues.
+//! Intent rows stay insert-only. Mutable lifecycle lives on additive columns
+//! so canonical intent/digest never rewrite. Dispatch fencing / approval
+//! consumption remain #1310 (fixtures seed Dispatching here).
 
 mod ops;
 pub(crate) mod schema_v11;
+pub(crate) mod schema_v12;
 
 #[cfg(test)]
 mod tests;
 
-pub use ops::{ActionAuthority, ActionError, PrepareOutcome};
+pub use ops::{ActionAuthority, ActionError, PersistedAction, PrepareOutcome};
 
 use crate::sqlite::AgentStore;
 

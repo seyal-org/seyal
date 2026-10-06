@@ -4,6 +4,7 @@
 //! `ClientSession` in place. A new process mints a new `BackendInstanceId` and
 //! therefore rejects every session opened by the previous process.
 
+mod action_ops;
 mod frame_io;
 mod launch_resolution;
 mod lifecycle_ops;
@@ -24,7 +25,7 @@ pub(crate) use frame_io::{read_session_frame, SessionRead};
 use std::path::{Path, PathBuf};
 
 use seyal_agent_core::{
-    ActionIntent, AgentRunId, AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId,
+    AgentRunId, AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId,
     ClientSessionId, ControlGeneration, DomainError, WorkItemId, WorkScopeId, WorkScopeKind,
 };
 use seyal_agent_protocol::{
@@ -32,10 +33,7 @@ use seyal_agent_protocol::{
     FrameKind, SnapshotView, ABSOLUTE_MAX_FRAME_SIZE, MAX_EVENT_WINDOW, REPLAY_EVENT_OVERHEAD,
     REPLAY_RESULT_OVERHEAD,
 };
-use seyal_agent_store::{
-    ActionError, AgentStore, AggregateId, AggregateSequence, PrepareOutcome, StoreError,
-    OUTPUT_REF_LEN,
-};
+use seyal_agent_store::{AgentStore, AggregateId, AggregateSequence, StoreError, OUTPUT_REF_LEN};
 
 use crate::{
     AuthorizationRepository, ClientScope, DurablePrincipal, HostObservation, HostObservationKind,
@@ -219,13 +217,6 @@ impl IntegrationService {
         self.store
             .set_adapter_enabled(adapter_id, enabled)
             .map_err(|_| ServiceError::Failed)
-    }
-
-    /// Persist immutable ActionIntent before Seyal-controlled dispatch
-    /// (SPEC-016 §3). Control-plane only: does not start a host or wait on
-    /// TerminalExecution.
-    pub fn prepare_action(&self, intent: &ActionIntent) -> Result<PrepareOutcome, ActionError> {
-        self.store.actions().prepare(intent)
     }
 
     /// HelloAck advertisement inputs (SPEC-027 §8.2): the composed host kind
