@@ -3,8 +3,8 @@
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{
-    ShellAction, ShellError, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
+    ShellAction, ShellError, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
+    ShellWorkspaceSeed, SplitAxis,
 };
 
 fn workspace_a() -> WorkspaceId {
@@ -253,9 +253,9 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
     shell
         .apply(ShellAction::TerminateExecution { execution })
         .unwrap();
-    assert_eq!(
-        shell.take_effects(),
-        vec![ShellNativeEffect::TerminateExecution { execution }]
+    assert!(
+        shell.take_effects().is_empty(),
+        "dispose is a ProvisioningEffect AttachController path, not a host NativeEffect"
     );
     assert!(shell.live_unpresented(workspace_a()).is_empty());
     assert_eq!(
