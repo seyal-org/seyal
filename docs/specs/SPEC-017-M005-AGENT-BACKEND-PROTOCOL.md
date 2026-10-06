@@ -1,6 +1,6 @@
 # SPEC-017 — M005 independent Agent Backend protocol, security and event replay
 
-- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment Accepted on merge of PR #1270 by a non-author maintainer under #1191.** An author or agent comment is not that acceptance. The pairing amendment is not an implemented-behavior claim.
+- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment is not Accepted.** PR #1270 (`92d9a00`) was squash-merged by author `@mahboobmonnamd` with zero reviews; that merge is not the non-author Accepted stamp. **Accepted on merge of this re-stamp PR by a non-author maintainer (`@anulalbs` / `@crdileep82`) under #1191.** An author or agent comment or merge is not that acceptance. Pairing amendment text is unchanged. This is not an implemented-behavior claim.
 - **Issue:** #838 (base contract); pairing amendment #1191
 - **Architecture:** ADR-012, ADR-013, ADR-014, ADR-015 (pairing approval UX ownership), ADR-016 (no ADR create/amend; §9 boundary unchanged)
 - **Consumers:** #678, #679, #680, #681, #1190, #1191, #1192
