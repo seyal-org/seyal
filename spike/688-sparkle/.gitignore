@@ -1,0 +1,9 @@
+.build/
+Sparkle.xcframework
+
+.spike-build/
+*.dmg
+*.pem
+*.seed
+*.keychain*
+artifacts/

@@ -1,0 +1,11 @@
+[package]
+name = "spike-688-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Separate workspace so this spike probe is not a production workspace member.
+[workspace]
+
+[dependencies]
+seyal-protocol = { path = "../../../crates/seyal-protocol" }
