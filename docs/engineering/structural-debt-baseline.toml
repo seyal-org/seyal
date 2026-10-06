@@ -66,9 +66,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1023
-issue = 1217
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1217 updates production SplitFocused enablement assertions here, while #1108 moved multi-window effect queue coverage into app/tests/window_effect_tests.rs. C3 acceptance cases stay in pane_provisioning_tests.rs."
+ceiling_loc = 1091
+issue = 1123
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
