@@ -224,9 +224,7 @@ impl ProvisioningSession {
             attachment: None,
         };
         self.insert_pending(owner, request_id, PendingKind::DisposeAttach, intent);
-        if !self.pane_pending.contains_key(&pane) {
-            self.pane_pending.insert(pane, request_id);
-        }
+        self.pane_pending.entry(pane).or_insert(request_id);
         Ok(vec![ProvisioningEffect::AttachController {
             owner,
             execution,
