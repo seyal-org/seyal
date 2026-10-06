@@ -456,6 +456,7 @@ impl ApplicationRoot {
         }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn window_encode_key(&self) -> (u64, u16, u64) {
         (
             self.snapshot_generation,
