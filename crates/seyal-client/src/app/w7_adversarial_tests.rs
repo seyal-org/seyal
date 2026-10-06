@@ -4,15 +4,19 @@
 //! `local_ipc_protocol` (Hidden finalize / terminate-while-suspended).
 
 use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
+#[cfg(target_os = "macos")]
 use seyal_protocol::framing::ErrorCode;
+#[cfg(target_os = "macos")]
 use seyal_runtime::local_ipc::framing::{
     CreateExecutionResult, CreateExecutionResultCode, MessageType, HEADER_LEN,
 };
 
+#[cfg(target_os = "macos")]
 use super::provisioning_apply::negotiated_provisioning_client;
 use super::{
     AppAction, AppError, ApplicationRoot, BindingEvidence, NativeEffect, WindowNativeEvent,
 };
+#[cfg(target_os = "macos")]
 use crate::provisioning::CreateOutcome;
 
 fn evidence(execution: ExecutionId, attachment: AttachmentId) -> BindingEvidence {
@@ -85,6 +89,7 @@ fn inverse_execution_terminate_without_window_close() {
 
 /// Quit while a CreateTab provisioning request is in flight: freeze + bounded
 /// cleanup; pending intent stays correlated until result (no cancel storm).
+#[cfg(target_os = "macos")]
 #[test]
 fn quit_while_create_tab_provisioning_in_flight() {
     let mut root = ApplicationRoot::new();
@@ -119,6 +124,7 @@ fn quit_while_create_tab_provisioning_in_flight() {
 
 /// Close of the requesting Pane/Tab while create is in flight: no cancel wire
 /// message; §6.3 dead-intent path; late Created still attach-to-dispose.
+#[cfg(target_os = "macos")]
 #[test]
 fn close_requesting_tab_while_provisioning_in_flight() {
     let mut root = ApplicationRoot::new();
@@ -343,6 +349,7 @@ fn quit_cleanup_deadline_matches_recorded_derivation() {
 }
 
 /// Capacity rejection mid-flight does not bind and does not retry.
+#[cfg(target_os = "macos")]
 #[test]
 fn capacity_rejection_mid_flight_is_bounded() {
     let mut root = ApplicationRoot::new();
