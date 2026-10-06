@@ -6,8 +6,8 @@
   implemented-behavior claim.
 - **Date:** 2026-10-05
 - **Issue:** #688 (spike) — parent epic #666, consumer #677, area owner #648
-- **Numbering:** SPEC-028 is proposed in open PR #1242; no open PR claims
-  SPEC-029 (checked 2026-10-05).
+- **Numbering:** SPEC-028 is Accepted (PR #1267). No accepted document claims
+  SPEC-029.
 - **Authority:**
   [`ADR-022-MACOS-RELEASE-TRUST-UPDATE-ROLLBACK.md`](../architecture/ADR-022-MACOS-RELEASE-TRUST-UPDATE-ROLLBACK.md).
   This document is the observable contract beneath it and cannot override it.

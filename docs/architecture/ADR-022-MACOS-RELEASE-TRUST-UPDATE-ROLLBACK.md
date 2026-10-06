@@ -4,13 +4,14 @@
   merged by a non-author maintainer under #688. An author or agent comment is
   not that acceptance. Decision-critical prototype G2–G5 ran on isolated
   `spike/688-sparkle-proto` (Apple Development only; evidence
-  `spike/688-sparkle/M004-688-SPARKLE-SPIKE-EVIDENCE.md`). A contradicting
+  `docs/evidence/m004-688-sparkle-g2-g5.md`; harness on
+  `spike/688-sparkle-proto`). A contradicting
   Developer ID rerun of G5's lost-key case, or a Sparkle version change,
   triggers the reopen conditions before acceptance.
 - **Date:** 2026-10-05
 - **Issue:** #688 (spike) — parent epic #666, consumer #677, area owner #648
-- **Numbering:** `master` ends at ADR-021; no open PR claims ADR-022 or
-  SPEC-029 (checked 2026-10-05). SPEC-028 is proposed in open PR #1242.
+- **Numbering:** `master` currently ends at ADR-021. SPEC-028 is Accepted
+  (PR #1267). No accepted document claims ADR-022 or SPEC-029.
 - **Companion specification:**
   [`SPEC-029-M004-MACOS-RELEASE-UPDATE.md`](../specs/SPEC-029-M004-MACOS-RELEASE-UPDATE.md)
   (Proposed) — observable update states, feed/item metadata, release record,
