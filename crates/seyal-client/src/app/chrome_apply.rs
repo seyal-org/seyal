@@ -129,9 +129,11 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Active Tab's Split dividers (#928), pre-order.
+    /// Active Tab's Split dividers (#928), pre-order. Empty while zoomed so
+    /// the host does not keep overlay-vs-divider policy of its own.
     pub fn pane_dividers(&self) -> Vec<pane_layout::PaneDivider> {
-        pane_layout::dividers(&self.shell.snapshot().tree)
+        let shell = self.shell.snapshot();
+        pane_layout::dividers_for_host(&shell.tree, shell.zoomed)
     }
 
     /// Resize the Split whose divider `pane` leads (#928). The host sends the

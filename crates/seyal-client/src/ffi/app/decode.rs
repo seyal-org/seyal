@@ -12,7 +12,7 @@ use crate::ffi::with_active_client;
 use crate::navigation::{decode_resource_address, ResourceAddress};
 use crate::pane_layout::SplitPosition;
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
-use crate::shell::SplitAxis;
+use crate::shell::{FocusDirection, MoveSide, SplitAxis};
 
 use super::{
     id16, optional_id, SeyalAppAction, FLAG_ALTERNATE_SCREEN, FLAG_CONTROLLER, FLAG_HAS_ATTACHMENT,
@@ -313,6 +313,60 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
+        // PT5 pane-tree verbs. Host names ids/directions; Rust owns policy.
+        63 => Ok(AppAction::ZoomPane {
+            id: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        64 => Ok(AppAction::Unzoom),
+        65 => Ok(AppAction::SwapPanes {
+            a: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            b: PaneId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
+        }),
+        66 => Ok(AppAction::MovePaneBeside {
+            pane: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            neighbor: PaneId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
+            side: decode_move_side(action.reserved)?,
+        }),
+        67 => Ok(AppAction::FocusDirection {
+            direction: decode_focus_direction(action.reserved)?,
+        }),
+        68 => Ok(AppAction::EqualizeFocused),
+        69 => Ok(AppAction::EqualizeTab),
+        _ => Err(-6),
+    }
+}
+
+fn decode_move_side(reserved: u32) -> Result<MoveSide, i32> {
+    match reserved {
+        0 => Ok(MoveSide::Left),
+        1 => Ok(MoveSide::Right),
+        2 => Ok(MoveSide::Above),
+        3 => Ok(MoveSide::Below),
+        _ => Err(-6),
+    }
+}
+
+fn decode_focus_direction(reserved: u32) -> Result<FocusDirection, i32> {
+    match reserved {
+        0 => Ok(FocusDirection::Left),
+        1 => Ok(FocusDirection::Right),
+        2 => Ok(FocusDirection::Up),
+        3 => Ok(FocusDirection::Down),
         _ => Err(-6),
     }
 }

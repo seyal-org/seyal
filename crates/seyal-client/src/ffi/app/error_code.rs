@@ -56,5 +56,9 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::GotoNoSelection => 48,
         AppError::GotoUnsupportedScope => 49,
         AppError::ActionUnavailable => 50,
+        AppError::NotZoomed => 51,
+        AppError::InvalidMoveTarget => 52,
+        AppError::NoDirectionalNeighbor => 53,
+        AppError::StaleContainment => 54,
     }
 }

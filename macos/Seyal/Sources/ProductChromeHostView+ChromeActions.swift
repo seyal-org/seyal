@@ -142,6 +142,65 @@ extension ProductChromeHostView {
         closePaneButton.action = #selector(closeFocusedPane(_:))
     }
 
+    /// PT5: name ids only. Rust owns zoom/layout; stale ids fail closed.
+    func zoomPane(lo: UInt64, hi: UInt64) {
+        applyPaneTreeKind(UInt16(SEYAL_APP_ACTION_ZOOM_PANE.rawValue), lo: lo, hi: hi)
+    }
+
+    func unzoomPane() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_UNZOOM.rawValue), reserved: 0)
+    }
+
+    func swapPanes(aLo: UInt64, aHi: UInt64, bLo: UInt64, bHi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_SWAP_PANES.rawValue)
+        action.target_execution_lo = aLo
+        action.target_execution_hi = aHi
+        action.target_attachment_lo = bLo
+        action.target_attachment_hi = bHi
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+    }
+
+    func movePaneBeside(paneLo: UInt64, paneHi: UInt64, neighborLo: UInt64, neighborHi: UInt64, side: UInt32) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_MOVE_PANE_BESIDE.rawValue)
+        action.target_execution_lo = paneLo
+        action.target_execution_hi = paneHi
+        action.target_attachment_lo = neighborLo
+        action.target_attachment_hi = neighborHi
+        action.reserved = side
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+    }
+
+    func focusDirection(_ reserved: UInt32) {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_FOCUS_DIRECTION.rawValue), reserved: reserved)
+    }
+
+    func equalizeFocused() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_EQUALIZE_FOCUSED.rawValue), reserved: 0)
+    }
+
+    func equalizeTab() {
+        applyChromeKind(UInt16(SEYAL_APP_ACTION_EQUALIZE_TAB.rawValue), reserved: 0)
+    }
+
+    private func applyPaneTreeKind(_ kind: UInt16, lo: UInt64, hi: UInt64) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = kind
+        action.target_execution_lo = lo
+        action.target_execution_hi = hi
+        _ = seyal_app_apply(pane.appHandle, &action)
+        reconcileChrome()
+    }
+
     func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {
         button.setButtonType(.toggle)
         button.bezelStyle = .inline

@@ -152,7 +152,25 @@ enum SeyalAppActionKind {
      * while open. Error codes 47-49.
      */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
-    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
+    /*
+     * PT5 pane-tree verbs. Hosts name identities only; Rust owns zoom/layout.
+     * ZOOM_PANE: target_execution_lo/hi = PaneId.
+     * UNZOOM: no identity fields.
+     * SWAP_PANES: target_execution_* = Pane A, target_attachment_* = Pane B.
+     * MOVE_PANE_BESIDE: target_execution_* = pane, target_attachment_* =
+     *   neighbor; reserved = 0 Left, 1 Right, 2 Above, 3 Below.
+     * FOCUS_DIRECTION: reserved = 0 Left, 1 Right, 2 Up, 3 Down.
+     * EQUALIZE_FOCUSED / EQUALIZE_TAB: no identity fields; Rust uses the
+     * live containment generation. Stale/unknown ids fail closed.
+     */
+    SEYAL_APP_ACTION_ZOOM_PANE = 63,
+    SEYAL_APP_ACTION_UNZOOM = 64,
+    SEYAL_APP_ACTION_SWAP_PANES = 65,
+    SEYAL_APP_ACTION_MOVE_PANE_BESIDE = 66,
+    SEYAL_APP_ACTION_FOCUS_DIRECTION = 67,
+    SEYAL_APP_ACTION_EQUALIZE_FOCUSED = 68,
+    SEYAL_APP_ACTION_EQUALIZE_TAB = 69
 };
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
@@ -460,11 +478,15 @@ typedef struct SeyalAppShell {
  * x/y/width/height are unit fractions of the Tab's center area, origin
  * top-left; hosts position regions and never derive geometry. LIVE marks the
  * single region that hosts the live terminal/Metal/composer surface; no region
- * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
+ * is LIVE while the focused Pane is not the execution's Pane. ZOOMED marks the
+ * overlay leaf (full-Tab rect); OCCLUDED leaves remain in the tree with a zero
+ * rect. Hosts must not invent zoom geometry. Out-of-range
  * indices return size == 0.
  */
 #define SEYAL_APP_PANE_REGION_FOCUSED 1u
 #define SEYAL_APP_PANE_REGION_LIVE 2u
+#define SEYAL_APP_PANE_REGION_ZOOMED 4u
+#define SEYAL_APP_PANE_REGION_OCCLUDED 8u
 
 typedef struct SeyalAppPaneRegion {
     uint16_t version;

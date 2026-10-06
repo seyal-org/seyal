@@ -11,6 +11,8 @@ use super::APPS;
 
 const PANE_REGION_FOCUSED: u16 = 1;
 const PANE_REGION_LIVE: u16 = 2;
+const PANE_REGION_ZOOMED: u16 = 4;
+const PANE_REGION_OCCLUDED: u16 = 8;
 
 /// One leaf of the active Tab's PaneTree (#923), in `SeyalAppShell` pane
 /// order. Geometry is unit space, origin top-left; Rust owns it.
@@ -63,6 +65,12 @@ pub extern "C" fn seyal_app_pane_region(handle: u64, index: u32) -> SeyalAppPane
         }
         if region.live {
             flags |= PANE_REGION_LIVE;
+        }
+        if region.zoomed {
+            flags |= PANE_REGION_ZOOMED;
+        }
+        if region.occluded {
+            flags |= PANE_REGION_OCCLUDED;
         }
         SeyalAppPaneRegion {
             version: APP_ABI_VERSION,
@@ -229,5 +237,81 @@ mod tests {
         );
         assert_eq!(seyal_app_destroy(handle), 0);
         assert_eq!(seyal_app_pane_region(handle, 0).size, 0);
+    }
+
+    #[test]
+    fn pt5_zoom_equalize_and_stale_verbs_round_trip_fail_closed() {
+        let handle = seyal_app_create();
+        let pane = seyal_app_shell_row(handle, 2, 0);
+        let mut zoom: SeyalAppAction = unsafe { std::mem::zeroed() };
+        zoom.version = APP_ABI_VERSION;
+        zoom.size = size_of::<SeyalAppAction>() as u16;
+        zoom.kind = 63;
+        zoom.target_execution_lo = pane.id_lo;
+        zoom.target_execution_hi = pane.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &zoom) }, 0);
+        let region = seyal_app_pane_region(handle, 0);
+        assert_eq!(
+            region.flags,
+            PANE_REGION_FOCUSED | PANE_REGION_LIVE | PANE_REGION_ZOOMED
+        );
+
+        let mut stale = zoom;
+        stale.target_execution_lo = 1;
+        stale.target_execution_hi = 2;
+        assert_eq!(unsafe { seyal_app_apply(handle, &stale) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 1, "UnknownPane");
+        assert_eq!(
+            seyal_app_pane_region(handle, 0).flags,
+            PANE_REGION_FOCUSED | PANE_REGION_LIVE | PANE_REGION_ZOOMED,
+            "rejected zoom leaves overlay"
+        );
+
+        let mut equalize = zoom;
+        equalize.kind = 68;
+        assert_eq!(unsafe { seyal_app_apply(handle, &equalize) }, 0);
+        assert_eq!(
+            seyal_app_pane_region(handle, 0).flags,
+            PANE_REGION_FOCUSED | PANE_REGION_LIVE,
+            "equalize success clears zoom overlay"
+        );
+
+        zoom.target_execution_lo = pane.id_lo;
+        zoom.target_execution_hi = pane.id_hi;
+        assert_eq!(unsafe { seyal_app_apply(handle, &zoom) }, 0);
+        let mut unzoom = zoom;
+        unzoom.kind = 64;
+        assert_eq!(unsafe { seyal_app_apply(handle, &unzoom) }, 0);
+        assert_eq!(unsafe { seyal_app_apply(handle, &unzoom) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 51, "NotZoomed");
+
+        let mut swap = zoom;
+        swap.kind = 65;
+        swap.target_attachment_lo = 9;
+        swap.target_attachment_hi = 9;
+        assert_eq!(unsafe { seyal_app_apply(handle, &swap) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 1, "UnknownPane");
+
+        let mut mv = zoom;
+        mv.kind = 66;
+        mv.target_attachment_lo = pane.id_lo;
+        mv.target_attachment_hi = pane.id_hi;
+        mv.reserved = 1;
+        assert_eq!(unsafe { seyal_app_apply(handle, &mv) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 52, "InvalidMoveTarget");
+
+        let mut dir = zoom;
+        dir.kind = 67;
+        dir.reserved = 1;
+        assert_eq!(unsafe { seyal_app_apply(handle, &dir) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 53, "NoDirectionalNeighbor");
+        dir.reserved = 99;
+        assert_eq!(unsafe { seyal_app_apply(handle, &dir) }, -6);
+
+        let mut tab = zoom;
+        tab.kind = 69;
+        assert_eq!(unsafe { seyal_app_apply(handle, &tab) }, 0);
+
+        assert_eq!(seyal_app_destroy(handle), 0);
     }
 }
