@@ -1,16 +1,20 @@
 # M005 Agent Backend — External Runtime Learnings for Implementation Qualification
 
-**Status:** Implementation guidance; non-normative  
-**Date:** 2026-10-07  
-**Scope:** Seyal OSS M005 Agent Backend implementation and qualification only.  
-**Normative authority remains:** ADR-012, ADR-013, ADR-014, ADR-016 and SPEC-013 through SPEC-021, SPEC-026, SPEC-027, SPEC-028.  
-**Implementation consumers:** existing M005 work, especially #678, #679, #680 and #681.
+- **Status:** Implementation guidance; non-normative
+- **Date:** 2026-10-07
+- **Scope:** Seyal OSS M005 Agent Backend implementation and qualification only.
+- **Relevant accepted authority:** ADR-012, ADR-013, ADR-014, ADR-016 and SPEC-012 through SPEC-021, SPEC-026, SPEC-027, SPEC-028, as applicable.
+- **Related M005 issues:** #678–#681. Issue #681 is a completed umbrella; its component work was carried by child issues. Any new implementation work requires its own current Ready Issue.
+
+The recommendations, example fixtures, matrices and checklists below are prompts for review and qualification. They do not create requirements or acceptance criteria. Only applicable accepted ADR/SPEC clauses and the current Ready Issue's acceptance criteria are normative. If a prompt goes beyond those sources, treat it as optional candidate coverage to refine through the owning Issue.
 
 ## 1. Provenance and licensing boundary
 
 This note records independently derived engineering lessons from comparative review of external agent/workspace implementations, including:
 
 - Odysseus: https://github.com/odysseus-dev/odysseus
+
+**Provenance refresh (2026-10-07):** The Odysseus materials named below were reviewed at the immutable repository revision [`2c8e00ca0551cda3052d529bfa08f7c263b85588`](https://github.com/odysseus-dev/odysseus/commit/2c8e00ca0551cda3052d529bfa08f7c263b85588): `README.md` (product scope and workflows), `specs/frontend.md` (frontend security, runtime and service-worker specification), and `PUBLICATION_ASSET_DECISIONS.md` (accepted publication asset decisions and artifact provenance). This is a current provenance refresh; the revision and item-level materials used for the original comparative review were not recorded, and this refresh does not claim to reconstruct them. The comparison draws high-level engineering lessons only; it does not copy or adapt source code.
 
 No source code is copied or adapted into Seyal by this note.
 
@@ -37,7 +41,7 @@ The useful delta is therefore implementation and qualification discipline.
 
 ## 3. Learning A — distinguish execution from verified effect
 
-Implementation must preserve this distinction end-to-end:
+Use this distinction as a review aid when applying the existing lifecycle contracts:
 
 ```text
 request
@@ -49,28 +53,28 @@ request
 != accepted outcome
 ```
 
-SPEC-016 already owns Action/effect state and SPEC-019 owns evaluation/outcome. Implementations must not collapse these states into one success boolean.
+SPEC-016 owns Action/effect state and SPEC-019 owns evaluation/outcome. Follow those authorities rather than treating this diagram as a second state model or collapsing their distinct states into one success boolean.
 
-### Required implementation behavior
+### Evidence review prompts
 
-For effectful operations:
+For an effectful operation, compare its governing SPEC and Ready Issue acceptance criteria with questions such as:
 
-1. executor/harness self-report is evidence, not sufficient proof of intended state;
-2. verification should use an independent readback/evaluator when the operation and resource support one;
-3. verification evidence must identify:
+1. Is executor/harness self-report treated as evidence, with sufficiency decided by the applicable contract?
+2. Where the operation and resource support it, is there an independent readback/evaluator?
+3. Does verification evidence identify the fields required by its governing contract, such as:
    - exact resource/artifact identity;
    - resource generation/fingerprint;
    - observation mechanism/evaluator;
    - observation coverage;
    - observation time/order;
    - freshness dependencies;
-4. later mutation of the same relevant resource must make earlier verification stale;
-5. cancelled, timed-out, interrupted or externally ambiguous effects must never be promoted to success from model narration;
-6. when authoritative verification is impossible, retain the appropriate unverified/unknown state rather than manufacturing certainty.
+4. Is earlier verification invalidated after a later mutation of the same relevant resource, where required by the contract?
+5. Are cancelled, timed-out, interrupted or externally ambiguous effects classified under the governing lifecycle authority rather than model narration?
+6. When authoritative verification is impossible, does the implementation preserve the state required by its contract instead of manufacturing certainty?
 
-### Qualification fixtures
+### Example qualification fixtures
 
-Retain tests for at least:
+Candidate fixtures, subject to the owning SPEC and Ready Issue:
 
 - write -> independent readback matches expected state;
 - write -> later mutation -> earlier verification becomes stale;
@@ -83,7 +87,7 @@ Retain tests for at least:
 
 A large adapter ecosystem may expose many tools/capabilities. Request assembly should not automatically send the entire catalog to every model.
 
-The implementation should keep these stages separate:
+A useful review model keeps these stages separate:
 
 ```text
 available capabilities
@@ -99,7 +103,7 @@ provider/harness delivery
 
 Selection improves context size, latency and local-model usability. It does **not** grant permission.
 
-### Required properties
+### Properties to check against the applicable authority
 
 - authorization remains a hard boundary independent of relevance ranking;
 - unsupported/disabled capabilities cannot reappear through retrieval;
@@ -130,7 +134,7 @@ The exact algorithm remains an implementation choice and must stay replaceable.
 
 Seyal already classifies terminal output, repository content, OCR/vision derivatives, model/provider output and adapter observations as untrusted or derived evidence.
 
-Implementation qualification should explicitly test the transition:
+When the owning acceptance criteria call for it, a useful security probe is this transition:
 
 ```text
 untrusted content becomes model-visible
@@ -142,7 +146,7 @@ normal Seyal Action/Approval authority still applies
 
 Prompt wording is not a security boundary.
 
-### Required fixtures
+### Example security fixtures
 
 - repository file contains fake "system" or approval instructions;
 - terminal output asks the agent to execute a privileged command;
@@ -151,13 +155,13 @@ Prompt wording is not a security boundary.
 - MCP/adapter result attempts to forge an approval/tool result;
 - model proposes a materially changed action after approval.
 
-Expected result: untrusted content may influence relevance or a proposal, but cannot mint Approval, Action authority, policy, evaluator trust or BackendEnforced guarantees.
+Check against the governing authority that untrusted content may influence relevance or a proposal, but cannot mint Approval, Action authority, policy, evaluator trust or BackendEnforced guarantees.
 
 ## 6. Learning D — provider/harness weirdness belongs in adapters
 
 Real providers and local models may emit malformed, partial or provider-specific tool-call representations.
 
-Do not move compatibility parsing into Seyal's core domain model.
+SPEC-018 defines the harness adapter boundary; use it when deciding where provider-specific compatibility parsing belongs.
 
 Boundary:
 
@@ -171,7 +175,7 @@ versioned Seyal typed protocol/domain observation
 
 ### Adapter conformance fixtures
 
-Each adapter claiming structured tool/event support should be tested against:
+Potential fixtures for an adapter claiming structured tool/event support include:
 
 - valid native structured calls;
 - malformed arguments;
@@ -184,15 +188,15 @@ Each adapter claiming structured tool/event support should be tested against:
 - oversized payload;
 - textual content that resembles a control event but is only ordinary output.
 
-Unknown or malformed input must fail/degrade according to the adapter contract and must never become control authority by heuristic parsing.
+Check that unknown or malformed input follows the adapter contract and does not become control authority through heuristic parsing.
 
 ## 7. Learning E — qualify complete conversations, not only helper functions
 
-Unit tests and protocol tests remain necessary but are insufficient for production readiness.
+Unit and protocol tests cover component behavior but may not cover a complete conversation.
 
-M005 qualification should include end-to-end scenarios through the real Agent Backend boundary.
+Where the governing SPEC and Ready Issue call for conversation-level evidence, use the real Agent Backend boundary.
 
-For every supported operation/tool family, where applicable test:
+Potential conversation-level probes, when relevant to the owned slice, include:
 
 - direct request;
 - natural typo or paraphrase;
@@ -210,7 +214,7 @@ For every supported operation/tool family, where applicable test:
 - retry/fallback without losing previous evidence;
 - persistence/replay equality.
 
-For mutating operations additionally test:
+For mutating operations, an additional probe may be useful when required by the owning acceptance criteria:
 
 ```text
 prepare
@@ -223,13 +227,13 @@ prepare
 -> verify freshness/invalidation
 ```
 
-A failed mutation must never produce a successful accepted outcome merely because the model produced confident prose.
+Check under SPEC-016 and SPEC-019 whether a failed mutation could satisfy the applicable AcceptanceContract from model narration alone; the contract's effect and evaluation evidence should determine the outcome.
 
-## 8. Multimodal qualification
+## 8. Multimodal qualification prompts
 
-Existing SPEC-018/SPEC-021 authority is sufficient; implementation should add conversation-level fixtures.
+Use the existing SPEC-018/SPEC-021 contracts to decide whether conversation-level multimodal fixtures apply to the owned slice.
 
-Required cases:
+Potential coverage cases, subject to the governing SPEC and Ready Issue, include:
 
 - image/screenshot reaches only a route with actual end-to-end multimodal injection;
 - original media remains the evidence reference;
@@ -242,9 +246,9 @@ Required cases:
 
 ## 9. Cancellation and orphan prevention
 
-For every ExecutionHost/adapter that can start child work, cancellation tests must prove the lifecycle contract rather than merely asserting a cancelled future/task.
+For an ExecutionHost/adapter that can start child work, assess cancellation against the lifecycle contract in its governing SPEC and Ready Issue; a cancelled future/task alone may not establish the required outcome.
 
-Qualification should cover:
+Potential probes, where required by that contract, include:
 
 - cancellation while launch is in progress;
 - cancellation after dispatch but before start confirmation;
@@ -254,13 +258,13 @@ Qualification should cover:
 - repeated cancellation;
 - cleanup failure.
 
-No path may leave an uncontrolled child merely because the async caller disappeared. Conversely, cancellation must not claim rollback of an effect that may already have crossed its irreversible boundary.
+Check under the governing lifecycle contract that cancellation does not leave an uncontrolled child merely because the async caller disappeared, and does not claim rollback of an effect that may already have crossed its irreversible boundary.
 
 SPEC-016 and SPEC-026 remain authoritative for final state classification.
 
 ## 10. Performance and boundedness checks
 
-Agent qualification must record, where applicable:
+Potential measurements, where relevant to and required by the owning acceptance criteria, include:
 
 - request preparation time;
 - context/tool selection time;
@@ -274,11 +278,11 @@ Agent qualification must record, where applicable:
 - memory growth across repeated conversations/replay;
 - terminal benchmark comparison with Agent Backend idle/active/failing.
 
-These measurements are diagnostic/evidence. They must not introduce synchronous dependencies into PTY -> VT -> TerminalState -> renderer progress.
+These measurements are diagnostic evidence. As specified by ADR-016 §5, they must not introduce synchronous dependencies into PTY -> VT -> TerminalState -> renderer progress.
 
-## 11. Implementation review checklist
+## 11. Optional implementation review prompts
 
-Before an M005 implementation PR claims completion, reviewers should be able to answer:
+Use these prompts when they help assess the owning Issue; they do not add completion gates:
 
 - Does this preserve the existing single authoritative writer/state model?
 - Is provider/harness self-report distinguished from independent verification?
