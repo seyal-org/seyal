@@ -1,8 +1,10 @@
 # ADR-022 — macOS release trust, signed update and rollback
 
-- **Status:** Proposed. Not normative until a docs-only Architecture PR is
-  merged by a non-author maintainer under #688. An author or agent comment is
-  not that acceptance. Decision-critical prototype G2–G5 ran on isolated
+- **Status:** Proposed. This ADR and companion SPEC-029 may be published as
+  Proposed before production release-candidate evidence is complete. They are
+  not normative until a docs-only Architecture PR is merged by a non-author
+  maintainer under #688. An author or agent comment is not that acceptance.
+  Decision-critical prototype G2–G5 ran on isolated
   `spike/688-sparkle-proto` (Apple Development only; evidence
   `docs/evidence/m004-688-sparkle-g2-g5.md`; harness on
   `spike/688-sparkle-proto`). A contradicting
@@ -137,10 +139,11 @@ Linux/Windows; telemetry; bit-for-bit reproducible signed artifacts.
 2. **Sparkle EdDSA (Ed25519) key**, distinct from the Apple identity. Its
    public half is committed as `SUPublicEDKey`.
 3. **Effective Sparkle authority is 1-of-2.** G5 (Apple Development host,
-   ad-hoc foreign archive, `SUVerifyUpdateBeforeExtraction=YES`) installed
-   an EdDSA-valid archive whose code-signing identity differed from the
-   running app. Sparkle does not require matching Team ID once EdDSA
-   verifies. Both roots remain **tier-0 secrets**. **Seyal's required host
+   ad-hoc archive with no Team ID, `SUVerifyUpdateBeforeExtraction=YES`)
+   installed an EdDSA-valid archive with a different code-signing identity.
+   This demonstrates acceptance of that ad-hoc archive, not acceptance of an
+   archive signed by a different Apple Team; G5 did not test another Team ID.
+   Both roots remain **tier-0 secrets**. **Seyal's required host
    check** at `showReady` replies Sparkle `Skip` when Team ID / designated
    requirement does not match, which held install through quit in G3/G5.
    That is product-level 2-of-2 only while the host check runs; a missed
@@ -267,9 +270,13 @@ Seyal.app/
   second Runtime. This does not claim a live-PTY handoff protocol.
 - **Runtime generation replacement** is the SPEC-003 §16 controlled shutdown,
   after which the new GUI launches the new bundled helper (SPEC-009 §8.1.1).
-  It is automatic only with zero live executions and no other attachments;
-  otherwise only after explicit confirmation listing the executions that will
-  be terminated. It is never silent and never forced.
+  Shutdown admission requires that the requesting GUI is the only Runtime
+  client attachment. Any other attachment blocks admission, even when there
+  are zero live executions. With no other attachment, replacement is automatic
+  only at zero live executions; otherwise it requires explicit confirmation
+  listing the executions that will be terminated. The Runtime checks
+  attachment exclusivity atomically at admission. Replacement is never silent
+  and never forced.
 - Each release declares `runtime_restart: none | recommended | security`. UX
   escalates with the class but never terminates executions on its own.
 - **Pre-install gating.** The old GUI, attached to the live Runtime, reads the
@@ -437,16 +444,25 @@ in SPEC-029 §17–§18.
   (Apple Development). Gaps: 2 h soak, Developer ID / notarization, HTTPS
   feed trust without interactive cert prompt. Attach that evidence to the
   ADR PR; do not treat the stub harness as #677.
-- **#677 acceptance gates:** G6 failure injection, G7 measurements, G8
-  notarization dry run, G9 reproducibility probe, and the full RC adversarial
-  matrix on the exact RC SHA.
+- **#677 release-candidate acceptance gates:** G6 failure injection, G7
+  measurements, G8 notarization dry run, G9 reproducibility probe, and the
+  full RC adversarial matrix on the exact RC SHA. These production gates do
+  not block publishing or accepting these Proposed architecture/specification
+  documents; they remain outstanding for #677 and release qualification.
 
 Prototypes run on an isolated non-mergeable branch with throwaway keys,
 identities and feed; their outputs graduate only as evidence.
 
-**Closure rule for #688:** close only when this ADR and SPEC-029 are accepted
-by a non-author maintainer **and** G2–G5 evidence is attached. Acceptance does
-not wait for #832; §11 states what #832, SPEC-004 and SPEC-003 §16 must
+**Issue #688 remains open after publication or acceptance of this document
+PR.** This PR is a refinement/evidence contribution and must reference the
+Issue (`Refs #688`), not close it. The decision-evidence gaps above remain
+outstanding: the full G2 soak, the Developer ID lost-key G5 rerun, and a
+non-interactive production-like HTTPS feed trust result. Close #688 only after
+those Issue-specific evidence gates are satisfied and its owner/maintainer
+confirms the Issue's acceptance criteria. Do not use #677 release-candidate
+gates as a reason to block publication of these Proposed documents; equally,
+do not claim #677 or release readiness from their publication. Acceptance
+does not wait for #832; §11 states what #832, SPEC-004 and SPEC-003 §16 must
 satisfy. #677 update work stays not-Ready until those obligations are
 accepted.
 
