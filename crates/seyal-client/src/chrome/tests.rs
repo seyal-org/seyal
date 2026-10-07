@@ -226,7 +226,7 @@ fn core_terminal_shell_chrome_is_visible_by_default_and_can_be_hidden() {
 }
 
 #[test]
-fn attention_item_navigates_then_dismisses() {
+fn attention_item_navigates_without_dismissing() {
     let mut shell = seed_shell();
     let snap = shell.snapshot();
     let mut chrome = ChromeState::new();
@@ -234,14 +234,14 @@ fn attention_item_navigates_then_dismisses() {
     chrome
         .apply(
             ChromeAction::ReplaceAttention {
-                items: vec![AttentionItem {
-                    id: AttentionId::new("attention-preview-tab"),
-                    title: "Preview attention item".into(),
-                    detail: "Open Agent Development".into(),
-                    workspace: Some(workspace(1)),
-                    tab: Some(tab(2)),
-                    agent: Some(AgentId::new("agent-codex")),
-                }],
+                items: vec![AttentionItem::projection(
+                    AttentionId::new("attention-preview-tab"),
+                    "Preview attention item",
+                    "Open Agent Development",
+                    Some(workspace(1)),
+                    Some(tab(2)),
+                    Some(AgentId::new("agent-codex")),
+                )],
             },
             &snap,
         )
@@ -263,7 +263,7 @@ fn attention_item_navigates_then_dismisses() {
         shell.apply(ShellAction::SelectTab { id }).unwrap();
     }
     let after = chrome.snapshot(&shell.snapshot(), &[]);
-    assert!(after.attention_items.is_empty());
+    assert_eq!(after.attention_items.len(), 1);
     assert_eq!(after.selected_agent, Some(AgentId::new("agent-codex")));
     assert_eq!(shell.snapshot().active_tab, tab(2));
 }
@@ -304,14 +304,14 @@ fn attention_unknown_workspace_does_not_dismiss() {
     chrome
         .apply(
             ChromeAction::ReplaceAttention {
-                items: vec![AttentionItem {
-                    id: AttentionId::new("bad-workspace"),
-                    title: "Ghost".into(),
-                    detail: "Missing".into(),
-                    workspace: Some(workspace(9)),
-                    tab: None,
-                    agent: None,
-                }],
+                items: vec![AttentionItem::projection(
+                    AttentionId::new("bad-workspace"),
+                    "Ghost",
+                    "Missing",
+                    Some(workspace(9)),
+                    None,
+                    None,
+                )],
             },
             &snap,
         )
@@ -323,8 +323,9 @@ fn attention_unknown_workspace_does_not_dismiss() {
             },
             &snap
         ),
-        Err(ChromeError::UnknownWorkspace)
+        Ok(ChromeEffect::default())
     );
+    assert!(chrome.last_retain_details());
     assert_eq!(chrome.snapshot(&snap, &[]).attention_items.len(), 1);
 }
 
@@ -592,4 +593,89 @@ fn block_selection_clears_on_navigation_and_replaces_agent_selection() {
     let navigated = chrome.snapshot(&snap, std::slice::from_ref(&b));
     assert!(navigated.selected_block.is_none());
     assert_eq!(navigated.inspector_mode, InspectorMode::Context);
+}
+
+#[test]
+fn spatial_focus_forbids_in_stack_approve_and_reveals_address() {
+    let shell = seed_shell();
+    let snap = shell.snapshot();
+    let mut chrome = ChromeState::new();
+    let mut item = AttentionItem::projection(
+        AttentionId::new("spatial"),
+        "Password",
+        "needs TTY",
+        Some(workspace(1)),
+        Some(tab(1)),
+        None,
+    );
+    item.requires_spatial_focus = true;
+    item.in_stack_approve = true;
+    item.resource_address = Some(vec![1, 2, 3, 4]);
+    chrome
+        .apply(ChromeAction::ReplaceAttention { items: vec![item] }, &snap)
+        .unwrap();
+    chrome
+        .apply(
+            ChromeAction::OpenAttention {
+                id: AttentionId::new("spatial"),
+            },
+            &snap,
+        )
+        .unwrap();
+    assert!(!chrome.last_in_stack_approve());
+    assert_eq!(chrome.take_pending_reveal(), Some(vec![1, 2, 3, 4]));
+    assert_eq!(chrome.snapshot(&snap, &[]).attention_items.len(), 1);
+}
+
+#[test]
+fn badges_do_not_reorder_workspaces() {
+    let shell = seed_shell();
+    let snap = shell.snapshot();
+    let before: Vec<_> = snap.workspaces.iter().map(|row| row.id).collect();
+    let mut chrome = ChromeState::new();
+    chrome
+        .apply(
+            ChromeAction::SetAttentionBadges {
+                workspace: vec![(workspace(2), 9), (workspace(1), 1)],
+                tab: vec![],
+                pane: vec![],
+            },
+            &snap,
+        )
+        .unwrap();
+    let after = chrome.snapshot(&snap, &[]);
+    let order: Vec<_> = snap.workspaces.iter().map(|row| row.id).collect();
+    assert_eq!(order, before);
+    assert_eq!(after.workspace_badges[0], (workspace(2), 9));
+}
+
+#[test]
+fn os_banner_dismiss_leaves_attention_list() {
+    let shell = seed_shell();
+    let snap = shell.snapshot();
+    let mut chrome = ChromeState::new();
+    chrome
+        .apply(
+            ChromeAction::ReplaceAttention {
+                items: vec![AttentionItem::projection(
+                    AttentionId::new("n1"),
+                    "Done",
+                    "ok",
+                    None,
+                    None,
+                    None,
+                )],
+            },
+            &snap,
+        )
+        .unwrap();
+    chrome
+        .apply(
+            ChromeAction::DismissOsBanner {
+                id: AttentionId::new("n1"),
+            },
+            &snap,
+        )
+        .unwrap();
+    assert_eq!(chrome.snapshot(&snap, &[]).attention_items.len(), 1);
 }

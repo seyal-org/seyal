@@ -13,6 +13,8 @@ mod encode;
 mod resolve;
 
 #[cfg(test)]
+mod reveal_tests;
+#[cfg(test)]
 mod tests;
 
 pub use address::{
@@ -20,8 +22,11 @@ pub use address::{
     RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE, RESOURCE_ADDRESS_KIND_TAB,
     RESOURCE_ADDRESS_KIND_WORKSPACE,
 };
-pub use commit::navigate;
-pub use encode::{encode_resource_address, RESOURCE_ADDRESS_MAX_PAYLOAD};
+pub use commit::{navigate, reveal_attention_target, AttentionReveal};
+pub use encode::{
+    encode_resource_address, pack_resource_address, unpack_resource_address,
+    RESOURCE_ADDRESS_MAX_PAYLOAD,
+};
 pub use resolve::{
     resolve, EmptyExecutionInventory, ExecutionInventory, ExecutionPresence, NavigationPrincipal,
     NavigationRejection, ResolvedTarget, WorkspaceAccess,

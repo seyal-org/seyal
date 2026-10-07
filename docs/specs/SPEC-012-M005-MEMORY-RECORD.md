@@ -4,6 +4,7 @@
 - **Issue:** #847; parent architecture refinement #838; implementation consumer #681
 - **Architecture:** `docs/architecture/ADR-013-CONTEXT-DURABLE-MEMORY.md`
 - **Scope:** durable `MemoryStore` / `MemoryRecord` behavior only
+- **Production calibration:** [`../evidence/m005-context-memory-production-calibration.md`](../evidence/m005-context-memory-production-calibration.md) (#1244; SPEC-012 §19 budgets frozen before #681 Ready)
 
 ## 1. Purpose and scope
 

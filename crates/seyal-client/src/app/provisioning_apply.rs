@@ -19,7 +19,7 @@ use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
 use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
-use crate::shell::ShellAction;
+use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
     /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
@@ -88,6 +88,63 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    /// Split the focused terminal leaf and begin one C1 provisioning intent for
+    /// the new terminal leaf (ADR-017 §4.4 / C3). Sibling bindings are untouched.
+    pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
+        self.shell
+            .apply(ShellAction::SplitFocused {
+                axis,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|_| AppError::PaneSplitUnavailable)?;
+        let snap = self.shell.snapshot();
+        let pane = snap.focused_pane;
+        // SPEC-004 §18.2 / ADR-017 §5.2: M003 create admits only workspace_id 0.
+        let workspace_id = 0u128;
+        self.seed_provisioning_request_floor_from_wire();
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let effect = match self.provisioning.begin_intent(pane, None) {
+            Ok(effect) => effect,
+            Err(failure) => {
+                let _ = self.shell.apply(ShellAction::ClosePane {
+                    id: pane,
+                    containment_generation: self.shell.containment_generation(),
+                });
+                let _ = self.shell.take_released_execution();
+                self.provisioning.note_rejected_without_retry(pane, failure);
+                return Err(provisioning_app_error(failure));
+            }
+        };
+        if let Err(error) = self.dispatch_wire_effects(
+            vec![effect],
+            WireDispatchContext {
+                workspace_id,
+                launch_profile: 0,
+            },
+        ) {
+            let _ = self.shell.apply(ShellAction::ClosePane {
+                id: pane,
+                containment_generation: self.shell.containment_generation(),
+            });
+            let _ = self.shell.take_released_execution();
+            if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
+                let _ = self.provisioning.apply_create_result(
+                    intent.owner,
+                    intent.request_id,
+                    CreateOutcome::Failed(ErrorCode::InvalidState),
+                );
+            }
+            return Err(error);
+        }
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        // Do not activate the unbound new leaf here: until attach+bind completes,
+        // fence/live surface stay on any already-bound sibling (#923 one-live
+        // Metal). Live attach / complete_create_attach_and_bind activate later.
+        Ok(())
+    }
+
     /// Remove a Tab's chrome. Bound panes detach only; executions stay live
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
@@ -125,7 +182,10 @@ impl ApplicationRoot {
     /// terminated as a side effect of presentation close.
     pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::ClosePane { id })
+            .apply(ShellAction::ClosePane {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(close_pane_error)?;
         if let Some((pane, execution)) = self.shell.take_released_execution() {
             let effects = self.provisioning.on_bound_pane_closed(pane);

@@ -8,15 +8,22 @@ use crate::{
     SnapshotPosition,
 };
 use seyal_agent_core::{
-    decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, RetentionPolicyRef, StreamKind,
+    decode_output_ref, encode_output_ref, FingerprintRef, OutputRef, PersistFailurePolicy,
+    RetentionPolicyRef, StreamKind,
 };
 
+mod action_persist;
+mod bindings;
 mod catalog;
+mod context_index;
 mod lifecycle_columns;
 mod schema;
 use schema::{initialize, migrate_to_current, SCHEMA_VERSION};
 
+pub(crate) use action_persist::ActionPersistGate;
+
 pub use catalog::{AdapterManifestRow, CwdPolicy, LaunchDescriptorTemplate, RouteOfferingRow};
+pub use context_index::ContextIndexRecord;
 
 const MAX_EVENT_PAYLOAD: usize = 64 * 1024;
 pub const OUTPUT_SEGMENT_LEN: usize = 4096;
@@ -71,6 +78,13 @@ pub enum StoreError {
 pub struct AgentStore {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) writes_before_fault: AtomicU64,
+    /// Action-scoped write fault injection. `u64::MAX` disables it.
+    pub(crate) action_writes_before_fault: AtomicU64,
+    /// Count of Action write gates that reached SQLite (soak: pause must stop this).
+    pub(crate) action_sqlite_gates: AtomicU64,
+    /// 0 = wall clock; tests may pin milliseconds.
+    pub(crate) clock_ms: AtomicU64,
+    pub(crate) action_persist: Mutex<PersistFailurePolicy>,
     /// Bytes loaded by `replay_after` / `replay_page` on this store instance.
     /// Test-fault instrumentation only; production builds keep a cheap zeroed cell.
     #[cfg(feature = "test-fault-injection")]
@@ -100,6 +114,10 @@ impl AgentStore {
         Ok(Self {
             conn: Mutex::new(conn),
             writes_before_fault: AtomicU64::new(u64::MAX),
+            action_writes_before_fault: AtomicU64::new(u64::MAX),
+            action_sqlite_gates: AtomicU64::new(0),
+            clock_ms: AtomicU64::new(0),
+            action_persist: Mutex::new(PersistFailurePolicy::default()),
             #[cfg(feature = "test-fault-injection")]
             replay_payload_bytes_loaded: AtomicU64::new(0),
         })
