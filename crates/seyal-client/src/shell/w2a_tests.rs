@@ -105,9 +105,16 @@ fn seed_two_workspaces() -> ShellState {
 fn structural_actions_reject_stale_generation_and_keep_containment() {
     let mut shell = seed_two_workspaces();
     let window = shell.product_window_id().unwrap();
+    let active_tab = shell.snapshot().active_tab;
     let stale = shell.containment_generation();
     shell.apply_product_create_tab().unwrap();
-    let before = containment_key(&shell);
+    let moved_tab = shell.snapshot().active_tab;
+    let destination_window = shell
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == other_workspace())
+        .and_then(|workspace| workspace.active_window)
+        .expect("second workspace window");
     let actions = [
         ShellAction::CreateWindow {
             workspace: WorkspaceId::m001_default(),
@@ -117,18 +124,29 @@ fn structural_actions_reject_stale_generation_and_keep_containment() {
             window,
             containment_generation: stale,
         },
+        ShellAction::MoveTabBefore {
+            tab: moved_tab,
+            before: Some(active_tab),
+            window,
+            containment_generation: stale,
+        },
+        ShellAction::MoveTabToWindow {
+            tab: moved_tab,
+            window: destination_window,
+            containment_generation: stale,
+        },
         ShellAction::MoveTabToNewWindow {
-            tab: shell.snapshot().active_tab,
+            tab: moved_tab,
             containment_generation: stale,
         },
     ];
     for action in actions {
         let mut probe = shell.clone();
-        // Force create-path ActivateWorkspace by using an empty workspace clone below.
         let err = probe.apply(action).unwrap_err();
         assert_eq!(err, ShellError::StaleContainment, "{action:?}");
-        assert_eq!(containment_key(&probe), before);
-        assert_eq!(probe.last_error(), Some(ShellError::StaleContainment));
+        let mut expected = shell.clone();
+        expected.last_error = Some(ShellError::StaleContainment);
+        assert_eq!(probe, expected, "rejection changed reducer state: {action:?}");
     }
 }
 
@@ -166,7 +184,8 @@ fn activate_workspace_create_path_is_generation_fenced() {
     )
     .expect("empty workspace fixture");
     let stale = 99;
-    let before = containment_key(&shell);
+    let mut expected = shell.clone();
+    expected.last_error = Some(ShellError::StaleContainment);
     assert_eq!(
         shell.apply(ShellAction::ActivateWorkspace {
             workspace: empty_id,
@@ -174,7 +193,7 @@ fn activate_workspace_create_path_is_generation_fenced() {
         }),
         Err(ShellError::StaleContainment)
     );
-    assert_eq!(containment_key(&shell), before);
+    assert_eq!(shell, expected, "stale activation changed reducer state");
     shell
         .apply_activate_workspace(empty_id)
         .expect("create when empty");
