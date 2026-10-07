@@ -20,7 +20,7 @@ mod budget;
 mod failure;
 mod pin;
 mod score;
-mod sha256;
+pub(crate) mod sha256;
 
 pub use baseline::{
     baseline_artifact_toml, cold_start_baseline_matches, load_verified_baseline, profile_weights,

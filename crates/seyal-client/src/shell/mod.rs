@@ -256,7 +256,9 @@ impl ShellState {
         Self {
             active_workspace: workspace.id,
             workspaces: vec![workspace],
-            allows_pane_splitting: false,
+            // C3 / #1217: production SplitFocused uses the same C1 create→attach→bind
+            // path as CreateTab (one ExecutionId per new terminal leaf).
+            allows_pane_splitting: true,
             allows_tab_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
