@@ -59,10 +59,18 @@ impl ShellState {
         if pane == neighbor {
             return Err(ShellError::InvalidMoveTarget);
         }
+        let neighbor_exists = self.location_of_pane(neighbor).is_some();
         let workspace = self.workspace_mut(self.active_workspace)?;
         let tab = workspace.active_tab_mut()?;
-        if !tab.panes.contains_key(&pane) || !tab.panes.contains_key(&neighbor) {
+        if !tab.panes.contains_key(&pane) {
             return Err(ShellError::UnknownPane);
+        }
+        if !tab.panes.contains_key(&neighbor) {
+            return Err(if neighbor_exists {
+                ShellError::InvalidMoveTarget
+            } else {
+                ShellError::UnknownPane
+            });
         }
         let Some(root_without) = tab.root.removing(pane) else {
             return Err(ShellError::InvalidMoveTarget);

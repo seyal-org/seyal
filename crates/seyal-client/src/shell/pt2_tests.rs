@@ -276,6 +276,69 @@ fn spec025_8_move_pane_equals_neighbor_rejects_atomically() {
 }
 
 #[test]
+fn spec025_8_move_neighbor_in_another_tab_is_invalid_target() {
+    let pane = PaneId::new();
+    let foreign_tab = TabId::new();
+    let window = WindowId::new();
+    let workspace = WorkspaceId::m001_default();
+    let second_tab_id = TabId::new();
+    let second_pane = PaneId::new();
+    let mut shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Seyal OSS".to_owned(),
+            detail: None,
+            attention: false,
+            active_window: window,
+            windows: vec![ShellWindowSeed {
+                id: window,
+                active_tab: foreign_tab,
+                tabs: vec![
+                    ShellTabSeed {
+                        id: foreign_tab,
+                        title: "Current".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: pane,
+                            title: "Source".to_owned(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                    ShellTabSeed {
+                        id: second_tab_id,
+                        title: "Other".to_owned(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: second_pane,
+                            title: "Foreign neighbor".to_owned(),
+                            allows_implicit_execution_bootstrap: true,
+                        },
+                    },
+                ],
+            }],
+        }],
+        workspace,
+        true,
+        true,
+    )
+    .expect("two-tab fixture");
+    let before = shell.clone();
+
+    assert_eq!(
+        shell.apply(ShellAction::MovePaneBeside {
+            pane,
+            neighbor: second_pane,
+            side: MoveSide::Right,
+            containment_generation: shell.containment_generation(),
+        }),
+        Err(ShellError::InvalidMoveTarget)
+    );
+    assert_rejection_atomic(&shell, &before);
+    assert_eq!(shell.last_error(), Some(ShellError::InvalidMoveTarget));
+    assert!(shell.location_of_pane(second_pane).is_some());
+}
+
+#[test]
 fn swap_a_equals_b_and_unknown_ids_reject_atomically() {
     let (mut shell, a, _, _) = seed_nested_abc();
     let before = shell.clone();
