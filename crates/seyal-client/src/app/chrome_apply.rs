@@ -78,13 +78,16 @@ impl ApplicationRoot {
             return Ok(());
         }
         if let Some(packed) = self.chrome.take_pending_reveal() {
-            let _ = crate::navigation::reveal_attention_target(
+            let reveal = crate::navigation::reveal_attention_target(
                 &packed,
                 &mut self.shell,
                 &crate::navigation::EmptyExecutionInventory,
                 crate::navigation::NavigationPrincipal::local_user(),
                 &mut self.focus_history,
             );
+            if matches!(reveal, crate::navigation::AttentionReveal::Focused(_)) {
+                self.activate_focused_pane_authority();
+            }
             let _ = self
                 .chrome
                 .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -101,6 +104,7 @@ impl ApplicationRoot {
                 .map_err(|_| AppError::UnknownChromeTab)?;
         }
         if effect.select_workspace.is_some() || effect.select_tab.is_some() {
+            self.activate_focused_pane_authority();
             self.record_focused_pane_commit();
         }
         let _ = self
