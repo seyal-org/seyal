@@ -2,12 +2,12 @@
 
 - **Status:** Accepted for M001 Pass 5. Candidate-D production performance validation passed on controlled physical Apple Silicon at benchmark commit `c8c121380002c86a4e42b6737238289db10965af`; Issue #651 closed as the Pass 5.1 acceptance authority (historical). The additive Pass 7 semantic-key and correlated-resize extensions below are **accepted** by #702 / SPEC-006 via PR #703; Pass 7 production completion was governed by #706 / PR #707 and is **closed/merged** (historical).
 - **Date:** 2026-08-24
-- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) **accepted** on merge of PR #1060 under Issue #1083 by a non-author maintainer (independent review of `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`). #865 consumes the accepted text; it does not own the amendment, and its implementation is not Done. M003 delivery-suspend, capacity, and multi-attachment demux (§5.1 / §6 / §10.4 / §11 / §12 / §18.6 / §19) under Issue #1162 restore the #1163 text approved by @anulalbs at `e2e3462f`; S1 acceptance is the non-author review of this closeout PR (not PR #1208, which had no non-author review). L0 launch-policy detail (`CAP_LAUNCH_POLICY_DETAIL`, bit 12) under Issue #1113.
+- **Amended:** 2026-08-25, 2026-08-26; Pass 7 extensions accepted 2026-08-27 via PR #703. §8.1 (`ViewportLineIds`, type 35 / bit 9) **accepted** on merge of PR #1060 under Issue #1083 by a non-author maintainer (independent review of `7ff8a9f9dfdd835e133ce045dd565b62f7b437e9`). #865 consumes the accepted text; it does not own the amendment, and its implementation is not Done. M003 delivery-suspend, capacity, and multi-attachment demux (§5.1 / §6 / §10.4 / §11 / §12 / §18.6 / §19) under Issue #1162 restore the #1163 baseline historically approved by @anulalbs at `e2e3462f`; that approval does not cover the proposed resume-sequence, envelope, or snapshot-commit corrections in this closeout. Acceptance of the current S1 text requires fresh independent review of this exact revision. L0 launch-policy detail (`CAP_LAUNCH_POLICY_DETAIL`, bit 12) under Issue #1113.
 - **Issue:** #105 (implementation), #651 (Pass 5.1 final acceptance), #702 (Pass 7 input/resize extension), #1083 (§8.1 ViewportLineIds), #1162 (M003 per-attachment delivery suspend and capacity), #1113 (L0 launch-policy Created detail / CAP_LAUNCH_POLICY_DETAIL)
 - **Architecture authority:** `ADR-001-LOCAL-DISPLAY-PROJECTION.md`; ADR-018 §5.1 for the §19 delivery-suspend / capacity amendment
-- **Depends on:** SPEC-001, SPEC-002, SPEC-003
+- **Depends on:** SPEC-001, SPEC-002, SPEC-003; SPEC-011 §§11.2–11.9 for V2 snapshot chunking and multi-batch atomicity
 - **Accepted M003 extension:** §18 execution provisioning/disposition (types 36–39, capability bit 10) under Issue #994; **normative** (ADR-017 Accepted). Create/terminate production path ships with Issue #1105 / PR #1112.
-- **Proposed M003 extension:** §19 per-attachment delivery suspend/resume, multi-attachment demux (§10.4), and revised §5 maxima (types 40–41, capability bit 11) under Issue #1162; S1 closeout PR restores the #1163 contract (`e2e3462f`, @anulalbs APPROVE) that #1208 dropped on squash into `master`. Runtime/client implementation is W5 and is **not** part of this amendment. This restored text remains Proposed until a non-author maintainer reviews and merges the S1 closeout PR; #1208 is not its acceptance vehicle.
+- **Proposed M003 extension:** §19 per-attachment delivery suspend/resume, multi-attachment demux (§10.4), revised §5 maxima, and the additional resume-sequence/envelope/snapshot-commit rules (types 40–41, capability bit 11) under Issue #1162. This PR restores the #1163 baseline (`e2e3462f`); the historical @anulalbs approval is provenance for that baseline only, not approval of the additional corrections proposed here. Runtime/client implementation is W5 and is **not** part of this amendment. The current §19 text remains Proposed and requires fresh independent review; #1208 is not its acceptance vehicle.
 - **Accepted M003 extension:** L0 amendment (Issue #1113) — §15/`Created` launch-policy result code 17 and `CAP_LAUNCH_POLICY_DETAIL` (capability bit 12) for nonzero `Created.detail_code` warning bits.
 
 ## 1. Purpose
@@ -123,9 +123,33 @@ Counted quantities and the revised maxima:
    §5 cell maximum remains chunked within the existing frame payload; this
    amendment does not raise encode size. Aggregate worst case under the revised
    caps is **100 attachments × (one in-flight + one pending) presentation
-   batches**, plus at most one bounded snapshot per attachment on resume or
-   resync; shareable encode bytes are still produced once per execution update
-   (§10.4) and are not multiplied by attachment count at encode time.
+   batches**; each batch remains capped at 4 MiB by SPEC-011 §11.8, so a
+   conservative upper bound for 100 distinct execution streams is **800 MiB**
+   of queued presentation-batch bytes. A resume snapshot occupies the
+   attachment's in-flight or pending batch slot; it is not an additional
+   unbounded queue. Identical execution updates shared across attachments are
+   encoded once and referenced, as §10.4 specifies, so this bound deliberately
+   assumes no cross-attachment sharing. Type 35
+   has one not-yet-started replaceable slot per live attachment, not per
+   connection (§8.1, §11). At maximum geometry, each slot carries at most 2,060
+   payload bytes (`12 + 8 × 256`), so 100 live attachments retain at most
+   **206,000 type-35 payload bytes**. Including a 24-byte `AttachmentId` +
+   `resume_sequence` prefix
+   and 24-byte frame header per bit-11 negotiated slot, those pending slots
+   occupy at most **210,800 bytes** (`100 × (2,060 + 24 + 24)`). They exclude
+   the ordinary connection writer's one partially written frame per
+   connection. Such a frame is bounded by the existing 262,144-byte payload
+   maximum plus its 24-byte header; the optional 24-byte `AttachmentId` +
+   `resume_sequence` envelope is
+   included within that payload maximum. For a connection with 100 pending
+   slots, pending type-35 slots plus its partial frame are bounded by **472,968
+   bytes**. Across 16 connections, the worst case is **4,405,488 bytes** for
+   pending type-35 slots and partially written frames (`210,800 + 16 ×
+   262,168`). This excludes the separately bounded presentation and mandatory
+   control queues.
+   Each live attachment additionally retains one 8-byte current delivery
+   sequence, so the Runtime-wide maximum adds at most **800 bytes** of sequence
+   state (`100 × 8`), excluding ordinary bounded map/allocator overhead.
 5. **Client RenderState.** This specification MUST NOT require the client to keep
    a second grid, a canonical grid, or a disposable RenderState for a suspended
    attachment. Releasing renderer/GPU resources for an ADR-018 `Hidden` leaf is a
@@ -246,7 +270,14 @@ Types **1–34 are all allocated** on `master` (`seyal-protocol` `MessageType` p
 
 Runtime→client message type **35**, `ViewportLineIds`, is gated on client capability bit 9 (`CAP_VIEWPORT_LINE_IDS = 1 << 9`). It carries the visible viewport's `LineId`s for one display generation so a Flow host can map a running Block's `start_line` onto prepared rows without inventing a history range. SPEC-008 §5.2 remains the presentation rule only.
 
-Payload, little-endian. Maximum size is `12 + 8 × 256` = 2060 bytes.
+Payload body, little-endian. The body maximum is `12 + 8 × 256` = 2,060 bytes.
+When both peers negotiated `CAP_ATTACHMENT_DELIVERY_CONTROL` (bit 11) at Hello,
+the §10.4 `AttachmentId` + `resume_sequence` prefix precedes this body for the full connection
+lifetime, including while the connection has exactly one or zero live
+attachments. The maximum frame payload is 2,084 bytes; the prefix is included
+in `payload_len` and in the §5 frame-payload limit. Attachment count never
+changes the negotiated envelope. Without mutual bit-11 negotiation, the legacy
+unprefixed envelope applies and the connection is limited to one attachment.
 
 ```text
 generation   u64   non-zero display generation
@@ -255,14 +286,22 @@ reserved     u16   must be 0
 line_ids     u64 × row_count
 ```
 
-Validation. A malformed type 35 is discarded. The client clears any stored vector and draws no running-Block primary clip. A malformed frame does not close the connection.
+Validation. A malformed type 35 is discarded and draws no running-Block primary
+clip. In the legacy envelope, the client clears that connection's sole stored
+vector. In the negotiated bit-11 envelope, the 24-byte prefix identifies the
+only vector that may be cleared: when it names a live `AttachmentId`, clear
+that attachment's vector; when the prefix is absent, zero, or names no live
+attachment, clear none. A malformed frame does not close the connection.
 
 The frame is malformed when:
 
 - `generation` is 0;
 - `reserved` is non-zero;
 - `row_count` is 0 or greater than 256;
-- payload length is not `12 + 8 × row_count`;
+- after removing the §10.4 prefix when bit 11 was mutually negotiated at Hello,
+  body length is not `12 + 8 × row_count` (full `payload_len` is `12 + 8 ×
+  row_count` for the legacy envelope and `24 + 12 + 8 × row_count` for the
+  negotiated envelope);
 - any LineId is 0;
 - the same LineId appears again after a different LineId has followed it (a non-consecutive repeat).
 
@@ -270,7 +309,20 @@ A consecutive run of the same LineId is valid. ADR-010 gives every visual row of
 
 LineIds are not required to be monotonic. Insert-line, reverse-index, and CSI T may reorder ids. The row order is the visible viewport order. Equality of ids is a soft-wrap run, not a sort key.
 
-**What the frame describes.** The ids are the active screen's source `LineId` for each visible row of the display generation just published, one id per visible row. While the alternate screen is active the frame is not suppressed and it does not carry the hidden primary buffer. ADR-004 / SPEC-001 give both screens one allocator that never reuses a `LineId`, so a primary `start_line` cannot match an alternate-screen row. The client pairs that vector with the committed display by generation and row count only. A Flow running-Block clip consumes a paired vector; it does not read a hidden primary buffer, and it draws no clip when the vector is absent or unpaired.
+**What the frame describes.** The ids are the active screen's source `LineId` for each visible row of the display generation just published, one id per visible row. While the alternate screen is active the frame is not suppressed and it does not carry the hidden primary buffer. ADR-004 / SPEC-001 give both screens one allocator that never reuses a `LineId`, so a primary `start_line` cannot match an alternate-screen row. The client pairs that vector with the committed display by generation and row count on the legacy envelope; under bit 11 it also requires the same `AttachmentId` and `resume_sequence`. A Flow running-Block clip consumes a paired vector; it does not read a hidden primary buffer, and it draws no clip when the vector is absent or unpaired.
+
+**M003 attachment demultiplexing.** On every connection where bit 11 was
+mutually negotiated at Hello, type 35 carries the 24-byte `AttachmentId` +
+`resume_sequence` prefix
+defined by §10.4 before this payload for the full connection lifetime; that
+prefix is included in the frame's `payload_len`, regardless of current
+attachment count. Each vector and its generation-order marker belong to exactly
+one attachment. Generation values are ordered only within that attachment;
+equal generations on different attachments are independent and may be
+interleaved on the connection. The client pairs
+`(AttachmentId, resume_sequence, generation, row_count)` with the corresponding committed display
+batch and never uses another attachment's display or LineIds, even when their
+generation values are equal.
 
 **Running-Block row mapping.** SPEC-008 §5.2 remains the presentation rule. This section only says which paired rows that rule may use:
 
@@ -280,21 +332,23 @@ LineIds are not required to be monotonic. Insert-line, reverse-index, and CSI T 
 
 **Publish rule.** Type 35 is bounded control output. It is not a presentation-batch member. Superseding a pending presentation batch does not delete a type 35 frame that has already started writing. A not-yet-started type 35 frame is replaced by a newer one, as bounded below.
 
-- Runtime prepares at most one type 35 frame after a snapshot batch is successfully enqueued, or after a delta is admitted to the presentation queue, for that same generation, and only for a viewer that advertised bit 9. Runtime sets bit 9 in `ServerHello.server_capabilities` when it implements this message.
-- Each connection holds at most one not-yet-started type 35 frame. Enqueuing a newer one replaces the older not-yet-started frame; a partially written type 35 frame is completed first. Type 35 therefore retains no generation history. It is not mandatory control and cannot by itself exhaust that budget or cause slow-client disconnection. Under sustained backlog the clip may stay absent until a type 35 frame for the committed generation is fully written. Absence is the safe presentation, not a protocol error.
-- Runtime must not write a type 35 frame for generation G until the last frame of the display batch that carried G has been completely written, or that batch has been superseded by a newer-generation snapshot whose last frame has been completely written. A mandatory control frame that preempts between complete display frames does not release queued type 35 frames. Type 35 is never written inside a partially written frame.
+- Runtime retains at most one pending type 35 frame for a snapshot or delta logical update, and only for a viewer that advertised bit 9. Runtime sets bit 9 in `ServerHello.server_capabilities` when it implements this message. For V2, this slot is not released for writing until every chunk in the complete logical update, across all transport batches, has been written.
+- A legacy-envelope connection holds at most one not-yet-started type 35 frame. A bit-11 negotiated connection holds at most one not-yet-started type 35 frame per live attachment (and none when no attachment is live); enqueuing a newer vector replaces only the pending vector for that same `AttachmentId`. A connection has at most one partially written wire frame at a time. It is completed before another frame starts, or the connection is closed; frame bytes are never interleaved. Type 35 therefore retains no generation history. It is not mandatory control and cannot by itself exhaust the mandatory-control budget or cause slow-client disconnection. Under sustained backlog the clip may stay absent until a type 35 frame for the matching committed display is fully written. Absence is the safe presentation, not a protocol error.
+- On a bit-11 negotiated connection, ordering and release are scoped by `(AttachmentId, resume_sequence, generation)`, not by connection, attachment, or generation alone. Runtime must not write attachment A's type 35 frame for sequence S and generation G until the final frame of A's complete logical display update for `(S, G)` has been written, including every chunk and transport batch for V2. The client pairs it only after that logical update is atomically committed. A batch boundary alone does not release or pair the vector. A display update for another attachment, sequence, or generation never releases A's pending vector. If A's pending update is superseded before completion, A's vector is replaced or cleared with that update; a replacement snapshot/update must complete before a newly paired vector for A can be written. A mandatory control frame that preempts between complete display frames does not release a type 35 frame. Type 35 is never written inside a partially written frame.
 - A delta that is dropped, or replaced by a current-state snapshot, does not send type 35 for that dropped attempt.
-- A viewer that did not advertise bit 9 never receives type 35. If `ServerHello` does not advertise bit 9, the client does not wait for type 35. A type 35 frame that arrives without both sides having advertised bit 9 is malformed: discard it and clear the stored vector.
+- A viewer that did not advertise bit 9 never receives type 35. If `ServerHello` does not advertise bit 9, the client does not wait for type 35. A type 35 frame that arrives without both sides having advertised bit 9 is malformed: discard it and clear the stored vector for its identified live attachment only.
 - If any visible-row LineId is missing or zero, Runtime skips the entire frame. It does not omit individual ids and it does not send a shorter vector. A consecutive repeated id is not missing.
 - The payload bound above is the cost of publishing the full vector, including when the ids are unchanged from the previous frame.
 
-If an older type 35 frame is already on the wire when a newer snapshot supersedes its display batch, the client trusts the generation field, not queue membership.
+If an older type 35 frame is already on the wire when a newer snapshot supersedes its display batch, the legacy client trusts the generation field, not queue membership. Under bit 11, the client first requires the current `resume_sequence`, then applies the generation and row-count pairing rules.
 
 **Client pairing.** The safe presentation is no running-Block primary clip. Pairing and clearing are owned by the Rust local client. The native host receives only a paired vector or none and must not pair, store, or infer LineIds.
 
-- The stored vector is scoped to one attachment. `Detach`, `Detached`, a new `Attached`, reconnect, and disconnect clear it before any display of the new attachment is projected.
+- The stored vector and its committed-generation ordering marker are scoped to one attachment. In the bit-11 negotiated envelope, the client stores them by `(AttachmentId, resume_sequence)`; equal generations on different attachments or sequences are independent. `Detach` / `Detached` clear only the named attachment's vector and marker. A new `Attached` initializes only that attachment's empty slot. Reconnect and disconnect clear every attachment's slot on that connection before any new attachment is projected.
+- A malformed type-35 frame with a parseable prefix naming a currently live attachment clears only that attachment's stored vector and draws no clip for it. In the bit-11 envelope it may clear state only when its `resume_sequence` equals that attachment's current expected sequence; a stale or unexpected-future sequence is discarded without clearing newer state. A frame whose prefix is absent, zero, or names no live attachment is discarded without clearing another attachment's state. Malformed payloads never clear or replace another attachment's pending or committed vector.
+- Suspending an attachment clears only its pending type-35 slot and client-side paired vector/generation marker. Resuming clears only that attachment's old vector/marker before the bounded snapshot resync; a new vector is paired only with that attachment's new committed display batch. Other attachments' vectors and pending slots remain unchanged.
 - Commit the vector only when `generation` equals the committed display generation and `row_count` equals the committed viewport row count. Evaluate in this order:
-  1. A strictly older generation than the last committed vector is ignored. The stored vector stays.
+  1. A strictly older generation than the last committed vector for this `AttachmentId` is ignored. That attachment's stored vector stays.
   2. A generation newer than the committed display generation is discarded, not buffered. The stored vector stays.
   3. The same generation with a different `row_count` than the committed viewport clears the stored vector and draws no clip. It does not close the connection.
   4. The same generation and the same `row_count`, with a different id vector than the one already committed, is a protocol failure. Protocol failure means the client's existing fatal protocol error, which closes the connection.
@@ -486,7 +540,7 @@ After successful atomic apply:
 client.generation = delta.generation
 ```
 
-A snapshot replaces the complete disposable client RenderState and sets its generation unconditionally after validation.
+A snapshot replaces the complete disposable client RenderState and sets its generation unconditionally after validation. Under the negotiated bit-11 envelope, the client applies this rule only after §19 accepts a complete snapshot for the currently expected `resume_sequence`; canonical generation alone never makes a frame current across suspend/resume.
 
 A duplicate/obsolete update at or below the already committed generation may be ignored. A forward delta whose base does not equal the committed generation triggers `Resync`; the client never replays PTY bytes.
 
@@ -503,54 +557,76 @@ For one canonical execution update the target path is:
 N × bounded references/socket deliveries
 ```
 
-**Single-attachment connections (M001 / capability absent).** Viewer identity is
+**Legacy envelope (bit 11 not mutually negotiated at Hello).** Viewer identity is
 connection state and is deliberately absent from display frame payloads
 (`DisplaySnapshot` / `DisplayDelta` and the SPEC-011 V2 frames, types 27/28) so
 otherwise identical display bytes can be shared across viewers without per-view
-serialization. With at most one live attachment per connection, the client can
-attribute every presentation frame to that attachment without a payload identity.
+serialization. A legacy-envelope connection is limited to one live attachment,
+so the client can attribute every presentation frame to it without a payload
+identity.
 
-**Multi-attachment connections (`CAP_ATTACHMENT_DELIVERY_CONTROL` negotiated).**
-A connection that holds two or more live attachments MUST demultiplex every
-replaceable presentation frame and every other R→C message that would otherwise
-rely on connection-implied attachment identity. Normative rules:
+**Attachment-identity envelope (bit 11 mutually negotiated at Hello).** Every
+connection-implied R→C message covered below carries `AttachmentId` and delivery
+sequence for the full
+connection lifetime, even with exactly one or zero live attachments. The
+envelope is fixed by Hello negotiation; attach/detach/count changes never
+switch it. A new connection negotiates again. Normative rules:
 
 1. Execution-scoped encode remains shareable: Runtime still builds one encoded
    update representation per execution (§10.4 path above). Encode MUST NOT embed
    a second VT/grid authority.
-2. On the wire to a multi-attachment peer, each presentation delivery is prefixed
-   with a 16-byte little-endian `u128 AttachmentId` immediately after the ordinary
-   24-byte frame header and before the existing snapshot/delta payload layout.
-   The same prefix applies to SPEC-011 `DisplaySnapshotV2` / `DisplayDeltaV2`
-   (types 27/28) when delivered on a multi-attachment connection. Single-attachment
-   peers (capability absent, or capability present but currently holding exactly
-   one attachment) keep the unprefixed M001 layout so existing clients do not
-   break.
-3. A multi-attachment connection MUST NOT hold two live attachments to the **same**
-   `ExecutionId` at once. That keeps the shareable encode unambiguous while the
-   `AttachmentId` prefix selects the consumer. A second `Attach` for an
-   `ExecutionId` already attached on that connection is rejected
-   (`AlreadyAttached` / capacity path as implemented by W5).
+2. On the wire to an attachment-identity-envelope peer, every covered
+   presentation delivery is prefixed immediately after the ordinary 24-byte
+   frame header by a 24-byte little-endian envelope:
+
+   ```text
+   u128 AttachmentId
+   u64  resume_sequence
+   ```
+
+   The message-specific payload begins after this envelope. It is part of the
+   frame's `payload_len` and counts against the existing 262,144-byte
+   frame-payload maximum. The envelope applies to `DisplaySnapshot`,
+   `DisplayDelta`, SPEC-011 `DisplaySnapshotV2` / `DisplayDeltaV2` (types 27/28),
+   type-35 `ViewportLineIds`, and every other covered connection-implied
+   R→C presentation or metadata frame. Initial attach uses sequence 0. Every
+   covered frame for that attachment carries its current sequence. Legacy
+   envelope peers keep the unprefixed M001 layout.
+3. An attachment-identity-envelope connection MUST NOT hold two live
+   attachments to the **same** `ExecutionId` at once. That keeps the shareable
+   encode unambiguous while the `AttachmentId` prefix selects the consumer. A
+   second `Attach` for an `ExecutionId` already attached on that connection is
+   rejected (`AlreadyAttached` / capacity path as implemented by W5).
 4. Other connection-implied R→C presentation or metadata frames that name or
-   imply a single attachment (including resume/resync snapshots under §12 / §19.3)
-   carry the same `AttachmentId` prefix when the connection holds more than one
-   live attachment. Mandatory control that is already attachment-scoped by its
-   existing payload (for example type-15 `Error` with only
+   imply a single attachment (including type-35 `ViewportLineIds` and
+   resume/resync snapshots under §12 / §19.3) carry the same `AttachmentId` +
+   `resume_sequence` envelope throughout the connection lifetime. Type 35 is
+   paired by attachment, sequence, canonical generation and row count.
+   Mandatory control that is
+   already attachment-scoped by its existing payload (for example type-15 `Error` with only
    `offending_message_type`) is unchanged; a rejected type 40/41 therefore cannot
    name which attachment failed, which is acceptable because there is no ack and
    the client correlates by the request it sent.
 
 ## 11. Backpressure, supersession and slow clients
 
-Mandatory control/lifecycle output and replaceable presentation output have separate bounded queue semantics. Mandatory output is serviced before presentation output. Type 35 (`ViewportLineIds`, §8.1) is a third class: one replaceable not-yet-started frame per connection, written only after the display batch for its generation is complete, and counted as neither presentation nor mandatory control.
+Mandatory control/lifecycle output and replaceable presentation output have separate bounded queue semantics. Mandatory output is serviced before presentation output. Type 35 (`ViewportLineIds`, §8.1) is a third class: one replaceable not-yet-started frame for a legacy-envelope connection, or one per live attachment on a bit-11 negotiated connection. It is written only after that attachment's matching display batch is complete and is counted as neither presentation nor mandatory control.
 
 Each **attachment** may have at most one presentation batch in flight and one not-yet-started pending batch. Presentation batches are immutable/shareable encoded bytes. Runtime must not retain unbounded generation history. A connection that holds several attachments applies these caps independently per `AttachmentId`; there is no shared single in-flight presentation slot for the whole connection.
 
 If a new delta is contiguous with the last presentation generation targeted for that attachment and a pending slot is available, it may be queued as a delta. If continuity cannot be guaranteed, or a pending presentation batch must be superseded, Runtime replaces the not-yet-started pending work with a current-state snapshot. Subsequent supersession replaces that pending snapshot with a newer snapshot rather than adding history.
 
-An attachment whose delivery is suspended under §19 MUST NOT receive new presentation enqueue (snapshot or delta). Pending not-yet-started presentation work for that attachment is dropped on suspend; an in-flight partially written frame is completed or the connection is closed under the ordinary frame rule below. Suspend never drops or delays mandatory control/lifecycle output.
+An attachment whose delivery is suspended under §19 MUST NOT receive new presentation enqueue (snapshot or delta). Pending not-yet-started presentation work for that attachment is dropped on suspend; an in-flight partially written frame is completed or the connection is closed under the ordinary frame rule below. Each queued frame retains the attachment's `resume_sequence` from enqueue through write; a partially written frame is never relabeled. A valid resume discards unstarted superseded work and places its new-sequence bounded snapshot before any new-sequence delta. Suspend never drops or delays mandatory control/lifecycle output.
 
-A partially written frame is completed or the connection is closed; bytes from two frames are never interleaved. A slow client may be disconnected under bounded resource policy. No case blocks PTY/VT progress.
+A connection may have only one partially written wire frame at a time. That
+frame is completed before another starts, or the connection is closed; bytes
+from two frames are never interleaved. Detaching or suspending an attachment
+clears only that attachment's not-yet-started presentation batch and type-35
+slot. Queued frames retain their attachment identity and envelope format. If a
+frame for it is already partially written, the writer completes that frame in
+its original format before any other frame or closes the connection. A slow
+client may be disconnected under bounded resource policy. No case blocks
+PTY/VT progress.
 
 Because mandatory control output may overtake not-yet-started presentation work, a Pass 7 client must use the generation-bearing success fence from SPEC-006 rather than immediately re-enqueueing a target after `ResizeResult(Applied)`.
 
@@ -558,11 +634,23 @@ Pass 7 client→Runtime input/control backpressure, `ResizeRequest` coalescing, 
 
 ## 12. Attach, reconnect and resync transactions
 
-First attach validates peer/state/role/`ExecutionId`/capacity, allocates `AttachmentId` privately, reads current canonical visible state without consuming shared canonical damage, encodes a bounded snapshot, admits both `Attached` and the snapshot into nonblocking bounded output, then publishes attachment/controller authority and transitions the connection to `Attached` (or keeps it `Attached` when this is an additional attachment on the same connection). The new attachment starts in delivery substate `Delivering` (§19.3).
+First attach validates peer/state/role/`ExecutionId`/capacity, allocates `AttachmentId` privately, reads current canonical visible state without consuming shared canonical damage, encodes a bounded snapshot, admits both `Attached` and the snapshot into nonblocking bounded output, then publishes attachment/controller authority and transitions the connection to `Attached` (or keeps it `Attached` when this is an additional attachment on the same connection). The new attachment starts in delivery substate `Delivering` at `resume_sequence = 0` (§19.3), with empty per-attachment presentation, type-35 pending-slot, and generation-order state before its sequence-0 attach snapshot is admitted.
 
 Failure before authority publication leaves no attachment/controller record. Client disappearance after publication is owned by disconnect cleanup and is idempotent.
 
-Explicit `Resync`, reconnect and detected generation gaps use the same current-state snapshot mechanism. No acknowledgement is required before terminal progress continues.
+`Detach` releases only the named attachment and clears only its not-yet-started
+presentation batch, type-35 pending slot, delivery substate, resume sequence,
+and attachment-scoped generation-order state. Any already partially written wire frame is
+completed before the next frame or the connection is closed; after release, a
+late frame carrying the detached `AttachmentId` is decoded using the
+connection's fixed envelope, then discarded by the client because the
+identity is retired; it cannot mutate another attachment's state. Unstarted
+work for the released identity is dropped. Disconnect/reconnect clears all
+attachment-scoped queues and pairing state on the old connection before new
+attachments are created. Malformed type-35 clearing is attachment-scoped under
+§8.1; malformed type-40/41 control changes no delivery state (§19.2).
+
+Explicit `Resync`, reconnect and detected generation gaps use the same current-state snapshot mechanism, except that §19 returns `InvalidState` for `Resync` while delivery is `Suspended`. On a bit-11 connection a `Resync` snapshot keeps the attachment's current `resume_sequence`; reconnect starts new per-attachment state at sequence 0 with fresh `AttachmentId`s. Resync is attachment-scoped: it replaces or clears only the targeted attachment's not-yet-started presentation batch and type-35 slot; other attachments' pending vectors and generation ordering remain unchanged. No acknowledgement is required before terminal progress continues.
 
 Reconnect invalidates all old correlated resize request IDs and any old applied-generation fence; new request IDs are connection-local and never substitute for `AttachmentId` authority.
 
@@ -973,12 +1061,15 @@ Allocation hygiene (do not reuse claimed numbers):
 
 Runtime must reject types 40/41 from a peer that did not advertise the
 capability with `UnknownMessage`. A client must not probe an older Runtime by
-sending an unknown message type. Without the capability there is **no**
-suspend and **no** multi-attachment connection: existing non-suspend
-single-attachment attach/delivery/resync behavior applies; the Runtime-wide
-live-attachment maximum of 100 still bounds attach; per-connection attachment
-count stays at 1 (§5.1). With the capability, multi-attachment demultiplexing
-follows §10.4 and per-connection attachment count may rise to 100.
+sending an unknown message type. Without mutual bit-11 negotiation at Hello
+there is **no** suspend and **no** multi-attachment connection: the fixed
+legacy envelope and existing non-suspend single-attachment attach/delivery/
+resync behavior apply; the Runtime-wide live-attachment maximum of 100 still
+bounds attach; per-connection attachment count stays at 1 (§5.1). With mutual
+negotiation, the fixed attachment-identity envelope follows §10.4 for the entire
+connection, and per-connection attachment count may rise to 100. Attachment
+count never changes the envelope; only reconnect performs Hello negotiation
+again.
 
 Capability-bit hygiene: Issue #1113 / L0 has landed on `master` and allocates
 `CAP_LAUNCH_POLICY_DETAIL` as bit **12**. This §19 amendment therefore keeps
@@ -997,21 +1088,46 @@ u8   reserved0 = 0
 u8[7] reserved1 = 0
 ```
 
-`ResumeDelivery` (type 41, C→R) is exactly 24 bytes with the same layout.
+`ResumeDelivery` (type 41, C→R) is exactly 24 bytes:
+
+```text
+u128 AttachmentId
+u64  resume_sequence   # nonzero; strictly greater than the last accepted value
+```
+
+`resume_sequence` is independent of canonical display generation. The first
+attach snapshot and all presentation frames before the first resume use
+sequence 0. For each live attachment, the client chooses a nonzero sequence
+greater than the last value it requested; Runtime adopts it only after
+validating the request and uses it for the resumed snapshot and subsequent
+covered frames. Sequences MUST NOT wrap. If the current sequence is `u64::MAX`,
+another resume is rejected with `InvalidState`; the attachment remains at its
+current sequence and a suspended attachment remains suspended. Sequence state
+resets only when a fresh `AttachmentId` is allocated.
 
 Who may send: the client that owns the live attachment — both `Observer` and
 `Controller` roles. Suspension does not grant, revoke, transfer or extend a
 Controller lease; existing Controller-lease rules (§5, attach, disconnect)
 remain authoritative and are not bypassed by types 40/41.
 
-Validation order before any delivery-state mutation:
+Validation is ordered before any delivery-state or sequence mutation:
 
-1. capability negotiated, otherwise `UnknownMessage`;
-2. connection state `Attached`, otherwise `InvalidState`;
-3. exact payload length and all reserved bytes zero, otherwise
-   `MalformedPayload`;
-4. `AttachmentId` is a live attachment on this connection, otherwise
-   `InvalidAttachment` (all-zero) or `StaleIdentity` (any other non-live value).
+1. Common checks for either type: bit 11 was negotiated, otherwise
+   `UnknownMessage`; connection state is `Attached`, otherwise `InvalidState`;
+   payload length is exactly 24 bytes, otherwise `MalformedPayload`.
+2. Message-specific shape check: type 40 requires every reserved byte to be
+   zero, otherwise `MalformedPayload`; type 41 requires nonzero
+   `resume_sequence`, otherwise `MalformedPayload`.
+3. Common identity check: `AttachmentId` is live on this connection, otherwise
+   `InvalidAttachment` (all-zero) or `StaleIdentity` (other non-live value).
+4. Type 41 only: `resume_sequence` is strictly greater than the attachment's
+   current sequence, otherwise `InvalidState`. A current sequence of
+   `u64::MAX` is exhausted and cannot be advanced; rejection changes neither
+   sequence nor delivery state. Type 40 never reads or advances the sequence:
+   it is valid and idempotent even when the current sequence is `u64::MAX`.
+
+A rejected request changes no sequence or delivery state. In particular,
+malformed type 40 reserved bytes do not suspend or resume an attachment.
 
 There is no Runtime→client acknowledgement message. Success is observed by
 delivery behavior (no further presentation for suspend; a bounded snapshot for
@@ -1020,64 +1136,129 @@ resume). Failures use the existing type-15 `Error` path with
 
 ### 19.3 Per-attachment delivery state machine
 
-Each live attachment has a delivery substate independent of other attachments
-on the same connection:
+Each live attachment has a delivery substate and a `resume_sequence`, both
+independent of other attachments on the same connection. Attach begins in
+`Delivering` at sequence 0; its attach snapshot and all later presentation
+frames carry sequence 0 until a valid `ResumeDelivery` is accepted.
 
 ```text
-Delivering   (default immediately after successful Attach)
-  ├─ SuspendDelivery → Suspended   (idempotent if already Suspended)
-  ├─ ResumeDelivery  → Delivering  (idempotent no-op if already Delivering;
-  │                                 does not force an extra snapshot)
-  ├─ Resync          → Delivering  (existing §12 bounded snapshot; legal while
-  │                                 Delivering)
+Delivering(sequence N)
+  ├─ SuspendDelivery → Suspended(sequence N) (idempotent if already Suspended)
+  ├─ ResumeDelivery(sequence > N)
+  │      → Delivering(sequence requested) with a bounded current-state snapshot
+  ├─ Resync → Delivering(sequence N) with a bounded current-state snapshot
   └─ Detach / disconnect → attachment released
 
-Suspended
-  ├─ SuspendDelivery → Suspended   (idempotent)
-  ├─ ResumeDelivery  → Delivering via the existing §12 bounded current-state
-  │                    snapshot resync path (same mechanism as explicit Resync /
-  │                    reconnect / generation-gap recovery)
-  ├─ Resync          → Delivering via the same §12 bounded snapshot path
-  │                    (Resync while Suspended is defined as resume+resync so a
-  │                    client cannot strand presentation permanently)
+Suspended(sequence N)
+  ├─ SuspendDelivery → Suspended(sequence N) (idempotent)
+  ├─ ResumeDelivery(sequence > N)
+  │      → Delivering(sequence requested) with a bounded current-state snapshot
+  ├─ Resync → InvalidState (no state or sequence mutation)
   └─ Detach / disconnect → attachment released
 ```
 
+A `ResumeDelivery` is never a no-op. In either delivery substate, a valid
+request advances the attachment's sequence to the requested value, discards
+that attachment's unstarted presentation and type-35 work, and schedules the
+existing bounded current-state snapshot (§12). The sequence transition and
+snapshot scheduling are one Runtime operation. If admission cannot complete,
+the connection follows the bounded backpressure/disconnect rule in §11; it must
+not expose a new sequence without its resync snapshot. A `Resync` while
+`Delivering` keeps the current sequence and uses the existing §12 bounded
+snapshot path. A `Resync` while `Suspended` returns `InvalidState`; only a valid
+`ResumeDelivery` leaves `Suspended`.
+
 **Resume rules (normative):**
 
-- `ResumeDelivery` always performs the existing bounded SPEC-004 snapshot
-  resync (§12): read current canonical visible state without consuming shared
-  canonical damage, encode a bounded `DisplaySnapshot`, and admit it into the
-  attachment's presentation queue.
-- Resume **never** replays historical PTY bytes into a client VT engine.
-- Resume **never** allocates a new `AttachmentId`. The same attachment and any
-  Controller lease it already holds continue.
-- Resume does not require Alternative E (release-on-hide) handshake, peer
-  re-auth, or a fresh attach.
+- The client advances its expected sequence when it sends `ResumeDelivery`,
+  clears that attachment's paired display/LineIds and disposable RenderState,
+  and remains fenced until it assembles and validates a complete logical
+  `DisplaySnapshot` for exactly the requested sequence in the display format
+  available to that connection: legacy type 12 under §10.2, or V2 type 27 when
+  `CAP_GRAPHEME_DISPLAY` is negotiated and the V2 path applies. It discards
+  frames with older sequences, including frames with a canonical generation equal to the resumed snapshot's
+  generation. A frame with an unexpected future sequence is a protocol/state
+  violation for that attachment: discard it, keep the attachment fenced, and
+  request no inferred fallback. A failed resume leaves the client fenced; it
+  must not restore or accept prior-sequence state.
+- For a resumed sequence, the first accepted presentation state MUST be one
+  complete validated logical snapshot transaction, not merely a completed
+  transport batch. On the legacy type-12 path, assemble every `chunk_count`
+  chunk and validate complete row coverage and metadata under §10.2. On the V2
+  type-27 path, assemble every `chunk_count` chunk across every transport batch
+  and validate the logical update under SPEC-011 §§11.2–11.9, including legal
+  partial-row cell spans, row-major coverage, sidecar bounds and atomicity.
+  Every chunk in either format MUST carry the same `AttachmentId` and
+  `resume_sequence` and belong to the same logical snapshot update. V2 chunk
+  spans may be partial rows and one logical snapshot may exceed 4 MiB and span
+  multiple batches; a batch boundary alone never completes the snapshot. Do not
+  commit or expose partial rows, chunks, or batches. A delta or type-35 frame
+  received before the whole matching snapshot commits is discarded and cannot
+  seed state. Runtime MUST preserve transaction order: deliver the bounded
+  snapshot batches in order and enqueue no delta for the adopted sequence until
+  every chunk of that logical snapshot has been delivered. If a newer update
+  supersedes an incomplete snapshot, replace it with a newer complete snapshot
+  at the same sequence; do not let a delta become the first committed state.
+  After commit, apply legacy deltas using §10.3
+  generation continuity, or V2 deltas using SPEC-011's logical-update assembly
+  and continuity: each delta's `base_generation` must equal the committed
+  display generation. A newer resume supersedes and
+  discards every incomplete snapshot assembly for an older sequence.
+- Type 35 cannot establish resumed presentation state. Runtime MUST NOT release
+  a resume-paired type-35 vector for writing until the final frame of the last
+  transport batch of that complete logical snapshot has been written. The
+  client independently discards the vector until the whole matching snapshot
+  is committed; a transport-batch boundary alone is insufficient. Afterwards,
+  pair only a type-35 vector with the committed display
+  having the same `AttachmentId`, `resume_sequence`, canonical generation and
+  row count. A type-35 frame from an older sequence is discarded even if its
+  generation equals the snapshot; an unexpected future sequence is discarded
+  while the client remains fenced.
+- Resume never replays historical PTY bytes and never allocates a new
+  `AttachmentId`. The same attachment and any Controller lease it already holds
+  continue. Resume does not require Alternative E handshake, peer re-auth, or a
+  fresh attach.
+- Sequence values are delivery epochs, not canonical generations. They do not
+  alter SPEC-003/ADR-001 generation ownership, generation ordering, or resize
+  fences.
 
 **While delivery is `Suspended` (normative):**
 
-- PTY reads, VT progress, canonical `TerminalState` mutation, damage
-  consumption for the execution, and child-exit observation **continue**
-  without throttling (ADR-018 §5.1 item 3 / §5.2).
+- PTY reads, VT progress, canonical `TerminalState` mutation, damage consumption
+  for the execution, and child-exit observation continue without throttling
+  (ADR-018 §5.1 item 3 / §5.2).
 - Runtime MUST NOT encode or write `DisplayDelta` (or enqueue other replaceable
   presentation) for that attachment. If an execution update has at least one
   non-suspended attachment that needs delivery, encode remains execution-scoped
   once (§10.4) and fanout skips suspended attachments.
+- On suspend, Runtime clears only that attachment's not-yet-started
+  presentation batch and type-35 pending slot. A frame for it already partially
+  written is completed under §11's one-frame-per-connection rule or the
+  connection is closed. The partial frame retains the sequence with which it
+  started; it is never relabeled. The client clears only that attachment's
+  paired display/LineIds, snapshot assembly, and generation-order state. While
+  suspended it discards every presentation/type-35 frame for that attachment,
+  including frames completed after suspension began. This applies even if the
+  frame has the same canonical generation as a later resume snapshot.
 - `Lifecycle`, `Error`, `ResizeResult`, and other mandatory control output for
-  the connection/attachment **continue**. Suspend MUST NOT suppress `Lifecycle`
-  and MUST NOT be usable to hide primary-child exit from a client that still
-  holds the attachment.
-- Controller input, semantic key, resize and disposition authority are unchanged
-  by suspend; role checks still apply. Suspend is not a Controller-lease hold
-  without the existing lease rules.
-- The client is not required to retain disposable RenderState, a second grid, or
-  GPU/renderer resources for the suspended attachment (§5.1). Rebuilding
-  RenderState happens only from the resume/resync snapshot.
+  the connection/attachment continue. Suspend MUST NOT suppress `Lifecycle` or
+  hide primary-child exit from a client that still holds the attachment.
+- Controller input, semantic key, resize and disposition authority are
+  unchanged. Controller-lease rules remain authoritative. The client is not
+  required to retain disposable RenderState, a second grid, or GPU/renderer
+  resources for a suspended attachment (§5.1).
+- A valid resume discards only that attachment's unstarted display and type-35
+  work, advances its delivery sequence, and schedules the bounded current-state
+  snapshot. Any partially written old-sequence frame completes first under §11
+  or the connection closes. The snapshot and subsequent frames carry the new
+  sequence. Runtime pairs a replacement type-35 vector with that attachment's
+  matching snapshot only after the final frame of the final batch of the full
+  logical snapshot is completely written. Other attachments' queues, sequences, and generation
+  ordering remain unchanged.
 
-Attach always enters `Delivering` after the attach-transaction snapshot. A
-client that wants Hidden-tier behavior sends `SuspendDelivery` after attach (or
-after a prior resume) when its presentation tier becomes Hidden.
+Attach always enters `Delivering(sequence 0)` after the attach-transaction
+snapshot. A client that wants Hidden-tier behavior sends `SuspendDelivery` after
+attach (or after a prior resume) when its presentation tier becomes Hidden.
 
 ### 19.4 Threat note
 
@@ -1103,15 +1284,69 @@ Owning production Issues (W5 and dependents) must prove:
 
 - capability negotiation: peers lacking bit 11 never successfully suspend;
   types 40/41 fail closed with `UnknownMessage`;
-- exact 24-byte fixtures for types 40/41 plus malformed/truncated/oversized/
-  nonzero-reserved and fuzz coverage;
+- exact 24-byte fixtures for types 40/41; `ResumeDelivery` rejects zero,
+  repeated, decreasing and exhausted sequences without wrapping or mutating
+  state, and detaching then allocating a fresh `AttachmentId` resets sequence
+  state; malformed/truncated/oversized payloads and fuzz coverage are included;
+- type-40 fixture with all-zero reserved bytes is accepted; a nonzero reserved
+  byte is rejected with `MalformedPayload` and leaves delivery state and
+  sequence unchanged; suspending an attachment already at `u64::MAX` succeeds
+  idempotently and leaves that sequence unchanged; rejected type-41 requests
+  leave both the last accepted sequence and delivery substate unchanged;
 - suspended attachments receive zero `DisplayDelta` encode/write while an
   unrelated delivering attachment on the same or another execution continues;
-- resume uses the §12 snapshot path, preserves `AttachmentId`, and never
-  replays PTY bytes;
+- initial attach uses sequence 0; every covered presentation frame carries the
+  fixed 24-byte attachment/sequence envelope on bit-11 connections, including
+  snapshots, deltas and type 35, regardless of live attachment count;
+- resume uses the §12 snapshot path, preserves `AttachmentId`, advances only
+  that attachment's delivery sequence, and never replays PTY bytes; a delivering
+  `Resync` keeps its sequence, while suspended `Resync` returns `InvalidState`;
+- rapid suspend/resume cycles use strictly increasing sequences; partial old
+  frames retain their old sequence, unstarted superseded work is discarded, and
+  old frames are rejected even when canonical generations are equal;
+- resumed type-12 legacy snapshots are committed only after all §10.2 chunks
+  validate; resumed type-27 V2 snapshots are committed only after all chunks
+  across all batches validate per SPEC-011 §§11.2–11.9; include legal partial-row
+  spans and a logical V2 snapshot larger than 4 MiB, proving a batch boundary
+  alone does not commit it;
+- every snapshot chunk carries the same attachment, resume sequence and logical
+  update identity; partial chunks/batches, deltas and type-35 frames cannot seed
+  resumed state before the complete matching snapshot commits; after commit,
+  legacy deltas follow §10.3 and V2 deltas follow SPEC-011 with generation
+  continuity; matching type 35 also requires sequence, generation and row count;
+- a resume-paired type-35 frame is not released for writing until the final
+  frame of the final batch of the full logical snapshot is written, and is not
+  paired by the client until that snapshot is committed;
+- unexpected future sequences and failed resume requests leave the client
+  fenced; sequence exhaustion never wraps and requires a fresh attachment to
+  resume again;
+- suspend while a presentation frame is partially written permits that frame to
+  finish under §11, but the client clears the attachment's paired state and
+  discards every later presentation/type-35 frame for it while suspended; the
+  bounded resume snapshot is the first accepted presentation state;
 - `Lifecycle` is still delivered while suspended, including primary-child exit;
 - Controller-lease rules are unchanged by suspend/resume;
 - §5 maxima admit 1/10/50/100 retained attachments on one connection without
   requiring one connection per Hidden leaf;
 - client-side Hidden release of renderer/GPU resources does not require a
   second VT or canonical grid in the client.
+- Multi-attachment type-35 tests cover equal-generation interleaving across two
+  attachments; replacement of one pending vector without changing another's;
+  release only after that same attachment's matching display batch completes;
+  detach and reconnect clearing scoped to the affected attachment or old
+  connection; malformed frames clearing only a named live attachment; and
+  suspend/resume clearing followed by pairing only with that attachment's
+  resumed snapshot sequence and generation.
+- Fixed-envelope transition tests cover one-to-two, two-to-one, and
+  one-to-zero-to-one live attachments on a bit-11 negotiated connection while
+  display and type-35 work is queued and while a frame is partially written;
+  attachment-count changes never alter the envelope. They also prove that a
+  second attach is rejected on a legacy-envelope connection, a late frame for
+  a retired identity is decoded then discarded without mutating another
+  attachment, and a legacy one-attachment fixture remains unprefixed.
+- Bounded-queue tests prove at most one pending type-35 vector per live
+  attachment (206,000 payload bytes / 210,800 bytes including 24-byte
+  attachment/sequence prefixes and headers at 100 attachments), plus no more
+  than one partially written frame
+  per connection. Repeated replacement, equal-generation interleaving,
+  detach, and suspend/resume do not grow retained vectors or interleave bytes.
