@@ -16,7 +16,6 @@ use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 #[cfg(target_os = "macos")]
 use crate::local::{ClientError, LocalDisplayClient};
-use crate::navigation::{matches_destroyed_pane, matches_destroyed_tab, ResourceAddress};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
 use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
@@ -150,17 +149,9 @@ impl ApplicationRoot {
             .is_ok()
         {
             let _ = self.shell.take_released_execution();
-            // R6.7a: purge the transient leaf, reposition history, then commit
-            // the restored focused successor in this same rollback transition.
-            self.focus_history
-                .on_destroy(|address| matches_destroyed_pane(address, pane), None);
-            let focus = self.shell.focus_checkpoint();
-            self.focus_history
-                .record_user_commit(ResourceAddress::Pane {
-                    workspace: focus.active_workspace,
-                    tab: focus.active_tab,
-                    pane: focus.focused_pane,
-                });
+            // R6.7a: purge the transient leaf and commit the restored focused
+            // successor in this same rollback transition.
+            self.record_destroyed_pane_focus(pane, true);
         }
     }
 
@@ -194,18 +185,7 @@ impl ApplicationRoot {
         );
         // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
         // product close path — surfaces do not scan history themselves.
-        let focus_after = self.shell.focus_checkpoint();
-        let successor = if was_active {
-            Some(ResourceAddress::Pane {
-                workspace: focus_after.active_workspace,
-                tab: focus_after.active_tab,
-                pane: focus_after.focused_pane,
-            })
-        } else {
-            None
-        };
-        self.focus_history
-            .on_destroy(|addr| matches_destroyed_tab(addr, id), successor);
+        self.record_destroyed_tab_focus(id, was_active);
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -250,18 +230,7 @@ impl ApplicationRoot {
             self.provisioning.mark_intent_dead(id);
         }
         // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
-        let focus_after = self.shell.focus_checkpoint();
-        let successor = if was_focused {
-            Some(ResourceAddress::Pane {
-                workspace: focus_after.active_workspace,
-                tab: focus_after.active_tab,
-                pane: focus_after.focused_pane,
-            })
-        } else {
-            None
-        };
-        self.focus_history
-            .on_destroy(|addr| matches_destroyed_pane(addr, id), successor);
+        self.record_destroyed_pane_focus(id, was_focused);
         if was_focused {
             // Closing an unbound in-flight leaf changes focus too. Restore any
             // retained authority for the shell-selected successor immediately.
