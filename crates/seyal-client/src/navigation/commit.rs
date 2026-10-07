@@ -159,6 +159,7 @@ pub fn reveal_attention_target(
     shell: &mut ShellState,
     inventory: &impl ExecutionInventory,
     principal: NavigationPrincipal<'_>,
+    history: &mut FocusHistory,
 ) -> AttentionReveal {
     let Ok(address) = super::unpack_resource_address(packed) else {
         return AttentionReveal::RetainedDetails;
@@ -168,7 +169,7 @@ pub fn reveal_attention_target(
         shell,
         inventory,
         principal,
-        NavigateHistory::ApplyOnly,
+        NavigateHistory::Record(history),
     ) {
         Ok(target) => AttentionReveal::Focused(target),
         Err(_) => AttentionReveal::RetainedDetails,

@@ -83,6 +83,7 @@ impl ApplicationRoot {
                 &mut self.shell,
                 &crate::navigation::EmptyExecutionInventory,
                 crate::navigation::NavigationPrincipal::local_user(),
+                &mut self.focus_history,
             );
             let _ = self
                 .chrome
@@ -144,7 +145,7 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Record the focused Pane after a user focus transition (ADR-019 §6 / R6.3).
+    /// Record the focused Pane after a user focus transition (SPEC-022 R6.3).
     pub(super) fn record_focused_pane_commit(&mut self) {
         let focus = self.shell.focus_checkpoint();
         self.focus_history
@@ -155,64 +156,8 @@ impl ApplicationRoot {
             });
     }
 
-    /// Active Tab's Split dividers (#928), pre-order.
-    pub fn pane_dividers(&self) -> Vec<pane_layout::PaneDivider> {
-        pane_layout::dividers(&self.shell.snapshot().tree)
-    }
-
-    /// Resize the Split whose divider `pane` leads (#928). The host sends the
-    /// raw pointer position; Rust derives and clamps the ratio from the
-    /// divider's own area, so no host inverts the layout.
-    pub(super) fn move_split_divider(
-        &mut self,
-        pane: PaneId,
-        position: SplitPosition,
-    ) -> Result<(), AppError> {
-        let shell = self.shell.snapshot();
-        let Some(divider) = pane_layout::dividers(&shell.tree)
-            .into_iter()
-            .find(|divider| divider.leading == pane)
-        else {
-            return Err(if shell.panes.iter().any(|row| row.id == pane) {
-                AppError::NoSplitDivider
-            } else {
-                AppError::UnknownPane
-            });
-        };
-        let ratio = divider.ratio_at(position).ok_or(AppError::NoSplitDivider)?;
-        self.shell
-            .apply(ShellAction::SetSplitRatio { pane, ratio })
-            .map_err(|error| match error {
-                ShellError::NoSplitDivider => AppError::NoSplitDivider,
-                _ => AppError::UnknownPane,
-            })
-    }
-
-    pub(super) fn replace_chrome(
-        &mut self,
-        fence: AppFence,
-        agents: Vec<crate::chrome::AgentRecord>,
-        attention: Vec<crate::chrome::AttentionItem>,
-    ) -> Result<(), AppError> {
-        self.require_fence(fence)?;
-        let shell = self.shell.snapshot();
-        self.chrome
-            .apply(
-                ChromeAction::ReplaceAgents {
-                    workspace: shell.active_workspace,
-                    agents,
-                },
-                &shell,
-            )
-            .map_err(chrome_error)?;
-        self.chrome
-            .apply(ChromeAction::ReplaceAttention { items: attention }, &shell)
-            .map(|_| ())
-            .map_err(chrome_error)
-    }
-
-    /// Switch active authority/presentation to the focused pane.
-    /// Unbound focus fails closed so input cannot reach another pane's execution.
+    /// Switch active authority/presentation to the focused pane. An unbound
+    /// target clears the active input route without deleting sibling bindings.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
         let Some(authority) = self.pane_authorities.get(&focused).copied() else {
@@ -269,8 +214,6 @@ impl ApplicationRoot {
         }
     }
 
-    /// Fail-closed input is process-wide TLS. Only the root that owns the
-    /// current display handle may clear it.
     #[cfg(target_os = "macos")]
     fn clear_focused_display_handle_if_owned(&self) {
         let focused = crate::ffi::focused_registry_handle();
@@ -285,6 +228,62 @@ impl ApplicationRoot {
         if owned {
             crate::ffi::set_focused_display_handle(0);
         }
+    }
+
+    /// Active Tab's Split dividers (#928), pre-order.
+    pub fn pane_dividers(&self) -> Vec<pane_layout::PaneDivider> {
+        pane_layout::dividers(&self.shell.snapshot().tree)
+    }
+
+    /// Resize the Split whose divider `pane` leads (#928). The host sends the
+    /// raw pointer position; Rust derives and clamps the ratio from the
+    /// divider's own area, so no host inverts the layout.
+    pub(super) fn move_split_divider(
+        &mut self,
+        pane: PaneId,
+        position: SplitPosition,
+    ) -> Result<(), AppError> {
+        let shell = self.shell.snapshot();
+        let Some(divider) = pane_layout::dividers(&shell.tree)
+            .into_iter()
+            .find(|divider| divider.leading == pane)
+        else {
+            return Err(if shell.panes.iter().any(|row| row.id == pane) {
+                AppError::NoSplitDivider
+            } else {
+                AppError::UnknownPane
+            });
+        };
+        let ratio = divider.ratio_at(position).ok_or(AppError::NoSplitDivider)?;
+        self.shell
+            .apply(ShellAction::SetSplitRatio { pane, ratio })
+            .map_err(|error| match error {
+                ShellError::NoSplitDivider => AppError::NoSplitDivider,
+                _ => AppError::UnknownPane,
+            })
+    }
+
+    pub(super) fn replace_chrome(
+        &mut self,
+        fence: AppFence,
+        agents: Vec<crate::chrome::AgentRecord>,
+        attention: Vec<crate::chrome::AttentionItem>,
+    ) -> Result<(), AppError> {
+        self.require_fence(fence)?;
+        let shell = self.shell.snapshot();
+        self.chrome
+            .apply(
+                ChromeAction::ReplaceAgents {
+                    workspace: shell.active_workspace,
+                    agents,
+                },
+                &shell,
+            )
+            .map_err(chrome_error)?;
+        self.chrome
+            .apply(ChromeAction::ReplaceAttention { items: attention }, &shell)
+            .map(|_| ())
+            .map_err(chrome_error)
     }
 }
 

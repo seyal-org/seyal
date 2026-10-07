@@ -317,14 +317,24 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
         // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
         // ActionUnavailable (50).
-        63 => Ok(AppAction::HistoryBack {
-            fence,
-            observed: decode_focus_seq(action.payload, action.payload_len)?,
-        }),
-        64 => Ok(AppAction::HistoryForward {
-            fence,
-            observed: decode_focus_seq(action.payload, action.payload_len)?,
-        }),
+        63 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryBack {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
+        64 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryForward {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
         _ => Err(-6),
     }
 }

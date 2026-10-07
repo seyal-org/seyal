@@ -101,9 +101,6 @@ impl ApplicationRoot {
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
-        // Split focuses a new leaf; record it as a user-initiated commit (R6.3).
-        // Keep authority fail-closed until create→attach→bind completes.
-        self.record_focused_pane_commit();
         // SPEC-004 §18.2 / ADR-017 §5.2: M003 create admits only workspace_id 0.
         let workspace_id = 0u128;
         self.seed_provisioning_request_floor_from_wire();
@@ -111,11 +108,7 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::ClosePane {
-                    id: pane,
-                    containment_generation: self.shell.containment_generation(),
-                });
-                let _ = self.shell.take_released_execution();
+                self.rollback_failed_split(pane);
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
             }
@@ -127,11 +120,7 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::ClosePane {
-                id: pane,
-                containment_generation: self.shell.containment_generation(),
-            });
-            let _ = self.shell.take_released_execution();
+            self.rollback_failed_split(pane);
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
                     intent.owner,
@@ -144,10 +133,35 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        // Do not activate the unbound new leaf here: until attach+bind completes,
-        // fence/live surface stay on any already-bound sibling (#923 one-live
-        // Metal). Live attach / complete_create_attach_and_bind activate later.
+        // The focused leaf is unbound until attach+bind completes. Clear the
+        // active input authority while retaining every sibling's pane binding.
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         Ok(())
+    }
+
+    fn rollback_failed_split(&mut self, pane: PaneId) {
+        if self
+            .shell
+            .apply(ShellAction::ClosePane {
+                id: pane,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .is_ok()
+        {
+            let _ = self.shell.take_released_execution();
+            // R6.7a: purge the transient leaf, reposition history, then commit
+            // the restored focused successor in this same rollback transition.
+            self.focus_history
+                .on_destroy(|address| matches_destroyed_pane(address, pane), None);
+            let focus = self.shell.focus_checkpoint();
+            self.focus_history
+                .record_user_commit(ResourceAddress::Pane {
+                    workspace: focus.active_workspace,
+                    tab: focus.active_tab,
+                    pane: focus.focused_pane,
+                });
+        }
     }
 
     /// Remove a Tab's chrome. Bound panes detach only; executions stay live
@@ -248,6 +262,11 @@ impl ApplicationRoot {
         };
         self.focus_history
             .on_destroy(|addr| matches_destroyed_pane(addr, id), successor);
+        if was_focused {
+            // Closing an unbound in-flight leaf changes focus too. Restore any
+            // retained authority for the shell-selected successor immediately.
+            self.activate_focused_pane_authority();
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

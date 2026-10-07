@@ -191,6 +191,113 @@ fn close_focused_pane_purges_then_commits_successor() {
     assert_eq!(root.snapshot().shell.focused_pane, p1);
 }
 
+#[test]
+fn failed_split_rolls_back_its_history_entry_with_destroyed_pane() {
+    let (root_with_history, _workspace, _tab, _p1, _p2) = two_pane_root();
+    // Keep the same shell layout while exercising rollback with an empty
+    // history, so R6.7a's restored-successor commit is observable.
+    let mut root = ApplicationRoot::with_shell(root_with_history.shell.clone());
+    root.provisioning_mut().seed_next_request_id(u64::MAX);
+
+    assert!(root
+        .apply(AppAction::SplitFocused {
+            axis: SplitAxis::Right,
+        })
+        .is_err());
+
+    let surviving_panes = root
+        .snapshot()
+        .shell
+        .panes
+        .into_iter()
+        .map(|pane| pane.id)
+        .collect::<std::collections::HashSet<_>>();
+    assert!(root
+        .focus_history
+        .entries()
+        .iter()
+        .all(|entry| match entry.target {
+            ResourceAddress::Pane { pane, .. } => surviving_panes.contains(&pane),
+            _ => false,
+        }));
+    // R6.7a: the restored focus is committed after purging the transient leaf.
+    let focus = root.shell.focus_checkpoint();
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace: focus.active_workspace,
+            tab: focus.active_tab,
+            pane: focus.focused_pane,
+        })
+    );
+}
+
+#[test]
+fn successful_split_records_new_focused_leaf() {
+    let (mut root, workspace, tab, _p1, _p2) = two_pane_root();
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .unwrap();
+    let pane = root.snapshot().shell.focused_pane;
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane
+        })
+    );
+}
+
+#[test]
+fn open_attention_reveal_records_exact_target_in_history() {
+    let (mut root, workspace, tab, p1, p2) = two_pane_root();
+    let id = AttentionId::new("history-reveal");
+    let mut item = crate::chrome::AttentionItem::projection(
+        id.clone(),
+        "Attention",
+        "target pane",
+        Some(workspace),
+        Some(tab),
+        None,
+    );
+    item.resource_address = Some(crate::navigation::pack_resource_address(
+        ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane: p2,
+        },
+    ));
+    root.apply(AppAction::ReplaceChrome {
+        fence: root.fence(),
+        agents: vec![],
+        attention: vec![item],
+    })
+    .unwrap();
+    root.apply(AppAction::OpenAttention {
+        fence: root.fence(),
+        id,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane: p2,
+        })
+    );
+    let seq = root.snapshot().focus_history_seq.unwrap();
+    root.apply(AppAction::HistoryBack {
+        fence: root.fence(),
+        observed: seq,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+}
+
 fn evidence_exec(tag: u8) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
@@ -309,7 +416,7 @@ fn history_back_and_forward_move_input_authority_with_tab_focus() {
 }
 
 #[test]
-fn history_back_onto_unbound_pane_clears_authority() {
+fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
     let w1 = WorkspaceId::m001_default();
     let t1 = TabId::from_bytes([0x01; 16]);
     let t2 = TabId::from_bytes([0x11; 16]);
@@ -361,22 +468,68 @@ fn history_back_onto_unbound_pane_clears_authority() {
         evidence: evidence_exec(0x21),
     })
     .unwrap();
-    root.apply(AppAction::SelectTab { id: t2 }).unwrap();
+    let bound_execution = ExecutionId::from_bytes([0x21; 16]);
+    let bound_authority = root.pane_authorities.get(&p1).copied();
+    assert!(bound_authority.is_some());
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w1,
+            tab: t1,
+            pane: p1,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Pane {
+            workspace: w1,
+            tab: t2,
+            pane: p2,
+        },
+    })
+    .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(root.snapshot().execution.is_none());
-    root.apply(AppAction::SelectTab { id: t1 }).unwrap();
+    assert!(root.pane_regions().iter().all(|region| !region.live));
     assert_eq!(
-        root.snapshot().execution,
-        Some(ExecutionId::from_bytes([0x21; 16]))
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must fail closed".into(),
+        }),
+        Err(AppError::UnboundUnauthorized)
     );
+    assert_eq!(root.pane_authorities.get(&p1).copied(), bound_authority);
+    assert!(root.pane_authorities.contains_key(&p1));
+
+    // Back/Forward traverse from the unbound Pane to its bound sibling and
+    // back, preserving the sibling attachment throughout.
     let seq = root.snapshot().focus_history_seq.expect("cursor seq");
     root.apply(AppAction::HistoryBack {
         fence: root.fence(),
         observed: seq,
     })
     .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().execution, Some(bound_execution));
+    assert_eq!(root.pane_authorities.get(&p1).copied(), bound_authority);
+
+    let seq = root.snapshot().focus_history_seq.expect("cursor seq");
+    root.apply(AppAction::HistoryForward {
+        fence: root.fence(),
+        observed: seq,
+    })
+    .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(root.snapshot().execution.is_none());
+    assert_eq!(root.pane_authorities.get(&p1).copied(), bound_authority);
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must fail closed".into(),
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
 }
 
 #[test]
@@ -402,7 +555,89 @@ fn focus_pane_onto_unbound_leaf_clears_authority() {
     let (mut root, _w1, _t1, p1, p2) = two_pane_root();
     assert_eq!(root.snapshot().shell.focused_pane, p1);
     assert!(root.snapshot().execution.is_some());
+    let sibling_authority = root.pane_authorities.get(&p1).copied();
     root.apply(AppAction::FocusPane { id: p2 }).unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(root.snapshot().execution.is_none());
+    assert_eq!(root.pane_authorities.get(&p1).copied(), sibling_authority);
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must fail closed".into(),
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
+    root.apply(AppAction::FocusPane { id: p1 }).unwrap();
+    assert!(root.snapshot().execution.is_some());
+}
+
+#[test]
+fn split_focus_on_unbound_leaf_fails_closed_and_retains_sibling_binding() {
+    let (mut root, _workspace, _tab, p1, _p2) = two_pane_root();
+    let sibling_authority = root.pane_authorities.get(&p1).copied();
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .unwrap();
+    let focused = root.snapshot().shell.focused_pane;
+    assert_ne!(focused, p1);
+    assert_eq!(root.fence().pane, focused);
+    assert!(root.snapshot().execution.is_none());
+    assert!(root.pane_regions().iter().all(|region| !region.live));
+    assert_eq!(root.pane_authorities.get(&p1).copied(), sibling_authority);
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must fail closed".into(),
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
+    root.apply(AppAction::FocusPane { id: p1 }).unwrap();
+    assert!(root.snapshot().execution.is_some());
+}
+
+#[test]
+fn closing_unbound_focused_pane_restores_retained_sibling_authority() {
+    let (mut root, _workspace, _tab, p1, _p2) = two_pane_root();
+    let sibling_authority = root.pane_authorities.get(&p1).copied();
+    let sibling_execution = root.snapshot().execution.expect("bound sibling");
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .unwrap();
+    let unbound = root.snapshot().shell.focused_pane;
+    assert!(root.snapshot().execution.is_none());
+
+    root.apply(AppAction::ClosePane { id: unbound }).unwrap();
+
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().execution, Some(sibling_execution));
+    assert_eq!(root.authority, sibling_authority);
+    assert_eq!(root.pane_authorities.get(&p1).copied(), sibling_authority);
+}
+
+#[test]
+fn selecting_bound_tab_restores_its_portable_input_authority() {
+    let (mut root, _t1, t2, _p1, _p2, _exec1, exec2) = two_tab_bound_root();
+    root.apply(AppAction::SelectTab { id: t2 }).unwrap();
+    assert_eq!(root.snapshot().execution, Some(exec2));
+}
+
+#[test]
+fn history_back_ensures_composer_for_reactivated_bound_pane() {
+    let (mut root, _t1, _t2, _p1, p2, _exec1, _exec2) = two_tab_bound_root();
+    // Model a pane whose product composer projection has not yet been
+    // materialized, while its binding already matches the history target.
+    root.composer = crate::composer::ComposerState::new();
+    root.authority = root.pane_authorities.get(&p2).copied();
+    let observed = root.snapshot().focus_history_seq.expect("cursor seq");
+
+    root.apply(AppAction::HistoryBack {
+        fence: root.fence(),
+        observed,
+    })
+    .unwrap();
+
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert!(root.snapshot().composer.is_some());
 }

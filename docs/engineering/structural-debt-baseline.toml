@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 988
-issue = 1117
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction. #1117 keeps Back/Forward apply in focus_history_apply.rs, adds R6.7 focus-history purge/successor routing and fail-closed unbound focus; #1217 registers pane provisioning tests without expanding dispatch."
+acknowledged_loc = 991
+issue = 1217
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane_provisioning_tests beside the existing tab provisioning suite without expanding apply dispatch."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 832
-issue = 1117
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1117 hooks authoritative Pane/Tab destruction for R6.7 history purge→reposition→successor; #1175 adds owning-Controller terminate routing; #1217 carries containment fencing through split rollback without adding a provisioning authority."
+acknowledged_loc = 797
+issue = 1217
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -77,9 +77,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1022
-issue = 1117
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1117 threads NavigateHistory::ApplyOnly through N2 regressions. N3 history cases stay in sibling history test modules, with ADR-018 fencing on split/close actions."
+ceiling_loc = 1027
+issue = 1217
+responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1217 updates production SplitFocused enablement assertions here. C3 acceptance cases stay in pane_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -242,9 +242,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1170
-issue = 1117
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1117 threads NavigateHistory::ApplyOnly through N2 regressions. N3 history cases stay in sibling history test modules, with ADR-018 fencing on split/close actions."
+ceiling_loc = 1151
+issue = 1122
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites without inventing a second navigation test authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -254,9 +254,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 836
-issue = 1217
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1122 adds Tab-scoped zoom and ADR-018 containment fences, while #1217 enables production SplitFocused alongside CreateTab without splitting tree/workspace ownership."
+acknowledged_loc = 869
+issue = 1131
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1131 adds identity-preserving SwapPanes/MovePaneBeside with ADR-018 containment fencing beside master’s Tab zoom, focus succession, and production SplitFocused, without splitting tree/workspace ownership. Move/swap algorithms live in pane_ops.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

@@ -35,6 +35,10 @@ impl ApplicationRoot {
 
     fn after_history_focus_applied(&mut self) {
         self.activate_focused_pane_authority();
+        // Authority activation can be a no-op when traversal lands on the
+        // already-active binding; ensure the destination Pane's composer and
+        // presentation projection in every traversal case.
+        self.sync_composer_presentation();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

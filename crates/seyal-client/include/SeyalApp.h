@@ -636,6 +636,8 @@ int32_t seyal_app_route_keystroke(
 
 int32_t seyal_app_apply(uint64_t handle, const SeyalAppAction *action);
 SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
+/* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
+uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
