@@ -254,9 +254,9 @@ reason = "Command palette query, frozen rows, and run dispatch remain one reduce
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 925
+acknowledged_loc = 930
 issue = 1092
-reason = "ShellState composition and snapshots stay in the reducer façade; #1092 moves typed host action values into action_types.rs and fences CloseTab with the ADR-018 containment generation, keeping the façade below the hard ceiling."
+reason = "ShellState composition and snapshots stay in the reducer façade; #1092 moves typed host action values into action_types.rs, carries the ADR-018 containment fence, and records close-focus successors so the new recency-derived active Workspace remains correct."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
