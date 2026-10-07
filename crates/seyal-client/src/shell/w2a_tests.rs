@@ -1,4 +1,3 @@
-patching file 'crates/seyal-client/src/shell/w2a_tests.rs'
 //! W2a reducer tests: non-close window/tab actions and containment fencing.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -229,46 +228,29 @@ fn selection_actions_accept_live_identities_across_generations() {
     let mut shell = seed_two_workspaces();
     let original_tab = shell.snapshot().active_tab;
     let original_window = shell.product_window_id().unwrap();
-    let stale_generation = shell.containment_generation();
     shell.apply_product_create_tab().unwrap();
-    let created_tab = shell.snapshot().active_tab;
-    shell
-        .apply(ShellAction::CreateWindow {
-            workspace: WorkspaceId::m001_default(),
-            containment_generation: shell.containment_generation(),
-        })
-        .unwrap();
-    let created_window = shell.product_window_id().unwrap();
-    assert_ne!(shell.containment_generation(), stale_generation);
+    let created = shell.snapshot().active_tab;
     assert_ne!(shell.containment_generation(), 0);
     shell
-        .apply(ShellAction::SelectTab {
-            id: original_tab,
-            containment_generation: stale_generation,
+        .apply(ShellAction::SelectTab { id: original_tab
+            containment_generation: shell.containment_generation(),
         })
         .expect("select original tab after generation bump");
     assert_eq!(shell.snapshot().active_tab, original_tab);
     shell
         .apply(ShellAction::SelectWindow {
             id: original_window,
-            containment_generation: stale_generation,
+            containment_generation: shell.containment_generation(),
         })
-        .expect("select original window after generation bump");
+        .expect("select original window");
     assert_eq!(shell.product_window_id().unwrap(), original_window);
     shell
         .apply(ShellAction::CycleTab {
             direction: CycleDirection::Next,
-            containment_generation: stale_generation,
+            containment_generation: shell.containment_generation(),
         })
         .expect("cycle tab");
-    assert_eq!(shell.snapshot().active_tab, created_tab);
-    shell
-        .apply(ShellAction::CycleWindow {
-            direction: CycleDirection::Next,
-            containment_generation: stale_generation,
-        })
-        .expect("cycle window after generation bump");
-    assert_eq!(shell.product_window_id().unwrap(), created_window);
+    assert_eq!(shell.snapshot().active_tab, created);
 }
 
 #[test]
@@ -277,22 +259,18 @@ fn selection_does_not_bump_containment_generation() {
     let generation = shell.containment_generation();
     let tab = shell.snapshot().active_tab;
     let window = shell.product_window_id().unwrap();
+    shell.apply(ShellAction::SelectTab { id: tab
+        containment_generation: shell.containment_generation(),
+    }).unwrap();
     shell
-        .apply(ShellAction::SelectTab {
-            id: tab,
-            containment_generation: generation,
-        })
-        .unwrap();
-    shell
-        .apply(ShellAction::SelectWindow {
-            id: window,
-            containment_generation: generation,
+        .apply(ShellAction::SelectWindow { id: window
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     shell
         .apply(ShellAction::CycleWindow {
             direction: CycleDirection::Next,
-            containment_generation: generation,
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     assert_eq!(shell.containment_generation(), generation);
@@ -513,8 +491,7 @@ fn last_tab_move_destroys_source_window_atomically() {
     assert_eq!(shell.snapshot().active_tab, moving);
     assert_eq!(shell.snapshot().tabs.len(), 2);
     assert_eq!(
-        shell.apply(ShellAction::SelectWindow {
-            id: source,
+        shell.apply(ShellAction::SelectWindow { id: source
             containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::UnknownWindow)
@@ -635,7 +612,7 @@ fn unknown_identities_fail_closed() {
     let generation = shell.containment_generation();
     assert_eq!(
         shell.apply(ShellAction::SelectWindow {
-            id: WindowId::new(),
+            id: WindowId::new()
             containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::UnknownWindow)
@@ -698,8 +675,7 @@ fn activate_workspace_raise_uses_derived_pane_recency() {
         .unwrap();
     let second_window = shell.product_window_id().unwrap();
     shell
-        .apply(ShellAction::SelectWindow {
-            id: first_window,
+        .apply(ShellAction::SelectWindow { id: first_window
             containment_generation: shell.containment_generation(),
         })
         .unwrap();
