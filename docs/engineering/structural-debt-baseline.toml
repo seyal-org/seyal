@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 797
-issue = 1217
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
+acknowledged_loc = 806
+issue = 1092
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, while #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -248,15 +248,15 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 854
-issue = 1105
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows, #1090 threads window identity, and #867 adds bound-Pane explicit Raw / Return to Flow beside those commands; splitting would separate the row model from the command it runs."
+acknowledged_loc = 857
+issue = 1092
+reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract and selection call site."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 1000
+acknowledged_loc = 925
 issue = 1092
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1092 adds Window-aware actions and containment fencing, while #1131 adds identity-preserving pane moves alongside master’s Tab zoom, focus succession, and production SplitFocused. Pane move algorithms live in pane_ops.rs; no further split is justified here."
+reason = "ShellState composition and snapshots stay in the reducer façade; #1092 moves typed host action values into action_types.rs and fences CloseTab with the ADR-018 containment generation, keeping the façade below the hard ceiling."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
