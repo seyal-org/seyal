@@ -146,7 +146,10 @@ fn structural_actions_reject_stale_generation_and_keep_containment() {
         assert_eq!(err, ShellError::StaleContainment, "{action:?}");
         let mut expected = shell.clone();
         expected.last_error = Some(ShellError::StaleContainment);
-        assert_eq!(probe, expected, "rejection changed reducer state: {action:?}");
+        assert_eq!(
+            probe, expected,
+            "rejection changed reducer state: {action:?}"
+        );
     }
 }
 
