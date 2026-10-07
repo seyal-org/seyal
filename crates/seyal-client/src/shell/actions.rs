@@ -28,7 +28,6 @@ impl ShellState {
             return Err(ShellError::UnknownWindow);
         }
         workspace.active_window = Some(window);
-        self.active_workspace = workspace_id;
         self.last_active_workspace = workspace_id;
         self.record_window_focus(window)?;
         Ok(())
@@ -144,7 +143,7 @@ impl ShellState {
     }
 
     pub(super) fn cycle_window(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
+        let workspace = self.workspace(self.active_workspace_id())?;
         if workspace.windows.is_empty() {
             return Err(ShellError::UnknownWindow);
         }
@@ -162,7 +161,7 @@ impl ShellState {
     }
 
     pub(super) fn cycle_tab(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
+        let workspace = self.workspace(self.active_workspace_id())?;
         let window = workspace.active_window().ok_or(ShellError::UnknownWindow)?;
         if window.tabs.is_empty() {
             return Err(ShellError::UnknownTab);

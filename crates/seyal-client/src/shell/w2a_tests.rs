@@ -266,6 +266,80 @@ fn selection_does_not_bump_containment_generation() {
 }
 
 #[test]
+fn active_workspace_projects_from_the_most_recent_live_window() {
+    let mut shell = seed_two_workspaces();
+    let other_pane = shell
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == other_workspace())
+        .and_then(|workspace| workspace.tabs().next())
+        .map(|tab| tab.focused)
+        .expect("other workspace pane");
+
+    // Focus history is the accepted application-wide source for derived
+    // Window recency. The product Workspace must follow its newest live Pane.
+    shell.focus_history.record(other_pane);
+    assert_eq!(shell.snapshot().active_workspace, other_workspace());
+    assert_eq!(
+        shell.snapshot().active_tab,
+        shell.workspaces[1].active_tab_id().unwrap()
+    );
+}
+
+#[test]
+fn zero_window_active_workspace_uses_last_active_workspace_for_reentry() {
+    let mut shell = seed_two_workspaces();
+    shell.apply_activate_workspace(other_workspace()).unwrap();
+    for workspace in &mut shell.workspaces {
+        workspace.windows.clear();
+        workspace.active_window = None;
+    }
+    shell.focus_history.purge_if(|_| true);
+
+    assert_eq!(shell.active_workspace_id(), other_workspace());
+    assert_eq!(shell.last_active_workspace(), other_workspace());
+    assert_eq!(shell.product_window_id(), Err(ShellError::UnknownWindow));
+    shell
+        .apply_activate_workspace(other_workspace())
+        .expect("re-entry creates in the last active workspace");
+    assert_eq!(shell.active_workspace_id(), other_workspace());
+    assert!(shell.product_window_id().is_ok());
+}
+
+#[test]
+fn initial_zero_window_reentry_workspace_is_first_workspace() {
+    let first = WorkspaceId::m001_default();
+    let second = other_workspace();
+    let shell = ShellState::from_workspaces(
+        vec![
+            ShellWorkspaceSeed {
+                id: first,
+                name: "First".to_owned(),
+                detail: None,
+                attention: false,
+                active_window: WindowId::new(),
+                windows: Vec::new(),
+            },
+            ShellWorkspaceSeed {
+                id: second,
+                name: "Second".to_owned(),
+                detail: None,
+                attention: false,
+                active_window: WindowId::new(),
+                windows: Vec::new(),
+            },
+        ],
+        second,
+        false,
+        true,
+    )
+    .expect("zero-window shell");
+
+    assert_eq!(shell.active_workspace_id(), first);
+    assert_eq!(shell.last_active_workspace(), first);
+}
+
+#[test]
 fn create_window_and_cycle_are_workspace_scoped() {
     let mut shell = seed_two_workspaces();
     let first_window = shell.product_window_id().unwrap();
@@ -646,18 +720,136 @@ fn reorder_and_move_never_yield_zero_tab_window() {
 }
 
 #[test]
+fn generated_reorder_and_window_move_sequences_preserve_structure_and_bindings() {
+    let ids: Vec<TabId> = (0..4).map(|_| TabId::new()).collect();
+    let executions: Vec<ExecutionId> = (0..4).map(|_| ExecutionId::new()).collect();
+    let windows = [WindowId::new(), WindowId::new()];
+    let workspace = WorkspaceId::m001_default();
+    let make_shell = || {
+        ShellState::from_workspaces(
+            vec![ShellWorkspaceSeed {
+                id: workspace,
+                name: "Local".to_owned(),
+                detail: None,
+                attention: false,
+                active_window: windows[0],
+                windows: vec![
+                    ShellWindowSeed {
+                        id: windows[0],
+                        active_tab: ids[0],
+                        tabs: vec![
+                            tab_seed(ids[0], "A"),
+                            tab_seed(ids[1], "B"),
+                            tab_seed(ids[2], "C"),
+                        ],
+                    },
+                    ShellWindowSeed {
+                        id: windows[1],
+                        active_tab: ids[3],
+                        tabs: vec![tab_seed(ids[3], "D")],
+                    },
+                ],
+            }],
+            workspace,
+            false,
+            true,
+        )
+        .expect("fixture")
+    };
+    let mut initial = make_shell();
+    let panes: Vec<_> = initial
+        .snapshot()
+        .panes
+        .iter()
+        .map(|pane| pane.id)
+        .collect();
+    for (pane, execution) in panes.iter().zip(&executions) {
+        initial
+            .apply(ShellAction::BindExecution {
+                pane: *pane,
+                execution: *execution,
+            })
+            .unwrap();
+    }
+    let assert_invariants = |shell: &ShellState| {
+        assert!(shell.every_window_has_a_tab());
+        let all_panes: Vec<_> = shell
+            .workspaces
+            .iter()
+            .flat_map(|workspace| workspace.tabs())
+            .flat_map(|tab| tab.root.pane_ids())
+            .collect();
+        let unique_panes: std::collections::HashSet<_> = all_panes.iter().copied().collect();
+        assert_eq!(
+            all_panes.len(),
+            unique_panes.len(),
+            "Pane identities stay unique"
+        );
+        for execution in &executions {
+            let bound = shell.panes_bound_to(*execution);
+            assert!(
+                bound.len() <= 1,
+                "Execution binding stays unique: {execution:?}"
+            );
+            if !bound.is_empty() {
+                assert!(unique_panes.contains(&bound[0].2));
+            }
+        }
+    };
+    // Enumerate every ordered pair of distinct Tabs and both structural
+    // operations, applying each operation to a fresh identical state.
+    for tab in &ids[..3] {
+        for before in &ids[..3] {
+            if tab != before {
+                let mut shell = initial.clone();
+                let generation = shell.containment_generation();
+                shell
+                    .apply(ShellAction::MoveTabBefore {
+                        tab: *tab,
+                        before: Some(*before),
+                        window: windows[0],
+                        containment_generation: generation,
+                    })
+                    .unwrap();
+                assert_invariants(&shell);
+            }
+        }
+    }
+    for tab in &ids {
+        for window in windows {
+            let mut shell = initial.clone();
+            let generation = shell.containment_generation();
+            let result = shell.apply(ShellAction::MoveTabToWindow {
+                tab: *tab,
+                window,
+                containment_generation: generation,
+            });
+            if result.is_err() {
+                let mut expected = initial.clone();
+                expected.last_error = shell.last_error();
+                assert_eq!(
+                    shell, expected,
+                    "rejection preserves full state for tab {tab:?}, window {window:?}"
+                );
+            }
+            assert_invariants(&shell);
+        }
+    }
+}
+
+#[test]
 fn rejection_is_atomic_including_unknown_tab_move() {
     let mut shell = seed_two_workspaces();
-    let before_generation = shell.containment_generation();
-    let before_tab = shell.snapshot().active_tab;
-    let before_tabs = shell.snapshot().tabs.len();
+    let mut expected = shell.clone();
+    expected.last_error = Some(ShellError::UnknownTab);
     let _ = shell.apply(ShellAction::MoveTabBefore {
         tab: TabId::new(),
         before: None,
         window: shell.product_window_id().unwrap(),
-        containment_generation: before_generation,
+        containment_generation: shell.containment_generation(),
     });
-    assert_eq!(shell.containment_generation(), before_generation);
-    assert_eq!(shell.snapshot().active_tab, before_tab);
-    assert_eq!(shell.snapshot().tabs.len(), before_tabs);
+    assert_eq!(
+        shell, expected,
+        "rejection preserves the complete product state"
+    );
 }
