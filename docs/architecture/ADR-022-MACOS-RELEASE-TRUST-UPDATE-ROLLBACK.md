@@ -143,7 +143,7 @@ Linux/Windows; telemetry; bit-for-bit reproducible signed artifacts.
    installed an EdDSA-valid archive with a different code-signing identity.
    This demonstrates acceptance of that ad-hoc archive, not acceptance of an
    archive signed by a different Apple Team; G5 did not test another Team ID.
-   Both roots remain **tier-0 secrets**. **Seyal's required host
+   The private signing keys remain **tier-0 secrets**; the Sparkle verification key is public and committed as `SUPublicEDKey`. **Seyal's required host
    check** at `showReady` replies Sparkle `Skip` when Team ID / designated
    requirement does not match, which held install through quit in G3/G5.
    That is product-level 2-of-2 only while the host check runs; a missed
