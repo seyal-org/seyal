@@ -703,15 +703,27 @@ impl ShellState {
     }
 
     fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace_id())?;
-        // Capture pane ids before removal for detach-only dispose (ADR-017 §6.1).
-        let removed: Vec<PaneId> = workspace
-            .tab(id)
-            .map(|tab| tab.panes.keys().copied().collect())
-            .unwrap_or_default();
-        workspace.close_tab(id)?;
+        let (removed, focus_successor) = {
+            let workspace = self.workspace_mut(self.active_workspace_id())?;
+            let was_active_tab = workspace.active_tab_id().ok() == Some(id);
+            // Capture pane ids before removal for detach-only dispose (ADR-017 §6.1).
+            let removed: Vec<PaneId> = workspace
+                .tab(id)
+                .map(|tab| tab.panes.keys().copied().collect())
+                .unwrap_or_default();
+            workspace.close_tab(id)?;
+            let successor = if was_active_tab {
+                Some(workspace.active_tab_mut()?.focused)
+            } else {
+                None
+            };
+            (removed, successor)
+        };
         self.last_removed_tab_panes = removed;
         self.purge_missing_panes();
+        if let Some(pane) = focus_successor {
+            self.focus_history.record(pane);
+        }
         self.bump_containment_generation();
         Ok(())
     }
@@ -762,6 +774,7 @@ impl ShellState {
         // Bound close releases presentation only (ADR-017 §6.1). Disposition
         // (detach-only / unreferenced record) is portable provisioning authority.
         let released = pane.execution.map(|execution| (pane_id, execution));
+        let focus_before = tab.focused;
         let sibling_successor = tab.root.sibling_first_leaf(pane_id);
         let Some(root) = tab.root.removing(pane_id) else {
             return Err(ShellError::CannotCloseLastPane);
@@ -776,8 +789,12 @@ impl ShellState {
                 .or_else(|| tab.root.first_pane())
                 .expect("remaining Pane tree must contain a Pane");
         }
+        let focus_successor = (tab.focused != focus_before).then_some(tab.focused);
         self.last_released_execution = released;
         self.purge_missing_panes();
+        if let Some(pane) = focus_successor {
+            self.focus_history.record(pane);
+        }
         self.bump_containment_generation();
         Ok(())
     }
