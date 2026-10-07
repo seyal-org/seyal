@@ -81,6 +81,7 @@ impl ShellState {
                 .collect(),
             active_tab: window.active_tab,
             focused_pane: tab.focused,
+            zoomed: tab.zoomed,
             panes: tab
                 .root
                 .pane_ids()
@@ -221,6 +222,7 @@ impl ShellError {
             Self::StaleContainment => 14,
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
+            Self::NotZoomed => 18,
         }
     }
 }

@@ -358,6 +358,54 @@ fn indexed_reads_reuse_one_encode_and_keep_title_borrow() {
 }
 
 #[test]
+fn shell_header_refreshes_after_rejected_and_successful_actions() {
+    use crate::app::AppAction;
+
+    let handle = seyal_app_create();
+    install_shell(handle, seed_n_windows(2));
+    assert_eq!(seyal_app_shell(handle).shell_last_error, 0);
+
+    let unknown_tab = TabId::new();
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        assert!(state
+            .root
+            .apply(AppAction::SelectTab { id: unknown_tab })
+            .is_err());
+        assert!(state.root.snapshot().last_error.is_some());
+    });
+    let rejected = seyal_app_shell(handle);
+    assert_ne!(
+        rejected.shell_last_error, 0,
+        "rejection must refresh cached header"
+    );
+
+    let valid_tab = APPS.with(|apps| {
+        let apps = apps.borrow();
+        apps.get(&handle)
+            .expect("handle")
+            .root
+            .snapshot()
+            .shell
+            .windows[0]
+            .tabs[0]
+            .id
+    });
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        state
+            .root
+            .apply(AppAction::SelectTab { id: valid_tab })
+            .expect("valid selection clears prior error");
+        assert!(state.root.snapshot().last_error.is_none());
+    });
+    assert_eq!(seyal_app_shell(handle).shell_last_error, 0);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
 fn navigate_to_other_window_tab_drains_order_front() {
     use crate::app::AppAction;
     use crate::navigation::ResourceAddress;

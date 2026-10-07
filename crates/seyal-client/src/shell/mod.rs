@@ -148,8 +148,6 @@ pub struct ShellSnapshot {
     pub tree: PaneTree,
     pub layout: LayoutDescription,
     pub last_error: Option<ShellError>,
-    /// ADR-018 containment fence for structural shell actions.
-    pub containment_generation: u64,
     /// Whether `CreateTab`/`SplitFocused` would currently be accepted.
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
@@ -162,7 +160,6 @@ pub struct ShellSnapshot {
     /// Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
-    pub last_active_workspace: WorkspaceId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

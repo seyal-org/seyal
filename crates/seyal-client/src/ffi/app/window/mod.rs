@@ -194,7 +194,7 @@ pub(in crate::ffi) struct WindowEncodeScratch {
     pub tree_nodes: Vec<(u16, u16, u16, SeyalAppPaneTreeNode)>,
     pub effects: Vec<SeyalAppNativeEffect>,
     pub header: SeyalAppShell,
-    cache_key: Option<(u64, u16, u64)>,
+    cache_key: Option<(u64, u16, u64, u32)>,
     #[cfg(test)]
     encode_count: u32,
 }
