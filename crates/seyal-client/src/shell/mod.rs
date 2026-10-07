@@ -5,6 +5,7 @@
 //! VT/grid, Runtime registry, or renderer. Hosts dispatch [`ShellAction`] values
 //! and render [`ShellSnapshot`]. Do not call this from the PTY→VT→damage path.
 
+mod action_types;
 mod actions;
 mod focus_history;
 mod inventory;
@@ -27,6 +28,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::pane_layout::SplitRatio;
 
+pub use action_types::{CycleDirection, ShellAction};
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
@@ -110,106 +112,6 @@ pub struct FocusCheckpoint {
     pub active_workspace: WorkspaceId,
     pub active_tab: TabId,
     pub focused_pane: PaneId,
-}
-
-/// Window/tab cycle direction within the Rust-owned order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CycleDirection {
-    Next,
-    Previous,
-}
-
-/// Typed host → Rust command. One action is one coarse transition.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShellAction {
-    CreateWindow {
-        workspace: WorkspaceId,
-        containment_generation: u64,
-    },
-    ActivateWorkspace {
-        workspace: WorkspaceId,
-        containment_generation: u64,
-    },
-    /// Selection actions carry the snapshot generation for complete host action context,
-    /// but acceptance is fenced only by live identity (ADR-018 §6).
-    SelectWindow {
-        id: WindowId,
-        containment_generation: u64,
-    },
-    SelectTab {
-        id: TabId,
-        containment_generation: u64,
-    },
-    CreateTab {
-        window: WindowId,
-        containment_generation: u64,
-    },
-    CycleWindow {
-        direction: CycleDirection,
-        containment_generation: u64,
-    },
-    CycleTab {
-        direction: CycleDirection,
-        containment_generation: u64,
-    },
-    MoveTabBefore {
-        tab: TabId,
-        before: Option<TabId>,
-        window: WindowId,
-        containment_generation: u64,
-    },
-    MoveTabToWindow {
-        tab: TabId,
-        window: WindowId,
-        containment_generation: u64,
-    },
-    MoveTabToNewWindow {
-        tab: TabId,
-        containment_generation: u64,
-    },
-    CloseTab {
-        id: TabId,
-    },
-    SplitFocused {
-        axis: SplitAxis,
-        containment_generation: u64,
-    },
-    SplitPane {
-        id: PaneId,
-        axis: SplitAxis,
-        containment_generation: u64,
-    },
-    ClosePane {
-        id: PaneId,
-        containment_generation: u64,
-    },
-    FocusPane {
-        id: PaneId,
-    },
-    ZoomPane {
-        id: PaneId,
-    },
-    Unzoom,
-    SwapPanes {
-        a: PaneId,
-        b: PaneId,
-        containment_generation: u64,
-    },
-    MovePaneBeside {
-        pane: PaneId,
-        neighbor: PaneId,
-        side: MoveSide,
-        containment_generation: u64,
-    },
-    /// Resize the Split whose divider follows `pane` (see `PaneTree`).
-    SetSplitRatio {
-        pane: PaneId,
-        ratio: SplitRatio,
-    },
-    BindExecution {
-        pane: PaneId,
-        execution: ExecutionId,
-    },
 }
 
 /// Read-only projection for native hosts.
@@ -749,7 +651,12 @@ impl ShellState {
             | ShellAction::MoveTabBefore { .. }
             | ShellAction::MoveTabToWindow { .. }
             | ShellAction::MoveTabToNewWindow { .. } => self.dispatch_w2a(action),
-            ShellAction::CloseTab { id } => self.close_tab(id),
+            ShellAction::CloseTab {
+                id,
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.close_tab(id)),
             ShellAction::SplitFocused {
                 axis,
                 containment_generation,
