@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use crate::{local_ipc::framing::Role, AttachmentId, ExecutionId};
 
-pub const MAX_LIVE_ATTACHMENTS: usize = 16;
+pub const MAX_LIVE_ATTACHMENTS: usize = 100;
+pub const MAX_ATTACHMENTS_PER_CONNECTION: usize = 100;
+pub const MAX_ATTACHMENTS_PER_CONNECTION_LEGACY: usize = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentError {
@@ -20,10 +22,17 @@ pub enum AttachmentError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryState {
+    Delivering,
+    Suspended,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct AttachmentRecord {
     execution_id: ExecutionId,
     role: Role,
     connection_token: u64,
+    delivery: DeliveryState,
 }
 
 #[derive(Default)]
@@ -69,6 +78,7 @@ impl AttachmentRegistry {
                 execution_id,
                 role,
                 connection_token,
+                delivery: DeliveryState::Delivering,
             },
         );
     }
@@ -125,6 +135,66 @@ impl AttachmentRegistry {
             .iter()
             .filter(|(_, record)| record.execution_id == execution_id)
             .map(|(id, record)| (*id, record.connection_token))
+            .collect()
+    }
+
+    pub fn delivering_viewers_for_execution(
+        &self,
+        execution_id: ExecutionId,
+    ) -> Vec<(AttachmentId, u64)> {
+        self.attachments
+            .iter()
+            .filter(|(_, record)| {
+                record.execution_id == execution_id && record.delivery == DeliveryState::Delivering
+            })
+            .map(|(id, record)| (*id, record.connection_token))
+            .collect()
+    }
+
+    pub fn attachments_on_connection(&self, connection_token: u64) -> Vec<AttachmentId> {
+        self.attachments
+            .iter()
+            .filter(|(_, record)| record.connection_token == connection_token)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    pub fn delivery_of(
+        &self,
+        attachment_id: AttachmentId,
+    ) -> Result<DeliveryState, AttachmentError> {
+        self.attachments
+            .get(&attachment_id)
+            .map(|record| record.delivery)
+            .ok_or(AttachmentError::StaleIdentity)
+    }
+
+    /// Returns previous delivery state.
+    pub fn set_delivery(
+        &mut self,
+        attachment_id: AttachmentId,
+        delivery: DeliveryState,
+    ) -> Result<DeliveryState, AttachmentError> {
+        let record = self
+            .attachments
+            .get_mut(&attachment_id)
+            .ok_or(AttachmentError::StaleIdentity)?;
+        let previous = record.delivery;
+        record.delivery = delivery;
+        Ok(previous)
+    }
+
+    pub fn delivering_on_connection(
+        &self,
+        connection_token: u64,
+    ) -> Vec<(AttachmentId, ExecutionId)> {
+        self.attachments
+            .iter()
+            .filter(|(_, record)| {
+                record.connection_token == connection_token
+                    && record.delivery == DeliveryState::Delivering
+            })
+            .map(|(id, record)| (*id, record.execution_id))
             .collect()
     }
 
@@ -297,5 +367,30 @@ mod tests {
         assert_eq!(registry.remove_all_for_execution(exec(1)).len(), 2);
         assert!(!registry.has_controller(exec(1)));
         assert_eq!(registry.attachments_for_execution(exec(2)), 1);
+    }
+
+    #[test]
+    fn delivery_state_is_independent_per_attachment() {
+        let mut registry = AttachmentRegistry::new();
+        let first = registry
+            .create_attachment(exec(1), Role::Controller, 1)
+            .unwrap();
+        let second = registry
+            .create_attachment(exec(2), Role::Observer, 1)
+            .unwrap();
+        assert_eq!(
+            registry.delivery_of(first).unwrap(),
+            DeliveryState::Delivering
+        );
+        assert_eq!(
+            registry
+                .set_delivery(first, DeliveryState::Suspended)
+                .unwrap(),
+            DeliveryState::Delivering
+        );
+        assert_eq!(registry.delivering_viewers_for_execution(exec(1)).len(), 0);
+        assert_eq!(registry.delivering_viewers_for_execution(exec(2)).len(), 1);
+        assert_eq!(registry.attachments_on_connection(1).len(), 2);
+        let _ = second;
     }
 }

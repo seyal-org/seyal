@@ -42,6 +42,7 @@ fn old_server_hello_without_extended_key_capability_disables_v2() {
         true,
         true,
         true,
+        true,
         Instant::now() + Duration::from_secs(1),
     )
     .expect("old server hello remains usable");
@@ -146,8 +147,8 @@ fn pre_viewport_line_ids_runtime_hello(mut server: UnixStream, accept_without_li
 
 #[test]
 fn requested_capabilities_can_omit_extended_key_for_old_runtimes() {
-    let with_v2 = requested_capabilities(true, true, true, true);
-    let without_v2 = requested_capabilities(true, false, true, true);
+    let with_v2 = requested_capabilities(true, true, true, true, true);
+    let without_v2 = requested_capabilities(true, false, true, true, false);
     assert_ne!(with_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
     assert_eq!(without_v2 & CAP_EXTENDED_TERMINAL_KEY, 0);
     assert_ne!(without_v2 & CAP_COMMAND_BLOCKS, 0);
@@ -156,7 +157,7 @@ fn requested_capabilities_can_omit_extended_key_for_old_runtimes() {
     assert_ne!(with_v2 & CAP_EXECUTION_PROVISIONING, 0);
     assert_ne!(without_v2 & CAP_VIEWPORT_LINE_IDS, 0);
     assert_ne!(without_v2 & seyal_runtime::pass8::CAP_BLOCK_METADATA, 0);
-    let m001 = requested_capabilities(true, false, false, false);
+    let m001 = requested_capabilities(true, false, false, false, false);
     assert_eq!(m001 & CAP_EXECUTION_PROVISIONING, 0);
     assert_eq!(m001 & CAP_EXTENDED_TERMINAL_KEY, 0);
     assert_eq!(m001 & CAP_VIEWPORT_LINE_IDS, 0);
@@ -164,8 +165,8 @@ fn requested_capabilities_can_omit_extended_key_for_old_runtimes() {
 
 #[test]
 fn requested_capabilities_can_omit_viewport_line_ids() {
-    let with = requested_capabilities(true, true, true, true);
-    let without = requested_capabilities(true, true, false, true);
+    let with = requested_capabilities(true, true, true, true, true);
+    let without = requested_capabilities(true, true, false, true, false);
     assert_ne!(with & CAP_VIEWPORT_LINE_IDS, 0);
     assert_eq!(without & CAP_VIEWPORT_LINE_IDS, 0);
     assert_ne!(without & CAP_EXTENDED_TERMINAL_KEY, 0);
@@ -178,6 +179,7 @@ fn pre_v2_runtime_rejects_extended_key_hello_and_accepts_m001_fallback() {
     let rejector = std::thread::spawn(move || pre_v2_runtime_hello(rejected_server, false));
     let error = hello_until(
         &mut rejected_client,
+        true,
         true,
         true,
         true,
@@ -198,6 +200,7 @@ fn pre_v2_runtime_rejects_extended_key_hello_and_accepts_m001_fallback() {
         false,
         false,
         false,
+        false,
         Instant::now() + Duration::from_secs(1),
     )
     .expect("M001 hello is accepted by a pre-v2 Runtime");
@@ -207,14 +210,16 @@ fn pre_v2_runtime_rejects_extended_key_hello_and_accepts_m001_fallback() {
 
 #[test]
 fn hello_fallback_reconnects_when_old_runtime_rejects_newer_capabilities() {
-    // Pre-V2 path needs two reconnects: drop VIEWPORT_LINE_IDS, then drop EXTENDED_KEY.
+    // Pre-V2 path: drop delivery control, then viewport LineIds, then EXTENDED_KEY.
     let (mut client, first_server) = UnixStream::pair().expect("first pair");
     let (second_client, second_server) = UnixStream::pair().expect("second pair");
     let (third_client, third_server) = UnixStream::pair().expect("third pair");
+    let (fourth_client, fourth_server) = UnixStream::pair().expect("fourth pair");
     let rejector = std::thread::spawn(move || pre_v2_runtime_hello(first_server, false));
     let rejector2 = std::thread::spawn(move || pre_v2_runtime_hello(second_server, false));
-    let acceptor = std::thread::spawn(move || pre_v2_runtime_hello(third_server, true));
-    let mut fallbacks = vec![second_client, third_client].into_iter();
+    let rejector3 = std::thread::spawn(move || pre_v2_runtime_hello(third_server, false));
+    let acceptor = std::thread::spawn(move || pre_v2_runtime_hello(fourth_server, true));
+    let mut fallbacks = vec![second_client, third_client, fourth_client].into_iter();
     let hello = hello_until_with_legacy_key_fallback(
         &mut client,
         || fallbacks.next().ok_or(ClientError::Io),
@@ -226,21 +231,25 @@ fn hello_fallback_reconnects_when_old_runtime_rejects_newer_capabilities() {
     assert!(!extended_terminal_key_supported(hello.server_capabilities));
     rejector.join().expect("rejector thread");
     rejector2.join().expect("rejector2 thread");
+    rejector3.join().expect("rejector3 thread");
     acceptor.join().expect("acceptor thread");
 }
 
 #[test]
 fn hello_fallback_drops_viewport_line_ids_against_pre_865_runtime() {
     let (mut client, first_server) = UnixStream::pair().expect("first pair");
-    let (fallback_client, second_server) = UnixStream::pair().expect("second pair");
+    let (second_client, second_server) = UnixStream::pair().expect("second pair");
+    let (third_client, third_server) = UnixStream::pair().expect("third pair");
     let rejector =
         std::thread::spawn(move || pre_viewport_line_ids_runtime_hello(first_server, false));
+    let rejector2 =
+        std::thread::spawn(move || pre_viewport_line_ids_runtime_hello(second_server, false));
     let acceptor =
-        std::thread::spawn(move || pre_viewport_line_ids_runtime_hello(second_server, true));
-    let mut fallbacks = Some(fallback_client);
+        std::thread::spawn(move || pre_viewport_line_ids_runtime_hello(third_server, true));
+    let mut fallbacks = vec![second_client, third_client].into_iter();
     let hello = hello_until_with_legacy_key_fallback(
         &mut client,
-        || fallbacks.take().ok_or(ClientError::Io),
+        || fallbacks.next().ok_or(ClientError::Io),
         true,
         true,
         Instant::now() + Duration::from_secs(1),
@@ -248,6 +257,7 @@ fn hello_fallback_drops_viewport_line_ids_against_pre_865_runtime() {
     .expect("pre-#865 Runtime accepts hello without CAP_VIEWPORT_LINE_IDS");
     assert!(extended_terminal_key_supported(hello.server_capabilities));
     rejector.join().expect("rejector thread");
+    rejector2.join().expect("rejector2 thread");
     acceptor.join().expect("acceptor thread");
 }
 

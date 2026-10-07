@@ -12,9 +12,9 @@ use seyal_runtime::{
         },
         framing::{
             encode_frame, ClientHello, ErrorCode, ErrorMessage, MessageType, ServerHello,
-            CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS, CAP_CORRELATED_RESIZE,
-            CAP_EXECUTION_PROVISIONING, CAP_EXTENDED_TERMINAL_KEY, CAP_GRAPHEME_DISPLAY,
-            CAP_SEMANTIC_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS,
+            CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS,
+            CAP_CORRELATED_RESIZE, CAP_EXECUTION_PROVISIONING, CAP_EXTENDED_TERMINAL_KEY,
+            CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS,
         },
     },
     pass8::CAP_BLOCK_METADATA,
@@ -219,11 +219,13 @@ pub(crate) fn classify_connect_error(error: std::io::Error) -> ClientError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn requested_capabilities(
     request_block_metadata: bool,
     request_extended_terminal_key: bool,
     request_viewport_line_ids: bool,
     request_execution_provisioning: bool,
+    request_delivery_control: bool,
 ) -> u32 {
     CAP_COMMAND_BLOCKS
         | CAP_GRAPHEME_DISPLAY
@@ -242,6 +244,11 @@ pub(crate) fn requested_capabilities(
         } else {
             0
         }
+        | if request_delivery_control {
+            CAP_ATTACHMENT_DELIVERY_CONTROL
+        } else {
+            0
+        }
         | if request_block_metadata {
             CAP_BLOCK_METADATA
         } else {
@@ -253,6 +260,7 @@ pub(crate) fn extended_terminal_key_supported(server_capabilities: u32) -> bool 
     server_capabilities & CAP_EXTENDED_TERMINAL_KEY != 0
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn hello_until(
     stream: &mut UnixStream,
     interactive: bool,
@@ -260,6 +268,7 @@ pub(crate) fn hello_until(
     request_extended_terminal_key: bool,
     request_viewport_line_ids: bool,
     request_execution_provisioning: bool,
+    request_delivery_control: bool,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
     let client_capabilities = requested_capabilities(
@@ -267,6 +276,7 @@ pub(crate) fn hello_until(
         request_extended_terminal_key,
         request_viewport_line_ids,
         request_execution_provisioning,
+        request_delivery_control,
     );
     send_control_until(
         stream,
@@ -309,9 +319,10 @@ pub(crate) fn hello_until(
 /// ClientHello bits as `MalformedPayload` instead of ignoring them.
 ///
 /// Ordered reconnect fallback (bounded; each step at most once):
-/// 1. Full advertise (viewport LineIds + extended key + execution provisioning).
-/// 2. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime; still advertises provisioning).
-/// 3. Drop extended key + provisioning (SPEC-006 §21.5 / pre-V2 M001 allowlist).
+/// 1. Full advertise (viewport LineIds + extended key + provisioning + delivery control).
+/// 2. Drop `CAP_ATTACHMENT_DELIVERY_CONTROL` (pre-W5 Runtime).
+/// 3. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime; still advertises provisioning).
+/// 4. Drop extended key + provisioning (SPEC-006 §21.5 / pre-V2 M001 allowlist).
 pub(crate) fn hello_until_with_legacy_key_fallback(
     stream: &mut UnixStream,
     mut reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
@@ -326,6 +337,7 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
         true,
         true,
         true,
+        true,
         deadline,
     ) {
         Ok(hello) => Ok(hello),
@@ -336,22 +348,40 @@ pub(crate) fn hello_until_with_legacy_key_fallback(
                 interactive,
                 request_block_metadata,
                 true,
-                false,
                 true,
+                true,
+                false,
                 deadline,
             ) {
                 Ok(hello) => Ok(hello),
                 Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
                     *stream = reconnect()?;
-                    hello_until(
+                    match hello_until(
                         stream,
                         interactive,
                         request_block_metadata,
+                        true,
                         false,
-                        false,
+                        true,
                         false,
                         deadline,
-                    )
+                    ) {
+                        Ok(hello) => Ok(hello),
+                        Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
+                            *stream = reconnect()?;
+                            hello_until(
+                                stream,
+                                interactive,
+                                request_block_metadata,
+                                false,
+                                false,
+                                false,
+                                false,
+                                deadline,
+                            )
+                        }
+                        Err(error) => Err(error),
+                    }
                 }
                 Err(error) => Err(error),
             }

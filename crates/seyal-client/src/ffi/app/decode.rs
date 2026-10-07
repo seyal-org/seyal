@@ -333,7 +333,8 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
-            event: decode_window_event(action.reserved)?,
+            event: decode_window_event(action.reserved & 0xff)?,
+            occluded: action.reserved & 0x100 != 0,
         }),
         67 => Ok(AppAction::CloseWindow {
             id: WindowId::from_bytes(id16(

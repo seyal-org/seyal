@@ -415,6 +415,8 @@ pub enum AppAction {
     ReportWindowEvent {
         window: WindowId,
         event: WindowNativeEvent,
+        /// Packed from FFI reserved bit 8 for OcclusionChanged.
+        occluded: bool,
     },
 }
 
@@ -982,14 +984,18 @@ impl ApplicationRoot {
             AppAction::SelectWindow { id } => self.select_window(id),
             AppAction::CycleWindow { direction } => self.cycle_window(direction),
             AppAction::CreateWindow => self.create_window(),
-            AppAction::ReportWindowEvent { window, event } => {
-                self.report_window_event(window, event)
-            }
+            AppAction::ReportWindowEvent {
+                window,
+                event,
+                occluded,
+            } => self.report_window_event(window, event, occluded),
         };
         match result {
             Ok(()) => {
                 self.last_error = None;
                 self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+                #[cfg(target_os = "macos")]
+                self.sync_attachment_delivery();
                 Ok(())
             }
             Err(error) => self.fail(error),

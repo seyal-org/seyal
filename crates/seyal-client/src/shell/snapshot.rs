@@ -216,14 +216,15 @@ fn leaf_snapshot(
     }
 }
 
-/// Product-derivable ADR-018 §5 tier (occlusion stays host input until W4a/W5).
+/// ADR-018 §5 product-derivable tier. Occlusion/miniaturize are host *inputs*;
+/// the host never invents the tier itself.
 fn tier_for_leaf(
     pane: PaneId,
     tab: &Tab,
     window: &Window,
     product_window: Option<WindowId>,
 ) -> PresentationTier {
-    if tab.id != window.active_tab {
+    if window.occluded || window.miniaturized || tab.id != window.active_tab {
         return PresentationTier::Hidden;
     }
     if product_window == Some(window.id) && pane == tab.focused {
@@ -258,5 +259,36 @@ impl ShellError {
             Self::ExecutionNotUnpresented => 19,
             Self::WindowCreationUnavailable => 20,
         }
+    }
+}
+
+impl ShellState {
+    /// Record host-forwarded occlusion. Does not bump containment generation.
+    pub(crate) fn set_window_occluded(
+        &mut self,
+        id: WindowId,
+        occluded: bool,
+    ) -> Result<(), ShellError> {
+        self.window_mut(id)?.occluded = occluded;
+        Ok(())
+    }
+
+    /// Record host-forwarded miniaturize. Does not bump containment generation.
+    pub(crate) fn set_window_miniaturized(
+        &mut self,
+        id: WindowId,
+        miniaturized: bool,
+    ) -> Result<(), ShellError> {
+        self.window_mut(id)?.miniaturized = miniaturized;
+        Ok(())
+    }
+
+    fn window_mut(&mut self, id: WindowId) -> Result<&mut Window, ShellError> {
+        for workspace in &mut self.workspaces {
+            if let Some(window) = workspace.window_mut(id) {
+                return Ok(window);
+            }
+        }
+        Err(ShellError::UnknownWindow)
     }
 }

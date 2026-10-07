@@ -36,9 +36,9 @@ hard_loc = 1000
 # architecture-gated under #882 and was not touched).
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 877
-issue = 1065
-reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator so the file only ratchets down."
+acknowledged_loc = 880
+issue = 1220
+reason = "CAMetalLayer surface stays one thin host type; #1220 applies Rust-authored Hidden/Unpresented GPU release on the same visibility path as AppKit occlusion."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1085
-issue = 1158
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1158 stacks W4a window actions/quit fixtures with W2b CloseWindow dispatch without splitting the façade."
+ceiling_loc = 1091
+issue = 1220
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1220 adds Hidden delivery sync after successful apply without splitting the façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -145,9 +145,9 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 940
-issue = 1175
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175 adds harness_probe=false on live finish_attach so CreateTab's second-Controller driver can distinguish Runtime clients from in-process unit-test probes without splitting the Ready-stream lifecycle."
+acknowledged_loc = 951
+issue = 1220
+reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1220 records SPEC-004 §19 delivery-control negotiation beside the existing ServerHello capability bits."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
@@ -232,15 +232,15 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 899
-issue = 1158
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1158 stacks W2b close dispatch with W4a allows_window_creation admission while snapshot encoding stays in shell/snapshot.rs."
+acknowledged_loc = 901
+issue = 1220
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1220 registers W5 tier tests beside the existing W2a/W4b action table."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 770
-issue = 1106
-reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+acknowledged_loc = 771
+issue = 1220
+reason = "Thin AppKit chrome host stays one cold-path façade; #1220 reconciles Rust presentation tiers onto the live Metal surface after chrome apply."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
@@ -251,12 +251,12 @@ reason = "SPEC-024 §14 K2 matrix stays one keybinding table-load test module; #
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 706
-issue = 1158
-reason = "ABI action decode stays one match surface; #1158 adds CloseWindow after W4a Select/Cycle/Create/Report kinds without splitting the versioned kind table."
+acknowledged_loc = 707
+issue = 1220
+reason = "ABI action decode stays one match surface; #1220 packs occlusion-hidden into REPORT_WINDOW_EVENT reserved so Rust can compute Hidden without a host-owned tier."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 747
-issue = 1123
-reason = "LocalDisplayClient stays one attach/poll client; #1123 adds request_bounded_detach and fallible try_reconstruction_probe_client for ADR-018 §4 quit fixtures without waiting on Detached."
+acknowledged_loc = 753
+issue = 1220
+reason = "LocalDisplayClient stays one attach/poll client; #1220 stores SPEC-004 §19 delivery-control negotiation and suspend state beside the existing provisioning flags."

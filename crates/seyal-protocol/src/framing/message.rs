@@ -7,7 +7,8 @@ use super::execution::{
 };
 use super::payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList, HostSearch,
-    HostSelection, InputRef, LifecycleMessage, Resize, Resync, ServerHello, TerminalMouse,
+    HostSelection, InputRef, LifecycleMessage, Resize, ResumeDelivery, Resync, ServerHello,
+    SuspendDelivery, TerminalMouse,
 };
 use super::{
     BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, HistoryRangeRequest,
@@ -68,6 +69,10 @@ pub enum MessageType {
     TerminateExecutionRequest = 38,
     /// SPEC-004 §18: terminate-execution result.
     TerminateExecutionResult = 39,
+    /// SPEC-004 §19: suspend replaceable display delivery for one attachment.
+    SuspendDelivery = 40,
+    /// SPEC-004 §19: resume delivery via the bounded snapshot resync path.
+    ResumeDelivery = 41,
 }
 impl MessageType {
     pub fn from_u16(value: u16) -> Option<Self> {
@@ -110,6 +115,8 @@ impl MessageType {
             37 => Self::CreateExecutionResult,
             38 => Self::TerminateExecutionRequest,
             39 => Self::TerminateExecutionResult,
+            40 => Self::SuspendDelivery,
+            41 => Self::ResumeDelivery,
             _ => return None,
         })
     }
@@ -155,6 +162,8 @@ pub enum Message<'a> {
     CreateExecutionResult(CreateExecutionResult),
     TerminateExecutionRequest(TerminateExecutionRequest),
     TerminateExecutionResult(TerminateExecutionResult),
+    SuspendDelivery(SuspendDelivery),
+    ResumeDelivery(ResumeDelivery),
 }
 
 pub fn decode_message<'a>(
@@ -229,6 +238,8 @@ pub fn decode_message<'a>(
         MessageType::TerminateExecutionResult => {
             Message::TerminateExecutionResult(TerminateExecutionResult::decode(payload)?)
         }
+        MessageType::SuspendDelivery => Message::SuspendDelivery(SuspendDelivery::decode(payload)?),
+        MessageType::ResumeDelivery => Message::ResumeDelivery(ResumeDelivery::decode(payload)?),
     })
 }
 

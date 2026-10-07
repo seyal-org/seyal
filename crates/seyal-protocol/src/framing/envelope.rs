@@ -24,6 +24,9 @@ pub const CAP_GRAPHEME_DISPLAY: u32 = 1 << 6;
 /// Flow live-tail can map Block `start_line` onto prepared-frame rows.
 /// Bit 8 is reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION`.
 pub const CAP_VIEWPORT_LINE_IDS: u32 = 1 << 9;
+/// Per-attachment delivery suspend/resume (SPEC-004 §19, types 40/41).
+/// Bit 10 is `CAP_EXECUTION_PROVISIONING`; bit 12 is `CAP_LAUNCH_POLICY_DETAIL`.
+pub const CAP_ATTACHMENT_DELIVERY_CONTROL: u32 = 1 << 11;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]

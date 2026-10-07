@@ -422,7 +422,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED)
+        var event = SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED
+        if !window.occlusionState.contains(.visible) {
+            event |= SEYAL_APP_WINDOW_EVENT_OCCLUSION_HIDDEN
+        }
+        reportWindowEvent(window: window, event: event)
     }
 
     func windowDidMiniaturize(_ notification: Notification) {

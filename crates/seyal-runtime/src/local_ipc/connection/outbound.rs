@@ -249,6 +249,13 @@ impl LocalIpcServer {
         };
         Ok(connection.try_queue_delta(delta))
     }
+
+    /// Drop not-yet-started presentation. In-flight frames complete (SPEC-004 §11 / §19).
+    pub fn drop_not_yet_started_presentation(&mut self, token: u64) {
+        if let Some(connection) = self.connections.get_mut(&token) {
+            connection.pending_display = None;
+        }
+    }
 }
 
 pub(in crate::local_ipc::connection) fn flush_outbound(
