@@ -795,6 +795,263 @@ final class SeyalHostUITests: XCTestCase {
         assertFlowBlocksOrFail(in: app)
     }
 
+    /// #866: Flow keeps composer exclusive IME/AX. Clicking Metal must not leave
+    /// `terminal-input` as a competing first-responder; subsequent keys stay on
+    /// the Rust draft and must not submit.
+    func testFlowComposerExclusiveIMEFocusFence() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 12))
+        let available = NSPredicate(format: "value == 'available'")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
+                timeout: 12
+            ),
+            .completed,
+            "composer never became available; value=\(composer.value ?? "nil")"
+        )
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.firstMatch.click()
+        XCTAssertTrue(composer.firstMatch.isHittable)
+        XCTAssertTrue(editor.firstMatch.isHittable)
+
+        let token = "seyal-866-ime-\(String(UUID().uuidString.prefix(8)))"
+        editor.firstMatch.typeText(token)
+        terminal.firstMatch.click()
+        waitBriefly(0.4)
+        XCTAssertTrue(composer.firstMatch.isHittable)
+        XCTAssertTrue(
+            editor.firstMatch.isHittable,
+            "Metal click under Flow must keep the composer editor interactive"
+        )
+        editor.firstMatch.click()
+        editor.firstMatch.typeText("-after-click")
+        let expected = NSPredicate(format: "value CONTAINS %@", token)
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: expected, evaluatedWith: editor.firstMatch, handler: nil)],
+                timeout: 5
+            ),
+            .completed,
+            "keys after a Metal click must remain on the composer draft; editor=\(editor.firstMatch.value ?? "nil")"
+        )
+        XCTAssertEqual(
+            composer.firstMatch.value as? String,
+            "available",
+            "draft typing must not submit a Block"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    /// #866: Shift-Return inserts one newline; successful Return admits one Block.
+    func testShiftReturnInsertsNewlineAndReturnCreatesOneBlock() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 12))
+        let available = NSPredicate(format: "value == 'available'")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
+                timeout: 12
+            ),
+            .completed,
+            "composer never became available; value=\(composer.value ?? "nil")"
+        )
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.firstMatch.click()
+        let token = "seyal-866-shift-\(String(UUID().uuidString.prefix(8)))"
+        editor.firstMatch.typeText("echo \(token)")
+        editor.firstMatch.typeKey("\r", modifierFlags: .shift)
+        editor.firstMatch.typeText("true")
+        XCTAssertEqual(
+            composer.firstMatch.value as? String,
+            "available",
+            "Shift-Return must insert a newline, not submit"
+        )
+        let editorText = (editor.firstMatch.value as? String) ?? ""
+        XCTAssertTrue(
+            editorText.contains(token),
+            "multi-line draft must keep the first line; editor=\(editorText)"
+        )
+        XCTAssertTrue(
+            editorText.contains("true"),
+            "Shift-Return must keep the draft editable for a second line; editor=\(editorText)"
+        )
+        editor.firstMatch.typeKey("\r", modifierFlags: [])
+        let cleared = NSPredicate(format: "value == nil OR value == ''")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: cleared, evaluatedWith: editor.firstMatch, handler: nil)],
+                timeout: 8
+            ),
+            .completed,
+            "Return must admit the draft; editor=\(editor.firstMatch.value ?? "nil")"
+        )
+        let card = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier MATCHES %@ AND label CONTAINS %@",
+                "seyal-block-[0-9]+",
+                token
+            )
+        ).firstMatch
+        if card.waitForExistence(timeout: 10) {
+            XCTAssertTrue(card.exists)
+        }
+        waitForUsablePty(in: app, timeout: 8)
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    /// #866: TUI may own Metal IME; returning to Flow revokes that route and
+    /// restores composer-exclusive focus without PTY key leakage.
+    func testTuiHandoffRestoresComposerExclusiveFocus() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        try exerciseBoundedAlternateScreen(in: app) { command in
+            submitComposerCommand(app, command)
+        }
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        XCTAssertTrue(composer.firstMatch.isHittable)
+        XCTAssertTrue(
+            editor.waitForExistence(timeout: 5) && editor.firstMatch.isHittable,
+            "leaving TUI must restore a hittable composer editor"
+        )
+        editor.firstMatch.click()
+        let token = "seyal-866-tui-\(String(UUID().uuidString.prefix(8)))"
+        editor.firstMatch.typeText(token)
+        let landed = NSPredicate(format: "value CONTAINS %@", token)
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: landed, evaluatedWith: editor.firstMatch, handler: nil)],
+                timeout: 5
+            ),
+            .completed,
+            "after TUI handoff, keys must enter the composer; editor=\(editor.firstMatch.value ?? "nil")"
+        )
+        XCTAssertEqual(composer.firstMatch.value as? String, "available")
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    /// #866: relaunch against the same `--runtime-dir` reconnects as controller
+    /// with composer-exclusive IME/AX (SPEC-009 reconstruction).
+    func testReconnectRestoresComposerExclusiveIME() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 8))
+        app.launch()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let recovery = app.descendants(matching: .any)["seyal-recovery"]
+        XCTAssertEqual(
+            recovery.firstMatch.value as? String,
+            "connected",
+            "reconnect must land on Rust Connected; seyal-recovery=\(recovery.firstMatch.value ?? "nil")"
+        )
+        XCTAssertTrue(composer.firstMatch.isHittable)
+        XCTAssertTrue(
+            editor.waitForExistence(timeout: 5) && editor.firstMatch.isHittable,
+            "reconnect must restore a hittable composer editor, not Metal IME"
+        )
+        editor.firstMatch.click()
+        let token = "seyal-866-re-\(String(UUID().uuidString.prefix(8)))"
+        editor.firstMatch.typeText(token)
+        let landed = NSPredicate(format: "value CONTAINS %@", token)
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: landed, evaluatedWith: editor.firstMatch, handler: nil)],
+                timeout: 5
+            ),
+            .completed,
+            "post-reconnect keys must enter the composer; editor=\(editor.firstMatch.value ?? "nil")"
+        )
+        XCTAssertTrue(composer.firstMatch.isHittable)
+        assertFlowBlocksOrFail(in: app)
+    }
+
+    /// #866: busy/disabled admission parity. Execute is disabled, AX must not
+    /// leak the draft, and a later successful Return still admits.
+    func testBusyAdmissionParityPreservesLaterDraft() throws {
+        guard loginShellIsZsh() else {
+            throw XCTSkip(
+                "This composer-eligibility case requires a zsh login shell; the host spawns pw_shell.")
+        }
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        let editor = app.descendants(matching: .any)["seyal-composer-editor"]
+        let execute = app.descendants(matching: .any)["seyal-composer-execute"]
+        let available = NSPredicate(format: "value == 'available'")
+        let busy = NSPredicate(format: "value == 'busy'")
+        XCTAssertTrue(composer.waitForExistence(timeout: 12))
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
+                timeout: 12
+            ),
+            .completed,
+            "composer never became available; value=\(composer.value ?? "nil")"
+        )
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.firstMatch.click()
+        editor.firstMatch.typeText("sleep 8")
+        editor.firstMatch.typeKey("\r", modifierFlags: [])
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: busy, evaluatedWith: composer, handler: nil)],
+                timeout: 6
+            ),
+            .completed,
+            "composer stayed \(composer.value ?? "nil") while sleep owned the shell"
+        )
+        XCTAssertTrue(execute.firstMatch.exists)
+        XCTAssertFalse(execute.firstMatch.isEnabled, "busy must disable native execute")
+        let busyValue = (composer.firstMatch.value as? String) ?? ""
+        XCTAssertFalse(
+            busyValue.contains("sleep"),
+            "admission/error AX must not leak the draft; value=\(busyValue)"
+        )
+        execute.firstMatch.click()
+        XCTAssertEqual(
+            composer.firstMatch.value as? String,
+            "busy",
+            "disabled execute must not admit a second command"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: available, evaluatedWith: composer, handler: nil)],
+                timeout: 14
+            ),
+            .completed,
+            "composer did not return to available after sleep; value=\(composer.value ?? "nil")"
+        )
+        let token = "seyal-866-admit-\(String(UUID().uuidString.prefix(8)))"
+        editor.firstMatch.click()
+        editor.firstMatch.typeText("echo \(token)")
+        editor.firstMatch.typeKey("\r", modifierFlags: [])
+        let cleared = NSPredicate(format: "value == nil OR value == ''")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [expectation(for: cleared, evaluatedWith: editor.firstMatch, handler: nil)],
+                timeout: 8
+            ),
+            .completed,
+            "successful Return after busy must admit a new draft"
+        )
+        assertFlowBlocksOrFail(in: app)
+    }
+
     func testCommandPaletteOpensFiltersRunsAndDismisses() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

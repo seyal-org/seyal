@@ -982,14 +982,14 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
             name: "Reviewer".into(),
             activity: AgentActivity::Attention,
         }],
-        attention: vec![AttentionItem {
-            id: AttentionId::new("att-1"),
-            title: "Need review".into(),
-            detail: "diff".into(),
-            workspace: Some(workspace),
-            tab: Some(tab),
-            agent: Some(AgentId::new("agent-1")),
-        }],
+        attention: vec![AttentionItem::projection(
+            AttentionId::new("att-1"),
+            "Need review",
+            "diff",
+            Some(workspace),
+            Some(tab),
+            Some(AgentId::new("agent-1")),
+        )],
     })
     .unwrap();
     root.apply(AppAction::SetLeftPanel {
@@ -1014,7 +1014,7 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
     })
     .unwrap();
     let after = root.snapshot();
-    assert!(after.chrome.attention_items.is_empty());
+    assert_eq!(after.chrome.attention_items.len(), 1);
     assert_eq!(after.shell.active_workspace, workspace);
     assert_eq!(after.shell.active_tab, tab);
     assert_eq!(

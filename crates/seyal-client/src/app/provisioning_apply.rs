@@ -92,7 +92,10 @@ impl ApplicationRoot {
     /// the new terminal leaf (ADR-017 §4.4 / C3). Sibling bindings are untouched.
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::SplitFocused { axis })
+            .apply(ShellAction::SplitFocused {
+                axis,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
@@ -103,7 +106,10 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::ClosePane { id: pane });
+                let _ = self.shell.apply(ShellAction::ClosePane {
+                    id: pane,
+                    containment_generation: self.shell.containment_generation(),
+                });
                 let _ = self.shell.take_released_execution();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
@@ -116,7 +122,10 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::ClosePane { id: pane });
+            let _ = self.shell.apply(ShellAction::ClosePane {
+                id: pane,
+                containment_generation: self.shell.containment_generation(),
+            });
             let _ = self.shell.take_released_execution();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
@@ -173,7 +182,10 @@ impl ApplicationRoot {
     /// terminated as a side effect of presentation close.
     pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::ClosePane { id })
+            .apply(ShellAction::ClosePane {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(close_pane_error)?;
         if let Some((pane, execution)) = self.shell.take_released_execution() {
             let effects = self.provisioning.on_bound_pane_closed(pane);

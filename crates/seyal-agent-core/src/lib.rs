@@ -6,6 +6,8 @@
 //!
 //! `ControlGeneration` is the client control epoch (SPEC-026 O1 / §8.3).
 
+pub mod action;
+pub mod attention;
 mod client_control;
 mod domain;
 mod evaluation;
@@ -19,6 +21,32 @@ mod restore;
 pub mod routing;
 mod transitions;
 
+pub use action::{
+    action_intent_digest, evaluate_dispatch, human_approval_required, linearize_cancel,
+    material_fields_changed, next_dispatch_generation, reconcile, recover, resume_crash_boundary,
+    ActionIntent, ActionIntentError, ActionLifecycle, ActionRuntime, ArgumentFingerprint,
+    AuthorizationClass, CapabilityRef, CausalMarker, CausalMarkerKind, CrashBoundary,
+    DispatchError, DispatchEval, EffectClass, EvidenceKind, ExecutorCapabilityRef,
+    PersistAdmitError, PersistFailurePolicy, PersistHealth, PersistPauseReason,
+    PrivacyDependencyId, ReconciliationRequiredHook, RecoveryDecision, RecoveryError,
+    RecoveryEvidence, RequestProvenance, ResourceIdentity, CANONICAL_INTENT_LAYOUT,
+    DEFAULT_AUTOMATIC_RECONCILIATION_BUDGET, DEFAULT_PERSIST_FAILURE_BUDGET,
+    DEFAULT_PERSIST_RETRY_DEADLINE_MS,
+};
+pub use attention::{
+    activate, allowed_attention_transition, authorize_decide, auto_approve_reconciliation, badges,
+    coalesce_key, evaluate_consume, in_stack_approve_allowed, mint_from_trusted_source,
+    mint_from_untrusted_terminal, next_attention, note_os_delivery_failure, notification_preview,
+    os_banner_dismiss, preserve_navigation_order, reject_untrusted_privileged,
+    request_from_untrusted_terminal, stack_for_run, stack_overlay, ApprovalDecision, ApprovalError,
+    ApprovalRequest, ApprovalRequestSpec, ApprovalVerdict, ArtifactKind, ArtifactRef,
+    AttentionActivation, AttentionBadge, AttentionItem, AttentionKind, AttentionPriority,
+    AttentionState, AttentionTarget, AttentionTransitionError, ConsumptionWitness, ControlMode,
+    DecisionAuthority, MintError, MintSource, OsBannerDismiss, OsDeliveryContext,
+    OsDeliveryDecision, OsNotificationController, PresentationText, TrustedMintSpec,
+    ATTENTION_SCHEMA_VERSION, MAX_OPEN_ATTENTION_PER_RUN, MAX_OS_DELIVERIES_PER_SOURCE,
+    MAX_OS_DELIVERIES_PER_WINDOW, MAX_TERMINAL_INFORMATIONAL_PER_WINDOW, OS_RATE_WINDOW_MS,
+};
 pub use client_control::{LoggedObservation, ObservationKind, ObservationRecordResult};
 pub use domain::{AgentDomain, AgentRun, Attempt, DomainError, WorkItem, WorkScope, WorkScopeKind};
 pub use evaluation::*;
@@ -27,10 +55,11 @@ pub use execution_host::{
     LaunchDescriptor,
 };
 pub use identity::{
-    AdapterId, AgentRunId, AttemptId, BackendInstanceId, BindingGeneration, ClientPrincipalId,
-    ClientSessionId, ContextBundleId, ContinuationPlanId, ControlGeneration, MemoryId,
-    PlanGeneration, RecordGeneration, RevocationEventId, RevocationGeneration, RouteOfferingId,
-    RunWorkingSetId, ScopePolicyGeneration, WorkItemId, WorkScopeId, WorkingSetGeneration,
+    ActionId, AdapterId, AgentRunId, ApprovalId, ArtifactId, AttemptId, AttentionId,
+    BackendInstanceId, BindingGeneration, ClientPrincipalId, ClientSessionId, ContextBundleId,
+    ContinuationPlanId, ControlGeneration, MemoryId, PlanGeneration, RecordGeneration,
+    RevocationEventId, RevocationGeneration, RouteOfferingId, RunWorkingSetId,
+    ScopePolicyGeneration, WorkItemId, WorkScopeId, WorkingSetGeneration,
 };
 pub use lifecycle::{
     codes, AcceptanceContractMode, AccountingValue, AgentRunLifecycle, AgentRunLineage,

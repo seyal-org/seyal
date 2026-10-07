@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 785
+acknowledged_loc = 797
 issue = 1217
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the same C1 create→attach→bind path as CreateTab without inventing a second provisioning authority."
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback without adding a second provisioning authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -163,11 +163,13 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # #1181 adds §10 output-ref encode consumers, partial-segment merge, and
 # materialize_output_ref beside append_output_event.
 # #1271 adds rebuildable context_index_cache re-export beside existing open paths.
+# #1312 collocates Action persist-pause write-fault cells with existing store
+# write-fault instrumentation; pause policy methods live in action_persist.rs.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 891
-issue = 1271
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1271 adds a one-line ContextIndexRecord re-export for the rebuildable SPEC-013 index table without a second store façade."
+acknowledged_loc = 906
+issue = 1312
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1312 adds Action persist-pause Atomic/Mutex cells beside writes_before_fault without a second store façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/catalog.rs"
@@ -198,9 +200,9 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 920
-issue = 1252
-reason = "IntegrationService remains the Agent Backend session façade; #1252 adds grant-gated admin.adapters install/enable beside CancelRun (#1255), WorkScope.bindings, StartAgentRun, and the #1253 fixture-11 hook without a second session authority or client Command."
+acknowledged_loc = 930
+issue = 1309
+reason = "IntegrationService remains the Agent Backend session façade; #1309 adds hostless prepare_action for immutable ActionIntent persistence beside admin.adapters, CancelRun, and StartAgentRun without a second session authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-protocol/src/command/mod.rs"
@@ -240,9 +242,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1143
-issue = 1101
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
+ceiling_loc = 1151
+issue = 1122
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites without inventing a second navigation test authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -252,15 +254,15 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 733
+acknowledged_loc = 836
 issue = 1217
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1217 enables production allows_pane_splitting beside allows_tab_creation without splitting tree/workspace ownership."
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1122 adds Tab-scoped zoom and ADR-018 containment fences, while #1217 enables production SplitFocused alongside CreateTab without splitting tree/workspace ownership."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 770
-issue = 1106
-reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+acknowledged_loc = 776
+issue = 866
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and projects failed composer admission as a native announcement without moving draft/admission policy into Swift."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
