@@ -570,7 +570,8 @@ fn moving_last_tab_preserves_recency_for_its_live_panes() {
 fn move_only_tab_to_new_window_is_rejected() {
     let mut shell = seed_two_workspaces();
     let tab = shell.snapshot().active_tab;
-    let before = containment_key(&shell);
+    let mut expected = shell.clone();
+    expected.last_error = Some(ShellError::MoveWouldNotChangeContainment);
     assert_eq!(
         shell.apply(ShellAction::MoveTabToNewWindow {
             tab,
@@ -578,7 +579,10 @@ fn move_only_tab_to_new_window_is_rejected() {
         }),
         Err(ShellError::MoveWouldNotChangeContainment)
     );
-    assert_eq!(containment_key(&shell), before);
+    assert_eq!(
+        shell, expected,
+        "only-Tab move rejection must preserve the complete product state"
+    );
 }
 
 #[test]
@@ -614,8 +618,8 @@ fn move_tab_to_new_window_when_sibling_exists() {
 #[test]
 fn unknown_identities_fail_closed() {
     let mut shell = seed_two_workspaces();
-    let before = containment_key(&shell);
-    let generation = shell.containment_generation();
+    let mut expected = shell.clone();
+    expected.last_error = Some(ShellError::UnknownWindow);
     assert_eq!(
         shell.apply(ShellAction::SelectWindow {
             id: WindowId::new(),
@@ -624,14 +628,25 @@ fn unknown_identities_fail_closed() {
         Err(ShellError::UnknownWindow)
     );
     assert_eq!(
+        shell, expected,
+        "unknown Window rejection must preserve the complete product state"
+    );
+
+    shell = seed_two_workspaces();
+    let mut expected = shell.clone();
+    expected.last_error = Some(ShellError::UnknownTab);
+    assert_eq!(
         shell.apply(ShellAction::MoveTabToWindow {
             tab: TabId::new(),
             window: shell.product_window_id().unwrap(),
-            containment_generation: generation,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::UnknownTab)
     );
-    assert_eq!(containment_key(&shell), before);
+    assert_eq!(
+        shell, expected,
+        "unknown Tab rejection must preserve the complete product state"
+    );
 }
 
 #[test]
