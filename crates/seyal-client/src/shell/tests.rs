@@ -129,13 +129,15 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
     shell
         .apply(ShellAction::CloseTab {
             id: two_tabs.active_tab,
+            containment_generation: shell.containment_generation(),
         })
         .expect("close created tab");
     let closed = shell.snapshot();
     assert!(!closed.allows_tab_close);
     assert_eq!(
         shell.apply(ShellAction::CloseTab {
-            id: closed.active_tab
+            id: closed.active_tab,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::CannotCloseLastTab)
     );
@@ -165,16 +167,44 @@ fn select_create_close_tabs_are_authoritative() {
         .expect("select original");
     assert_eq!(shell.snapshot().active_tab, before.active_tab);
     shell
-        .apply(ShellAction::CloseTab { id: created })
+        .apply(ShellAction::CloseTab {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("close created");
     assert_eq!(shell.snapshot().tabs.len(), 1);
     assert_eq!(shell.snapshot().active_tab, before.active_tab);
     assert_eq!(
         shell.apply(ShellAction::CloseTab {
-            id: before.active_tab
+            id: before.active_tab,
+            containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::CannotCloseLastTab)
     );
+}
+
+#[test]
+fn stale_close_tab_is_rejected_without_mutation() {
+    let mut shell = seed_two_workspaces();
+    let tab = shell.snapshot().active_tab;
+    let stale_generation = shell.containment_generation();
+    shell.apply_product_create_tab().expect("create tab");
+    let before_rejected_close = shell.snapshot();
+
+    assert_eq!(
+        shell.apply(ShellAction::CloseTab {
+            id: tab,
+            containment_generation: stale_generation,
+        }),
+        Err(ShellError::StaleContainment)
+    );
+    let after_rejected_close = shell.snapshot();
+    assert_eq!(after_rejected_close.tabs, before_rejected_close.tabs);
+    assert_eq!(
+        after_rejected_close.containment_generation,
+        before_rejected_close.containment_generation
+    );
+    assert!(shell.take_removed_tab_panes().is_empty());
 }
 
 #[test]
