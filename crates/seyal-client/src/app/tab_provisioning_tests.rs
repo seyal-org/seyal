@@ -8,9 +8,7 @@ use seyal_runtime::local_ipc::framing::{
 };
 
 use super::provisioning_apply::negotiated_provisioning_client;
-use super::{
-    AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility, SplitAxis,
-};
+use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility};
 use crate::provisioning::{CreateOutcome, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS};
 
 fn exec(byte: u8) -> ExecutionId {
@@ -226,18 +224,12 @@ fn create_result_is_absorbed_from_registry_client_without_install_wire_client() 
 }
 
 #[test]
-fn production_composition_enables_tab_creation_and_keeps_splits_fail_closed() {
-    let mut root = ApplicationRoot::new();
+fn production_composition_enables_tab_creation_alongside_pane_splitting() {
+    let root = ApplicationRoot::new();
     let snap = root.snapshot();
-    // C2b / #1175: production CreateTab enabled with live attach driver; splits stay off.
+    // C2b / #1175 + C3 / #1217: CreateTab and SplitFocused share the live C1 path.
     assert!(snap.shell.allows_tab_creation);
-    assert!(!snap.shell.allows_pane_splitting);
-    assert_eq!(
-        root.apply(AppAction::SplitFocused {
-            axis: SplitAxis::Right,
-        }),
-        Err(AppError::PaneSplitUnavailable)
-    );
+    assert!(snap.shell.allows_pane_splitting);
 }
 
 #[test]

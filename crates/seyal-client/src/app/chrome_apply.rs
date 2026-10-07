@@ -11,22 +11,9 @@ use crate::navigation::ResourceAddress;
 use crate::palette::PaletteError;
 use crate::pane_layout::{self, SplitPosition};
 use crate::presentation::{PresentationAction, PresentationIdentity};
-use crate::shell::{ShellAction, ShellError, SplitAxis};
+use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
-    pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::SplitFocused { axis })
-            .map_err(|_| AppError::PaneSplitUnavailable)?;
-        // Split focuses the new leaf; record as a user-initiated commit (R6.3).
-        self.activate_focused_pane_authority();
-        self.record_focused_pane_commit();
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
         self.close_pane_with_disposition(id)
     }

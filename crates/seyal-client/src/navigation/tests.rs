@@ -340,6 +340,7 @@ fn rejection_navigation_denied() {
         .apply(ShellAction::SplitPane {
             id: p_multi,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let second = shell_multi
@@ -499,6 +500,7 @@ fn rejection_ambiguous_target() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let second = shell
@@ -887,6 +889,7 @@ fn navigate_execution_rejection_matrix_r8_3() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let second = shell
@@ -991,6 +994,7 @@ fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let second = shell
@@ -1130,6 +1134,7 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
         .apply(ShellAction::SplitPane {
             id: p1,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let created = shell.snapshot().focused_pane;
@@ -1143,7 +1148,10 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
         pane: created,
     };
     shell
-        .apply(ShellAction::ClosePane { id: created })
+        .apply(ShellAction::ClosePane {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("destroy stored target");
     let before = shell.focus_checkpoint();
     // A fresh ordinal rebuild would now offer other rows at the old index.

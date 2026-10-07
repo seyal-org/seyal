@@ -598,8 +598,10 @@ mod root_tests {
         // terminal actions cannot reach the other leaf's bound execution.
         let snap = root.snapshot();
         assert_eq!(snap.shell.focused_pane, created);
-        assert!(snap.execution.is_none());
-        assert_eq!(snap.pane, created);
+        assert_eq!(root.provisioning().recorded_execution(created), None);
+        assert_eq!(snap.pane, bound, "input fence retains the bound Pane authority");
+        assert!(snap.execution.is_some(), "bound sibling remains input authority");
+        assert!(!root.pane_regions()[1].live);
         root.apply(AppAction::Refresh {
             fence: root.fence(),
             alternate_screen: false,

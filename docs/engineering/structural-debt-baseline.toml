@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 987
+acknowledged_loc = 988
 issue = 1117
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction. #1117 keeps Back/Forward apply in focus_history_apply.rs and uses the existing authority activation path to fail closed on unbound focus; pane projection suppresses a live surface until its focused pane has a binding. The 987-line façade remains below the 1000-line hard limit."
+reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade after chrome/composer/palette/recovery/session/accessibility extraction. #1117 keeps Back/Forward apply in focus_history_apply.rs, adds R6.7 focus-history purge/successor routing and fail-closed unbound focus; #1217 registers pane provisioning tests without expanding dispatch."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 769
+acknowledged_loc = 832
 issue = 1117
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1117 hooks the authoritative Pane/Tab destroy path for focus-history R6.7/R6.7a purge→reposition→successor without splitting the cold control path."
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1117 hooks authoritative Pane/Tab destruction for R6.7 history purge→reposition→successor; #1175 adds owning-Controller terminate routing; #1217 carries containment fencing through split rollback without adding a provisioning authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -77,9 +77,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1018
-issue = 1003
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1175 updates production CreateTab enablement assertions here. C2 acceptance cases stay in tab_provisioning_tests.rs."
+ceiling_loc = 1022
+issue = 1117
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1117 threads NavigateHistory::ApplyOnly through N2 regressions. N3 history cases stay in sibling history test modules, with ADR-018 fencing on split/close actions."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -242,9 +242,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1162
+ceiling_loc = 1170
 issue = 1117
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1117 threads NavigateHistory::ApplyOnly through N2 regressions; N3 history coverage lives in sibling history test modules."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1117 threads NavigateHistory::ApplyOnly through N2 regressions. N3 history cases stay in sibling history test modules, with ADR-018 fencing on split/close actions."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -254,9 +254,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 731
-issue = 1175
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1175 enables production allows_tab_creation and documents the macOS-only test helper for force policy flips without splitting tree/workspace ownership."
+acknowledged_loc = 836
+issue = 1217
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1122 adds Tab-scoped zoom and ADR-018 containment fences, while #1217 enables production SplitFocused alongside CreateTab without splitting tree/workspace ownership."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
