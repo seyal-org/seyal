@@ -186,6 +186,11 @@ impl ApplicationRoot {
         // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
         // product close path — surfaces do not scan history themselves.
         self.record_destroyed_tab_focus(id, was_active);
+        if was_active {
+            // Closing the active Tab selects a successor; restore that Pane's
+            // retained binding as the ApplicationRoot input authority.
+            self.activate_focused_pane_authority();
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
