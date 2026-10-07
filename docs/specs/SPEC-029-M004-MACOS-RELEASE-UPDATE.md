@@ -58,9 +58,12 @@ non-goals in §20.
 
 ## 3. Invariants
 
-- **I1.** An update replaces only `Seyal.app`. The updater writes only its
-  staging cache (keyed by bundle identifier `dev.seyal.Seyal`) and the target
-  bundle path.
+- **I1.** An update replaces only `Seyal.app`. The out-of-process
+  updater/installer tree (`Autoupdate`, `Updater.app`, and spawned installers)
+  writes only its Sparkle staging cache (keyed by bundle identifier
+  `dev.seyal.Seyal`) and the target bundle path. The host GUI may persist
+  Sparkle preference keys only in its own user-defaults domain as a derived
+  adapter cache (ADR-022 §9); Rust remains authoritative.
 - **I2.** The updater and installer process tree (Sparkle `Autoupdate`,
   `Updater.app` and any installer it spawns) makes no write, rename or delete
   under: `~/Library/Application Support/dev.seyal`,
