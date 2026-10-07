@@ -187,8 +187,6 @@ impl ApplicationRoot {
         // product close path — surfaces do not scan history themselves.
         self.record_destroyed_tab_focus(id, was_active);
         if was_active {
-            // Closing the active Tab selects a successor; restore that Pane's
-            // retained binding as the ApplicationRoot input authority.
             self.activate_focused_pane_authority();
         }
         let _ = self
