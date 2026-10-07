@@ -160,6 +160,7 @@ fn select_create_close_tabs_are_authoritative() {
     shell
         .apply(ShellAction::SelectTab {
             id: before.active_tab,
+            containment_generation: shell.containment_generation(),
         })
         .expect("select original");
     assert_eq!(shell.snapshot().active_tab, before.active_tab);
@@ -289,7 +290,10 @@ fn stale_identities_fail_closed_and_leave_state() {
         Err(ShellError::UnknownWorkspace)
     );
     assert_eq!(
-        shell.apply(ShellAction::SelectTab { id: TabId::new() }),
+        shell.apply(ShellAction::SelectTab {
+            id: TabId::new(),
+            containment_generation: shell.containment_generation(),
+        }),
         Err(ShellError::UnknownTab)
     );
     assert_eq!(
