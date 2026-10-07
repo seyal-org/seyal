@@ -22,10 +22,9 @@ fn unpresented_adopt_emits_attach_without_bind() {
 #[test]
 fn unpresented_dispose_emits_attach_then_terminate_once() {
     let mut session = ProvisioningSession::new();
-    let pane = PaneId::new();
     let execution = exec(41);
     let effects = session
-        .begin_unpresented_dispose(pane, execution)
+        .begin_unpresented_dispose(execution)
         .expect("dispose");
     let ProvisioningEffect::AttachController {
         owner,
@@ -52,11 +51,9 @@ fn unpresented_dispose_emits_attach_then_terminate_once() {
 #[test]
 fn duplicate_unpresented_dispose_does_not_queue_second_attach_or_terminate() {
     let mut session = ProvisioningSession::new();
-    let first_pane = PaneId::new();
-    let second_pane = PaneId::new();
     let execution = exec(42);
     let effects = session
-        .begin_unpresented_dispose(first_pane, execution)
+        .begin_unpresented_dispose(execution)
         .expect("first disposal begins");
     let [ProvisioningEffect::AttachController {
         owner,
@@ -71,7 +68,7 @@ fn duplicate_unpresented_dispose_does_not_queue_second_attach_or_terminate() {
         .expect("one pending dispose attach");
 
     assert_eq!(
-        session.begin_unpresented_dispose(second_pane, execution),
+        session.begin_unpresented_dispose(execution),
         Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState)),
         "repeated dispose while attach is pending must not allocate another request"
     );
@@ -92,11 +89,10 @@ fn duplicate_unpresented_dispose_does_not_queue_second_attach_or_terminate() {
 #[test]
 fn unpresented_adopt_rejects_execution_with_pending_dispose() {
     let mut session = ProvisioningSession::new();
-    let dispose_pane = PaneId::new();
     let adopt_pane = PaneId::new();
     let execution = exec(43);
     let effects = session
-        .begin_unpresented_dispose(dispose_pane, execution)
+        .begin_unpresented_dispose(execution)
         .expect("dispose begins");
     let [ProvisioningEffect::AttachController {
         owner,
@@ -163,7 +159,6 @@ fn duplicate_unpresented_adopt_does_not_queue_second_attach() {
 fn unpresented_dispose_rejects_execution_with_pending_adopt() {
     let mut session = ProvisioningSession::new();
     let adopt_pane = PaneId::new();
-    let dispose_pane = PaneId::new();
     let execution = exec(44);
     let effects = session
         .begin_unpresented_adopt(adopt_pane, execution)
@@ -182,7 +177,7 @@ fn unpresented_dispose_rejects_execution_with_pending_adopt() {
 
     assert_eq!(*attached, execution);
     assert_eq!(
-        session.begin_unpresented_dispose(dispose_pane, execution),
+        session.begin_unpresented_dispose(execution),
         Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState)),
         "dispose must not race a pending adopt of the same execution"
     );
@@ -190,18 +185,15 @@ fn unpresented_dispose_rejects_execution_with_pending_adopt() {
         session.pending_attach_request_id(owner, execution),
         Some(request_id)
     );
-    assert!(session.pending_intent(dispose_pane).is_none());
-    assert!(session.owner_for_pane(dispose_pane).is_none());
 }
 
 #[test]
 fn unpresented_adopt_rejects_execution_until_dispose_result_arrives() {
     let mut session = ProvisioningSession::new();
-    let dispose_pane = PaneId::new();
     let adopt_pane = PaneId::new();
     let execution = exec(45);
     let effects = session
-        .begin_unpresented_dispose(dispose_pane, execution)
+        .begin_unpresented_dispose(execution)
         .expect("dispose begins");
     let [ProvisioningEffect::AttachController { owner, .. }] = effects.as_slice() else {
         panic!("expected one pending dispose attach");

@@ -461,10 +461,16 @@ impl ApplicationRoot {
         for effect in effects {
             match effect {
                 ProvisioningEffect::Detach { .. } => {
-                    let _ = self.shell.release_execution(pane);
-                    self.clear_authority_for_pane(pane);
+                    if let Some(pane) = pane {
+                        let _ = self.shell.release_execution(pane);
+                        self.clear_authority_for_pane(pane);
+                    } else {
+                        #[cfg(target_os = "macos")]
+                        self.dispose_clients.remove(&intent.owner);
+                    }
                     if matches!(outcome, TerminateOutcome::TerminationRequested)
                         && let Some(execution) = disposed_execution
+                        && pane.is_none()
                     {
                         let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
                     }
@@ -488,8 +494,15 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     fn take_wire_terminate_result(&mut self) -> Result<Option<TerminateExecutionResult>, AppError> {
-        if let Some(client) = self.wire_client.as_mut() {
-            return Ok(client.take_terminate_result());
+        if let Some(client) = self.wire_client.as_mut()
+            && let Some(result) = client.take_terminate_result()
+        {
+            return Ok(Some(result));
+        }
+        for client in self.dispose_clients.values_mut() {
+            if let Some(result) = client.take_terminate_result() {
+                return Ok(Some(result));
+            }
         }
         // Prefer the focused/authority pane client (may be a second Controller).
         if let Some(pane) = self.authority.map(|authority| authority.pane)
@@ -699,6 +712,13 @@ impl ApplicationRoot {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Result<(), AppError> {
+        if let ProvisioningEffect::SendTerminate { owner, .. } = effect
+            && let Some(client) = self.dispose_clients.get_mut(&owner)
+        {
+            return client
+                .submit_terminate_execution_with_id(request_id, execution, attachment)
+                .map_err(client_error);
+        }
         if !self.has_wire_client() {
             let _ = effect;
             return Err(AppError::NoLiveClient);

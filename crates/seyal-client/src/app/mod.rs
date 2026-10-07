@@ -477,6 +477,10 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Dispose-only Controller clients, keyed by synthetic owner and never
+    /// associated with a shell Pane or display handle.
+    #[cfg(target_os = "macos")]
+    dispose_clients: HashMap<crate::provisioning::ConnectionOwner, LocalDisplayClient>,
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
@@ -553,6 +557,8 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            dispose_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
@@ -597,7 +603,10 @@ impl ApplicationRoot {
     /// create/attach/terminate progress (not every Candidate-D frame).
     #[cfg(target_os = "macos")]
     pub(crate) fn needs_provisioning_drive(&self) -> bool {
-        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
+        if self.live_client_handle_for_test().is_none()
+            && self.wire_client.is_none()
+            && self.dispose_clients.is_empty()
+        {
             return false;
         }
         self.pending_live_attach.is_some()

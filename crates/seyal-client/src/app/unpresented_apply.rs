@@ -103,10 +103,9 @@ impl ApplicationRoot {
         if !self.shell.live_unpresented(workspace).contains(&execution) {
             return Err(AppError::ExecutionNotUnpresented);
         }
-        let pane = self.shell.snapshot().focused_pane;
         let effects = self
             .provisioning
-            .begin_unpresented_dispose(pane, execution)
+            .begin_unpresented_dispose(execution)
             .map_err(|_| AppError::ProvisioningRejected)?;
         self.dispatch_provisioning_effects(effects)
     }

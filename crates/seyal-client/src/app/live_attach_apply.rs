@@ -18,7 +18,7 @@ use crate::provisioning::{ConnectionOwner, ProvisioningEffect, ProvisioningFailu
 pub(super) struct PendingLiveAttach {
     pub owner: ConnectionOwner,
     pub request_id: u64,
-    pub pane: PaneId,
+    pub pane: Option<PaneId>,
     pub rx: mpsc::Receiver<Result<LocalDisplayClient, ClientError>>,
 }
 
@@ -61,8 +61,7 @@ impl ApplicationRoot {
             .ok_or(AppError::ProvisioningRejected)?;
         let pane = self
             .provisioning
-            .pending_intent_for_request(request_id)
-            .map(|intent| intent.pane)
+            .pending_attach_pane_by_request_id(request_id)
             .ok_or(AppError::ProvisioningRejected)?;
 
         if self.inject_live_attach_failures > 0 {
@@ -137,7 +136,15 @@ impl ApplicationRoot {
         let pending = self.pending_live_attach.take().expect("pending attach");
         let completed = match result {
             Ok(client) => {
-                self.complete_live_controller_attach(pending.pane, pending.request_id, client)
+                if let Some(pane) = pending.pane {
+                    self.complete_live_controller_attach(pane, pending.request_id, client)
+                } else {
+                    self.complete_dispose_controller_attach(
+                        pending.owner,
+                        pending.request_id,
+                        client,
+                    )
+                }
             }
             Err(error) => self.fail_live_controller_attach(
                 pending.owner,
@@ -223,7 +230,7 @@ impl ApplicationRoot {
         &mut self,
         owner: crate::provisioning::ConnectionOwner,
         request_id: u64,
-        pane: PaneId,
+        pane: Option<PaneId>,
         error: ClientError,
     ) -> Result<(), AppError> {
         let failure = match error {
@@ -235,11 +242,35 @@ impl ApplicationRoot {
             .provisioning
             .apply_attach_failure(owner, request_id, still_listed);
         if effects.is_empty() {
-            self.provisioning.note_rejected_without_retry(pane, failure);
+            if let Some(pane) = pane {
+                self.provisioning.note_rejected_without_retry(pane, failure);
+            }
         } else {
             self.dispatch_live_provisioning_effects(effects)?;
         }
         Err(map_client_error(error))
+    }
+
+    fn complete_dispose_controller_attach(
+        &mut self,
+        owner: ConnectionOwner,
+        request_id: u64,
+        client: LocalDisplayClient,
+    ) -> Result<(), AppError> {
+        if client.role() != Role::Controller {
+            return self.fail_live_controller_attach(
+                owner,
+                request_id,
+                None,
+                ClientError::UnsupportedInteractiveCapability,
+            );
+        }
+        let attachment = client.attachment_id();
+        self.dispose_clients.insert(owner, client);
+        let effects = self
+            .provisioning
+            .apply_attach_success(owner, request_id, attachment);
+        self.dispatch_live_provisioning_effects(effects)
     }
 
     /// Install or replace per-pane Controller authority; activate when focused.

@@ -194,11 +194,25 @@ impl ApplicationRoot {
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;
         self.poll_unfocused_pane_clients();
+        self.poll_dispose_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn poll_dispose_clients(&mut self) {
+        let lost: Vec<_> = self
+            .dispose_clients
+            .iter_mut()
+            .filter_map(|(owner, client)| client.poll_prepare().is_err().then_some(*owner))
+            .collect();
+        for owner in lost {
+            self.dispose_clients.remove(&owner);
+            self.provisioning.on_connection_lost(owner, None);
+        }
     }
 
     /// Ensure the create connection has flushed/read control frames when it is
