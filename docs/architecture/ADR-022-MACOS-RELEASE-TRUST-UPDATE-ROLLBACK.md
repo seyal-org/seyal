@@ -460,18 +460,22 @@ in SPEC-029 §17–§18.
 Prototypes run on an isolated non-mergeable branch with throwaway keys,
 identities and feed; their outputs graduate only as evidence.
 
-**Issue #688 remains open after publication or acceptance of this document
-PR.** This PR is a refinement/evidence contribution and must reference the
-Issue (`Refs #688`), not close it. The decision-evidence gaps above remain
-outstanding: the full G2 soak, the Developer ID lost-key G5 rerun, and a
-non-interactive production-like HTTPS feed trust result. Close #688 only after
-those Issue-specific evidence gates are satisfied and its owner/maintainer
-confirms the Issue's acceptance criteria. Do not use #677 release-candidate
-gates as a reason to block publication of these Proposed documents; equally,
-do not claim #677 or release readiness from their publication. Acceptance
-does not wait for #832; §11 states what #832, SPEC-004 and SPEC-003 §16 must
-satisfy. #677 update work stays not-Ready until those obligations are
-accepted.
+**Issue #688 remains open after publication or acceptance of this
+document PR.** This PR is a refinement/evidence contribution and must reference
+the Issue (`Refs #688`), not close it. Issue-specific evidence remains
+outstanding: the full G2 soak; a Developer ID lost-key G5 rerun; a
+different-Apple-Team G5 case (the current ad-hoc result does not establish
+this); non-interactive production-like HTTPS trust; interrupted download and
+install; corrupted archive; downgrade/rollback; and the Issue's measurements
+for package size, startup impact, update-check cost, install/update time,
+rollback reliability, and network/background overhead. The existing live
+Runtime prototype does not claim a live-PTY handoff. Close #688 only after
+these required experiments and measurements are reported and its
+owner/maintainer confirms the Issue's acceptance criteria. These Issue gates
+do not block publishing the Proposed documents, and publication does not
+claim #688, #677, or release qualification complete. Acceptance does not wait
+for #832; §11 states what #832, SPEC-004 and SPEC-003 §16 must satisfy.
+#677 update work stays not-Ready until those obligations are accepted.
 
 ## Not in this ADR
 
