@@ -57,14 +57,27 @@ fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
     );
     let mut split = identity_fence(25, &seyal_app_snapshot(handle));
     split.reserved = 1;
-    assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
+    assert_eq!(unsafe { seyal_app_apply(handle, &split) }, 0);
+    let after_split = seyal_app_shell(handle);
+    assert_eq!(after_split.pane_count, 2);
+    assert_ne!(
+        after_split.flags & SHELL_FLAG_ALLOWS_PANE_SPLITTING,
+        0,
+        "production composition advertises pane splitting after C3"
+    );
 
-    let active_pane = seyal_app_shell_row(handle, 2, 0);
+    let created_pane = seyal_app_shell_row(handle, 2, 1);
     let mut close_pane = identity_fence(26, &seyal_app_snapshot(handle));
-    close_pane.target_execution_lo = active_pane.id_lo;
-    close_pane.target_execution_hi = active_pane.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, -4);
+    close_pane.target_execution_lo = created_pane.id_lo;
+    close_pane.target_execution_hi = created_pane.id_hi;
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, 0);
+    assert_eq!(seyal_app_shell(handle).pane_count, 1);
+
+    let sole_pane = seyal_app_shell_row(handle, 2, 0);
+    let mut close_last_pane = identity_fence(26, &seyal_app_snapshot(handle));
+    close_last_pane.target_execution_lo = sole_pane.id_lo;
+    close_last_pane.target_execution_hi = sole_pane.id_hi;
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_last_pane) }, -4);
     assert_eq!(seyal_app_last_error(handle), 32, "CannotCloseLastPane");
 
     let created = seyal_app_shell_row(handle, 1, 1);
@@ -95,8 +108,9 @@ fn shell_projection_is_one_local_workspace() {
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
     assert_eq!(
-        shell.flags, SHELL_FLAG_ALLOWS_TAB_CREATION,
-        "production advertises tab creation after C2b; splits stay off"
+        shell.flags,
+        SHELL_FLAG_ALLOWS_TAB_CREATION | SHELL_FLAG_ALLOWS_PANE_SPLITTING,
+        "production advertises tab creation and pane splitting after C2b/C3"
     );
 
     let workspace = seyal_app_shell_row(handle, 0, 0);
