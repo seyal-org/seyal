@@ -1041,3 +1041,182 @@ fn rejection_is_atomic_including_unknown_tab_move() {
         "rejection preserves the complete product state"
     );
 }
+
+#[test]
+fn close_focused_pane_records_successor_before_other_workspace_recency() {
+    let mut shell = seed_two_workspaces();
+    let workspace = WorkspaceId::m001_default();
+    let other = other_workspace();
+    let closing_pane = shell.snapshot().focused_pane;
+    let other_pane = shell
+        .workspaces
+        .iter()
+        .find(|item| item.id == other)
+        .and_then(|item| item.tabs().next())
+        .map(|tab| tab.focused)
+        .expect("other workspace pane");
+
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let successor = shell.snapshot().focused_pane;
+
+    // Arrange a valid history where the removed Pane is newest and the
+    // other Workspace is older than the close successor.
+    shell.focus_history.purge_if(|_| true);
+    shell.focus_history.record(successor);
+    shell.focus_history.record(other_pane);
+    shell.focus_history.record(closing_pane);
+    assert_eq!(shell.active_workspace_id(), workspace);
+
+    shell
+        .apply(ShellAction::ClosePane {
+            id: closing_pane,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+
+    assert_eq!(shell.focus_history.panes().first(), Some(&successor));
+    assert_eq!(shell.active_workspace_id(), workspace);
+    assert_eq!(shell.snapshot().focused_pane, successor);
+}
+
+#[test]
+fn close_active_tab_records_successor_before_other_workspace_recency() {
+    let mut shell = seed_two_workspaces();
+    let workspace = WorkspaceId::m001_default();
+    let other = other_workspace();
+    let successor_tab = shell.snapshot().active_tab;
+    let successor_pane = shell.snapshot().focused_pane;
+    let other_pane = shell
+        .workspaces
+        .iter()
+        .find(|item| item.id == other)
+        .and_then(|item| item.tabs().next())
+        .map(|tab| tab.focused)
+        .expect("other workspace pane");
+
+    shell.apply_product_create_tab().unwrap();
+    let closing_tab = shell.snapshot().active_tab;
+    let closing_pane = shell.snapshot().focused_pane;
+
+    shell.focus_history.purge_if(|_| true);
+    shell.focus_history.record(successor_pane);
+    shell.focus_history.record(other_pane);
+    shell.focus_history.record(closing_pane);
+    assert_eq!(shell.active_workspace_id(), workspace);
+
+    shell
+        .apply(ShellAction::CloseTab {
+            id: closing_tab,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+
+    assert_eq!(shell.focus_history.panes().first(), Some(&successor_pane));
+    assert_eq!(shell.active_workspace_id(), workspace);
+    assert_eq!(shell.snapshot().active_tab, successor_tab);
+    assert_eq!(shell.snapshot().focused_pane, successor_pane);
+}
+
+#[test]
+fn workspace_activation_falls_back_to_retained_active_window_after_history_eviction() {
+    let mut shell = seed_two_workspaces();
+    let workspace = WorkspaceId::m001_default();
+    shell
+        .apply(ShellAction::CreateWindow {
+            workspace,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let recently_active = shell.product_window_id().unwrap();
+
+    // Evict every live Pane identity from the bounded history.
+    for _ in 0..80 {
+        shell.focus_history.record(PaneId::new());
+    }
+
+    assert_eq!(
+        shell.derived_mru_window(workspace),
+        Some(recently_active),
+        "re-entry should use the Workspace's retained active Window"
+    );
+}
+
+#[test]
+fn rejected_structural_actions_preserve_full_state() {
+    let shell = seed_two_workspaces();
+    let workspace = WorkspaceId::m001_default();
+    let other = other_workspace();
+    let tab = shell.snapshot().active_tab;
+    let window = shell.product_window_id().unwrap();
+    let other_window = shell
+        .workspaces
+        .iter()
+        .find(|item| item.id == other)
+        .and_then(|item| item.active_window)
+        .expect("other workspace window");
+    let generation = shell.containment_generation();
+    let cases = [
+        (
+            ShellAction::MoveTabBefore {
+                tab,
+                before: Some(TabId::new()),
+                window,
+                containment_generation: generation,
+            },
+            ShellError::UnknownTab,
+        ),
+        (
+            ShellAction::MoveTabToWindow {
+                tab,
+                window: WindowId::new(),
+                containment_generation: generation,
+            },
+            ShellError::UnknownWindow,
+        ),
+        (
+            ShellAction::MoveTabToWindow {
+                tab,
+                window: other_window,
+                containment_generation: generation,
+            },
+            ShellError::CrossWorkspaceMove,
+        ),
+        (
+            ShellAction::CreateWindow {
+                workspace: WorkspaceId::from_bytes([0x55; 16]),
+                containment_generation: generation,
+            },
+            ShellError::UnknownWorkspace,
+        ),
+    ];
+
+    for (action, error) in cases {
+        let mut probe = shell.clone();
+        let mut expected = shell.clone();
+        expected.last_error = Some(error);
+        assert_eq!(probe.apply(action), Err(error), "{action:?}");
+        assert_eq!(probe, expected, "rejection changed state: {action:?}");
+    }
+
+    let mut disabled = seed_two_workspaces();
+    disabled.allows_tab_creation = false;
+    let window = disabled.product_window_id().unwrap();
+    let mut expected = disabled.clone();
+    expected.last_error = Some(ShellError::TabCreationUnavailable);
+    assert_eq!(
+        disabled.apply(ShellAction::CreateTab {
+            window,
+            containment_generation: disabled.containment_generation(),
+        }),
+        Err(ShellError::TabCreationUnavailable)
+    );
+    assert_eq!(
+        disabled, expected,
+        "disabled CreateTab rejection changed state"
+    );
+}
