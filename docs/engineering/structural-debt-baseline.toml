@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 820
+acknowledged_loc = 823
 issue = 1117
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane; #1117 adds split rollback and close-path focus-history lifecycle hooks, with shared history cleanup delegated to focus_history_apply.rs."
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane; #1117 adds split rollback, close-path focus-history lifecycle hooks, and active-close successor authority restoration, with shared history cleanup delegated to focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
