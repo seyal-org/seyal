@@ -1140,9 +1140,11 @@ fn workspace_activation_falls_back_to_retained_active_window_after_history_evict
         shell.focus_history.record(PaneId::new());
     }
 
+    shell.apply_activate_workspace(other_workspace()).unwrap();
+    shell.apply_activate_workspace(workspace).unwrap();
     assert_eq!(
-        shell.derived_mru_window(workspace),
-        Some(recently_active),
+        shell.product_window_id().unwrap(),
+        recently_active,
         "re-entry should use the Workspace's retained active Window"
     );
 }
