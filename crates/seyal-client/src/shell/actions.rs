@@ -92,7 +92,7 @@ impl ShellState {
         }
         self.workspace(workspace)
             .ok()
-            .and_then(|item| item.windows.first().map(|window| window.id))
+            .and_then(|item| item.active_window)
     }
 
     pub(super) fn create_window(
