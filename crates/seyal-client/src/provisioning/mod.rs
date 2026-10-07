@@ -820,6 +820,14 @@ impl ProvisioningSession {
         self.pending_kind.insert((owner, request_id), kind);
     }
 
+    /// Keep a given execution under one in-flight provisioning/disposition
+    /// operation until its attach, bind, or terminate result is applied.
+    fn has_pending_operation_for_execution(&self, execution: ExecutionId) -> bool {
+        self.pending_by_key
+            .values()
+            .any(|intent| execution_from_phase(intent.phase) == Some(execution))
+    }
+
     fn queue_terminate(
         &mut self,
         pane: PaneId,
