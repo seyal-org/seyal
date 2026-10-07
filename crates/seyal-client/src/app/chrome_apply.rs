@@ -10,7 +10,10 @@ use crate::shell::{ShellAction, ShellError, SplitAxis};
 impl ApplicationRoot {
     pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::SplitFocused { axis })
+            .apply(ShellAction::SplitFocused {
+                axis,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(|_| AppError::PaneSplitUnavailable)?;
         let _ = self
             .chrome
