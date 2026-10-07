@@ -67,7 +67,7 @@ fn seed_two_workspaces() -> ShellState {
 }
 
 #[test]
-fn production_shell_enables_tab_creation_and_keeps_splits_fail_closed() {
+fn production_shell_enables_tab_creation_and_pane_splitting() {
     let mut shell = ShellState::m001_local("/tmp/seyal");
     let snap = shell.snapshot();
     assert_eq!(snap.workspaces.len(), 1);
@@ -77,9 +77,9 @@ fn production_shell_enables_tab_creation_and_keeps_splits_fail_closed() {
     assert_eq!(snap.panes.len(), 1);
     assert_eq!(snap.panes[0].title, "Pane 1");
     assert!(snap.panes[0].allows_implicit_bootstrap);
-    // C2b / #1175: production CreateTab is enabled; splits stay fail-closed until C3.
+    // C2b / #1175 + C3 / #1217: production CreateTab and SplitFocused are enabled.
     assert!(shell.allows_tab_creation());
-    assert!(!shell.allows_pane_splitting());
+    assert!(shell.allows_pane_splitting());
     assert!(!snap.allows_tab_close);
     assert!(!snap.allows_pane_close);
     shell
@@ -87,15 +87,15 @@ fn production_shell_enables_tab_creation_and_keeps_splits_fail_closed() {
         .expect("production shell admits CreateTab");
     assert_eq!(shell.snapshot().tabs.len(), 2);
     let focused = shell.snapshot().focused_pane;
-    assert_eq!(
-        shell.apply(ShellAction::SplitPane {
+    shell
+        .apply(ShellAction::SplitPane {
             id: focused,
             axis: SplitAxis::Right,
             containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::PaneSplitUnavailable)
-    );
-    assert_eq!(shell.snapshot().layout, LayoutDescription::Single);
+        })
+        .expect("production shell admits SplitPane");
+    assert_ne!(shell.snapshot().layout, LayoutDescription::Single);
+    assert_eq!(shell.snapshot().panes.len(), 2);
 }
 
 #[test]
