@@ -83,7 +83,7 @@ fn production_shell_enables_tab_creation_and_pane_splitting() {
     assert!(!snap.allows_tab_close);
     assert!(!snap.allows_pane_close);
     shell
-        .apply(ShellAction::CreateTab)
+        .apply_product_create_tab()
         .expect("production shell admits CreateTab");
     assert_eq!(shell.snapshot().tabs.len(), 2);
     let focused = shell.snapshot().focused_pane;
@@ -105,7 +105,7 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
     assert!(!single.allows_tab_close);
     assert!(!single.allows_pane_close);
 
-    shell.apply(ShellAction::CreateTab).expect("tabs allowed");
+    shell.apply_product_create_tab().expect("tabs allowed");
     let two_tabs = shell.snapshot();
     assert!(two_tabs.allows_tab_close);
     assert!(!two_tabs.allows_pane_close);
@@ -152,7 +152,7 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
 fn select_create_close_tabs_are_authoritative() {
     let mut shell = seed_two_workspaces();
     let before = shell.snapshot();
-    shell.apply(ShellAction::CreateTab).expect("tabs allowed");
+    shell.apply_product_create_tab().expect("tabs allowed");
     let after_create = shell.snapshot();
     assert_eq!(after_create.tabs.len(), 2);
     assert_ne!(after_create.active_tab, before.active_tab);
@@ -271,9 +271,7 @@ fn workspace_selection_switches_tab_inventory() {
     let mut shell = seed_two_workspaces();
     let first = shell.snapshot();
     shell
-        .apply(ShellAction::SelectWorkspace {
-            id: other_workspace(),
-        })
+        .apply_activate_workspace(other_workspace())
         .expect("select second workspace");
     let second = shell.snapshot();
     assert_eq!(second.active_workspace, other_workspace());
@@ -287,9 +285,7 @@ fn stale_identities_fail_closed_and_leave_state() {
     let mut shell = seed_two_workspaces();
     let before = shell.snapshot();
     assert_eq!(
-        shell.apply(ShellAction::SelectWorkspace {
-            id: WorkspaceId::from_bytes([0xff; 16])
-        }),
+        shell.apply_activate_workspace(WorkspaceId::from_bytes([0xff; 16])),
         Err(ShellError::UnknownWorkspace)
     );
     assert_eq!(
