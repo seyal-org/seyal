@@ -395,6 +395,73 @@ fn two_tab_bound_root() -> (
 }
 
 #[test]
+fn open_attention_packed_reveal_activates_focused_tab_authority() {
+    let (mut root, _t1, t2, _p1, p2, _exec1, exec2) = two_tab_bound_root();
+    let workspace = root.snapshot().shell.active_workspace;
+    let id = AttentionId::new("packed-authority-target");
+    let mut item = crate::chrome::AttentionItem::projection(
+        id.clone(),
+        "Attention",
+        "target execution",
+        Some(workspace),
+        Some(t2),
+        None,
+    );
+    item.resource_address = Some(crate::navigation::pack_resource_address(
+        ResourceAddress::Pane {
+            workspace,
+            tab: t2,
+            pane: p2,
+        },
+    ));
+    root.apply(AppAction::ReplaceChrome {
+        fence: root.fence(),
+        agents: vec![],
+        attention: vec![item],
+    })
+    .unwrap();
+
+    root.apply(AppAction::OpenAttention {
+        fence: root.fence(),
+        id,
+    })
+    .unwrap();
+
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().execution, Some(exec2));
+}
+
+#[test]
+fn open_attention_fallback_tab_focus_activates_focused_tab_authority() {
+    let (mut root, _t1, t2, _p1, p2, _exec1, exec2) = two_tab_bound_root();
+    let workspace = root.snapshot().shell.active_workspace;
+    let id = AttentionId::new("fallback-authority-target");
+    let item = crate::chrome::AttentionItem::projection(
+        id.clone(),
+        "Attention",
+        "target execution",
+        Some(workspace),
+        Some(t2),
+        None,
+    );
+    root.apply(AppAction::ReplaceChrome {
+        fence: root.fence(),
+        agents: vec![],
+        attention: vec![item],
+    })
+    .unwrap();
+
+    root.apply(AppAction::OpenAttention {
+        fence: root.fence(),
+        id,
+    })
+    .unwrap();
+
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().execution, Some(exec2));
+}
+
+#[test]
 fn history_back_and_forward_move_input_authority_with_tab_focus() {
     let (mut root, _t1, _t2, p1, p2, exec1, exec2) = two_tab_bound_root();
     let seq = root.snapshot().focus_history_seq.expect("cursor seq");
