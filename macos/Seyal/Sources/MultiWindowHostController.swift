@@ -125,10 +125,16 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         }
         window.delegate = nil
         window.contentView = nil
-        // orderOut (not close): XCTest hosts may lack AppDelegate, and closing
-        // the last NSWindow would terminate the test process. Production quit
-        // still proceeds via reply(toApplicationShouldTerminate:).
-        window.orderOut(nil)
+        if NSApp.delegate is AppDelegate {
+            // In production AppDelegate keeps Seyal running after the last
+            // window closes. Remove the NSWindow from AppKit's window list so
+            // last-window-close and Dock reopen observe the true zero-window state.
+            window.close()
+        } else {
+            // Some component-test hosts lack AppDelegate; ordering out avoids
+            // XCTest termination while still removing the realization.
+            window.orderOut(nil)
+        }
     }
 
     private func orderFrontMakeKey(_ key: WindowKey) {

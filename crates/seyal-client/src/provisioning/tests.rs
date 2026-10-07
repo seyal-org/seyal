@@ -1,6 +1,9 @@
 //! ADR-017 §6.3/§7 and Issue #1136 acceptance coverage for portable provisioning.
 
 use seyal_core::{AttachmentId, ExecutionId, PaneId};
+
+#[path = "tests/unpresented.rs"]
+mod unpresented;
 use seyal_protocol::framing::ErrorCode;
 
 use super::{
@@ -767,53 +770,6 @@ fn dispose_attach_failure_never_retries() {
     assert!(effects.is_empty());
     assert!(session.is_unreferenced(execution));
     assert_eq!(session.automatic_retries(), 0);
-}
-
-#[test]
-fn unpresented_adopt_emits_attach_without_bind() {
-    let mut session = ProvisioningSession::new();
-    let pane = PaneId::new();
-    let execution = exec(40);
-    let effects = session
-        .begin_unpresented_adopt(pane, execution)
-        .expect("adopt");
-    assert!(matches!(
-        effects.as_slice(),
-        [ProvisioningEffect::AttachController { execution: parked, .. }]
-            if *parked == execution
-    ));
-    assert!(session.is_unreferenced(execution));
-    assert!(session.recorded_execution(pane).is_none());
-}
-
-#[test]
-fn unpresented_dispose_emits_attach_then_terminate_once() {
-    let mut session = ProvisioningSession::new();
-    let pane = PaneId::new();
-    let execution = exec(41);
-    let effects = session
-        .begin_unpresented_dispose(pane, execution)
-        .expect("dispose");
-    let ProvisioningEffect::AttachController {
-        owner,
-        execution: parked,
-    } = effects[0]
-    else {
-        panic!("expected AttachController");
-    };
-    assert_eq!(parked, execution);
-    let request_id = session
-        .pending_attach_request_id(owner, execution)
-        .expect("pending dispose attach");
-    let effects = session.apply_attach_success(owner, request_id, attachment(7));
-    assert!(matches!(
-        effects.as_slice(),
-        [ProvisioningEffect::SendTerminate {
-            execution: terminated,
-            ..
-        }] if *terminated == execution
-    ));
-    assert!(session.is_unreferenced(execution));
 }
 
 #[test]
