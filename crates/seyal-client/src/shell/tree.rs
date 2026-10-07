@@ -141,6 +141,26 @@ impl PaneTree {
         }
     }
 
+    /// Exchange leaf `PaneId`s in place (SPEC-025 §5.3). Topology nodes unchanged.
+    pub(super) fn swapping_leaves(&self, a: PaneId, b: PaneId) -> PaneTree {
+        match self {
+            Self::Leaf(id) if *id == a => Self::Leaf(b),
+            Self::Leaf(id) if *id == b => Self::Leaf(a),
+            Self::Leaf(_) => self.clone(),
+            Self::Split {
+                axis,
+                first,
+                second,
+                ratio,
+            } => Self::Split {
+                axis: *axis,
+                first: Box::new(first.swapping_leaves(a, b)),
+                second: Box::new(second.swapping_leaves(a, b)),
+                ratio: *ratio,
+            },
+        }
+    }
+
     pub(super) fn layout_description(&self) -> LayoutDescription {
         match self {
             Self::Leaf(_) => LayoutDescription::Single,
