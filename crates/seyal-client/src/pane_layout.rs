@@ -599,8 +599,14 @@ mod root_tests {
         let snap = root.snapshot();
         assert_eq!(snap.shell.focused_pane, created);
         assert_eq!(root.provisioning().recorded_execution(created), None);
-        assert_eq!(snap.pane, bound, "input fence retains the bound Pane authority");
-        assert!(snap.execution.is_some(), "bound sibling remains input authority");
+        assert_eq!(
+            snap.pane, bound,
+            "input fence retains the bound Pane authority"
+        );
+        assert!(
+            snap.execution.is_some(),
+            "bound sibling remains input authority"
+        );
         assert!(!root.pane_regions()[1].live);
         root.apply(AppAction::Refresh {
             fence: root.fence(),
