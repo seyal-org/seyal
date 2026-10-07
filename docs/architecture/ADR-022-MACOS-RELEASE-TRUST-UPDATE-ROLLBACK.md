@@ -253,11 +253,15 @@ Seyal.app/
    hold. Team-continuity Skip is mandatory before install.
 4. **Framework-managed swap.** After install either the old valid app or the
    new valid app is selected; never a half-valid bundle.
-5. **Updater write authority** is limited to its staging cache (keyed by the
-   app bundle identifier `dev.seyal.Seyal`) and the target bundle path. It
-   never touches `~/Library/Application Support/dev.seyal`,
+5. **Out-of-process updater/installer write authority** is limited to the
+   Sparkle staging cache (keyed by app bundle identifier `dev.seyal.Seyal`)
+   and the target bundle path. The `Autoupdate`, `Updater.app`, and installer
+   subprocesses never touch `~/Library/Application Support/dev.seyal`,
    `~/Library/Caches/dev.seyal`, the Runtime directory or socket,
    `~/.config/seyal` / `SEYAL_CONFIG`, the keychain, or any persistence store.
+   The host GUI's in-process Sparkle updater may persist Sparkle preference
+   keys in the host app's user-defaults domain as a derived adapter cache
+   (§9).
 
 ### 7. GUI update versus resident Runtime — no false handoff
 
@@ -309,9 +313,12 @@ Seyal.app/
 
 Update state is Rust-owned product state (ADR-015). Swift realizes it and
 forwards Sparkle events as typed actions; Swift does not decide whether to
-install, defer, retry or show an alert. Any preference Sparkle persists (for
-example automatic-check consent) is a derived adapter cache reconciled from
-Rust state; on conflict Rust wins.
+install, defer, retry or show an alert. Sparkle may persist preference keys
+(for example automatic-check consent) from its updater object in the host GUI
+process, in the host app's user-defaults domain. Those keys are a derived
+adapter cache reconciled from Rust state; on conflict Rust wins. These
+host-process preference writes are outside the out-of-process updater and
+installer write boundary in §6.5.
 
 Update states (normative transitions in SPEC-029 §7):
 `Disabled(distributor | user)`, `UpToDate`, `Checking`, `Available`,
