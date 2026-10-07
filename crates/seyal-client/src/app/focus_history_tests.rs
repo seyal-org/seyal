@@ -708,3 +708,16 @@ fn history_back_ensures_composer_for_reactivated_bound_pane() {
     assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(root.snapshot().composer.is_some());
 }
+
+#[test]
+fn closing_active_tab_restores_successor_pane_authority() {
+    let (mut root, t1, _t2, _p1, p2, _exec1, exec2) = two_tab_bound_root();
+    assert_eq!(root.snapshot().shell.active_tab, t1);
+
+    root.apply(AppAction::CloseTab { id: t1 }).unwrap();
+
+    assert_eq!(root.snapshot().shell.active_tab, root.shell.snapshot().active_tab);
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().execution, Some(exec2));
+    assert_eq!(root.authority, root.pane_authorities.get(&p2).copied());
+}
