@@ -1045,6 +1045,7 @@ fn rejection_is_atomic_including_unknown_tab_move() {
 #[test]
 fn close_focused_pane_records_successor_before_other_workspace_recency() {
     let mut shell = seed_two_workspaces();
+    shell.allows_pane_splitting = true;
     let workspace = WorkspaceId::m001_default();
     let other = other_workspace();
     let closing_pane = shell.snapshot().focused_pane;
