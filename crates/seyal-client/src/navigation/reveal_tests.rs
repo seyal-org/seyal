@@ -6,8 +6,8 @@ use crate::shell::{ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, She
 
 use super::{
     pack_resource_address, reveal_attention_target, unpack_resource_address, AttentionReveal,
-    EmptyExecutionInventory, FocusHistory, NavigationPrincipal, NavigationRejection,
-    ResolvedTarget, ResourceAddress,
+    EmptyExecutionInventory, NavigationPrincipal, NavigationRejection, ResolvedTarget,
+    ResourceAddress,
 };
 
 fn mini_shell() -> (ShellState, WorkspaceId, TabId, PaneId) {
@@ -53,7 +53,6 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
         tab,
         pane,
     });
-    let mut history = FocusHistory::default();
     assert_eq!(
         unpack_resource_address(&packed).unwrap(),
         ResourceAddress::Pane {
@@ -67,8 +66,7 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
             &packed,
             &mut shell,
             &EmptyExecutionInventory,
-            NavigationPrincipal::local_user(),
-            &mut history
+            NavigationPrincipal::local_user()
         ),
         AttentionReveal::Focused(ResolvedTarget::Pane {
             workspace,
@@ -85,8 +83,7 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
             &ghost,
             &mut shell,
             &EmptyExecutionInventory,
-            NavigationPrincipal::local_user(),
-            &mut history
+            NavigationPrincipal::local_user()
         ),
         AttentionReveal::RetainedDetails
     );
@@ -96,8 +93,7 @@ fn spec028_12_15_reveal_uses_resource_address_and_missing_retains() {
             &[],
             &mut shell,
             &EmptyExecutionInventory,
-            NavigationPrincipal::local_user(),
-            &mut history
+            NavigationPrincipal::local_user()
         ),
         AttentionReveal::RetainedDetails
     );

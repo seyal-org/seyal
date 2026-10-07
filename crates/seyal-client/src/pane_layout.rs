@@ -600,12 +600,17 @@ mod root_tests {
         assert_eq!(snap.shell.focused_pane, created);
         assert_eq!(root.provisioning().recorded_execution(created), None);
         assert_eq!(
-            snap.pane, bound,
-            "input fence retains the bound Pane authority"
+            snap.pane, created,
+            "the unbound focused Pane is the fenced target"
         );
-        assert!(
-            snap.execution.is_some(),
-            "bound sibling remains input authority"
+        assert_eq!(
+            snap.execution, None,
+            "unbound focus must not inherit sibling execution authority"
+        );
+        assert_eq!(
+            root.provisioning().recorded_execution(bound),
+            Some(bound_evidence.execution),
+            "the sibling binding remains available when focus returns"
         );
         assert!(!root.pane_regions()[1].live);
         root.apply(AppAction::Refresh {

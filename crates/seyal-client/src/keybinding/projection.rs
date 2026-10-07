@@ -51,7 +51,7 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PresentationToggleTui
         | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
-        // Focus-history is key-only in M003 (K8); not a K5 menu row.
+        // Focus-history menus land with N3 / tip B (no dead catalog entries).
         WorkspaceCommandId::TabSelectOrdinal
         | WorkspaceCommandId::CommandPaletteClose
         | WorkspaceCommandId::PaneCloseFocused
@@ -80,7 +80,7 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
-        // Focus-history remains key-only in M003 (K8); not a K5 menu title.
+        // Focus-history titles land with N3 / tip B; keep out of the menu catalog until then.
         other => other.as_str(),
     }
 }

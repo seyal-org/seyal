@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 820
-issue = 1117
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane; #1117 adds split rollback and close-path focus-history lifecycle hooks, with shared history cleanup delegated to focus_history_apply.rs."
+acknowledged_loc = 797
+issue = 1217
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -77,15 +77,15 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1022
+ceiling_loc = 1027
 issue = 1217
 responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1217 updates production SplitFocused enablement assertions here. C3 acceptance cases stay in pane_provisioning_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 992
-issue = 1117
-reason = "Published C ABI entry points stay one thin façade. #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; #1117 adds the scalar focus-history sequence accessor without changing the v1 snapshot layout."
+acknowledged_loc = 980
+issue = 1175
+reason = "Published C ABI entry points stay one thin façade. #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -242,9 +242,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1166
-issue = 1117
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites; #1117 makes Navigate's history policy explicit at legacy ApplyOnly call sites through a shared test helper, while new history integration tests live in history_integration_tests.rs."
+ceiling_loc = 1151
+issue = 1122
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites without inventing a second navigation test authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"

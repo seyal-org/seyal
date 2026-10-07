@@ -470,19 +470,6 @@ pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
     })
 }
 
-/// Return the current focus-history cursor sequence for Back/Forward actions.
-/// Zero means the application has no history entries or the handle is invalid.
-/// This additive scalar accessor preserves the v1 return-by-value snapshot layout.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_focus_history_seq(handle: u64) -> u64 {
-    APPS.with(|apps| {
-        apps.borrow()
-            .get(&handle)
-            .and_then(|state| state.root.snapshot().focus_history_seq)
-            .map_or(0, |seq| seq.get())
-    })
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_accessibility(handle: u64) -> SeyalAppAccessibility {
     APPS.with(|apps| {

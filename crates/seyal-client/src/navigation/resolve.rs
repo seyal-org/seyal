@@ -19,10 +19,6 @@ pub enum NavigationRejection {
     TargetTerminated,
     TargetUnbound,
     AmbiguousTarget,
-    /// Back/Forward observed `FocusSeq` does not match the cursor (R6.8).
-    StaleHistoryCursor,
-    /// Back/Forward unavailable (empty history or no step in that direction).
-    HistoryUnavailable,
 }
 
 /// Successful resolution target. An [`ResourceAddress::Execution`] with exactly
