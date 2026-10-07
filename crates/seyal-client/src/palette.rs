@@ -843,7 +843,10 @@ mod tests {
             .find(|id| *id != core)
             .expect("other tab");
         shell
-            .apply(ShellAction::SelectTab { id: other })
+            .apply(ShellAction::SelectTab {
+                id: other,
+                containment_generation: shell.containment_generation(),
+            })
             .expect("select");
         // Frozen selection still carries the original address.
         assert_eq!(
