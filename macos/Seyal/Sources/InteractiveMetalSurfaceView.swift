@@ -4,6 +4,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private let appHandle: UInt64
     private let optionAsAlt: Bool
     private var composition = CompositionDocument()
+    /// When true, `unmarkText` clears preedit without PTY admission (#866).
+    private var discardingMark = false
     private var interpretingEscape = false
     private var escapeNeedsTerminalEncoding = false
     private var nextKeyboardActionID: UInt32 = 1
@@ -24,14 +26,18 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         super.init(frame: frameRect, paneID: "m001-pane")
         wantsLayer = true
         setAccessibilityIdentifier("terminal-input")
-        setAccessibilityRole(.textArea)
-        setAccessibilityElement(true)
+        // Flow/unbound: composer owns IME. Raw/TUI uses a textArea role.
+        // The identifier stays in the AX tree so attach diagnostics remain
+        // observable (`connection=usable`) without becoming an IME target.
+        syncInputRoutePresentation()
     }
 
     override var recoveryAppHandle: UInt64 { appHandle }
 
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
-        if seyal_app_snapshot(appHandle).eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
+        syncInputRoutePresentation()
+        if !allowsDirectTerminalInput {
+            discardUncommittedMark()
             onRequestComposerFocus?()
             return true
         }
@@ -50,18 +56,40 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             heldKeyboardKinds.removeAll(keepingCapacity: true)
             nextKeyboardActionID = 1
             nextMouseActionID = 1
-            composition.clear()
+            discardUncommittedMark()
         }
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    /// Consumes Rust eligibility: Metal is first-responder/IME/AX only for
+    /// Raw/TUI direct route. Flow and unbound keep the Pane composer exclusive.
+    func syncInputRoutePresentation() {
+        let direct = allowsDirectTerminalInput
+        setAccessibilityElement(true)
+        setAccessibilityRole(direct ? .textArea : .group)
+        if !direct {
+            discardUncommittedMark()
+            if window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { allowsDirectTerminalInput }
 
     override func becomeFirstResponder() -> Bool {
+        guard allowsDirectTerminalInput else { return false }
         let became = super.becomeFirstResponder()
         if became {
             inputContext?.activate()
         }
         return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        if !allowsDirectTerminalInput {
+            discardUncommittedMark()
+        }
+        return super.resignFirstResponder()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -307,7 +335,19 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         guard composition.hasMarkedText else { return }
         let text = composition.text
         composition.clear()
-        submitIfAllowed(text)
+        if !discardingMark {
+            submitIfAllowed(text)
+        }
+        inputContext?.invalidateCharacterCoordinates()
+    }
+
+    /// Cancel marked/preedit without PTY submission. Used when Rust revokes
+    /// the direct-terminal route (Flow/unbound/transition) or the bridge drops.
+    func discardUncommittedMark() {
+        discardingMark = true
+        composition.clear()
+        inputContext?.discardMarkedText()
+        discardingMark = false
         inputContext?.invalidateCharacterCoordinates()
     }
 
