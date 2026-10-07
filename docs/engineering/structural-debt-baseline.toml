@@ -67,7 +67,7 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
 acknowledged_loc = 797
 issue = 1217
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback without adding a second provisioning authority."
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -254,9 +254,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 836
-issue = 1217
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1122 adds Tab-scoped zoom and ADR-018 containment fences, while #1217 enables production SplitFocused alongside CreateTab without splitting tree/workspace ownership."
+acknowledged_loc = 869
+issue = 1131
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1131 adds identity-preserving SwapPanes/MovePaneBeside with ADR-018 containment fencing beside master’s Tab zoom, focus succession, and production SplitFocused, without splitting tree/workspace ownership. Move/swap algorithms live in pane_ops.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
