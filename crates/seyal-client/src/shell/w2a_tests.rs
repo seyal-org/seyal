@@ -1,5 +1,7 @@
 //! W2a reducer tests: non-close window/tab actions and containment fencing.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
@@ -835,6 +837,168 @@ fn generated_reorder_and_window_move_sequences_preserve_structure_and_bindings()
             assert_invariants(&shell);
         }
     }
+}
+
+#[test]
+fn composed_reorder_and_move_sequence_fences_stale_action_atomically() {
+    let workspace = WorkspaceId::m001_default();
+    let windows = [WindowId::new(), WindowId::new()];
+    let tabs: Vec<TabId> = (0..4).map(|_| TabId::new()).collect();
+    let mut shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Local".to_owned(),
+            detail: None,
+            attention: false,
+            active_window: windows[0],
+            windows: vec![
+                ShellWindowSeed {
+                    id: windows[0],
+                    active_tab: tabs[0],
+                    tabs: vec![
+                        tab_seed(tabs[0], "A"),
+                        tab_seed(tabs[1], "B"),
+                        tab_seed(tabs[2], "C"),
+                    ],
+                },
+                ShellWindowSeed {
+                    id: windows[1],
+                    active_tab: tabs[3],
+                    tabs: vec![tab_seed(tabs[3], "D")],
+                },
+            ],
+        }],
+        workspace,
+        false,
+        true,
+    )
+    .expect("two-window fixture");
+
+    let mut bindings = BTreeMap::new();
+    let all_panes: Vec<PaneId> = shell
+        .workspaces
+        .iter()
+        .flat_map(|item| item.tabs())
+        .flat_map(|tab| tab.panes.keys().copied())
+        .collect();
+    for (index, pane) in all_panes.iter().copied().enumerate() {
+        let execution = ExecutionId::from_bytes([index as u8 + 1; 16]);
+        shell
+            .apply(ShellAction::BindExecution { pane, execution })
+            .expect("bind each pane exactly once");
+        bindings.insert(pane, execution);
+    }
+
+    let assert_invariants = |shell: &ShellState, expected_tabs: &[TabId]| {
+        assert!(shell.every_window_has_a_tab());
+        let actual_tabs: BTreeSet<_> = shell
+            .workspaces
+            .iter()
+            .flat_map(|item| item.tabs())
+            .map(|tab| tab.id)
+            .collect();
+        assert_eq!(actual_tabs, expected_tabs.iter().copied().collect());
+
+        let mut actual_bindings = BTreeMap::new();
+        for item in &shell.workspaces {
+            for window in &item.windows {
+                assert_eq!(window.workspace_id, item.id);
+                assert!(!window.tabs.is_empty());
+                for tab in &window.tabs {
+                    for pane in tab.panes.values() {
+                        if let Some(execution) = pane.execution {
+                            assert!(actual_bindings.insert(pane.id, execution).is_none());
+                            let bound = shell.panes_bound_to(execution);
+                            assert_eq!(bound.len(), 1, "execution must have one leaf");
+                            assert_eq!(bound[0].2, pane.id);
+                        }
+                    }
+                }
+            }
+            if let Some(active) = item.active_window {
+                assert!(item.window(active).is_some());
+            } else {
+                assert!(item.windows.is_empty());
+            }
+        }
+        assert_eq!(actual_bindings, bindings);
+    };
+
+    let original_generation = shell.containment_generation();
+    assert_invariants(&shell, &tabs);
+
+    // Reorder C before A, then prove a structural action from the old snapshot
+    // is rejected without changing any containment, focus, or execution binding.
+    shell
+        .apply(ShellAction::MoveTabBefore {
+            tab: tabs[2],
+            before: Some(tabs[0]),
+            window: windows[0],
+            containment_generation: shell.containment_generation(),
+        })
+        .expect("reorder within the source Window");
+    assert_eq!(shell.containment_generation(), original_generation + 1);
+    assert_invariants(&shell, &tabs);
+
+    let mut expected = shell.clone();
+    expected.last_error = Some(ShellError::StaleContainment);
+    assert_eq!(
+        shell.apply(ShellAction::MoveTabToWindow {
+            tab: tabs[1],
+            window: windows[1],
+            containment_generation: original_generation,
+        }),
+        Err(ShellError::StaleContainment)
+    );
+    assert_eq!(shell, expected, "stale rejection must be atomic");
+    assert_invariants(&shell, &tabs);
+
+    // Continue with fresh generations through cross-Window moves and reorder.
+    for action in [
+        ShellAction::MoveTabToWindow {
+            tab: tabs[1],
+            window: windows[1],
+            containment_generation: shell.containment_generation(),
+        },
+        ShellAction::MoveTabBefore {
+            tab: tabs[1],
+            before: Some(tabs[3]),
+            window: windows[1],
+            containment_generation: shell.containment_generation() + 1,
+        },
+        ShellAction::MoveTabToWindow {
+            tab: tabs[0],
+            window: windows[1],
+            containment_generation: shell.containment_generation() + 2,
+        },
+        ShellAction::MoveTabToWindow {
+            tab: tabs[2],
+            window: windows[1],
+            containment_generation: shell.containment_generation() + 3,
+        },
+    ] {
+        let before = shell.containment_generation();
+        shell
+            .apply(action)
+            .expect("freshly fenced structural action");
+        assert_eq!(shell.containment_generation(), before + 1);
+        assert_invariants(&shell, &tabs);
+    }
+    assert!(shell
+        .workspaces
+        .iter()
+        .flat_map(|item| &item.windows)
+        .all(|window| window.id != windows[0]));
+
+    let moved_to_new = shell.containment_generation();
+    shell
+        .apply(ShellAction::MoveTabToNewWindow {
+            tab: tabs[0],
+            containment_generation: moved_to_new,
+        })
+        .expect("move Tab from a multi-Tab Window into a new Window");
+    assert_eq!(shell.containment_generation(), moved_to_new + 1);
+    assert_invariants(&shell, &tabs);
 }
 
 #[test]

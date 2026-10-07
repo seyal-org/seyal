@@ -44,7 +44,7 @@ impl ApplicationRoot {
     /// admits the resulting type-36 create on the wire client (same request id).
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
         self.shell
-            .apply_product_create_tab()
+            .apply(ShellAction::CreateTab)
             .map_err(|_| AppError::TabCreationUnavailable)?;
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;

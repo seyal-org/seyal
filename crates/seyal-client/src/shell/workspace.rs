@@ -45,7 +45,7 @@ pub(super) struct Workspace {
     pub(super) detail: Option<String>,
     pub(super) attention: bool,
     pub(super) windows: Vec<Window>,
-    pub(super) active_window: Option<WindowId>,
+    pub(super) active_window: WindowId,
 }
 
 /// Constructor input for tests and future hosts. Not a persistence schema.
@@ -101,14 +101,13 @@ impl Window {
             active_tab,
         })
     }
-
-    pub(super) fn tab_index(&self, id: TabId) -> Option<usize> {
-        self.tabs.iter().position(|tab| tab.id == id)
-    }
 }
 
 impl Workspace {
     pub(super) fn from_seed(seed: ShellWorkspaceSeed) -> Result<Self, ShellError> {
+        if seed.windows.is_empty() {
+            return Err(ShellError::EmptyWindow);
+        }
         let mut windows = Vec::with_capacity(seed.windows.len());
         for window in seed.windows {
             let tabs = window
@@ -135,20 +134,15 @@ impl Workspace {
                 window.active_tab,
             )?);
         }
-        let active_window = if windows.is_empty() {
-            None
-        } else {
-            if !windows.iter().any(|window| window.id == seed.active_window) {
-                return Err(ShellError::UnknownWindow);
-            }
-            Some(seed.active_window)
-        };
+        if !windows.iter().any(|window| window.id == seed.active_window) {
+            return Err(ShellError::UnknownWindow);
+        }
         Ok(Self {
             id: seed.id,
             name: seed.name,
             detail: seed.detail,
             attention: seed.attention,
-            active_window,
+            active_window: seed.active_window,
             windows,
         })
     }
@@ -166,18 +160,6 @@ impl Workspace {
         self.tabs().find(|tab| tab.id == id)
     }
 
-    pub(super) fn window(&self, id: WindowId) -> Option<&Window> {
-        self.windows.iter().find(|window| window.id == id)
-    }
-
-    pub(super) fn window_mut(&mut self, id: WindowId) -> Option<&mut Window> {
-        self.windows.iter_mut().find(|window| window.id == id)
-    }
-
-    pub(super) fn window_index(&self, id: WindowId) -> Option<usize> {
-        self.windows.iter().position(|window| window.id == id)
-    }
-
     #[cfg(test)]
     pub(super) fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.windows
@@ -185,31 +167,29 @@ impl Workspace {
             .find_map(|window| window.tabs.iter_mut().find(|tab| tab.id == id))
     }
 
-    pub(super) fn active_window(&self) -> Option<&Window> {
-        let id = self.active_window?;
-        self.windows.iter().find(|window| window.id == id)
+    pub(super) fn active_window(&self) -> &Window {
+        self.windows
+            .iter()
+            .find(|window| window.id == self.active_window)
+            .expect("active Window must exist")
     }
 
     pub(super) fn active_window_mut(&mut self) -> Result<&mut Window, ShellError> {
-        let id = self.active_window.ok_or(ShellError::UnknownWindow)?;
+        let id = self.active_window;
         self.windows
             .iter_mut()
             .find(|window| window.id == id)
             .ok_or(ShellError::UnknownWindow)
     }
 
-    pub(super) fn active_tab_id(&self) -> Result<TabId, ShellError> {
-        Ok(self
-            .active_window()
-            .ok_or(ShellError::UnknownWindow)?
-            .active_tab)
+    pub(super) fn active_tab_id(&self) -> TabId {
+        self.active_window().active_tab
     }
 
     /// The active Window's last Tab cannot be closed. Closing it would leave a
     /// zero-Tab Window, which is not a W1 close-window path.
     pub(super) fn allows_tab_close(&self) -> bool {
-        self.active_window()
-            .is_some_and(|window| window.tabs.len() > 1)
+        self.active_window().tabs.len() > 1
     }
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
@@ -219,17 +199,13 @@ impl Workspace {
             .find(|window| window.tabs.iter().any(|tab| tab.id == id))
             .map(|window| window.id)
             .ok_or(ShellError::UnknownTab)?;
-        self.active_window = Some(window_id);
+        self.active_window = window_id;
         self.active_window_mut()?.active_tab = id;
         Ok(())
     }
 
-    pub(super) fn push_tab_on_window(
-        &mut self,
-        window: WindowId,
-        tab: Tab,
-    ) -> Result<(), ShellError> {
-        let window = self.window_mut(window).ok_or(ShellError::UnknownWindow)?;
+    pub(super) fn push_tab_on_active_window(&mut self, tab: Tab) -> Result<(), ShellError> {
+        let window = self.active_window_mut()?;
         window.active_tab = tab.id;
         window.tabs.push(tab);
         Ok(())
@@ -267,60 +243,12 @@ impl Workspace {
     }
 
     pub(super) fn active_tab_mut(&mut self) -> Result<&mut Tab, ShellError> {
-        let tab_id = self.active_tab_id()?;
+        let tab_id = self.active_tab_id();
         self.active_window_mut()?
             .tabs
             .iter_mut()
             .find(|tab| tab.id == tab_id)
             .ok_or(ShellError::UnknownTab)
-    }
-
-    /// Remove `tab`. If it was the Window's only Tab, destroy that Window.
-    pub(super) fn take_tab(&mut self, tab: TabId) -> Result<(Tab, Option<WindowId>), ShellError> {
-        let window_index = self
-            .windows
-            .iter()
-            .position(|window| window.tabs.iter().any(|item| item.id == tab))
-            .ok_or(ShellError::UnknownTab)?;
-        let tab_index = self.windows[window_index]
-            .tab_index(tab)
-            .ok_or(ShellError::UnknownTab)?;
-        let removed = self.windows[window_index].tabs.remove(tab_index);
-        if self.windows[window_index].tabs.is_empty() {
-            let destroyed = self.windows.remove(window_index).id;
-            if self.active_window == Some(destroyed) {
-                self.active_window = self.windows.first().map(|window| window.id);
-            }
-            return Ok((removed, Some(destroyed)));
-        }
-        if self.windows[window_index].active_tab == tab {
-            let replacement = tab_index.min(self.windows[window_index].tabs.len() - 1);
-            self.windows[window_index].active_tab = self.windows[window_index].tabs[replacement].id;
-        }
-        Ok((removed, None))
-    }
-
-    pub(super) fn insert_tab_before(
-        &mut self,
-        window_id: WindowId,
-        tab: Tab,
-        before: Option<TabId>,
-    ) -> Result<(), ShellError> {
-        let window = self
-            .window_mut(window_id)
-            .ok_or(ShellError::UnknownWindow)?;
-        let index = match before {
-            None => window.tabs.len(),
-            Some(before_id) => window.tab_index(before_id).ok_or(ShellError::UnknownTab)?,
-        };
-        window.active_tab = tab.id;
-        window.tabs.insert(index, tab);
-        Ok(())
-    }
-
-    pub(super) fn push_window(&mut self, window: Window) {
-        self.active_window = Some(window.id);
-        self.windows.push(window);
     }
 
     #[cfg(test)]

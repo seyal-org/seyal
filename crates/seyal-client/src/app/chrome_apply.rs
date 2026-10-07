@@ -85,7 +85,7 @@ impl ApplicationRoot {
         }
         if let Some(workspace) = effect.select_workspace {
             self.shell
-                .apply_activate_workspace(workspace)
+                .apply(ShellAction::SelectWorkspace { id: workspace })
                 .map_err(|_| AppError::UnknownChromeWorkspace)?;
         }
         if let Some(tab) = effect.select_tab {
@@ -101,7 +101,7 @@ impl ApplicationRoot {
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
         self.shell
-            .apply_activate_workspace(id)
+            .apply(ShellAction::SelectWorkspace { id })
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         let _ = self
             .chrome
