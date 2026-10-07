@@ -9,6 +9,7 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
@@ -21,6 +22,8 @@ mod session;
 
 use accessibility::accessibility_nodes;
 
+#[cfg(test)]
+mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
 #[cfg(all(test, target_os = "macos"))]
@@ -42,17 +45,15 @@ use std::time::Duration;
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
 
 use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
-    LeftPanelMode,
+    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
 use crate::composer::{
-    ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
-    RuntimeComposerEligibility,
+    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord, RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
-use crate::navigation::ResourceAddress;
-use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
+use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
+use crate::palette::{PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
@@ -62,7 +63,7 @@ use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::local::LocalDisplayClient;
@@ -121,6 +122,8 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
+    NavigationStaleHistoryCursor,
+    NavigationHistoryUnavailable,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
@@ -335,6 +338,16 @@ pub enum AppAction {
         fence: AppFence,
         address: ResourceAddress,
     },
+    /// Focus-history Back (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryBack {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    /// Focus-history Forward (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryForward {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
     ClosePalette {
         fence: AppFence,
     },
@@ -422,6 +435,9 @@ pub struct AppSnapshot {
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
     pub goto: GotoSnapshot,
+    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
+    /// when history is empty.
+    pub focus_history_seq: Option<FocusSeq>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -464,6 +480,8 @@ pub struct ApplicationRoot {
     /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
+    /// Application-scoped focus history (SPEC-022 §6 / N3).
+    focus_history: FocusHistory,
     /// Last canonical alternate-screen evidence. TUI while this is set.
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
@@ -547,6 +565,7 @@ impl ApplicationRoot {
             palette: PaletteState::new(),
             chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
+            focus_history: FocusHistory::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
             explicit_raw: false,
@@ -647,7 +666,19 @@ impl ApplicationRoot {
     /// `Bind` will land); it is shown only while that Pane is focused.
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
-        pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+        let focused = shell.focused_pane;
+        let live_pane =
+            if self.pane_authorities.contains_key(&focused) || self.pane_authorities.is_empty() {
+                focused
+            } else {
+                // Unbound focus while another leaf remains bound: no live surface.
+                self.pane_authorities
+                    .keys()
+                    .copied()
+                    .next()
+                    .expect("non-empty pane_authorities")
+            };
+        pane_layout::project(&shell.tree, focused, live_pane)
     }
 
     pub fn fence(&self) -> AppFence {
@@ -688,9 +719,8 @@ impl ApplicationRoot {
         let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
             generation: self.snapshot_generation,
-            // The fence Pane, not the focused one: host actions fenced from
-            // this snapshot must keep reaching the bound execution while
-            // another split leaf is focused.
+            // The fence Pane when bound; the focused Pane when fail-closed
+            // unbound (N3). Hosts must not send input to another Pane's execution.
             pane: self.fence().pane,
             execution: self.authority.map(|bound| bound.execution),
             attachment: self.authority.map(|bound| bound.attachment),
@@ -717,6 +747,7 @@ impl ApplicationRoot {
             chrome,
             palette,
             goto,
+            focus_history_seq: self.focus_history.cursor_seq(),
         }
     }
 
@@ -885,6 +916,14 @@ impl ApplicationRoot {
                 self.require_fence(fence)?;
                 self.navigate_address(address)
             }
+            AppAction::HistoryBack { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_back(observed)
+            }
+            AppAction::HistoryForward { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_forward(observed)
+            }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
             AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
@@ -944,48 +983,6 @@ impl ApplicationRoot {
     }
 }
 
-pub(super) fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub(super) fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub(super) fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub(super) fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub(super) fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
-        }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
-    }
-}
+pub(super) use chrome_apply::{
+    chrome_error, close_pane_error, close_tab_error, composer_error, palette_error,
+};
