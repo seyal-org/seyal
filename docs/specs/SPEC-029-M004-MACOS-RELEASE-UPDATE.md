@@ -397,7 +397,7 @@ secrets, private keys or credentials.
 | Archive modified, truncated or re-signed by another key | `Failed(archive_signature)` before extraction |
 | Extracted app has different Team, entitlements or broken signature | Host `Skip` or `Failed(code_identity)`; nothing installed. G5: Sparkle EdDSA alone installed an ad-hoc foreign archive; Team continuity is the host Skip, not Sparkle. |
 | Item advertises lower/equal sequence | never offered |
-| EdDSA-valid archive signed by a different Team | Sparkle accepts (G5, 1-of-2). Required host `Skip` holds install. Missed Skip is the residual. |
+| Tested ad-hoc archive with no Team ID | Sparkle accepted it (G5); host `Skip` held the tested case. An archive signed by another Apple Team ID remains untested; verify it before acceptance and retain the host `Skip` gate. |
 | Updater attempts writes outside I1 | detected by the I2 check in every G6 case; any violation fails the release |
 | Secrets in artifacts | release record, feed, bundle and logs scanned; any private key material fails the release |
 
@@ -464,7 +464,7 @@ Runtime state is as listed.
 | M11 | Invalid feed signature persisting past 20 simulated days | remains `Failed(feed_signature)`; bounded backoff; no update presented |
 | M12 | Invalid EdDSA archive signature | `Failed(archive_signature)` before extraction |
 | M13 | Truncated download; single flipped DMG byte | `Failed(network)` / `Failed(archive_signature)`; staged file discarded |
-| M14 | EdDSA-valid archive, different Team ID | Sparkle would install (G5). Host Skip required; version unchanged through quit. |
+| M14 | EdDSA-valid ad-hoc archive with no Team ID (tested); archive signed by a different Apple Team ID (not tested) | Tested ad-hoc archive would install without host `Skip`; the host `Skip` held it. Verify the different-Team case before acceptance; host `Skip` remains required. |
 | M15 | Disk full (small APFS image) during download and during install | `Failed(disk)`; old app valid |
 | M16 | App in a non-writable location; non-admin user with `/Applications` | `Failed(permission)` or transient authorization prompt; old app valid; no privileged helper installed |
 | M17 | Item with lower or equal sequence | never offered |
