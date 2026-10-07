@@ -189,7 +189,12 @@ fn left_panel_mode_does_not_invent_workspace_or_tab_identities() {
         LeftPanelMode::Tabs
     );
     assert!(chrome.snapshot(&after_shell, &[]).selected_agent.is_none());
-    shell.apply(ShellAction::SelectTab { id: tab(2) }).unwrap();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: tab(2),
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
     chrome
         .apply(ChromeAction::ContextNavigated, &shell.snapshot())
         .unwrap();
@@ -260,7 +265,12 @@ fn attention_item_navigates_without_dismissing() {
         shell.apply_activate_workspace(id).unwrap();
     }
     if let Some(id) = effect.select_tab {
-        shell.apply(ShellAction::SelectTab { id }).unwrap();
+        shell
+            .apply(ShellAction::SelectTab {
+                id,
+                containment_generation: shell.containment_generation(),
+            })
+            .unwrap();
     }
     let after = chrome.snapshot(&shell.snapshot(), &[]);
     assert_eq!(after.attention_items.len(), 1);
