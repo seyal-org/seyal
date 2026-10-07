@@ -72,7 +72,8 @@ non-goals in §20.
   replacement changes only what SPEC-003 §16 shutdown and normal Runtime
   startup change.
 - **I3.** No update step terminates a live execution except the SPEC-003 §16
-  shutdown in §9, and that runs only at `n = 0` or after confirmation.
+  shutdown in §9, admitted only with no other Runtime client attachments and
+  either `n = 0` or explicit confirmation.
 - **I4.** No update step claims Runtime or PTY continuity it does not have.
   A replaced Runtime has a new `RuntimeId`; replacement executions have new
   `ExecutionId`s (SPEC-003 §3).
@@ -165,27 +166,35 @@ UpdateState
   Available(item)
   Downloading(item)
   ReadyToInstall(item)
-  Deferred(reason, item)       reason = live_sessions | incompatible_runtime | user
+  Deferred(reason, item)       reason = live_sessions | other_attachments |
+                                      incompatible_runtime | user
   Installing(item)
   Failed(kind)                 kind = network | feed_signature | feed_metadata |
                                       archive_signature | code_identity | disk |
                                       permission | unsupported_system
 
 RuntimeGeneration
-  Current                      L unknown, or L >= G (L > G only after a
-                               manual downgrade, §10)
-  InstalledRuntimePending(n, L)  L known and L < G
+  RuntimeAbsent
+  RuntimeIdentityUnknown      Runtime is running, but L is not reported
+  Current(L)                  Runtime is running and L >= G (L > G only
+                               after a manual downgrade, §10)
+  InstalledRuntimePending(n, L)  L is known and L < G
 ```
 
-`RuntimeGeneration` is recomputed whenever `G`, `L` or `n` changes, in every
-`UpdateState` including `Disabled(_)`. It leaves `InstalledRuntimePending`
-only through §9 replacement or a Runtime restart outside Seyal (logout,
-reboot); it never changes `UpdateState`.
+`RuntimeGeneration` is recomputed whenever Runtime presence, `G`, `L` or `n`
+changes, in every `UpdateState` including `Disabled(_)`. `RuntimeIdentityUnknown`
+is not `Current`: compatibility checks fail closed while a Runtime is running
+without a known `L`. It leaves `InstalledRuntimePending` only through §9
+replacement or a Runtime restart outside Seyal (logout, reboot); it never
+changes `UpdateState`.
 
 Deferral reasons:
 
 - `live_sessions` — the item is not compatible, `C` is available and
   `n > 0`; resolvable by ending sessions or confirming a restart.
+- `other_attachments` — Runtime replacement is otherwise needed, but one or
+  more Runtime client attachments exist besides the requesting GUI; resolvable
+  only after those clients detach.
 - `incompatible_runtime` — the item is not compatible and `C` is unavailable;
   not resolvable in-app.
 - `user` — the user postponed or skipped the item.
@@ -214,11 +223,14 @@ listed is rejected and leaves state unchanged):
 | `Downloading` | out of space | `Failed(disk)` |
 | `Downloading` | archive verified, app verified | `ReadyToInstall(item)` |
 | `ReadyToInstall` | install safe point (§8), `Compatible(item)` | `Installing(item)` |
-| `ReadyToInstall` | install safe point, not compatible, `C`, `n = 0` | §9 replacement, then `Installing(item)` |
-| `ReadyToInstall` | install safe point, not compatible, `C`, `n > 0` | `Deferred(live_sessions, item)` |
+| `ReadyToInstall` | install safe point, not compatible, `C`, other Runtime client attachments exist | `Deferred(other_attachments, item)` |
+| `ReadyToInstall` | install safe point, not compatible, `C`, no other attachments, `n = 0` | §9 replacement, then `Installing(item)` |
+| `ReadyToInstall` | install safe point, not compatible, `C`, no other attachments, `n > 0` | `Deferred(live_sessions, item)` |
 | `ReadyToInstall` | install safe point, not compatible, not `C` | `Deferred(incompatible_runtime, item)` |
 | `Deferred(live_sessions)` | `n` becomes 0 | `ReadyToInstall(item)`; installs at the next safe point via the row above |
-| `Deferred(live_sessions)` | user confirms restart for the current execution snapshot | §9 replacement, then `Installing(item)` |
+| `Deferred(live_sessions)` | user confirms restart for the current execution snapshot and no other attachments exist | §9 replacement, then `Installing(item)` |
+| `Deferred(other_attachments)` | all other Runtime client attachments detach | re-evaluated as `ReadyToInstall(item)` |
+| `Deferred(live_sessions)` | another Runtime client attachment appears before shutdown admission | `Deferred(other_attachments, item)`; confirmation does not override §9 admission |
 | `Deferred(incompatible_runtime)` | no Runtime is running, or a Runtime with `C` is live | re-evaluated as `ReadyToInstall(item)` |
 | `Deferred(user)` | user resumes | `ReadyToInstall(item)` if the verified archive is still staged, else `Available(item)` |
 | `Installing` | swap fails (permission, disk, verification) | old app remains valid; the next GUI start reports `Failed(permission \| disk \| code_identity)` |
@@ -228,8 +240,8 @@ listed is rejected and leaves state unchanged):
 
 | From | Event / guard | Effect |
 | --- | --- | --- |
-| `InstalledRuntimePending` | `n` becomes 0 and `C` | §9 replacement runs automatically |
-| `InstalledRuntimePending` | user confirms restart for the current execution snapshot, `C` | §9 replacement runs |
+| `InstalledRuntimePending` | `n` becomes 0, no other attachments, and `C` | §9 replacement runs automatically |
+| `InstalledRuntimePending` | user confirms restart for the current execution snapshot, no other attachments, and `C` | §9 replacement runs |
 
 Rules:
 
@@ -276,8 +288,14 @@ Rules:
 Runtime replacement is the only update-related operation that may terminate
 executions.
 
-1. **Preconditions:** `C` is available; and either `n = 0`, or the user has
-   confirmed a restart for an execution snapshot.
+1. **Admission preconditions:** `C` is available; no Runtime client attachment
+   exists other than the requesting GUI's attachment; and either `n = 0`, or
+   the user has confirmed a restart for an execution snapshot. The Runtime
+   must check the attachment condition
+   atomically with admitting controlled shutdown, before it stops accepting
+   new work. If another attachment exists, shutdown is rejected and the
+   Runtime continues serving it; zero live executions alone does not authorize
+   shutdown. Re-evaluate this condition on every retry/admission attempt.
 2. **Confirmation** lists every live execution by its user-visible title and
    states that each will be terminated. It carries the Runtime execution-set
    snapshot it showed. If the set changed before confirmation (an execution
@@ -285,7 +303,8 @@ executions.
    prompt is reissued. Confirmation is never implied by a timeout.
 3. **Who requests it:** for an incompatible item, the old GUI before install;
    for `InstalledRuntimePending`, the new GUI after relaunch.
-4. **Shutdown** follows SPEC-003 §16: the Runtime stops accepting new
+4. **Shutdown** follows SPEC-003 §16 after admission succeeds: the Runtime
+   stops accepting new
    executions, drives each live execution through bounded termination
    (SPEC-003 §11) and exits, releasing the singleton and removing its socket.
 5. **Failure:** if bounded shutdown does not complete, the Runtime reports
@@ -430,8 +449,8 @@ Runtime state is as listed.
 | # | Situation | Expected outcome |
 | --- | --- | --- |
 | M1 | Compatible install with `n > 0`, `C` absent | GUI replaced; same Runtime PID survives with healthy executions for ≥ 2 h including forced cold page-ins; new GUI attaches; `InstalledRuntimePending` if `G > L` |
-| M2 | Compatible install with `n = 0`, `C` present, `G > L` after relaunch | GUI replaced; §9 replacement runs automatically; new `RuntimeId`; `RuntimeGeneration` = `Current` |
-| M3 | Incompatible item, `n > 0`, `C` present | `Deferred(live_sessions)`; no install until `n = 0` or confirmed restart |
+| M2 | Compatible install with `n = 0`, `C` present, `G > L` after relaunch | GUI replaced; §9 replacement runs automatically; new `RuntimeId`; `RuntimeGeneration` = `Current(L)` |
+| M3 | Incompatible item, `n > 0`, `C` present | `Deferred(live_sessions)`; no install until `n = 0` or confirmed restart, and no other attachment remains at shutdown admission |
 | M4 | Incompatible item, `C` absent | `Deferred(incompatible_runtime)` indefinitely; UX names manual recovery; never installs in-app |
 | M5 | Runtime running with `L` unknown | treated as incompatible (M3/M4) |
 | M6 | Confirmation prompt shown, then an execution is created before confirm | confirmation rejected as stale; prompt reissued with the new set |
@@ -454,16 +473,20 @@ Runtime state is as listed.
 | M23 | Install on quit opted in, item incompatible at quit | quit completes within the ADR-018 deadline; no install |
 | M24 | Non-official build | `Disabled(distributor)`; zero update network traffic |
 | M25 | `InstalledRuntimePending` while a newer item is published | the newer item is checked, offered and gated normally; pending Runtime replacement is unaffected |
+| M26 | `n = 0`, but another Runtime client attachment exists at shutdown admission | shutdown is rejected; no execution is terminated; attachment remains served |
+| M27 | no other Runtime client attachment at initial check, but one appears before admission | atomic admission rejects shutdown; no execution is terminated; request must be reconsidered after attachment state changes |
+| M28 | `InstalledRuntimePending`, `n = 0`, `C` present, and another Runtime client attachment exists | replacement remains pending; no shutdown is admitted until that client detaches |
 
 Inverse cases required by the AGENTS.md lifecycle rules: M1 (GUI replaced
 without Runtime replaced), M5 (Runtime alive without identity), M7 (shutdown
 requested without completing), M18 (valid signature without valid metadata),
-M19 (declared compatible without actual compatibility) and M25 (Runtime
-pending without blocking update discovery).
+M19 (declared compatible without actual compatibility), M25 (Runtime pending
+without blocking update discovery), and M26–M28 (shutdown without exclusive
+attachment authority, including an attachment race).
 
 ## 18. Required tests and evidence
 
-### 18.1 Decision-critical prototype evidence (before #688 closes)
+### 18.1 Decision-critical prototype evidence
 
 Run on an isolated non-mergeable branch with a throwaway EdDSA key and
 keychain, a test signing identity (Developer ID preferred; Apple Development
@@ -510,7 +533,8 @@ results are labelled as such), and a throwaway HTTPS feed. No production keys.
 3. Every §7 transition and rejection is covered by Rust tests.
 4. Every §17 row passes on the RC SHA with the I2 check passing.
 5. No live execution is terminated by any update path except a §9
-   replacement at `n = 0` or after a non-stale confirmation.
+  replacement at `n = 0` with no other Runtime client attachment, or after a
+  non-stale confirmation and no other Runtime client attachment at admission.
 6. Non-official builds make no update network requests.
 7. The install, uninstall and recovery guide is validated on a fresh machine.
 8. ADR-022 §11 prerequisites are accepted by their owners before the #677
