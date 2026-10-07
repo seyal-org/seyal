@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1019
-issue = 1143
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1175 live-attach queues and #1143 Adopt/TerminateUnpresented/RecordUnpresented/SyncLiveUnpresented actions share this dispatch table. Further splitting would separate AppAction from the apply match that owns it."
+ceiling_loc = 1025
+issue = 1153
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1153 adds CloseWindow action and maps StaleContainment on close paths. Close apply logic remains in provisioning_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1143 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 771
-issue = 1143
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1143 forgets the live-unpresented catalog on TerminationRequested and dispatches palette dispose/adopt through the same effect queue."
+acknowledged_loc = 848
+issue = 1153
+reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1153 hierarchical ClosePane cascade plus #1143 live-unpresented catalog recording share this close path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -77,7 +77,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented a
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1063
+ceiling_loc = 1055
 issue = 1108
 responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1108 adds OrderFrontMakeKey coalescing evidence beside quit native-effect proofs. C2 acceptance cases stay in tab_provisioning_tests.rs."
 
@@ -220,9 +220,9 @@ reason = "Session façade regressions stay beside IntegrationService; #1194 adds
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1131
-issue = 1101
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. W1 wraps each fixture workspace in one window seed. Further N3 history coverage lands in sibling history test modules."
+ceiling_loc = 1134
+issue = 1153
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1153 adds containment_generation to the ClosePane destroy path used by the address-fail-closed proof without inventing a sibling module."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
@@ -232,9 +232,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer.
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 900
-issue = 1143
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1108 OrderFront from Navigate/commit_focus and #1143 live-unpresented catalog share this façade while §3.3 predicates live in shell/unpresented.rs."
+acknowledged_loc = 877
+issue = 1153
+reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1153 routes CloseWindow/CloseTab/ClosePane through shell/close.rs while the façade retains apply dispatch, snapshot types, W6 unpresented fields, and #1108 OrderFront from Navigate."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

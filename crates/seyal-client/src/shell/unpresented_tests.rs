@@ -234,7 +234,12 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
         })
         .unwrap();
     let created = shell.snapshot().focused_pane;
-    shell.apply(ShellAction::ClosePane { id: created }).unwrap();
+    shell
+        .apply(ShellAction::ClosePane {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
     assert!(shell.take_effects().is_empty());
 
     let execution = ExecutionId::new();

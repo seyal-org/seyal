@@ -114,13 +114,10 @@ fn split_focused_fails_closed_while_create_tab_is_enabled() {
 }
 
 #[test]
-fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
-    // The M001 production shell starts with exactly one Tab and one
-    // Pane, so ShellState's "cannot close last" guard rejects CloseTab/
-    // ClosePane before an id is even looked up (shell.rs close_tab/
-    // close_pane), whether the id is real or not. This exercises the
-    // new close_tab_error/close_pane_error mapping surfaces that
-    // distinct cause rather than collapsing it to an unknown-id error.
+fn close_unknown_ids_reject_and_sole_tab_removes_window() {
+    // Unknown identities reject without retarget. The sole Tab of the
+    // production Window removes that Window (ADR-018 §3.2), replacing the
+    // older last-tab refusal.
     let mut root = ApplicationRoot::new();
     let snap = root.snapshot();
     let only_tab = snap.shell.tabs[0].id;
@@ -128,26 +125,21 @@ fn close_tab_and_close_pane_fail_closed_when_only_one_exists() {
 
     assert_eq!(
         root.apply(AppAction::CloseTab { id: TabId::new() }),
-        Err(AppError::CannotCloseLastTab)
+        Err(AppError::UnknownChromeTab)
     );
     assert_eq!(
         root.apply(AppAction::ClosePane { id: PaneId::new() }),
-        Err(AppError::CannotCloseLastPane)
+        Err(AppError::UnknownPane)
     );
-    assert_eq!(
-        root.apply(AppAction::CloseTab { id: only_tab }),
-        Err(AppError::CannotCloseLastTab)
-    );
-    assert_eq!(
-        root.apply(AppAction::ClosePane { id: only_pane }),
-        Err(AppError::CannotCloseLastPane)
-    );
-    // A rejected mutation does not remove the only Tab/Pane.
-    let after = root.snapshot();
-    assert_eq!(after.shell.tabs.len(), 1);
-    assert_eq!(after.shell.panes.len(), 1);
-    assert_eq!(after.shell.tabs[0].id, only_tab);
-    assert_eq!(after.shell.panes[0].id, only_pane);
+    assert_eq!(root.snapshot().shell.tabs.len(), 1);
+    assert_eq!(root.snapshot().shell.panes.len(), 1);
+    assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
+    assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
+
+    root.apply(AppAction::CloseTab { id: only_tab })
+        .expect("sole tab removes window");
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert_eq!(root.snapshot().shell.active_window, None);
 }
 
 #[test]

@@ -7,7 +7,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use super::tree::PaneTree;
 use super::ShellError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Pane {
     pub(super) id: PaneId,
     pub(super) title: String,
@@ -15,7 +15,7 @@ pub(super) struct Pane {
     pub(super) allows_implicit_execution_bootstrap: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Tab {
     pub(super) id: TabId,
     pub(super) title: String,
@@ -26,7 +26,7 @@ pub(super) struct Tab {
 }
 
 /// One Window inside a Workspace. `workspace_id` is fixed at construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Window {
     pub(super) id: WindowId,
     /// Stored with the window. Shell tests read it; the library build does not.
@@ -36,7 +36,7 @@ pub(super) struct Window {
     pub(super) active_tab: TabId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
     pub(super) name: String,
@@ -203,13 +203,6 @@ impl Workspace {
             .active_tab)
     }
 
-    /// The active Window's last Tab cannot be closed. Closing it would leave a
-    /// zero-Tab Window, which is not a W1 close-window path.
-    pub(super) fn allows_tab_close(&self) -> bool {
-        self.active_window()
-            .is_some_and(|window| window.tabs.len() > 1)
-    }
-
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
         let window_id = self
             .windows
@@ -230,37 +223,6 @@ impl Workspace {
         let window = self.window_mut(window).ok_or(ShellError::UnknownWindow)?;
         window.active_tab = tab.id;
         window.tabs.push(tab);
-        Ok(())
-    }
-
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), ShellError> {
-        // One Tab in the Workspace fails closed before the id is resolved, so a
-        // stale id and the real last Tab report the same cause.
-        if self.tab_count() <= 1 {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(window_index) = self
-            .windows
-            .iter()
-            .position(|window| window.tabs.iter().any(|tab| tab.id == id))
-        else {
-            return Err(ShellError::UnknownTab);
-        };
-        if self.windows[window_index].tabs.len() <= 1 {
-            return Err(ShellError::CannotCloseLastTab);
-        }
-        let Some(tab_index) = self.windows[window_index]
-            .tabs
-            .iter()
-            .position(|tab| tab.id == id)
-        else {
-            return Err(ShellError::UnknownTab);
-        };
-        self.windows[window_index].tabs.remove(tab_index);
-        if self.windows[window_index].active_tab == id {
-            let replacement = tab_index.min(self.windows[window_index].tabs.len() - 1);
-            self.windows[window_index].active_tab = self.windows[window_index].tabs[replacement].id;
-        }
         Ok(())
     }
 
@@ -346,17 +308,6 @@ impl Tab {
             root: PaneTree::Leaf(pane_id),
             focused: pane_id,
         }
-    }
-
-    /// The last Pane of a Tab cannot be closed.
-    pub(super) fn allows_pane_close(&self) -> bool {
-        self.panes.len() > 1
-    }
-
-    /// `ClosePane` of the focused Pane would be accepted: not the last Pane.
-    /// A bound Pane may close; provisioning records detach-only disposition.
-    pub(super) fn allows_focused_pane_close(&self) -> bool {
-        self.allows_pane_close()
     }
 
     #[cfg(test)]

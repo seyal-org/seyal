@@ -60,30 +60,24 @@ fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
     assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
     assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
 
+    // ClosePane on the sole Pane of the active Tab removes that Tab.
     let active_pane = seyal_app_shell_row(handle, 2, 0);
     let mut close_pane = identity_fence(26, &seyal_app_snapshot(handle));
     close_pane.target_execution_lo = active_pane.id_lo;
     close_pane.target_execution_hi = active_pane.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 32, "CannotCloseLastPane");
-
-    let created = seyal_app_shell_row(handle, 1, 1);
-    let mut close_tab = identity_fence(24, &seyal_app_snapshot(handle));
-    close_tab.target_execution_lo = created.id_lo;
-    close_tab.target_execution_hi = created.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, 0);
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, 0);
     assert_eq!(seyal_app_shell(handle).tab_count, 1);
 
+    // Closing the remaining sole Tab removes the Window (hierarchical close).
     let remaining = seyal_app_shell_row(handle, 1, 0);
     let mut close_last = identity_fence(24, &seyal_app_snapshot(handle));
     close_last.target_execution_lo = remaining.id_lo;
     close_last.target_execution_hi = remaining.id_hi;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_last) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 31, "CannotCloseLastTab");
-
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_last) }, 0);
     let shell = seyal_app_shell(handle);
-    assert_eq!(shell.tab_count, 1);
-    assert_eq!(shell.pane_count, 1);
+    assert_eq!(shell.window_count, 0);
+    assert_eq!(shell.tab_count, 0);
+    assert_eq!(shell.pane_count, 0);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -95,8 +89,14 @@ fn shell_projection_is_one_local_workspace() {
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
     assert_eq!(
-        shell.flags, SHELL_FLAG_ALLOWS_TAB_CREATION,
+        shell.flags & 3,
+        SHELL_FLAG_ALLOWS_TAB_CREATION,
         "production advertises tab creation after C2b; splits stay off"
+    );
+    assert_ne!(
+        shell.flags & 12,
+        0,
+        "hierarchical close is admitted while a Window exists"
     );
 
     let workspace = seyal_app_shell_row(handle, 0, 0);

@@ -2,7 +2,7 @@
 
 use seyal_core::{AttachmentId, ExecutionId, WorkspaceId};
 
-use super::{AppAction, AppError, ApplicationRoot, BindingEvidence};
+use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, NativeEffect};
 use crate::palette::PaletteCommand;
 use crate::provisioning::ProvisioningEffect;
 
@@ -176,9 +176,6 @@ fn sync_drops_retired_and_bound() {
 
 #[test]
 fn close_actions_do_not_emit_terminate_execution() {
-    // Production shell is single-pane; close fails as last-pane before bound
-    // checks. Either way no TerminateExecution effect is queued — destruction
-    // paths that could unbind are W2b/W4b and do not exist on this branch.
     let mut root = ApplicationRoot::new();
     let execution = ExecutionId::new();
     let workspace = WorkspaceId::m001_default();
@@ -193,11 +190,14 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    assert!(matches!(
-        root.apply(AppAction::ClosePane { id: pane }),
-        Err(AppError::CannotCloseLastPane) | Err(AppError::CannotCloseBoundPane)
-    ));
-    assert!(root.snapshot().pending_effects.is_empty());
+    root.apply(AppAction::ClosePane { id: pane })
+        .expect("presentation removal");
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert_eq!(root.live_unpresented(), vec![execution]);
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
 

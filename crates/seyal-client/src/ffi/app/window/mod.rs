@@ -251,7 +251,7 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
         let (active_tab_lo, active_tab_hi) = split_id(window.active_tab.to_bytes());
         let title = push_text(&mut state.window_scratch.text, &window.title);
         let mut flags = 0u16;
-        if window.id == shell.active_window {
+        if Some(window.id) == shell.active_window {
             flags |= WINDOW_FLAG_PRODUCT_ACTIVE;
         }
         if window.attention {
@@ -479,7 +479,10 @@ pub(super) fn fill_shell_header_from(
     let last_workspace = split_id(shell.last_active_workspace.to_bytes());
     let tab = split_id(shell.active_tab.to_bytes());
     let pane = split_id(shell.focused_pane.to_bytes());
-    let window = split_id(shell.active_window.to_bytes());
+    let window = match shell.active_window {
+        Some(id) => split_id(id.to_bytes()),
+        None => (0, 0),
+    };
     let mut flags = 0u16;
     if shell.allows_tab_creation {
         flags |= SHELL_FLAG_ALLOWS_TAB_CREATION;
