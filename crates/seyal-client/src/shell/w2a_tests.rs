@@ -232,7 +232,7 @@ fn selection_actions_accept_live_identities_across_generations() {
     let created = shell.snapshot().active_tab;
     assert_ne!(shell.containment_generation(), 0);
     shell
-        .apply(ShellAction::SelectTab { id: original_tab
+        .apply(ShellAction::SelectTab { id: original_tab,
             containment_generation: shell.containment_generation(),
         })
         .expect("select original tab after generation bump");
@@ -259,11 +259,11 @@ fn selection_does_not_bump_containment_generation() {
     let generation = shell.containment_generation();
     let tab = shell.snapshot().active_tab;
     let window = shell.product_window_id().unwrap();
-    shell.apply(ShellAction::SelectTab { id: tab
+    shell.apply(ShellAction::SelectTab { id: tab,
         containment_generation: shell.containment_generation(),
     }).unwrap();
     shell
-        .apply(ShellAction::SelectWindow { id: window
+        .apply(ShellAction::SelectWindow { id: window,
             containment_generation: shell.containment_generation(),
         })
         .unwrap();
@@ -491,7 +491,7 @@ fn last_tab_move_destroys_source_window_atomically() {
     assert_eq!(shell.snapshot().active_tab, moving);
     assert_eq!(shell.snapshot().tabs.len(), 2);
     assert_eq!(
-        shell.apply(ShellAction::SelectWindow { id: source
+        shell.apply(ShellAction::SelectWindow { id: source,
             containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::UnknownWindow)
@@ -612,7 +612,7 @@ fn unknown_identities_fail_closed() {
     let generation = shell.containment_generation();
     assert_eq!(
         shell.apply(ShellAction::SelectWindow {
-            id: WindowId::new()
+            id: WindowId::new(),
             containment_generation: shell.containment_generation(),
         }),
         Err(ShellError::UnknownWindow)
@@ -675,7 +675,7 @@ fn activate_workspace_raise_uses_derived_pane_recency() {
         .unwrap();
     let second_window = shell.product_window_id().unwrap();
     shell
-        .apply(ShellAction::SelectWindow { id: first_window
+        .apply(ShellAction::SelectWindow { id: first_window,
             containment_generation: shell.containment_generation(),
         })
         .unwrap();
