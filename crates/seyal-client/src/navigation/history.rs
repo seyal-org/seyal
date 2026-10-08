@@ -585,12 +585,12 @@ mod tests {
         x
     }
 
-    fn gen_ops(seed: u64, n: usize) -> Vec<HistOp> {
+    fn gen_ops(seed: u64, n: usize, include_destroy: bool) -> Vec<HistOp> {
         let mut state = seed | 1;
         let mut ops = Vec::with_capacity(n);
         for _ in 0..n {
             let r = xorshift(&mut state);
-            let op = match r % 5 {
+            let op = match if include_destroy { r % 5 } else { r % 4 } {
                 0 | 1 => HistOp::Commit(((r >> 8) % 12) as u8 + 1),
                 2 => HistOp::Back,
                 3 => HistOp::Forward,
@@ -601,66 +601,154 @@ mod tests {
         ops
     }
 
-    fn apply_ops(history: &mut FocusHistory, ops: &[HistOp]) {
-        for op in ops {
-            match *op {
+    #[derive(Default)]
+    struct HistoryModel {
+        targets: Vec<ResourceAddress>,
+        cursor: Option<usize>,
+    }
+
+    impl HistoryModel {
+        fn apply(&mut self, op: HistOp) {
+            match op {
+                HistOp::Commit(target) => {
+                    let target = pane(target);
+                    if self.cursor.is_some_and(|idx| self.targets[idx] == target) {
+                        return;
+                    }
+                    if let Some(idx) = self.cursor {
+                        self.targets.truncate(idx + 1);
+                    }
+                    if self.targets.len() == FOCUS_HISTORY_CAPACITY {
+                        self.targets.remove(0);
+                        self.cursor = self.cursor.map(|idx| idx.saturating_sub(1));
+                    }
+                    self.targets.push(target);
+                    self.cursor = Some(self.targets.len() - 1);
+                }
+                HistOp::Back => {
+                    if let Some(idx) = self.cursor
+                        && idx > 0
+                    {
+                        self.cursor = Some(idx - 1);
+                    }
+                }
+                HistOp::Forward => {
+                    if let Some(idx) = self.cursor
+                        && idx + 1 < self.targets.len()
+                    {
+                        self.cursor = Some(idx + 1);
+                    }
+                }
+                HistOp::Destroy(n) => {
+                    let ResourceAddress::Pane { pane: destroyed, .. } = pane(n) else {
+                        unreachable!()
+                    };
+                    let old_cursor = self.cursor;
+                    let surviving_before_or_at_cursor = old_cursor.map(|cursor| {
+                        self.targets
+                            .iter()
+                            .take(cursor + 1)
+                            .filter(|target| !matches_destroyed_pane(target, destroyed))
+                            .count()
+                    });
+                    self.targets
+                        .retain(|target| !matches_destroyed_pane(target, destroyed));
+                    self.cursor = match surviving_before_or_at_cursor {
+                        Some(count) if count > 0 => Some(count - 1),
+                        _ if !self.targets.is_empty() => Some(0),
+                        _ => None,
+                    };
+                }
+            }
+        }
+    }
+
+    fn assert_matches_model(history: &FocusHistory, model: &HistoryModel, context: &str) {
+        let actual_targets = targets(history);
+        assert_eq!(actual_targets, model.targets, "{context}: targets");
+        assert_eq!(history.cursor_index(), model.cursor, "{context}: cursor index");
+        assert_eq!(
+            history.cursor_target(),
+            model.cursor.map(|idx| model.targets[idx]),
+            "{context}: cursor target"
+        );
+        assert!(history.len() <= FOCUS_HISTORY_CAPACITY, "{context}: capacity");
+        for pair in history.entries().windows(2) {
+            assert!(pair[0].seq < pair[1].seq, "{context}: sequence order");
+        }
+        assert_eq!(
+            history.cursor_seq(),
+            model.cursor.map(|idx| history.entries()[idx].seq),
+            "{context}: cursor sequence"
+        );
+    }
+
+    fn apply_and_check(history: &mut FocusHistory, model: &mut HistoryModel, ops: &[HistOp], seed: u64) {
+        for (index, op) in ops.iter().copied().enumerate() {
+            let context = format!("seed {seed}, operation {index}");
+            let expected_cursor = model.cursor;
+            let expected_target = expected_cursor.map(|idx| model.targets[idx]);
+            match op {
                 HistOp::Commit(n) => history.record_user_commit(pane(n)),
                 HistOp::Back => {
                     if let Some(seq) = history.cursor_seq() {
-                        let _ = history.prepare_back(seq);
+                        let actual = history.prepare_back(seq);
+                        let expected = model.cursor.and_then(|idx| idx.checked_sub(1)).map(|idx| model.targets[idx]);
+                        match expected {
+                            Some(target) => assert_eq!(actual, Ok(target), "{context}: back target"),
+                            None => assert_eq!(actual, Err(NavigationRejection::HistoryUnavailable), "{context}: unavailable back"),
+                        }
                     }
                 }
                 HistOp::Forward => {
                     if let Some(seq) = history.cursor_seq() {
-                        let _ = history.prepare_forward(seq);
+                        let actual = history.prepare_forward(seq);
+                        let expected = model.cursor
+                            .filter(|idx| idx + 1 < model.targets.len())
+                            .map(|idx| model.targets[idx + 1]);
+                        match expected {
+                            Some(target) => assert_eq!(actual, Ok(target), "{context}: forward target"),
+                            None => assert_eq!(actual, Err(NavigationRejection::HistoryUnavailable), "{context}: unavailable forward"),
+                        }
                     }
                 }
                 HistOp::Destroy(n) => {
-                    let ResourceAddress::Pane { pane: id, .. } = pane(n) else {
+                    let ResourceAddress::Pane { pane: destroyed, .. } = pane(n) else {
                         unreachable!()
                     };
-                    history.purge_matching(|t| matches_destroyed_pane(t, id));
+                    history.purge_matching(|target| matches_destroyed_pane(target, destroyed));
                 }
             }
+            model.apply(op);
+            assert_matches_model(history, model, &context);
+            if matches!(op, HistOp::Commit(_))
+                && expected_cursor.is_some()
+                && model.cursor == expected_cursor
+                && model.cursor.map(|idx| model.targets[idx]) == expected_target
+            {
+                // Cursor-equal commits are true no-ops, including while behind the head.
+                assert_eq!(history.cursor_index(), expected_cursor, "{context}: dedup cursor");
+            }
         }
     }
 
     #[test]
-    fn property_length_never_exceeds_capacity() {
+    fn property_navigation_sequences_match_reference_model() {
         for seed in 1_u64..64 {
-            let ops = gen_ops(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15), 200);
-            let mut h = FocusHistory::new();
-            apply_ops(&mut h, &ops);
-            assert!(
-                h.len() <= FOCUS_HISTORY_CAPACITY,
-                "seed {seed}: len {} > capacity",
-                h.len()
-            );
-            if let Some(idx) = h.cursor_index() {
-                assert!(idx < h.len());
-            }
+            let ops = gen_ops(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15), 200, false);
+            let mut history = FocusHistory::new();
+            let mut model = HistoryModel::default();
+            apply_and_check(&mut history, &mut model, &ops, seed);
         }
     }
 
     #[test]
-    fn property_ordering_total_and_reproducible() {
-        for seed in 1_u64..48 {
-            let ops = gen_ops(seed.wrapping_mul(0xD1B5_4A32_D192_ED03), 120);
-            let mut a = FocusHistory::new();
-            let mut b = FocusHistory::new();
-            apply_ops(&mut a, &ops);
-            apply_ops(&mut b, &ops);
-            let seqs_a: Vec<_> = a.entries().iter().map(|e| e.seq).collect();
-            let seqs_b: Vec<_> = b.entries().iter().map(|e| e.seq).collect();
-            let targets_a = targets(&a);
-            let targets_b = targets(&b);
-            assert_eq!(targets_a, targets_b, "seed {seed}: targets diverge");
-            assert_eq!(seqs_a, seqs_b, "seed {seed}: seqs diverge");
-            assert_eq!(a.cursor_index(), b.cursor_index(), "seed {seed}: cursor");
-            // Total order: seqs are strictly increasing along the list.
-            for w in seqs_a.windows(2) {
-                assert!(w[0] < w[1], "seed {seed}: seq not total/increasing");
-            }
+    fn property_destruction_sequences_match_reference_model() {
+        for seed in 1_u64..64 {
+            let ops = gen_ops(seed.wrapping_mul(0xD1B5_4A32_D192_ED03), 240, true);
+            let mut history = FocusHistory::new();
+            let mut model = HistoryModel::default();
+            apply_and_check(&mut history, &mut model, &ops, seed);
         }
     }
 
