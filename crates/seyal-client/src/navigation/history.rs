@@ -741,7 +741,7 @@ mod tests {
             apply_and_check(&mut history, &mut model, &ops, seed);
 
             let mut repeated = FocusHistory::new();
-            let mut repeated_model = model.clone();
+            let mut repeated_model = HistoryModel::default();
             apply_and_check(&mut repeated, &mut repeated_model, &ops, seed);
             assert_eq!(targets(&history), targets(&repeated), "seed {seed}: targets");
             let seqs: Vec<_> = history.entries().iter().map(|entry| entry.seq).collect();
