@@ -105,4 +105,22 @@ pub enum ShellAction {
         pane: PaneId,
         execution: ExecutionId,
     },
+    /// Record a live execution with no Pane binding (tests / Runtime sync).
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    /// Drop a previously recorded live-unpresented entry after Runtime retirement.
+    ForgetUnpresented {
+        execution: ExecutionId,
+    },
+    /// Rebind a live-unpresented execution into a Pane leaf.
+    AdoptExecution {
+        pane: PaneId,
+        execution: ExecutionId,
+    },
+    /// Explicit disposition; never implied by Tab/Window destruction.
+    TerminateExecution {
+        execution: ExecutionId,
+    },
 }

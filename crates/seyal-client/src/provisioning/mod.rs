@@ -7,6 +7,7 @@
 mod disposition;
 mod intent;
 mod resolution;
+mod unpresented;
 
 #[cfg(test)]
 mod tests;
@@ -149,14 +150,6 @@ impl ProvisioningSession {
         self.recorded_bindings.get(&pane).copied()
     }
 
-    pub fn is_unreferenced(&self, execution: ExecutionId) -> bool {
-        self.unreferenced.contains(&execution)
-    }
-
-    pub fn unreferenced_executions(&self) -> impl Iterator<Item = ExecutionId> + '_ {
-        self.unreferenced.iter().copied()
-    }
-
     pub fn needs_bootstrap_resize(&self, pane: PaneId) -> bool {
         self.awaiting_bootstrap_resize.contains(&pane)
     }
@@ -230,6 +223,23 @@ impl ProvisioningSession {
             .find_map(|((_, id), intent)| (*id == request_id).then_some(intent))
     }
 
+    /// Pane associated with a live create attach, or `None` for dispose-only
+    /// attaches that intentionally have no shell Pane owner.
+    pub fn pending_attach_pane_by_request_id(&self, request_id: u64) -> Option<Option<PaneId>> {
+        self.pending_by_key
+            .iter()
+            .find_map(|((owner, id), intent)| {
+                if *id != request_id {
+                    return None;
+                }
+                match self.pending_kind.get(&(*owner, *id))? {
+                    PendingKind::Create if intent.intent_alive => Some(intent.pane),
+                    PendingKind::Create | PendingKind::DisposeAttach => Some(None),
+                    PendingKind::Terminate => None,
+                }
+            })
+    }
+
     /// Locate a pending terminate intent by connection-local `request_id`.
     pub fn pending_terminate_by_request_id(&self, request_id: u64) -> Option<&PendingIntent> {
         self.pending_by_key
@@ -250,9 +260,14 @@ impl ProvisioningSession {
         if let Some(owner) = self.pane_owners.get(&pane).copied() {
             return owner;
         }
+        let owner = self.allocate_connection_owner();
+        self.pane_owners.insert(pane, owner);
+        owner
+    }
+
+    fn allocate_connection_owner(&mut self) -> ConnectionOwner {
         let owner = ConnectionOwner(self.next_owner.saturating_add(1).max(1));
         self.next_owner = owner.0;
-        self.pane_owners.insert(pane, owner);
         owner
     }
 
@@ -284,7 +299,7 @@ impl ProvisioningSession {
             ),
         };
         let intent = PendingIntent {
-            pane,
+            pane: Some(pane),
             owner,
             request_id,
             geometry,
@@ -332,11 +347,14 @@ impl ProvisioningSession {
             return Vec::new();
         };
         self.pending_kind.remove(&key);
-        if self.pane_pending.get(&intent.pane).copied() != Some(request_id) {
+        let Some(pane) = intent.pane else {
+            return Vec::new();
+        };
+        if self.pane_pending.get(&pane).copied() != Some(request_id) {
             // Duplicate or already correlated elsewhere: bind nothing.
             return Vec::new();
         }
-        self.pane_pending.remove(&intent.pane);
+        self.pane_pending.remove(&pane);
 
         match result {
             CreateOutcome::Created(execution) => {
@@ -351,11 +369,11 @@ impl ProvisioningSession {
                 }
                 intent.phase = IntentPhase::Attaching { execution };
                 self.insert_pending(owner, request_id, PendingKind::Create, intent.clone());
-                self.pane_pending.insert(intent.pane, request_id);
+                self.pane_pending.insert(pane, request_id);
                 vec![ProvisioningEffect::AttachController { owner, execution }]
             }
             CreateOutcome::Failed(code) => {
-                self.last_failure = Some((intent.pane, ProvisioningFailure::CreateRejected(code)));
+                self.last_failure = Some((pane, ProvisioningFailure::CreateRejected(code)));
                 Vec::new()
             }
         }
@@ -401,14 +419,16 @@ impl ProvisioningSession {
                 if !intent.intent_alive {
                     let intent = self.pending_by_key.remove(&key).expect("checked");
                     self.pending_kind.remove(&key);
-                    self.pane_pending.remove(&intent.pane);
+                    self.remove_pane_pending_for_intent(&intent);
                     return self.queue_terminate(intent.pane, owner, execution, attachment);
                 }
                 intent.phase = IntentPhase::Attached {
                     execution,
                     attachment,
                 };
-                let pane = intent.pane;
+                let Some(pane) = intent.pane else {
+                    return Vec::new();
+                };
                 vec![ProvisioningEffect::BindPane { pane, execution }]
             }
             PendingKind::Terminate => Vec::new(),
@@ -428,7 +448,7 @@ impl ProvisioningSession {
         let Some(intent) = self.pending_by_key.remove(&key) else {
             return Vec::new();
         };
-        self.pane_pending.remove(&intent.pane);
+        self.remove_pane_pending_for_intent(&intent);
         let execution = match intent.phase {
             IntentPhase::Attaching { execution }
             | IntentPhase::Created { execution }
@@ -437,7 +457,9 @@ impl ProvisioningSession {
         };
         match kind {
             PendingKind::DisposeAttach => {
-                self.last_failure = Some((intent.pane, ProvisioningFailure::DisposeAttachFailed));
+                if let Some(pane) = intent.pane {
+                    self.last_failure = Some((pane, ProvisioningFailure::DisposeAttachFailed));
+                }
                 if let Some(execution) = execution {
                     if still_listed {
                         self.unreferenced.insert(execution);
@@ -447,12 +469,15 @@ impl ProvisioningSession {
                 }
             }
             PendingKind::Create => {
-                self.last_failure = Some((intent.pane, ProvisioningFailure::AttachFailed));
+                if let Some(pane) = intent.pane {
+                    self.last_failure = Some((pane, ProvisioningFailure::AttachFailed));
+                }
                 // Spawn succeeded, attach failed → try dispose attach (§6.3).
                 if let Some(execution) = execution
                     && still_listed
                 {
                     let mut intent = intent;
+                    intent.pane = None;
                     intent.phase = IntentPhase::Disposing {
                         execution,
                         attached: false,
@@ -491,9 +516,10 @@ impl ProvisioningSession {
         self.pane_pending.remove(&pane);
         if !intent.intent_alive {
             return match intent.attachment {
-                Some(attachment) => self.queue_terminate(pane, owner, execution, attachment),
+                Some(attachment) => self.queue_terminate(Some(pane), owner, execution, attachment),
                 None => {
                     let mut intent = intent;
+                    intent.pane = None;
                     intent.phase = IntentPhase::Disposing {
                         execution,
                         attached: false,
@@ -532,7 +558,7 @@ impl ProvisioningSession {
                 self.pending_kind.remove(&key);
                 self.pane_pending.remove(&pane);
                 if let Some(attachment) = intent.attachment {
-                    return self.queue_terminate(pane, owner, execution, attachment);
+                    return self.queue_terminate(Some(pane), owner, execution, attachment);
                 }
             } else {
                 self.pane_pending.remove(&pane);
@@ -546,7 +572,7 @@ impl ProvisioningSession {
             }
         };
         let intent = PendingIntent {
-            pane,
+            pane: Some(pane),
             owner,
             request_id: dispose_id,
             geometry: PaneGeometry {
@@ -595,7 +621,7 @@ impl ProvisioningSession {
             return Err(ProvisioningFailure::AttachFailed);
         };
         self.awaiting_bootstrap_resize.remove(&pane);
-        Ok(self.queue_terminate(pane, owner, execution, attachment))
+        Ok(self.queue_terminate(Some(pane), owner, execution, attachment))
     }
 
     /// Undo [`Self::begin_explicit_terminate`] when type 38 was not admitted.
@@ -611,12 +637,15 @@ impl ProvisioningSession {
             return;
         };
         self.pending_kind.remove(&key);
-        self.pane_pending.remove(&intent.pane);
+        self.remove_pane_pending_for_intent(&intent);
+        let Some(pane) = intent.pane else {
+            return;
+        };
         let Some(execution) = execution_from_phase(intent.phase) else {
             return;
         };
-        self.recorded_bindings.insert(intent.pane, execution);
-        self.bound_owners.insert(intent.pane, intent.owner);
+        self.recorded_bindings.insert(pane, execution);
+        self.bound_owners.insert(pane, intent.owner);
         self.unreferenced.remove(&execution);
     }
 
@@ -651,8 +680,9 @@ impl ProvisioningSession {
                 self.unreferenced.remove(&execution);
             }
             TerminateOutcome::Failed(_) => {
-                self.last_failure =
-                    Some((intent.pane, ProvisioningFailure::DisposeTerminateFailed));
+                if let Some(pane) = intent.pane {
+                    self.last_failure = Some((pane, ProvisioningFailure::DisposeTerminateFailed));
+                }
                 if still_listed {
                     self.unreferenced.insert(execution);
                 } else {
@@ -678,11 +708,13 @@ impl ProvisioningSession {
         for key in keys {
             if let Some(intent) = self.pending_by_key.remove(&key) {
                 self.pending_kind.remove(&key);
-                self.pane_pending.remove(&intent.pane);
+                self.remove_pane_pending_for_intent(&intent);
                 if let Some(execution) = execution_from_phase(intent.phase) {
                     self.unreferenced.insert(execution);
                 }
-                self.last_failure = Some((intent.pane, ProvisioningFailure::ConnectionLost));
+                if let Some(pane) = intent.pane {
+                    self.last_failure = Some((pane, ProvisioningFailure::ConnectionLost));
+                }
             }
         }
         if let Some(execution) = created_execution {
@@ -744,9 +776,25 @@ impl ProvisioningSession {
         self.pending_kind.insert((owner, request_id), kind);
     }
 
+    fn remove_pane_pending_for_intent(&mut self, intent: &PendingIntent) {
+        if let Some(pane) = intent.pane
+            && self.pane_pending.get(&pane).copied() == Some(intent.request_id)
+        {
+            self.pane_pending.remove(&pane);
+        }
+    }
+
+    /// Keep a given execution under one in-flight provisioning/disposition
+    /// operation until its attach, bind, or terminate result is applied.
+    fn has_pending_operation_for_execution(&self, execution: ExecutionId) -> bool {
+        self.pending_by_key
+            .values()
+            .any(|intent| execution_from_phase(intent.phase) == Some(execution))
+    }
+
     fn queue_terminate(
         &mut self,
-        pane: PaneId,
+        pane: Option<PaneId>,
         owner: ConnectionOwner,
         execution: ExecutionId,
         attachment: AttachmentId,

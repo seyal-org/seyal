@@ -552,7 +552,9 @@ typedef struct SeyalAppPaneTreeNode {
 /*
  * ADR-018 §2.4 native effects in commit order.
  * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
- *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
+ *       3 DestroyWindowRealization, 4 OrderFrontMakeKey,
+ *       5 TerminateExecution (window_* slots carry ExecutionId),
+ *       6 RequestAdoptAttach (window_* slots carry ExecutionId).
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -567,6 +569,8 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
+#define SEYAL_APP_EFFECT_TERMINATE_EXECUTION 5u
+#define SEYAL_APP_EFFECT_REQUEST_ADOPT_ATTACH 6u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u

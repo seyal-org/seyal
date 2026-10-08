@@ -19,6 +19,7 @@ mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
 
@@ -36,6 +37,8 @@ mod recovery_tests;
 mod tab_provisioning_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unpresented_tests;
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
@@ -127,6 +130,10 @@ pub enum AppError {
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
+    /// Adopt naming an execution owned by a different Workspace (ADR-017).
+    CrossWorkspaceAdopt,
+    /// Adopt/terminate of an id that is not live-unpresented in this session.
+    ExecutionNotUnpresented,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +276,25 @@ pub enum AppAction {
     },
     TerminateExecution {
         fence: AppFence,
+    },
+    /// ADR-018 §3.3: adopt a live-unpresented execution with Runtime evidence.
+    Adopt {
+        fence: AppFence,
+        evidence: BindingEvidence,
+    },
+    /// Test/Runtime sync of the live-unpresented catalog.
+    SyncLiveUnpresented {
+        entries: Vec<(ExecutionId, WorkspaceId)>,
+    },
+    /// Record one live-unpresented execution (tests construct Unpresented directly).
+    RecordUnpresented {
+        execution: ExecutionId,
+        workspace: WorkspaceId,
+    },
+    /// Explicit terminate of a live-unpresented execution (ADR-018 §3.3).
+    /// Distinct from [`AppAction::TerminateExecution`] (P4 fenced Controller dispose).
+    TerminateUnpresented {
+        execution: ExecutionId,
     },
     SplitFocused {
         axis: SplitAxis,
@@ -477,6 +503,10 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Dispose-only Controller clients, keyed by synthetic owner and never
+    /// associated with a shell Pane or display handle.
+    #[cfg(target_os = "macos")]
+    dispose_clients: HashMap<crate::provisioning::ConnectionOwner, LocalDisplayClient>,
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
@@ -553,6 +583,8 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            dispose_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
@@ -597,7 +629,10 @@ impl ApplicationRoot {
     /// create/attach/terminate progress (not every Candidate-D frame).
     #[cfg(target_os = "macos")]
     pub(crate) fn needs_provisioning_drive(&self) -> bool {
-        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
+        if self.live_client_handle_for_test().is_none()
+            && self.wire_client.is_none()
+            && self.dispose_clients.is_empty()
+        {
             return false;
         }
         self.pending_live_attach.is_some()
@@ -854,6 +889,13 @@ impl ApplicationRoot {
             }
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
+            AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            AppAction::RecordUnpresented {
+                execution,
+                workspace,
+            } => self.record_unpresented(execution, workspace),
+            AppAction::TerminateUnpresented { execution } => self.terminate_unpresented(execution),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
             AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),

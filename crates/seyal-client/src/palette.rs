@@ -9,7 +9,8 @@
 
 use crate::chrome::{AgentId, AttentionId, ChromeSnapshot, InspectorMode, LeftPanelMode};
 use crate::navigation::ResourceAddress;
-use crate::shell::{ShellSnapshot, SplitAxis};
+use crate::shell::{unpresented_palette_label, ShellSnapshot, SplitAxis};
+use seyal_core::ExecutionId;
 
 /// Maximum rows projected to the host for one filter result.
 pub const PALETTE_VISIBLE_ROWS: usize = 12;
@@ -33,6 +34,10 @@ pub enum PaletteCommand {
     SelectResting {
         raw: bool,
     },
+    /// ADR-018 §3.3: adopt a live-unpresented execution into the focused Pane.
+    AdoptUnpresented(ExecutionId),
+    /// ADR-018 §3.3: explicit terminate of a live-unpresented execution.
+    TerminateUnpresented(ExecutionId),
 }
 
 /// What Run executes for the current selection (never a re-resolved ordinal).
@@ -174,6 +179,7 @@ impl PaletteState {
     /// Called after Open and SetQuery so Run never re-resolves by ordinal.
     /// `explicit_raw` is `Some` only for a bound Pane: `Some(true)` offers
     /// return to Flow; `Some(false)` offers explicit Raw; `None` omits both.
+    /// `unpresented` must already be sorted deterministically (ExecutionId order).
     pub fn rebuild(
         &mut self,
         shell: &ShellSnapshot,
@@ -181,6 +187,7 @@ impl PaletteState {
         allows_tab_creation: bool,
         allows_pane_splitting: bool,
         explicit_raw: Option<bool>,
+        unpresented: &[ExecutionId],
     ) {
         if !self.open {
             self.projected.clear();
@@ -192,6 +199,7 @@ impl PaletteState {
             allows_tab_creation,
             allows_pane_splitting,
             explicit_raw,
+            unpresented,
         );
         self.projected = filter(&commands, &self.query);
         self.selected = clamp(self.selected, self.projected.len());
@@ -290,6 +298,7 @@ fn build_commands(
     allows_tab_creation: bool,
     allows_pane_splitting: bool,
     explicit_raw: Option<bool>,
+    unpresented: &[ExecutionId],
 ) -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
 
@@ -471,6 +480,23 @@ fn build_commands(
         });
     }
 
+    // Deterministic §3.3 rows: caller supplies already-sorted ids; never auto-pick.
+    for execution in unpresented {
+        let label = unpresented_palette_label(*execution);
+        entries.push(PaletteEntry {
+            label: format!("Adopt Unpresented: {label}"),
+            category: "Execution",
+            address: None,
+            command: Some(PaletteCommand::AdoptUnpresented(*execution)),
+        });
+        entries.push(PaletteEntry {
+            label: format!("Terminate Unpresented: {label}"),
+            category: "Execution",
+            address: None,
+            command: Some(PaletteCommand::TerminateUnpresented(*execution)),
+        });
+    }
+
     entries
 }
 
@@ -568,7 +594,7 @@ mod tests {
         splits: bool,
     ) {
         palette.apply(PaletteAction::Open, 0).unwrap();
-        palette.rebuild(shell, chrome, tabs, splits, None);
+        palette.rebuild(shell, chrome, tabs, splits, None, &[]);
     }
 
     #[test]
@@ -606,7 +632,7 @@ mod tests {
         palette
             .apply(PaletteAction::SetQuery("split".into()), 0)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true, None);
+        palette.rebuild(&shell, &chrome, true, true, None, &[]);
         palette.apply(PaletteAction::Open, 0).unwrap();
         assert_eq!(palette.query(), "split", "reopen is a no-op while open");
     }
@@ -700,7 +726,7 @@ mod tests {
         palette
             .apply(PaletteAction::SetQuery("split".into()), row_count)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true, None);
+        palette.rebuild(&shell, &chrome, true, true, None, &[]);
         assert_eq!(
             palette.snapshot().selected,
             0,
@@ -717,7 +743,7 @@ mod tests {
         palette
             .apply(PaletteAction::SetQuery("split pane down".into()), 0)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true, None);
+        palette.rebuild(&shell, &chrome, true, true, None, &[]);
         assert_eq!(
             palette.selected_target(),
             Some(PaletteRunTarget::Command(PaletteCommand::SplitFocused(
@@ -739,7 +765,7 @@ mod tests {
         palette
             .apply(PaletteAction::SetQuery("zzz-no-such-command".into()), 0)
             .unwrap();
-        palette.rebuild(&shell, &chrome, true, true, None);
+        palette.rebuild(&shell, &chrome, true, true, None, &[]);
         assert!(palette.snapshot().rows.is_empty());
         assert!(palette.selected_target().is_none());
     }
@@ -792,7 +818,7 @@ mod tests {
             )
             .unwrap();
         let after = chrome.snapshot(&shell, &[]);
-        palette.rebuild(&shell, &after, true, true, None);
+        palette.rebuild(&shell, &after, true, true, None, &[]);
         let rows = palette.snapshot().rows;
         assert!(!labels(&rows).contains(&"Focus Agent: Claude"));
     }
@@ -825,7 +851,7 @@ mod tests {
         palette
             .apply(PaletteAction::SetQuery("Switch to Tab: Core".into()), 0)
             .unwrap();
-        palette.rebuild(&snap, &chrome, true, true, None);
+        palette.rebuild(&snap, &chrome, true, true, None, &[]);
         let address = match palette.selected_target() {
             Some(PaletteRunTarget::Navigate(address)) => address,
             other => panic!("expected navigate target, got {other:?}"),

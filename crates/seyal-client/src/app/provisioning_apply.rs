@@ -162,8 +162,10 @@ impl ApplicationRoot {
             })
             .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
+        let workspace = self.shell.snapshot().active_workspace;
         let mut effects = Vec::new();
         for pane in removed {
+            let released = self.provisioning.recorded_execution(pane);
             let pane_effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
                 !pane_effects
@@ -173,6 +175,9 @@ impl ApplicationRoot {
             );
             effects.extend(pane_effects);
             self.clear_authority_for_pane(pane);
+            if let Some(execution) = released {
+                let _ = self.record_unpresented(execution, workspace);
+            }
         }
         let _ = self.dispatch_wire_effects(
             effects,
@@ -198,6 +203,7 @@ impl ApplicationRoot {
             })
             .map_err(close_pane_error)?;
         if let Some((pane, execution)) = self.shell.take_released_execution() {
+            let workspace = self.shell.snapshot().active_workspace;
             let effects = self.provisioning.on_bound_pane_closed(pane);
             debug_assert!(
                 self.provisioning.is_unreferenced(execution),
@@ -210,6 +216,7 @@ impl ApplicationRoot {
                 "closing a pane must not terminate a bound execution"
             );
             self.clear_authority_for_pane(pane);
+            let _ = self.record_unpresented(execution, workspace);
             let _ = self.dispatch_wire_effects(
                 effects,
                 WireDispatchContext {
@@ -431,6 +438,14 @@ impl ApplicationRoot {
             return Ok(Some(()));
         };
         let pane = intent.pane;
+        let disposed_execution = match intent.phase {
+            crate::provisioning::IntentPhase::Disposing { execution, .. }
+            | crate::provisioning::IntentPhase::Created { execution }
+            | crate::provisioning::IntentPhase::Attaching { execution }
+            | crate::provisioning::IntentPhase::Attached { execution, .. }
+            | crate::provisioning::IntentPhase::Bound { execution } => Some(execution),
+            crate::provisioning::IntentPhase::AwaitingCreate => None,
+        };
         let outcome = match result.result_code {
             TerminateExecutionResultCode::TerminationRequested => {
                 TerminateOutcome::TerminationRequested
@@ -446,8 +461,19 @@ impl ApplicationRoot {
         for effect in effects {
             match effect {
                 ProvisioningEffect::Detach { .. } => {
-                    let _ = self.shell.release_execution(pane);
-                    self.clear_authority_for_pane(pane);
+                    if let Some(pane) = pane {
+                        let _ = self.shell.release_execution(pane);
+                        self.clear_authority_for_pane(pane);
+                    } else {
+                        #[cfg(target_os = "macos")]
+                        self.dispose_clients.remove(&intent.owner);
+                    }
+                    if matches!(outcome, TerminateOutcome::TerminationRequested)
+                        && let Some(execution) = disposed_execution
+                        && pane.is_none()
+                    {
+                        let _ = self.apply_shell(ShellAction::ForgetUnpresented { execution });
+                    }
                 }
                 other => {
                     self.dispatch_wire_effects(
@@ -468,8 +494,15 @@ impl ApplicationRoot {
 
     #[cfg(target_os = "macos")]
     fn take_wire_terminate_result(&mut self) -> Result<Option<TerminateExecutionResult>, AppError> {
-        if let Some(client) = self.wire_client.as_mut() {
-            return Ok(client.take_terminate_result());
+        if let Some(client) = self.wire_client.as_mut()
+            && let Some(result) = client.take_terminate_result()
+        {
+            return Ok(Some(result));
+        }
+        for client in self.dispose_clients.values_mut() {
+            if let Some(result) = client.take_terminate_result() {
+                return Ok(Some(result));
+            }
         }
         // Prefer the focused/authority pane client (may be a second Controller).
         if let Some(pane) = self.authority.map(|authority| authority.pane)
@@ -529,6 +562,19 @@ impl ApplicationRoot {
         let pending = std::mem::take(&mut self.pending_wire_effects);
         self.dispatch_wire_effects(
             pending,
+            WireDispatchContext {
+                workspace_id: 0,
+                launch_profile: 0,
+            },
+        )
+    }
+
+    pub(crate) fn dispatch_provisioning_effects(
+        &mut self,
+        effects: Vec<ProvisioningEffect>,
+    ) -> Result<(), AppError> {
+        self.dispatch_wire_effects(
+            effects,
             WireDispatchContext {
                 workspace_id: 0,
                 launch_profile: 0,
@@ -666,6 +712,13 @@ impl ApplicationRoot {
         execution: ExecutionId,
         attachment: AttachmentId,
     ) -> Result<(), AppError> {
+        if let ProvisioningEffect::SendTerminate { owner, .. } = effect
+            && let Some(client) = self.dispose_clients.get_mut(&owner)
+        {
+            return client
+                .submit_terminate_execution_with_id(request_id, execution, attachment)
+                .map_err(client_error);
+        }
         if !self.has_wire_client() {
             let _ = effect;
             return Err(AppError::NoLiveClient);

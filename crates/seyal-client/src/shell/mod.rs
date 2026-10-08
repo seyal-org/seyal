@@ -13,6 +13,7 @@ mod inventory;
 mod pane_ops;
 mod snapshot;
 mod tree;
+mod unpresented;
 mod workspace;
 
 #[cfg(test)]
@@ -22,8 +23,11 @@ mod pt2_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod unpresented_tests;
+#[cfg(test)]
 mod w2a_tests;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
@@ -38,6 +42,7 @@ pub use inventory::{
 pub use pane_ops::MoveSide;
 pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
+pub use unpresented::unpresented_palette_label;
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
 use focus_history::FocusHistory;
@@ -79,6 +84,10 @@ pub enum ShellError {
     NotZoomed,
     /// `pane == neighbor`, `SwapPanes` with `a == b`, or neighbor not a same-Tab leaf.
     InvalidMoveTarget,
+    /// Adopt naming an execution owned by a different Workspace (ADR-017).
+    CrossWorkspaceAdopt,
+    /// Adopt/terminate of an execution that is not live-unpresented here.
+    ExecutionNotUnpresented,
 }
 
 impl ShellError {
@@ -109,6 +118,10 @@ impl ShellError {
             Self::CrossWorkspaceMove => "A Tab cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
+            Self::CrossWorkspaceAdopt => "An execution cannot be adopted across Workspaces.",
+            Self::ExecutionNotUnpresented => {
+                "This execution is not a live-unpresented execution in this Workspace."
+            }
         }
     }
 }
@@ -206,6 +219,8 @@ pub struct ShellState {
     last_removed_tab_panes: Vec<PaneId>,
     /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
     pending_effects: Vec<ShellNativeEffect>,
+    /// Live executions with no Pane binding in this headed session (ADR-018 §3.3).
+    unpresented: BTreeMap<ExecutionId, WorkspaceId>,
 }
 
 impl ShellState {
@@ -246,6 +261,7 @@ impl ShellState {
             last_released_execution: None,
             last_removed_tab_panes: Vec::new(),
             pending_effects: Vec::new(),
+            unpresented: BTreeMap::new(),
         };
         shell.seed_focus_from_product();
         shell
@@ -287,6 +303,7 @@ impl ShellState {
             last_released_execution: None,
             last_removed_tab_panes: Vec::new(),
             pending_effects: Vec::new(),
+            unpresented: BTreeMap::new(),
         };
         shell.seed_focus_from_product();
         Ok(shell)
@@ -683,6 +700,10 @@ impl ShellState {
                 .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
+            ShellAction::RecordUnpresented { .. }
+            | ShellAction::ForgetUnpresented { .. }
+            | ShellAction::AdoptExecution { .. }
+            | ShellAction::TerminateExecution { .. } => self.dispatch_unpresented(action),
         }
     }
 
@@ -844,6 +865,7 @@ impl ShellState {
             return Err(ShellError::ExecutionAlreadyBound);
         }
         pane.execution = Some(execution);
+        self.unpresented.remove(&execution);
         Ok(())
     }
 
