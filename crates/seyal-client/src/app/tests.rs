@@ -1,6 +1,7 @@
 use super::*;
 use crate::presentation::InputRoute;
 mod close_disposition_tests;
+mod window_effect_tests;
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
@@ -380,46 +381,6 @@ fn quit_freezes_and_emits_one_native_effect() {
     );
     root.apply(AppAction::AckEffect).unwrap();
     assert!(root.snapshot().pending_effects.is_empty());
-}
-
-#[test]
-fn repeated_same_window_selection_keeps_effect_queue_bounded() {
-    let mut root = ApplicationRoot::new();
-    let workspace = root.snapshot().shell.active_workspace;
-    let generation = root.snapshot().shell.containment_generation;
-    root.apply_shell(crate::shell::ShellAction::CreateWindow {
-        workspace,
-        containment_generation: generation,
-    })
-    .unwrap();
-    let first = root.snapshot().shell.windows[0].id;
-    let second = root.snapshot().shell.windows[1].id;
-    for i in 0..32 {
-        let window = if i % 2 == 0 { first } else { second };
-        root.apply_shell(crate::shell::ShellAction::SelectWindow { id: window })
-            .unwrap();
-    }
-    let effects = root.snapshot().pending_effects;
-    assert!(
-        effects
-            .iter()
-            .filter(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. }))
-            .count()
-            <= 1,
-        "OrderFrontMakeKey must stay coalesced, got {effects:?}"
-    );
-    root.apply(AppAction::Quit).unwrap();
-    let snap = root.snapshot();
-    assert!(snap.frozen);
-    assert!(
-        snap.pending_effects
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
-        "quit effect must remain present after prior selections"
-    );
-    while !root.snapshot().pending_effects.is_empty() {
-        root.apply(AppAction::AckEffect).unwrap();
-    }
 }
 
 #[test]

@@ -57,7 +57,10 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.apply_shell(ShellAction::CloseTab { id: tab });
+                let _ = self.apply_shell(ShellAction::CloseTab {
+                    id: tab,
+                    containment_generation: self.shell.containment_generation(),
+                });
                 let _ = self.shell.take_removed_tab_panes();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
@@ -70,7 +73,10 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.apply_shell(ShellAction::CloseTab { id: tab });
+            let _ = self.apply_shell(ShellAction::CloseTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            });
             let _ = self.shell.take_removed_tab_panes();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(

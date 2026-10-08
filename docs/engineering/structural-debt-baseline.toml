@@ -65,7 +65,7 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 806
+acknowledged_loc = 807
 issue = 1092
 reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, and #1108 drains native window realization effects without adding a second provisioning authority."
 
@@ -77,9 +77,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1067
+ceiling_loc = 1028
 issue = 1108
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1217 updates production SplitFocused enablement assertions and #1108 covers window effect coalescing and navigation integration. C3 acceptance cases stay in pane_provisioning_tests.rs."
+responsibility = "Legacy ApplicationRoot lifecycle tests remain in one suite; #1108 moved multi-window effect queue coverage into app/tests/window_effect_tests.rs, reducing this file's ratchet from 1067 to 1028 LOC."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"

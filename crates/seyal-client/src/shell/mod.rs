@@ -582,12 +582,7 @@ impl ShellState {
         {
             return Err(ShellError::UnknownPane);
         }
-        let previous_product = self
-            .workspace(self.active_workspace)
-            .ok()
-            .and_then(|item| item.active_window);
-        self.active_workspace = workspace;
-        self.last_active_workspace = workspace;
+        let previous_product = self.product_active_window().map(|window| window.id);
         let workspace_mut = self.workspace_mut(workspace)?;
         workspace_mut.select_tab(tab)?;
         let active_tab = workspace_mut.active_tab_mut()?;

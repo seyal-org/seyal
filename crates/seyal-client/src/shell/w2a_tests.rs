@@ -588,6 +588,14 @@ fn move_tab_to_new_window_when_sibling_exists() {
         .unwrap();
     let new_window = shell.product_window_id().unwrap();
     assert_ne!(new_window, original_window);
+    assert_eq!(
+        shell.take_effects(),
+        [
+            ShellNativeEffect::RealizeWindow { window: new_window },
+            ShellNativeEffect::OrderFrontMakeKey { window: new_window },
+        ],
+        "moving a Tab to a new Window must realize and activate that Window"
+    );
     assert_eq!(shell.snapshot().active_tab, created);
     assert_eq!(
         shell.snapshot().tabs.len(),
@@ -1244,10 +1252,16 @@ fn cross_window_select_tab_emits_order_front() {
     shell
         .apply(ShellAction::SelectWindow {
             id: original_window,
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     let _ = shell.take_effects();
-    shell.apply(ShellAction::SelectTab { id: created }).unwrap();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
     assert_eq!(shell.product_window_id().unwrap(), new_window);
     assert_eq!(
         shell.take_effects(),

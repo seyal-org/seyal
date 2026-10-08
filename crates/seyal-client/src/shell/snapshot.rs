@@ -43,12 +43,17 @@ pub struct PaneLeafSnapshot {
 
 impl ShellState {
     pub(super) fn build_snapshot(&self) -> ShellSnapshot {
-        let product_window = self.product_active_window();
+        let product_window = self.product_active_window().map(|window| window.id);
+        let active_workspace = self.active_workspace_id();
         let workspace = self
-            .workspace(self.active_workspace)
+            .workspace(active_workspace)
             .expect("active Workspace must exist");
         let window = workspace
-            .active_window()
+            .window(product_window.unwrap_or_else(|| {
+                workspace
+                    .active_window
+                    .expect("retained Workspace must have an active Window")
+            }))
             .expect("product-active Window must exist for snapshot");
         let tab = workspace
             .tab(window.active_tab)
@@ -65,8 +70,8 @@ impl ShellState {
                     tab_count: item.tab_count(),
                 })
                 .collect(),
-            windows: self.ordered_window_snapshots(product_window),
-            active_workspace: self.active_workspace,
+            windows: self.ordered_window_snapshots(window.id),
+            active_workspace,
             last_active_workspace: self.last_active_workspace,
             active_window: window.id,
             containment_generation: self.containment_generation,
@@ -103,13 +108,6 @@ impl ShellState {
             allows_tab_close: workspace.allows_tab_close(),
             allows_pane_close: tab.allows_focused_pane_close(),
         }
-    }
-
-    pub(super) fn product_active_window(&self) -> WindowId {
-        self.workspace(self.active_workspace)
-            .ok()
-            .and_then(|workspace| workspace.active_window)
-            .expect("product-active Window must exist")
     }
 
     fn ordered_window_snapshots(&self, product_window: WindowId) -> Vec<WindowSnapshot> {
@@ -223,6 +221,7 @@ impl ShellError {
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
             Self::NotZoomed => 18,
+            Self::InvalidMoveTarget => 19,
         }
     }
 }

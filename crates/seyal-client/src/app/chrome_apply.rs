@@ -97,8 +97,11 @@ impl ApplicationRoot {
             self.drain_shell_effects();
         }
         if let Some(tab) = effect.select_tab {
-            self.apply_shell(ShellAction::SelectTab { id: tab })
-                .map_err(|_| AppError::UnknownChromeTab)?;
+            self.apply_shell(ShellAction::SelectTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|_| AppError::UnknownChromeTab)?;
         }
         let _ = self
             .chrome
@@ -118,8 +121,11 @@ impl ApplicationRoot {
     }
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::SelectTab { id })
-            .map_err(|_| AppError::UnknownChromeTab)?;
+        self.apply_shell(ShellAction::SelectTab {
+            id,
+            containment_generation: self.shell.containment_generation(),
+        })
+        .map_err(|_| AppError::UnknownChromeTab)?;
         #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
         let _ = self
