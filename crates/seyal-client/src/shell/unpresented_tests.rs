@@ -148,6 +148,7 @@ fn adopt_rejects_execution_already_bound_elsewhere() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     let second = shell.snapshot().focused_pane;
@@ -231,10 +232,16 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .unwrap();
     let created = shell.snapshot().focused_pane;
-    shell.apply(ShellAction::ClosePane { id: created }).unwrap();
+    shell
+        .apply(ShellAction::ClosePane {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
     assert!(shell.take_effects().is_empty());
 
     let execution = ExecutionId::new();

@@ -8,8 +8,10 @@ use seyal_runtime::local_ipc::framing::{
 };
 
 use super::provisioning_apply::negotiated_provisioning_client;
-use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility, SplitAxis};
-use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS};
+use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility};
+use crate::provisioning::{
+    CreateOutcome, ProvisioningEffect, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS,
+};
 
 fn exec(byte: u8) -> ExecutionId {
     ExecutionId::from_bytes([byte; 16])

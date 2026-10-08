@@ -51,11 +51,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 991
-issue = 1217
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane_provisioning_tests beside the existing tab provisioning suite without expanding apply dispatch."
+ceiling_loc = 1030
+issue = 1143
+responsibility = "ApplicationRoot types, action dispatch, and product-state façade remain one authority; W6 adds the explicit adopt/terminate and Runtime catalog-sync actions that route through existing provisioning and shell reducers. Further splitting would separate AppAction from the apply match that owns it."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1143 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 807
+acknowledged_loc = 860
 issue = 1143
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, #1108 drains native window realization effects, and #1143 dispatches unpresented adopt/dispose through the same effect queue."
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, #1108 drains native window realization effects, and #1143 records live-unpresented disposals through the pane-less AttachController path."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -248,9 +248,9 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 857
-issue = 1092
-reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract and selection call site."
+acknowledged_loc = 883
+issue = 1143
+reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract, and #1143 adds deterministic explicit adopt/terminate rows for live-unpresented executions."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"

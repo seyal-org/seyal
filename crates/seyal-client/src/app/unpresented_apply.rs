@@ -23,12 +23,13 @@ impl ApplicationRoot {
         execution: ExecutionId,
         workspace: WorkspaceId,
     ) -> Result<(), AppError> {
-        self.provisioning.note_unreferenced(execution);
         self.apply_shell(ShellAction::RecordUnpresented {
             execution,
             workspace,
         })
-        .map_err(unpresented_shell_error)
+        .map_err(unpresented_shell_error)?;
+        self.provisioning.note_unreferenced(execution);
+        Ok(())
     }
 
     /// Adopt with fresh Runtime attachment evidence (no new PTY / ExecutionId).

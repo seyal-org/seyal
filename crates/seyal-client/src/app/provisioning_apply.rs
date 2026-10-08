@@ -18,7 +18,7 @@ use crate::composer::ComposerAction;
 use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
-use crate::provisioning::{CreateOutcome, IntentPhase, ProvisioningEffect, ProvisioningFailure};
+use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
 use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {

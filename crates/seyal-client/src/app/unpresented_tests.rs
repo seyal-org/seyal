@@ -103,6 +103,11 @@ fn palette_lists_unpresented_without_auto_select() {
 
     let fence = root.fence();
     root.apply(AppAction::OpenPalette { fence }).unwrap();
+    root.apply(AppAction::SetPaletteQuery {
+        fence: root.fence(),
+        query: "Adopt Unpresented".to_owned(),
+    })
+    .unwrap();
     let rows = root.snapshot().palette.rows;
     let adopt: Vec<_> = rows
         .iter()
