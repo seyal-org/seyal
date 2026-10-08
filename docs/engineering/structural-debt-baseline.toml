@@ -54,9 +54,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 823
-issue = 1117
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane; #1117 adds split rollback, close-path focus-history lifecycle hooks, and active-close successor authority restoration, with shared history cleanup delegated to focus_history_apply.rs."
+acknowledged_loc = 832
+issue = 1092
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, and #1117 adds split rollback plus close-path focus-history lifecycle hooks and active-close successor authority restoration through focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -221,21 +221,21 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1166
-issue = 1117
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites; #1117 makes Navigate's history policy explicit at legacy ApplyOnly call sites through a shared test helper, while new history integration tests live in history_integration_tests.rs."
+ceiling_loc = 1154
+issue = 1122
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside its address; #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites, W2a adds Window-aware navigation fixtures, and #1117 makes history policy explicit at legacy ApplyOnly call sites with new integration tests in history_integration_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 876
-issue = 1175
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1175 adds the P4 Terminate Execution verb beside New Tab so headed C2b can distinguish detach-only Close Tab from explicit terminate without splitting the row model from the command it runs."
+acknowledged_loc = 879
+issue = 1092
+reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract and selection call site, while #1175 adds the P4 Terminate Execution verb beside New Tab for headed C2b."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 881
-issue = 1142
-reason = "Shell composition reducer remains one Workspace/Tab/Pane façade; #1131 owns identity-preserving swaps/moves, while #1142 adds FocusDirection dispatch and NoDirectionalNeighbor without splitting tree/workspace ownership. Neighbor selection lives in focus_direction.rs."
+acknowledged_loc = 938
+issue = 1092
+reason = "ShellState composition and snapshots stay in the reducer façade; #1092 moves typed host action values into action_types.rs, carries the ADR-018 containment fence, and records close-focus successors so the recency-derived active Workspace remains correct; #1131 owns identity-preserving swaps/moves, while #1142 adds FocusDirection dispatch and NoDirectionalNeighbor in focus_direction.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

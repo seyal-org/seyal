@@ -158,6 +158,7 @@ fn spec025_14_directional_focus_2x2_and_uneven_tie_break() {
         })
         .expect("A → Right → B");
     assert_eq!(shell.snapshot().focused_pane, b);
+    assert_eq!(shell.focus_history.panes().first(), Some(&b));
     assert_eq!(shell.snapshot().tree, before_tree);
 
     shell

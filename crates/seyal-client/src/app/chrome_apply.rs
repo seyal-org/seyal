@@ -95,12 +95,15 @@ impl ApplicationRoot {
         }
         if let Some(workspace) = effect.select_workspace {
             self.shell
-                .apply(ShellAction::SelectWorkspace { id: workspace })
+                .apply_activate_workspace(workspace)
                 .map_err(|_| AppError::UnknownChromeWorkspace)?;
         }
         if let Some(tab) = effect.select_tab {
             self.shell
-                .apply(ShellAction::SelectTab { id: tab })
+                .apply(ShellAction::SelectTab {
+                    id: tab,
+                    containment_generation: self.shell.containment_generation(),
+                })
                 .map_err(|_| AppError::UnknownChromeTab)?;
         }
         if effect.select_workspace.is_some() || effect.select_tab.is_some() {
@@ -115,7 +118,7 @@ impl ApplicationRoot {
 
     pub(super) fn select_workspace(&mut self, id: WorkspaceId) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::SelectWorkspace { id })
+            .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
@@ -127,7 +130,10 @@ impl ApplicationRoot {
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::SelectTab { id })
+            .apply(ShellAction::SelectTab {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(|_| AppError::UnknownChromeTab)?;
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();

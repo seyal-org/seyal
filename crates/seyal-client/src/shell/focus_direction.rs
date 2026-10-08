@@ -373,20 +373,25 @@ pub(super) fn geometric_neighbor(
 
 impl ShellState {
     pub(super) fn focus_direction(&mut self, direction: FocusDirection) -> Result<(), ShellError> {
-        let workspace = self.workspace_mut(self.active_workspace)?;
-        let tab = workspace.active_tab_mut()?;
-        let focused = tab.focused;
-        if !tab.panes.contains_key(&focused) {
-            return Err(ShellError::UnknownPane);
-        }
-        let leaves = leaf_rects(&tab.root);
-        let Some(chosen) = choose_neighbor(&leaves, focused, direction) else {
-            return Err(ShellError::NoDirectionalNeighbor);
+        let workspace_id = self.active_workspace_id();
+        let chosen = {
+            let workspace = self.workspace_mut(workspace_id)?;
+            let tab = workspace.active_tab_mut()?;
+            let focused = tab.focused;
+            if !tab.panes.contains_key(&focused) {
+                return Err(ShellError::UnknownPane);
+            }
+            let leaves = leaf_rects(&tab.root);
+            let Some(chosen) = choose_neighbor(&leaves, focused, direction) else {
+                return Err(ShellError::NoDirectionalNeighbor);
+            };
+            if tab.zoomed.is_some_and(|zoomed| zoomed != chosen) {
+                tab.zoomed = None;
+            }
+            tab.focused = chosen;
+            chosen
         };
-        if tab.zoomed.is_some_and(|zoomed| zoomed != chosen) {
-            tab.zoomed = None;
-        }
-        tab.focused = chosen;
+        self.focus_history.record(chosen);
         Ok(())
     }
 }

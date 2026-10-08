@@ -366,11 +366,8 @@ fn rejection_navigation_denied() {
         .find(|id| *id != p_multi)
         .expect("split pane");
     shell_multi
-        .apply(ShellAction::BindExecution {
-            pane: second,
-            execution: multi,
-        })
-        .expect("bind second");
+        .overwrite_pane_execution_for_test(second, multi)
+        .expect("defensive dual bind for AmbiguousTarget");
     let only_w2_multi = NavigationPrincipal {
         local_navigation: true,
         workspaces: WorkspaceAccess::Only(std::slice::from_ref(&w2b)),
@@ -526,11 +523,8 @@ fn rejection_ambiguous_target() {
         .find(|id| *id != p1)
         .expect("split pane");
     shell
-        .apply(ShellAction::BindExecution {
-            pane: second,
-            execution,
-        })
-        .expect("bind second");
+        .overwrite_pane_execution_for_test(second, execution)
+        .expect("defensive dual bind for AmbiguousTarget");
     assert_eq!(
         resolve(
             ResourceAddress::Execution { execution },
@@ -907,11 +901,8 @@ fn navigate_execution_rejection_matrix_r8_3() {
         .find(|id| *id != p1)
         .expect("split pane");
     shell
-        .apply(ShellAction::BindExecution {
-            pane: second,
-            execution: exited,
-        })
-        .expect("bind second");
+        .overwrite_pane_execution_for_test(second, exited)
+        .expect("defensive dual bind for AmbiguousTarget");
     let before = shell.focus_checkpoint();
     assert_eq!(
         navigate_apply_only(
@@ -1007,11 +998,8 @@ fn navigate_unauthorized_principal_is_denied_without_existence_probe() {
         .find(|id| *id != p1)
         .expect("split pane");
     shell
-        .apply(ShellAction::BindExecution {
-            pane: second,
-            execution: exec,
-        })
-        .expect("bind twice");
+        .overwrite_pane_execution_for_test(second, exec)
+        .expect("defensive dual bind for NavigationDenied");
     let after_ambiguous_bind = shell.focus_checkpoint();
     assert_eq!(
         navigate_apply_only(
@@ -1096,7 +1084,7 @@ fn address_run_reaches_original_target_after_ordinal_would_shift() {
     assert_eq!(shell.snapshot().active_tab, t1);
     assert_eq!(shell.snapshot().focused_pane, p1);
     shell
-        .apply(ShellAction::CreateTab)
+        .apply_product_create_tab()
         .expect("create shifts ordinals");
     let after_create = shell.snapshot();
     assert_ne!(

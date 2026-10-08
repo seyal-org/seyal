@@ -44,7 +44,7 @@ impl ApplicationRoot {
     /// admits the resulting type-36 create on the wire client (same request id).
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::CreateTab)
+            .apply_product_create_tab()
             .map_err(|_| AppError::TabCreationUnavailable)?;
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
@@ -56,7 +56,10 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::CloseTab { id: tab });
+                let _ = self.shell.apply(ShellAction::CloseTab {
+                    id: tab,
+                    containment_generation: self.shell.containment_generation(),
+                });
                 let _ = self.shell.take_removed_tab_panes();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
@@ -69,7 +72,10 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::CloseTab { id: tab });
+            let _ = self.shell.apply(ShellAction::CloseTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            });
             let _ = self.shell.take_removed_tab_panes();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
@@ -161,7 +167,10 @@ impl ApplicationRoot {
         let focus_before = self.shell.focus_checkpoint();
         let was_active = focus_before.active_tab == id;
         self.shell
-            .apply(ShellAction::CloseTab { id })
+            .apply(ShellAction::CloseTab {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
         let mut effects = Vec::new();
