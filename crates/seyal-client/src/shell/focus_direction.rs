@@ -1,8 +1,10 @@
 //! Directional focus among leaves (SPEC-025 §5.7 / PT3).
 //!
-//! Neighbor geometry uses the stored [`SplitRatio`] basis points so nested
-//! non-dyadic splits share edges exactly. Host `pane_layout::project` f32
-//! rects are not used for adjacency.
+//! Neighbor geometry keeps exact rational coordinates derived from stored
+//! [`SplitRatio`] basis points. Host `pane_layout::project` f32 rects are not
+//! used for adjacency.
+
+use std::cmp::Ordering;
 
 use seyal_core::PaneId;
 
@@ -11,66 +13,222 @@ use crate::pane_layout::SplitRatio;
 use super::tree::PaneTree;
 use super::{ShellError, ShellState, SplitAxis};
 
-/// Unit square in SplitRatio basis points (`0..=10_000`).
-const UNIT: i32 = 10_000;
+const RATIO_DENOMINATOR: u32 = 10_000;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Small unsigned arbitrary-precision integer for exact split coordinates.
+/// Limb storage is base 1e9, little endian. This stays local to the focus
+/// control path and avoids making geometry precision depend on tree depth.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BigNat(Vec<u32>);
+
+impl BigNat {
+    fn zero() -> Self {
+        Self(vec![0])
+    }
+
+    fn from_u32(value: u32) -> Self {
+        Self(vec![value])
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0.len() == 1 && self.0[0] == 0
+    }
+
+    fn normalize(&mut self) {
+        while self.0.len() > 1 && self.0.last() == Some(&0) {
+            self.0.pop();
+        }
+    }
+
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.0.len().cmp(&other.0.len()) {
+            Ordering::Equal => self.0.iter().rev().cmp(other.0.iter().rev()),
+            ordering => ordering,
+        }
+    }
+
+    fn add(&self, other: &Self) -> Self {
+        const BASE: u64 = 1_000_000_000;
+        let mut result = Vec::with_capacity(self.0.len().max(other.0.len()) + 1);
+        let mut carry = 0_u64;
+        for index in 0..self.0.len().max(other.0.len()) {
+            let sum = u64::from(*self.0.get(index).unwrap_or(&0))
+                + u64::from(*other.0.get(index).unwrap_or(&0))
+                + carry;
+            result.push((sum % BASE) as u32);
+            carry = sum / BASE;
+        }
+        if carry != 0 {
+            result.push(carry as u32);
+        }
+        Self(result)
+    }
+
+    /// Subtract with the precondition `self >= other`.
+    fn sub(&self, other: &Self) -> Self {
+        const BASE: i64 = 1_000_000_000;
+        debug_assert_ne!(self.cmp(other), Ordering::Less);
+        let mut result = Vec::with_capacity(self.0.len());
+        let mut borrow = 0_i64;
+        for index in 0..self.0.len() {
+            let mut digit =
+                i64::from(self.0[index]) - i64::from(*other.0.get(index).unwrap_or(&0)) - borrow;
+            if digit < 0 {
+                digit += BASE;
+                borrow = 1;
+            } else {
+                borrow = 0;
+            }
+            result.push(digit as u32);
+        }
+        let mut result = Self(result);
+        result.normalize();
+        result
+    }
+
+    fn mul_small(&self, factor: u32) -> Self {
+        const BASE: u64 = 1_000_000_000;
+        if factor == 0 || self.is_zero() {
+            return Self::zero();
+        }
+        let mut result = Vec::with_capacity(self.0.len() + 1);
+        let mut carry = 0_u64;
+        for &digit in &self.0 {
+            let product = u64::from(digit) * u64::from(factor) + carry;
+            result.push((product % BASE) as u32);
+            carry = product / BASE;
+        }
+        if carry != 0 {
+            result.push(carry as u32);
+        }
+        Self(result)
+    }
+}
+
+/// Nonnegative rational coordinate `numerator / 10_000^scale`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Exact {
+    numerator: BigNat,
+    scale: usize,
+}
+
+impl Exact {
+    fn zero() -> Self {
+        Self {
+            numerator: BigNat::zero(),
+            scale: 0,
+        }
+    }
+
+    fn one() -> Self {
+        Self {
+            numerator: BigNat::from_u32(1),
+            scale: 0,
+        }
+    }
+
+    fn at_scale(&self, scale: usize) -> BigNat {
+        debug_assert!(scale >= self.scale);
+        let mut numerator = self.numerator.clone();
+        for _ in self.scale..scale {
+            numerator = numerator.mul_small(RATIO_DENOMINATOR);
+        }
+        numerator
+    }
+
+    fn cmp(&self, other: &Self) -> Ordering {
+        let scale = self.scale.max(other.scale);
+        self.at_scale(scale).cmp(&other.at_scale(scale))
+    }
+
+    fn add(&self, other: &Self) -> Self {
+        let scale = self.scale.max(other.scale);
+        Self {
+            numerator: self.at_scale(scale).add(&other.at_scale(scale)),
+            scale,
+        }
+    }
+
+    fn sub(&self, other: &Self) -> Self {
+        let scale = self.scale.max(other.scale);
+        let lhs = self.at_scale(scale);
+        let rhs = other.at_scale(scale);
+        debug_assert_ne!(lhs.cmp(&rhs), Ordering::Less);
+        Self {
+            numerator: lhs.sub(&rhs),
+            scale,
+        }
+    }
+
+    fn abs_diff(&self, other: &Self) -> Self {
+        if self.cmp(other) == Ordering::Less {
+            other.sub(self)
+        } else {
+            self.sub(other)
+        }
+    }
+
+    /// Exact split point `start + (end - start) * basis_points / 10_000`.
+    fn split_point(start: &Self, end: &Self, basis_points: u16) -> Self {
+        let scale = start.scale.max(end.scale);
+        let start_numerator = start.at_scale(scale);
+        let extent = end.at_scale(scale).sub(&start_numerator);
+        Self {
+            numerator: start_numerator
+                .mul_small(RATIO_DENOMINATOR)
+                .add(&extent.mul_small(u32::from(basis_points))),
+            scale: scale + 1,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ExactRect {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
+    x1: Exact,
+    y1: Exact,
+    x2: Exact,
+    y2: Exact,
 }
 
 impl ExactRect {
-    const FULL: Self = Self {
-        x: 0,
-        y: 0,
-        width: UNIT,
-        height: UNIT,
-    };
+    fn full() -> Self {
+        Self {
+            x1: Exact::zero(),
+            y1: Exact::zero(),
+            x2: Exact::one(),
+            y2: Exact::one(),
+        }
+    }
 
-    fn divided(self, axis: SplitAxis, ratio: SplitRatio) -> (Self, Self) {
+    fn divided(&self, axis: SplitAxis, ratio: SplitRatio) -> (Self, Self) {
         match axis {
             SplitAxis::Right => {
-                let first = (i64::from(self.width) * i64::from(ratio.basis_points())
-                    / i64::from(UNIT)) as i32;
+                let cut = Exact::split_point(&self.x1, &self.x2, ratio.basis_points());
                 (
                     Self {
-                        width: first,
-                        ..self
+                        x2: cut.clone(),
+                        ..self.clone()
                     },
                     Self {
-                        x: self.x + first,
-                        width: self.width - first,
-                        ..self
+                        x1: cut,
+                        ..self.clone()
                     },
                 )
             }
             SplitAxis::Down => {
-                let first = (i64::from(self.height) * i64::from(ratio.basis_points())
-                    / i64::from(UNIT)) as i32;
+                let cut = Exact::split_point(&self.y1, &self.y2, ratio.basis_points());
                 (
                     Self {
-                        height: first,
-                        ..self
+                        y2: cut.clone(),
+                        ..self.clone()
                     },
                     Self {
-                        y: self.y + first,
-                        height: self.height - first,
-                        ..self
+                        y1: cut,
+                        ..self.clone()
                     },
                 )
             }
         }
-    }
-
-    fn x2(self) -> i32 {
-        self.x + self.width
-    }
-
-    fn y2(self) -> i32 {
-        self.y + self.height
     }
 }
 
@@ -86,7 +244,7 @@ pub enum FocusDirection {
 /// Pre-order leaf id + exact rectangle (depth-first, first before second).
 fn leaf_rects(tree: &PaneTree) -> Vec<(PaneId, ExactRect)> {
     let mut leaves = Vec::new();
-    collect_leaves(tree, ExactRect::FULL, &mut leaves);
+    collect_leaves(tree, ExactRect::full(), &mut leaves);
     leaves
 }
 
@@ -106,52 +264,64 @@ fn collect_leaves(tree: &PaneTree, rect: ExactRect, leaves: &mut Vec<(PaneId, Ex
     }
 }
 
-fn shares_edge(focused: ExactRect, candidate: ExactRect, direction: FocusDirection) -> bool {
+fn shares_edge(focused: &ExactRect, candidate: &ExactRect, direction: FocusDirection) -> bool {
     match direction {
         FocusDirection::Right => {
-            candidate.x == focused.x2() && orthogonal_overlap_y(focused, candidate) > 0
+            candidate.x1.cmp(&focused.x2) == Ordering::Equal
+                && orthogonal_overlap_y(focused, candidate)
         }
         FocusDirection::Left => {
-            candidate.x2() == focused.x && orthogonal_overlap_y(focused, candidate) > 0
+            candidate.x2.cmp(&focused.x1) == Ordering::Equal
+                && orthogonal_overlap_y(focused, candidate)
         }
         FocusDirection::Down => {
-            candidate.y == focused.y2() && orthogonal_overlap_x(focused, candidate) > 0
+            candidate.y1.cmp(&focused.y2) == Ordering::Equal
+                && orthogonal_overlap_x(focused, candidate)
         }
         FocusDirection::Up => {
-            candidate.y2() == focused.y && orthogonal_overlap_x(focused, candidate) > 0
+            candidate.y2.cmp(&focused.y1) == Ordering::Equal
+                && orthogonal_overlap_x(focused, candidate)
         }
     }
 }
 
-fn orthogonal_overlap_x(a: ExactRect, b: ExactRect) -> i32 {
-    let start = a.x.max(b.x);
-    let end = a.x2().min(b.x2());
-    (end - start).max(0)
+fn has_positive_overlap(a_start: &Exact, a_end: &Exact, b_start: &Exact, b_end: &Exact) -> bool {
+    let start = if a_start.cmp(b_start) == Ordering::Greater {
+        a_start
+    } else {
+        b_start
+    };
+    let end = if a_end.cmp(b_end) == Ordering::Less {
+        a_end
+    } else {
+        b_end
+    };
+    start.cmp(end) == Ordering::Less
 }
 
-fn orthogonal_overlap_y(a: ExactRect, b: ExactRect) -> i32 {
-    let start = a.y.max(b.y);
-    let end = a.y2().min(b.y2());
-    (end - start).max(0)
+fn orthogonal_overlap_x(a: &ExactRect, b: &ExactRect) -> bool {
+    has_positive_overlap(&a.x1, &a.x2, &b.x1, &b.x2)
 }
 
-/// Orthogonal center distance in doubled basis points so halves stay exact.
+fn orthogonal_overlap_y(a: &ExactRect, b: &ExactRect) -> bool {
+    has_positive_overlap(&a.y1, &a.y2, &b.y1, &b.y2)
+}
+
+/// Twice the orthogonal center distance, kept rational so comparisons stay exact.
 fn orthogonal_center_distance(
-    focused: ExactRect,
-    candidate: ExactRect,
+    focused: &ExactRect,
+    candidate: &ExactRect,
     direction: FocusDirection,
-) -> i32 {
+) -> Exact {
     match direction {
-        FocusDirection::Left | FocusDirection::Right => {
-            let focused_cy2 = 2 * focused.y + focused.height;
-            let candidate_cy2 = 2 * candidate.y + candidate.height;
-            (focused_cy2 - candidate_cy2).abs()
-        }
-        FocusDirection::Up | FocusDirection::Down => {
-            let focused_cx2 = 2 * focused.x + focused.width;
-            let candidate_cx2 = 2 * candidate.x + candidate.width;
-            (focused_cx2 - candidate_cx2).abs()
-        }
+        FocusDirection::Left | FocusDirection::Right => focused
+            .y1
+            .add(&focused.y2)
+            .abs_diff(&candidate.y1.add(&candidate.y2)),
+        FocusDirection::Up | FocusDirection::Down => focused
+            .x1
+            .add(&focused.x2)
+            .abs_diff(&candidate.x1.add(&candidate.x2)),
     }
 }
 
@@ -162,17 +332,18 @@ fn choose_neighbor(
     direction: FocusDirection,
 ) -> Option<PaneId> {
     let focused_index = leaves.iter().position(|(id, _)| *id == focused)?;
-    let focused_rect = leaves[focused_index].1;
-    let mut best: Option<(PaneId, i32, usize)> = None;
+    let focused_rect = &leaves[focused_index].1;
+    let mut best: Option<(PaneId, Exact, usize)> = None;
     for (index, (id, rect)) in leaves.iter().enumerate() {
-        if *id == focused || !shares_edge(focused_rect, *rect, direction) {
+        if *id == focused || !shares_edge(focused_rect, rect, direction) {
             continue;
         }
-        let distance = orthogonal_center_distance(focused_rect, *rect, direction);
-        match best {
+        let distance = orthogonal_center_distance(focused_rect, rect, direction);
+        match &best {
             Some((_, best_distance, best_index))
-                if distance > best_distance
-                    || (distance == best_distance && index >= best_index) => {}
+                if distance.cmp(best_distance) == Ordering::Greater
+                    || (distance.cmp(best_distance) == Ordering::Equal && index >= *best_index) => {
+            }
             _ => best = Some((*id, distance, index)),
         }
     }

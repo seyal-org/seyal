@@ -425,3 +425,42 @@ fn nested_ratio_sweep_right_from_inner_leaf_never_misses_outer_neighbor() {
         }
     }
 }
+
+#[test]
+fn deep_positive_area_leaf_keeps_its_shared_edge_neighbor() {
+    let left = PaneId::new();
+    // Sweep beyond the depth where a 10,000-unit grid first collapses a valid
+    // positive region. The target is the first child after repeated 10%
+    // remainder descents; both legal edge ratios must retain the same neighbor.
+    for &target_ratio in &[SplitRatio::MIN, SplitRatio::MAX] {
+        for depth in 0..=64 {
+            let deepest = PaneId::new();
+            let mut nested = PaneTree::Split {
+                axis: SplitAxis::Down,
+                first: Box::new(PaneTree::Leaf(deepest)),
+                second: Box::new(PaneTree::Leaf(PaneId::new())),
+                ratio: target_ratio,
+            };
+            for _ in 0..depth {
+                nested = PaneTree::Split {
+                    axis: SplitAxis::Down,
+                    first: Box::new(PaneTree::Leaf(PaneId::new())),
+                    second: Box::new(nested),
+                    ratio: SplitRatio::MAX,
+                };
+            }
+            let tree = PaneTree::Split {
+                axis: SplitAxis::Right,
+                first: Box::new(PaneTree::Leaf(left)),
+                second: Box::new(nested),
+                ratio: SplitRatio::HALF,
+            };
+
+            assert_eq!(
+                geometric_neighbor(&tree, deepest, FocusDirection::Left),
+                Some(left),
+                "depth {depth}, ratio {target_ratio:?}: positive-area region lost its edge neighbor"
+            );
+        }
+    }
+}
