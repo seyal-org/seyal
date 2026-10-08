@@ -1072,8 +1072,8 @@ fn close_focused_pane_records_successor_before_other_workspace_recency() {
     // Arrange a valid history where the removed Pane is newest and the
     // other Workspace is older than the close successor.
     shell.focus_history.purge_if(|_| true);
-    shell.focus_history.record(successor);
     shell.focus_history.record(other_pane);
+    shell.focus_history.record(successor);
     shell.focus_history.record(closing_pane);
     assert_eq!(shell.active_workspace_id(), workspace);
 
