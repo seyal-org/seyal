@@ -19,6 +19,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     var observedAlternateScreen = false
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
+    private var composerRecoveryFocusRetryScheduled = false
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
         self.appHandle = appHandle
@@ -38,9 +39,47 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         syncInputRoutePresentation()
         if !allowsDirectTerminalInput {
             discardUncommittedMark()
-            return onRequestComposerFocus?() ?? false
+            return requestComposerFocusForRecovery()
         }
         return window?.makeFirstResponder(self) ?? false
+    }
+
+    @discardableResult
+    func requestComposerFocusForRecovery() -> Bool {
+        requestComposerFocusForRecovery(
+            focus: { [weak self] in self?.onRequestComposerFocus?() ?? false },
+            onAccepted: { [weak self] in
+                guard let self else { return }
+                _ = self.advanceRecoveryPresentationIfReady()
+            }
+        )
+    }
+
+    @discardableResult
+    func requestComposerFocusForRecovery(
+        focus: @escaping () -> Bool,
+        onAccepted: @escaping () -> Void
+    ) -> Bool {
+        let focused = focus()
+        guard !focused,
+            recoveryPresentationPending,
+            !composerRecoveryFocusRetryScheduled
+        else { return focused }
+
+        // A recovery callback can run during chrome reconciliation, before
+        // AppKit has completed the current responder/layout transaction. Make
+        // one deferred attempt after that turn; do not poll or claim Usable
+        // until the composer actually accepts first responder.
+        composerRecoveryFocusRetryScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.composerRecoveryFocusRetryScheduled = false
+            guard self.recoveryPresentationPending,
+                focus()
+            else { return }
+            onAccepted()
+        }
+        return false
     }
 
     override func terminalBridgeStatusDidChange() {

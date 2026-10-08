@@ -1112,6 +1112,29 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(view.recoveryPresentationPending)
     }
 
+    @MainActor
+    func testRecoveryRetriesDeferredComposerFocusOnNextAppKitTurn() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let accepted = expectation(description: "accepted deferred focus advances recovery")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return attempts == 2
+            },
+            onAccepted: { accepted.fulfill() }
+        ))
+        await fulfillment(of: [accepted], timeout: 1)
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(view.recoveryPresentationPending)
+    }
+
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.
