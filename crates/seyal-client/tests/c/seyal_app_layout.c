@@ -30,7 +30,9 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppWindow) == 72);
     REQUIRE(sizeof(SeyalAppTab) == 64);
     REQUIRE(sizeof(SeyalAppPaneLeaf) == 56);
-    REQUIRE(sizeof(SeyalAppPaneTreeNode) == 32);
+    REQUIRE(sizeof(SeyalAppPaneTreeNode) == 40);
+    REQUIRE(offsetof(SeyalAppPaneTreeNode, ratio) == 32);
+    REQUIRE(offsetof(SeyalAppPaneTreeNode, reserved2) == 36);
     REQUIRE(sizeof(SeyalAppNativeEffect) == 24);
     REQUIRE(sizeof(SeyalAppRow) == 112);
     REQUIRE(offsetof(SeyalAppRow, address_version) == 56);

@@ -87,6 +87,8 @@ pub struct SeyalAppPaneTreeNode {
     pub pane_hi: u64,
     pub first: u32,
     pub second: u32,
+    pub ratio: f32,
+    pub reserved2: u32,
 }
 
 #[repr(C)]
@@ -169,6 +171,8 @@ impl SeyalAppPaneTreeNode {
             pane_hi: 0,
             first: 0,
             second: 0,
+            ratio: 0.0,
+            reserved2: 0,
         }
     }
 }
@@ -414,6 +418,8 @@ fn encode_tree(
                     pane_hi,
                     first: 0,
                     second: 0,
+                    ratio: 0.0,
+                    reserved2: 0,
                 },
             ));
         }
@@ -421,7 +427,7 @@ fn encode_tree(
             axis,
             first,
             second,
-            ..
+            ratio,
         } => {
             let slot = out.len();
             out.push((
@@ -440,6 +446,8 @@ fn encode_tree(
                     pane_hi: 0,
                     first: 0,
                     second: 0,
+                    ratio: ratio.fraction(),
+                    reserved2: 0,
                 },
             ));
             let first_i = encode_tree(first, wi, ti, base, out);

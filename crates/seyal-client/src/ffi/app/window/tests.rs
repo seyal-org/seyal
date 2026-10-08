@@ -5,9 +5,10 @@ use std::{mem::size_of, slice};
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::app::{ApplicationRoot, APP_ABI_VERSION};
+use crate::pane_layout::SplitRatio;
 use crate::shell::{
-    PresentationTier, ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed,
+    PaneTree, PresentationTier, ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState,
+    ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
 };
 
 use super::super::{
@@ -176,6 +177,90 @@ fn round_trip_windows(n: usize) {
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
+#[test]
+fn pane_tree_split_ratio_round_trips_through_ffi() {
+    let workspace = WorkspaceId::m001_default();
+    let window = WindowId::new();
+    let tab = TabId::new();
+    let leading_pane = PaneId::new();
+    let mut shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Local".to_owned(),
+            detail: Some("local".to_owned()),
+            attention: false,
+            active_window: window,
+            windows: vec![ShellWindowSeed {
+                id: window,
+                active_tab: tab,
+                tabs: vec![ShellTabSeed {
+                    id: tab,
+                    title: "Terminal".to_owned(),
+                    attention: false,
+                    pane: ShellPaneSeed {
+                        id: leading_pane,
+                        title: "Pane 1".to_owned(),
+                        allows_implicit_execution_bootstrap: true,
+                    },
+                }],
+            }],
+        }],
+        workspace,
+        true,
+        true,
+    )
+    .expect("splittable shell");
+    let initial = shell.snapshot();
+    assert_eq!(initial.focused_pane, leading_pane);
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: leading_pane,
+            ratio: SplitRatio::from_fraction(0.65).unwrap(),
+        })
+        .unwrap();
+    let nested_leading_pane = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: nested_leading_pane,
+            ratio: SplitRatio::from_fraction(0.4).unwrap(),
+        })
+        .unwrap();
+    let expected_ratios = match &shell.snapshot().windows[0].tabs[0].tree {
+        PaneTree::Split { ratio, .. } => ratio.fraction(),
+        PaneTree::Leaf(_) => panic!("split action must create a PaneTree split"),
+    };
+
+    let handle = seyal_app_create();
+    install_shell(handle, shell);
+    let tab = seyal_app_tab(handle, 0, 0);
+    assert_eq!(tab.tree_node_count, 5);
+    let split = seyal_app_tab_tree_node(handle, 0, 0, 0);
+    assert_eq!(split.kind, 1, "the root node must preserve its split axis");
+    assert!((split.ratio - expected_ratios).abs() < f32::EPSILON);
+    assert_eq!(split.reserved2, 0);
+    assert_eq!(seyal_app_tab_tree_node(handle, 0, 0, 1).ratio, 0.0);
+    let nested = seyal_app_tab_tree_node(handle, 0, 0, 2);
+    assert_eq!(
+        nested.kind, 2,
+        "the nested node must preserve its split axis"
+    );
+    assert!((nested.ratio - 0.4).abs() < f32::EPSILON);
+    assert_eq!(nested.reserved2, 0);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
 fn split(bytes: [u8; 16]) -> (u64, u64) {
     (
         u64::from_le_bytes(bytes[..8].try_into().unwrap()),
@@ -218,6 +303,11 @@ fn version_and_size_mismatch_fail_closed() {
         -2
     );
     assert_eq!(seyal_app_record_compatible(APP_ABI_VERSION, 4, 1), -3);
+    assert_eq!(
+        seyal_app_record_compatible(APP_ABI_VERSION, 32, 4),
+        -3,
+        "pre-ratio pane-tree node size must fail closed"
+    );
     assert_eq!(
         seyal_app_record_compatible(APP_ABI_VERSION, size_of::<SeyalAppNativeEffect>() as u16, 5),
         0

@@ -533,7 +533,9 @@ typedef struct SeyalAppPaneLeaf {
 } SeyalAppPaneLeaf;
 
 /* SeyalAppPaneTreeNode.kind: 0 leaf, 1 split-right, 2 split-down.
- * first/second are relative indices within the Tab's tree_node_count. */
+ * first/second are relative indices within the Tab's tree_node_count.
+ * ratio is the first child's share (0.1...0.9) for split nodes; leaf nodes
+ * report 0.0. reserved2 must be zero. */
 typedef struct SeyalAppPaneTreeNode {
     uint16_t version;
     uint16_t size;
@@ -543,6 +545,8 @@ typedef struct SeyalAppPaneTreeNode {
     uint64_t pane_hi;
     uint32_t first;
     uint32_t second;
+    float ratio;
+    uint32_t reserved2;
 } SeyalAppPaneTreeNode;
 
 /*
