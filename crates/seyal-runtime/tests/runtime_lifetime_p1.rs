@@ -1,11 +1,10 @@
 #![cfg(target_os = "macos")]
 
-//! SPEC-003 §4.1 / ADR-017 P1 scaffolding (interim before C1).
+//! SPEC-003 §4.1 / ADR-017 P1 and C1 Runtime lifetime.
 //!
-//! Library Runtime may exist with zero executions. The production helper still
-//! creates a startup shell on empty argv and exits when the live-execution
-//! count reaches zero (SPEC-003 §4.1 interim until C1 / #1148). True
-//! zero-execution helper residency is deferred to C1.
+//! The client-launched helper is resident with zero executions when started
+//! with empty argv. The explicit-command developer/test mode creates its
+//! requested execution and exits after that execution finalizes.
 
 use std::{
     io::{Read, Write},
@@ -309,16 +308,15 @@ fn controlled_shutdown_still_progresses_live_executions() {
 }
 
 #[test]
-fn helper_empty_argv_creates_interim_startup_execution() {
-    // Interim SPEC-003 §4.1: empty argv invents a startup shell so headed
-    // smoke works before C1. True zero-execution helper residency moves to C1.
+fn helper_empty_argv_stays_resident_with_zero_executions() {
+    // C1 / SPEC-003 §4.1: an empty client-launched helper creates no startup
+    // execution and remains resident until controlled shutdown or OS signal.
     let mut helper = HelperChild::spawn(&[]);
     helper.wait_for_socket();
-
     std::thread::sleep(Duration::from_millis(200));
     assert!(
         helper.child.try_wait().expect("try_wait").is_none(),
-        "empty-argv helper with startup shell must stay alive"
+        "zero-execution helper must remain resident"
     );
 
     let mut stream = UnixStream::connect(helper.socket()).expect("connect helper");
@@ -343,13 +341,11 @@ fn helper_empty_argv_creates_interim_startup_execution() {
     let (kind, payload) = read_frame(&mut stream, &mut buffered, deadline);
     assert_eq!(kind, MessageType::ExecutionList as u16);
     let list = ExecutionList::decode(&payload).expect("ExecutionList");
-    assert_eq!(
-        list.entries.len(),
-        1,
-        "interim empty-argv helper must publish exactly one startup execution"
+    assert!(
+        list.entries.is_empty(),
+        "C1 empty-argv helper must publish no startup execution"
     );
 }
-
 #[test]
 fn helper_explicit_command_creates_one_execution_and_exits_at_zero() {
     let mut helper = HelperChild::spawn(&["/bin/sh", "-c", "sleep 30"]);
@@ -387,9 +383,8 @@ fn helper_explicit_command_creates_one_execution_and_exits_at_zero() {
         "explicit command must create exactly one execution"
     );
 
-    // Interim exit-at-zero: when the last startup execution finalizes, the
-    // helper process exits (true zero-execution residency deferred to C1).
-    // Do not require the control socket — a fast-exiting child can race past
+    // Explicit-command developer/test mode exits at zero after its requested
+    // execution finalizes. Do not require the control socket — a fast-exiting child can race past
     // bind before the test observes the path.
     drop(helper);
     let mut helper = HelperChild::spawn(&["/bin/sh", "-c", "exit 0"]);
@@ -404,7 +399,7 @@ fn helper_explicit_command_creates_one_execution_and_exits_at_zero() {
         }
         assert!(
             Instant::now() < deadline,
-            "interim helper must exit-at-zero after last startup execution finalizes"
+            "explicit-command helper must exit-at-zero after its execution finalizes"
         );
         std::thread::sleep(Duration::from_millis(50));
     }

@@ -4,7 +4,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::pane_layout::SplitRatio;
 
-use super::{MoveSide, SplitAxis};
+use super::{FocusDirection, MoveSide, SplitAxis};
 
 /// Window/tab cycle direction within the Rust-owned order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +95,10 @@ pub enum ShellAction {
         neighbor: PaneId,
         side: MoveSide,
         containment_generation: u64,
+    },
+    /// Focus the geometric neighbor of the focused leaf (SPEC-025 §5.7).
+    FocusDirection {
+        direction: FocusDirection,
     },
     /// Resize the Split whose divider follows `pane` (see `PaneTree`).
     SetSplitRatio {

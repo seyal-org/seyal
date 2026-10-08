@@ -89,11 +89,23 @@ pub use ffi::focused_registry_handle as ffi_test_focused_registry_handle;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
+pub use ffi::claim_focused_display_if_unset_for_test as ffi_test_claim_focused_display_if_unset;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
 pub use ffi::force_registry_client_eof as ffi_test_force_registry_client_eof;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use ffi::submit_utf8_for_test as ffi_test_submit_utf8;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::submit_utf8_on_handle_for_test as ffi_test_submit_utf8_on_handle;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::registry_cache_contains_for_test as ffi_test_registry_cache_contains;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]

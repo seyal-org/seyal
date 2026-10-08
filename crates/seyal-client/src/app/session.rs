@@ -51,7 +51,9 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
-        crate::ffi::set_focused_display_handle(handle);
+        if self.shell.snapshot().focused_pane == fence.pane {
+            crate::ffi::set_focused_display_handle(handle);
+        }
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
@@ -442,7 +444,7 @@ impl ApplicationRoot {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
+pub(crate) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
     use seyal_runtime::display::DisplayCellRole;
     let mut text = String::new();
     for (index, cell) in cache.cells.iter().enumerate() {

@@ -62,6 +62,39 @@ fn action_and_snapshot_match_published_sizes() {
     assert_eq!(offset_of!(SeyalAppComposerHistory, query_utf8), 16);
 }
 
+#[test]
+fn focus_history_cursor_accessor_preserves_v1_snapshot_layout() {
+    let handle = seyal_app_create();
+    let initial = seyal_app_snapshot(handle);
+    assert_eq!(initial.version, APP_ABI_VERSION);
+    assert_eq!(initial.size as usize, size_of::<SeyalAppSnapshot>());
+    assert_eq!(seyal_app_focus_history_seq(handle), 0);
+
+    let mut focus = identity_fence(21, &initial);
+    focus.target_execution_lo = initial.pane_lo;
+    focus.target_execution_hi = initial.pane_hi;
+    assert_eq!(unsafe { seyal_app_apply(handle, &focus) }, 0);
+    assert_ne!(seyal_app_focus_history_seq(handle), 0);
+    assert_eq!(seyal_app_snapshot(handle).size as usize, 112);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn history_traversal_actions_reject_nonzero_reserved() {
+    let root = ApplicationRoot::new();
+    let payload = 1_u64.to_le_bytes();
+    for kind in [63, 64] {
+        let mut action = fence_action(kind, &root);
+        action.payload = payload.as_ptr();
+        action.payload_len = payload.len() as u32;
+        action.reserved = 1;
+        assert_eq!(super::decode::decode_action(&action), Err(-6));
+
+        action.reserved = 0;
+        assert!(super::decode::decode_action(&action).is_ok());
+    }
+}
+
 fn bound_handle() -> (u64, SeyalAppSnapshot) {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);

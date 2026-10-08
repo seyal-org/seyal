@@ -33,6 +33,9 @@ pub enum PaletteCommand {
     SelectResting {
         raw: bool,
     },
+    /// P4 terminate of the focused Controller execution (C2b / #1175).
+    /// Distinct from Close Tab, which detaches only.
+    TerminateExecution,
 }
 
 /// What Run executes for the current selection (never a re-resolved ordinal).
@@ -471,6 +474,15 @@ fn build_commands(
         });
     }
 
+    // Destructive P4 verb: always in the catalog, discovered by query so it
+    // does not crowd the empty-query visible window (PALETTE_VISIBLE_ROWS).
+    entries.push(PaletteEntry {
+        label: "Terminate Execution".to_owned(),
+        category: "Terminal",
+        address: None,
+        command: Some(PaletteCommand::TerminateExecution),
+    });
+
     entries
 }
 
@@ -723,6 +735,16 @@ mod tests {
             Some(PaletteRunTarget::Command(PaletteCommand::SplitFocused(
                 SplitAxis::Down
             )))
+        );
+        palette
+            .apply(PaletteAction::SetQuery("terminate execution".into()), 0)
+            .unwrap();
+        palette.rebuild(&shell, &chrome, true, true, None);
+        assert_eq!(
+            palette.selected_target(),
+            Some(PaletteRunTarget::Command(
+                PaletteCommand::TerminateExecution
+            ))
         );
         palette.close();
         assert!(!palette.is_open());
