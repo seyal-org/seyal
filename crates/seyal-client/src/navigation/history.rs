@@ -601,7 +601,7 @@ mod tests {
         ops
     }
 
-    #[derive(Clone, Default)]
+    #[derive(Default)]
     struct HistoryModel {
         targets: Vec<ResourceAddress>,
         cursor: Option<usize>,
