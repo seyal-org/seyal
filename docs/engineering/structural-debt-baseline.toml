@@ -65,9 +65,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 797
-issue = 1217
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path and carries ADR-018 containment_generation through split and rollback; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
+acknowledged_loc = 806
+issue = 1092
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, while #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch; #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch; #1122 adds containment fencing on ClosePane."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -242,21 +242,21 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1151
+ceiling_loc = 1139
 issue = 1122
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites without inventing a second navigation test authority."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads ADR-018 containment_generation on Split/Close actions while W2a adds Window-aware navigation fixtures."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 854
-issue = 1105
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows, #1090 threads window identity, and #867 adds bound-Pane explicit Raw / Return to Flow beside those commands; splitting would separate the row model from the command it runs."
+acknowledged_loc = 857
+issue = 1092
+reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract and selection call site."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 869
-issue = 1131
-reason = "Shell composition reducer stays one Workspace/Tab/Pane façade; #1131 adds identity-preserving SwapPanes/MovePaneBeside with ADR-018 containment fencing beside master’s Tab zoom, focus succession, and production SplitFocused, without splitting tree/workspace ownership. Move/swap algorithms live in pane_ops.rs."
+acknowledged_loc = 930
+issue = 1092
+reason = "ShellState composition and snapshots stay in the reducer façade; #1092 moves typed host action values into action_types.rs, carries the ADR-018 containment fence, and records close-focus successors so the new recency-derived active Workspace remains correct."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

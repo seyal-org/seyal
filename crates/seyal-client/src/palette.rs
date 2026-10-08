@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn build_commands_excludes_no_ops_and_includes_split_and_new_tab() {
         let mut shell = seed_shell();
-        shell.apply(ShellAction::CreateTab).unwrap();
+        shell.apply_product_create_tab().unwrap();
         let snap = shell.snapshot();
         let chrome = ChromeState::new().snapshot(&snap, &[]);
         let mut palette = PaletteState::new();
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn frozen_projection_ignores_live_shell_changes_until_rebuild() {
         let mut shell = seed_shell();
-        shell.apply(ShellAction::CreateTab).unwrap();
+        shell.apply_product_create_tab().unwrap();
         let snap = shell.snapshot();
         let chrome = ChromeState::new().snapshot(&snap, &[]);
         let mut palette = PaletteState::new();
@@ -843,7 +843,10 @@ mod tests {
             .find(|id| *id != core)
             .expect("other tab");
         shell
-            .apply(ShellAction::SelectTab { id: other })
+            .apply(ShellAction::SelectTab {
+                id: other,
+                containment_generation: shell.containment_generation(),
+            })
             .expect("select");
         // Frozen selection still carries the original address.
         assert_eq!(
