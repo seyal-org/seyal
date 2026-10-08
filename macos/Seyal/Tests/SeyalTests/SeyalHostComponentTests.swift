@@ -1113,6 +1113,23 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
     }
 
+    /// #1062: light Canvas must drive Raw/TUI full-grid clear (not hardcoded dark).
+    @MainActor
+    func testFullGridClearFollowsRustThemeCanvas() {
+        let light = seyal_app_visual(1)
+        let theme = NativeThemeRealization.theme(from: light)
+        XCTAssertEqual(theme.terminalDefaultBackground, light.canvas.byteSwapped)
+        let clear = metalClearColor(fromPackedRGBA: theme.terminalDefaultBackground)
+        let expectedRed = Double((light.canvas >> 24) & 0xff) / 255.0
+        let expectedGreen = Double((light.canvas >> 16) & 0xff) / 255.0
+        let expectedBlue = Double((light.canvas >> 8) & 0xff) / 255.0
+        XCTAssertEqual(clear.red, expectedRed, accuracy: 0.001)
+        XCTAssertEqual(clear.green, expectedGreen, accuracy: 0.001)
+        XCTAssertEqual(clear.blue, expectedBlue, accuracy: 0.001)
+        XCTAssertGreaterThan(clear.red, 0.8, "light Canvas clear must not be near-black")
+        XCTAssertTrue(RendererValidation.fullGridClearFollowsThemeOffscreenSelfTest())
+    }
+
     @MainActor
     func testM002RendererPrepareSubmissionContractWritesCohort() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath)
