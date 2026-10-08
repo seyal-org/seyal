@@ -1,6 +1,6 @@
 //! SPEC-024 §14 item 18 / K7 (#1145): zoom, swap, and move dispatch.
 //!
-//! Directional focus (#1150) and equalize (PT4/#928) are out of scope.
+//! Equalize (PT4/#928) is out of scope.
 
 use crate::goto::GotoScope;
 use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
@@ -183,6 +183,59 @@ fn item18_focus_right_calls_focus_direction_and_miss_rejects() {
     );
     assert_eq!(root.snapshot().shell.focused_pane, a);
     assert_eq!(root.snapshot().shell.zoomed, Some(a));
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn directional_focus_moves_controller_authority_with_focused_pane() {
+    use crate::app::{AppAction, BindingEvidence};
+    use seyal_core::{AttachmentId, ExecutionId};
+
+    let mut root = split_enabled_root();
+    let a = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([0x31; 16]),
+            attachment: AttachmentId::from_bytes([0x41; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .expect("bind A");
+
+    root.split_focused(SplitAxis::Right).expect("A|B");
+    let b = root.snapshot().shell.focused_pane;
+    let execution_b = ExecutionId::from_bytes([0x32; 16]);
+    root.shell
+        .apply(ShellAction::BindExecution {
+            pane: b,
+            execution: execution_b,
+        })
+        .expect("bind B in shell");
+    root.install_pane_authority(
+        b,
+        BindingEvidence {
+            execution: execution_b,
+            attachment: AttachmentId::from_bytes([0x42; 16]),
+            controller: true,
+            pty_generation: 2,
+            alternate_screen: false,
+        },
+    )
+    .expect("install B controller");
+    root.focus_pane(a).expect("focus A");
+    root.activate_focused_pane_authority();
+
+    assert_eq!(root.snapshot().pane, a);
+    invoke(&mut root, WorkspaceCommandId::PaneFocusRight).expect("focus B");
+
+    let active = root.snapshot();
+    assert_eq!(active.shell.focused_pane, b);
+    assert_eq!(active.pane, b);
+    assert_eq!(active.execution, Some(execution_b));
+    assert!(active.controller);
 }
 
 #[test]
