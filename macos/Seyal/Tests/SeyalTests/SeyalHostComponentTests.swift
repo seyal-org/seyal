@@ -327,6 +327,55 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testRecoveryFocusDoesNotTakeFirstResponderFromOpenPalette() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.pane.inputSurface.recoveryPresentationPending = true
+        window.makeKeyAndOrderFront(nil)
+        view.commandPalette.requestOpen()
+        XCTAssertTrue(view.commandPalette.isOpen)
+        view.commandPalette.focusQuery()
+        let paletteQuery = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-command-palette-query")
+        )
+        let paletteResponder = try XCTUnwrap(window.firstResponder)
+        XCTAssertTrue(paletteResponder === paletteQuery || paletteResponder is NSTextView)
+
+        XCTAssertFalse(view.pane.inputSurface.onRequestComposerFocus?() ?? true)
+        XCTAssertTrue(
+            window.firstResponder === paletteResponder,
+            "a deferred reconnect focus request must not steal focus while the palette owns it"
+        )
+
+        var closePalette = SeyalAppAction()
+        closePalette.version = UInt16(SEYAL_APP_ABI_VERSION)
+        closePalette.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        closePalette.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PALETTE.rawValue)
+        closePalette.applySnapshotFence(seyal_app_snapshot(view.pane.appHandle))
+        XCTAssertEqual(seyal_app_apply(view.pane.appHandle, &closePalette), 0)
+        view.reconcileChrome()
+        let composerEditor = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(
+            window.firstResponder === composerEditor,
+            "closing the palette must resume pending recovery focus"
+        )
+    }
+
+    @MainActor
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
@@ -370,6 +419,13 @@ final class SeyalHostComponentTests: XCTestCase {
         let shell = seyal_app_shell(handle)
         XCTAssertEqual(shell.tab_count, 2)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
+        XCTAssertNotEqual(
+            shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE),
+            0,
+            "a second tab enables Close Tab (detach-only)"
+        )
+        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        XCTAssertFalse(closeTab.isHidden, "seyal-close-tab is shown once more than one tab exists")
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
 
         var split = SeyalAppAction()
@@ -1103,6 +1159,29 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
         XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
         XCTAssertFalse(view.recoveryPresentationPending)
+    }
+
+    @MainActor
+    func testRecoveryRetriesDeferredComposerFocusOnNextAppKitTurn() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let accepted = expectation(description: "accepted deferred focus advances recovery")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return attempts == 2
+            },
+            onAccepted: { accepted.fulfill() }
+        ))
+        await fulfillment(of: [accepted], timeout: 1)
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(view.recoveryPresentationPending)
     }
 
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
