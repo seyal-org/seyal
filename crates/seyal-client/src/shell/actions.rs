@@ -3,7 +3,7 @@
 use seyal_core::{TabId, WindowId, WorkspaceId};
 
 use super::workspace::{Pane, Tab, Window};
-use super::{CycleDirection, ShellAction, ShellError, ShellState};
+use super::{CycleDirection, ShellAction, ShellError, ShellNativeEffect, ShellState};
 
 impl ShellState {
     pub(super) fn require_containment_generation(&self, carried: u64) -> Result<(), ShellError> {
@@ -18,7 +18,21 @@ impl ShellState {
         self.containment_generation = self.containment_generation.saturating_add(1);
     }
 
+    /// Make `window` product-active and refresh focus history.
+    ///
+    /// Emits [`ShellNativeEffect::OrderFrontMakeKey`] only when the
+    /// product-active Window actually changes (W3: keep the host effect
+    /// queue bounded under same-window selection).
     pub(super) fn activate_window(&mut self, window: WindowId) -> Result<(), ShellError> {
+        let previous_product = self.product_active_window().map(|window| window.id);
+        self.activate_window_from(window, previous_product)
+    }
+
+    fn activate_window_from(
+        &mut self,
+        window: WindowId,
+        previous_product: Option<WindowId>,
+    ) -> Result<(), ShellError> {
         let workspace_id = self
             .find_window(window)
             .map(|workspace| workspace.id)
@@ -30,6 +44,9 @@ impl ShellState {
         workspace.active_window = Some(window);
         self.last_active_workspace = workspace_id;
         self.record_window_focus(window)?;
+        if previous_product != Some(window) {
+            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        }
         Ok(())
     }
 
@@ -105,6 +122,7 @@ impl ShellState {
         let window = self.new_window_record(workspace)?;
         let window_id = window.id;
         self.workspace_mut(workspace)?.push_window(window);
+        self.push_effect(ShellNativeEffect::RealizeWindow { window: window_id });
         self.activate_window(window_id)?;
         self.bump_containment_generation();
         Ok(())
@@ -138,8 +156,9 @@ impl ShellState {
     pub(super) fn select_tab_identity(&mut self, id: TabId) -> Result<(), ShellError> {
         let (workspace_id, window_id, _) =
             self.find_tab_location(id).ok_or(ShellError::UnknownTab)?;
+        let previous_product = self.product_active_window().map(|window| window.id);
         self.workspace_mut(workspace_id)?.select_tab(id)?;
-        self.activate_window(window_id)
+        self.activate_window_from(window_id, previous_product)
     }
 
     pub(super) fn cycle_window(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
@@ -243,14 +262,19 @@ impl ShellState {
             }
         }
 
-        // Moving a Tab can destroy its now-empty source Window, but the Tab's
-        // Pane identities remain live. Focus history is Pane-addressed and
-        // derives Window placement at use time, so containment moves must not
-        // purge those entries.
-        let (removed, _) = self.workspace_mut(source_workspace)?.take_tab(tab)?;
+        let previous_product = self.product_active_window().map(|active| active.id);
+        let (removed, destroyed) = self.workspace_mut(source_workspace)?.take_tab(tab)?;
+        if let Some(destroyed_id) = destroyed {
+            // The Tab and its Pane identities remain live after a move, so
+            // preserve pane-addressed focus history while releasing the empty
+            // source Window realization in the host.
+            self.push_effect(ShellNativeEffect::DestroyWindowRealization {
+                window: destroyed_id,
+            });
+        }
         self.workspace_mut(source_workspace)?
             .insert_tab_before(window, removed, before)?;
-        self.activate_window(window)?;
+        self.activate_window_from(window, previous_product)?;
         self.bump_containment_generation();
         Ok(())
     }
@@ -282,13 +306,15 @@ impl ShellState {
         if only {
             return Err(ShellError::MoveWouldNotChangeContainment);
         }
+        let previous_product = self.product_active_window().map(|active| active.id);
         let new_id = WindowId::new();
         let (removed, destroyed) = self.workspace_mut(workspace_id)?.take_tab(tab)?;
         debug_assert!(destroyed.is_none());
         let window = Window::try_new(new_id, workspace_id, vec![removed], tab)
             .expect("moved tab forms a valid window");
         self.workspace_mut(workspace_id)?.push_window(window);
-        self.activate_window(new_id)?;
+        self.push_effect(ShellNativeEffect::RealizeWindow { window: new_id });
+        self.activate_window_from(new_id, previous_product)?;
         self.bump_containment_generation();
         Ok(())
     }

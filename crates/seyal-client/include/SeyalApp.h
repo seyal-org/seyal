@@ -438,6 +438,12 @@ typedef struct SeyalAppTheme {
 #define SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE 4u
 #define SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE 8u
 
+/*
+ * Multi-window shell header (#1108 / ADR-018 §2.1). window_count / effect_count
+ * index seyal_app_window / seyal_app_native_effect. containment_generation is
+ * the monotonic shell fence; shell_last_error is a bounded non-secret code.
+ * Active-window tab/pane counts remain for the product-active Window projection.
+ */
 typedef struct SeyalAppShell {
     uint16_t version;
     uint16_t size;
@@ -445,14 +451,130 @@ typedef struct SeyalAppShell {
     uint16_t tab_count;
     uint16_t pane_count;
     uint16_t flags;
-    uint32_t reserved;
+    uint16_t window_count;
+    uint16_t effect_count;
+    uint32_t shell_last_error;
     uint64_t active_workspace_lo;
     uint64_t active_workspace_hi;
     uint64_t active_tab_lo;
     uint64_t active_tab_hi;
     uint64_t focused_pane_lo;
     uint64_t focused_pane_hi;
+    uint64_t containment_generation;
+    uint64_t active_window_lo;
+    uint64_t active_window_hi;
+    uint64_t last_active_workspace_lo;
+    uint64_t last_active_workspace_hi;
 } SeyalAppShell;
+
+/* SeyalAppWindow.flags */
+#define SEYAL_APP_WINDOW_PRODUCT_ACTIVE 1u
+#define SEYAL_APP_WINDOW_ATTENTION 2u
+
+typedef struct SeyalAppWindow {
+    uint16_t version;
+    uint16_t size;
+    uint16_t tab_count;
+    uint16_t flags;
+    uint64_t window_lo;
+    uint64_t window_hi;
+    uint64_t workspace_lo;
+    uint64_t workspace_hi;
+    uint64_t active_tab_lo;
+    uint64_t active_tab_hi;
+    const uint8_t *title;
+    uint32_t title_len;
+    uint32_t reserved;
+} SeyalAppWindow;
+
+/* SeyalAppTab.flags / layout */
+#define SEYAL_APP_TAB_ACTIVE 1u
+#define SEYAL_APP_TAB_ATTENTION 2u
+#define SEYAL_APP_TAB_LAYOUT_SINGLE 0u
+#define SEYAL_APP_TAB_LAYOUT_SPLIT_RIGHT 1u
+#define SEYAL_APP_TAB_LAYOUT_SPLIT_DOWN 2u
+
+typedef struct SeyalAppTab {
+    uint16_t version;
+    uint16_t size;
+    uint16_t pane_count;
+    uint16_t tree_node_count;
+    uint16_t flags;
+    uint16_t layout;
+    uint64_t tab_lo;
+    uint64_t tab_hi;
+    uint64_t focused_pane_lo;
+    uint64_t focused_pane_hi;
+    const uint8_t *title;
+    uint32_t title_len;
+    uint32_t reserved;
+} SeyalAppTab;
+
+/* SeyalAppPaneLeaf.flags / presentation_tier (ADR-018 §5) */
+#define SEYAL_APP_PANE_FOCUSED 1u
+#define SEYAL_APP_PANE_HAS_EXECUTION 2u
+#define SEYAL_APP_TIER_FOCUSED 0u
+#define SEYAL_APP_TIER_VISIBLE 1u
+#define SEYAL_APP_TIER_HIDDEN 2u
+#define SEYAL_APP_TIER_UNPRESENTED 3u
+
+typedef struct SeyalAppPaneLeaf {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t presentation_tier;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+    const uint8_t *title;
+    uint32_t title_len;
+    uint32_t reserved;
+} SeyalAppPaneLeaf;
+
+/* SeyalAppPaneTreeNode.kind: 0 leaf, 1 split-right, 2 split-down.
+ * first/second are relative indices within the Tab's tree_node_count.
+ * ratio is the first child's share (0.1...0.9) for split nodes; leaf nodes
+ * report 0.0. reserved2 must be zero. */
+typedef struct SeyalAppPaneTreeNode {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint32_t first;
+    uint32_t second;
+    float ratio;
+    uint32_t reserved2;
+} SeyalAppPaneTreeNode;
+
+/*
+ * ADR-018 §2.4 native effects in commit order.
+ * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
+ *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
+ */
+typedef struct SeyalAppNativeEffect {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t reserved;
+    uint64_t window_lo;
+    uint64_t window_hi;
+} SeyalAppNativeEffect;
+
+#define SEYAL_APP_EFFECT_BOUNDED_DETACH_THEN_TERMINATE 1u
+#define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
+#define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
+#define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
+
+/* seyal_app_record_compatible kind values. */
+#define SEYAL_APP_RECORD_SHELL 0u
+#define SEYAL_APP_RECORD_WINDOW 1u
+#define SEYAL_APP_RECORD_TAB 2u
+#define SEYAL_APP_RECORD_PANE_LEAF 3u
+#define SEYAL_APP_RECORD_TREE_NODE 4u
+#define SEYAL_APP_RECORD_NATIVE_EFFECT 5u
 
 /*
  * Pane regions (#923): one per leaf of the active Tab's PaneTree, index

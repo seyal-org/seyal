@@ -7,9 +7,11 @@
 
 mod action_types;
 mod actions;
+mod effects;
 mod focus_history;
 mod inventory;
 mod pane_ops;
+mod snapshot;
 mod tree;
 mod workspace;
 
@@ -29,17 +31,28 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use crate::pane_layout::SplitRatio;
 
 pub use action_types::{CycleDirection, ShellAction};
+pub use effects::ShellNativeEffect;
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
 pub use pane_ops::MoveSide;
+pub use snapshot::{PaneLeafSnapshot, WindowSnapshot, WindowTabSnapshot};
 pub use tree::{LayoutDescription, PaneTree, SplitAxis};
 pub use workspace::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
 
 use focus_history::FocusHistory;
 use workspace::{Pane, Tab, Window, Workspace};
 
-/// Why a [`ShellAction`] was rejected. The previous state is unchanged.
+/// ADR-018 §5 presentation tier for one Pane leaf (product-derived in W3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresentationTier {
+    Focused,
+    Visible,
+    Hidden,
+    Unpresented,
+}
+
+/// Why a [`ShellAction`] was rejected. The previous containment state is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellError {
     UnknownWorkspace,
@@ -118,7 +131,14 @@ pub struct FocusCheckpoint {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShellSnapshot {
     pub workspaces: Vec<WorkspaceSnapshot>,
+    /// Ordered Windows across Workspaces (`workspace order`, then window order).
+    pub windows: Vec<WindowSnapshot>,
     pub active_workspace: WorkspaceId,
+    pub last_active_workspace: WorkspaceId,
+    pub active_window: WindowId,
+    /// ADR-018 §6 fence. Bumps only on Window/Tab/PaneTree membership change.
+    pub containment_generation: u64,
+    /// Active-Window Tab projection (compatible with pre-W3 hosts).
     pub tabs: Vec<TabSnapshot>,
     pub active_tab: TabId,
     pub focused_pane: PaneId,
@@ -128,8 +148,6 @@ pub struct ShellSnapshot {
     pub tree: PaneTree,
     pub layout: LayoutDescription,
     pub last_error: Option<ShellError>,
-    /// ADR-018 containment fence for structural shell actions.
-    pub containment_generation: u64,
     /// Whether `CreateTab`/`SplitFocused` would currently be accepted.
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
@@ -142,7 +160,6 @@ pub struct ShellSnapshot {
     /// Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
-    pub last_active_workspace: WorkspaceId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -187,6 +204,8 @@ pub struct ShellState {
     last_released_execution: Option<(PaneId, ExecutionId)>,
     /// Pane ids removed by the most recent successful `CloseTab` (detach-only).
     last_removed_tab_panes: Vec<PaneId>,
+    /// ADR-018 §2.4 effects from the last successful commit (drained by the host path).
+    pending_effects: Vec<ShellNativeEffect>,
 }
 
 impl ShellState {
@@ -226,6 +245,7 @@ impl ShellState {
             containment_generation: 0,
             last_released_execution: None,
             last_removed_tab_panes: Vec::new(),
+            pending_effects: Vec::new(),
         };
         shell.seed_focus_from_product();
         shell
@@ -266,6 +286,7 @@ impl ShellState {
             containment_generation: 0,
             last_released_execution: None,
             last_removed_tab_panes: Vec::new(),
+            pending_effects: Vec::new(),
         };
         shell.seed_focus_from_product();
         Ok(shell)
@@ -287,6 +308,15 @@ impl ShellState {
 
     pub fn containment_generation(&self) -> u64 {
         self.containment_generation
+    }
+
+    /// Drain §2.4 effects produced by the last successful commit(s).
+    pub fn take_effects(&mut self) -> Vec<ShellNativeEffect> {
+        std::mem::take(&mut self.pending_effects)
+    }
+
+    pub(super) fn push_effect(&mut self, effect: ShellNativeEffect) {
+        self.pending_effects.push(effect);
     }
 
     pub fn last_active_workspace(&self) -> WorkspaceId {
@@ -552,6 +582,7 @@ impl ShellState {
         {
             return Err(ShellError::UnknownPane);
         }
+        let previous_product = self.product_active_window().map(|window| window.id);
         let workspace_mut = self.workspace_mut(workspace)?;
         workspace_mut.select_tab(tab)?;
         let active_tab = workspace_mut.active_tab_mut()?;
@@ -562,69 +593,22 @@ impl ShellState {
         self.focus_history.record(pane);
         self.last_active_workspace = workspace;
         self.last_error = None;
+        if let Some((_, window, _)) = self.find_tab_location(tab)
+            && previous_product != Some(window)
+        {
+            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
+        }
         Ok(())
     }
 
     pub fn snapshot(&self) -> ShellSnapshot {
-        let active_workspace = self.active_workspace_id();
-        let workspace = self
-            .workspace(active_workspace)
-            .expect("active Workspace must exist");
-        let tab = workspace
-            .tab(workspace.active_tab_id().expect("active Tab must exist"))
-            .expect("active Tab must exist");
-        ShellSnapshot {
-            workspaces: self
-                .workspaces
-                .iter()
-                .map(|item| WorkspaceSnapshot {
-                    id: item.id,
-                    name: item.name.clone(),
-                    detail: item.detail.clone(),
-                    attention: item.attention,
-                    tab_count: item.tab_count(),
-                })
-                .collect(),
-            active_workspace,
-            tabs: workspace
-                .tabs()
-                .map(|item| TabSnapshot {
-                    id: item.id,
-                    title: item.title.clone(),
-                    attention: item.attention,
-                    pane_count: item.panes.len(),
-                })
-                .collect(),
-            active_tab: workspace.active_tab_id().expect("active Tab must exist"),
-            focused_pane: tab.focused,
-            zoomed: tab.zoomed,
-            panes: tab
-                .root
-                .pane_ids()
-                .into_iter()
-                .filter_map(|id| {
-                    tab.panes.get(&id).map(|pane| PaneSnapshot {
-                        id: pane.id,
-                        title: pane.title.clone(),
-                        execution: pane.execution,
-                        allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
-                    })
-                })
-                .collect(),
-            tree: tab.root.clone(),
-            layout: tab.root.layout_description(),
-            last_error: self.last_error,
-            containment_generation: self.containment_generation,
-            allows_tab_creation: self.allows_tab_creation,
-            allows_pane_splitting: self.allows_pane_splitting,
-            allows_tab_close: workspace.allows_tab_close(),
-            allows_pane_close: tab.allows_focused_pane_close(),
-            last_active_workspace: self.last_active_workspace,
-        }
+        self.build_snapshot()
     }
 
     pub fn apply(&mut self, action: ShellAction) -> Result<(), ShellError> {
         let mut next = self.clone();
+        // Effects belong to this commit only; do not replay prior drained ones.
+        next.pending_effects.clear();
         let result = next.dispatch(action);
         match result {
             Ok(()) => {

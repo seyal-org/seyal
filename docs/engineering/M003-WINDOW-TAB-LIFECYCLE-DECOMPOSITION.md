@@ -174,8 +174,9 @@ unknown version or size mismatch fails closed.
 **Acceptance.**
 
 - Snapshot carries ordered windows, per-window ordered tabs and active tab, the
-  product-active window, per-tab pane tree and focused pane, per-leaf presentation
-  tier and execution binding, titles, attention flags, capability flags,
+  product-active window, per-tab pane tree (including split ratios) and focused
+  pane, per-leaf presentation tier and execution binding, titles, attention
+  flags, capability flags,
   `last_error` and the monotonic generation.
 - Borrow policy is unchanged: pointer-bearing fields are valid only until the next
   mutating bridge call; the host copies synchronously (ADR-015).

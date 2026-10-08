@@ -46,6 +46,7 @@ impl ApplicationRoot {
         self.shell
             .apply_product_create_tab()
             .map_err(|_| AppError::TabCreationUnavailable)?;
+        self.drain_shell_effects();
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
         let tab = snap.active_tab;
@@ -56,7 +57,7 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::CloseTab {
+                let _ = self.apply_shell(ShellAction::CloseTab {
                     id: tab,
                     containment_generation: self.shell.containment_generation(),
                 });
@@ -72,7 +73,7 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::CloseTab {
+            let _ = self.apply_shell(ShellAction::CloseTab {
                 id: tab,
                 containment_generation: self.shell.containment_generation(),
             });

@@ -288,8 +288,10 @@ impl Workspace {
         let removed = self.windows[window_index].tabs.remove(tab_index);
         if self.windows[window_index].tabs.is_empty() {
             let destroyed = self.windows.remove(window_index).id;
+            // Leave product-active unset so the caller’s `activate_window`
+            // observes a real change and emits OrderFrontMakeKey (ADR-018 §6.1).
             if self.active_window == Some(destroyed) {
-                self.active_window = self.windows.first().map(|window| window.id);
+                self.active_window = None;
             }
             return Ok((removed, Some(destroyed)));
         }
@@ -319,7 +321,8 @@ impl Workspace {
     }
 
     pub(super) fn push_window(&mut self, window: Window) {
-        self.active_window = Some(window.id);
+        // Do not mark product-active here — callers use `activate_window` so
+        // OrderFrontMakeKey emits when the product-active Window actually changes.
         self.windows.push(window);
     }
 

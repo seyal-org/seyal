@@ -13,6 +13,7 @@ mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+mod native_effect;
 mod palette_apply;
 mod presentation_apply;
 mod provisioning_apply;
@@ -20,6 +21,8 @@ mod recovery_apply;
 mod session;
 
 use accessibility::accessibility_nodes;
+
+pub use native_effect::NativeEffect;
 
 #[cfg(test)]
 mod keybinding_apply_tests;
@@ -132,12 +135,6 @@ pub enum PresentationEligibility {
     Flow,
     Raw,
     Tui,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NativeEffect {
-    None,
-    BoundedDetachThenTerminate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -410,7 +407,7 @@ pub struct AppSnapshot {
     pub composer_eligible: bool,
     pub frozen: bool,
     pub last_error: Option<AppError>,
-    pub pending_effect: NativeEffect,
+    pub pending_effects: Vec<NativeEffect>,
     pub output_utf8: String,
     pub shell: ShellSnapshot,
     pub accessibility: Vec<AccessibilityNode>,
@@ -453,7 +450,7 @@ pub struct ApplicationRoot {
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
-    pending_effect: NativeEffect,
+    pending_effects: Vec<NativeEffect>,
     frozen: bool,
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
@@ -537,7 +534,7 @@ impl ApplicationRoot {
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
-            pending_effect: NativeEffect::None,
+            pending_effects: Vec::new(),
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
@@ -700,7 +697,7 @@ impl ApplicationRoot {
             composer_eligible,
             frozen: self.frozen,
             last_error: self.last_error,
-            pending_effect: self.pending_effect,
+            pending_effects: self.pending_effects.clone(),
             output_utf8: self.output_utf8.clone(),
             accessibility: accessibility_nodes(
                 &shell,
