@@ -31,17 +31,6 @@ fn two_tab_window(window: WindowId, first: TabId, second: TabId) -> ShellWindowS
     }
 }
 
-fn containment_key(shell: &ShellState) -> (u64, WorkspaceId, TabId, usize, Option<WindowId>) {
-    let snap = shell.snapshot();
-    (
-        snap.containment_generation,
-        snap.active_workspace,
-        snap.active_tab,
-        snap.tabs.len(),
-        shell.product_window_id().ok(),
-    )
-}
-
 fn seed_two_workspaces() -> ShellState {
     let first_tab = TabId::new();
     let first_pane = PaneId::new();
@@ -1167,7 +1156,6 @@ fn workspace_activation_falls_back_to_retained_active_window_after_history_evict
 #[test]
 fn rejected_structural_actions_preserve_full_state() {
     let shell = seed_two_workspaces();
-    let workspace = WorkspaceId::m001_default();
     let other = other_workspace();
     let tab = shell.snapshot().active_tab;
     let window = shell.product_window_id().unwrap();
