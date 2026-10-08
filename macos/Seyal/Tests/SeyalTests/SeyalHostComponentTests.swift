@@ -244,6 +244,71 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
     }
 
+    /// #867: explicit Raw is a full-Pane direct-terminal presentation — Metal
+    /// owns first responder / AX terminal role; Flow composer is not eligible.
+    @MainActor
+    func testExplicitRawEligibilityAcceptsMetalFirstResponderAndAX() {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(
+            seyal_app_snapshot(handle).eligibility,
+            UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue)
+        )
+
+        var open = SeyalAppAction()
+        open.version = bind.version
+        open.size = bind.size
+        open.kind = UInt16(SEYAL_APP_ACTION_OPEN_PALETTE.rawValue)
+        open.applySnapshotFence(seyal_app_snapshot(handle))
+        XCTAssertEqual(seyal_app_apply(handle, &open), 0)
+
+        let query = Array("Use Raw Terminal".utf8)
+        var setQuery = SeyalAppAction()
+        setQuery.version = bind.version
+        setQuery.size = bind.size
+        setQuery.kind = UInt16(SEYAL_APP_ACTION_SET_PALETTE_QUERY.rawValue)
+        setQuery.applySnapshotFence(seyal_app_snapshot(handle))
+        query.withUnsafeBufferPointer { buffer in
+            setQuery.payload = buffer.baseAddress
+            setQuery.payload_len = UInt32(buffer.count)
+            XCTAssertEqual(seyal_app_apply(handle, &setQuery), 0)
+        }
+
+        var run = SeyalAppAction()
+        run.version = bind.version
+        run.size = bind.size
+        run.kind = UInt16(SEYAL_APP_ACTION_RUN_PALETTE.rawValue)
+        run.applySnapshotFence(seyal_app_snapshot(handle))
+        XCTAssertEqual(seyal_app_apply(handle, &run), 0)
+
+        let raw = seyal_app_snapshot(handle)
+        XCTAssertEqual(raw.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue))
+        XCTAssertEqual(raw.flags & UInt16(SEYAL_APP_SNAP_COMPOSER), 0)
+        XCTAssertEqual(
+            seyal_app_composer(handle).mode,
+            UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        )
+
+        let surface = InteractiveMetalSurfaceView(frame: .zero, appHandle: handle)
+        surface.syncInputRoutePresentation()
+        XCTAssertTrue(surface.acceptsFirstResponder)
+        XCTAssertTrue(surface.isAccessibilityElement())
+        XCTAssertEqual(surface.accessibilityRole() as? NSAccessibility.Role, .textArea)
+    }
+
     @MainActor
     func testFailedAdmissionAnnouncesWithoutClearingRustDraft() {
         let handle = seyal_app_create()
