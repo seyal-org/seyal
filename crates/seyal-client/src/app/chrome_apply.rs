@@ -3,8 +3,14 @@
 use seyal_core::{PaneId, TabId, WorkspaceId};
 
 use super::*;
-use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
+use crate::chrome::{
+    AgentId, AttentionId, ChromeAction, ChromeError, InspectorMode, LeftPanelMode,
+};
+use crate::composer::ComposerError;
+use crate::navigation::ResourceAddress;
+use crate::palette::PaletteError;
 use crate::pane_layout::{self, SplitPosition};
+use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
@@ -72,12 +78,16 @@ impl ApplicationRoot {
             return Ok(());
         }
         if let Some(packed) = self.chrome.take_pending_reveal() {
-            let _ = crate::navigation::reveal_attention_target(
+            let reveal = crate::navigation::reveal_attention_target(
                 &packed,
                 &mut self.shell,
                 &crate::navigation::EmptyExecutionInventory,
                 crate::navigation::NavigationPrincipal::local_user(),
+                &mut self.focus_history,
             );
+            if matches!(reveal, crate::navigation::AttentionReveal::Focused(_)) {
+                self.activate_focused_pane_authority();
+            }
             let _ = self
                 .chrome
                 .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -93,6 +103,10 @@ impl ApplicationRoot {
                 .apply(ShellAction::SelectTab { id: tab })
                 .map_err(|_| AppError::UnknownChromeTab)?;
         }
+        if effect.select_workspace.is_some() || effect.select_tab.is_some() {
+            self.activate_focused_pane_authority();
+            self.record_focused_pane_commit();
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -103,6 +117,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::SelectWorkspace { id })
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -113,8 +129,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::SelectTab { id })
             .map_err(|_| AppError::UnknownChromeTab)?;
-        #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -125,10 +141,97 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    /// Record the focused Pane after a user focus transition (SPEC-022 R6.3).
+    pub(super) fn record_focused_pane_commit(&mut self) {
+        let focus = self.shell.focus_checkpoint();
+        self.focus_history
+            .record_user_commit(ResourceAddress::Pane {
+                workspace: focus.active_workspace,
+                tab: focus.active_tab,
+                pane: focus.focused_pane,
+            });
+    }
+
+    /// Switch active authority/presentation to the focused pane. An unbound
+    /// target clears the active input route without deleting sibling bindings.
+    pub(super) fn activate_focused_pane_authority(&mut self) {
+        let focused = self.shell.snapshot().focused_pane;
+        let Some(authority) = self.pane_authorities.get(&focused).copied() else {
+            self.authority = None;
+            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+            self.sync_composer_presentation();
+            self.output_utf8.clear();
+            #[cfg(target_os = "macos")]
+            self.clear_focused_display_handle_if_owned();
+            return;
+        };
+        if self.authority == Some(authority) {
+            #[cfg(target_os = "macos")]
+            if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
+                crate::ffi::set_focused_display_handle(raw);
+            }
+            return;
+        }
+        let Some(identity) =
+            PresentationIdentity::new(authority.execution, authority.pty_generation)
+        else {
+            return;
+        };
+        let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+        let _ = self
+            .presentation
+            .apply(PresentationAction::BindIdentity(identity));
+        self.authority = Some(authority);
+        let alternate = self.alternate_screen_for_pane(focused);
+        let _ = self.derive_presentation(alternate);
+        self.sync_composer_presentation();
+        #[cfg(target_os = "macos")]
+        self.refresh_output_from_pane_client(focused);
+        #[cfg(target_os = "macos")]
+        if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
+            crate::ffi::set_focused_display_handle(raw);
+        }
+    }
+
+    fn alternate_screen_for_pane(&self, pane: PaneId) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.pane_client_raws
+                .get(&pane)
+                .and_then(|handle| {
+                    crate::ffi::with_client(*handle, |client| client.cache().alternate_screen)
+                })
+                .unwrap_or(self.alternate_screen)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = pane;
+            self.alternate_screen
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn clear_focused_display_handle_if_owned(&self) {
+        let focused = crate::ffi::focused_registry_handle();
+        if focused == 0 {
+            return;
+        }
+        let owned = self.pane_client_raws.values().any(|raw| *raw == focused)
+            || self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == focused);
+        if owned {
+            crate::ffi::set_focused_display_handle(0);
+        }
     }
 
     /// Active Tab's Split dividers (#928), pre-order.
@@ -185,5 +288,51 @@ impl ApplicationRoot {
             .apply(ChromeAction::ReplaceAttention { items: attention }, &shell)
             .map(|_| ())
             .map_err(chrome_error)
+    }
+}
+
+pub fn chrome_error(error: ChromeError) -> AppError {
+    match error {
+        ChromeError::UnknownAgent => AppError::UnknownAgent,
+        ChromeError::UnknownAttention => AppError::UnknownAttention,
+        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
+        ChromeError::UnknownTab => AppError::UnknownChromeTab,
+        ChromeError::UnknownBlock => AppError::UnknownBlock,
+    }
+}
+
+pub fn close_tab_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
+        _ => AppError::UnknownChromeTab,
+    }
+}
+
+pub fn close_pane_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
+        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
+        _ => AppError::UnknownPane,
+    }
+}
+
+pub fn palette_error(error: PaletteError) -> AppError {
+    match error {
+        PaletteError::NotOpen => AppError::PaletteNotOpen,
+        PaletteError::NoSelection => AppError::PaletteNoSelection,
+    }
+}
+
+pub fn composer_error(error: ComposerError) -> AppError {
+    match error {
+        ComposerError::UnknownPane => AppError::UnknownPane,
+        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
+            AppError::ComposerSubmitDisabled
+        }
+        ComposerError::StaleRequest => AppError::StaleComposerRequest,
+        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
+        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
+        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
+        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
     }
 }
