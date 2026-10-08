@@ -1,79 +1,64 @@
-# M003 #869 — Flow/Raw/TUI presentation qualification
+# M003 #869 — presentation qualification evidence
 
-**Issue:** [#869](https://github.com/seyal-org/seyal/issues/869)  
-**Closing keyword:** **Closes #869** (after independent performance review + explicit merge confirmation)  
-**Evidence class:** `controlled-host` (paired exact-head) + `CI` (harness via `make bench`) + `PLATFORM_LIMITED` (headed Metal dedicated-GPU bytes not re-measured; inherit Pass 663 / `RendererValidation`)
+**Issue:** [#869](https://github.com/seyal-org/seyal/issues/869)
 
-## Frozen comparison
+**Disposition:** `NOT_QUALIFIED` — this file records a paired diagnostic run only. It does not close #869 or satisfy the frozen production workload matrix.
+
+**Claim label:** all harness rows remain `performance_claim=false`.
+
+## Frozen comparison and diagnostic run
 
 | Field | Value |
 |---|---|
-| Baseline | `f0a91d9604742272d619d5c4e2a0e7e5cd8a242c` (`origin/master` at Ready freeze) |
-| Candidate start | `1e001f4e178f9c7f8ed5803edc8bb2289057643b` (#868 VERIFIED tip) |
-| Candidate (this PR tip) | `4d7d451693fb3629981262aa751268c075bcc70c` |
+| Frozen baseline | `f0a91d9604742272d619d5c4e2a0e7e5cd8a242c` |
+| Exact candidate | `7b613d058681e05df0b747525e8add037e3a26d4` |
 | Host | Apple M5 Pro (`Mac17,9`), arm64, macOS 27.0 (Build 26A428) |
 | Toolchain | `rustc 1.98.0 (88d9e12ae 2026-08-18)` |
-| Build | `cargo bench` Release |
-| Percentiles | nearest-rank, N=120 after warmups |
-| RSS | median of 5 quiescent `ps` samples |
-| Harness | `crates/seyal-client/benches/m003_presentation_qualification.rs` |
+| Build | Release benchmark, 120 latency samples, 50 transition cycles |
+| Harness | `crates/seyal-client/benches/m003_presentation_qualification.rs` from the exact candidate |
+| Raw outputs | `m003-869-presentation-qualification-baseline.txt` and `m003-869-presentation-qualification-candidate.txt` |
+| Run date | 2026-10-08 UTC |
 
-## Commands
+The candidate harness was overlaid on the detached baseline worktree. The baseline already had the required `benchmark-instrumentation` feature and presentation APIs; its temporary worktree also needed the matching `[[bench]]` entry. No baseline source or PR branch was changed.
+
+The command was:
 
 ```bash
-# Candidate (this branch tip)
-cargo bench -p seyal-client --bench m003_presentation_qualification \
-  --features benchmark-instrumentation --locked \
-  | tee docs/evidence/m003-869-presentation-qualification-candidate.txt
-
-# Baseline (same harness overlaid on frozen SHA for API-fair comparison)
-git worktree add --detach /tmp/seyal-869-baseline f0a91d9604742272d619d5c4e2a0e7e5cd8a242c
-cp crates/seyal-client/benches/m003_presentation_qualification.rs \
-  /tmp/seyal-869-baseline/crates/seyal-client/benches/
-# ensure [[bench]] entry exists in baseline Cargo.toml, then:
-(cd /tmp/seyal-869-baseline && cargo bench -p seyal-client \
-  --bench m003_presentation_qualification --features benchmark-instrumentation --locked) \
-  | tee docs/evidence/m003-869-presentation-qualification-baseline.txt
+rustup run 1.98.0 cargo bench -p seyal-client \
+  --bench m003_presentation_qualification \
+  --features benchmark-instrumentation --locked
 ```
 
-Canonical task wiring: `make bench` runs this target on macOS after Pass 8.
+## Measured diagnostic rows
 
-## Paired results (controlled-host 2026-10-05)
+These values are Rust-level presentation snapshot/transition and metadata measurements. They are not AppKit, PTY, compositor, or GPU measurements.
 
-Raw logs: `m003-869-presentation-qualification-baseline.txt`,
-`m003-869-presentation-qualification-candidate.txt`.
+| Synthetic boundary | Baseline p50 / p99 (µs) | Candidate p50 / p99 (µs) |
+|---|---:|---:|
+| Idle Flow snapshot | 0.000 / 0.042 | 0.000 / 0.042 |
+| Flow↔Raw↔TUI transition cycle | 0.041 / 0.083 | 0.000 / 0.042 |
+| Live-tail projection, 8 Blocks | 0.041 / 0.042 | 0.041 / 0.083 |
+| Live-tail projection, 32 Blocks | 0.084 / 0.125 | 0.084 / 0.166 |
+| Live-tail projection, 128 Blocks | 0.292 / 0.334 | 0.292 / 0.458 |
 
-| Boundary | Baseline p99 (µs) | Candidate p99 (µs) | Δ median policy |
-|---|---:|---:|---|
-| idle Flow snapshot | 0.042 | 0.042 | within noise (<5%) |
-| Flow↔Raw↔TUI cycle | 0.042 | 0.042 | within noise (<5%) |
-| live-tail project N=8 | 0.042 | 0.084 | absolute sub-µs; no product regression |
-| live-tail project N=32 | 0.209 | 0.125 | candidate faster / noise |
-| live-tail project N=128 | 0.375 | 0.375 | within noise (<5%) |
+| Synthetic resource row | Baseline | Candidate |
+|---|---:|---:|
+| Attributable RSS median, 8 / 32 / 128 records | 16 / 16 / 0 KiB | 16 / 16 / 0 KiB |
+| 50-cycle RSS before→after median | 2432→2448 KiB | 2480→2512 KiB |
+| Threads / file descriptors in sampled rows | 1 / 4 | 1 / 4 |
 
-| Resource | Baseline | Candidate | Gate |
-|---|---|---|---|
-| Block metadata RSS median N=8/32/128 | 16 / 0 / 0 KiB | 16 / 0 / 0 KiB | under scaled Pass-8-style ceiling |
-| Transition RSS return (50 cycles) | 2368→2368 KiB | 2352→2352 KiB | within 10% return policy |
-| Flow renderer plan Pane-scoped | true | true | no renderer-per-Block |
+The RSS samples are quantized at 16 KiB. The emitted `ps %cpu` values are diagnostic lifetime averages, not windowed active/idle CPU measurements. The synthetic p99 differences cannot be used to pass or fail the production compositor regression gate.
 
-No paired median latency delta exceeded the frozen **5% explain / 10% block** policy on any measured boundary. No transition RSS leak. No per-Block renderer authority observed on the production `RendererPlan` / live-tail projection path.
+## Frozen acceptance mapping
 
-## Disposition
+| Criterion | Status | Evidence needed to close |
+|---|---|---|
+| Exact baseline, candidate, host, toolchain, and raw diagnostic logs | **Recorded** | None for this diagnostic row |
+| Actual idle Flow and active live-tail terminal workloads | **Not measured** | Run the frozen workload on the headed production path |
+| Long normal-screen `seq 1 1000`, explicit Raw, and TUI alternate-screen workloads | **Not measured** | Exercise each real terminal presentation mode |
+| Production compositor/presentation-apply p50/p95/p99 and paired regression attribution | **Not measured** | Instrument the production apply boundary and run the frozen paired cohorts |
+| Active/idle CPU, threads, file descriptors, retained Block RSS, and transition return | **Partial** | Current thread/fd/RSS rows are synthetic; add windowed process sampling on the real workload |
+| GPU and dedicated Metal resource behavior | **PLATFORM_LIMITED** | Capture headed per-surface GPU/Metal evidence or keep this gate explicitly limited |
+| Final Issue #869 qualification | **Open** | Complete the actual workload matrix, retain exact-head baseline/candidate evidence, and obtain independent review |
 
-- **No production remediation required** for Slices #861/#865/#866/#867/#868 on the measured portable presentation/metadata path.
-- **Metal dedicated GPU / headed display-link:** `PLATFORM_LIMITED` for this Issue — not re-run as a Pass-663 matrix. Inherit `docs/evidence/pass663-metal-scalability-final.md` and `RendererValidation` hide/release checks. Headed Flow/Raw/TUI correctness remains owned by #868 XCUI evidence.
-- **Secrets:** harness emits only counters/timings; no command text, PTY bytes, or credentials.
-- All harness lines remain `performance_claim=false` unless a later controlled-host row upgrades a specific gate under a new Ready freeze.
-
-## Acceptance mapping
-
-| #869 criterion | Result |
-|---|---|
-| Baseline/candidate/hardware/OS/commands recorded | **PASS** (this document + logs) |
-| Workloads reproducible | **PASS** (commands above) |
-| Flow resources Pane/visible-region bounded | **PASS** (`m003_renderer_plan`, live-tail fail-closed under Raw/TUI, RSS scaling) |
-| Terminal progress / input / idle no silent regress | **PASS** on measured presentation boundaries; input latency remains Pass-7 authority |
-| Regressions fixed or dispositioned | **PASS** (none blocking; Metal GPU inherited `PLATFORM_LIMITED`) |
-| Transitions return to baseline bounds | **PASS** |
-| No secret-bearing metrics | **PASS** |
+Keep the frozen 5% explain / 10% block policy, the 1 MiB / 512-record ceiling, and the 10% transition-return gate unchanged. Do not use this diagnostic pair as a production pass or as a reason to weaken any threshold.
