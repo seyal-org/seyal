@@ -38,6 +38,11 @@ impl SplitRatio {
     pub fn fraction(self) -> f32 {
         f32::from(self.0) / 10_000.0
     }
+
+    /// Stored first-child share in ten-thousandths of the Split's extent.
+    pub(crate) const fn basis_points(self) -> u16 {
+        self.0
+    }
 }
 
 /// A pointer coordinate along one divider's axis, in Tab unit space (x for a
