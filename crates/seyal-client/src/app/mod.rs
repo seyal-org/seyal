@@ -130,7 +130,7 @@ pub enum AppError {
     NotZoomed,
     /// Swap/move target is the same leaf or not a same-Tab leaf.
     InvalidMoveTarget,
-    /// No geometric neighbor in the requested direction.
+    /// SPEC-024 §5.1 / SPEC-025 §5.7: no geometric neighbor in that direction.
     NoDirectionalNeighbor,
     /// Structural pane action carried a stale ADR-018 `containment_generation`.
     StaleContainment,

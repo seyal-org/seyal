@@ -58,6 +58,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::FocusDirection { direction })
             .map_err(pane_tree_error)?;
+        #[cfg(target_os = "macos")]
+        self.activate_focused_pane_authority();
         self.note_context_navigated()
     }
 

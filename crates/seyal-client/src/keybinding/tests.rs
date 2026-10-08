@@ -211,7 +211,7 @@ action = "window.new"
 
 [[keybindings]]
 keys = "cmd+opt+left"
-action = "pane.focus_left"
+action = "pane.equalize_focused"
 
 [[keybindings]]
 keys = "cmd+["
@@ -400,9 +400,21 @@ fn defaults_every_k2_builtin_row_validates_cleanly() {
     );
     assert!(contexts_for(&table, "cmd+[").is_empty());
     assert!(contexts_for(&table, "cmd+]").is_empty());
-    // Exclusions: ADR-021 pane focus/zoom, ADR-018 window
-    assert!(contexts_for(&table, "cmd+opt+left").is_empty());
-    assert!(contexts_for(&table, "cmd+shift+enter").is_empty());
+    // §5.1 / K7: zoom + directional focus builtins; equalize waits for PT4/#928.
+    let zoom = binding_for(
+        &table,
+        "cmd+shift+enter",
+        WorkspaceCommandId::PaneZoomToggle,
+    )
+    .expect("cmd+shift+enter pane.zoom_toggle");
+    assert_eq!(zoom.context, BindingContext::APP);
+    let focus_left = binding_for(&table, "cmd+opt+left", WorkspaceCommandId::PaneFocusLeft)
+        .expect("cmd+opt+left pane.focus_left");
+    assert_eq!(focus_left.context, BindingContext::APP);
+    assert!(
+        WorkspaceCommandId::parse("pane.equalize_focused").is_none(),
+        "no dead equalize catalog id before PT4/#928"
+    );
 
     assert!(contexts_for(&table, "cmd+n").is_empty());
     assert!(contexts_for(&table, "cmd+,").is_empty());

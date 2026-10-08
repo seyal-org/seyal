@@ -1,5 +1,6 @@
-//! SPEC-024 K3–K5: dispatch matched commands, own chord prefix wait, and read the projected table.
+//! SPEC-024 K3–K5 / K7 / K8: dispatch matched commands, own chord prefix wait, and read the projected table.
 
+use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 use crate::goto::GotoScope;
 use crate::keybinding::{
@@ -8,7 +9,7 @@ use crate::keybinding::{
     WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
-use crate::shell::SplitAxis;
+use crate::shell::{FocusDirection, MoveSide, ShellAction, ShellError, SplitAxis};
 use std::time::Instant;
 
 use super::{AppError, ApplicationRoot};
@@ -117,6 +118,27 @@ impl ApplicationRoot {
             }
             WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
             WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),
+            WorkspaceCommandId::PaneFocusLeft => self.focus_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneFocusRight => self.focus_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneFocusUp => self.focus_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneFocusDown => self.focus_direction(FocusDirection::Down),
+            WorkspaceCommandId::PaneZoomToggle => self.zoom_toggle_focused(),
+            WorkspaceCommandId::PaneSwapLeft => self.swap_focused_direction(FocusDirection::Left),
+            WorkspaceCommandId::PaneSwapRight => self.swap_focused_direction(FocusDirection::Right),
+            WorkspaceCommandId::PaneSwapUp => self.swap_focused_direction(FocusDirection::Up),
+            WorkspaceCommandId::PaneSwapDown => self.swap_focused_direction(FocusDirection::Down),
+            WorkspaceCommandId::PaneMoveLeft => {
+                self.move_focused_beside(FocusDirection::Left, MoveSide::Left)
+            }
+            WorkspaceCommandId::PaneMoveRight => {
+                self.move_focused_beside(FocusDirection::Right, MoveSide::Right)
+            }
+            WorkspaceCommandId::PaneMoveUp => {
+                self.move_focused_beside(FocusDirection::Up, MoveSide::Above)
+            }
+            WorkspaceCommandId::PaneMoveDown => {
+                self.move_focused_beside(FocusDirection::Down, MoveSide::Below)
+            }
             WorkspaceCommandId::PresentationSetFlow => {
                 self.transition_presentation(PresentationMode::Flow)
             }
@@ -189,6 +211,71 @@ impl ApplicationRoot {
         self.focus_pane(panes[next].id)
     }
 
+    /// SPEC-024 R5.1.2: Unzoom when the Tab is zoomed, else ZoomPane on the focused leaf.
+    pub(super) fn zoom_toggle_focused(&mut self) -> Result<(), AppError> {
+        let snap = self.shell.snapshot();
+        let action = if snap.zoomed.is_some() {
+            ShellAction::Unzoom
+        } else {
+            ShellAction::ZoomPane {
+                id: snap.focused_pane,
+            }
+        };
+        self.shell.apply(action).map_err(pane_verb_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    /// SPEC-024 §5.1: `SwapPanes` with the §5.7 neighbor of the focused leaf.
+    pub(super) fn swap_focused_direction(
+        &mut self,
+        direction: FocusDirection,
+    ) -> Result<(), AppError> {
+        let focused = self.shell.snapshot().focused_pane;
+        let neighbor = self
+            .shell
+            .directional_neighbor_of_focused(direction)
+            .map_err(pane_verb_error)?;
+        self.shell
+            .apply(ShellAction::SwapPanes {
+                a: focused,
+                b: neighbor,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(pane_verb_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    /// SPEC-024 §5.1: `MovePaneBeside` with the §5.7 neighbor and mapped side.
+    pub(super) fn move_focused_beside(
+        &mut self,
+        direction: FocusDirection,
+        side: MoveSide,
+    ) -> Result<(), AppError> {
+        let focused = self.shell.snapshot().focused_pane;
+        let neighbor = self
+            .shell
+            .directional_neighbor_of_focused(direction)
+            .map_err(pane_verb_error)?;
+        self.shell
+            .apply(ShellAction::MovePaneBeside {
+                pane: focused,
+                neighbor,
+                side,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(pane_verb_error)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
     fn transition_presentation(&mut self, mode: PresentationMode) -> Result<(), AppError> {
         let snap = self.presentation.snapshot();
         let Some(identity) = snap.identity else {
@@ -218,5 +305,16 @@ impl ApplicationRoot {
 fn invoke_error(error: InvokeError) -> AppError {
     match error {
         InvokeError::ActionUnavailable => AppError::ActionUnavailable,
+    }
+}
+
+fn pane_verb_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::NoDirectionalNeighbor => AppError::NoDirectionalNeighbor,
+        ShellError::UnknownPane => AppError::UnknownPane,
+        ShellError::StaleContainment => AppError::StaleContainment,
+        ShellError::InvalidMoveTarget => AppError::InvalidMoveTarget,
+        ShellError::NotZoomed => AppError::NotZoomed,
+        _ => AppError::ActionUnavailable,
     }
 }
