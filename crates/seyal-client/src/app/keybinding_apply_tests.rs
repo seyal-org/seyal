@@ -1,12 +1,12 @@
 //! SPEC-024 §14 item 18 / K7 (#1145): zoom, swap, and move dispatch.
 //!
-//! Directional focus (#1150) and equalize (PT4/#928) are out of scope.
+//! Equalize (PT4/#928) is out of scope.
 
 use crate::goto::GotoScope;
 use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
 use crate::shell::{
-    FocusDirection, ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
-    ShellWorkspaceSeed, SplitAxis,
+    ShellAction, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+    SplitAxis,
 };
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
@@ -152,15 +152,98 @@ fn item18_swap_left_from_right_leaf_uses_neighbor() {
 }
 
 #[test]
-fn item18_no_focus_catalog_ids_pt3_reducer_untouched() {
-    assert!(WorkspaceCommandId::parse("pane.focus_left").is_none());
-    assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
+fn item18_focus_right_calls_focus_direction_and_miss_rejects() {
     let mut root = split_enabled_root();
-    let (_a, b) = seed_ab(&mut root);
-    root.shell
-        .apply(ShellAction::FocusDirection {
-            direction: FocusDirection::Right,
-        })
-        .expect("direct FocusDirection");
+    let (a, b) = seed_ab(&mut root);
+    assert_eq!(root.snapshot().shell.focused_pane, a);
+
+    invoke(&mut root, WorkspaceCommandId::PaneFocusRight).expect("focus right");
     assert_eq!(root.snapshot().shell.focused_pane, b);
+    assert_eq!(root.shell.last_error(), None);
+
+    // No right neighbor from B.
+    assert_eq!(
+        invoke(&mut root, WorkspaceCommandId::PaneFocusRight),
+        Err(AppError::NoDirectionalNeighbor)
+    );
+    assert_eq!(root.snapshot().shell.focused_pane, b);
+    assert_eq!(
+        root.shell.last_error(),
+        Some(crate::shell::ShellError::NoDirectionalNeighbor)
+    );
+
+    // Zoom + miss: focus and zoom unchanged except last_error (PT3 contract).
+    root.focus_pane(a).expect("focus A");
+    root.shell
+        .apply(ShellAction::ZoomPane { id: a })
+        .expect("zoom A");
+    assert_eq!(
+        invoke(&mut root, WorkspaceCommandId::PaneFocusLeft),
+        Err(AppError::NoDirectionalNeighbor)
+    );
+    assert_eq!(root.snapshot().shell.focused_pane, a);
+    assert_eq!(root.snapshot().shell.zoomed, Some(a));
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn directional_focus_moves_controller_authority_with_focused_pane() {
+    use crate::app::{AppAction, BindingEvidence};
+    use seyal_core::{AttachmentId, ExecutionId};
+
+    let mut root = split_enabled_root();
+    let a = root.snapshot().shell.focused_pane;
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([0x31; 16]),
+            attachment: AttachmentId::from_bytes([0x41; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .expect("bind A");
+
+    root.split_focused(SplitAxis::Right).expect("A|B");
+    let b = root.snapshot().shell.focused_pane;
+    let execution_b = ExecutionId::from_bytes([0x32; 16]);
+    root.shell
+        .apply(ShellAction::BindExecution {
+            pane: b,
+            execution: execution_b,
+        })
+        .expect("bind B in shell");
+    root.install_pane_authority(
+        b,
+        BindingEvidence {
+            execution: execution_b,
+            attachment: AttachmentId::from_bytes([0x42; 16]),
+            controller: true,
+            pty_generation: 2,
+            alternate_screen: false,
+        },
+    )
+    .expect("install B controller");
+    root.focus_pane(a).expect("focus A");
+    root.activate_focused_pane_authority();
+
+    assert_eq!(root.snapshot().pane, a);
+    invoke(&mut root, WorkspaceCommandId::PaneFocusRight).expect("focus B");
+
+    let active = root.snapshot();
+    assert_eq!(active.shell.focused_pane, b);
+    assert_eq!(active.pane, b);
+    assert_eq!(active.execution, Some(execution_b));
+    assert!(active.controller);
+}
+
+#[test]
+fn item18_focus_does_not_add_equalize_catalog() {
+    // This Issue owns only the four focus ids; equalize waits for PT4/#928.
+    assert_eq!(
+        WorkspaceCommandId::parse("pane.focus_left"),
+        Some(WorkspaceCommandId::PaneFocusLeft)
+    );
+    assert!(WorkspaceCommandId::parse("pane.equalize_focused").is_none());
 }
