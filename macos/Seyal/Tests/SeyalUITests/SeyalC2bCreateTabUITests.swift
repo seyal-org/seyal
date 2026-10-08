@@ -48,6 +48,8 @@ final class SeyalC2bCreateTabUITests: XCTestCase {
         let app = hostedApp()
         waitForUsablePty(in: app)
         clickNewTab(in: app)
+        waitForRunLoop(5)
+        showTabs(in: app)
         XCTAssertTrue(
             app.descendants(matching: .any)["seyal-tab-1"].firstMatch.waitForExistence(timeout: 12),
             "second tab must be projected before the palette terminate verb"

@@ -316,7 +316,7 @@ final class ProductChromeHostView: NSView {
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
         }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
-            self?.composer.focusEditor()
+            self?.composer.focusEditor() ?? false
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()

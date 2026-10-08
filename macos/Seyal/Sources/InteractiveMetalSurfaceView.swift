@@ -13,7 +13,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var heldKeyboardKinds: [UInt16: TerminalNativeKeyV2] = [:]
     static let maxHeldKeyboardKinds = 256
     var onBridgeBecameUsable: (() -> Void)?
-    var onRequestComposerFocus: (() -> Void)?
+    var onRequestComposerFocus: (() -> Bool)?
     /// A Rust table match already changed product state. The chrome host projects it.
     var onCommandConsumed: (() -> Void)?
     var observedAlternateScreen = false
@@ -38,8 +38,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         syncInputRoutePresentation()
         if !allowsDirectTerminalInput {
             discardUncommittedMark()
-            onRequestComposerFocus?()
-            return true
+            return onRequestComposerFocus?() ?? false
         }
         return window?.makeFirstResponder(self) ?? false
     }
