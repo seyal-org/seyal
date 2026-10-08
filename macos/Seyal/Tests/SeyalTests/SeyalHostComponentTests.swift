@@ -327,6 +327,55 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testRecoveryFocusDoesNotTakeFirstResponderFromOpenPalette() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.pane.inputSurface.recoveryPresentationPending = true
+        window.makeKeyAndOrderFront(nil)
+        view.commandPalette.requestOpen()
+        XCTAssertTrue(view.commandPalette.isOpen)
+        view.commandPalette.focusQuery()
+        let paletteQuery = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-command-palette-query")
+        )
+        let paletteResponder = try XCTUnwrap(window.firstResponder)
+        XCTAssertTrue(paletteResponder === paletteQuery || paletteResponder is NSTextView)
+
+        XCTAssertFalse(view.pane.inputSurface.onRequestComposerFocus?() ?? true)
+        XCTAssertTrue(
+            window.firstResponder === paletteResponder,
+            "a deferred reconnect focus request must not steal focus while the palette owns it"
+        )
+
+        var closePalette = SeyalAppAction()
+        closePalette.version = UInt16(SEYAL_APP_ABI_VERSION)
+        closePalette.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        closePalette.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PALETTE.rawValue)
+        closePalette.applySnapshotFence(seyal_app_snapshot(view.pane.appHandle))
+        XCTAssertEqual(seyal_app_apply(view.pane.appHandle, &closePalette), 0)
+        view.reconcileChrome()
+        let composerEditor = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(
+            window.firstResponder === composerEditor,
+            "closing the palette must resume pending recovery focus"
+        )
+    }
+
+    @MainActor
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()

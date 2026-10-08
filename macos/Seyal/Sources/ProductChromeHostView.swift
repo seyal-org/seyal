@@ -204,7 +204,7 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         commandPalette.onDismissed = { [weak self] in
-            self?.routeFocus()
+            self?.commandPaletteDidDismiss()
         }
 
         pane.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -316,7 +316,7 @@ final class ProductChromeHostView: NSView {
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
         }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
-            self?.composer.focusEditor() ?? false
+            self?.requestComposerFocusIfPaletteAllows() ?? false
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
