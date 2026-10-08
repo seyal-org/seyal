@@ -601,7 +601,7 @@ mod tests {
         ops
     }
 
-    #[derive(Default)]
+    #[derive(Clone, Default)]
     struct HistoryModel {
         targets: Vec<ResourceAddress>,
         cursor: Option<usize>,
@@ -739,6 +739,16 @@ mod tests {
             let mut history = FocusHistory::new();
             let mut model = HistoryModel::default();
             apply_and_check(&mut history, &mut model, &ops, seed);
+
+            let mut repeated = FocusHistory::new();
+            let mut repeated_model = model.clone();
+            apply_and_check(&mut repeated, &mut repeated_model, &ops, seed);
+            assert_eq!(targets(&history), targets(&repeated), "seed {seed}: targets");
+            let seqs: Vec<_> = history.entries().iter().map(|entry| entry.seq).collect();
+            let repeated_seqs: Vec<_> =
+                repeated.entries().iter().map(|entry| entry.seq).collect();
+            assert_eq!(seqs, repeated_seqs, "seed {seed}: ordering reproducibility");
+            assert_eq!(history.cursor_index(), repeated.cursor_index(), "seed {seed}: cursor");
         }
     }
 
