@@ -347,6 +347,9 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
             let accepted = result.code == .accepted || result.code == .unsupported
             self?.composer.applyComposerResult(requestID: result.requestID, accepted: accepted)
+            if !accepted {
+                self?.composer.presentAdmissionFailure(result.code)
+            }
             self?.reconcileChrome()
         }
         pane.inputSurface.onComposerStatusChanged = { [weak self] status in
@@ -562,6 +565,9 @@ final class ProductChromeHostView: NSView {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
+        // Revoke Metal IME/AX before focusing the composer so Flow never keeps
+        // a competing terminal first responder (#866).
+        inputSurface.syncInputRoutePresentation()
         let snapshot = seyal_app_snapshot(pane.appHandle)
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
