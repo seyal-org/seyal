@@ -640,7 +640,10 @@ mod tests {
                     }
                 }
                 HistOp::Destroy(n) => {
-                    let ResourceAddress::Pane { pane: destroyed, .. } = pane(n) else {
+                    let ResourceAddress::Pane {
+                        pane: destroyed, ..
+                    } = pane(n)
+                    else {
                         unreachable!()
                     };
                     let old_cursor = self.cursor;
@@ -666,13 +669,20 @@ mod tests {
     fn assert_matches_model(history: &FocusHistory, model: &HistoryModel, context: &str) {
         let actual_targets = targets(history);
         assert_eq!(actual_targets, model.targets, "{context}: targets");
-        assert_eq!(history.cursor_index(), model.cursor, "{context}: cursor index");
+        assert_eq!(
+            history.cursor_index(),
+            model.cursor,
+            "{context}: cursor index"
+        );
         assert_eq!(
             history.cursor_target(),
             model.cursor.map(|idx| model.targets[idx]),
             "{context}: cursor target"
         );
-        assert!(history.len() <= FOCUS_HISTORY_CAPACITY, "{context}: capacity");
+        assert!(
+            history.len() <= FOCUS_HISTORY_CAPACITY,
+            "{context}: capacity"
+        );
         for pair in history.entries().windows(2) {
             assert!(pair[0].seq < pair[1].seq, "{context}: sequence order");
         }
@@ -683,7 +693,12 @@ mod tests {
         );
     }
 
-    fn apply_and_check(history: &mut FocusHistory, model: &mut HistoryModel, ops: &[HistOp], seed: u64) {
+    fn apply_and_check(
+        history: &mut FocusHistory,
+        model: &mut HistoryModel,
+        ops: &[HistOp],
+        seed: u64,
+    ) {
         for (index, op) in ops.iter().copied().enumerate() {
             let context = format!("seed {seed}, operation {index}");
             let expected_cursor = model.cursor;
@@ -693,27 +708,46 @@ mod tests {
                 HistOp::Back => {
                     if let Some(seq) = history.cursor_seq() {
                         let actual = history.prepare_back(seq);
-                        let expected = model.cursor.and_then(|idx| idx.checked_sub(1)).map(|idx| model.targets[idx]);
+                        let expected = model
+                            .cursor
+                            .and_then(|idx| idx.checked_sub(1))
+                            .map(|idx| model.targets[idx]);
                         match expected {
-                            Some(target) => assert_eq!(actual, Ok(target), "{context}: back target"),
-                            None => assert_eq!(actual, Err(NavigationRejection::HistoryUnavailable), "{context}: unavailable back"),
+                            Some(target) => {
+                                assert_eq!(actual, Ok(target), "{context}: back target")
+                            }
+                            None => assert_eq!(
+                                actual,
+                                Err(NavigationRejection::HistoryUnavailable),
+                                "{context}: unavailable back"
+                            ),
                         }
                     }
                 }
                 HistOp::Forward => {
                     if let Some(seq) = history.cursor_seq() {
                         let actual = history.prepare_forward(seq);
-                        let expected = model.cursor
+                        let expected = model
+                            .cursor
                             .filter(|idx| idx + 1 < model.targets.len())
                             .map(|idx| model.targets[idx + 1]);
                         match expected {
-                            Some(target) => assert_eq!(actual, Ok(target), "{context}: forward target"),
-                            None => assert_eq!(actual, Err(NavigationRejection::HistoryUnavailable), "{context}: unavailable forward"),
+                            Some(target) => {
+                                assert_eq!(actual, Ok(target), "{context}: forward target")
+                            }
+                            None => assert_eq!(
+                                actual,
+                                Err(NavigationRejection::HistoryUnavailable),
+                                "{context}: unavailable forward"
+                            ),
                         }
                     }
                 }
                 HistOp::Destroy(n) => {
-                    let ResourceAddress::Pane { pane: destroyed, .. } = pane(n) else {
+                    let ResourceAddress::Pane {
+                        pane: destroyed, ..
+                    } = pane(n)
+                    else {
                         unreachable!()
                     };
                     history.purge_matching(|target| matches_destroyed_pane(target, destroyed));
@@ -727,7 +761,11 @@ mod tests {
                 && model.cursor.map(|idx| model.targets[idx]) == expected_target
             {
                 // Cursor-equal commits are true no-ops, including while behind the head.
-                assert_eq!(history.cursor_index(), expected_cursor, "{context}: dedup cursor");
+                assert_eq!(
+                    history.cursor_index(),
+                    expected_cursor,
+                    "{context}: dedup cursor"
+                );
             }
         }
     }
@@ -743,12 +781,19 @@ mod tests {
             let mut repeated = FocusHistory::new();
             let mut repeated_model = HistoryModel::default();
             apply_and_check(&mut repeated, &mut repeated_model, &ops, seed);
-            assert_eq!(targets(&history), targets(&repeated), "seed {seed}: targets");
+            assert_eq!(
+                targets(&history),
+                targets(&repeated),
+                "seed {seed}: targets"
+            );
             let seqs: Vec<_> = history.entries().iter().map(|entry| entry.seq).collect();
-            let repeated_seqs: Vec<_> =
-                repeated.entries().iter().map(|entry| entry.seq).collect();
+            let repeated_seqs: Vec<_> = repeated.entries().iter().map(|entry| entry.seq).collect();
             assert_eq!(seqs, repeated_seqs, "seed {seed}: ordering reproducibility");
-            assert_eq!(history.cursor_index(), repeated.cursor_index(), "seed {seed}: cursor");
+            assert_eq!(
+                history.cursor_index(),
+                repeated.cursor_index(),
+                "seed {seed}: cursor"
+            );
         }
     }
 
