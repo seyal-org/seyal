@@ -248,9 +248,9 @@ responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proof
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 854
-issue = 1105
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1101 carries ResourceAddress on navigation rows, #1090 threads window identity, and #867 adds bound-Pane explicit Raw / Return to Flow beside those commands; splitting would separate the row model from the command it runs."
+acknowledged_loc = 876
+issue = 1175
+reason = "Command palette query, frozen rows, and run dispatch stay one reducer. #1175 adds the P4 Terminate Execution verb beside New Tab so headed C2b can distinguish detach-only Close Tab from explicit terminate without splitting the row model from the command it runs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"

@@ -14,9 +14,9 @@ use std::{
 };
 
 use seyal_client::{
-    seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle, seyal_bridge_ensure_prepared,
-    seyal_bridge_frame, seyal_bridge_poll, seyal_bridge_select, test_register_pending_client,
-    LocalDisplayClient,
+    ffi_test_claim_focused_display_if_unset, seyal_bridge_adopt_handle,
+    seyal_bridge_disconnect_handle, seyal_bridge_ensure_prepared, seyal_bridge_frame,
+    seyal_bridge_poll, seyal_bridge_select, test_register_pending_client, LocalDisplayClient,
 };
 use seyal_exec::{CommandSpec, WindowSize};
 use seyal_runtime::{local_ipc::framing::Role, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig};
@@ -141,6 +141,7 @@ fn frame_cells_are_cleared_after_disconnect_following_poll() {
     let handle =
         test_register_pending_client(harness.connect(), 9).expect("register pending handle");
     assert_eq!(seyal_bridge_adopt_handle(handle), 0);
+    ffi_test_claim_focused_display_if_unset(handle);
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

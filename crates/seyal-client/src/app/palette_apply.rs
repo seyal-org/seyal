@@ -137,6 +137,7 @@ impl ApplicationRoot {
             PaletteCommand::OpenAttention(id) => self.open_attention(fence, id),
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
             PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
+            PaletteCommand::TerminateExecution => self.terminate_execution(fence),
         }
     }
 }

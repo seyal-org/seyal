@@ -370,6 +370,13 @@ final class SeyalHostComponentTests: XCTestCase {
         let shell = seyal_app_shell(handle)
         XCTAssertEqual(shell.tab_count, 2)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
+        XCTAssertNotEqual(
+            shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE),
+            0,
+            "a second tab enables Close Tab (detach-only)"
+        )
+        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        XCTAssertFalse(closeTab.isHidden, "seyal-close-tab is shown once more than one tab exists")
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
 
         var split = SeyalAppAction()
