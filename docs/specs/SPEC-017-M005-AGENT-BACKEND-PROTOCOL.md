@@ -1,6 +1,6 @@
 # SPEC-017 — M005 independent Agent Backend protocol, security and event replay
 
-- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment Accepted on merge of PR #1270 by a non-author maintainer under #1191.** An author or agent comment is not that acceptance. The pairing amendment is not an implemented-behavior claim.
+- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment is not Accepted.** PR #1270 (`92d9a00`) was squash-merged by author `@mahboobmonnamd` with zero reviews; that merge is not the non-author Accepted stamp. **Accepted on merge of PR #1316 by a non-author maintainer (`@anulalbs` / `@crdileep82`) under #1191.** An author or agent comment or merge is not that acceptance. Pairing amendment text is unchanged. This is not an implemented-behavior claim.
 - **Issue:** #838 (base contract); pairing amendment #1191
 - **Architecture:** ADR-012, ADR-013, ADR-014, ADR-015 (pairing approval UX ownership), ADR-016 (no ADR create/amend; §9 boundary unchanged)
 - **Consumers:** #678, #679, #680, #681, #1190, #1191, #1192
@@ -102,7 +102,7 @@ Representative scopes:
 
 A same-UID process is not automatically globally privileged.
 
-### 5.1 Hello evidence resolution (Accepted under #1191)
+### 5.1 Hello evidence resolution
 
 `Hello.client_principal_evidence` selects at most one `Active` `ClientPrincipal`. Evidence resolution is fail-closed:
 
@@ -113,7 +113,7 @@ A same-UID process is not automatically globally privileged.
 
 Transport admission (same-UID Unix socket / named pipe) remains necessary but never sufficient (ADR-016 §9).
 
-### 5.2 First-party identity evidence (Accepted under #1191)
+### 5.2 First-party identity evidence
 
 `FirstPartySeyal` and `FirstPartyCLI` must present install-bound identity evidence that only the corresponding first-party install can mint or renew:
 
@@ -134,7 +134,7 @@ Requirements:
 
 Until first-party install evidence and pairing are implemented, production claims that rely on SPEC-017 §15.3–15.5 third-party / UserApprovedLocalClient behavior remain out of scope for M005 exit.
 
-### 5.3 Per-principal target grants (Accepted under #1191)
+### 5.3 Per-principal target grants
 
 Exact resource/run authorization is **per principal**, not broadcast:
 
@@ -145,7 +145,7 @@ Exact resource/run authorization is **per principal**, not broadcast:
 
 `admin.clients` (or an equally privileged first-party admin scope) may mint, suspend, revoke, or retarget grants. Ordinary observe-only sessions cannot self-escalate.
 
-## 6. Pairing (Accepted under #1191)
+## 6. Pairing
 
 Third-party local clients (`UserApprovedLocalClient`, `ManagedClient`, and any non-first-party principal) require explicit pairing before privileged scopes or durable identity evidence are issued.
 
