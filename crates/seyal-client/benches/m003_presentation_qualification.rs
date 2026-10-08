@@ -214,10 +214,10 @@ fn measure_retained_block_rss_scaling() {
                 let incremental = populated.rss_kib.saturating_sub(baseline.rss_kib);
                 timeline.complete_and_retire_all();
                 assert!(timeline.is_empty());
-                incremental
+                (incremental, baseline, populated)
             })
             .collect::<Vec<_>>();
-        let mut sorted = samples.clone();
+        let mut sorted = samples.iter().map(|sample| sample.0).collect::<Vec<_>>();
         sorted.sort_unstable();
         let median = sorted[sorted.len() / 2];
         // Linear metadata growth is allowed; a full renderer-per-Block would blow
@@ -227,8 +227,14 @@ fn measure_retained_block_rss_scaling() {
             .div_ceil(512)
             .max(RSS_GATE_KIB / 8);
         println!(
-            "m003_block_rss classification=MEASURED live_records={live_records} attributable_rss_kib_median={median} rss_samples={:?} scaled_gate_kib={scaled_gate} rss_gate_kib={RSS_GATE_KIB} {PERFORMANCE_CLAIM}",
-            samples
+            "m003_block_rss classification=MEASURED live_records={live_records} attributable_rss_kib_median={median} rss_samples_kib={:?} cpu_percent_samples_baseline={:?} cpu_percent_samples_populated={:?} threads_samples_baseline={:?} threads_samples_populated={:?} fds_samples_baseline={:?} fds_samples_populated={:?} scaled_gate_kib={scaled_gate} rss_gate_kib={RSS_GATE_KIB} {PERFORMANCE_CLAIM}",
+            samples.iter().map(|sample| sample.0).collect::<Vec<_>>(),
+            samples.iter().map(|sample| sample.1.cpu_percent).collect::<Vec<_>>(),
+            samples.iter().map(|sample| sample.2.cpu_percent).collect::<Vec<_>>(),
+            samples.iter().map(|sample| sample.1.threads).collect::<Vec<_>>(),
+            samples.iter().map(|sample| sample.2.threads).collect::<Vec<_>>(),
+            samples.iter().map(|sample| sample.1.fds).collect::<Vec<_>>(),
+            samples.iter().map(|sample| sample.2.fds).collect::<Vec<_>>(),
         );
         assert!(
             median <= scaled_gate,
@@ -243,10 +249,14 @@ fn measure_transition_resource_return() {
     let pre_samples = (0..5)
         .map(|_| {
             thread::sleep(Duration::from_millis(20));
-            process_metrics().rss_kib
+            process_metrics()
         })
         .collect::<Vec<_>>();
-    let pre_median = median_usize(&pre_samples);
+    let pre_rss = pre_samples
+        .iter()
+        .map(|sample| sample.rss_kib)
+        .collect::<Vec<_>>();
+    let pre_median = median_usize(&pre_rss);
 
     for _ in 0..TRANSITION_CYCLES {
         black_box(run_transition_cycle(identity));
@@ -256,18 +266,29 @@ fn measure_transition_resource_return() {
     let post_samples = (0..5)
         .map(|_| {
             thread::sleep(Duration::from_millis(20));
-            process_metrics().rss_kib
+            process_metrics()
         })
         .collect::<Vec<_>>();
-    let post_median = median_usize(&post_samples);
+    let post_rss = post_samples
+        .iter()
+        .map(|sample| sample.rss_kib)
+        .collect::<Vec<_>>();
+    let post_median = median_usize(&post_rss);
     let allowed = pre_median
         + pre_median
             .saturating_mul(TRANSITION_RSS_RETURN_PERCENT)
             .div_ceil(100)
             .max(256);
     println!(
-        "m003_transition_rss classification=MEASURED cycles={TRANSITION_CYCLES} rss_pre_median_kib={pre_median} rss_post_median_kib={post_median} rss_pre_samples={:?} rss_post_samples={:?} allowed_post_kib={allowed} {PERFORMANCE_CLAIM}",
-        pre_samples, post_samples
+        "m003_transition_rss classification=MEASURED cycles={TRANSITION_CYCLES} rss_pre_median_kib={pre_median} rss_post_median_kib={post_median} rss_pre_samples_kib={:?} rss_post_samples_kib={:?} cpu_percent_pre_samples={:?} cpu_percent_post_samples={:?} threads_pre_samples={:?} threads_post_samples={:?} fds_pre_samples={:?} fds_post_samples={:?} allowed_post_kib={allowed} {PERFORMANCE_CLAIM}",
+        pre_rss,
+        post_rss,
+        pre_samples.iter().map(|sample| sample.cpu_percent).collect::<Vec<_>>(),
+        post_samples.iter().map(|sample| sample.cpu_percent).collect::<Vec<_>>(),
+        pre_samples.iter().map(|sample| sample.threads).collect::<Vec<_>>(),
+        post_samples.iter().map(|sample| sample.threads).collect::<Vec<_>>(),
+        pre_samples.iter().map(|sample| sample.fds).collect::<Vec<_>>(),
+        post_samples.iter().map(|sample| sample.fds).collect::<Vec<_>>(),
     );
     assert!(
         post_median <= allowed,
@@ -351,24 +372,56 @@ fn median_usize(values: &[usize]) -> usize {
 #[derive(Clone, Copy)]
 struct Metrics {
     rss_kib: usize,
+    cpu_percent: f32,
+    threads: usize,
+    fds: usize,
 }
 
 #[cfg(target_os = "macos")]
 fn process_metrics() -> Metrics {
     let pid = process::id();
     let output = Command::new("/bin/ps")
-        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .args(["-o", "rss=,%cpu=,thcount=", "-p", &pid.to_string()])
         .output()
-        .expect("ps rss");
-    let rss_kib = String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
+        .expect("ps metrics");
+    let line = String::from_utf8_lossy(&output.stdout);
+    let mut fields = line.split_whitespace();
+    let rss_kib = fields
         .next()
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
-    let _fds = fs::read_dir("/dev/fd")
+    let cpu_percent = fields
+        .next()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.0);
+    let parsed_threads = fields
+        .next()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    let threads = if parsed_threads == 0 {
+        Command::new("/bin/ps")
+            .args(["-M", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .skip(1)
+                    .count()
+            })
+            .unwrap_or(0)
+    } else {
+        parsed_threads
+    };
+    let fds = fs::read_dir("/dev/fd")
         .map(|entries| entries.count())
         .unwrap_or(0);
-    Metrics { rss_kib }
+    Metrics {
+        rss_kib,
+        cpu_percent,
+        threads,
+        fds,
+    }
 }
 
 #[cfg(target_os = "macos")]
