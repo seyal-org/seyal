@@ -161,6 +161,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Remaining injected failures for the next `WindowActivation` (tests).
     var activationFailBudget: Int = 0
+    /// Replaces AppKit's activation request to exercise OS refusal in tests.
+    var activationRequestForTests: ((NSWindow) -> Void)?
+    /// Provides AppKit's key-state observation when tests need deterministic success.
+    var keyWindowStatusForTests: ((NSWindow) -> Bool)?
     /// Attempts spent on the last `WindowActivation` effect (tests).
     private(set) var lastActivationAttempts: Int = 0
     private var pendingActivationFailure: WindowKey?
@@ -186,11 +190,34 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         }
         // Host must not pick a different window than the effect names.
         guard let window = realizations[key] else { return false }
+        if let activationRequestForTests {
+            activationRequestForTests(window)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
+        if isKeyWindow(window) {
+            if liveKey != key {
+                installLiveHost(in: window, key: key)
+            }
+            return true
+        }
+        // `makeKeyAndOrderFront` has no result value. Confirm AppKit actually
+        // assigned key status to the named window before changing the live host.
+        // Do not pump a nested event loop here: it can reenter effect draining
+        // while this activation is still being acknowledged.
+        guard isKeyWindow(window) else { return false }
         if liveKey != key {
             installLiveHost(in: window, key: key)
         }
-        window.makeKeyAndOrderFront(nil)
         return true
+    }
+
+    private func isKeyWindow(_ window: NSWindow) -> Bool {
+        if let keyWindowStatusForTests {
+            return keyWindowStatusForTests(window)
+        }
+        return window.isKeyWindow && NSApp.keyWindow === window
     }
 
     private func reportActivationFailed(_ key: WindowKey) {

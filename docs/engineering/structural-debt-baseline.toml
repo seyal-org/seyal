@@ -254,7 +254,7 @@ reason = "Command palette query, frozen rows, and run dispatch remain one reduce
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 941
+acknowledged_loc = 935
 issue = 1144
 reason = "Shell composition reducer remains the portable Workspace/Window/Tab/Pane authority; #1108 carries snapshot/effects, #1123 adds fail-closed window creation, and #1144 adds the N5 tab-to-window activation lookup. Snapshot encoding stays in shell/snapshot.rs."
 

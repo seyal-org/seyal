@@ -251,8 +251,14 @@ final class MultiWindowHostTests: XCTestCase {
         defer { host.performQuitCleanup() }
         let target = seyal_app_window(host.appHandle, 1)
         XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
-        host.applyPendingEffectsAndReconcile()
         let expectedId = "seyal-window-\(target.window_lo)-\(target.window_hi)"
+        // XCTest's hosted app is not foregrounded, so supply the key-state
+        // acknowledgement while still asserting the requested WindowId.
+        host.activationRequestForTests = { window in
+            XCTAssertEqual(window.identifier?.rawValue, expectedId)
+        }
+        host.keyWindowStatusForTests = { $0.identifier?.rawValue == expectedId }
+        host.applyPendingEffectsAndReconcile()
         XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
         let windows = host.snapshotOrderedWindowKeys()
         XCTAssertEqual(windows.count, 2)
@@ -274,6 +280,41 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertNotEqual(after.flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE), 0)
         XCTAssertTrue(host.liveHost.window === liveBefore)
         XCTAssertEqual(host.activationFailBudget, 8 - Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+    }
+
+    func testWindowActivationDetectsAppKitRefusingToKeyNamedWindow() {
+        let host = seededQuitHost(windows: 2)
+        defer { host.performQuitCleanup() }
+        let target = seyal_app_window(host.appHandle, 1)
+        let sourceWindow = host.liveHost.window
+        XCTAssertNotNil(sourceWindow)
+        let keyWindowBefore = NSApp.keyWindow
+
+        XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
+        var requests = 0
+        var targetWasKeyAfterRequest: Bool?
+        host.activationRequestForTests = { requestedWindow in
+            XCTAssertEqual(
+                requestedWindow.identifier?.rawValue,
+                "seyal-window-\(target.window_lo)-\(target.window_hi)"
+            )
+            requests += 1
+            // Model AppKit refusing the request: the named window stays non-key.
+            targetWasKeyAfterRequest = requestedWindow.isKeyWindow
+        }
+        host.applyPendingEffects()
+
+        XCTAssertEqual(requests, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+        XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        XCTAssertEqual(targetWasKeyAfterRequest, false)
+        XCTAssertTrue(NSApp.keyWindow === keyWindowBefore)
+        XCTAssertTrue(host.liveHost.window === sourceWindow)
+        XCTAssertNotEqual(
+            seyal_app_window(host.appHandle, 1).flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE),
+            0,
+            "portable focus remains committed after native activation failure"
+        )
     }
 
     func testCreateWindowRejectedDoesNotMoveLiveHost() {
