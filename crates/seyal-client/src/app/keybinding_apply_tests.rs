@@ -1,5 +1,9 @@
 //! K8: `goto.open` dispatch opens the existing N4 surface.
 
+#[cfg(target_os = "macos")]
+#[path = "pane_tree_apply_tests.rs"]
+mod pane_tree_apply_tests;
+
 use crate::goto::GotoScope;
 use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
 
