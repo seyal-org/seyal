@@ -42,9 +42,9 @@ reason = "SPEC-022 §6 focus history store and its state-transition proofs stay 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 991
-issue = 1217
-reason = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane_provisioning_tests beside the existing tab provisioning suite without expanding apply dispatch."
+ceiling_loc = 1050
+issue = 1123
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning beside tab provisioning and #1123 adds W4a window actions, native events, quit deadline, and live-attachment fixture fields beside the existing live-attach maps."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -66,7 +66,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1091
+ceiling_loc = 1100
 issue = 1123
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture."
 
@@ -223,13 +223,13 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 path = "crates/seyal-client/src/navigation/tests.rs"
 ceiling_loc = 1154
 issue = 1122
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside its address; #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites, W2a adds Window-aware navigation fixtures, and #1117 makes history policy explicit at legacy ApplyOnly call sites with new integration tests in history_integration_tests.rs."
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through Split/Close, W2a adds Window-aware fixtures, #1117 records history policy and integration tests, and #1123 adds W4a fixture admission coverage."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
 acknowledged_loc = 879
 issue = 1092
-reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract and selection call site, while #1175 adds the P4 Terminate Execution verb beside New Tab for headed C2b."
+reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries containment generation through window-aware actions, #1175 adds the P4 Terminate Execution verb, and #1123 keeps W4a fixture admission policy in the Rust shell."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
