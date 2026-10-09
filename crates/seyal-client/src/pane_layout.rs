@@ -120,6 +120,11 @@ pub struct PaneRegion {
     /// This region hosts the single live terminal/Metal/composer surface.
     /// At most one region is live, and only when it is also focused.
     pub live: bool,
+    /// Rust-owned zoom overlay: this leaf fills the Tab.
+    pub zoomed: bool,
+    /// Present in the tree but covered by the zoom overlay (host must not
+    /// invent geometry). Rect is zeroed.
+    pub occluded: bool,
 }
 
 /// One Split's divider. `leading` names it for `SetSplitRatio`: the last leaf
@@ -165,11 +170,52 @@ pub fn project(tree: &PaneTree, focused: PaneId, live_pane: PaneId) -> Vec<PaneR
     regions
 }
 
+/// Host projection (#923 / PT5): same leaf order as [`project`], but a zoomed
+/// leaf fills the Tab and other leaves are occluded without mutating topology.
+pub fn project_for_host(
+    tree: &PaneTree,
+    focused: PaneId,
+    live_pane: PaneId,
+    zoomed: Option<PaneId>,
+) -> Vec<PaneRegion> {
+    let mut regions = project(tree, focused, live_pane);
+    let Some(zoomed) = zoomed else {
+        return regions;
+    };
+    for region in &mut regions {
+        if region.pane == zoomed {
+            region.rect = PaneRect::FULL;
+            region.zoomed = true;
+            region.occluded = false;
+        } else {
+            region.rect = PaneRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 0.0,
+            };
+            region.zoomed = false;
+            region.occluded = true;
+            region.live = false;
+        }
+    }
+    regions
+}
+
 /// Dividers in pre-order (outer Split before the Splits nested inside it).
 pub fn dividers(tree: &PaneTree) -> Vec<PaneDivider> {
     let mut dividers = Vec::new();
     collect(tree, PaneRect::FULL, &mut Vec::new(), &mut dividers);
     dividers
+}
+
+/// Host dividers: omitted while zoomed so AppKit does not keep overlay policy.
+pub fn dividers_for_host(tree: &PaneTree, zoomed: Option<PaneId>) -> Vec<PaneDivider> {
+    if zoomed.is_some() {
+        Vec::new()
+    } else {
+        dividers(tree)
+    }
 }
 
 fn collect(
@@ -184,6 +230,8 @@ fn collect(
             rect,
             focused: false,
             live: false,
+            zoomed: false,
+            occluded: false,
         }),
         PaneTree::Split {
             axis,
@@ -237,6 +285,8 @@ mod tests {
                 rect: PaneRect::FULL,
                 focused: true,
                 live: true,
+                zoomed: false,
+                occluded: false,
             }]
         );
     }
@@ -633,5 +683,54 @@ mod root_tests {
             Err(AppError::CannotCloseLastPane)
         );
         assert_eq!(root.pane_regions(), regions);
+    }
+
+    #[test]
+    fn zoom_overlay_fills_the_tab_and_equalize_clears_it() {
+        let mut root = split_enabled_root();
+        root.apply(AppAction::SplitFocused {
+            axis: SplitAxis::Right,
+        })
+        .unwrap();
+        let a = root.snapshot().shell.panes[0].id;
+        let b = root.snapshot().shell.panes[1].id;
+        assert_eq!(root.pane_dividers().len(), 1);
+
+        root.apply(AppAction::ZoomPane { id: a }).unwrap();
+        let regions = root.pane_regions();
+        assert_eq!(regions.len(), 2, "overlay does not drop leaves");
+        assert_eq!(root.snapshot().shell.zoomed, Some(a));
+        let zoomed = regions.iter().find(|r| r.pane == a).unwrap();
+        let occluded = regions.iter().find(|r| r.pane == b).unwrap();
+        assert_eq!(zoomed.rect, PaneRect::FULL);
+        assert!(zoomed.zoomed && zoomed.focused);
+        assert!(occluded.occluded);
+        assert_eq!(occluded.rect.width, 0.0);
+        assert!(root.pane_dividers().is_empty());
+
+        assert_eq!(
+            root.apply(AppAction::ZoomPane { id: PaneId::new() }),
+            Err(AppError::UnknownPane)
+        );
+        assert_eq!(root.snapshot().shell.zoomed, Some(a));
+
+        root.apply(AppAction::EqualizeTab).unwrap();
+        assert_eq!(root.snapshot().shell.zoomed, None);
+        assert_eq!(root.pane_dividers().len(), 1);
+        assert!(root.pane_regions().iter().all(|r| !r.zoomed && !r.occluded));
+        assert_eq!(
+            root.apply(AppAction::SwapPanes {
+                a,
+                b: PaneId::new()
+            }),
+            Err(AppError::UnknownPane)
+        );
+        assert_eq!(
+            root.apply(AppAction::FocusDirection {
+                direction: crate::shell::FocusDirection::Up,
+            }),
+            Err(AppError::NoDirectionalNeighbor)
+        );
+        assert_eq!(root.apply(AppAction::Unzoom), Err(AppError::NotZoomed));
     }
 }

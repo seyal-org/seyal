@@ -22,11 +22,16 @@ final class PaneLayoutView: NSView {
         let rect: CGRect
         let focused: Bool
         let live: Bool
+        let zoomed: Bool
+        let occluded: Bool
         let title: String
 
         /// Everything but geometry: a change here rebuilds region views.
         var identity: Region {
-            Region(paneLo: paneLo, paneHi: paneHi, rect: .zero, focused: focused, live: live, title: title)
+            Region(
+                paneLo: paneLo, paneHi: paneHi, rect: .zero, focused: focused, live: live,
+                zoomed: zoomed, occluded: occluded, title: title
+            )
         }
     }
 
@@ -150,6 +155,8 @@ final class PaneLayoutView: NSView {
                     ),
                     focused: raw.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED) != 0,
                     live: raw.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE) != 0,
+                    zoomed: raw.flags & UInt16(SEYAL_APP_PANE_REGION_ZOOMED) != 0,
+                    occluded: raw.flags & UInt16(SEYAL_APP_PANE_REGION_OCCLUDED) != 0,
                     title: title
                 )
             )
@@ -168,9 +175,11 @@ final class PaneLayoutView: NSView {
         // divider being dragged, and just relayout.
         guard rebuild else { return }
         regionViews.forEach { $0.removeFromSuperview() }
-        let split = next.count > 1
+        let visible = next.filter { !$0.occluded }
+        let split = visible.count > 1
         regionViews = next.enumerated().map { index, region in
             let view = PaneRegionView(region: region, index: index, split: split)
+            view.isHidden = region.occluded
             view.onFocus = { [weak self] in
                 self?.onFocusPane?(region.paneLo, region.paneHi)
             }
@@ -207,7 +216,7 @@ final class PaneLayoutView: NSView {
         // Before the first projection the live container fills the Tab so the
         // single production Pane can present and bind.
         let live = regions.first(where: \.live)?.rect ?? CGRect(x: 0, y: 0, width: 1, height: 1)
-        let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
+        let inset: CGFloat = regions.filter { !$0.occluded }.count > 1 ? PaneRegionView.borderWidth : 0
         liveContent.frame = scaled(live).insetBy(dx: inset, dy: inset)
         for (view, divider) in zip(dividerViews, dividers) {
             // Centre a fixed-thickness hit zone on the Rust-projected line.

@@ -227,6 +227,31 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
     }
 
+    /// #1219 / PT5: host zoom/move/equalize verbs are live, but production C3
+    /// split stays fail-closed. The focused region remains mounted.
+    func testPaneTreeHostKeepsOneFocusedRegionWhileSplitsStayFailClosed() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let region = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        XCTAssertTrue(region.waitForExistence(timeout: 5), "Pane region projection missing")
+        XCTAssertEqual(region.value as? String, "focused")
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        if split.exists {
+            XCTAssertFalse(
+                split.isHittable,
+                "PT5 ancestry keeps Split chrome fail-closed until C3"
+            )
+        }
+        region.click()
+        XCTAssertEqual(app.state, .runningForeground, "region press must not crash Seyal.app")
+        XCTAssertFalse(
+            app.descendants(matching: .any)["seyal-pane-region-1"].exists,
+            "fail-closed Split must not invent a second region"
+        )
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        XCTAssertTrue(composer.isHittable, "the sole live composer stays interactive")
+    }
+
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
