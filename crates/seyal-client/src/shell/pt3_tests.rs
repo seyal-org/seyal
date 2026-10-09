@@ -2,9 +2,124 @@
 //!
 //! Kept as a `_tests` sibling so the shell suite stays under hard_loc.
 
-use super::focus_direction::is_geometric_neighbor;
 use super::*;
 use seyal_core::WindowId;
+
+#[derive(Clone, Copy)]
+struct ReferenceRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+/// Independent §5.7 oracle: derive leaf rectangles directly from the tree,
+/// then select by edge contact, positive orthogonal overlap, nearest center,
+/// and pre-order tie-break. This deliberately does not call production layout
+/// or directional-focus helpers.
+pub(super) fn reference_directional_neighbor(
+    tree: &PaneTree,
+    focused: PaneId,
+    direction: FocusDirection,
+) -> Option<PaneId> {
+    fn collect(tree: &PaneTree, rect: ReferenceRect, out: &mut Vec<(PaneId, ReferenceRect)>) {
+        match tree {
+            PaneTree::Leaf(id) => out.push((*id, rect)),
+            PaneTree::Split {
+                axis,
+                first,
+                second,
+                ratio,
+            } => {
+                let share = ratio.fraction();
+                let (first_rect, second_rect) = match axis {
+                    SplitAxis::Right => {
+                        let first_width = rect.width * share;
+                        (
+                            ReferenceRect {
+                                width: first_width,
+                                ..rect
+                            },
+                            ReferenceRect {
+                                x: rect.x + first_width,
+                                width: rect.width - first_width,
+                                ..rect
+                            },
+                        )
+                    }
+                    SplitAxis::Down => {
+                        let first_height = rect.height * share;
+                        (
+                            ReferenceRect {
+                                height: first_height,
+                                ..rect
+                            },
+                            ReferenceRect {
+                                y: rect.y + first_height,
+                                height: rect.height - first_height,
+                                ..rect
+                            },
+                        )
+                    }
+                };
+                collect(first, first_rect, out);
+                collect(second, second_rect, out);
+            }
+        }
+    }
+
+    let mut leaves = Vec::new();
+    collect(
+        tree,
+        ReferenceRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+        },
+        &mut leaves,
+    );
+    let (_, source) = leaves.iter().find(|(id, _)| *id == focused)?;
+    let mut best: Option<(PaneId, f32)> = None;
+    for (id, candidate) in &leaves {
+        if *id == focused {
+            continue;
+        }
+        let (touches, overlap, distance) = match direction {
+            FocusDirection::Right => (
+                candidate.x == source.x + source.width,
+                (source.y + source.height).min(candidate.y + candidate.height)
+                    - source.y.max(candidate.y),
+                ((source.y + source.height / 2.0) - (candidate.y + candidate.height / 2.0)).abs(),
+            ),
+            FocusDirection::Left => (
+                candidate.x + candidate.width == source.x,
+                (source.y + source.height).min(candidate.y + candidate.height)
+                    - source.y.max(candidate.y),
+                ((source.y + source.height / 2.0) - (candidate.y + candidate.height / 2.0)).abs(),
+            ),
+            FocusDirection::Down => (
+                candidate.y == source.y + source.height,
+                (source.x + source.width).min(candidate.x + candidate.width)
+                    - source.x.max(candidate.x),
+                ((source.x + source.width / 2.0) - (candidate.x + candidate.width / 2.0)).abs(),
+            ),
+            FocusDirection::Up => (
+                candidate.y + candidate.height == source.y,
+                (source.x + source.width).min(candidate.x + candidate.width)
+                    - source.x.max(candidate.x),
+                ((source.x + source.width / 2.0) - (candidate.x + candidate.width / 2.0)).abs(),
+            ),
+        };
+        if !touches || overlap <= 0.0 {
+            continue;
+        }
+        if best.is_none_or(|(_, best_distance)| distance < best_distance) {
+            best = Some((*id, distance));
+        }
+    }
+    best.map(|(id, _)| id)
+}
 
 fn other_workspace() -> WorkspaceId {
     WorkspaceId::from_bytes([0x11; 16])
@@ -315,9 +430,10 @@ fn spec025_p7_directional_focus_neighbor_or_reject() {
                 match shell.apply(ShellAction::FocusDirection { direction }) {
                     Ok(()) => {
                         let chosen = shell.snapshot().focused_pane;
-                        assert!(
-                            is_geometric_neighbor(&before_tree, focused, chosen, direction),
-                            "chosen leaf must be a §5.7 neighbor"
+                        assert_eq!(
+                            reference_directional_neighbor(&before_tree, focused, direction),
+                            Some(chosen),
+                            "chosen leaf must match the independent §5.7 oracle"
                         );
                         assert_eq!(shell.snapshot().tree, before_tree);
                         // Restore focused for the next direction sample.
@@ -326,6 +442,11 @@ fn spec025_p7_directional_focus_neighbor_or_reject() {
                             .expect("restore focus");
                     }
                     Err(ShellError::NoDirectionalNeighbor) => {
+                        assert_eq!(
+                            reference_directional_neighbor(&before_tree, focused, direction),
+                            None,
+                            "rejection is valid only when the independent §5.7 oracle finds no neighbor"
+                        );
                         assert_rejection_atomic(&shell, &before);
                         assert_eq!(shell.snapshot().focused_pane, focused);
                     }

@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::focus_direction::is_geometric_neighbor;
 use super::*;
 use crate::app::NativeEffect;
 use seyal_core::{ExecutionId, WindowId};
@@ -375,14 +374,28 @@ fn apply_stream_step(shell: &mut ShellState, rng: &mut Lcg, kind: StreamKind) {
             match shell.apply(ShellAction::FocusDirection { direction }) {
                 Ok(()) => {
                     let chosen = shell.snapshot().focused_pane;
-                    assert!(
-                        is_geometric_neighbor(&before_tree, focused, chosen, direction),
-                        "P7: success must focus a geometric neighbor"
+                    assert_eq!(
+                        super::pt3_tests::reference_directional_neighbor(
+                            &before_tree,
+                            focused,
+                            direction,
+                        ),
+                        Some(chosen),
+                        "P7: production choice must match the independent geometric oracle"
                     );
                     assert_no_terminate_or_provision(shell);
                     assert_tab_invariants(&shell.snapshot());
                 }
                 Err(ShellError::NoDirectionalNeighbor) => {
+                    assert_eq!(
+                        super::pt3_tests::reference_directional_neighbor(
+                            &before_tree,
+                            focused,
+                            direction,
+                        ),
+                        None,
+                        "P7: rejection requires no neighbor in the independent oracle"
+                    );
                     assert_rejection_byte_identical(
                         &before_state,
                         shell,
@@ -804,18 +817,30 @@ fn spec025_p7_generated_directional_focus_neighbor_or_reject() {
                 match shell.apply(ShellAction::FocusDirection { direction }) {
                     Ok(()) => {
                         let chosen = shell.snapshot().focused_pane;
-                        assert!(is_geometric_neighbor(
-                            &before_tree,
-                            focused,
-                            chosen,
-                            direction
-                        ));
+                        assert_eq!(
+                            super::pt3_tests::reference_directional_neighbor(
+                                &before_tree,
+                                focused,
+                                direction,
+                            ),
+                            Some(chosen),
+                            "P7: production choice must match the independent geometric oracle"
+                        );
                         assert_no_terminate_or_provision(&mut shell);
                         shell
                             .apply(ShellAction::FocusPane { id: focused })
                             .expect("restore");
                     }
                     Err(ShellError::NoDirectionalNeighbor) => {
+                        assert_eq!(
+                            super::pt3_tests::reference_directional_neighbor(
+                                &before_tree,
+                                focused,
+                                direction,
+                            ),
+                            None,
+                            "P7: rejection requires no geometric neighbor in the independent oracle"
+                        );
                         assert_rejection_byte_identical(
                             &before,
                             &shell,
