@@ -254,4 +254,26 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn many_blocks_stay_flow_pane_scoped_and_raw_fail_closed() {
+        // #869: projecting many Blocks must not invent Raw/TUI Block scrapes and
+        // must keep using the same Flow presentation mode for every Block.
+        let ids: Vec<u64> = (1..=40).collect();
+        for index in 0..128u64 {
+            let start = index + 1;
+            let running = index + 1 == 128;
+            let end = if running { None } else { Some(start + 2) };
+            let flow = project_block_output(PresentationMode::Flow, start, end, running, &ids);
+            assert_ne!(flow, LiveTailProjection::FailClosed);
+            assert_eq!(
+                project_block_output(PresentationMode::Raw, start, end, running, &ids),
+                LiveTailProjection::FailClosed
+            );
+            assert_eq!(
+                project_block_output(PresentationMode::Tui, start, end, running, &ids),
+                LiveTailProjection::FailClosed
+            );
+        }
+    }
 }
