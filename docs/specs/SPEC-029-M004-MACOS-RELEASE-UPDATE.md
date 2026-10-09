@@ -1,8 +1,13 @@
 # SPEC-029 — M004 macOS release artifact, signed update and rollback
 
-- **Status:** Proposed under #688 / ADR-022 (Proposed). Not normative until
-  merged by a non-author maintainer together with or after ADR-022
-  acceptance. An author or agent comment is not that acceptance. Not an
+- **Status:** Proposed under #688 / ADR-022 (Proposed). This PR publishes a
+  non-normative draft only; merging it does not accept ADR-022 or make this
+  specification normative. SPEC-029 may become normative only after ADR-022
+  has an explicit Accepted transition in a separate docs-only Architecture
+  PR, following completion and attachment of the required #688 security
+  evidence (including Developer ID signing/notarization and G6–G9) and
+  approval by a non-author maintainer and an independent security reviewer.
+  An author or agent comment is not that acceptance. This is not an
   implemented-behavior claim.
 - **Date:** 2026-10-05
 - **Issue:** #688 (spike) — parent epic #666, consumer #677, area owner #648

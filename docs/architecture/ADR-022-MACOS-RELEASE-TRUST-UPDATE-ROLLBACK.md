@@ -1,9 +1,13 @@
 # ADR-022 — macOS release trust, signed update and rollback
 
-- **Status:** Proposed. This ADR and companion SPEC-029 may be published as
-  Proposed before production release-candidate evidence is complete. They are
-  not normative until a docs-only Architecture PR is merged by a non-author
-  maintainer under #688. An author or agent comment is not that acceptance.
+- **Status:** Proposed. This PR publishes a non-normative draft only; merging
+  it does not accept this ADR or make it normative. A later, explicit
+  transition to **Accepted** requires a separate docs-only Architecture PR
+  under #688, completion and attachment of the required #688 security evidence
+  (including Developer ID signing/notarization and G6–G9), and approval by
+  both a non-author maintainer and an independent security reviewer. Until
+  that transition is recorded, this ADR and SPEC-029 remain Proposed and
+  non-normative. An author or agent comment is not acceptance.
   Decision-critical prototype G2–G5 ran on isolated
   `spike/688-sparkle-proto` (Apple Development only; evidence
   `docs/evidence/m004-688-sparkle-g2-g5.md`; harness on
@@ -454,8 +458,12 @@ in SPEC-029 §17–§18.
 - **#677 release-candidate acceptance gates:** G6 failure injection, G7
   measurements, G8 notarization dry run, G9 reproducibility probe, and the
   full RC adversarial matrix on the exact RC SHA. These production gates do
-  not block publishing or accepting these Proposed architecture/specification
-  documents; they remain outstanding for #677 and release qualification.
+  not block publishing these Proposed drafts. However, the #688 security
+  evidence, including Developer ID signing/notarization and G6–G9, must be
+  completed and attached before either document may transition to Accepted.
+  That transition requires a separate docs-only Architecture PR and approval
+  by a non-author maintainer and an independent security reviewer. The full RC
+  adversarial matrix remains a #677/release-qualification gate.
 
 Prototypes run on an isolated non-mergeable branch with throwaway keys,
 identities and feed; their outputs graduate only as evidence.
