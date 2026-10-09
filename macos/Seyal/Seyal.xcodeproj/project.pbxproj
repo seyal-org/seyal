@@ -37,6 +37,7 @@
 		A10000000000000000000044 /* ComposerBridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ComposerBridgeView.swift */; };
 		A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000047 /* ComposerHistoryOverlayView.swift */; };
 		A10000000000000000000045 /* ProductChromeHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* ProductChromeHostView.swift */; };
+		A10000000000000000000081 /* ProductChromePaneProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000081 /* ProductChromePaneProjection.swift */; };
 		A10000000000000000000046 /* NativeThemeRealization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000046 /* NativeThemeRealization.swift */; };
 		A1000000000000000000006C /* LaunchPolicyProductCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006C /* LaunchPolicyProductCopy.swift */; };
 		C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* SeyalHostComponentTests.swift */; };
@@ -140,6 +141,7 @@
 		A20000000000000000000044 /* ComposerBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBridgeView.swift; sourceTree = "<group>"; };
 		A20000000000000000000047 /* ComposerHistoryOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHistoryOverlayView.swift; sourceTree = "<group>"; };
 		A20000000000000000000045 /* ProductChromeHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeHostView.swift; sourceTree = "<group>"; };
+		A20000000000000000000081 /* ProductChromePaneProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromePaneProjection.swift; sourceTree = "<group>"; };
 		A20000000000000000000046 /* NativeThemeRealization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeThemeRealization.swift; sourceTree = "<group>"; };
 		A2000000000000000000006C /* LaunchPolicyProductCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPolicyProductCopy.swift; sourceTree = "<group>"; };
 		A20000000000000000000050 /* TerminalCompositionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCompositionDocument.swift; sourceTree = "<group>"; };
@@ -225,6 +227,7 @@
 				A2000000000000000000004B /* SecondaryLivePaneHost.swift */,
 				A20000000000000000000048 /* CommandPaletteOverlayView.swift */,
 				A20000000000000000000045 /* ProductChromeHostView.swift */,
+				A20000000000000000000081 /* ProductChromePaneProjection.swift */,
 				A20000000000000000000044 /* ComposerBridgeView.swift */,
 				A20000000000000000000047 /* ComposerHistoryOverlayView.swift */,
 				A20000000000000000000046 /* NativeThemeRealization.swift */,
@@ -453,6 +456,7 @@
 				A1000000000000000000004B /* SecondaryLivePaneHost.swift in Sources */,
 				A10000000000000000000048 /* CommandPaletteOverlayView.swift in Sources */,
 				A10000000000000000000045 /* ProductChromeHostView.swift in Sources */,
+				A10000000000000000000081 /* ProductChromePaneProjection.swift in Sources */,
 				A10000000000000000000044 /* ComposerBridgeView.swift in Sources */,
 				A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */,
 				A10000000000000000000046 /* NativeThemeRealization.swift in Sources */,

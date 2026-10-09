@@ -139,6 +139,61 @@ impl ApplicationRoot {
             .map(crate::ffi::ClientRegistryHandle::raw)
     }
 
+    /// Propose point-space geometry for one Pane through its own attached
+    /// Controller. Rust resolves the active Pane binding, derives the grid,
+    /// and the existing client resize state machine fences Runtime results
+    /// against authoritative projections (SPEC-004 / SPEC-006).
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose_pane_geometry(
+        &mut self,
+        pane: PaneId,
+        viewport_width: f64,
+        viewport_height: f64,
+        horizontal_insets: f64,
+        vertical_insets: f64,
+        cell_width: f64,
+        cell_height: f64,
+        meaningful_layout_epoch: bool,
+    ) -> Result<(), AppError> {
+        let geometry = crate::derive_grid_geometry(
+            viewport_width,
+            viewport_height,
+            horizontal_insets,
+            vertical_insets,
+            cell_width,
+            cell_height,
+        )
+        .ok_or(AppError::InvalidPayload)?;
+        let shell = self.shell.snapshot();
+        let execution = shell
+            .panes
+            .iter()
+            .find(|row| row.id == pane)
+            .ok_or(AppError::UnknownPane)?
+            .execution
+            .ok_or(AppError::UnboundUnauthorized)?;
+        let handle = self
+            .pane_client_raws
+            .get(&pane)
+            .copied()
+            .ok_or(AppError::NoLiveClient)?;
+        let Some(result) = crate::ffi::with_client_mut(handle, |client| {
+            if client.execution_id() != execution {
+                return Err(AppError::StaleExecution);
+            }
+            client
+                .set_desired_geometry_for_layout(geometry, meaningful_layout_epoch)
+                .map_err(|error| match error {
+                    crate::ClientError::LostController => AppError::NotController,
+                    crate::ClientError::InvalidGeometry => AppError::InvalidPayload,
+                    _ => AppError::NoLiveClient,
+                })
+        }) else {
+            return Err(AppError::NoLiveClient);
+        };
+        result
+    }
+
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;

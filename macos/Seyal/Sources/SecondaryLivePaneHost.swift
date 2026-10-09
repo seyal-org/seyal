@@ -8,12 +8,16 @@ import AppKit
 /// `MetalSurfaceView` with automatic Runtime recovery suppressed.
 @MainActor
 final class SecondaryLivePaneHost: NSView {
+    let appHandle: UInt64
     let paneLo: UInt64
     let paneHi: UInt64
     private(set) var displayHandle: UInt64
     private let surface: MetalSurfaceView
+    private var lastProposedGeometry = CGRect.null
+    private var lastProposedCellSize = CGSize.zero
 
-    init(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64) {
+    init(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64) {
+        self.appHandle = appHandle
         self.paneLo = paneLo
         self.paneHi = paneHi
         self.displayHandle = displayHandle
@@ -52,7 +56,37 @@ final class SecondaryLivePaneHost: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        needsLayout = true
         publishFrame()
+    }
+
+    override func layout() {
+        super.layout()
+        guard displayHandle != 0, window != nil, !isHidden,
+              bounds.width > 8, bounds.height > 8 else { return }
+        let rounded = bounds.integral
+        let cell = surface.terminalPresentationCellSize()
+        guard cell.width > 0, cell.height > 0,
+              rounded != lastProposedGeometry || cell != lastProposedCellSize else { return }
+        // Only point-space viewport and permanent renderer metrics cross the
+        // ABI. Rust derives the grid and verifies the Pane → ExecutionId before
+        // its own client submits the correlated SPEC-004 resize.
+        let result = seyal_app_propose_pane_geometry(
+            appHandle,
+            paneLo,
+            paneHi,
+            Double(rounded.width),
+            Double(rounded.height),
+            0,
+            0,
+            Double(cell.width),
+            Double(cell.height),
+            1
+        )
+        if result == 0 {
+            lastProposedGeometry = rounded
+            lastProposedCellSize = cell
+        }
     }
 
     @available(*, unavailable)
@@ -63,6 +97,9 @@ final class SecondaryLivePaneHost: NSView {
     func updateDisplayHandle(_ handle: UInt64) {
         guard handle != 0, handle != displayHandle else { return }
         displayHandle = handle
+        lastProposedGeometry = .null
+        lastProposedCellSize = .zero
+        needsLayout = true
         publishFrame()
     }
 

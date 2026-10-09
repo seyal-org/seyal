@@ -664,6 +664,19 @@ SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppPaneBinding seyal_app_pane_binding(uint64_t handle, uint32_t index);
+/* Propose view metrics for an active Pane; Rust validates the Pane and routes
+ * the derived correlated resize through its bound Controller client. */
+int32_t seyal_app_propose_pane_geometry(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    double viewport_width,
+    double viewport_height,
+    double horizontal_insets,
+    double vertical_insets,
+    double cell_width,
+    double cell_height,
+    uint8_t meaningful_layout_epoch);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);

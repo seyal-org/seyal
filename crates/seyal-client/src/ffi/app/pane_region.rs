@@ -201,6 +201,47 @@ pub extern "C" fn seyal_app_pane_binding(handle: u64, index: u32) -> SeyalAppPan
     })
 }
 
+/// Propose viewport metrics for one active Pane. Rust verifies the Pane's
+/// current ExecutionId, derives rows/columns, and submits through that Pane's
+/// Controller client; callers cannot select a Runtime handle directly.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_propose_pane_geometry(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+    viewport_width: f64,
+    viewport_height: f64,
+    horizontal_insets: f64,
+    vertical_insets: f64,
+    cell_width: f64,
+    cell_height: f64,
+    meaningful_layout_epoch: u8,
+) -> i32 {
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&pane_lo.to_le_bytes());
+    bytes[8..].copy_from_slice(&pane_hi.to_le_bytes());
+    let pane = PaneId::from_bytes(bytes);
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        state
+            .root
+            .propose_pane_geometry(
+                pane,
+                viewport_width,
+                viewport_height,
+                horizontal_insets,
+                vertical_insets,
+                cell_width,
+                cell_height,
+                meaningful_layout_epoch != 0,
+            )
+            .map_or_else(super::error_code::error_number, |_| 0)
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn pane_display_handle(root: &crate::app::ApplicationRoot, pane: PaneId) -> u64 {
     root.pane_client_raw(pane).unwrap_or(0)
@@ -251,7 +292,7 @@ mod tests {
     use super::*;
     use crate::ffi::app::{
         seyal_app_apply, seyal_app_create, seyal_app_destroy, seyal_app_last_error,
-        seyal_app_shell, seyal_app_shell_row, SeyalAppAction,
+        seyal_app_propose_pane_geometry, seyal_app_shell, seyal_app_shell_row, SeyalAppAction,
     };
 
     #[test]
@@ -320,5 +361,33 @@ mod tests {
         );
         assert_eq!(seyal_app_destroy(handle), 0);
         assert_eq!(seyal_app_pane_region(handle, 0).size, 0);
+    }
+
+    #[test]
+    fn pane_geometry_ffi_rejects_invalid_metrics_and_stale_pane_ids() {
+        let handle = seyal_app_create();
+        let current = seyal_app_shell_row(handle, 2, 0);
+        assert_eq!(
+            seyal_app_propose_pane_geometry(
+                handle,
+                current.id_lo,
+                current.id_hi,
+                f64::NAN,
+                600.0,
+                0.0,
+                0.0,
+                10.0,
+                20.0,
+                1,
+            ),
+            14,
+            "invalid metrics are rejected before a client lookup"
+        );
+        assert_eq!(
+            seyal_app_propose_pane_geometry(handle, 1, 2, 800.0, 600.0, 0.0, 0.0, 10.0, 20.0, 1,),
+            1,
+            "a stale PaneId cannot resolve to the current focused client"
+        );
+        assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

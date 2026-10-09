@@ -91,7 +91,13 @@ fn split_focus_has_no_live_region_until_bound_then_moves_authority_to_new_leaf()
     .unwrap();
     let new_pane = root.snapshot().shell.focused_pane;
     assert_ne!(new_pane, first);
-    assert!(root.pane_regions().iter().all(|region| !region.live));
+    let regions = root.pane_regions();
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == first && region.live));
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == new_pane && region.focused && region.live));
     assert_eq!(root.snapshot().execution, None);
 
     complete_pending_split(&mut root, new_pane, exec(0xA1));
@@ -107,13 +113,13 @@ fn split_focus_has_no_live_region_until_bound_then_moves_authority_to_new_leaf()
         first_evidence.execution
     );
     let regions = root.pane_regions();
-    assert_eq!(regions.iter().filter(|region| region.live).count(), 1);
+    assert_eq!(regions.iter().filter(|region| region.live).count(), 2);
     assert!(regions
         .iter()
         .any(|region| region.pane == new_pane && region.focused && region.live));
     assert!(regions
         .iter()
-        .any(|region| region.pane == first && !region.live));
+        .any(|region| region.pane == first && region.live));
 }
 
 fn build_two_by_two(root: &mut ApplicationRoot) -> [PaneId; 4] {

@@ -631,15 +631,15 @@ mod root_tests {
             Some(bound_evidence.execution),
             "the sibling binding remains available when focus returns"
         );
-        assert!(!root.pane_regions()[1].live);
+        assert!(root.pane_regions()[1].live);
         root.apply(AppAction::Refresh {
             fence: root.fence(),
             alternate_screen: false,
         })
         .unwrap();
 
-        // Host click on the bound region refocuses it; unbound sibling stays
-        // non-live until it receives an execution binding.
+        // Host click on the bound region refocuses it; the unbound sibling
+        // stops being live once it loses focus.
         root.apply(AppAction::FocusPane { id: bound }).unwrap();
         let regions = root.pane_regions();
         assert!(regions[0].focused && regions[0].live);

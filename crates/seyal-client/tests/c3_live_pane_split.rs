@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use seyal_client::app::{AppAction, ApplicationRoot};
+use seyal_client::app::{AppAction, AppError, ApplicationRoot};
 use seyal_client::shell::SplitAxis;
 use seyal_client::LocalDisplayClient;
 use seyal_core::PaneId;
@@ -191,6 +191,80 @@ fn split_live_two_by_two_binds_four_distinct_executions() {
             "each live leaf keeps a distinct Controller registry handle"
         );
     }
+
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_isolated_runtime(None);
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first)
+        .expect("bind first Controller");
+    let second_pane = live_split(&mut root, SplitAxis::Right);
+    let first_handle = root.pane_client_raw(first_pane).expect("first Pane client");
+    let second_handle = root
+        .pane_client_raw(second_pane)
+        .expect("second Pane client");
+    assert_ne!(first_handle, second_handle);
+
+    // Host supplies point-space viewport and renderer cell metrics. Rust
+    // derives rows/columns and routes each correlated resize by Pane identity.
+    let first_geometry = seyal_client::derive_grid_geometry(801.0, 641.0, 0.0, 0.0, 10.0, 20.0)
+        .expect("first geometry");
+    let second_geometry = seyal_client::derive_grid_geometry(509.0, 799.0, 0.0, 0.0, 10.0, 20.0)
+        .expect("second geometry");
+    assert_ne!(first_geometry, second_geometry);
+    root.propose_pane_geometry(first_pane, 801.0, 641.0, 0.0, 0.0, 10.0, 20.0, true)
+        .expect("resize first execution");
+    root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0, true)
+        .expect("resize second execution");
+
+    fn wait_for_geometry(handle: u64, expected: seyal_client::GridGeometry, deadline: Instant) {
+        while Instant::now() < deadline {
+            let _ = seyal_client::seyal_bridge_poll_for(handle);
+            let frame = seyal_client::seyal_bridge_frame_for(handle);
+            if frame.rows == expected.rows && frame.columns == expected.columns {
+                assert!(!frame.cells.is_null());
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timed out waiting for pane geometry {expected:?}");
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    wait_for_geometry(first_handle, first_geometry, deadline);
+    wait_for_geometry(second_handle, second_geometry, deadline);
+
+    // Invalid metrics and a closed Pane fail before submitting another
+    // resize; neither may redirect geometry to the currently focused sibling.
+    assert_eq!(
+        root.propose_pane_geometry(second_pane, f64::NAN, 799.0, 0.0, 0.0, 10.0, 20.0, true),
+        Err(AppError::InvalidPayload)
+    );
+    root.apply(AppAction::ClosePane { id: second_pane })
+        .expect("close second Pane");
+    assert_eq!(
+        root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0, true),
+        Err(AppError::UnknownPane)
+    );
+    wait_for_geometry(
+        first_handle,
+        first_geometry,
+        Instant::now() + Duration::from_secs(5),
+    );
 
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");

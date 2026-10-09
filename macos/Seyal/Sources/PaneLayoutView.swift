@@ -99,6 +99,7 @@ final class PaneLayoutView: NSView {
                 existing.updateDisplayHandle(binding.displayHandle)
             } else {
                 let host = SecondaryLivePaneHost(
+                    appHandle: appHandle,
                     paneLo: binding.paneLo,
                     paneHi: binding.paneHi,
                     displayHandle: binding.displayHandle
