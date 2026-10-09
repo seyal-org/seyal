@@ -53,7 +53,7 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1048
+ceiling_loc = 1050
 issue = 1123
 responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning beside tab provisioning and #1123 adds W4a window actions, native events, quit deadline, and live-attachment fixture fields beside the existing live-attach maps."
 
@@ -77,7 +77,7 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1091
+ceiling_loc = 1100
 issue = 1123
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1108 retains effect queue coverage and #1123 adds bootstrap effect ordering and install_quit_fixture probe-detach evidence."
 
@@ -242,13 +242,13 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1139
+ceiling_loc = 1140
 issue = 1122
 responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through actions and #1123 configures W4a fixture admission defaults."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 857
+acknowledged_loc = 858
 issue = 1092
 reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries containment generation through window-aware actions, and #1123 configures W4a fixture admission defaults without moving projection authority."
 

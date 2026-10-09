@@ -209,6 +209,7 @@ fn pane_tree_split_ratio_round_trips_through_ffi() {
         workspace,
         true,
         true,
+        false,
     )
     .expect("splittable shell");
     let initial = shell.snapshot();

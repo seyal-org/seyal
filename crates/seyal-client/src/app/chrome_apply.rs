@@ -198,8 +198,12 @@ impl ApplicationRoot {
             .map_err(chrome_error)
     }
     pub(super) fn select_window(&mut self, id: WindowId) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::SelectWindow { id })
-            .map_err(|_| AppError::UnknownWindow)?;
+        let containment_generation = self.shell.snapshot().containment_generation;
+        self.apply_shell(ShellAction::SelectWindow {
+            id,
+            containment_generation,
+        })
+        .map_err(|_| AppError::UnknownWindow)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -210,8 +214,12 @@ impl ApplicationRoot {
         &mut self,
         direction: crate::shell::CycleDirection,
     ) -> Result<(), AppError> {
-        self.apply_shell(ShellAction::CycleWindow { direction })
-            .map_err(|_| AppError::UnknownWindow)?;
+        let containment_generation = self.shell.snapshot().containment_generation;
+        self.apply_shell(ShellAction::CycleWindow {
+            direction,
+            containment_generation,
+        })
+        .map_err(|_| AppError::UnknownWindow)?;
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());

@@ -73,7 +73,7 @@ fn production_default_rejects_extra_window_without_mutation() {
     );
     assert_eq!(
         shell.last_error().expect("error").error_number(),
-        19,
+        20,
         "shell snapshot error number"
     );
     assert_eq!(shell.snapshot().windows.len(), windows);
