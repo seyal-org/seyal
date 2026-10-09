@@ -350,17 +350,6 @@ fn choose_neighbor(
     best.map(|(id, _, _)| id)
 }
 
-/// True when `candidate` is a §5.7 geometric neighbor of `focused` in `direction`.
-#[cfg(test)]
-pub(super) fn is_geometric_neighbor(
-    tree: &PaneTree,
-    focused: PaneId,
-    candidate: PaneId,
-    direction: FocusDirection,
-) -> bool {
-    geometric_neighbor(tree, focused, direction) == Some(candidate)
-}
-
 /// Exact shared-edge neighbor, or `None`.
 #[cfg(test)]
 pub(super) fn geometric_neighbor(
