@@ -23,6 +23,8 @@ mod pt2_tests;
 mod tests;
 #[cfg(test)]
 mod w2a_tests;
+#[cfg(test)]
+mod window_admission_tests;
 
 use std::fmt;
 
@@ -79,6 +81,8 @@ pub enum ShellError {
     NotZoomed,
     /// `pane == neighbor`, `SwapPanes` with `a == b`, or neighbor not a same-Tab leaf.
     InvalidMoveTarget,
+    /// Extra Window create stays off until headed close exists (W4a / ADR-018 §3.3a).
+    WindowCreationUnavailable,
 }
 
 impl ShellError {
@@ -109,6 +113,9 @@ impl ShellError {
             Self::CrossWorkspaceMove => "A Tab cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
+            Self::WindowCreationUnavailable => {
+                "Creating another Window is unavailable until window close exists."
+            }
         }
     }
 }
@@ -152,6 +159,7 @@ pub struct ShellSnapshot {
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
+    pub allows_window_creation: bool,
     pub allows_pane_splitting: bool,
     /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
     /// Pane would currently be accepted (the last Tab/Pane cannot close).
@@ -195,6 +203,7 @@ pub struct ShellState {
     focus_history: FocusHistory,
     allows_pane_splitting: bool,
     allows_tab_creation: bool,
+    allows_window_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
     /// Monotonic ADR-018 fence; bumps only on containment mutations.
@@ -240,6 +249,7 @@ impl ShellState {
             // path as CreateTab (one ExecutionId per new terminal leaf).
             allows_pane_splitting: true,
             allows_tab_creation: true,
+            allows_window_creation: false,
             last_error: None,
             next_tab_ordinal: 2,
             containment_generation: 0,
@@ -257,6 +267,7 @@ impl ShellState {
         active_workspace: WorkspaceId,
         allows_pane_splitting: bool,
         allows_tab_creation: bool,
+        allows_window_creation: bool,
     ) -> Result<Self, ShellError> {
         if workspaces.is_empty() {
             return Err(ShellError::EmptyShell);
@@ -281,6 +292,7 @@ impl ShellState {
             focus_history: FocusHistory::default(),
             allows_pane_splitting,
             allows_tab_creation,
+            allows_window_creation,
             last_error: None,
             next_tab_ordinal: 2,
             containment_generation: 0,
@@ -395,6 +407,16 @@ impl ShellState {
 
     pub fn allows_tab_creation(&self) -> bool {
         self.allows_tab_creation
+    }
+
+    pub fn allows_window_creation(&self) -> bool {
+        self.allows_window_creation
+    }
+
+    /// Test harness: admit CreateWindow on an occupied Workspace.
+    #[cfg(test)]
+    pub(crate) fn set_allows_window_creation_for_test(&mut self, allowed: bool) {
+        self.allows_window_creation = allowed;
     }
 
     /// Test/C2 harness: flip the production gate without rebuilding the shell.

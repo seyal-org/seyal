@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation_for_test(true);
     let workspace = root.snapshot().shell.active_workspace;
     let generation = root.snapshot().shell.containment_generation;
     root.apply_shell(crate::shell::ShellAction::CreateWindow {
@@ -36,7 +37,7 @@ fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     assert!(
         snap.pending_effects
             .iter()
-            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate)),
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
         "quit effect must remain present after prior selections"
     );
     while !root.snapshot().pending_effects.is_empty() {

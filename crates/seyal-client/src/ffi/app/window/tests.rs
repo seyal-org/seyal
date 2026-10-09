@@ -4,7 +4,7 @@ use std::{mem::size_of, slice};
 
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
-use crate::app::{ApplicationRoot, APP_ABI_VERSION};
+use crate::app::{AppAction, ApplicationRoot, APP_ABI_VERSION};
 use crate::pane_layout::SplitRatio;
 use crate::shell::{
     PaneTree, PresentationTier, ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState,
@@ -59,6 +59,7 @@ fn seed_n_windows(n: usize) -> ShellState {
         }],
         workspace,
         false,
+        true,
         true,
     )
     .expect("seeded shell")
@@ -208,6 +209,7 @@ fn pane_tree_split_ratio_round_trips_through_ffi() {
         workspace,
         true,
         true,
+        false,
     )
     .expect("splittable shell");
     let initial = shell.snapshot();
@@ -375,6 +377,14 @@ fn effects_emit_in_commit_order() {
         ]
     );
     install_shell(handle, seed_n_windows(1));
+    // Drain with_shell bootstrap Realize/OrderFront so this case measures CreateWindow.
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        while !state.root.snapshot().pending_effects.is_empty() {
+            state.root.apply(AppAction::AckEffect).unwrap();
+        }
+    });
     let generation = seyal_app_shell(handle).containment_generation;
     apply_on_handle(
         handle,

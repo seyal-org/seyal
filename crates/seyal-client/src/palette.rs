@@ -552,6 +552,7 @@ mod tests {
             workspace,
             true,
             true,
+            false,
         )
         .expect("fixture")
     }
