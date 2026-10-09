@@ -71,6 +71,9 @@ final class RustDisplayBridge {
   let onError: ErrorHandler
   var onStatusChanged: StatusHandler
   var onCopiedText: ((String) -> Void)?
+  /// Notifies the multi-live host after a non-primary registry handle is polled
+  /// (#936) so a secondary Metal surface can present without changing focus.
+  var onRegistryHandlePolled: ((UInt64) -> Void)?
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
   var auxiliaryWriteSources: [UInt64: DispatchSourceWrite] = [:]
@@ -435,6 +438,7 @@ final class RustDisplayBridge {
             self.onStatusChanged()
             return
           }
+          self.onRegistryHandlePolled?(handle)
           _ = self.selectClient()
           self.publishCurrentFrame()
           self.synchronizeWriteReadinessSource()

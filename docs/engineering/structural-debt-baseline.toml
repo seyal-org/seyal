@@ -54,9 +54,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 832
-issue = 1092
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, and #1117 adds split rollback plus close-path focus-history lifecycle hooks and active-close successor authority restoration through focus_history_apply.rs."
+acknowledged_loc = 833
+issue = 936
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, and #1117 adds split rollback plus close-path focus-history lifecycle hooks and active-close successor authority restoration through focus_history_apply.rs. #936's per-pane geometry proposal uses the active Pane binding here to reject stale resize requests."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -72,9 +72,9 @@ responsibility = "N2 navigate and palette address proofs stay in the app tests m
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 992
-issue = 1117
-reason = "Published C ABI entry points stay one thin façade. #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; #1117 adds the scalar focus-history sequence accessor without changing the v1 snapshot layout."
+acknowledged_loc = 995
+issue = 936
+reason = "Published C ABI entry points stay one thin façade. #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; #1117 adds the scalar focus-history sequence accessor without changing the v1 snapshot layout. #936 exposes per-Pane geometry proposals through the existing application ABI."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

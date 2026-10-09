@@ -558,7 +558,11 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
     .unwrap();
     assert_eq!(root.snapshot().shell.focused_pane, p2);
     assert!(root.snapshot().execution.is_none());
-    assert!(root.pane_regions().iter().all(|region| !region.live));
+    let regions = root.pane_regions();
+    assert_eq!(regions.len(), 1);
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == p2 && region.focused && region.live));
     assert_eq!(
         root.apply(AppAction::SubmitInput {
             fence: root.fence(),
@@ -650,7 +654,13 @@ fn split_focus_on_unbound_leaf_fails_closed_and_retains_sibling_binding() {
     assert_ne!(focused, p1);
     assert_eq!(root.fence().pane, focused);
     assert!(root.snapshot().execution.is_none());
-    assert!(root.pane_regions().iter().all(|region| !region.live));
+    let regions = root.pane_regions();
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == p1 && region.live));
+    assert!(regions
+        .iter()
+        .any(|region| region.pane == focused && region.focused && region.live));
     assert_eq!(root.pane_authorities.get(&p1).copied(), sibling_authority);
     assert_eq!(
         root.apply(AppAction::SubmitInput {

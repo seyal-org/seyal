@@ -1,7 +1,11 @@
 //! Active-Tab PaneTree region (#923) and Split divider (#928) FFI exports.
 //!
 //! Rust owns Pane geometry, divider placement and ratios; the host only lays
-//! out native views from these rows.
+//! out native views from these rows. Pane bindings (#936) expose the
+//! Runtime-owned execution and registry display handle per leaf so the host
+//! can present multiple live Metal surfaces without inventing executions.
+
+use seyal_core::{ExecutionId, PaneId};
 
 use crate::app::APP_ABI_VERSION;
 use crate::shell::SplitAxis;
@@ -11,6 +15,8 @@ use super::APPS;
 
 const PANE_REGION_FOCUSED: u16 = 1;
 const PANE_REGION_LIVE: u16 = 2;
+const PANE_BINDING_HAS_EXECUTION: u16 = 1;
+const PANE_BINDING_HAS_DISPLAY: u16 = 2;
 
 /// One leaf of the active Tab's PaneTree (#923), in `SeyalAppShell` pane
 /// order. Geometry is unit space, origin top-left; Rust owns it.
@@ -123,6 +129,129 @@ impl SeyalAppPaneDivider {
     }
 }
 
+/// One leaf's Runtime binding for multi-live Metal (#936). Index order matches
+/// [`seyal_app_pane_region`]. `display_handle` is the adopted registry client
+/// for that Pane's Controller when attached; 0 means no live client yet.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppPaneBinding {
+    pub version: u16,
+    pub size: u16,
+    pub flags: u16,
+    pub reserved: u16,
+    pub pane_lo: u64,
+    pub pane_hi: u64,
+    pub execution_lo: u64,
+    pub execution_hi: u64,
+    pub display_handle: u64,
+}
+
+impl SeyalAppPaneBinding {
+    const fn empty() -> Self {
+        Self {
+            version: APP_ABI_VERSION,
+            size: 0,
+            flags: 0,
+            reserved: 0,
+            pane_lo: 0,
+            pane_hi: 0,
+            execution_lo: 0,
+            execution_hi: 0,
+            display_handle: 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_binding(handle: u64, index: u32) -> SeyalAppPaneBinding {
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return SeyalAppPaneBinding::empty();
+        };
+        let snap = state.root.snapshot();
+        let Some(pane) = snap.shell.panes.get(index as usize) else {
+            return SeyalAppPaneBinding::empty();
+        };
+        let (pane_lo, pane_hi) = split_id(pane.id.to_bytes());
+        let execution = pane
+            .execution
+            .unwrap_or(ExecutionId::from_bytes([0; 16]))
+            .to_bytes();
+        let (execution_lo, execution_hi) = split_id(execution);
+        let mut flags = 0u16;
+        if pane.execution.is_some() {
+            flags |= PANE_BINDING_HAS_EXECUTION;
+        }
+        let display_handle = pane_display_handle(&state.root, pane.id);
+        if display_handle != 0 {
+            flags |= PANE_BINDING_HAS_DISPLAY;
+        }
+        SeyalAppPaneBinding {
+            version: APP_ABI_VERSION,
+            size: size_of::<SeyalAppPaneBinding>() as u16,
+            flags,
+            reserved: 0,
+            pane_lo,
+            pane_hi,
+            execution_lo,
+            execution_hi,
+            display_handle,
+        }
+    })
+}
+
+/// Propose viewport metrics for one active Pane. Rust verifies the Pane's
+/// current ExecutionId, derives rows/columns, and submits through that Pane's
+/// Controller client; callers cannot select a Runtime handle directly.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_propose_pane_geometry(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+    viewport_width: f64,
+    viewport_height: f64,
+    horizontal_insets: f64,
+    vertical_insets: f64,
+    cell_width: f64,
+    cell_height: f64,
+    meaningful_layout_epoch: u8,
+) -> i32 {
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&pane_lo.to_le_bytes());
+    bytes[8..].copy_from_slice(&pane_hi.to_le_bytes());
+    let pane = PaneId::from_bytes(bytes);
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        state
+            .root
+            .propose_pane_geometry(
+                pane,
+                viewport_width,
+                viewport_height,
+                horizontal_insets,
+                vertical_insets,
+                cell_width,
+                cell_height,
+                meaningful_layout_epoch != 0,
+            )
+            .map_or_else(super::error_code::error_number, |_| 0)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn pane_display_handle(root: &crate::app::ApplicationRoot, pane: PaneId) -> u64 {
+    root.pane_client_raw(pane).unwrap_or(0)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pane_display_handle(_root: &crate::app::ApplicationRoot, _pane: PaneId) -> u64 {
+    0
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_pane_divider(handle: u64, index: u32) -> SeyalAppPaneDivider {
     APPS.with(|apps| {
@@ -163,7 +292,7 @@ mod tests {
     use super::*;
     use crate::ffi::app::{
         seyal_app_apply, seyal_app_create, seyal_app_destroy, seyal_app_last_error,
-        seyal_app_shell, seyal_app_shell_row, SeyalAppAction,
+        seyal_app_propose_pane_geometry, seyal_app_shell, seyal_app_shell_row, SeyalAppAction,
     };
 
     #[test]
@@ -174,6 +303,9 @@ mod tests {
         assert_eq!(offset_of!(SeyalAppPaneDivider, x), 24);
         assert_eq!(offset_of!(SeyalAppPaneDivider, line_x), 40);
         assert_eq!(offset_of!(SeyalAppPaneDivider, ratio), 48);
+        assert_eq!(size_of::<SeyalAppPaneBinding>(), 48);
+        assert_eq!(offset_of!(SeyalAppPaneBinding, execution_lo), 24);
+        assert_eq!(offset_of!(SeyalAppPaneBinding, display_handle), 40);
     }
 
     #[test]
@@ -229,5 +361,33 @@ mod tests {
         );
         assert_eq!(seyal_app_destroy(handle), 0);
         assert_eq!(seyal_app_pane_region(handle, 0).size, 0);
+    }
+
+    #[test]
+    fn pane_geometry_ffi_rejects_invalid_metrics_and_stale_pane_ids() {
+        let handle = seyal_app_create();
+        let current = seyal_app_shell_row(handle, 2, 0);
+        assert_eq!(
+            seyal_app_propose_pane_geometry(
+                handle,
+                current.id_lo,
+                current.id_hi,
+                f64::NAN,
+                600.0,
+                0.0,
+                0.0,
+                10.0,
+                20.0,
+                1,
+            ),
+            14,
+            "invalid metrics are rejected before a client lookup"
+        );
+        assert_eq!(
+            seyal_app_propose_pane_geometry(handle, 1, 2, 800.0, 600.0, 0.0, 0.0, 10.0, 20.0, 1,),
+            1,
+            "a stale PaneId cannot resolve to the current focused client"
+        );
+        assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

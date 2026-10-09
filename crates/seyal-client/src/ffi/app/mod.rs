@@ -39,7 +39,10 @@ use encode::{
 
 pub use block_projection::seyal_app_block_projection;
 pub(crate) use loss::note_application_roots_client_loss;
-pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
+pub use pane_region::{
+    seyal_app_pane_binding, seyal_app_pane_divider, seyal_app_pane_region,
+    seyal_app_propose_pane_geometry, SeyalAppPaneBinding,
+};
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item,

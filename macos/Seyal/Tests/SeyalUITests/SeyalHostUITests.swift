@@ -201,9 +201,8 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
-    /// #923: the Tab's Rust PaneTree is projected into Pane regions. M001
-    /// policy keeps one Pane, so exactly one focused region hosts the live
-    /// composer/transcript surface, and no second region is invented.
+    /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a
+    /// Split, exactly one focused region hosts the live composer/transcript.
     func testSinglePaneTreeProjectsOneFocusedRegionHostingTheLiveSurface() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -225,6 +224,116 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(composer.isHittable, "live composer stays interactive inside the region")
         XCTAssertTrue(region.frame.contains(composer.frame), "composer sits in the live region")
         XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
+    }
+
+    /// #936: C3 SplitFocused provisions a second leaf; both bound leaves stay
+    /// LIVE and the unfocused sibling presents through SecondaryLivePaneHost.
+    func testSplitProjectsSecondLiveRegionAndSecondaryMetalHost() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8), "C3 production composition shows Split Right")
+        XCTAssertTrue(split.isHittable, "Split Right must be interactive once splitting is enabled")
+        split.click()
+        let second = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 12), "SplitFocused must project a second Pane region")
+        XCTAssertEqual(app.state, .runningForeground, "split must not crash Seyal.app")
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch.exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-pane-divider-0"].firstMatch.waitForExistence(timeout: 5),
+            "a two-leaf tree projects the Rust divider"
+        )
+        let secondary = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+        XCTAssertTrue(
+            secondary.waitForExistence(timeout: 12),
+            "unfocused bound sibling must keep a live Metal host"
+        )
+    }
+
+    /// #936: a real outer-window resize reaches both independent PTYs. The
+    /// second execution is unfocused while its secondary host proposes layout.
+    func testWindowResizeUpdatesBothLivePanePtyGeometries() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8))
+        split.click()
+        let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(secondRegion.waitForExistence(timeout: 12))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+                .waitForExistence(timeout: 12)
+        )
+
+        let firstFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-a")
+        let secondFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-b")
+        defer {
+            try? FileManager.default.removeItem(at: firstFile)
+            try? FileManager.default.removeItem(at: secondFile)
+        }
+
+        func runSize(in region: XCUIElement, file: URL) -> (Int, Int)? {
+            region.click()
+            let focused = NSPredicate(format: "value == 'focused'")
+            let focusExpectation = expectation(for: focused, evaluatedWith: region, handler: nil)
+            guard XCTWaiter.wait(for: [focusExpectation], timeout: 5) == .completed else {
+                return nil
+            }
+            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            guard editor.waitForExistence(timeout: 5) else { return nil }
+            editor.click()
+            editor.typeText("stty size > \(file.path)")
+            editor.typeKey("\r", modifierFlags: [])
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if let output = try? String(contentsOf: file, encoding: .utf8) {
+                    let fields = output.split(whereSeparator: \.isWhitespace)
+                    if fields.count == 2, let rows = Int(fields[0]), let columns = Int(fields[1]) {
+                        return (rows, columns)
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            return nil
+        }
+
+        guard let firstBefore = runSize(in: firstRegion, file: firstFile),
+              let secondBefore = runSize(in: secondRegion, file: secondFile) else {
+            XCTFail("both PTYs must report their initial stty size")
+            return
+        }
+        XCTAssertGreaterThan(firstBefore.0, 0)
+        XCTAssertGreaterThan(firstBefore.1, 0)
+        XCTAssertGreaterThan(secondBefore.0, 0)
+        XCTAssertGreaterThan(secondBefore.1, 0)
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.exists)
+        let oldWidth = window.frame.width
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+            .withOffset(CGVector(dx: -3, dy: -3))
+        corner.press(forDuration: 0.05, thenDragTo: corner.withOffset(CGVector(dx: 100, dy: 0)))
+        let resizeDeadline = Date().addingTimeInterval(5)
+        while Date() < resizeDeadline, window.frame.width <= oldWidth + 24 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertGreaterThan(window.frame.width, oldWidth + 24, "window must resize")
+
+        try? FileManager.default.removeItem(at: firstFile)
+        try? FileManager.default.removeItem(at: secondFile)
+        guard let firstAfter = runSize(in: firstRegion, file: firstFile),
+              let secondAfter = runSize(in: secondRegion, file: secondFile) else {
+            XCTFail("both PTYs must report their size after the window resize")
+            return
+        }
+        XCTAssertNotEqual(firstAfter.1, firstBefore.1, "focused Pane PTY columns must follow layout")
+        XCTAssertNotEqual(
+            secondAfter.1,
+            secondBefore.1,
+            "unfocused secondary Pane PTY columns must follow layout independently"
+        )
+        XCTAssertEqual(app.state, .runningForeground, "resizing live panes must not crash Seyal.app")
     }
 
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {
