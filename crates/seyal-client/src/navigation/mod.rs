@@ -1,12 +1,13 @@
 //! Local `ResourceAddress`, pure resolution, and atomic Navigate commit.
 //!
 //! This module owns the M003 closed address set, the fail-closed resolver, and
-//! the atomic navigation commit (SPEC-022 §2–§4, ADR-019). It reads and, for
+//! the atomic navigation commit (SPEC-022 §2–§5, ADR-019). It reads and, for
 //! Navigate only, mutates focus on [`crate::shell::ShellState`] through a
-//! single validated write. It does not own workspaces, tabs, panes, focus
-//! history, window activation, or a second registry. Resolution never mutates
-//! state; Navigate mutates only the focus triple.
+//! single validated write. Placement looks up the Tab → Window map; `WindowId`
+//! appears only there and on the `WindowActivation` effect. Resolution never
+//! mutates state; Navigate mutates the focus triple and may queue activation.
 
+mod activation;
 mod address;
 mod commit;
 mod encode;
@@ -16,7 +17,10 @@ mod resolve;
 mod reveal_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod window_activation_tests;
 
+pub use activation::{may_retry_activation, WINDOW_ACTIVATION_MAX_ATTEMPTS};
 pub use address::{
     decode_resource_address, ResourceAddress, RESOURCE_ADDRESS_ABI_VERSION,
     RESOURCE_ADDRESS_KIND_EXECUTION, RESOURCE_ADDRESS_KIND_PANE, RESOURCE_ADDRESS_KIND_TAB,

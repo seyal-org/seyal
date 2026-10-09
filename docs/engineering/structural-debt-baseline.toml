@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1050
-issue = 1123
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning beside tab provisioning and #1123 adds W4a window actions, native events, quit deadline, and live-attachment fixture fields beside the existing live-attach maps."
+ceiling_loc = 1054
+issue = 1144
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions and native events, and #1144 adds WindowActivationFailed and ActivationFailed beside the W4a apply table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -254,9 +254,9 @@ reason = "Command palette query, frozen rows, and run dispatch remain one reduce
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 937
-issue = 1108
-reason = "Shell composition reducer remains the portable Workspace/Window/Tab/Pane authority; #1108 carries snapshot/effects and #1123 adds fail-closed window-creation admission. Snapshot encoding stays in shell/snapshot.rs."
+acknowledged_loc = 935
+issue = 1144
+reason = "Shell composition reducer remains the portable Workspace/Window/Tab/Pane authority; #1108 carries snapshot/effects, #1123 adds fail-closed window creation, and #1144 adds the N5 tab-to-window activation lookup. Snapshot encoding stays in shell/snapshot.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -273,9 +273,9 @@ reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one key
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 700
-issue = 1123
-reason = "ABI action decode stays one match surface; #1123 adds SelectWindow/CycleWindow/CreateWindow/ReportWindowEvent kinds after goto without splitting the versioned kind table."
+acknowledged_loc = 701
+issue = 1144
+reason = "ABI action decode stays one match surface; #1144 adds WindowNativeEvent::ActivationFailed (reserved 10) on ReportWindowEvent without splitting the versioned kind table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"

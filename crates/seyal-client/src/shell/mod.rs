@@ -327,8 +327,13 @@ impl ShellState {
         std::mem::take(&mut self.pending_effects)
     }
 
-    pub(super) fn push_effect(&mut self, effect: ShellNativeEffect) {
+    pub(crate) fn push_effect(&mut self, effect: ShellNativeEffect) {
         self.pending_effects.push(effect);
+    }
+
+    /// Hosting window of `tab` from the Tab → Window placement map (SPEC-022 R5.1).
+    pub fn window_of_tab(&self, tab: TabId) -> Option<WindowId> {
+        self.find_tab_location(tab).map(|(_, window, _)| window)
     }
 
     pub fn last_active_workspace(&self) -> WorkspaceId {
@@ -604,7 +609,6 @@ impl ShellState {
         {
             return Err(ShellError::UnknownPane);
         }
-        let previous_product = self.product_active_window().map(|window| window.id);
         let workspace_mut = self.workspace_mut(workspace)?;
         workspace_mut.select_tab(tab)?;
         let active_tab = workspace_mut.active_tab_mut()?;
@@ -615,11 +619,6 @@ impl ShellState {
         self.focus_history.record(pane);
         self.last_active_workspace = workspace;
         self.last_error = None;
-        if let Some((_, window, _)) = self.find_tab_location(tab)
-            && previous_product != Some(window)
-        {
-            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
-        }
         Ok(())
     }
 

@@ -267,6 +267,9 @@ impl ApplicationRoot {
         }
         // Disposable presentation input only — never mutates window/tab/pane product state.
         self.last_window_event = Some((window, event));
+        if event == WindowNativeEvent::ActivationFailed {
+            return Err(AppError::WindowActivationFailed);
+        }
         Ok(())
     }
 

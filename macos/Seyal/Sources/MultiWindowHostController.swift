@@ -74,10 +74,28 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             {
                 break
             }
-            applyEffect(effect)
+            if !orderFrontIsSupersededByActivation(effect) {
+                applyEffect(effect)
+            }
             ackOneEffect()
+            if let failed = pendingActivationFailure {
+                pendingActivationFailure = nil
+                reportActivationFailed(failed)
+            }
         }
         orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
+    }
+
+    /// Cross-window navigation publishes product focus and an OrderFront
+    /// projection before the retryable activation effect. Defer that raise
+    /// until activation succeeds so a bounded failure leaves AppKit on the
+    /// previous live host while Rust's committed focus remains authoritative.
+    private func orderFrontIsSupersededByActivation(_ effect: SeyalAppNativeEffect) -> Bool {
+        guard effect.kind == UInt16(SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY) else { return false }
+        let next = seyal_app_native_effect(appHandle, 1)
+        return next.kind == UInt16(SEYAL_APP_EFFECT_WINDOW_ACTIVATION)
+            && next.window_lo == effect.window_lo
+            && next.window_hi == effect.window_hi
     }
 
     private func applyEffect(_ effect: SeyalAppNativeEffect) {
@@ -89,6 +107,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             destroyRealization(key)
         case UInt16(SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY):
             orderFrontMakeKey(key)
+        case UInt16(SEYAL_APP_EFFECT_WINDOW_ACTIVATION):
+            realizeWindowActivation(key)
         default:
             break
         }
@@ -137,6 +157,78 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             installLiveHost(in: window, key: key)
         }
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Remaining injected failures for the next `WindowActivation` (tests).
+    var activationFailBudget: Int = 0
+    /// Replaces AppKit's activation request to exercise OS refusal in tests.
+    var activationRequestForTests: ((NSWindow) -> Void)?
+    /// Provides AppKit's key-state observation when tests need deterministic success.
+    var keyWindowStatusForTests: ((NSWindow) -> Bool)?
+    /// Attempts spent on the last `WindowActivation` effect (tests).
+    private(set) var lastActivationAttempts: Int = 0
+    private var pendingActivationFailure: WindowKey?
+
+    /// Realize SPEC-022 WindowActivation: only the named window, bounded retry.
+    private func realizeWindowActivation(_ key: WindowKey) {
+        lastActivationAttempts = 0
+        pendingActivationFailure = nil
+        let maxAttempts = Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS)
+        while lastActivationAttempts < maxAttempts {
+            lastActivationAttempts += 1
+            if tryActivateNamedWindow(key) {
+                return
+            }
+        }
+        pendingActivationFailure = key
+    }
+
+    private func tryActivateNamedWindow(_ key: WindowKey) -> Bool {
+        if activationFailBudget > 0 {
+            activationFailBudget -= 1
+            return false
+        }
+        // Host must not pick a different window than the effect names.
+        guard let window = realizations[key] else { return false }
+        if let activationRequestForTests {
+            activationRequestForTests(window)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
+        if isKeyWindow(window) {
+            if liveKey != key {
+                installLiveHost(in: window, key: key)
+            }
+            return true
+        }
+        // `makeKeyAndOrderFront` has no result value. Confirm AppKit actually
+        // assigned key status to the named window before changing the live host.
+        // Do not pump a nested event loop here: it can reenter effect draining
+        // while this activation is still being acknowledged.
+        guard isKeyWindow(window) else { return false }
+        if liveKey != key {
+            installLiveHost(in: window, key: key)
+        }
+        return true
+    }
+
+    private func isKeyWindow(_ window: NSWindow) -> Bool {
+        if let keyWindowStatusForTests {
+            return keyWindowStatusForTests(window)
+        }
+        return window.isKeyWindow && NSApp.keyWindow === window
+    }
+
+    private func reportActivationFailed(_ key: WindowKey) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_REPORT_WINDOW_EVENT.rawValue)
+        action.target_execution_lo = key.lo
+        action.target_execution_hi = key.hi
+        action.reserved = SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED
+        _ = seyal_app_apply(appHandle, &action)
     }
 
     private func installLiveHost(in window: NSWindow, key: WindowKey) {
