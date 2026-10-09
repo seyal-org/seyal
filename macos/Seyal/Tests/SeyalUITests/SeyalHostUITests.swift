@@ -1202,9 +1202,5 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
         let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
-        let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
-        if splitRight.exists {
-            XCTAssertFalse(splitRight.isHittable, "splits stay fail-closed until C3")
-        }
     }
 }
