@@ -181,6 +181,17 @@ pub fn focused_registry_handle() -> u64 {
     focused_display_handle_if_live()
 }
 
+/// Test/diagnostic: bootstrap-only claim of display/input when nothing is focused.
+/// Recovery/adopt must not call this while another tab is unbound-focused.
+#[doc(hidden)]
+pub fn claim_focused_display_if_unset_for_test(handle: u64) {
+    FOCUSED_DISPLAY_HANDLE.with(|focused| {
+        if focused.get() == 0 {
+            focused.set(handle);
+        }
+    });
+}
+
 /// Test/diagnostic: shut down `handle`'s socket so the next poll observes EOF.
 #[doc(hidden)]
 pub fn force_registry_client_eof(handle: u64) -> bool {
@@ -192,6 +203,40 @@ pub fn force_registry_client_eof(handle: u64) -> bool {
 pub fn submit_utf8_for_test(text: &str) -> i32 {
     with_display_client_mut(|client| client.submit_committed_text(text))
         .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
+/// Test/diagnostic: submit UTF-8 on a named registry Controller (not the focused display).
+#[doc(hidden)]
+pub fn submit_utf8_on_handle_for_test(handle: u64, text: &str) -> i32 {
+    with_client_mut(handle, |client| client.submit_committed_text(text))
+        .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+}
+
+/// Test/diagnostic: whether a named registry client's display cache contains `needle`.
+#[doc(hidden)]
+pub fn registry_cache_contains_for_test(handle: u64, needle: &str) -> bool {
+    with_client(handle, |client| {
+        cache_contains_needle(client.cache(), needle)
+    })
+    .unwrap_or(false)
+}
+
+fn cache_contains_needle(cache: &seyal_runtime::display::DisplayCache, needle: &str) -> bool {
+    use seyal_runtime::display::DisplayCellRole;
+    let mut text = String::new();
+    for (index, cell) in cache.cells.iter().enumerate() {
+        if cell.role == DisplayCellRole::Lead {
+            if !cell.text.is_empty() {
+                text.push_str(&String::from_utf8_lossy(&cell.text));
+            } else if cell.scalar != ' ' && cell.scalar != '\0' {
+                text.push(cell.scalar);
+            }
+        }
+        if cache.columns > 0 && (index + 1) % usize::from(cache.columns) == 0 {
+            text.push('\n');
+        }
+    }
+    text.contains(needle)
 }
 
 pub(crate) fn with_display_client<R>(

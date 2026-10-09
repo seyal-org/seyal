@@ -17,15 +17,17 @@ use seyal_client::app::{AppAction, AppError, ApplicationRoot, PresentationEligib
 use seyal_client::provisioning::IntentPhase;
 use seyal_client::{
     ffi_test_client_registry_contains, ffi_test_drain_attach_wakeup,
-    ffi_test_focused_registry_handle, ffi_test_force_registry_client_eof, ffi_test_submit_utf8,
-    ffi_test_try_read_attach_wakeup, seyal_bridge_poll_for, seyal_bridge_provisioning_wakeup_fd,
-    seyal_bridge_wants_write_for, LocalDisplayClient,
+    ffi_test_focused_registry_handle, ffi_test_force_registry_client_eof,
+    ffi_test_registry_cache_contains, ffi_test_submit_utf8, ffi_test_submit_utf8_on_handle,
+    ffi_test_try_read_attach_wakeup, seyal_bridge_adopt_handle, seyal_bridge_poll_for,
+    seyal_bridge_provisioning_wakeup_fd, seyal_bridge_wants_write_for,
+    test_register_pending_client, ClientError, LocalDisplayClient,
 };
 use seyal_core::{AttachmentId, PaneId};
 use seyal_protocol::runtime_dir::{
     override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
 };
-use seyal_runtime::{Runtime, RuntimeConfig};
+use seyal_runtime::{local_ipc::framing::Role, Runtime, RuntimeConfig};
 
 struct OverrideReset;
 
@@ -255,10 +257,37 @@ fn create_tab_explicit_terminate_rides_owning_second_controller() {
             .is_none()
             && root.extra_pane_client_count() == 0
     });
+    assert!(
+        root.provisioning().last_failure().is_none(),
+        "explicit terminate must be TerminationRequested, not DisposeTerminateFailed: {:?}",
+        root.provisioning().last_failure()
+    );
     assert_eq!(
         root.provisioning().recorded_execution(first_pane),
         Some(first_execution),
         "explicit terminate of tab 2 must not dispose tab 1"
+    );
+    LocalDisplayClient::connect_execution_until(
+        &socket_path,
+        first_execution,
+        Role::Observer,
+        Instant::now() + Duration::from_secs(5),
+    )
+    .expect("first execution must remain listed after terminating tab 2");
+    assert!(
+        matches!(
+            LocalDisplayClient::connect_execution_until(
+                &socket_path,
+                second_execution,
+                Role::Observer,
+                Instant::now() + Duration::from_secs(2),
+            ),
+            Err(ClientError::NoRunningExecution
+                | ClientError::InvalidAttachment
+                | ClientError::StartupDeadlineExceeded
+                | ClientError::Protocol)
+        ),
+        "Runtime must no longer attach to the terminated second execution"
     );
     assert_eq!(root.extra_pane_client_count(), 0);
     assert_eq!(root.provisioning().automatic_retries(), 0);
@@ -517,11 +546,30 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
     let mut root = ApplicationRoot::new();
     let first_pane = root.snapshot().shell.focused_pane;
     root.attach_client(root.fence(), first).expect("bind first");
+    let first_handle = root.pane_client_raw(first_pane).expect("first handle");
+    let nonce = format!("C2B-OUT-{}", std::process::id());
     let (release_tx, release_rx) = mpsc::channel();
     root.gate_next_live_attach(release_rx);
 
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_pane = root.snapshot().shell.focused_pane;
+    assert_eq!(
+        ffi_test_submit_utf8_on_handle(first_handle, &format!("printf '%s\\n' '{nonce}'\n")),
+        0,
+        "first Controller must still accept input while second attach is gated"
+    );
+    let nonce_deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < nonce_deadline {
+        let _ = seyal_bridge_poll_for(first_handle);
+        if ffi_test_registry_cache_contains(first_handle, &nonce) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        ffi_test_registry_cache_contains(first_handle, &nonce),
+        "first client's cache must receive bytes while the second attach is gated"
+    );
     for _ in 0..25 {
         let _ = root.poll_client(root.fence());
         assert!(
@@ -928,6 +976,65 @@ fn foreign_root_create_tab_does_not_clear_live_focus() {
         "live surface input must survive foreign CreateTab"
     );
 
+    stop.store(true, Ordering::Relaxed);
+    runtime.join().expect("Runtime thread");
+}
+
+#[test]
+fn reconnecting_first_tab_does_not_steal_unbound_second_tab_input() {
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = OverrideReset;
+    let (socket_path, stop, runtime) = start_empty_isolated_runtime();
+    let runtime_dir = socket_path.parent().expect("socket parent").to_path_buf();
+    set_explicit_runtime_dir(runtime_dir).expect("install isolated dir");
+
+    let first =
+        LocalDisplayClient::connect_first_running_until(Instant::now() + Duration::from_secs(5))
+            .expect("first Controller");
+    let first_execution = first.execution_id();
+    let mut root = ApplicationRoot::new();
+    let first_pane = root.snapshot().shell.focused_pane;
+    root.attach_client(root.fence(), first).expect("bind first");
+    let first_handle = root.pane_client_raw(first_pane).expect("first handle");
+
+    let (release_tx, release_rx) = mpsc::channel();
+    root.gate_next_live_attach(release_rx);
+    root.apply(AppAction::CreateTab).expect("CreateTab");
+    let second_pane = root.snapshot().shell.focused_pane;
+    assert_ne!(first_pane, second_pane);
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Unbound
+    );
+    assert_eq!(ffi_test_focused_registry_handle(), 0);
+
+    assert!(ffi_test_force_registry_client_eof(first_handle));
+    let _ = seyal_bridge_poll_for(first_handle);
+    let _ = root.poll_client(root.fence());
+
+    let recovered = LocalDisplayClient::connect_execution_until(
+        &socket_path,
+        first_execution,
+        Role::Controller,
+        Instant::now() + Duration::from_secs(5),
+    )
+    .expect("reconnect tab 1 Controller");
+    let recovered_handle =
+        test_register_pending_client(recovered, 9).expect("pending recovered handle");
+    assert_eq!(seyal_bridge_adopt_handle(recovered_handle), 0);
+    assert_eq!(
+        ffi_test_focused_registry_handle(),
+        0,
+        "adopting a reconnect for tab 1 must not claim display while tab 2 is focused and unbound"
+    );
+    assert_eq!(
+        ffi_test_submit_utf8("must-not-reach-reconnected-tab-1\n"),
+        -1,
+        "input must stay fail-closed on the unbound focused tab"
+    );
+
+    let _ = release_tx.send(());
     stop.store(true, Ordering::Relaxed);
     runtime.join().expect("Runtime thread");
 }

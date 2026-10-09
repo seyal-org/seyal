@@ -701,4 +701,17 @@ fn palette_lists_new_tab_under_production_policy() {
             .any(|row| row.label == "New Tab"),
         "production composition enables CreateTab in the palette"
     );
+    root.apply(AppAction::SetPaletteQuery {
+        fence: root.fence(),
+        query: "Terminate Execution".into(),
+    })
+    .unwrap();
+    assert!(
+        root.snapshot()
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label == "Terminate Execution"),
+        "P4 terminate is a palette product action, distinct from Close Tab"
+    );
 }

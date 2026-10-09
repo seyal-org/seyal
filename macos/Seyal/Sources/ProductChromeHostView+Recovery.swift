@@ -6,6 +6,22 @@ import AppKit
 /// helper, disposes handles and reports truthful outcomes.
 @MainActor
 extension ProductChromeHostView {
+    /// Recovery and presentation handoffs must honor the palette's focus
+    /// ownership at the moment AppKit accepts the responder change.
+    func requestComposerFocusIfPaletteAllows() -> Bool {
+        guard !commandPalette.isOpen else { return false }
+        return composer.focusEditor()
+    }
+
+    func commandPaletteDidDismiss() {
+        guard pane.inputSurface.recoveryPresentationPending else {
+            routeFocus()
+            return
+        }
+        pane.inputSurface.syncInputRoutePresentation()
+        _ = pane.inputSurface.requestComposerFocusForRecovery()
+    }
+
     func recoveryText(_ snapshot: SeyalAppSnapshot) -> String {
         let stage: String
         switch snapshot.recovery_stage {
