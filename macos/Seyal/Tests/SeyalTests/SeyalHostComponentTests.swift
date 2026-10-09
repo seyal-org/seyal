@@ -516,6 +516,13 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testSecondaryLiveSurfacePassesPointerHitsToPaneRegion() {
+        let host = SecondaryLivePaneHost(appHandle: 0, paneLo: 1, paneHi: 2, displayHandle: 0)
+        XCTAssertNil(host.hitTest(NSPoint(x: 10, y: 10)))
+        XCTAssertEqual(host.accessibilityRole(), .group)
+    }
+
+    @MainActor
     func testSinglePaneProjectsNoSplitDividerAndDividerDragFailsClosed() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 56)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))

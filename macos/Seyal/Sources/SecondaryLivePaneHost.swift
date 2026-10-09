@@ -29,7 +29,8 @@ final class SecondaryLivePaneHost: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = true
         setAccessibilityElement(true)
-        setAccessibilityRole(.image)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Secondary terminal presentation")
         setAccessibilityIdentifier("seyal-secondary-live-pane")
         surface.suppressesAutomaticBridgeRecovery = true
         surface.translatesAutoresizingMaskIntoConstraints = false
@@ -37,13 +38,11 @@ final class SecondaryLivePaneHost: NSView {
         // or reconnect them when the host is removed.
         surface.bridge?.stop()
         surface.bridge = nil
-        let handleBox = displayHandle
         surface.renderer.onNeedsCurrentFrame = { [weak self] in
             seyalRunAsMainActorFromMainQueue {
                 self?.publishFrame()
             }
         }
-        _ = handleBox
         addSubview(surface)
         NSLayoutConstraint.activate([
             surface.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -58,6 +57,12 @@ final class SecondaryLivePaneHost: NSView {
         super.viewDidMoveToWindow()
         needsLayout = true
         publishFrame()
+    }
+
+    /// Secondary surfaces are presentation only. Let the pane-region view
+    /// underneath receive clicks and dispatch the Rust-owned FocusPane action.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 
     override func layout() {
