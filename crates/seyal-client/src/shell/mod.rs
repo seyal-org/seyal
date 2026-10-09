@@ -23,6 +23,8 @@ mod pt3_tests;
 #[cfg(test)]
 mod pt4_tests;
 #[cfg(test)]
+mod pt6_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod w2a_tests;

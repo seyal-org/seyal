@@ -105,32 +105,6 @@ fn choose_neighbor(
     best.map(|(id, _, _)| id)
 }
 
-/// True when `candidate` is a §5.7 geometric neighbor of `focused` in `direction`.
-#[cfg(test)]
-pub(super) fn is_geometric_neighbor(
-    tree: &PaneTree,
-    focused: PaneId,
-    candidate: PaneId,
-    direction: FocusDirection,
-) -> bool {
-    let leaves = leaf_rects(tree);
-    let Some(focused_rect) = leaves
-        .iter()
-        .find(|(id, _)| *id == focused)
-        .map(|(_, r)| *r)
-    else {
-        return false;
-    };
-    let Some(candidate_rect) = leaves
-        .iter()
-        .find(|(id, _)| *id == candidate)
-        .map(|(_, r)| *r)
-    else {
-        return false;
-    };
-    shares_edge(focused_rect, candidate_rect, direction)
-}
-
 impl ShellState {
     pub(super) fn focus_direction(&mut self, direction: FocusDirection) -> Result<(), ShellError> {
         let workspace = self.workspace_mut(self.active_workspace)?;
