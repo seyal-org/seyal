@@ -258,7 +258,7 @@ final class MultiWindowHostTests: XCTestCase {
             XCTAssertEqual(window.identifier?.rawValue, expectedId)
         }
         host.keyWindowStatusForTests = { $0.identifier?.rawValue == expectedId }
-        host.applyPendingEffectsAndReconcile()
+        applyAndWaitForActivation(host, reconcile: true)
         XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
         let windows = host.snapshotOrderedWindowKeys()
         XCTAssertEqual(windows.count, 2)
@@ -273,7 +273,7 @@ final class MultiWindowHostTests: XCTestCase {
         let liveBefore = host.liveHost.window
         XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
         host.activationFailBudget = 8
-        host.applyPendingEffects()
+        applyAndWaitForActivation(host)
         XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
         XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
         let after = seyal_app_window(host.appHandle, 1)
@@ -302,7 +302,7 @@ final class MultiWindowHostTests: XCTestCase {
             // Model AppKit refusing the request: the named window stays non-key.
             targetWasKeyAfterRequest = requestedWindow.isKeyWindow
         }
-        host.applyPendingEffects()
+        applyAndWaitForActivation(host)
 
         XCTAssertEqual(requests, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
         XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
@@ -315,6 +315,47 @@ final class MultiWindowHostTests: XCTestCase {
             0,
             "portable focus remains committed after native activation failure"
         )
+    }
+
+    func testWindowActivationWaitsForDelayedNamedWindowKeyAcknowledgement() {
+        let host = seededQuitHost(windows: 2)
+        defer { host.performQuitCleanup() }
+        let target = seyal_app_window(host.appHandle, 1)
+        let expectedId = "seyal-window-\(target.window_lo)-\(target.window_hi)"
+        XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
+
+        let delayedKeyAcknowledgement = expectation(description: "named window becomes key")
+        var targetBecameKey = false
+        var requests = 0
+        host.activationRequestForTests = { window in
+            XCTAssertEqual(window.identifier?.rawValue, expectedId)
+            requests += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                targetBecameKey = true
+                delayedKeyAcknowledgement.fulfill()
+            }
+        }
+        host.keyWindowStatusForTests = { _ in targetBecameKey }
+
+        applyAndWaitForActivation(host)
+        wait(for: [delayedKeyAcknowledgement], timeout: 1.0)
+
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(host.lastActivationAttempts, 1)
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 0)
+        XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
+    }
+
+    private func applyAndWaitForActivation(_ host: MultiWindowHostController, reconcile: Bool = false) {
+        let activationSettled = expectation(description: "window activation settles")
+        host.activationCompletionForTests = { _ in activationSettled.fulfill() }
+        if reconcile {
+            host.applyPendingEffectsAndReconcile()
+        } else {
+            host.applyPendingEffects()
+        }
+        wait(for: [activationSettled], timeout: 1.0)
+        host.activationCompletionForTests = nil
     }
 
     func testCreateWindowRejectedDoesNotMoveLiveHost() {

@@ -78,10 +78,6 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
                 applyEffect(effect)
             }
             ackOneEffect()
-            if let failed = pendingActivationFailure {
-                pendingActivationFailure = nil
-                reportActivationFailed(failed)
-            }
         }
         orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
     }
@@ -131,6 +127,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     }
 
     private func destroyRealization(_ key: WindowKey) {
+        if pendingActivationKey == key {
+            cancelPendingActivation()
+        }
         guard let window = realizations.removeValue(forKey: key) else { return }
         orderedKeys.removeAll { $0 == key }
         if liveKey == key {
@@ -165,52 +164,112 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     var activationRequestForTests: ((NSWindow) -> Void)?
     /// Provides AppKit's key-state observation when tests need deterministic success.
     var keyWindowStatusForTests: ((NSWindow) -> Bool)?
+    /// Observes completion without depending on XCTest's foreground activation state.
+    var activationCompletionForTests: ((Bool) -> Void)?
     /// Attempts spent on the last `WindowActivation` effect (tests).
     private(set) var lastActivationAttempts: Int = 0
-    private var pendingActivationFailure: WindowKey?
+    private static let activationAcknowledgementDelay: TimeInterval = 0.05
+    private var activationGeneration: UInt64 = 0
+    private var activationWorkItem: DispatchWorkItem?
+    private var pendingActivationKey: WindowKey?
 
-    /// Realize SPEC-022 WindowActivation: only the named window, bounded retry.
+    /// Realize SPEC-022 WindowActivation: only the named window, bounded asynchronous retry.
     private func realizeWindowActivation(_ key: WindowKey) {
+        cancelPendingActivation()
+        let generation = activationGeneration
         lastActivationAttempts = 0
-        pendingActivationFailure = nil
-        let maxAttempts = Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS)
-        while lastActivationAttempts < maxAttempts {
-            lastActivationAttempts += 1
-            if tryActivateNamedWindow(key) {
-                return
-            }
-        }
-        pendingActivationFailure = key
+        pendingActivationKey = key
+        scheduleActivationAttempt(key, generation: generation)
     }
 
-    private func tryActivateNamedWindow(_ key: WindowKey) -> Bool {
+    private func scheduleActivationAttempt(_ key: WindowKey, generation: UInt64, after delay: TimeInterval = 0) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.attemptNamedWindowActivation(key, generation: generation)
+        }
+        activationWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func attemptNamedWindowActivation(_ key: WindowKey, generation: UInt64) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        guard let window = realizations[key] else {
+            completeWindowActivation(key, generation: generation, succeeded: false)
+            return
+        }
+
+        lastActivationAttempts += 1
         if activationFailBudget > 0 {
             activationFailBudget -= 1
-            return false
+            retryOrFailWindowActivation(key, generation: generation)
+            return
         }
+
         // Host must not pick a different window than the effect names.
-        guard let window = realizations[key] else { return false }
         if let activationRequestForTests {
             activationRequestForTests(window)
         } else {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         }
-        if isKeyWindow(window) {
-            if liveKey != key {
-                installLiveHost(in: window, key: key)
+
+        // AppKit can complete key-window activation on a later event turn.
+        // A bounded delayed acknowledgement avoids both a false immediate
+        // failure and a nested event loop that could reenter effect draining.
+        let acknowledgement = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.pendingActivationKey == key,
+                  self.activationGeneration == generation
+            else { return }
+            guard let target = self.realizations[key] else {
+                self.completeWindowActivation(key, generation: generation, succeeded: false)
+                return
             }
-            return true
+            if self.isKeyWindow(target) {
+                self.completeWindowActivation(key, generation: generation, succeeded: true)
+            } else {
+                self.retryOrFailWindowActivation(key, generation: generation)
+            }
         }
-        // `makeKeyAndOrderFront` has no result value. Confirm AppKit actually
-        // assigned key status to the named window before changing the live host.
-        // Do not pump a nested event loop here: it can reenter effect draining
-        // while this activation is still being acknowledged.
-        guard isKeyWindow(window) else { return false }
-        if liveKey != key {
+        activationWorkItem = acknowledgement
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.activationAcknowledgementDelay,
+            execute: acknowledgement
+        )
+    }
+
+    private func retryOrFailWindowActivation(_ key: WindowKey, generation: UInt64) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        if lastActivationAttempts >= Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS) {
+            completeWindowActivation(key, generation: generation, succeeded: false)
+        } else {
+            scheduleActivationAttempt(
+                key,
+                generation: generation,
+                after: Self.activationAcknowledgementDelay
+            )
+        }
+    }
+
+    private func completeWindowActivation(_ key: WindowKey, generation: UInt64, succeeded: Bool) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        activationWorkItem?.cancel()
+        activationWorkItem = nil
+        pendingActivationKey = nil
+
+        if succeeded, let window = realizations[key], liveKey != key {
             installLiveHost(in: window, key: key)
+        } else if !succeeded {
+            reportActivationFailed(key)
         }
-        return true
+        activationCompletionForTests?(succeeded)
+    }
+
+    private func cancelPendingActivation() {
+        activationGeneration &+= 1
+        activationWorkItem?.cancel()
+        activationWorkItem = nil
+        pendingActivationKey = nil
     }
 
     private func isKeyWindow(_ window: NSWindow) -> Bool {
@@ -343,6 +402,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     }
 
     func performQuitCleanup() {
+        cancelPendingActivation()
         liveHost.detachForTermination()
         for key in Array(realizations.keys) {
             destroyRealization(key)
@@ -440,6 +500,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        if let key = key(for: window), pendingActivationKey == key, isKeyWindow(window) {
+            completeWindowActivation(key, generation: activationGeneration, succeeded: true)
+        }
         reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_BECAME_KEY)
     }
 
