@@ -516,10 +516,12 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testSecondaryLiveSurfacePassesPointerHitsToPaneRegion() {
+    func testSecondaryLiveSurfaceOwnsPointerHitForPaneFocus() {
         let host = SecondaryLivePaneHost(appHandle: 0, paneLo: 1, paneHi: 2, displayHandle: 0)
-        XCTAssertNil(host.hitTest(NSPoint(x: 10, y: 10)))
-        XCTAssertEqual(host.accessibilityRole(), .group)
+        host.frame = NSRect(x: 0, y: 0, width: 100, height: 80)
+        XCTAssertTrue(host.hitTest(NSPoint(x: 10, y: 10)) === host)
+        XCTAssertEqual(host.accessibilityRole(), .button)
+        XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
     }
 
     @MainActor

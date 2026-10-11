@@ -261,10 +261,8 @@ final class SeyalHostUITests: XCTestCase {
         let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
         let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
         XCTAssertTrue(secondRegion.waitForExistence(timeout: 12))
-        XCTAssertTrue(
-            app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
-                .waitForExistence(timeout: 12)
-        )
+        let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+        XCTAssertTrue(secondaryHost.waitForExistence(timeout: 12))
 
         let firstFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-a")
         let secondFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-b")
@@ -273,12 +271,13 @@ final class SeyalHostUITests: XCTestCase {
             try? FileManager.default.removeItem(at: secondFile)
         }
 
-        func runSize(in region: XCUIElement, file: URL) -> (Int, Int)? {
+        func runSize(
+            in region: XCUIElement,
+            activating focusTarget: XCUIElement,
+            file: URL
+        ) -> (Int, Int)? {
             let focused = NSPredicate(format: "value == 'focused'")
             if (region.value as? String) != "focused" {
-                // The secondary Metal view overlays the pane outline. Its
-                // accessibility press is the real focus target for that leaf.
-                let focusTarget = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
                 guard focusTarget.waitForExistence(timeout: 5), focusTarget.isHittable else {
                     return nil
                 }
@@ -306,8 +305,8 @@ final class SeyalHostUITests: XCTestCase {
             return nil
         }
 
-        guard let firstBefore = runSize(in: firstRegion, file: firstFile),
-              let secondBefore = runSize(in: secondRegion, file: secondFile) else {
+        guard let firstBefore = runSize(in: firstRegion, activating: firstRegion, file: firstFile),
+              let secondBefore = runSize(in: secondRegion, activating: secondaryHost, file: secondFile) else {
             XCTFail("both PTYs must report their initial stty size")
             return
         }
@@ -330,8 +329,8 @@ final class SeyalHostUITests: XCTestCase {
 
         try? FileManager.default.removeItem(at: firstFile)
         try? FileManager.default.removeItem(at: secondFile)
-        guard let firstAfter = runSize(in: firstRegion, file: firstFile),
-              let secondAfter = runSize(in: secondRegion, file: secondFile) else {
+        guard let firstAfter = runSize(in: firstRegion, activating: firstRegion, file: firstFile),
+              let secondAfter = runSize(in: secondRegion, activating: secondaryHost, file: secondFile) else {
             XCTFail("both PTYs must report their size after the window resize")
             return
         }
