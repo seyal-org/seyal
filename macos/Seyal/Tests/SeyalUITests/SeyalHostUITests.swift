@@ -274,11 +274,19 @@ final class SeyalHostUITests: XCTestCase {
         }
 
         func runSize(in region: XCUIElement, file: URL) -> (Int, Int)? {
-            region.click()
             let focused = NSPredicate(format: "value == 'focused'")
-            let focusExpectation = expectation(for: focused, evaluatedWith: region, handler: nil)
-            guard XCTWaiter.wait(for: [focusExpectation], timeout: 5) == .completed else {
-                return nil
+            if (region.value as? String) != "focused" {
+                // The secondary Metal view overlays the pane outline. Its
+                // accessibility press is the real focus target for that leaf.
+                let focusTarget = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+                guard focusTarget.waitForExistence(timeout: 5), focusTarget.isHittable else {
+                    return nil
+                }
+                focusTarget.click()
+                let focusExpectation = expectation(for: focused, evaluatedWith: region, handler: nil)
+                guard XCTWaiter.wait(for: [focusExpectation], timeout: 5) == .completed else {
+                    return nil
+                }
             }
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             guard editor.waitForExistence(timeout: 5) else { return nil }

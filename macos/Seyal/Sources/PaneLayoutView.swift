@@ -104,6 +104,9 @@ final class PaneLayoutView: NSView {
                     paneHi: binding.paneHi,
                     displayHandle: binding.displayHandle
                 )
+                host.onFocus = { [weak self] in
+                    self?.onFocusPane?(key.lo, key.hi)
+                }
                 secondaryLiveHosts[key] = host
                 addSubview(host, positioned: .above, relativeTo: liveContent)
                 host.noteRegistryPolled()

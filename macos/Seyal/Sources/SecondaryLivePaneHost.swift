@@ -11,6 +11,7 @@ final class SecondaryLivePaneHost: NSView {
     let appHandle: UInt64
     let paneLo: UInt64
     let paneHi: UInt64
+    var onFocus: (() -> Void)?
     private(set) var displayHandle: UInt64
     private let surface: MetalSurfaceView
     private var lastProposedGeometry = CGRect.null
@@ -29,8 +30,8 @@ final class SecondaryLivePaneHost: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = true
         setAccessibilityElement(true)
-        setAccessibilityRole(.group)
-        setAccessibilityLabel("Secondary terminal presentation")
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Focus secondary terminal pane")
         setAccessibilityIdentifier("seyal-secondary-live-pane")
         surface.suppressesAutomaticBridgeRecovery = true
         surface.translatesAutoresizingMaskIntoConstraints = false
@@ -59,10 +60,15 @@ final class SecondaryLivePaneHost: NSView {
         publishFrame()
     }
 
-    /// Secondary surfaces are presentation only. Let the pane-region view
-    /// underneath receive clicks and dispatch the Rust-owned FocusPane action.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
+    /// A secondary pane has no keyboard authority, but it is the visible
+    /// hit target for moving Rust-owned focus to that pane.
+    override func mouseDown(with event: NSEvent) {
+        onFocus?()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onFocus?()
+        return true
     }
 
     override func layout() {
