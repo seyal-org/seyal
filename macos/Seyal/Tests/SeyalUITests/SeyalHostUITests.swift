@@ -1184,4 +1184,207 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
+
+    /// #867: palette **Use Raw Terminal** replaces Flow chrome with full-Pane
+    /// Raw; **Return to Flow** restores Blocks/composer on the same execution.
+    func testExplicitRawTakeoverAndReturnToFlow() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty, "usable attach must name an execution")
+
+        runPaletteCommand(in: app, query: "Use Raw Terminal", expectedRow: "Use Raw Terminal")
+        assertRawFullPaneOrFail(in: app)
+
+        let mid = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(mid, key: "execution="),
+            executionBefore,
+            "Raw takeover must keep the same ExecutionId"
+        )
+
+        runPaletteCommand(in: app, query: "Return to Flow", expectedRow: "Return to Flow")
+        assertFlowBlocksOrFail(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "Return to Flow must keep the same ExecutionId"
+        )
+    }
+
+    /// #867: leaving alternate-screen TUI returns to explicit Raw, not Flow.
+    func testExplicitRawSurvivesAlternateScreenExit() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty)
+
+        runPaletteCommand(in: app, query: "Use Raw Terminal", expectedRow: "Use Raw Terminal")
+        assertRawFullPaneOrFail(in: app)
+
+        try exerciseBoundedAlternateScreenReturningToRaw(in: app)
+        assertRawFullPaneOrFail(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "TUI exit back to Raw must keep the same ExecutionId"
+        )
+    }
+
+    /// #867: GUI relaunch while Flow is active restores one presentation owner
+    /// (composer). Explicit Raw is a client resting latch and is re-evaluated
+    /// after process death; reconnect must not create a second terminal.
+    func testReconnectRestoresSinglePresentationOwner() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        let before = terminal.firstMatch.value as? String ?? ""
+        let executionBefore = identityToken(before, key: "execution=")
+        XCTAssertFalse(executionBefore.isEmpty)
+
+        runPaletteCommand(in: app, query: "Use Raw Terminal", expectedRow: "Use Raw Terminal")
+        assertRawFullPaneOrFail(in: app)
+
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 8))
+        app.launch()
+        waitForUsablePty(in: app)
+        let after = terminal.firstMatch.value as? String ?? ""
+        XCTAssertEqual(
+            identityToken(after, key: "execution="),
+            executionBefore,
+            "reconnect must keep the same Runtime execution"
+        )
+        assertFlowBlocksOrFail(in: app)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["seyal-recovery"].firstMatch.value as? String,
+            "connected"
+        )
+    }
+
+    private func runPaletteCommand(
+        in app: XCUIApplication, query: String, expectedRow: String
+    ) {
+        let palette = app.descendants(matching: .any)["seyal-command-palette"]
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "⌘K opens the Rust-backed palette")
+        let queryField = app.descendants(matching: .any)["seyal-command-palette-query"]
+        XCTAssertTrue(queryField.waitForExistence(timeout: 5))
+        queryField.firstMatch.click()
+        queryField.firstMatch.typeText(query)
+        let row = app.descendants(matching: .any)["seyal-command-palette-row-0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "palette did not filter to \(expectedRow)")
+        XCTAssertEqual(row.label, expectedRow)
+        app.typeKey("\r", modifierFlags: [])
+        let dismissed = expectation(
+            for: NSPredicate(format: "isHittable == false"),
+            evaluatedWith: palette.firstMatch,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [dismissed], timeout: 5),
+            .completed,
+            "palette must close after running \(expectedRow)"
+        )
+    }
+
+    private func assertRawFullPaneOrFail(in app: XCUIApplication, timeout: TimeInterval = 8) {
+        let composer = app.descendants(matching: .any)["seyal-composer"]
+        let transcript = app.descendants(matching: .any)["seyal-blocks-scroll"]
+        let terminal = app.descendants(matching: .any)["terminal-input"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: timeout), "Raw must keep terminal-input")
+        XCTAssertTrue(terminal.firstMatch.isHittable, "Raw must keep a hittable terminal surface")
+        // Hidden NSViews drop out of the AX tree; either missing or non-hittable
+        // proves Flow chrome yielded.
+        let deadline = Date().addingTimeInterval(timeout)
+        var composerYielded = false
+        while Date() < deadline {
+            if !composer.exists || !composer.firstMatch.isHittable {
+                composerYielded = true
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertTrue(
+            composerYielded,
+            "Raw must hide composer; exists=\(composer.exists) hittable=\(composer.exists ? composer.firstMatch.isHittable : false) value=\(composer.value ?? "nil")"
+        )
+        if transcript.exists {
+            XCTAssertFalse(
+                transcript.firstMatch.isHittable,
+                "Raw must hide the Flow transcript; height=\(transcript.firstMatch.frame.height)"
+            )
+        }
+    }
+
+    private func identityToken(_ value: String, key: String) -> String {
+        guard let range = value.range(of: key) else { return "" }
+        let rest = value[range.upperBound...]
+        return rest.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+    }
+
+    /// Alternate-screen fixture that expects resting Raw after exit (composer
+    /// stays hidden). The shared Flow helper asserts composer return.
+    private func exerciseBoundedAlternateScreenReturningToRaw(in app: XCUIApplication) throws {
+        let token = String(UUID().uuidString.prefix(8))
+        let scriptURL = URL(fileURLWithPath: "/tmp/s867-\(token).sh")
+        let startedURL = URL(fileURLWithPath: "/tmp/s867-\(token).ran")
+        try """
+        trap 'printf "\\033[?1049l"' EXIT
+        : > \(startedURL.path)
+        printf '\\033[?1049h'
+        read -r -t 20 answer
+        """.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+        let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+        let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+        defer {
+            do {
+                try FileManager.default.removeItem(at: scriptURL)
+                if FileManager.default.fileExists(atPath: startedURL.path) {
+                    try FileManager.default.removeItem(at: startedURL)
+                }
+            } catch {
+                XCTFail("Could not remove Raw/TUI fixture: \(error)")
+            }
+        }
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        terminal.click()
+        app.typeText("/bin/bash --noprofile --norc \(scriptURL.path)")
+        app.typeKey("\r", modifierFlags: [])
+        let startedDeadline = Date().addingTimeInterval(8)
+        while Date() < startedDeadline,
+            !FileManager.default.fileExists(atPath: startedURL.path)
+        {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: startedURL.path),
+            "alt-screen fixture never started under Raw"
+        )
+        XCTAssertFalse(composer.isHittable, "TUI under Raw must keep composer hidden")
+        XCTAssertEqual(app.state, .runningForeground)
+        terminal.click()
+        app.typeKey("\r", modifierFlags: [])
+        let exitedDeadline = Date().addingTimeInterval(12)
+        while Date() < exitedDeadline,
+            FileManager.default.fileExists(atPath: startedURL.path)
+        {
+            // Fixture process exits after read; file may linger — wait for
+            // presentation to settle on Raw (composer remains non-hittable).
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            if !composer.isHittable { break }
+        }
+        XCTAssertFalse(
+            composer.isHittable,
+            "leaving TUI must restore Raw, not Flow; composer=\(composer.value ?? "nil")"
+        )
+    }
 }
