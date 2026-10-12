@@ -333,6 +333,7 @@ impl ShellState {
             title: "Pane 1".to_owned(),
             execution: None,
             allows_implicit_execution_bootstrap: false,
+            presentation_mode: crate::presentation::PresentationMode::Flow,
         };
         Tab::with_pane(TabId::new(), format!("Terminal {ordinal}"), pane)
     }

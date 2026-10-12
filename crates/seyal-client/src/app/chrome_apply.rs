@@ -88,6 +88,7 @@ impl ApplicationRoot {
             if matches!(reveal, crate::navigation::AttentionReveal::Focused(_)) {
                 self.activate_focused_pane_authority();
             }
+            self.drain_shell_effects();
             let _ = self
                 .chrome
                 .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -110,6 +111,7 @@ impl ApplicationRoot {
             self.activate_focused_pane_authority();
             self.record_focused_pane_commit();
         }
+        self.drain_shell_effects();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -197,6 +199,17 @@ impl ApplicationRoot {
             .presentation
             .apply(PresentationAction::BindIdentity(identity));
         self.authority = Some(authority);
+        let stored_mode = self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .flat_map(|window| &window.tabs)
+            .flat_map(|tab| &tab.panes)
+            .find(|pane| pane.id == focused)
+            .map(|pane| pane.presentation_mode);
+        self.explicit_raw = stored_mode == Some(crate::presentation::PresentationMode::Raw);
+        self.recompute_resting();
         let alternate = self.alternate_screen_for_pane(focused);
         let _ = self.derive_presentation(alternate);
         self.sync_composer_presentation();

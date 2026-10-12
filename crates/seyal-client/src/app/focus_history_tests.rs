@@ -298,6 +298,98 @@ fn open_attention_reveal_records_exact_target_in_history() {
     assert_eq!(root.snapshot().shell.focused_pane, p1);
 }
 
+#[test]
+fn open_attention_cross_window_drains_the_window_raise_effect() {
+    let workspace = WorkspaceId::m001_default();
+    let first_window = WindowId::from_bytes([0x20; 16]);
+    let target_window = WindowId::from_bytes([0x21; 16]);
+    let first_tab = TabId::from_bytes([0x22; 16]);
+    let target_tab = TabId::from_bytes([0x23; 16]);
+    let first_pane = PaneId::from_bytes([0x24; 16]);
+    let target_pane = PaneId::from_bytes([0x25; 16]);
+    let shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Local".into(),
+            detail: None,
+            attention: false,
+            active_window: first_window,
+            windows: vec![
+                ShellWindowSeed {
+                    id: first_window,
+                    active_tab: first_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: first_tab,
+                        title: "First".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: first_pane,
+                            title: "First pane".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
+                },
+                ShellWindowSeed {
+                    id: target_window,
+                    active_tab: target_tab,
+                    tabs: vec![ShellTabSeed {
+                        id: target_tab,
+                        title: "Target".into(),
+                        attention: false,
+                        pane: ShellPaneSeed {
+                            id: target_pane,
+                            title: "Target pane".into(),
+                            allows_implicit_execution_bootstrap: false,
+                        },
+                    }],
+                },
+            ],
+        }],
+        workspace,
+        true,
+        true,
+    )
+    .unwrap();
+    let mut root = ApplicationRoot::with_shell(shell);
+    let id = AttentionId::new("cross-window-effect");
+    let mut item = crate::chrome::AttentionItem::projection(
+        id.clone(),
+        "Attention",
+        "target pane",
+        Some(workspace),
+        Some(target_tab),
+        None,
+    );
+    item.resource_address = Some(crate::navigation::pack_resource_address(
+        ResourceAddress::Pane {
+            workspace,
+            tab: target_tab,
+            pane: target_pane,
+        },
+    ));
+    root.apply(AppAction::ReplaceChrome {
+        fence: root.fence(),
+        agents: vec![],
+        attention: vec![item],
+    })
+    .unwrap();
+    root.apply(AppAction::OpenAttention {
+        fence: root.fence(),
+        id,
+    })
+    .unwrap();
+
+    assert_eq!(root.snapshot().shell.active_window, target_window);
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .any(|effect| matches!(
+            effect,
+            NativeEffect::OrderFrontMakeKey { window } if *window == target_window
+        )));
+}
+
 fn evidence_exec(tag: u8) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),

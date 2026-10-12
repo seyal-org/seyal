@@ -6,6 +6,7 @@ use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::app::{ApplicationRoot, APP_ABI_VERSION};
 use crate::pane_layout::SplitRatio;
+use crate::presentation::PresentationMode;
 use crate::shell::{
     PaneTree, PresentationTier, ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState,
     ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
@@ -58,7 +59,7 @@ fn seed_n_windows(n: usize) -> ShellState {
             active_window: active,
         }],
         workspace,
-        false,
+        true,
         true,
     )
     .expect("seeded shell")
@@ -325,18 +326,20 @@ fn version_and_size_mismatch_fail_closed() {
 fn generation_is_monotonic_across_commits() {
     let handle = seyal_app_create();
     install_shell(handle, seed_n_windows(1));
-    let first = seyal_app_shell(handle).containment_generation;
+    let first = seyal_app_shell(handle);
+    assert!(first.shell_generation > 0);
     let workspace = WorkspaceId::m001_default();
     apply_on_handle(
         handle,
         ShellAction::CreateWindow {
             workspace,
-            containment_generation: first,
+            containment_generation: first.containment_generation,
         },
     );
     let second = seyal_app_shell(handle);
     assert_eq!(second.window_count, 2);
-    assert!(second.containment_generation > first);
+    assert!(second.containment_generation > first.containment_generation);
+    assert!(second.shell_generation > first.shell_generation);
     apply_on_handle(
         handle,
         ShellAction::CreateWindow {
@@ -344,8 +347,9 @@ fn generation_is_monotonic_across_commits() {
             containment_generation: second.containment_generation,
         },
     );
-    let third = seyal_app_shell(handle).containment_generation;
-    assert!(third > second.containment_generation);
+    let third = seyal_app_shell(handle);
+    assert!(third.containment_generation > second.containment_generation);
+    assert!(third.shell_generation > second.shell_generation);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -421,6 +425,73 @@ fn bindings_and_focused_tier_round_trip() {
         (pane_row.execution_lo, pane_row.execution_hi),
         split(execution.to_bytes())
     );
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
+    let handle = seyal_app_create();
+    let mut shell = seed_n_windows(2);
+    let first_pane = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let second_pane = shell.snapshot().focused_pane;
+    let panes = shell
+        .snapshot()
+        .windows
+        .iter()
+        .map(|window| window.tabs[0].panes[0].id)
+        .collect::<Vec<_>>();
+    shell
+        .set_presentation_mode(second_pane, PresentationMode::Raw)
+        .unwrap();
+    shell
+        .set_presentation_mode(panes[1], PresentationMode::Tui)
+        .unwrap();
+    assert_eq!(shell.snapshot().windows[0].tabs[0].panes[0].id, first_pane);
+    let expected = shell.snapshot();
+    install_shell(handle, shell);
+
+    assert_eq!(seyal_app_pane_leaf(handle, 0, 0, 0).presentation_mode, 0);
+    assert_eq!(seyal_app_pane_leaf(handle, 0, 0, 1).presentation_mode, 1);
+    assert_eq!(seyal_app_pane_leaf(handle, 1, 0, 0).presentation_mode, 2);
+    assert_eq!(
+        expected.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Flow
+    );
+    assert_eq!(
+        expected.windows[0].tabs[0].panes[1].presentation_mode,
+        PresentationMode::Raw
+    );
+    assert_eq!(
+        expected.windows[1].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Tui
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn shell_generation_advances_for_selection_without_containment_change() {
+    let handle = seyal_app_create();
+    let shell = seed_n_windows(2);
+    let expected = shell.snapshot();
+    let target = expected.windows[1].id;
+    install_shell(handle, shell);
+    let first = seyal_app_shell(handle);
+    apply_on_handle(
+        handle,
+        ShellAction::SelectWindow {
+            id: target,
+            containment_generation: first.containment_generation,
+        },
+    );
+    let second = seyal_app_shell(handle);
+    assert_eq!(second.containment_generation, first.containment_generation);
+    assert!(second.shell_generation > first.shell_generation);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 

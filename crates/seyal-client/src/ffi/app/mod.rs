@@ -640,6 +640,7 @@ pub struct SeyalAppShell {
     pub active_window_hi: u64,
     pub last_active_workspace_lo: u64,
     pub last_active_workspace_hi: u64,
+    pub shell_generation: u64,
 }
 
 impl SeyalAppShell {
@@ -665,6 +666,7 @@ impl SeyalAppShell {
             active_window_hi: 0,
             last_active_workspace_lo: 0,
             last_active_workspace_hi: 0,
+            shell_generation: 0,
         }
     }
 }

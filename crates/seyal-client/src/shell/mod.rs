@@ -224,6 +224,7 @@ impl ShellState {
             title: "Pane 1".to_owned(),
             execution: None,
             allows_implicit_execution_bootstrap: true,
+            presentation_mode: crate::presentation::PresentationMode::Flow,
         };
         let tab = Tab::with_pane(TabId::new(), "Terminal".to_owned(), pane);
         let tab_id = tab.id;
@@ -734,6 +735,7 @@ impl ShellState {
             title: format!("Pane {}", pane_count + 1),
             execution: None,
             allows_implicit_execution_bootstrap: false,
+            presentation_mode: crate::presentation::PresentationMode::Flow,
         };
         let id = pane.id;
         // ADR-021 §3: successful structural mutation clears zoom.

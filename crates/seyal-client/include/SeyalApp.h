@@ -448,8 +448,9 @@ typedef struct SeyalAppTheme {
 
 /*
  * Multi-window shell header (#1108 / ADR-018 §2.1). window_count / effect_count
- * index seyal_app_window / seyal_app_native_effect. containment_generation is
- * the monotonic shell fence; shell_last_error is a bounded non-secret code.
+ * index seyal_app_window / seyal_app_native_effect. shell_generation changes
+ * on every committed application snapshot; containment_generation is the
+ * monotonic structural fence. shell_last_error is a bounded non-secret code.
  * Active-window tab/pane counts remain for the product-active Window projection.
  */
 typedef struct SeyalAppShell {
@@ -473,6 +474,7 @@ typedef struct SeyalAppShell {
     uint64_t active_window_hi;
     uint64_t last_active_workspace_lo;
     uint64_t last_active_workspace_hi;
+    uint64_t shell_generation;
 } SeyalAppShell;
 
 /* SeyalAppWindow.flags */
@@ -537,7 +539,8 @@ typedef struct SeyalAppPaneLeaf {
     uint64_t execution_hi;
     const uint8_t *title;
     uint32_t title_len;
-    uint32_t reserved;
+    uint16_t presentation_mode; /* 0 Flow, 1 Raw, 2 TUI */
+    uint16_t reserved;
 } SeyalAppPaneLeaf;
 
 /* SeyalAppPaneTreeNode.kind: 0 leaf, 1 split-right, 2 split-down.

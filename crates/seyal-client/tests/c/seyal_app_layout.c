@@ -25,11 +25,13 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppComposer) == 40);
     REQUIRE(sizeof(SeyalAppChrome) == 24);
     REQUIRE(sizeof(SeyalAppTheme) == 16);
-    REQUIRE(sizeof(SeyalAppShell) == 112);
+    REQUIRE(sizeof(SeyalAppShell) == 120);
     REQUIRE(offsetof(SeyalAppShell, containment_generation) == 72);
+    REQUIRE(offsetof(SeyalAppShell, shell_generation) == 112);
     REQUIRE(sizeof(SeyalAppWindow) == 72);
     REQUIRE(sizeof(SeyalAppTab) == 64);
     REQUIRE(sizeof(SeyalAppPaneLeaf) == 56);
+    REQUIRE(offsetof(SeyalAppPaneLeaf, presentation_mode) == 52);
     REQUIRE(sizeof(SeyalAppPaneTreeNode) == 40);
     REQUIRE(offsetof(SeyalAppPaneTreeNode, ratio) == 32);
     REQUIRE(offsetof(SeyalAppPaneTreeNode, reserved2) == 36);

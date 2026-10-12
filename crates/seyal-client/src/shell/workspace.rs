@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::presentation::PresentationMode;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::tree::PaneTree;
@@ -13,6 +14,7 @@ pub(super) struct Pane {
     pub(super) title: String,
     pub(super) execution: Option<ExecutionId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
+    pub(super) presentation_mode: PresentationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +124,7 @@ impl Workspace {
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
+                        presentation_mode: PresentationMode::Flow,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;
@@ -332,6 +335,26 @@ impl Workspace {
             .iter()
             .find(|window| window.id == id)
             .map(|window| window.workspace_id)
+    }
+}
+
+impl super::ShellState {
+    pub(crate) fn set_presentation_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode: PresentationMode,
+    ) -> Result<(), ShellError> {
+        for workspace in &mut self.workspaces {
+            for window in &mut workspace.windows {
+                for tab in &mut window.tabs {
+                    if let Some(pane) = tab.panes.get_mut(&pane_id) {
+                        pane.presentation_mode = mode;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(ShellError::UnknownPane)
     }
 }
 
