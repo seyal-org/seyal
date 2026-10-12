@@ -166,5 +166,15 @@ fn close_window_action_uses_observed_containment_generation() {
     let after = seyal_app_shell(handle);
     assert_eq!(after.window_count, 0);
     assert_eq!(after.tab_count, 0);
+    assert_eq!(
+        after.effect_count, 1,
+        "close must expose DestroyWindowRealization"
+    );
+    let effect = seyal_app_native_effect(handle, 0);
+    assert_eq!(effect.kind, 3, "DestroyWindowRealization");
+    assert_eq!(
+        (effect.window_lo, effect.window_hi),
+        (shell.active_window_lo, shell.active_window_hi)
+    );
     assert_eq!(seyal_app_destroy(handle), 0);
 }

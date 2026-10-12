@@ -42,6 +42,7 @@ impl ApplicationRoot {
                 ShellError::StaleContainment => AppError::StalePane,
                 _ => AppError::UnknownChromeTab,
             })?;
+        self.drain_shell_effects();
         let removed = self.shell.take_removed_tab_panes();
         let mut effects = Vec::new();
         for pane in removed {
@@ -81,6 +82,7 @@ impl ApplicationRoot {
                 containment_generation,
             })
             .map_err(close_tab_error)?;
+        self.drain_shell_effects();
         let removed = self.shell.take_removed_tab_panes();
         let workspace = self.shell.snapshot().active_workspace;
         let mut effects = Vec::new();
@@ -124,6 +126,7 @@ impl ApplicationRoot {
                 containment_generation,
             })
             .map_err(close_pane_error)?;
+        self.drain_shell_effects();
         let workspace = self.shell.snapshot().active_workspace;
         let removed = self.shell.take_removed_tab_panes();
         if !removed.is_empty() {
