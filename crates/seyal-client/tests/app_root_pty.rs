@@ -13,6 +13,9 @@ use std::{
 use seyal_client::app::{ApplicationRoot, PresentationEligibility};
 use seyal_client::LocalDisplayClient;
 use seyal_exec::{CommandSpec, WindowSize};
+use seyal_protocol::runtime_dir::{
+    override_test_lock, reset_explicit_runtime_dir, set_explicit_runtime_dir,
+};
 use seyal_runtime::{local_ipc::framing::Role, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -61,6 +64,148 @@ fn start_runtime(command: &str) -> (PathBuf, ExecutionId, thread::JoinHandle<()>
         .recv_timeout(Duration::from_secs(2))
         .expect("Runtime ready");
     (socket_path, execution_id, join)
+}
+
+struct RuntimeDirReset;
+
+impl Drop for RuntimeDirReset {
+    fn drop(&mut self) {
+        reset_explicit_runtime_dir();
+    }
+}
+
+#[test]
+fn unpresented_execution_terminates_while_another_window_stays_open() {
+    use seyal_client::app::AppAction;
+
+    let _lock = override_test_lock();
+    reset_explicit_runtime_dir();
+    let _reset = RuntimeDirReset;
+    let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let runtime_dir = std::env::temp_dir().join(format!("s1269d-{suffix:x}"));
+    let singleton_path = std::env::temp_dir().join(format!("s1269-{suffix:x}.lock"));
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (finalized_tx, finalized_rx) = mpsc::channel();
+    let (stop_tx, stop_rx) = mpsc::channel();
+    let runtime = thread::spawn(move || {
+        let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
+        config.singleton_path = singleton_path;
+        config.local_ipc = LocalIpcMode::Enabled {
+            runtime_dir_override: Some(runtime_dir),
+        };
+        config.graceful_termination = Duration::from_millis(50);
+        config.forced_reap = Duration::from_millis(250);
+        config.final_drain = Duration::from_millis(100);
+        let mut runtime = Runtime::new(config).expect("Runtime");
+        let anchor = runtime
+            .create_execution(
+                CommandSpec::new("/bin/sh").args(["-c", "sleep 30"]),
+                WindowSize::cells(80, 24).expect("geometry"),
+            )
+            .expect("anchor execution");
+        let unpresented = runtime
+            .create_execution(
+                CommandSpec::new("/bin/sh").args(["-c", "sleep 30"]),
+                WindowSize::cells(80, 24).expect("geometry"),
+            )
+            .expect("unpresented execution");
+        let socket_path = runtime
+            .local_ipc_socket_path()
+            .expect("local IPC socket")
+            .to_path_buf();
+        ready_tx
+            .send((socket_path, anchor, unpresented))
+            .expect("test receiver");
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while runtime.execution_count() > 1 && Instant::now() < deadline {
+            runtime
+                .poll_once(Some(Duration::from_millis(5)))
+                .expect("Runtime poll");
+        }
+        if runtime.execution_count() == 1 {
+            finalized_tx.send(()).expect("finalization receiver");
+        }
+        let _ = stop_rx.recv_timeout(Duration::from_secs(10));
+        runtime.begin_shutdown().expect("begin shutdown");
+        runtime
+            .run_until_empty(Instant::now() + Duration::from_secs(2))
+            .expect("shutdown");
+    });
+    let (socket_path, anchor, unpresented) = ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("Runtime ready");
+    set_explicit_runtime_dir(
+        socket_path
+            .parent()
+            .expect("runtime directory")
+            .to_path_buf(),
+    )
+    .expect("install isolated runtime directory");
+
+    let client = LocalDisplayClient::connect_execution(&socket_path, anchor, Role::Controller)
+        .expect("anchor Controller");
+    let mut root = ApplicationRoot::new();
+    root.attach_client(root.fence(), client)
+        .expect("bind anchor execution");
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).expect("ack window effect");
+    }
+    root.apply(AppAction::CreateWindow)
+        .expect("open independent window");
+    let open_window = root.snapshot().shell.active_window.expect("new window");
+    let workspace = root.snapshot().shell.active_workspace;
+    root.apply(AppAction::RecordUnpresented {
+        execution: unpresented,
+        workspace,
+    })
+    .expect("record unpresented execution");
+    root.apply(AppAction::TerminateUnpresented {
+        execution: unpresented,
+    })
+    .expect("request disposal");
+
+    let deadline = Instant::now() + Duration::from_secs(7);
+    let mut runtime_finalized = false;
+    while Instant::now() < deadline {
+        if let Err(error) = root.poll_client(root.fence()) {
+            panic!(
+                "drive attach and terminate: {error:?}; extra_clients={}; snapshot={:?}",
+                root.extra_pane_client_count(),
+                root.snapshot()
+            );
+        }
+        assert!(
+            root.snapshot()
+                .shell
+                .windows
+                .iter()
+                .any(|window| window.id == open_window),
+            "disposing an unpresented execution must preserve the open window"
+        );
+        if finalized_rx.try_recv().is_ok() {
+            runtime_finalized = true;
+        }
+        if runtime_finalized && root.live_unpresented().is_empty() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        runtime_finalized,
+        "Runtime must finalize the disposed child"
+    );
+    assert!(!root.live_unpresented().contains(&unpresented));
+    assert!(
+        root.snapshot()
+            .shell
+            .windows
+            .iter()
+            .any(|window| window.id == open_window),
+        "the independent window must remain open after child finalization"
+    );
+    let _ = stop_tx.send(());
+    runtime.join().expect("Runtime thread");
 }
 
 #[test]
