@@ -139,11 +139,11 @@ impl ShellState {
     }
 }
 
-/// Short non-secret palette label for one unpresented execution.
+/// Collision-free, non-secret palette label for one unpresented execution.
 pub fn unpresented_palette_label(execution: ExecutionId) -> String {
-    let bytes = execution.to_bytes();
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3]
-    )
+    execution
+        .to_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }

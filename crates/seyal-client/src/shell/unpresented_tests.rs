@@ -3,8 +3,8 @@
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::{
-    ShellAction, ShellError, ShellPaneSeed, ShellState, ShellTabSeed, ShellWindowSeed,
-    ShellWorkspaceSeed, SplitAxis,
+    unpresented_palette_label, ShellAction, ShellError, ShellPaneSeed, ShellState, ShellTabSeed,
+    ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
 };
 
 fn workspace_a() -> WorkspaceId {
@@ -13,6 +13,20 @@ fn workspace_a() -> WorkspaceId {
 
 fn workspace_b() -> WorkspaceId {
     WorkspaceId::from_bytes([0x22; 16])
+}
+
+#[test]
+fn unpresented_palette_labels_distinguish_ids_with_matching_prefixes() {
+    let first =
+        ExecutionId::from_bytes([0x11, 0x22, 0x33, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    let second =
+        ExecutionId::from_bytes([0x11, 0x22, 0x33, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
+
+    let first_label = unpresented_palette_label(first);
+    let second_label = unpresented_palette_label(second);
+    assert_ne!(first_label, second_label);
+    assert_eq!(first_label.len(), 32);
+    assert_eq!(second_label.len(), 32);
 }
 
 fn seed_two_workspaces() -> ShellState {
