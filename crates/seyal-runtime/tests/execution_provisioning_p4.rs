@@ -421,9 +421,16 @@ fn controller_terminate_requests_then_finalizes_via_lifecycle_only() {
         TerminateExecutionResultCode::TerminationRequested
     );
     assert_eq!(result.detail_code, 0);
-    assert_eq!(
-        h.runtime.lookup(created.execution_id).unwrap().lifecycle,
-        ExecutionLifecycle::TerminatingGraceful
+    let observed_lifecycle = h
+        .runtime
+        .lookup(created.execution_id)
+        .map(|snapshot| snapshot.lifecycle);
+    assert!(
+        matches!(
+            observed_lifecycle,
+            Some(ExecutionLifecycle::TerminatingGraceful) | None
+        ),
+        "termination may finalize before its reply is observed; the Lifecycle frame below remains mandatory"
     );
 
     let progress_deadline = Instant::now() + Duration::from_secs(3);
