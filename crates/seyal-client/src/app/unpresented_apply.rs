@@ -21,12 +21,23 @@ impl ApplicationRoot {
     }
 
     pub(super) fn reconcile_live_unpresented(&mut self, live: &[ExecutionId]) {
+        let known_workspaces: std::collections::HashMap<_, _> =
+            self.shell.unpresented_entries().into_iter().collect();
         let live: HashSet<_> = live.iter().copied().collect();
-        let entries = self
-            .shell
-            .unpresented_entries()
-            .into_iter()
-            .filter(|(execution, _)| live.contains(execution));
+        // Runtime owns the authoritative execution → Workspace association.
+        // The current local ListExecutions protocol is scoped to SPEC-004's
+        // implicit/default Workspace, so a fresh GUI can safely recover that
+        // association even though presentation state was not persisted.
+        let default_workspace = WorkspaceId::m001_default();
+        let entries = live.into_iter().map(|execution| {
+            (
+                execution,
+                known_workspaces
+                    .get(&execution)
+                    .copied()
+                    .unwrap_or(default_workspace),
+            )
+        });
         self.shell.replace_live_unpresented(entries);
     }
 

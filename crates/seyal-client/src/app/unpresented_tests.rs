@@ -207,6 +207,20 @@ fn runtime_inventory_reconciles_unpresented_catalog_and_keeps_workspace_scope() 
 }
 
 #[test]
+fn runtime_inventory_imports_survivors_into_a_fresh_shell_catalog() {
+    let mut root = ApplicationRoot::new();
+    let first = ExecutionId::from_bytes([0x51; 16]);
+    let second = ExecutionId::from_bytes([0x52; 16]);
+
+    // A restarted GUI has no prior shell catalog. Runtime still owns these
+    // live executions, and its current M001 association is the stable default
+    // Workspace (SPEC-004 §18.2; ADR-007 §2).
+    root.reconcile_live_unpresented(&[second, first]);
+
+    assert_eq!(root.live_unpresented(), vec![first, second]);
+}
+
+#[test]
 fn close_actions_do_not_emit_terminate_execution() {
     // Production shell is single-pane; close fails as last-pane before bound
     // checks. Either way no TerminateExecution effect is queued — destruction
