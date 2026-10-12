@@ -374,6 +374,7 @@ fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i
         7 => EnteredFullscreen,
         8 => ExitedFullscreen,
         9 => ScreenOrScaleChanged,
+        10 => ActivationFailed,
         _ => return Err(-6),
     })
 }

@@ -134,6 +134,8 @@ pub enum AppError {
     UnknownWindow,
     /// Extra Window create rejected until close exists (W4a). ABI 52.
     WindowCreationUnavailable,
+    /// Native WindowActivation failed after bounded retry. ABI 53.
+    WindowActivationFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -418,6 +420,8 @@ pub enum WindowNativeEvent {
     EnteredFullscreen = 7,
     ExitedFullscreen = 8,
     ScreenOrScaleChanged = 9,
+    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
+    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

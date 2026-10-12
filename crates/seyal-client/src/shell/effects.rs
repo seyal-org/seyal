@@ -8,7 +8,17 @@ use seyal_core::WindowId;
 /// Rust remains the sole product authority (ADR-015 / ADR-018 §2.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellNativeEffect {
-    RealizeWindow { window: WindowId },
-    DestroyWindowRealization { window: WindowId },
-    OrderFrontMakeKey { window: WindowId },
+    RealizeWindow {
+        window: WindowId,
+    },
+    DestroyWindowRealization {
+        window: WindowId,
+    },
+    OrderFrontMakeKey {
+        window: WindowId,
+    },
+    /// Navigate named this window; host realizes key/front only (SPEC-022 §5).
+    WindowActivation {
+        window: WindowId,
+    },
 }

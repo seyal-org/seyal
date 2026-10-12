@@ -28,6 +28,10 @@ pub enum NativeEffect {
     OrderFrontMakeKey {
         window: WindowId,
     },
+    /// SPEC-022 R5.2: host must activate this window, not another.
+    WindowActivation {
+        window: WindowId,
+    },
     /// Rust finished quit bookkeeping after the host acked BoundedDetachThenTerminate.
     QuitCleanupComplete,
 }
@@ -40,6 +44,7 @@ impl From<ShellNativeEffect> for NativeEffect {
                 Self::DestroyWindowRealization { window }
             }
             ShellNativeEffect::OrderFrontMakeKey { window } => Self::OrderFrontMakeKey { window },
+            ShellNativeEffect::WindowActivation { window } => Self::WindowActivation { window },
         }
     }
 }
@@ -53,6 +58,7 @@ impl NativeEffect {
             Self::DestroyWindowRealization { .. } => 3,
             Self::OrderFrontMakeKey { .. } => 4,
             Self::QuitCleanupComplete => 5,
+            Self::WindowActivation { .. } => 6,
         }
     }
 
@@ -61,7 +67,8 @@ impl NativeEffect {
             Self::BoundedDetachThenTerminate { .. } | Self::QuitCleanupComplete => None,
             Self::RealizeWindow { window }
             | Self::DestroyWindowRealization { window }
-            | Self::OrderFrontMakeKey { window } => Some(window),
+            | Self::OrderFrontMakeKey { window }
+            | Self::WindowActivation { window } => Some(window),
         }
     }
 
