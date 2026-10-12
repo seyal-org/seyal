@@ -1,8 +1,8 @@
 # M003 W7 (#1221) — adversarial lifecycle matrix
 
-**Candidate base:** refreshed W5 head `a58c3613` (PR #1268 head at capture time).
+**W5 base for this candidate:** `ee4fb99607ae76ab190eee2d4cda3b7f784f1b7d` (PR #1268 current head at the time of capture).
 **Not Done:** M003 / #665 / #674 remain open. This ledger is validation evidence only.
-**Merge deps not octopus-merged:** #936 / PR #1250, PT4 #1249, PT5 #1259 (merge-tree conflicts with W5 tip).
+**Dependencies not on this W5 base:** #936 / PR #1250 and PT4 #1249. PT5 #1259 has merged into the separate PT4 stack; neither stack is included here (merge-tree conflicts with W5 tip).
 
 ## Orthogonal dimensions
 
@@ -57,4 +57,4 @@
 
 ## M002 contract
 
-Empty diff vs W5 tip for `crates/seyal-terminal/**`, HistoryStore, Unicode, reflow, terminfo, and keyboard-protocol modules. Confirmed at PR open by `git diff 9e2a06e6 -- crates/seyal-terminal`.
+Empty diff vs W5 base `ee4fb99607ae76ab190eee2d4cda3b7f784f1b7d` for `crates/seyal-terminal/**`, HistoryStore, Unicode, reflow, terminfo, and keyboard-protocol modules. Reproduced with `git diff ee4fb99607ae76ab190eee2d4cda3b7f784f1b7d...HEAD -- crates/seyal-terminal` at capture.

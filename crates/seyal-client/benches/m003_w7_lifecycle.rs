@@ -103,7 +103,7 @@ fn measure_create_tab_latency() {
         &mut samples,
     );
     println!(
-        "m003_w7_create_latency boundary=Pane_split_create evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_C3_1238_and_PT5_1219 {PERFORMANCE_CLAIM}"
+        "m003_w7_create_latency boundary=Pane_split_create evidence_class=PLATFORM_LIMITED reason=PT4_1249_not_on_W5_base_PT5_1259_is_merged_into_PT4_stack {PERFORMANCE_CLAIM}"
     );
 }
 
@@ -212,12 +212,12 @@ fn print_quit_cleanup_derivation() {
 
 fn print_platform_limited_rows() {
     println!(
-        "m003_w7_idle_cpu_rss_hidden_occluded evidence_class=PLATFORM_LIMITED reason=headed_idle_sampling_requires_Seyal_app_plus_unmerged_936_multi_live_and_PT5_pane_ops {PERFORMANCE_CLAIM}"
+        "m003_w7_idle_cpu_rss_hidden_occluded evidence_class=PLATFORM_LIMITED reason=headed_idle_sampling_requires_Seyal_app_plus_PR_1250_multi_live_and_PT4_pane_ops {PERFORMANCE_CLAIM}"
     );
     println!(
-        "m003_w7_presentation_scaling_headed_multi_live counts=1,10,50,100 evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_PR_1250_issue_936_and_PR_1259_issue_1219 {PERFORMANCE_CLAIM}"
+        "m003_w7_presentation_scaling_headed_multi_live counts=1,10,50,100 evidence_class=PLATFORM_LIMITED reason=PR_1250_issue_936_not_on_W5_base {PERFORMANCE_CLAIM}"
     );
     println!(
-        "m003_w7_pane_ops_equalize_swap_move evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_PT4_1249_PT5_1259 {PERFORMANCE_CLAIM}"
+        "m003_w7_pane_ops_equalize_swap_move evidence_class=PLATFORM_LIMITED reason=PT4_1249_not_on_W5_base_PT5_1259_is_merged_into_PT4_stack {PERFORMANCE_CLAIM}"
     );
 }
