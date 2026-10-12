@@ -1,6 +1,6 @@
 # M003 W7 (#1221) — adversarial lifecycle matrix
 
-**Candidate stack tip:** W7 validation commit `d092e8b6` on refreshed W5 tip `a58c3613` (PR #1268 head at capture time).
+**Candidate base:** refreshed W5 head `a58c3613` (PR #1268 head at capture time).
 **Not Done:** M003 / #665 / #674 remain open. This ledger is validation evidence only.
 **Merge deps not octopus-merged:** #936 / PR #1250, PT4 #1249, PT5 #1259 (merge-tree conflicts with W5 tip).
 
@@ -26,6 +26,7 @@
 | Tab close leaves Window open | `shell::w7_matrix_tests::tab_close_leaves_window_open_without_terminate` |
 | Window close without execution death | `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (real Runtime child remains in unpresented inventory after its Window closes) |
 | Unpresented execution finalizes without closing another Window | `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (real Runtime child + ApplicationRoot attach/dispose; asserts child finalization, retained other Window, and surviving closed-window child) |
+| Last Window closes while the App remains running | `SeyalHostUITests::testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit` (W4b/W7; closes the final live-PTY Window and asserts zero windows plus foreground process) |
 | Quit × create in flight | `app::w7_adversarial_tests::quit_while_create_tab_provisioning_in_flight` |
 | Close requesting Tab × create in flight | `app::w7_adversarial_tests::close_requesting_tab_while_provisioning_in_flight` |
 | Terminate after Hidden → Unpresented | `app::w7_adversarial_tests::terminate_path_survives_hidden_then_unpresented` |
