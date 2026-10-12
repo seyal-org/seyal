@@ -207,8 +207,11 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    root.apply(AppAction::ClosePane { id: pane })
-        .expect("presentation removal");
+    root.apply(AppAction::ClosePane {
+        id: pane,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("presentation removal");
     assert!(root
         .snapshot()
         .pending_effects
@@ -321,8 +324,12 @@ fn close_window_keeps_bound_execution_enumerable_without_terminate() {
         evidence: evidence(execution, AttachmentId::from_bytes([0x45; 16])),
     })
     .unwrap();
-    root.apply(AppAction::CloseWindow { id: window })
-        .expect("W4b CloseWindow");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation,
+    })
+    .expect("W4b CloseWindow");
     assert!(root.snapshot().shell.windows.is_empty());
     assert!(root.snapshot().shell.active_window.is_none());
     assert!(root
