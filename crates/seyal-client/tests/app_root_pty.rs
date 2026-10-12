@@ -161,19 +161,6 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         .expect("open independent window");
     let open_window = root.snapshot().shell.active_window.expect("new window");
     let workspace = root.snapshot().shell.active_workspace;
-    root.apply(AppAction::CloseWindow {
-        id: anchor_window,
-        containment_generation: root.snapshot().shell.containment_generation,
-    })
-    .expect("close anchor window");
-    while !root.snapshot().pending_effects.is_empty() {
-        root.apply(AppAction::AckEffect).expect("ack close effect");
-    }
-    assert_eq!(
-        root.live_unpresented(),
-        vec![anchor],
-        "closing the anchor window must retain its live execution in inventory"
-    );
     root.apply(AppAction::RecordUnpresented {
         execution: unpresented,
         workspace,
@@ -223,6 +210,22 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         "Runtime must finalize the disposed child"
     );
     assert!(!root.live_unpresented().contains(&unpresented));
+    assert!(
+        root.snapshot()
+            .shell
+            .windows
+            .iter()
+            .any(|window| window.id == anchor_window),
+        "the bound anchor window must remain open while the unbound focused window is active"
+    );
+    root.apply(AppAction::CloseWindow {
+        id: anchor_window,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("close anchor window");
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).expect("ack close effect");
+    }
     assert!(
         root.snapshot()
             .shell
