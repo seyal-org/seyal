@@ -510,6 +510,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
         // Focused chrome container follows the focused LIVE region.
         let focusedRegion = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertTrue(focusedRegion.isAccessibilityEnabled())
         let live = try XCTUnwrap(view.pane.superview)
         XCTAssertFalse(live.isHidden)
         XCTAssertEqual(live.frame, focusedRegion.frame.insetBy(dx: 1, dy: 1))
@@ -521,6 +522,7 @@ final class SeyalHostComponentTests: XCTestCase {
         host.frame = NSRect(x: 0, y: 0, width: 100, height: 80)
         XCTAssertTrue(host.hitTest(NSPoint(x: 10, y: 10)) === host)
         XCTAssertEqual(host.accessibilityRole(), .button)
+        XCTAssertTrue(host.isAccessibilityEnabled())
         XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
     }
 

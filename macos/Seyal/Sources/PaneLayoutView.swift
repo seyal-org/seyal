@@ -334,6 +334,12 @@ private final class PaneRegionView: NSView {
         title.font = .systemFont(ofSize: theme.uiFontSize, weight: .regular)
     }
 
+    /// Pane regions route clicks to Rust focus. Keep the custom accessibility
+    /// group enabled so assistive technology and XCUI can invoke that action.
+    override func isAccessibilityEnabled() -> Bool {
+        true
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard !region.focused else {
             super.mouseDown(with: event)

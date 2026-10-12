@@ -6,7 +6,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var host: ProductChromeHostView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let host = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
+        let initialSize = initialWindowSize
+        let host = ProductChromeHostView(
+            frame: NSRect(origin: .zero, size: initialSize)
+        )
         self.host = host
 
         let window = NSWindow(
@@ -31,6 +34,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installMenus(host: host)
         host.activateAfterWindowPresentation()
         NSApp.activate(ignoringOtherApps: true)
+
+        #if DEBUG
+        // AppKit may restore/zoom the previous window frame after launch. The
+        // multi-Pane UI test opts into a compact frame so both real Pane hit
+        // targets fit on the test display before it starts interacting.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            DispatchQueue.main.async {
+                window.setContentSize(initialSize)
+                window.center()
+            }
+        }
+        #endif
+    }
+
+    private var initialWindowSize: NSSize {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            return NSSize(width: 1100, height: 760)
+        }
+        #endif
+        return NSSize(width: 1280, height: 800)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

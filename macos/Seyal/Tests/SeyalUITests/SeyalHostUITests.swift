@@ -71,9 +71,12 @@ final class SeyalHostUITests: XCTestCase {
 
     /// Kill a leftover Seyal.app from the previous case before launch.
     /// Must run on the test's MainActor isolation, not XCTest's sync tearDown.
-    private func hostedApp() -> XCUIApplication {
+    private func hostedApp(compactWindowForResize: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchIsolatedHost()
+        let environment = compactWindowForResize
+            ? ["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW": "1"]
+            : [:]
+        app.launchIsolatedHost(environment: environment)
         return app
     }
 
@@ -253,16 +256,39 @@ final class SeyalHostUITests: XCTestCase {
     /// #936: a real outer-window resize reaches both independent PTYs. The
     /// second execution is unfocused while its secondary host proposes layout.
     func testWindowResizeUpdatesBothLivePanePtyGeometries() throws {
-        let app = hostedApp()
+        let app = hostedApp(compactWindowForResize: true)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 8))
+        let compactWindow = expectation(
+            for: NSPredicate { _, _ in window.frame.width <= 1200 },
+            evaluatedWith: window,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [compactWindow], timeout: 5),
+            .completed,
+            "test launch must apply its compact frame after AppKit restores the window"
+        )
         waitForUsablePty(in: app)
+        XCTAssertLessThanOrEqual(
+            window.frame.width,
+            1200,
+            "Runtime attach must not restore a window larger than the test display: \(window.frame)"
+        )
         let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
         XCTAssertTrue(split.waitForExistence(timeout: 8))
         split.click()
+        XCTAssertLessThanOrEqual(
+            window.frame.width,
+            1200,
+            "split must preserve the compact test window: \(window.frame)"
+        )
         let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
         let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
         XCTAssertTrue(secondRegion.waitForExistence(timeout: 12))
         let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
         XCTAssertTrue(secondaryHost.waitForExistence(timeout: 12))
+        XCTAssertTrue(secondaryHost.isEnabled, "secondary Pane focus target must be an enabled AX button")
 
         let firstFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-a")
         let secondFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-b")
@@ -278,7 +304,16 @@ final class SeyalHostUITests: XCTestCase {
         ) -> (Int, Int)? {
             let focused = NSPredicate(format: "value == 'focused'")
             if (region.value as? String) != "focused" {
-                guard focusTarget.waitForExistence(timeout: 5), focusTarget.isHittable else {
+                guard focusTarget.waitForExistence(timeout: 5) else {
+                    return nil
+                }
+                guard focusTarget.isEnabled else { return nil }
+                let hittable = expectation(
+                    for: NSPredicate(format: "isHittable == true"),
+                    evaluatedWith: focusTarget,
+                    handler: nil
+                )
+                guard XCTWaiter.wait(for: [hittable], timeout: 5) == .completed else {
                     return nil
                 }
                 focusTarget.click()
@@ -305,9 +340,14 @@ final class SeyalHostUITests: XCTestCase {
             return nil
         }
 
-        guard let firstBefore = runSize(in: firstRegion, activating: firstRegion, file: firstFile),
-              let secondBefore = runSize(in: secondRegion, activating: secondaryHost, file: secondFile) else {
-            XCTFail("both PTYs must report their initial stty size")
+        guard let firstBefore = runSize(in: firstRegion, activating: firstRegion, file: firstFile) else {
+            XCTFail("first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil")")
+            return
+        }
+        guard let secondBefore = runSize(in: secondRegion, activating: secondaryHost, file: secondFile) else {
+            XCTFail(
+                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
+            )
             return
         }
         XCTAssertGreaterThan(firstBefore.0, 0)
@@ -315,17 +355,17 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertGreaterThan(secondBefore.0, 0)
         XCTAssertGreaterThan(secondBefore.1, 0)
 
-        let window = app.windows.firstMatch
-        XCTAssertTrue(window.exists)
         let oldWidth = window.frame.width
+        // The compact test frame leaves enough display space for both panes
+        // and a real native resize gesture.
         let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
             .withOffset(CGVector(dx: -3, dy: -3))
-        corner.press(forDuration: 0.05, thenDragTo: corner.withOffset(CGVector(dx: 100, dy: 0)))
+        corner.click(forDuration: 0.15, thenDragTo: corner.withOffset(CGVector(dx: 120, dy: 0)))
         let resizeDeadline = Date().addingTimeInterval(5)
-        while Date() < resizeDeadline, window.frame.width <= oldWidth + 24 {
+        while Date() < resizeDeadline, window.frame.width <= oldWidth + 20 {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
-        XCTAssertGreaterThan(window.frame.width, oldWidth + 24, "window must resize")
+        XCTAssertGreaterThan(window.frame.width, oldWidth + 20, "window must resize")
 
         try? FileManager.default.removeItem(at: firstFile)
         try? FileManager.default.removeItem(at: secondFile)

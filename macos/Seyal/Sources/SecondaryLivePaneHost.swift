@@ -76,6 +76,13 @@ final class SecondaryLivePaneHost: NSView {
         return true
     }
 
+    /// NSView's custom accessibility element defaults to disabled unless the
+    /// enabled attribute is supplied. This visible focus target must advertise
+    /// that it responds to mouse and accessibility press actions.
+    override func isAccessibilityEnabled() -> Bool {
+        true
+    }
+
     override func layout() {
         super.layout()
         guard displayHandle != 0, window != nil, !isHidden,
