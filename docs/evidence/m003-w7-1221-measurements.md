@@ -3,7 +3,7 @@
 **Harness:** `cargo bench -p seyal-client --locked --bench m003_w7_lifecycle`
 **Skill:** `.agents/skills/performance-gate/SKILL.md`
 **Claim policy:** all rows `performance_claim=false` unless a future freeze SHA re-qualifies them.
-**Stack:** W5 tip `a58c3613` + W7 source commit `ada74d7c`. This candidate is validation evidence only, not an M003 Done freeze.
+**Stack:** W5 tip `a58c3613` + W7 source commit `d092e8b6`. This candidate is validation evidence only, not an M003 Done freeze.
 
 ## Environment (controlled-host)
 
@@ -27,18 +27,18 @@ Recorded by the harness `m003_w7_lifecycle_host` line. Local capture:
 | Presentation scaling 1/10/50/100 | AppRoot occlusion + select-all-tabs | `controlled-host` | **`real_pty_count=0`** — presentation count separated from PTY count |
 | Quit-cleanup deadline | Configured 500 ms | `PLATFORM_LIMITED` | No accepted derivation establishes renderer/GPU cleanup headroom or the 16-attachment bound for this path |
 
-### Harness stdout (W7 source commit `ada74d7c`)
+### Harness stdout (W7 source commit `d092e8b6`)
 
 ```text
-m003_w7_lifecycle_host os=macos arch=aarch64 sha=ada74d7cbd1397f96f5e9e9ebcda482960378f20 build=release_bench evidence_class=controlled-host percentile_method=nearest_rank warmups=20 samples=200 performance_claim=false
-m003_w7_create_latency boundary=AppAction_CreateWindow_zero_window_reentry evidence_class=controlled-host sample_count=200 p50_us=1 p95_us=1 p99_us=1 max_us=1 performance_claim=false
-m003_w7_create_latency boundary=AppAction_CreateTab_shell_admit_no_wire evidence_class=controlled-host sample_count=200 p50_us=2 p95_us=2 p99_us=4 max_us=12 performance_claim=false
+m003_w7_lifecycle_host os=macos arch=aarch64 sha=d092e8b60128f9d2cdc644c05e0dff702f9d85c3 build=release_bench evidence_class=controlled-host percentile_method=nearest_rank warmups=20 samples=200 performance_claim=false
+m003_w7_create_latency boundary=AppAction_CreateWindow_zero_window_reentry evidence_class=controlled-host sample_count=200 p50_us=1 p95_us=1 p99_us=1 max_us=4 performance_claim=false
+m003_w7_create_latency boundary=AppAction_CreateTab_shell_admit_no_wire evidence_class=controlled-host sample_count=200 p50_us=4 p95_us=5 p99_us=9 max_us=12 performance_claim=false
 m003_w7_create_latency boundary=Pane_split_create evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_C3_1238_and_PT5_1219 performance_claim=false
-m003_w7_focus_switch_latency boundary=AppAction_SelectTab evidence_class=controlled-host sample_count=200 p50_us=2 p95_us=2 p99_us=3 max_us=10 performance_claim=false
-m003_w7_presentation_scaling presentation_count=1 real_pty_count=0 hidden_inactive_tabs=0 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=3 note=separates_presentation_count_from_pty_count performance_claim=false
-m003_w7_presentation_scaling presentation_count=10 real_pty_count=0 hidden_inactive_tabs=9 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=98 note=separates_presentation_count_from_pty_count performance_claim=false
-m003_w7_presentation_scaling presentation_count=50 real_pty_count=0 hidden_inactive_tabs=49 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=1243 note=separates_presentation_count_from_pty_count performance_claim=false
-m003_w7_presentation_scaling presentation_count=100 real_pty_count=0 hidden_inactive_tabs=99 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=4525 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_focus_switch_latency boundary=AppAction_SelectTab evidence_class=controlled-host sample_count=200 p50_us=3 p95_us=3 p99_us=7 max_us=18 performance_claim=false
+m003_w7_presentation_scaling presentation_count=1 real_pty_count=0 hidden_inactive_tabs=0 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=5 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_presentation_scaling presentation_count=10 real_pty_count=0 hidden_inactive_tabs=9 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=144 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_presentation_scaling presentation_count=50 real_pty_count=0 hidden_inactive_tabs=49 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=1848 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_presentation_scaling presentation_count=100 real_pty_count=0 hidden_inactive_tabs=99 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=6470 note=separates_presentation_count_from_pty_count performance_claim=false
 m003_w7_quit_cleanup_deadline configured_ms=500 evidence_class=PLATFORM_LIMITED reason=no_accepted_derivation_for_quit_cleanup_headroom performance_claim=false
 m003_w7_idle_cpu_rss_hidden_occluded evidence_class=PLATFORM_LIMITED reason=headed_idle_sampling_requires_Seyal_app_plus_unmerged_936_multi_live_and_PT5_pane_ops performance_claim=false
 m003_w7_presentation_scaling_headed_multi_live counts=1,10,50,100 evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_PR_1250_issue_936_and_PR_1259_issue_1219 performance_claim=false
