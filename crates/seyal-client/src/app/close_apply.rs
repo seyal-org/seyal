@@ -40,7 +40,7 @@ impl ApplicationRoot {
             })
             .map_err(|error| match error {
                 ShellError::StaleContainment => AppError::StalePane,
-                _ => AppError::UnknownChromeTab,
+                _ => AppError::UnknownWindow,
             })?;
         self.drain_shell_effects();
         let removed = self.shell.take_removed_tab_panes();
