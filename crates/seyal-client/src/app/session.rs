@@ -140,6 +140,8 @@ impl ApplicationRoot {
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
+        #[cfg(target_os = "macos")]
+        self.poll_unpresented_inventory_refresh();
         let display_handle = self
             .authority
             .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())

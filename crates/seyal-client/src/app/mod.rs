@@ -9,6 +9,7 @@
 mod accessibility;
 mod chrome_apply;
 mod composer_apply;
+mod errors;
 mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
@@ -22,6 +23,7 @@ mod session;
 mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
+use errors::{chrome_error, close_pane_error, close_tab_error, composer_error, palette_error};
 
 pub use native_effect::NativeEffect;
 
@@ -283,10 +285,12 @@ pub enum AppAction {
         evidence: BindingEvidence,
     },
     /// Test/Runtime sync of the live-unpresented catalog.
+    #[cfg(test)]
     SyncLiveUnpresented {
         entries: Vec<(ExecutionId, WorkspaceId)>,
     },
     /// Record one live-unpresented execution (tests construct Unpresented directly).
+    #[cfg(test)]
     RecordUnpresented {
         execution: ExecutionId,
         workspace: WorkspaceId,
@@ -516,6 +520,10 @@ pub struct ApplicationRoot {
     /// In-flight second-Controller connect (off the host poll thread).
     #[cfg(target_os = "macos")]
     pending_live_attach: Option<live_attach_apply::PendingLiveAttach>,
+    /// In-flight cold Runtime inventory request, separate from per-Pane attach.
+    #[cfg(target_os = "macos")]
+    pending_unpresented_inventory:
+        Option<std::sync::mpsc::Receiver<Result<Vec<ExecutionId>, crate::local::ClientError>>>,
     /// Created executions waiting for a free live-attach worker (ADR-017 §6.3).
     #[cfg(target_os = "macos")]
     queued_live_attaches: VecDeque<(crate::provisioning::ConnectionOwner, ExecutionId)>,
@@ -590,6 +598,8 @@ impl ApplicationRoot {
             inject_live_attach_failures: 0,
             #[cfg(target_os = "macos")]
             pending_live_attach: None,
+            #[cfg(target_os = "macos")]
+            pending_unpresented_inventory: None,
             #[cfg(target_os = "macos")]
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
@@ -890,7 +900,9 @@ impl ApplicationRoot {
             AppAction::CloseTab { id } => self.close_tab(id),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            #[cfg(test)]
             AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            #[cfg(test)]
             AppAction::RecordUnpresented {
                 execution,
                 workspace,
@@ -980,51 +992,5 @@ impl ApplicationRoot {
     pub(crate) fn fail(&mut self, error: AppError) -> Result<(), AppError> {
         self.last_error = Some(error);
         Err(error)
-    }
-}
-
-pub(super) fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub(super) fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub(super) fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub(super) fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub(super) fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
-        }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
     }
 }

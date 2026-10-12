@@ -48,14 +48,11 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 
 # #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
 # and relocated unit-test modules land in the cohesion-review band by design.
-
-# #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
-# and relocated unit-test modules land in the cohesion-review band by design.
-[[exception]]
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1030
+acknowledged_loc = 996
 issue = 1143
-responsibility = "ApplicationRoot types, action dispatch, and product-state façade remain one authority; W6 adds the explicit adopt/terminate and Runtime catalog-sync actions that route through existing provisioning and shell reducers. Further splitting would separate AppAction from the apply match that owns it."
+reason = "ApplicationRoot retains the single product-state façade and action dispatch; #1143 moves error translation to errors.rs while keeping cross-cutting action ownership together."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"

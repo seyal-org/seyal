@@ -1,10 +1,10 @@
-//! ADR-018 §3.3 live-unpresented inventory, adopt, and explicit terminate.
+//! ADR-018 §3.3 live-unpresented inventory and adoption.
 //!
 //! Enumeration is deterministic (`BTreeMap` by `ExecutionId`) and never
 //! auto-selects (SPEC-009 §8.2). Adoption rebinds the same `ExecutionId` into a
 //! Pane leaf; Runtime supplies a fresh `AttachmentId` on the attach path.
-//! `TerminateExecution` drops the catalog entry only; Runtime dispose is
-//! `ProvisioningEffect::AttachController` plus type 38, not a host native effect.
+//! Runtime dispose is `ProvisioningEffect::AttachController` plus type 38 and
+//! the catalog entry remains until its correlated result arrives.
 
 use std::collections::BTreeMap;
 
@@ -22,6 +22,13 @@ impl ShellState {
             .iter()
             .filter(|(_, owned)| **owned == workspace)
             .map(|(id, _)| *id)
+            .collect()
+    }
+
+    pub(crate) fn unpresented_entries(&self) -> Vec<(ExecutionId, WorkspaceId)> {
+        self.unpresented
+            .iter()
+            .map(|(execution, workspace)| (*execution, *workspace))
             .collect()
     }
 
@@ -102,16 +109,6 @@ impl ShellState {
         Ok(())
     }
 
-    pub(super) fn terminate_execution(&mut self, execution: ExecutionId) -> Result<(), ShellError> {
-        if self.execution_is_bound(execution) {
-            return Err(ShellError::ExecutionAlreadyBound);
-        }
-        if self.unpresented.remove(&execution).is_none() {
-            return Err(ShellError::ExecutionNotUnpresented);
-        }
-        Ok(())
-    }
-
     pub(super) fn pane_workspace(&self, pane: PaneId) -> Result<WorkspaceId, ShellError> {
         for workspace in &self.workspaces {
             for tab in workspace.tabs() {
@@ -137,7 +134,6 @@ impl ShellState {
             ShellAction::AdoptExecution { pane, execution } => {
                 self.adopt_execution(pane, execution)
             }
-            ShellAction::TerminateExecution { execution } => self.terminate_execution(execution),
             _ => unreachable!("dispatch_unpresented only handles §3.3 actions"),
         }
     }

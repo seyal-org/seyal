@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::shell::ShellAction;
+use std::collections::HashSet;
 
 impl ApplicationRoot {
     /// Deterministic live-unpresented ids for the active Workspace (ADR-018 §3.3).
@@ -10,12 +11,60 @@ impl ApplicationRoot {
         self.shell.live_unpresented(workspace)
     }
 
+    #[cfg(test)]
     pub(super) fn sync_live_unpresented(
         &mut self,
         entries: Vec<(ExecutionId, WorkspaceId)>,
     ) -> Result<(), AppError> {
         self.shell.replace_live_unpresented(entries);
         Ok(())
+    }
+
+    pub(super) fn reconcile_live_unpresented(&mut self, live: &[ExecutionId]) {
+        let live: HashSet<_> = live.iter().copied().collect();
+        let entries = self
+            .shell
+            .unpresented_entries()
+            .into_iter()
+            .filter(|(execution, _)| live.contains(execution));
+        self.shell.replace_live_unpresented(entries);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn begin_unpresented_inventory_refresh(&mut self) {
+        if self.pending_unpresented_inventory.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        if std::thread::Builder::new()
+            .name("seyal-execution-inventory".to_owned())
+            .spawn(move || {
+                let _ = tx.send(crate::local::LocalDisplayClient::list_live_execution_ids());
+            })
+            .is_ok()
+        {
+            self.pending_unpresented_inventory = Some(rx);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn poll_unpresented_inventory_refresh(&mut self) {
+        let Some(rx) = self.pending_unpresented_inventory.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(live)) => {
+                self.pending_unpresented_inventory = None;
+                self.reconcile_live_unpresented(&live);
+                if self.palette.is_open() {
+                    self.rebuild_palette();
+                }
+            }
+            Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending_unpresented_inventory = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
     }
 
     pub(super) fn record_unpresented(

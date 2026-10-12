@@ -885,16 +885,6 @@ impl LocalDisplayClient {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn read_blocking_frame(
-    stream: &mut UnixStream,
-) -> Result<(MessageType, Vec<u8>), ClientError> {
-    let frame = read_blocking_raw_frame(stream)?;
-    let header = FrameHeader::decode(&frame[..HEADER_LEN]).map_err(|_| ClientError::Protocol)?;
-    let message_type = MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
-    Ok((message_type, frame[HEADER_LEN..].to_vec()))
-}
-
 pub(crate) fn read_blocking_frame_until(
     stream: &mut UnixStream,
     deadline: Instant,
@@ -903,23 +893,6 @@ pub(crate) fn read_blocking_frame_until(
     let header = FrameHeader::decode(&frame[..HEADER_LEN]).map_err(|_| ClientError::Protocol)?;
     let message_type = MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
     Ok((message_type, frame[HEADER_LEN..].to_vec()))
-}
-
-#[cfg(test)]
-fn read_blocking_raw_frame(stream: &mut UnixStream) -> Result<Vec<u8>, ClientError> {
-    use std::io::Read;
-    let mut header_bytes = [0u8; HEADER_LEN];
-    stream
-        .read_exact(&mut header_bytes)
-        .map_err(|_| ClientError::Io)?;
-    let header = FrameHeader::decode(&header_bytes).map_err(|_| ClientError::Protocol)?;
-    let mut frame = Vec::with_capacity(HEADER_LEN + header.payload_len as usize);
-    frame.extend_from_slice(&header_bytes);
-    frame.resize(HEADER_LEN + header.payload_len as usize, 0);
-    stream
-        .read_exact(&mut frame[HEADER_LEN..])
-        .map_err(|_| ClientError::Io)?;
-    Ok(frame)
 }
 
 pub(crate) fn read_blocking_raw_frame_until(
@@ -936,5 +909,8 @@ pub(crate) fn read_blocking_raw_frame_until(
     Ok(frame)
 }
 
+mod execution_inventory;
+#[cfg(test)]
+mod execution_inventory_tests;
 #[cfg(test)]
 mod tests;

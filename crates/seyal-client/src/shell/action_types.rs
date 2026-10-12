@@ -119,8 +119,4 @@ pub enum ShellAction {
         pane: PaneId,
         execution: ExecutionId,
     },
-    /// Explicit disposition; never implied by Tab/Window destruction.
-    TerminateExecution {
-        execution: ExecutionId,
-    },
 }

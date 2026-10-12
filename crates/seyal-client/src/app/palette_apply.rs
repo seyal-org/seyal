@@ -14,6 +14,8 @@ impl ApplicationRoot {
         self.palette
             .apply(PaletteAction::Open, 0)
             .map_err(palette_error)?;
+        #[cfg(target_os = "macos")]
+        self.begin_unpresented_inventory_refresh();
         self.rebuild_palette();
         Ok(())
     }
@@ -60,7 +62,7 @@ impl ApplicationRoot {
             .map_err(palette_error)
     }
 
-    fn rebuild_palette(&mut self) {
+    pub(super) fn rebuild_palette(&mut self) {
         let shell = self.shell.snapshot();
         let chrome = self.chrome.snapshot(&shell, &self.focused_blocks());
         let unpresented = self.shell.live_unpresented(shell.active_workspace);

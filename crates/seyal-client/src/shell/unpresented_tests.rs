@@ -227,7 +227,7 @@ fn adopt_rejects_retired_or_finalized() {
 }
 
 #[test]
-fn terminate_is_distinct_and_not_emitted_by_close() {
+fn close_and_catalog_forget_emit_no_native_terminate() {
     let mut shell = seed_two_workspaces();
     shell
         .apply(ShellAction::SplitFocused {
@@ -252,7 +252,7 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
         })
         .unwrap();
     shell
-        .apply(ShellAction::TerminateExecution { execution })
+        .apply(ShellAction::ForgetUnpresented { execution })
         .unwrap();
     assert!(
         shell.take_effects().is_empty(),
@@ -260,7 +260,7 @@ fn terminate_is_distinct_and_not_emitted_by_close() {
     );
     assert!(shell.live_unpresented(workspace_a()).is_empty());
     assert_eq!(
-        shell.apply(ShellAction::TerminateExecution { execution }),
+        shell.apply(ShellAction::ForgetUnpresented { execution }),
         Err(ShellError::ExecutionNotUnpresented)
     );
 }

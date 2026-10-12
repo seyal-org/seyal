@@ -702,8 +702,7 @@ impl ShellState {
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
             ShellAction::RecordUnpresented { .. }
             | ShellAction::ForgetUnpresented { .. }
-            | ShellAction::AdoptExecution { .. }
-            | ShellAction::TerminateExecution { .. } => self.dispatch_unpresented(action),
+            | ShellAction::AdoptExecution { .. } => self.dispatch_unpresented(action),
         }
     }
 

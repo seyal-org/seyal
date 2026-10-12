@@ -180,6 +180,33 @@ fn sync_drops_retired_and_bound() {
 }
 
 #[test]
+fn runtime_inventory_reconciles_unpresented_catalog_and_keeps_workspace_scope() {
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let other_workspace = WorkspaceId::from_bytes([0x44; 16]);
+    let live_here = ExecutionId::from_bytes([0x11; 16]);
+    let exited_here = ExecutionId::from_bytes([0x22; 16]);
+    let live_elsewhere = ExecutionId::from_bytes([0x33; 16]);
+
+    root.sync_live_unpresented(vec![
+        (live_here, workspace),
+        (exited_here, workspace),
+        (live_elsewhere, other_workspace),
+    ])
+    .unwrap();
+
+    // Runtime reports two live executions and omits the naturally exited one.
+    root.reconcile_live_unpresented(&[live_here, live_elsewhere]);
+
+    assert_eq!(root.live_unpresented(), vec![live_here]);
+    assert_eq!(
+        root.shell.live_unpresented(other_workspace),
+        vec![live_elsewhere],
+        "reconciliation keeps the Workspace association while removing exited ids"
+    );
+}
+
+#[test]
 fn close_actions_do_not_emit_terminate_execution() {
     // Production shell is single-pane; close fails as last-pane before bound
     // checks. Either way no TerminateExecution effect is queued — destruction
