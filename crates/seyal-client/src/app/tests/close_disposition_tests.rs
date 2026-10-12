@@ -15,6 +15,21 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
 }
 
 #[test]
+fn closing_unknown_window_returns_window_error_without_mutation() {
+    let mut root = ApplicationRoot::new();
+    let before = root.snapshot().shell;
+
+    assert_eq!(
+        root.apply(AppAction::CloseWindow {
+            id: WindowId::new(),
+            containment_generation: before.containment_generation,
+        }),
+        Err(AppError::UnknownWindow)
+    );
+    assert_eq!(root.snapshot().shell.windows, before.windows);
+}
+
+#[test]
 fn closing_bound_authority_pane_clears_presentation_for_rebind() {
     let tab = TabId::new();
     let pane = PaneId::new();
