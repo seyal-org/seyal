@@ -94,8 +94,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::CommandPaletteClose => self.close_palette(fence),
             WorkspaceCommandId::TabCreate => self.create_tab(),
             WorkspaceCommandId::TabCloseFocused => {
-                let id = self.shell.snapshot().active_tab;
-                self.close_tab(id)
+                let shell = self.shell.snapshot();
+                self.close_tab(shell.active_tab, shell.containment_generation)
             }
             WorkspaceCommandId::TabSelectPrevious => self.select_tab_relative(-1),
             WorkspaceCommandId::TabSelectNext => self.select_tab_relative(1),
@@ -112,8 +112,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneSplitRight => self.split_focused(SplitAxis::Right),
             WorkspaceCommandId::PaneSplitDown => self.split_focused(SplitAxis::Down),
             WorkspaceCommandId::PaneCloseFocused => {
-                let id = self.shell.snapshot().focused_pane;
-                self.close_pane(id)
+                let shell = self.shell.snapshot();
+                self.close_pane(shell.focused_pane, shell.containment_generation)
             }
             WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
             WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),
@@ -156,17 +156,14 @@ impl ApplicationRoot {
             }
             WorkspaceCommandId::AppQuit => self.quit(),
             WorkspaceCommandId::AppCloseFocused => {
-                let id = self.shell.snapshot().focused_pane;
-                self.close_pane(id)
+                let shell = self.shell.snapshot();
+                self.close_pane(shell.focused_pane, shell.containment_generation)
             }
             WorkspaceCommandId::WindowNew => self.create_window(),
             WorkspaceCommandId::WindowClose => {
-                let id = self
-                    .shell
-                    .snapshot()
-                    .active_window
-                    .ok_or(AppError::ActionUnavailable)?;
-                self.close_window(id)
+                let shell = self.shell.snapshot();
+                let id = shell.active_window.ok_or(AppError::ActionUnavailable)?;
+                self.close_window(id, shell.containment_generation)
             }
             WorkspaceCommandId::WindowCycleNext => {
                 self.cycle_window(crate::shell::CycleDirection::Next)

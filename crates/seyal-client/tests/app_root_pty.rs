@@ -161,8 +161,11 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         .expect("open independent window");
     let open_window = root.snapshot().shell.active_window.expect("new window");
     let workspace = root.snapshot().shell.active_workspace;
-    root.apply(AppAction::CloseWindow { id: anchor_window })
-        .expect("close anchor window");
+    root.apply(AppAction::CloseWindow {
+        id: anchor_window,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("close anchor window");
     while !root.snapshot().pending_effects.is_empty() {
         root.apply(AppAction::AckEffect).expect("ack close effect");
     }

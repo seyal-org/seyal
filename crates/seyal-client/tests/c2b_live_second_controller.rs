@@ -199,8 +199,11 @@ fn create_tab_live_second_controller_attach_binds_distinct_execution() {
     );
 
     let second_tab = root.snapshot().shell.active_tab;
-    root.apply(AppAction::CloseTab { id: second_tab })
-        .expect("close second tab (detach-only)");
+    root.apply(AppAction::CloseTab {
+        id: second_tab,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("close second tab (detach-only)");
     assert!(root.provisioning().is_unreferenced(second_execution));
     assert_eq!(
         root.provisioning().recorded_execution(first_pane),
@@ -287,8 +290,11 @@ fn create_tab_close_before_created_disposes_via_section_6_3() {
 
     root.apply(AppAction::CreateTab).expect("CreateTab");
     let second_tab = root.snapshot().shell.active_tab;
-    root.apply(AppAction::CloseTab { id: second_tab })
-        .expect("CloseTab before type-37");
+    root.apply(AppAction::CloseTab {
+        id: second_tab,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("CloseTab before type-37");
 
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         root.snapshot().shell.tabs.len() == 1
@@ -342,7 +348,10 @@ fn create_tab_attach_failure_n_times_stays_bounded() {
         assert_eq!(root.provisioning().automatic_retries(), 0);
         if root.snapshot().shell.tabs.len() > before_tabs {
             let extra = root.snapshot().shell.active_tab;
-            let _ = root.apply(AppAction::CloseTab { id: extra });
+            let _ = root.apply(AppAction::CloseTab {
+                id: extra,
+                containment_generation: root.snapshot().shell.containment_generation,
+            });
             let _ = root.poll_client(root.fence());
         }
     }
@@ -660,8 +669,11 @@ fn create_tab_close_unattached_tab_while_attach_in_flight_disposes() {
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {
         pane_awaiting_attach(root, third_pane) && root.queued_live_attach_count() >= 1
     });
-    root.apply(AppAction::CloseTab { id: third_tab })
-        .expect("close unattached B");
+    root.apply(AppAction::CloseTab {
+        id: third_tab,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("close unattached B");
 
     release_tx.send(()).expect("release A");
     poll_until(&mut root, Instant::now() + Duration::from_secs(8), |root| {

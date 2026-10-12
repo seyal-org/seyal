@@ -51,8 +51,11 @@ fn inverse_window_close_without_execution_death() {
         evidence: evidence(execution, AttachmentId::from_bytes([0x72; 16])),
     })
     .unwrap();
-    root.apply(AppAction::CloseWindow { id: window })
-        .expect("close");
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("close");
     assert!(root
         .snapshot()
         .pending_effects
@@ -141,7 +144,11 @@ fn close_requesting_tab_while_provisioning_in_flight() {
         .expect("pending")
         .clone();
 
-    root.apply(AppAction::CloseTab { id: tab }).unwrap();
+    root.apply(AppAction::CloseTab {
+        id: tab,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     // Request not cancelled on the wire; session keeps the dead intent until result.
     assert!(
         root.provisioning().pending_intent(pane).is_some()
@@ -193,7 +200,11 @@ fn terminate_path_survives_hidden_then_unpresented() {
         occluded: true,
     })
     .unwrap();
-    root.apply(AppAction::CloseWindow { id: window }).unwrap();
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert_eq!(root.live_unpresented(), vec![execution]);
     root.apply(AppAction::TerminateUnpresented { execution })
         .unwrap();
@@ -214,18 +225,26 @@ fn terminate_path_survives_hidden_then_unpresented() {
 fn stale_and_unknown_refs_fail_closed() {
     let mut root = ApplicationRoot::new();
     drain_effects(&mut root);
+    let containment_generation = root.snapshot().shell.containment_generation;
     assert_eq!(
         root.apply(AppAction::CloseWindow {
-            id: WindowId::new()
+            id: WindowId::new(),
+            containment_generation,
         }),
         Err(AppError::UnknownWindow)
     );
     assert_eq!(
-        root.apply(AppAction::CloseTab { id: TabId::new() }),
+        root.apply(AppAction::CloseTab {
+            id: TabId::new(),
+            containment_generation,
+        }),
         Err(AppError::UnknownChromeTab)
     );
     assert_eq!(
-        root.apply(AppAction::ClosePane { id: PaneId::new() }),
+        root.apply(AppAction::ClosePane {
+            id: PaneId::new(),
+            containment_generation,
+        }),
         Err(AppError::UnknownPane)
     );
     assert_eq!(
@@ -259,8 +278,11 @@ fn close_cannot_target_sibling_window_execution() {
     .unwrap();
     assert_eq!(root.snapshot().execution, Some(execution));
 
-    root.apply(AppAction::CloseWindow { id: first_window })
-        .unwrap();
+    root.apply(AppAction::CloseWindow {
+        id: first_window,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert!(root
         .snapshot()
         .pending_effects
@@ -312,14 +334,18 @@ fn rejection_surfaces_carry_no_content_cwd_env_or_secrets() {
 fn app_action_has_no_text_driven_window_authority() {
     // Compile-time documentation via exhaustive match of chrome-authority actions:
     // none take a String/bytes payload that could originate from terminal text.
+    let root = ApplicationRoot::new();
+    let containment_generation = root.snapshot().shell.containment_generation;
     let actions = [
         AppAction::CreateWindow,
         AppAction::CreateTab,
         AppAction::CloseWindow {
             id: WindowId::from_bytes([1; 16]),
+            containment_generation,
         },
         AppAction::CloseTab {
             id: TabId::from_bytes([2; 16]),
+            containment_generation,
         },
         AppAction::Quit,
     ];

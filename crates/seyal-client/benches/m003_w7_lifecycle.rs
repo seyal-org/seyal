@@ -63,7 +63,11 @@ fn measure_create_window_latency() {
         }
         // Close bootstrap window so CreateWindow is zero-window re-entry cost.
         let window = root.snapshot().shell.active_window.expect("window");
-        root.apply(AppAction::CloseWindow { id: window }).unwrap();
+        root.apply(AppAction::CloseWindow {
+            id: window,
+            containment_generation: root.snapshot().shell.containment_generation,
+        })
+        .unwrap();
         while !root.snapshot().pending_effects.is_empty() {
             root.apply(AppAction::AckEffect).unwrap();
         }

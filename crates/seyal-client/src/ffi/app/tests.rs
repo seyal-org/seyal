@@ -36,7 +36,7 @@ fn fence_action(kind: u16, root: &ApplicationRoot) -> SeyalAppAction {
         target_execution_hi: 0,
         target_attachment_lo: 0,
         target_attachment_hi: 0,
-        target_pty_generation: 0,
+        target_generation: 0,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -87,7 +87,7 @@ fn bound_handle() -> (u64, SeyalAppSnapshot) {
         target_execution_hi: 0,
         target_attachment_lo: 2,
         target_attachment_hi: 0,
-        target_pty_generation: 1,
+        target_generation: 1,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -128,7 +128,7 @@ fn composer_status_relay_gates_availability_and_rejects_bad_codes() {
         target_execution_hi: 0,
         target_attachment_lo: 2,
         target_attachment_hi: 0,
-        target_pty_generation: 1,
+        target_generation: 1,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -166,12 +166,12 @@ fn accepted_submit(handle: u64, command: &str) {
     let snap = seyal_app_snapshot(handle);
     let composer = seyal_app_composer(handle);
     let mut draft = identity_fence(10, &snap);
-    draft.target_pty_generation = composer.epoch;
+    draft.target_generation = composer.epoch;
     draft.payload = command.as_ptr();
     draft.payload_len = command.len() as u32;
     assert_eq!(unsafe { seyal_app_apply(handle, &draft) }, 0);
     let mut submit = identity_fence(11, &snap);
-    submit.target_pty_generation = composer.epoch;
+    submit.target_generation = composer.epoch;
     assert_eq!(unsafe { seyal_app_apply(handle, &submit) }, 0);
     let pending = seyal_app_composer(handle);
     let mut result = identity_fence(12, &snap);
@@ -236,12 +236,12 @@ fn composer_history_ffi_round_trips_open_filter_select() {
     assert_eq!(unsafe { seyal_app_apply(handle, &up) }, 0);
 
     let mut stale = identity_fence(43, &bound);
-    stale.target_pty_generation = seyal_app_composer(handle).epoch + 7;
+    stale.target_generation = seyal_app_composer(handle).epoch + 7;
     assert_eq!(unsafe { seyal_app_apply(handle, &stale) }, -4);
     assert_eq!(seyal_app_last_error(handle), 18);
 
     let mut select = identity_fence(43, &bound);
-    select.target_pty_generation = seyal_app_composer(handle).epoch;
+    select.target_generation = seyal_app_composer(handle).epoch;
     assert_eq!(unsafe { seyal_app_apply(handle, &select) }, 0);
     let composer = seyal_app_composer(handle);
     assert_eq!(
@@ -307,7 +307,7 @@ fn core_terminal_chrome_ffi_is_visible_by_default_and_can_be_hidden() {
         target_execution_hi: 0,
         target_attachment_lo: 0,
         target_attachment_hi: 0,
-        target_pty_generation: 0,
+        target_generation: 0,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -370,7 +370,7 @@ fn bind_through_explicit_handle_does_not_use_implicit_select() {
         target_execution_hi: 0,
         target_attachment_lo: 2,
         target_attachment_hi: 0,
-        target_pty_generation: 1,
+        target_generation: 1,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -386,7 +386,7 @@ fn bind_through_explicit_handle_does_not_use_implicit_select() {
 
     let composer = seyal_app_composer(handle);
     let mut draft = identity_fence(10, &bound);
-    draft.target_pty_generation = composer.epoch;
+    draft.target_generation = composer.epoch;
     let text = b"echo hi";
     draft.payload = text.as_ptr();
     draft.payload_len = text.len() as u32;
@@ -429,7 +429,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
         target_execution_hi: 0,
         target_attachment_lo: 2,
         target_attachment_hi: 0,
-        target_pty_generation: 1,
+        target_generation: 1,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -604,7 +604,7 @@ fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
         target_execution_hi: 0,
         target_attachment_lo: 0,
         target_attachment_hi: 0,
-        target_pty_generation: 0,
+        target_generation: 0,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,
@@ -676,7 +676,7 @@ fn refresh_alternate_screen_after_bind_derives_tui() {
         target_execution_hi: 0,
         target_attachment_lo: 2,
         target_attachment_hi: 0,
-        target_pty_generation: 1,
+        target_generation: 1,
         payload: ptr::null(),
         payload_len: 0,
         reserved: 0,

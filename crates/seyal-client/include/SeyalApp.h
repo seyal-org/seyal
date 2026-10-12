@@ -50,7 +50,9 @@ enum SeyalAppActionKind {
      * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
      * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
      * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
-     * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
+     * target_execution_lo/hi = TabId/PaneId and target_generation is the
+     * containment_generation from the shell snapshot that produced the action.
+     * SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
@@ -65,7 +67,7 @@ enum SeyalAppActionKind {
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
      * MOVE_COMPOSER_HISTORY_SELECTION: reserved = signed row delta (int32).
-     * SELECT_COMPOSER_HISTORY: target_pty_generation = composer epoch.
+     * SELECT_COMPOSER_HISTORY: target_generation = composer epoch.
      */
     SEYAL_APP_ACTION_OPEN_COMPOSER_HISTORY = 40,
     SEYAL_APP_ACTION_SET_COMPOSER_HISTORY_FILTER = 41,
@@ -150,7 +152,7 @@ enum SeyalAppActionKind {
      * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
      * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
      * while open. Error codes 47-49.
-     */
+    */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
     SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
     /*
@@ -165,8 +167,9 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_CREATE_WINDOW = 65,
     SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 66,
     /*
-     * W4b: title-bar / window.close forwards CloseWindow. target_execution_lo/hi
-     * = WindowId. Hierarchical ⌘W uses CLOSE_PANE on the focused Pane.
+     * ADR-018 structural CloseWindow. target_execution_lo/hi = WindowId;
+     * target_generation = containment_generation from the shell snapshot.
+     * The host forwards this typed action; Rust commits removal/effects.
      */
     SEYAL_APP_ACTION_CLOSE_WINDOW = 67
 };
@@ -220,11 +223,11 @@ enum SeyalAppEligibility {
 
 /*
  * Recovery actions keep the 120-byte SeyalAppAction record.
- * BEGIN/FIRE: target_pty_generation = host clock milliseconds.
+ * BEGIN/FIRE: target_generation = host clock milliseconds.
  * COMPLETE: target_execution_lo = episode generation,
  *           reserved = outcome | (launch << 8),
  *           target_attachment_lo = opened handle,
- *           target_pty_generation = host clock milliseconds.
+ *           target_generation = host clock milliseconds.
  */
 enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_DISCONNECTED = 0,
@@ -287,7 +290,8 @@ typedef struct SeyalAppAction {
     uint64_t target_execution_hi;
     uint64_t target_attachment_lo;
     uint64_t target_attachment_hi;
-    uint64_t target_pty_generation;
+    /* Kind-specific target generation (PTY, containment, composer epoch, etc.). */
+    uint64_t target_generation;
     const uint8_t *payload;
     uint32_t payload_len;
     uint32_t reserved;
@@ -577,7 +581,8 @@ typedef struct SeyalAppPaneTreeNode {
 /*
  * ADR-018 §2.4 native effects in commit order.
  * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
- *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
+ *       2 RealizeWindow,
+ *       3 DestroyWindowRealization, 4 OrderFrontMakeKey,
  *       5 TerminateExecution (window_* slots carry ExecutionId),
  *       6 RequestAdoptAttach (window_* slots carry ExecutionId),
  *       7 QuitCleanupComplete.
