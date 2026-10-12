@@ -3,7 +3,7 @@
 **Harness:** `cargo bench -p seyal-client --locked --bench m003_w7_lifecycle`
 **Skill:** `.agents/skills/performance-gate/SKILL.md`
 **Claim policy:** all rows `performance_claim=false` unless a future freeze SHA re-qualifies them.
-**Stack:** W5 tip `9e2a06e6` + this W7 commit. Not an M003 Done freeze.
+**Stack:** W5 tip `a58c3613` + W7 source commit `da3a640a`. This candidate is validation evidence only, not an M003 Done freeze.
 
 ## Environment (controlled-host)
 
@@ -27,25 +27,25 @@ Recorded by the harness `m003_w7_lifecycle_host` line. Local capture:
 | Presentation scaling 1/10/50/100 | AppRoot occlusion + select-all-tabs | `controlled-host` | **`real_pty_count=0`** — presentation count separated from PTY count |
 | Quit-cleanup deadline | Derived 500 ms | `controlled-host` | See derivation below |
 
-### Harness stdout (this tip, pre-commit worktree)
+### Harness stdout (W7 source commit `da3a640a`)
 
 ```text
-m003_w7_lifecycle_host os=macos arch=aarch64 sha=9e2a06e65a39ec5e243ff41a31943263bbf00c00 build=release_bench evidence_class=controlled-host percentile_method=nearest_rank warmups=20 samples=200 performance_claim=false
-m003_w7_create_latency boundary=AppAction_CreateWindow_zero_window_reentry evidence_class=controlled-host sample_count=200 p50_us=1 p95_us=2 p99_us=9 max_us=17 performance_claim=false
-m003_w7_create_latency boundary=AppAction_CreateTab_shell_admit_no_wire evidence_class=controlled-host sample_count=200 p50_us=4 p95_us=4 p99_us=8 max_us=11 performance_claim=false
+m003_w7_lifecycle_host os=macos arch=aarch64 sha=da3a640a13d93132eb8a9ca0b185bf1fb61cc460 build=release_bench evidence_class=controlled-host percentile_method=nearest_rank warmups=20 samples=200 performance_claim=false
+m003_w7_create_latency boundary=AppAction_CreateWindow_zero_window_reentry evidence_class=controlled-host sample_count=200 p50_us=1 p95_us=1 p99_us=2 max_us=2 performance_claim=false
+m003_w7_create_latency boundary=AppAction_CreateTab_shell_admit_no_wire evidence_class=controlled-host sample_count=200 p50_us=4 p95_us=4 p99_us=5 max_us=9 performance_claim=false
 m003_w7_create_latency boundary=Pane_split_create evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_C3_1238_and_PT5_1219 performance_claim=false
-m003_w7_focus_switch_latency boundary=AppAction_SelectTab evidence_class=controlled-host sample_count=200 p50_us=3 p95_us=3 p99_us=3 max_us=4 performance_claim=false
-m003_w7_presentation_scaling presentation_count=1 real_pty_count=0 hidden_inactive_tabs=0 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=5 note=separates_presentation_count_from_pty_count performance_claim=false
-m003_w7_presentation_scaling presentation_count=10 real_pty_count=0 hidden_inactive_tabs=9 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=115 note=separates_presentation_count_from_pty_count performance_claim=false
-m003_w7_presentation_scaling presentation_count=50 real_pty_count=0 hidden_inactive_tabs=49 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=2122 note=separates_presentation_count_from_pty_count performance_claim=false
-m003_w7_presentation_scaling presentation_count=100 real_pty_count=0 hidden_inactive_tabs=99 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=7911 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_focus_switch_latency boundary=AppAction_SelectTab evidence_class=controlled-host sample_count=200 p50_us=2 p95_us=3 p99_us=19 max_us=26 performance_claim=false
+m003_w7_presentation_scaling presentation_count=1 real_pty_count=0 hidden_inactive_tabs=0 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=6 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_presentation_scaling presentation_count=10 real_pty_count=0 hidden_inactive_tabs=9 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=105 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_presentation_scaling presentation_count=50 real_pty_count=0 hidden_inactive_tabs=49 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=1700 note=separates_presentation_count_from_pty_count performance_claim=false
+m003_w7_presentation_scaling presentation_count=100 real_pty_count=0 hidden_inactive_tabs=99 evidence_class=controlled-host boundary=AppRoot_occlusion_and_select_all_tabs elapsed_us=5877 note=separates_presentation_count_from_pty_count performance_claim=false
 m003_w7_quit_cleanup_deadline derived_ms=500 formula=spec009_detach_p99_us_250_x_headroom_2000_for_up_to_16_attachments evidence_class=controlled-host skill=performance-gate performance_claim=false
 m003_w7_idle_cpu_rss_hidden_occluded evidence_class=PLATFORM_LIMITED reason=headed_idle_sampling_requires_Seyal_app_plus_unmerged_936_multi_live_and_PT5_pane_ops performance_claim=false
 m003_w7_presentation_scaling_headed_multi_live counts=1,10,50,100 evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_PR_1250_issue_936_and_PR_1259_issue_1219 performance_claim=false
 m003_w7_pane_ops_equalize_swap_move evidence_class=PLATFORM_LIMITED reason=blocked_on_unmerged_PT4_1249_PT5_1259 performance_claim=false
 ```
 
-Re-run after the W7 commit lands so the host `sha=` line matches the PR head.
+This run matches the W7 source commit above. The follow-up commit updates only this evidence ledger. Headed UI and real multi-live rows remain unverified/`PLATFORM_LIMITED` until their dependencies and acceptance gates are complete.
 
 ## Quit-cleanup deadline derivation
 

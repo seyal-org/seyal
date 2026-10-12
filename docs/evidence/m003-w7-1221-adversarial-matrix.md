@@ -1,6 +1,6 @@
 # M003 W7 (#1221) — adversarial lifecycle matrix
 
-**Stack tip:** `mahboobmonnamd/issue/1221` on W5 tip `9e2a06e6` (PR #1268).
+**Candidate stack tip:** W7 validation commit `da3a640a` on refreshed W5 tip `a58c3613` (PR #1268 head at capture time).
 **Not Done:** M003 / #665 / #674 remain open. This ledger is validation evidence only.
 **Merge deps not octopus-merged:** #936 / PR #1250, PT4 #1249, PT5 #1259 (merge-tree conflicts with W5 tip).
 
