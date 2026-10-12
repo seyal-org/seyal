@@ -1,4 +1,8 @@
-use super::{AppError, ChromeError, ComposerError, PaletteError, ShellError};
+use super::AppError;
+use crate::chrome::ChromeError;
+use crate::composer::ComposerError;
+use crate::palette::PaletteError;
+use crate::shell::ShellError;
 
 pub(super) fn chrome_error(error: ChromeError) -> AppError {
     match error {

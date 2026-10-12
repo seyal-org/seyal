@@ -1,6 +1,7 @@
 use super::*;
 use crate::composer::ComposerMode;
 use crate::presentation::InputRoute;
+use crate::presentation::PresentationMode;
 
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
@@ -53,8 +54,16 @@ fn explicit_raw_replaces_flow_and_tui_exit_returns_to_it() {
     bind(&mut root, false);
     let execution = root.snapshot().execution;
     let attachment = root.snapshot().attachment;
+    assert_eq!(
+        root.snapshot().shell.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Flow
+    );
     run_palette(&mut root, "use raw terminal");
     let raw = root.snapshot();
+    assert_eq!(
+        raw.shell.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Raw
+    );
     assert_eq!(raw.eligibility, PresentationEligibility::Raw);
     assert!(!raw.composer_eligible);
     assert_eq!(raw.execution, execution);
@@ -72,6 +81,10 @@ fn explicit_raw_replaces_flow_and_tui_exit_returns_to_it() {
     let before_blocks = composer.blocks.len();
     refresh(&mut root, true);
     let tui = root.snapshot();
+    assert_eq!(
+        tui.shell.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Tui
+    );
     assert_eq!(tui.eligibility, PresentationEligibility::Tui);
     assert_eq!(tui.execution, execution);
     assert!(!tui.composer_eligible);
@@ -93,6 +106,10 @@ fn explicit_raw_replaces_flow_and_tui_exit_returns_to_it() {
 
     refresh(&mut root, false);
     let returned = root.snapshot();
+    assert_eq!(
+        returned.shell.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Raw
+    );
     assert_eq!(returned.eligibility, PresentationEligibility::Raw);
     assert_eq!(returned.execution, execution);
     assert_eq!(returned.attachment, attachment);

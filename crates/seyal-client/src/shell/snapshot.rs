@@ -31,7 +31,7 @@ pub struct WindowTabSnapshot {
     pub layout: LayoutDescription,
 }
 
-/// One Pane leaf with presentation tier and execution binding.
+/// One Pane leaf with presentation mode/tier and execution binding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneLeafSnapshot {
     pub id: PaneId,
@@ -39,6 +39,7 @@ pub struct PaneLeafSnapshot {
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
     pub presentation_tier: PresentationTier,
+    pub presentation_mode: crate::presentation::PresentationMode,
 }
 
 impl ShellState {
@@ -179,6 +180,7 @@ fn leaf_snapshot(
         execution: pane.execution,
         allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
         presentation_tier: tier_for_leaf(pane.id, tab, window, product_window),
+        presentation_mode: pane.presentation_mode,
     }
 }
 
@@ -222,8 +224,9 @@ impl ShellError {
             Self::CrossWorkspaceMove => 16,
             Self::NotZoomed => 18,
             Self::InvalidMoveTarget => 19,
-            Self::CrossWorkspaceAdopt => 20,
-            Self::ExecutionNotUnpresented => 21,
+            Self::NoDirectionalNeighbor => 20,
+            Self::CrossWorkspaceAdopt => 21,
+            Self::ExecutionNotUnpresented => 22,
         }
     }
 }

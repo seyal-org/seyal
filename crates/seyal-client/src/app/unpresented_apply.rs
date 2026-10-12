@@ -5,6 +5,13 @@ use crate::shell::ShellAction;
 use std::collections::HashSet;
 
 impl ApplicationRoot {
+    pub(crate) fn apply_shell(&mut self, action: ShellAction) -> Result<(), ShellError> {
+        self.shell.apply(action)?;
+        self.drain_shell_effects();
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+        Ok(())
+    }
+
     /// Deterministic live-unpresented ids for the active Workspace (ADR-018 §3.3).
     pub fn live_unpresented(&self) -> Vec<ExecutionId> {
         let workspace = self.shell.snapshot().active_workspace;

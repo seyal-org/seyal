@@ -56,7 +56,9 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::GotoNoSelection => 48,
         AppError::GotoUnsupportedScope => 49,
         AppError::ActionUnavailable => 50,
-        AppError::CrossWorkspaceAdopt => 51,
-        AppError::ExecutionNotUnpresented => 52,
+        AppError::NavigationStaleHistoryCursor => 51,
+        AppError::NavigationHistoryUnavailable => 52,
+        AppError::CrossWorkspaceAdopt => 53,
+        AppError::ExecutionNotUnpresented => 54,
     }
 }

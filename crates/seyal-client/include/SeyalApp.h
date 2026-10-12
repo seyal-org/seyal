@@ -19,7 +19,7 @@ extern "C" {
  * Product snapshots and Candidate-D prepared frames are separate transfers.
  */
 
-#define SEYAL_APP_ABI_VERSION 1u
+#define SEYAL_APP_ABI_VERSION 2u
 
 enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS = 0,
@@ -152,7 +152,15 @@ enum SeyalAppActionKind {
      * while open. Error codes 47-49.
      */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
-    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62
+    SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
+    /**
+     * Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq as
+     * little-endian u64. reserved = 0. Observed cursor must match the current
+     * history seq or the action rejects with StaleHistoryCursor (51).
+     * Numbers 63/64 follow N4 OpenGoto/SetGotoScope (61/62).
+     */
+    SEYAL_APP_ACTION_HISTORY_BACK = 63,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 64
 };
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
@@ -440,8 +448,9 @@ typedef struct SeyalAppTheme {
 
 /*
  * Multi-window shell header (#1108 / ADR-018 §2.1). window_count / effect_count
- * index seyal_app_window / seyal_app_native_effect. containment_generation is
- * the monotonic shell fence; shell_last_error is a bounded non-secret code.
+ * index seyal_app_window / seyal_app_native_effect. shell_generation changes
+ * on every committed application snapshot; containment_generation is the
+ * monotonic structural fence. shell_last_error is a bounded non-secret code.
  * Active-window tab/pane counts remain for the product-active Window projection.
  */
 typedef struct SeyalAppShell {
@@ -465,6 +474,7 @@ typedef struct SeyalAppShell {
     uint64_t active_window_hi;
     uint64_t last_active_workspace_lo;
     uint64_t last_active_workspace_hi;
+    uint64_t shell_generation;
 } SeyalAppShell;
 
 /* SeyalAppWindow.flags */
@@ -529,7 +539,8 @@ typedef struct SeyalAppPaneLeaf {
     uint64_t execution_hi;
     const uint8_t *title;
     uint32_t title_len;
-    uint32_t reserved;
+    uint16_t presentation_mode; /* 0 Flow, 1 Raw, 2 TUI */
+    uint16_t reserved;
 } SeyalAppPaneLeaf;
 
 /* SeyalAppPaneTreeNode.kind: 0 leaf, 1 split-right, 2 split-down.
@@ -750,6 +761,8 @@ int32_t seyal_app_route_keystroke(
 
 int32_t seyal_app_apply(uint64_t handle, const SeyalAppAction *action);
 SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
+/* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
+uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
