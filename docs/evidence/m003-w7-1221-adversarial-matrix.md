@@ -1,6 +1,6 @@
 # M003 W7 (#1221) — adversarial lifecycle matrix
 
-**Candidate stack tip:** W7 validation commit `da3a640a` on refreshed W5 tip `a58c3613` (PR #1268 head at capture time).
+**Candidate stack tip:** W7 validation commit `ada74d7c` on refreshed W5 tip `a58c3613` (PR #1268 head at capture time).
 **Not Done:** M003 / #665 / #674 remain open. This ledger is validation evidence only.
 **Merge deps not octopus-merged:** #936 / PR #1250, PT4 #1249, PT5 #1259 (merge-tree conflicts with W5 tip).
 
@@ -25,7 +25,7 @@
 | closed window × Unpresented inventory | `shell::w7_matrix_tests::closed_window_has_no_leaf_presentation_tiers` |
 | Tab close leaves Window open | `shell::w7_matrix_tests::tab_close_leaves_window_open_without_terminate` |
 | Window close without terminate | `app::w7_adversarial_tests::inverse_window_close_without_execution_death` |
-| Terminate without window close | `app::w7_adversarial_tests::inverse_execution_terminate_without_window_close` |
+| Unpresented disposal starts without window close | `app::w7_adversarial_tests::unpresented_dispose_begins_without_window_close` (proves the attach-for-dispose request only; child finalization is covered by Runtime P4 termination tests) |
 | Quit × create in flight | `app::w7_adversarial_tests::quit_while_create_tab_provisioning_in_flight` |
 | Close requesting Tab × create in flight | `app::w7_adversarial_tests::close_requesting_tab_while_provisioning_in_flight` |
 | Terminate after Hidden → Unpresented | `app::w7_adversarial_tests::terminate_path_survives_hidden_then_unpresented` |
