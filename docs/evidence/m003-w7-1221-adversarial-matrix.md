@@ -24,8 +24,8 @@
 | open × occluded → Hidden | `shell::w7_matrix_tests::open_occluded_hidden_without_containment_bump` + W5 `w5_tests` |
 | closed window × Unpresented inventory | `shell::w7_matrix_tests::closed_window_has_no_leaf_presentation_tiers` |
 | Tab close leaves Window open | `shell::w7_matrix_tests::tab_close_leaves_window_open_without_terminate` |
-| Window close without terminate | `app::w7_adversarial_tests::inverse_window_close_without_execution_death` |
-| Unpresented execution finalizes without closing another Window | `app_root_pty::unpresented_execution_terminates_while_another_window_stays_open` (real Runtime child + ApplicationRoot Controller attach/dispose; asserts process finalization and retained Window) |
+| Window close without execution death | `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (real Runtime child remains in unpresented inventory after its Window closes) |
+| Unpresented execution finalizes without closing another Window | `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (real Runtime child + ApplicationRoot attach/dispose; asserts child finalization, retained other Window, and surviving closed-window child) |
 | Quit × create in flight | `app::w7_adversarial_tests::quit_while_create_tab_provisioning_in_flight` |
 | Close requesting Tab × create in flight | `app::w7_adversarial_tests::close_requesting_tab_while_provisioning_in_flight` |
 | Terminate after Hidden → Unpresented | `app::w7_adversarial_tests::terminate_path_survives_hidden_then_unpresented` |

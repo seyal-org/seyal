@@ -75,7 +75,7 @@ impl Drop for RuntimeDirReset {
 }
 
 #[test]
-fn unpresented_execution_terminates_while_another_window_stays_open() {
+fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window() {
     use seyal_client::app::AppAction;
 
     let _lock = override_test_lock();
@@ -148,6 +148,7 @@ fn unpresented_execution_terminates_while_another_window_stays_open() {
     let mut root = ApplicationRoot::new();
     root.attach_client(root.fence(), client)
         .expect("bind anchor execution");
+    let anchor_window = root.snapshot().shell.active_window.expect("anchor window");
     while !root.snapshot().pending_effects.is_empty() {
         root.apply(AppAction::AckEffect).expect("ack window effect");
     }
@@ -155,6 +156,16 @@ fn unpresented_execution_terminates_while_another_window_stays_open() {
         .expect("open independent window");
     let open_window = root.snapshot().shell.active_window.expect("new window");
     let workspace = root.snapshot().shell.active_workspace;
+    root.apply(AppAction::CloseWindow { id: anchor_window })
+        .expect("close anchor window");
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).expect("ack close effect");
+    }
+    assert_eq!(
+        root.live_unpresented(),
+        vec![anchor],
+        "closing the anchor window must retain its live execution in inventory"
+    );
     root.apply(AppAction::RecordUnpresented {
         execution: unpresented,
         workspace,
@@ -186,7 +197,7 @@ fn unpresented_execution_terminates_while_another_window_stays_open() {
         if finalized_rx.try_recv().is_ok() {
             runtime_finalized = true;
         }
-        if runtime_finalized && root.live_unpresented().is_empty() {
+        if runtime_finalized && !root.live_unpresented().contains(&unpresented) {
             break;
         }
         thread::sleep(Duration::from_millis(10));
@@ -203,6 +214,11 @@ fn unpresented_execution_terminates_while_another_window_stays_open() {
             .iter()
             .any(|window| window.id == open_window),
         "the independent window must remain open after child finalization"
+    );
+    assert_eq!(
+        root.live_unpresented(),
+        vec![anchor],
+        "the closed window's Runtime child must remain live after the other child is disposed"
     );
     let _ = stop_tx.send(());
     runtime.join().expect("Runtime thread");
