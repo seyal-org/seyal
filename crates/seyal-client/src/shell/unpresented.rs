@@ -25,6 +25,7 @@ impl ShellState {
             .collect()
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn unpresented_entries(&self) -> Vec<(ExecutionId, WorkspaceId)> {
         self.unpresented
             .iter()

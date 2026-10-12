@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::shell::ShellAction;
+#[cfg(any(target_os = "macos", test))]
 use std::collections::HashSet;
 
 impl ApplicationRoot {
@@ -27,6 +28,7 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(super) fn reconcile_live_unpresented(&mut self, live: &[ExecutionId]) {
         let known_workspaces: std::collections::HashMap<_, _> =
             self.shell.unpresented_entries().into_iter().collect();
