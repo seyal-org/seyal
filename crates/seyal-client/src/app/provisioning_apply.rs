@@ -139,7 +139,8 @@ impl ApplicationRoot {
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         // The focused leaf is unbound until attach+bind completes. Clear the
-        // active input authority while retaining every sibling's pane binding.
+        // active input authority while retaining sibling bindings. Projection
+        // keeps bound siblings live and exposes this leaf as the bind landing.
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         Ok(())

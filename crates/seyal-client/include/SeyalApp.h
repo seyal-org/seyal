@@ -463,13 +463,12 @@ typedef struct SeyalAppShell {
 } SeyalAppShell;
 
 /*
- * Pane regions (#923): one per leaf of the active Tab's PaneTree, index
+ * Pane regions (#923 / #936): one per leaf of the active Tab's PaneTree, index
  * 0..<SeyalAppShell.pane_count in the same order as SEYAL_APP_ROW_PANE rows.
  * x/y/width/height are unit fractions of the Tab's center area, origin
- * top-left; hosts position regions and never derive geometry. LIVE marks the
- * single region that hosts the live terminal/Metal/composer surface; no region
- * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
- * indices return size == 0.
+ * top-left; hosts position regions and never derive geometry. LIVE marks every
+ * execution-bound leaf plus the focused bind-landing leaf so multiple Metal
+ * surfaces can present simultaneously. Out-of-range indices return size == 0.
  */
 #define SEYAL_APP_PANE_REGION_FOCUSED 1u
 #define SEYAL_APP_PANE_REGION_LIVE 2u
@@ -486,6 +485,27 @@ typedef struct SeyalAppPaneRegion {
     float width;
     float height;
 } SeyalAppPaneRegion;
+
+/*
+ * Pane bindings (#936): same index order as seyal_app_pane_region. Exposes the
+ * Runtime-owned ExecutionId and registry display handle for each leaf so the
+ * thin host can attach Metal surfaces without inventing executions (ADR-017).
+ * Out-of-range indices return size == 0.
+ */
+#define SEYAL_APP_PANE_BINDING_HAS_EXECUTION 1u
+#define SEYAL_APP_PANE_BINDING_HAS_DISPLAY 2u
+
+typedef struct SeyalAppPaneBinding {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+    uint64_t display_handle;
+} SeyalAppPaneBinding;
 
 /*
  * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
@@ -643,6 +663,20 @@ SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
+SeyalAppPaneBinding seyal_app_pane_binding(uint64_t handle, uint32_t index);
+/* Propose view metrics for an active Pane; Rust validates the Pane and routes
+ * the derived correlated resize through its bound Controller client. */
+int32_t seyal_app_propose_pane_geometry(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    double viewport_width,
+    double viewport_height,
+    double horizontal_insets,
+    double vertical_insets,
+    double cell_width,
+    double cell_height,
+    uint8_t meaningful_layout_epoch);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
