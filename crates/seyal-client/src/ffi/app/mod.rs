@@ -86,7 +86,7 @@ pub struct SeyalAppAction {
     pub target_execution_hi: u64,
     pub target_attachment_lo: u64,
     pub target_attachment_hi: u64,
-    pub target_generation: u64,
+    pub target_pty_generation: u64,
     pub payload: *const u8,
     pub payload_len: u32,
     pub reserved: u32,
@@ -479,6 +479,19 @@ pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
     })
 }
 
+/// Return the current focus-history cursor sequence for Back/Forward actions.
+/// Zero means the application has no history entries or the handle is invalid.
+/// This additive scalar accessor preserves the v1 return-by-value snapshot layout.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_focus_history_seq(handle: u64) -> u64 {
+    APPS.with(|apps| {
+        apps.borrow()
+            .get(&handle)
+            .and_then(|state| state.root.snapshot().focus_history_seq)
+            .map_or(0, |seq| seq.get())
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_accessibility(handle: u64) -> SeyalAppAccessibility {
     APPS.with(|apps| {
@@ -627,6 +640,7 @@ pub struct SeyalAppShell {
     pub active_window_hi: u64,
     pub last_active_workspace_lo: u64,
     pub last_active_workspace_hi: u64,
+    pub shell_generation: u64,
 }
 
 impl SeyalAppShell {
@@ -652,6 +666,7 @@ impl SeyalAppShell {
             active_window_hi: 0,
             last_active_workspace_lo: 0,
             last_active_workspace_hi: 0,
+            shell_generation: 0,
         }
     }
 }

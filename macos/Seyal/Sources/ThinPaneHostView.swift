@@ -117,7 +117,7 @@ final class ThinPaneHostView: NSView {
         action.target_execution_hi = executionHigh
         action.target_attachment_lo = attachmentLow
         action.target_attachment_hi = attachmentHigh
-        action.target_generation = 1
+        action.target_pty_generation = 1
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
         lastBoundExecution = (executionLow, executionHigh)
         announceAccessibility()

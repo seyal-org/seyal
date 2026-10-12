@@ -2,15 +2,6 @@ import AppKit
 
 @MainActor
 extension ProductChromeHostView {
-    func configureStructuralCloseButtons(_ shell: SeyalAppShell) {
-        closeTabButton.setShellIdentity(
-            shell.active_tab_lo, shell.active_tab_hi, shell.containment_generation
-        )
-        closePaneButton.setShellIdentity(
-            shell.focused_pane_lo, shell.focused_pane_hi, shell.containment_generation
-        )
-    }
-
     @objc func showWorkspaces() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 0)
     }
@@ -90,13 +81,6 @@ extension ProductChromeHostView {
         action.kind = kind
         action.target_execution_lo = tagged.idLo
         action.target_execution_hi = tagged.idHi
-        if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
-            || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
-        {
-            // Structural actions must carry the generation from the shell
-            // snapshot that produced this button. Rust rejects stale chrome.
-            action.target_generation = tagged.containmentGeneration
-        }
         _ = seyal_app_apply(pane.appHandle, &action)
         reconcileChrome()
     }

@@ -1,0 +1,26 @@
+[package]
+name = "m005-spec013-terminal-isolation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Justified measurement harness only. Composes Runtime + Local Context Engine
+# without creating a production agent↔runtime dependency edge in either crate.
+# Authority: SPEC-013 §21 / §23.40; Issue #1301.
+
+[[bin]]
+name = "m005_spec013_terminal_isolation"
+path = "src/main.rs"
+
+[dependencies]
+seyal-agent-context = { path = "../../crates/seyal-agent-context" }
+seyal-agent-core = { path = "../../crates/seyal-agent-core" }
+seyal-agent-store = { path = "../../crates/seyal-agent-store" }
+seyal-exec = { path = "../../crates/seyal-exec" }
+seyal-runtime = { path = "../../crates/seyal-runtime" }
+
+[lints.rust]
+unsafe_code = "deny"

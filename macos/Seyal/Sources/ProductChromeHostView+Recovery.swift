@@ -6,6 +6,22 @@ import AppKit
 /// helper, disposes handles and reports truthful outcomes.
 @MainActor
 extension ProductChromeHostView {
+    /// Recovery and presentation handoffs must honor the palette's focus
+    /// ownership at the moment AppKit accepts the responder change.
+    func requestComposerFocusIfPaletteAllows() -> Bool {
+        guard !commandPalette.isOpen else { return false }
+        return composer.focusEditor()
+    }
+
+    func commandPaletteDidDismiss() {
+        guard pane.inputSurface.recoveryPresentationPending else {
+            routeFocus()
+            return
+        }
+        pane.inputSurface.syncInputRoutePresentation()
+        _ = pane.inputSurface.requestComposerFocusForRecovery()
+    }
+
     func recoveryText(_ snapshot: SeyalAppSnapshot) -> String {
         let stage: String
         switch snapshot.recovery_stage {
@@ -197,7 +213,7 @@ extension ProductChromeHostView {
         let now = runtimeRecoveryNowMillis()
         return applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_COMPLETE_RECOVERY) {
             $0.target_execution_lo = generation
-            $0.target_generation = now
+            $0.target_pty_generation = now
             $0.target_attachment_lo = handle
             $0.reserved = UInt32(outcome.rawValue) | (UInt32(launch.rawValue) << 8)
         }
@@ -209,7 +225,7 @@ extension ProductChromeHostView {
         let now = runtimeRecoveryNowMillis()
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_FIRE_RECOVERY) {
             $0.target_execution_lo = generation
-            $0.target_generation = now
+            $0.target_pty_generation = now
         }
         reconcileChrome()
     }

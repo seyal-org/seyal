@@ -24,10 +24,7 @@ impl ShellState {
     /// product-active Window actually changes (W3: keep the host effect
     /// queue bounded under same-window selection).
     pub(super) fn activate_window(&mut self, window: WindowId) -> Result<(), ShellError> {
-        let previous_product = self
-            .workspace(self.active_workspace)
-            .ok()
-            .and_then(|workspace| workspace.active_window);
+        let previous_product = self.product_active_window().map(|window| window.id);
         self.activate_window_from(window, previous_product)
     }
 
@@ -45,7 +42,6 @@ impl ShellState {
             return Err(ShellError::UnknownWindow);
         }
         workspace.active_window = Some(window);
-        self.active_workspace = workspace_id;
         self.last_active_workspace = workspace_id;
         self.record_window_focus(window)?;
         if previous_product != Some(window) {
@@ -113,7 +109,7 @@ impl ShellState {
         }
         self.workspace(workspace)
             .ok()
-            .and_then(|item| item.windows.first().map(|window| window.id))
+            .and_then(|item| item.active_window)
     }
 
     pub(super) fn create_window(
@@ -160,16 +156,13 @@ impl ShellState {
     pub(super) fn select_tab_identity(&mut self, id: TabId) -> Result<(), ShellError> {
         let (workspace_id, window_id, _) =
             self.find_tab_location(id).ok_or(ShellError::UnknownTab)?;
-        let previous_product = self
-            .workspace(self.active_workspace)
-            .ok()
-            .and_then(|workspace| workspace.active_window);
+        let previous_product = self.product_active_window().map(|window| window.id);
         self.workspace_mut(workspace_id)?.select_tab(id)?;
         self.activate_window_from(window_id, previous_product)
     }
 
     pub(super) fn cycle_window(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
+        let workspace = self.workspace(self.active_workspace_id())?;
         if workspace.windows.is_empty() {
             return Err(ShellError::UnknownWindow);
         }
@@ -187,7 +180,7 @@ impl ShellState {
     }
 
     pub(super) fn cycle_tab(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
+        let workspace = self.workspace(self.active_workspace_id())?;
         let window = workspace.active_window().ok_or(ShellError::UnknownWindow)?;
         if window.tabs.is_empty() {
             return Err(ShellError::UnknownTab);
@@ -269,16 +262,19 @@ impl ShellState {
             }
         }
 
+        let previous_product = self.product_active_window().map(|active| active.id);
         let (removed, destroyed) = self.workspace_mut(source_workspace)?.take_tab(tab)?;
         if let Some(destroyed_id) = destroyed {
-            self.purge_missing_panes();
+            // The Tab and its Pane identities remain live after a move, so
+            // preserve pane-addressed focus history while releasing the empty
+            // source Window realization in the host.
             self.push_effect(ShellNativeEffect::DestroyWindowRealization {
                 window: destroyed_id,
             });
         }
         self.workspace_mut(source_workspace)?
             .insert_tab_before(window, removed, before)?;
-        self.activate_window(window)?;
+        self.activate_window_from(window, previous_product)?;
         self.bump_containment_generation();
         Ok(())
     }
@@ -310,6 +306,7 @@ impl ShellState {
         if only {
             return Err(ShellError::MoveWouldNotChangeContainment);
         }
+        let previous_product = self.product_active_window().map(|active| active.id);
         let new_id = WindowId::new();
         let (removed, destroyed) = self.workspace_mut(workspace_id)?.take_tab(tab)?;
         debug_assert!(destroyed.is_none());
@@ -317,7 +314,7 @@ impl ShellState {
             .expect("moved tab forms a valid window");
         self.workspace_mut(workspace_id)?.push_window(window);
         self.push_effect(ShellNativeEffect::RealizeWindow { window: new_id });
-        self.activate_window(new_id)?;
+        self.activate_window_from(new_id, previous_product)?;
         self.bump_containment_generation();
         Ok(())
     }
@@ -336,6 +333,7 @@ impl ShellState {
             title: "Pane 1".to_owned(),
             execution: None,
             allows_implicit_execution_bootstrap: false,
+            presentation_mode: crate::presentation::PresentationMode::Flow,
         };
         Tab::with_pane(TabId::new(), format!("Terminal {ordinal}"), pane)
     }
@@ -365,10 +363,10 @@ impl ShellState {
                 tab,
                 containment_generation,
             } => self.move_tab_to_new_window(tab, containment_generation),
-            ShellAction::SelectWindow { id } => self.select_window(id),
-            ShellAction::SelectTab { id } => self.select_tab_identity(id),
-            ShellAction::CycleWindow { direction } => self.cycle_window(direction),
-            ShellAction::CycleTab { direction } => self.cycle_tab(direction),
+            ShellAction::SelectWindow { id, .. } => self.select_window(id),
+            ShellAction::SelectTab { id, .. } => self.select_tab_identity(id),
+            ShellAction::CycleWindow { direction, .. } => self.cycle_window(direction),
+            ShellAction::CycleTab { direction, .. } => self.cycle_tab(direction),
             ShellAction::ActivateWorkspace {
                 workspace,
                 containment_generation,

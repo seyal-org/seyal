@@ -30,7 +30,7 @@ It does not create a second AgentRun, PTY, resource, privacy/revocation, approva
 
 ```text
 WorkItem -> Attempt -> AgentRun       ADR-012 + ADR-016 Agent Backend/domain authority
-Attention / human Approval            #680 human-decision authority
+Attention / human Approval            Accepted SPEC-028 + #680 human-decision authority
 Context/privacy eligibility            ADR-013 + SPEC-015 privacy authority
 ActionId / ActionIntent / effect state ADR-014 Action authority
 resource/executor                      owns the actual resource operation

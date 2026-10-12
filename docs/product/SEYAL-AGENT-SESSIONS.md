@@ -24,7 +24,7 @@ This document defines **Seyal Agent Sessions** only. It refines the existing OSS
 A user may install and run coding/operations agents as ordinary terminal programs, including examples such as:
 
 - Claude Code;
-- Codex CLI;
+- Codex CLI (first-party OSS adapter on `StandaloneProcessHost` — see `docs/engineering/CODEX-ADAPTER.md`);
 - Cursor Agent CLI;
 - OpenCode;
 - Gemini CLI;
@@ -66,6 +66,11 @@ external agent process / harness session
                  CostEvent(s)
                  AttentionItem(s)
 ```
+
+**Local first-party adapter (M005):** Claude Code is the first supported local CLI
+adapter on `StandaloneProcessHost` (pipe-safe stream-json). Install/enable is a
+trusted `admin.adapters` path; repository content never auto-enables it. See
+`docs/engineering/CLAUDE-CODE-ADAPTER.md`. Codex remains a sibling adapter.
 
 The upstream session/thread identifier remains an opaque adapter-scoped reference. It never replaces Seyal identity or becomes terminal authority.
 

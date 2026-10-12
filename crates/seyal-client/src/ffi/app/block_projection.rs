@@ -221,7 +221,7 @@ mod tests {
             target_execution_hi: 0,
             target_attachment_lo: 2,
             target_attachment_hi: 0,
-            target_generation: 1,
+            target_pty_generation: 1,
             payload: ptr::null(),
             payload_len: 0,
             reserved: 0,

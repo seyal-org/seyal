@@ -2,14 +2,24 @@
 
 use super::*;
 use crate::shell::ShellAction;
+#[cfg(any(target_os = "macos", test))]
+use std::collections::HashSet;
 
 impl ApplicationRoot {
+    pub(crate) fn apply_shell(&mut self, action: ShellAction) -> Result<(), ShellError> {
+        self.shell.apply(action)?;
+        self.drain_shell_effects();
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+        Ok(())
+    }
+
     /// Deterministic live-unpresented ids for the active Workspace (ADR-018 §3.3).
     pub fn live_unpresented(&self) -> Vec<ExecutionId> {
         let workspace = self.shell.snapshot().active_workspace;
         self.shell.live_unpresented(workspace)
     }
 
+    #[cfg(test)]
     pub(super) fn sync_live_unpresented(
         &mut self,
         entries: Vec<(ExecutionId, WorkspaceId)>,
@@ -18,17 +28,77 @@ impl ApplicationRoot {
         Ok(())
     }
 
+    #[cfg(any(target_os = "macos", test))]
+    pub(super) fn reconcile_live_unpresented(&mut self, live: &[ExecutionId]) {
+        let known_workspaces: std::collections::HashMap<_, _> =
+            self.shell.unpresented_entries().into_iter().collect();
+        let live: HashSet<_> = live.iter().copied().collect();
+        // Runtime owns the authoritative execution → Workspace association.
+        // The current local ListExecutions protocol is scoped to SPEC-004's
+        // implicit/default Workspace, so a fresh GUI can safely recover that
+        // association even though presentation state was not persisted.
+        let default_workspace = WorkspaceId::m001_default();
+        let entries = live.into_iter().map(|execution| {
+            (
+                execution,
+                known_workspaces
+                    .get(&execution)
+                    .copied()
+                    .unwrap_or(default_workspace),
+            )
+        });
+        self.shell.replace_live_unpresented(entries);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn begin_unpresented_inventory_refresh(&mut self) {
+        if self.pending_unpresented_inventory.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        if std::thread::Builder::new()
+            .name("seyal-execution-inventory".to_owned())
+            .spawn(move || {
+                let _ = tx.send(crate::local::LocalDisplayClient::list_live_execution_ids());
+            })
+            .is_ok()
+        {
+            self.pending_unpresented_inventory = Some(rx);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn poll_unpresented_inventory_refresh(&mut self) {
+        let Some(rx) = self.pending_unpresented_inventory.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(live)) => {
+                self.pending_unpresented_inventory = None;
+                self.reconcile_live_unpresented(&live);
+                if self.palette.is_open() {
+                    self.rebuild_palette();
+                }
+            }
+            Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending_unpresented_inventory = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+
     pub(super) fn record_unpresented(
         &mut self,
         execution: ExecutionId,
         workspace: WorkspaceId,
     ) -> Result<(), AppError> {
-        self.provisioning.note_unreferenced(execution);
         self.apply_shell(ShellAction::RecordUnpresented {
             execution,
             workspace,
         })
-        .map_err(unpresented_shell_error)
+        .map_err(unpresented_shell_error)?;
+        self.provisioning.note_unreferenced(execution);
+        Ok(())
     }
 
     /// Adopt with fresh Runtime attachment evidence (no new PTY / ExecutionId).
@@ -103,10 +173,9 @@ impl ApplicationRoot {
         if !self.shell.live_unpresented(workspace).contains(&execution) {
             return Err(AppError::ExecutionNotUnpresented);
         }
-        let pane = self.shell.snapshot().focused_pane;
         let effects = self
             .provisioning
-            .begin_unpresented_dispose(pane, execution)
+            .begin_unpresented_dispose(execution)
             .map_err(|_| AppError::ProvisioningRejected)?;
         self.dispatch_provisioning_effects(effects)
     }

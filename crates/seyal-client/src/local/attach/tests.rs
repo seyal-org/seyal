@@ -8,6 +8,26 @@ use seyal_runtime::{
 };
 use std::io::Write;
 
+pub(crate) fn read_blocking_frame(
+    stream: &mut UnixStream,
+) -> Result<(MessageType, Vec<u8>), ClientError> {
+    use std::io::Read;
+    let mut header_bytes = [0u8; HEADER_LEN];
+    stream
+        .read_exact(&mut header_bytes)
+        .map_err(|_| ClientError::Io)?;
+    let header = FrameHeader::decode(&header_bytes).map_err(|_| ClientError::Protocol)?;
+    let mut frame = Vec::with_capacity(HEADER_LEN + header.payload_len as usize);
+    frame.extend_from_slice(&header_bytes);
+    frame.resize(HEADER_LEN + header.payload_len as usize, 0);
+    stream
+        .read_exact(&mut frame[HEADER_LEN..])
+        .map_err(|_| ClientError::Io)?;
+    let header = FrameHeader::decode(&frame[..HEADER_LEN]).map_err(|_| ClientError::Protocol)?;
+    let message_type = MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
+    Ok((message_type, frame[HEADER_LEN..].to_vec()))
+}
+
 #[test]
 fn implicit_resolution_fails_closed_when_multiple_executions_are_running() {
     let first = ExecutionId::from_bytes([1; 16]);

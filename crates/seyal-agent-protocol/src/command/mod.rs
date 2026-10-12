@@ -74,6 +74,12 @@ pub enum Command {
         session_id: ClientSessionId,
         run_id: AgentRunId,
     },
+    /// SPEC-026 §9.2 cancel intent (not proof of termination).
+    CancelRun {
+        session_id: ClientSessionId,
+        run_id: AgentRunId,
+        control_generation: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -247,6 +253,19 @@ pub fn encode_command(command: &Command, max_frame_size: u32) -> Result<Vec<u8>,
             body.extend_from_slice(&session_id.to_bytes());
             body.extend_from_slice(&run_id.to_bytes());
         }
+        Command::CancelRun {
+            session_id,
+            run_id,
+            control_generation,
+        } => {
+            if *control_generation == 0 {
+                return Err(FrameError::Malformed);
+            }
+            body.extend_from_slice(&11_u16.to_le_bytes());
+            body.extend_from_slice(&session_id.to_bytes());
+            body.extend_from_slice(&run_id.to_bytes());
+            body.extend_from_slice(&control_generation.to_le_bytes());
+        }
     }
     encode_frame(FrameKind::Command, &body, max_frame_size)
 }
@@ -337,6 +356,19 @@ pub fn decode_command(body: &[u8]) -> Result<Command, FrameError> {
             session_id: reader.session()?,
             run_id: reader.run()?,
         },
+        11 => {
+            let session_id = reader.session()?;
+            let run_id = reader.run()?;
+            let control_generation = reader.u64()?;
+            if control_generation == 0 {
+                return Err(FrameError::Malformed);
+            }
+            Command::CancelRun {
+                session_id,
+                run_id,
+                control_generation,
+            }
+        }
         _ => return Err(FrameError::Malformed),
     };
     reader.finish()?;

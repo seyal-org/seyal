@@ -1,9 +1,7 @@
-//! Pure pin/singleton execution-target resolution (SPEC-027 §4.3).
+//! Pin / singleton hard resolution (SPEC-027 §4.3).
 //!
-//! No I/O, no store access: callers (Agent Backend) materialize eligibility
-//! facts from the durable adapter catalog and pass them in. Scored selection
-//! (`RouterV1`) is forbidden here until SPEC-020 V1 ranking (#681) lands;
-//! this function never returns [`SelectionKind::RouterV1`].
+//! Remains a valid selection path after V1 ranking is composed. Pins never
+//! bypass SPEC-020 §5 hard constraints.
 
 use crate::lifecycle::SelectionKind;
 use crate::{AdapterId, RouteOfferingId};
@@ -36,14 +34,17 @@ pub enum ResolveFailure {
     /// Pin names a present, hard-constraint-satisfying offering whose
     /// adapter is disabled.
     AdapterDisabled { adapter_id: AdapterId },
-    /// Unpinned resolution saw zero or more than one eligible offering.
+    /// Unpinned resolution saw zero eligible offerings, or more than one
+    /// without a ranking stage result.
     AmbiguousOrNoTarget,
+    /// Explicit NoRoute after hard-constraint / floor / budget conflict.
+    NoRoute,
+    /// BaselineCalibrationArtifact integrity or cold-start bind failed.
+    BaselineIntegrity,
 }
 
-/// SPEC-027 §4.3 resolver. `candidates` is the full known offering set
-/// (enabled or not); eligibility filtering happens here, not by the caller
-/// pre-filtering on `adapter.execute` (that is a later, separate check).
-pub fn resolve_execution_target(
+/// SPEC-027 §4.3 pin/singleton resolver (no soft ranking).
+pub fn resolve_pin_or_singleton(
     pin: Option<RouteOfferingId>,
     candidates: &[AdapterCandidate],
 ) -> Result<ResolvedTarget, ResolveFailure> {
@@ -68,8 +69,6 @@ pub fn resolve_execution_target(
         });
     }
 
-    // §4.3 step 2: eligibility is enabled + hard-constraint only, never
-    // filtered by the caller's adapter.execute grant.
     let mut eligible = candidates
         .iter()
         .filter(|candidate| candidate.adapter_enabled && candidate.hard_constraint_satisfied);
@@ -84,6 +83,14 @@ pub fn resolve_execution_target(
         }),
         _ => Err(ResolveFailure::AmbiguousOrNoTarget),
     }
+}
+
+/// Backward-compatible name used by Agent Backend pin/singleton composition.
+pub fn resolve_execution_target(
+    pin: Option<RouteOfferingId>,
+    candidates: &[AdapterCandidate],
+) -> Result<ResolvedTarget, ResolveFailure> {
+    resolve_pin_or_singleton(pin, candidates)
 }
 
 #[cfg(test)]
@@ -119,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn unpinned_two_eligible_is_unavailable_no_ranking() {
+    fn unpinned_two_eligible_without_ranking_is_unavailable() {
         let candidates = [candidate(true, true), candidate(true, true)];
         assert_eq!(
             resolve_execution_target(None, &candidates),

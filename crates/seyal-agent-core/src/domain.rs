@@ -291,6 +291,15 @@ impl AgentDomain {
         &mut self,
         work_scope_id: WorkScopeId,
     ) -> Result<WorkItemId, DomainError> {
+        self.create_work_item_with_mode(work_scope_id, AcceptanceContractMode::HumanFinal)
+    }
+
+    /// Create a WorkItem with an explicit AcceptanceContract mode (SPEC-019 §4).
+    pub fn create_work_item_with_mode(
+        &mut self,
+        work_scope_id: WorkScopeId,
+        acceptance_mode: AcceptanceContractMode,
+    ) -> Result<WorkItemId, DomainError> {
         if !self.work_scopes.contains_key(&work_scope_id) {
             return Err(DomainError::UnknownWorkScope(work_scope_id));
         }
@@ -302,7 +311,7 @@ impl AgentDomain {
                 work_scope_id,
                 lifecycle: WorkItemLifecycle::Open,
                 outcome: None,
-                acceptance_mode: AcceptanceContractMode::HumanFinal,
+                acceptance_mode,
                 related_to: None,
             },
         );

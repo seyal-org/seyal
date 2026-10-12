@@ -49,6 +49,16 @@ define_id!(ClientSessionId, 0x4147_5345_5353_4901);
 define_id!(AdapterId, 0x4147_4144_4150_5401);
 // RouteOffering identity within an adapter manifest (SPEC-027 §4).
 define_id!(RouteOfferingId, 0x4147_524f_4646_4501);
+define_id!(MemoryId, 0x4147_4d45_4d52_5901);
+define_id!(RunWorkingSetId, 0x4147_5257_5345_5401);
+define_id!(ContinuationPlanId, 0x4147_4350_4c41_4e01);
+define_id!(RevocationEventId, 0x4147_5256_4b45_5601);
+define_id!(ContextBundleId, 0x4147_4358_424e_4401);
+// SPEC-016 ActionId (master #1317 domain) plus SPEC-028 Attention/Approval/Artifact.
+define_id!(ActionId, 0x4147_4143_544e_4901);
+define_id!(AttentionId, 0x4147_4154_544e_0101);
+define_id!(ApprovalId, 0x4147_4150_5052_0101);
+define_id!(ArtifactId, 0x4147_4152_5446_0101);
 
 fn unique_id(domain: u64) -> u128 {
     let sequence = NEXT_ID
@@ -102,7 +112,7 @@ macro_rules! define_generation {
                 }
             }
 
-            pub(crate) fn next(self) -> Option<Self> {
+            pub fn next(self) -> Option<Self> {
                 self.0.checked_add(1).map(Self)
             }
         }
@@ -110,10 +120,12 @@ macro_rules! define_generation {
 }
 
 define_generation!(BindingGeneration);
-// ControlGeneration is the client control epoch (SPEC-026 O1 / §8.3).
-// Advances on Agent Backend restart/recovery and whenever control authority is
-// re-established. Older epochs are rejected as StaleControlEpoch.
 define_generation!(ControlGeneration);
+define_generation!(RecordGeneration);
+define_generation!(WorkingSetGeneration);
+define_generation!(PlanGeneration);
+define_generation!(RevocationGeneration);
+define_generation!(ScopePolicyGeneration);
 
 #[cfg(test)]
 mod tests {

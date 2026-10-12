@@ -19,7 +19,7 @@ extern "C" {
  * Product snapshots and Candidate-D prepared frames are separate transfers.
  */
 
-#define SEYAL_APP_ABI_VERSION 1u
+#define SEYAL_APP_ABI_VERSION 2u
 
 enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS = 0,
@@ -50,9 +50,9 @@ enum SeyalAppActionKind {
      * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
      * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
      * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
-     * target_execution_lo/hi = TabId/PaneId and target_generation is the
-     * containment_generation from the shell snapshot that produced the action.
-     * SPLIT_FOCUSED: reserved = 0
+     * target_execution_lo/hi = TabId/PaneId; close actions carry the
+     * containment_generation observed in the shell snapshot in
+     * target_pty_generation. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
@@ -63,11 +63,13 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
     SEYAL_APP_ACTION_SPLIT_FOCUSED = 25,
     SEYAL_APP_ACTION_CLOSE_PANE = 26,
+    /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 67,
     /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
      * MOVE_COMPOSER_HISTORY_SELECTION: reserved = signed row delta (int32).
-     * SELECT_COMPOSER_HISTORY: target_generation = composer epoch.
+     * SELECT_COMPOSER_HISTORY: target_pty_generation = composer epoch.
      */
     SEYAL_APP_ACTION_OPEN_COMPOSER_HISTORY = 40,
     SEYAL_APP_ACTION_SET_COMPOSER_HISTORY_FILTER = 41,
@@ -156,10 +158,13 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
     SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
     /**
-     * ADR-018 structural CloseWindow. target_execution_lo/hi = WindowId;
-     * target_generation = containment_generation from the shell snapshot.
+     * Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq as
+     * little-endian u64. reserved = 0. Observed cursor must match the current
+     * history seq or the action rejects with StaleHistoryCursor (51).
+     * Numbers 63/64 follow N4 OpenGoto/SetGotoScope (61/62).
      */
-    SEYAL_APP_ACTION_CLOSE_WINDOW = 67
+    SEYAL_APP_ACTION_HISTORY_BACK = 63,
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 64
 };
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
@@ -198,11 +203,11 @@ enum SeyalAppEligibility {
 
 /*
  * Recovery actions keep the 120-byte SeyalAppAction record.
- * BEGIN/FIRE: target_generation = host clock milliseconds.
+ * BEGIN/FIRE: target_pty_generation = host clock milliseconds.
  * COMPLETE: target_execution_lo = episode generation,
  *           reserved = outcome | (launch << 8),
  *           target_attachment_lo = opened handle,
- *           target_generation = host clock milliseconds.
+ *           target_pty_generation = host clock milliseconds.
  */
 enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_DISCONNECTED = 0,
@@ -265,8 +270,7 @@ typedef struct SeyalAppAction {
     uint64_t target_execution_hi;
     uint64_t target_attachment_lo;
     uint64_t target_attachment_hi;
-    /* Kind-specific target generation (PTY, containment, composer epoch, etc.). */
-    uint64_t target_generation;
+    uint64_t target_pty_generation;
     const uint8_t *payload;
     uint32_t payload_len;
     uint32_t reserved;
@@ -448,8 +452,9 @@ typedef struct SeyalAppTheme {
 
 /*
  * Multi-window shell header (#1108 / ADR-018 §2.1). window_count / effect_count
- * index seyal_app_window / seyal_app_native_effect. containment_generation is
- * the monotonic shell fence; shell_last_error is a bounded non-secret code.
+ * index seyal_app_window / seyal_app_native_effect. shell_generation changes
+ * on every committed application snapshot; containment_generation is the
+ * monotonic structural fence. shell_last_error is a bounded non-secret code.
  * Active-window tab/pane counts remain for the product-active Window projection.
  */
 typedef struct SeyalAppShell {
@@ -473,6 +478,7 @@ typedef struct SeyalAppShell {
     uint64_t active_window_hi;
     uint64_t last_active_workspace_lo;
     uint64_t last_active_workspace_hi;
+    uint64_t shell_generation;
 } SeyalAppShell;
 
 /* SeyalAppWindow.flags */
@@ -537,11 +543,14 @@ typedef struct SeyalAppPaneLeaf {
     uint64_t execution_hi;
     const uint8_t *title;
     uint32_t title_len;
-    uint32_t reserved;
+    uint16_t presentation_mode; /* 0 Flow, 1 Raw, 2 TUI */
+    uint16_t reserved;
 } SeyalAppPaneLeaf;
 
 /* SeyalAppPaneTreeNode.kind: 0 leaf, 1 split-right, 2 split-down.
- * first/second are relative indices within the Tab's tree_node_count. */
+ * first/second are relative indices within the Tab's tree_node_count.
+ * ratio is the first child's share (0.1...0.9) for split nodes; leaf nodes
+ * report 0.0. reserved2 must be zero. */
 typedef struct SeyalAppPaneTreeNode {
     uint16_t version;
     uint16_t size;
@@ -551,14 +560,14 @@ typedef struct SeyalAppPaneTreeNode {
     uint64_t pane_hi;
     uint32_t first;
     uint32_t second;
+    float ratio;
+    uint32_t reserved2;
 } SeyalAppPaneTreeNode;
 
 /*
  * ADR-018 §2.4 native effects in commit order.
  * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
- *       3 DestroyWindowRealization, 4 OrderFrontMakeKey,
- *       5 TerminateExecution (window_* slots carry ExecutionId),
- *       6 RequestAdoptAttach (window_* slots carry ExecutionId).
+ *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -573,8 +582,6 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
-#define SEYAL_APP_EFFECT_TERMINATE_EXECUTION 5u
-#define SEYAL_APP_EFFECT_REQUEST_ADOPT_ATTACH 6u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u
@@ -758,6 +765,8 @@ int32_t seyal_app_route_keystroke(
 
 int32_t seyal_app_apply(uint64_t handle, const SeyalAppAction *action);
 SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
+/* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
+uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);

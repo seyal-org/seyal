@@ -274,6 +274,24 @@ impl TestClient {
         }
     }
 
+    pub fn cancel_run(&mut self, run_id: AgentRunId, control_generation: u64) -> (u64, u64, u8) {
+        match round_trip(
+            &mut self.stream,
+            &Command::CancelRun {
+                session_id: self.session_id,
+                run_id,
+                control_generation,
+            },
+        ) {
+            CommandResult::Run {
+                binding_generation,
+                control_generation,
+                liveness,
+            } => (binding_generation, control_generation, liveness),
+            other => panic!("cancel: {other:?}"),
+        }
+    }
+
     pub fn check_generation(
         &mut self,
         run_id: AgentRunId,

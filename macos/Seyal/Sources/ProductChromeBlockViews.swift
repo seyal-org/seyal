@@ -8,13 +8,6 @@ final class IdentityButton: NSButton {
     var kind: UInt16 = 0
     var idLo: UInt64 = 0
     var idHi: UInt64 = 0
-    var containmentGeneration: UInt64 = 0
-
-    func setShellIdentity(_ low: UInt64, _ high: UInt64, _ generation: UInt64) {
-        idLo = low
-        idHi = high
-        containmentGeneration = generation
-    }
 }
 
 final class CommandBlockView: NSView {

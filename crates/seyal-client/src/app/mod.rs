@@ -7,9 +7,12 @@
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
 mod accessibility;
+mod action_types;
 mod chrome_apply;
 mod close_apply;
 mod composer_apply;
+mod errors;
+mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
@@ -23,11 +26,17 @@ mod session;
 mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
+use errors::{chrome_error, close_pane_error, close_tab_error, composer_error, palette_error};
 
+pub use action_types::AppAction;
 pub use native_effect::NativeEffect;
 
 #[cfg(test)]
+mod focus_history_tests;
+#[cfg(test)]
 mod keybinding_apply_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod pane_provisioning_tests;
 #[cfg(test)]
 mod presentation_tests;
 #[cfg(test)]
@@ -47,17 +56,15 @@ use std::time::Duration;
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
-    LeftPanelMode,
+    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
 use crate::composer::{
-    ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
-    RuntimeComposerEligibility,
+    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord, RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
-use crate::navigation::ResourceAddress;
-use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
+use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
+use crate::palette::{PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
@@ -73,7 +80,7 @@ use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis
 use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
-pub const APP_ABI_VERSION: u16 = 1;
+pub const APP_ABI_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppError {
@@ -126,6 +133,8 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
+    NavigationStaleHistoryCursor,
+    NavigationHistoryUnavailable,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
@@ -159,249 +168,6 @@ pub struct BindingEvidence {
     pub controller: bool,
     pub pty_generation: u64,
     pub alternate_screen: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AppAction {
-    Focus {
-        fence: AppFence,
-    },
-    Bind {
-        fence: AppFence,
-        evidence: BindingEvidence,
-    },
-    Refresh {
-        fence: AppFence,
-        alternate_screen: bool,
-    },
-    SubmitInput {
-        fence: AppFence,
-        text: String,
-    },
-    Quit,
-    AckEffect,
-    BeginRecovery {
-        now: Duration,
-    },
-    CompleteRecovery {
-        generation: u64,
-        outcome: AttemptOutcome,
-        now: Duration,
-        launch: Option<LaunchResult>,
-    },
-    FireScheduledRecovery {
-        generation: u64,
-        now: Duration,
-    },
-    AckRecoveryEffect,
-    CancelRecovery,
-    /// Host presentation progress after connect (`RestoringInteraction` / `Usable`).
-    AdvanceRecoveryStage {
-        stage: RecoveryStage,
-    },
-    /// Begin a continuity-identity commit attempt (pins retained across episodes).
-    BeginReconstructionAttempt,
-    /// Commit Runtime/execution continuity and a fresh attachment. Rust is the
-    /// sole fencing authority (ADR-015 / #1065).
-    CommitReconstruction {
-        runtime: ContinuityIdentity,
-        execution: ContinuityIdentity,
-        attachment: ContinuityIdentity,
-        controller_authority_committed: bool,
-        authoritative_snapshot_committed: bool,
-    },
-    /// Mark reconstruction disconnected after the host drops the live client.
-    DisconnectReconstruction,
-    SetComposerDraft {
-        fence: AppFence,
-        text: String,
-        composer_epoch: u64,
-    },
-    SubmitComposer {
-        fence: AppFence,
-        composer_epoch: u64,
-    },
-    ApplyComposerResult {
-        fence: AppFence,
-        request_id: u64,
-        accepted: bool,
-    },
-    ApplyRuntimeBlocks {
-        fence: AppFence,
-        records: Vec<RuntimeBlockRecord>,
-    },
-    /// Relay the attached client's Runtime-published composer eligibility
-    /// (ADR-009 invariant 7). `None` clears it when the transport is lost.
-    ApplyRuntimeComposerStatus {
-        fence: AppFence,
-        eligibility: Option<RuntimeComposerEligibility>,
-        revision: u64,
-    },
-    /// User choice of the non-TUI presentation (#867).
-    /// `raw` keeps Raw across TUI entry and exit. Clearing it follows
-    /// structured eligibility again.
-    SelectRestingPresentation {
-        fence: AppFence,
-        raw: bool,
-    },
-    SetLeftPanel {
-        mode: LeftPanelMode,
-    },
-    SetInspectorMode {
-        mode: InspectorMode,
-    },
-    SelectAgent {
-        fence: AppFence,
-        id: AgentId,
-    },
-    OpenAttention {
-        fence: AppFence,
-        id: AttentionId,
-    },
-    ReplaceChrome {
-        fence: AppFence,
-        agents: Vec<crate::chrome::AgentRecord>,
-        attention: Vec<crate::chrome::AttentionItem>,
-    },
-    SelectWorkspace {
-        id: WorkspaceId,
-    },
-    SelectTab {
-        id: TabId,
-    },
-    CreateTab,
-    CloseWindow {
-        id: WindowId,
-        containment_generation: u64,
-    },
-    CloseTab {
-        id: TabId,
-        containment_generation: u64,
-    },
-    TerminateExecution {
-        fence: AppFence,
-    },
-    /// ADR-018 §3.3: adopt a live-unpresented execution with Runtime evidence.
-    Adopt {
-        fence: AppFence,
-        evidence: BindingEvidence,
-    },
-    /// Test/Runtime sync of the live-unpresented catalog.
-    SyncLiveUnpresented {
-        entries: Vec<(ExecutionId, WorkspaceId)>,
-    },
-    /// Record one live-unpresented execution (tests construct Unpresented directly).
-    RecordUnpresented {
-        execution: ExecutionId,
-        workspace: WorkspaceId,
-    },
-    /// Explicit terminate of a live-unpresented execution (ADR-018 §3.3).
-    /// Distinct from [`AppAction::TerminateExecution`] (P4 fenced Controller dispose).
-    TerminateUnpresented {
-        execution: ExecutionId,
-    },
-    SplitFocused {
-        axis: SplitAxis,
-    },
-    ClosePane {
-        id: PaneId,
-        containment_generation: u64,
-    },
-    FocusPane {
-        id: PaneId,
-    },
-    /// Drag the divider that `pane` leads to a pointer position (#928).
-    MoveSplitDivider {
-        pane: PaneId,
-        position: SplitPosition,
-    },
-    SetShellVisibility {
-        left: bool,
-        inspector: bool,
-        tab_strip: bool,
-    },
-    OpenComposerHistory {
-        fence: AppFence,
-    },
-    SetComposerHistoryFilter {
-        fence: AppFence,
-        query: String,
-    },
-    MoveComposerHistorySelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    SelectComposerHistory {
-        fence: AppFence,
-        composer_epoch: u64,
-    },
-    CloseComposerHistory {
-        fence: AppFence,
-    },
-    /// Global keyboard-first command palette (#932). Rows/selection are
-    /// derived fresh from Shell/Chrome; no command is ever fabricated.
-    OpenPalette {
-        fence: AppFence,
-    },
-    SetPaletteQuery {
-        fence: AppFence,
-        query: String,
-    },
-    MovePaletteSelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    /// Run the selected palette row. When `address` is `Some`, Navigate that
-    /// host-echoed address (SPEC-022 R7.2). When `None`, run the frozen
-    /// selected verb/chrome command. Never re-resolves by ordinal.
-    RunPalette {
-        fence: AppFence,
-        address: Option<ResourceAddress>,
-    },
-    /// Atomic Navigate(address) commit (SPEC-022 §4).
-    Navigate {
-        fence: AppFence,
-        address: ResourceAddress,
-    },
-    ClosePalette {
-        fence: AppFence,
-    },
-    /// Navigation-only goto / quick-switcher (SPEC-022 §7 / N4).
-    OpenGoto {
-        fence: AppFence,
-        scope: GotoScope,
-    },
-    SetGotoScope {
-        fence: AppFence,
-        scope: GotoScope,
-    },
-    CycleGotoScope {
-        fence: AppFence,
-    },
-    SetGotoQuery {
-        fence: AppFence,
-        query: String,
-    },
-    MoveGotoSelection {
-        fence: AppFence,
-        delta: i32,
-    },
-    /// Run the selected goto row by stored/host-echoed address.
-    RunGoto {
-        fence: AppFence,
-        address: Option<ResourceAddress>,
-    },
-    CloseGoto {
-        fence: AppFence,
-    },
-    /// Bind the inspector to one Block of the focused Pane (#935).
-    SelectBlock {
-        fence: AppFence,
-        id: BlockId,
-    },
-    ClearBlockSelection {
-        fence: AppFence,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -450,6 +216,9 @@ pub struct AppSnapshot {
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
     pub goto: GotoSnapshot,
+    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
+    /// when history is empty.
+    pub focus_history_seq: Option<FocusSeq>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -492,6 +261,8 @@ pub struct ApplicationRoot {
     /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
+    /// Application-scoped focus history (SPEC-022 §6 / N3).
+    focus_history: FocusHistory,
     /// Last canonical alternate-screen evidence. TUI while this is set.
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
@@ -508,6 +279,10 @@ pub struct ApplicationRoot {
     /// Never duplicates [`Self::client_handle`].
     #[cfg(target_os = "macos")]
     extra_pane_clients: HashMap<PaneId, crate::ffi::ClientRegistryHandle>,
+    /// Dispose-only Controller clients, keyed by synthetic owner and never
+    /// associated with a shell Pane or display handle.
+    #[cfg(target_os = "macos")]
+    dispose_clients: HashMap<crate::provisioning::ConnectionOwner, LocalDisplayClient>,
     /// Pane → registry raw for display/terminate (includes first pane).
     #[cfg(target_os = "macos")]
     pane_client_raws: HashMap<PaneId, u64>,
@@ -517,6 +292,10 @@ pub struct ApplicationRoot {
     /// In-flight second-Controller connect (off the host poll thread).
     #[cfg(target_os = "macos")]
     pending_live_attach: Option<live_attach_apply::PendingLiveAttach>,
+    /// In-flight cold Runtime inventory request, separate from per-Pane attach.
+    #[cfg(target_os = "macos")]
+    pending_unpresented_inventory:
+        Option<std::sync::mpsc::Receiver<Result<Vec<ExecutionId>, crate::local::ClientError>>>,
     /// Created executions waiting for a free live-attach worker (ADR-017 §6.3).
     #[cfg(target_os = "macos")]
     queued_live_attaches: VecDeque<(crate::provisioning::ConnectionOwner, ExecutionId)>,
@@ -575,6 +354,7 @@ impl ApplicationRoot {
             palette: PaletteState::new(),
             chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
+            focus_history: FocusHistory::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
             explicit_raw: false,
@@ -584,11 +364,15 @@ impl ApplicationRoot {
             #[cfg(target_os = "macos")]
             extra_pane_clients: HashMap::new(),
             #[cfg(target_os = "macos")]
+            dispose_clients: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pane_client_raws: HashMap::new(),
             #[cfg(target_os = "macos")]
             inject_live_attach_failures: 0,
             #[cfg(target_os = "macos")]
             pending_live_attach: None,
+            #[cfg(target_os = "macos")]
+            pending_unpresented_inventory: None,
             #[cfg(target_os = "macos")]
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
@@ -628,7 +412,10 @@ impl ApplicationRoot {
     /// create/attach/terminate progress (not every Candidate-D frame).
     #[cfg(target_os = "macos")]
     pub(crate) fn needs_provisioning_drive(&self) -> bool {
-        if self.live_client_handle_for_test().is_none() && self.wire_client.is_none() {
+        if self.live_client_handle_for_test().is_none()
+            && self.wire_client.is_none()
+            && self.dispose_clients.is_empty()
+        {
             return false;
         }
         self.pending_live_attach.is_some()
@@ -675,7 +462,19 @@ impl ApplicationRoot {
     /// `Bind` will land); it is shown only while that Pane is focused.
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
-        pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+        let focused = shell.focused_pane;
+        let live_pane =
+            if self.pane_authorities.contains_key(&focused) || self.pane_authorities.is_empty() {
+                focused
+            } else {
+                // Unbound focus while another leaf remains bound: no live surface.
+                self.pane_authorities
+                    .keys()
+                    .copied()
+                    .next()
+                    .expect("non-empty pane_authorities")
+            };
+        pane_layout::project(&shell.tree, focused, live_pane)
     }
 
     pub fn fence(&self) -> AppFence {
@@ -716,9 +515,8 @@ impl ApplicationRoot {
         let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
             generation: self.snapshot_generation,
-            // The fence Pane, not the focused one: host actions fenced from
-            // this snapshot must keep reaching the bound execution while
-            // another split leaf is focused.
+            // The fence Pane when bound; the focused Pane when fail-closed
+            // unbound (N3). Hosts must not send input to another Pane's execution.
             pane: self.fence().pane,
             execution: self.authority.map(|bound| bound.execution),
             attachment: self.authority.map(|bound| bound.attachment),
@@ -745,6 +543,7 @@ impl ApplicationRoot {
             chrome,
             palette,
             goto,
+            focus_history_seq: self.focus_history.cursor_seq(),
         }
     }
 
@@ -883,12 +682,14 @@ impl ApplicationRoot {
                 }
                 self.create_tab()
             }
-            action @ (AppAction::CloseWindow { .. }
-            | AppAction::CloseTab { .. }
-            | AppAction::ClosePane { .. }) => self.apply_close(action),
+            AppAction::CloseTab { .. }
+            | AppAction::CloseWindow { .. }
+            | AppAction::ClosePane { .. } => self.apply_close(action),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
+            #[cfg(test)]
             AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
+            #[cfg(test)]
             AppAction::RecordUnpresented {
                 execution,
                 workspace,
@@ -920,6 +721,14 @@ impl ApplicationRoot {
             AppAction::Navigate { fence, address } => {
                 self.require_fence(fence)?;
                 self.navigate_address(address)
+            }
+            AppAction::HistoryBack { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_back(observed)
+            }
+            AppAction::HistoryForward { fence, observed } => {
+                self.require_fence(fence)?;
+                self.history_forward(observed)
             }
             AppAction::ClosePalette { fence } => self.close_palette(fence),
             AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
@@ -977,53 +786,5 @@ impl ApplicationRoot {
     pub(crate) fn fail(&mut self, error: AppError) -> Result<(), AppError> {
         self.last_error = Some(error);
         Err(error)
-    }
-}
-
-pub(super) fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub(super) fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        ShellError::StaleContainment => AppError::StalePane,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub(super) fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        ShellError::StaleContainment => AppError::StalePane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub(super) fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub(super) fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
-        }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
     }
 }

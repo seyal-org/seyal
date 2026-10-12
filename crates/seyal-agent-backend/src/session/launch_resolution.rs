@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use seyal_agent_core::{AdapterId, AgentRunId, BindingGeneration, LaunchDescriptor, WorkScopeKind};
-use seyal_agent_store::LaunchDescriptorTemplate;
+use seyal_agent_store::{CwdPolicy, LaunchDescriptorTemplate};
 
 const WORK_SCOPE_ROOT_TOKEN: &str = "{work_scope_root}";
 const ENV_RUN_ID: &str = "SEYAL_RUN_ID";
@@ -16,17 +16,15 @@ const ENV_BINDING_GENERATION: &str = "SEYAL_BINDING_GENERATION";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchResolutionFailure {
-    /// SPEC-027 §6: `Repository`/`Project` cwd is "bound root from
-    /// `WorkScope.bindings`". No bindings subsystem exists in this
-    /// codebase yet (tracked by a linked follow-up issue), so resolution
-    /// fails closed rather than guessing a root or silently falling back
-    /// to `AdapterWorkDir`.
+    /// SPEC-027 §6: `Repository`/`Project` cwd requires a durable bound root
+    /// that still exists as a directory after canonicalization.
     MissingBoundRoot,
-    /// `argv_template` names `{work_scope_root}` but this manifest/
-    /// WorkScope combination never resolves one (§5.1: the token is only
-    /// expanded when `cwd_policy = WorkScopeRoot` and the binding is a
-    /// repository/root — which this codebase cannot yet produce).
+    /// `argv_template` names `{work_scope_root}` but `cwd_policy` is not
+    /// `WorkScopeRoot` or no bound root is available (§5.1).
     UnresolvedWorkScopeToken,
+    /// Expanded `{work_scope_root}` path left the canonical bound root
+    /// (traversal or symlink-escape).
+    EscapedBoundRoot,
     AdapterWorkDirUnavailable,
 }
 
@@ -41,39 +39,82 @@ pub fn adapter_work_dir(adapter_work_root: &Path, adapter_id: AdapterId) -> Path
     adapter_work_root.join(hex)
 }
 
-/// SPEC-027 §6 cwd table, restricted to the kinds this codebase can resolve
-/// without inventing a bindings subsystem: `Repository`/`Project` fail
-/// closed on a missing bound root — exactly §6's own prescribed failure mode
-/// (fixture 17's fail-closed sub-case; the happy-path "resolve to the bound
-/// root, reject traversal/escape" half of fixture 17 needs a durable
-/// `WorkScope.bindings` concept that does not exist yet, tracked by
-/// https://github.com/seyal-org/seyal/issues/1226). `HostBound` (no
-/// host-supplied root binding exists either) and `AdHoc` both resolve to
-/// `AdapterWorkDir`.
+fn canonical_existing_dir(path: &Path) -> Result<PathBuf, LaunchResolutionFailure> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| LaunchResolutionFailure::MissingBoundRoot)?;
+    if !canonical.is_dir() {
+        return Err(LaunchResolutionFailure::MissingBoundRoot);
+    }
+    Ok(canonical)
+}
+
+/// SPEC-027 §6 cwd table. `AdHoc` is always `AdapterWorkDir`. `HostBound`
+/// uses a supplied binding when present. `Repository`/`Project` require one.
 fn resolve_cwd(
     kind: WorkScopeKind,
     adapter_work_dir: &Path,
+    bound_root: Option<&Path>,
 ) -> Result<PathBuf, LaunchResolutionFailure> {
     match kind {
         WorkScopeKind::Repository | WorkScopeKind::Project => {
-            Err(LaunchResolutionFailure::MissingBoundRoot)
+            let Some(path) = bound_root else {
+                return Err(LaunchResolutionFailure::MissingBoundRoot);
+            };
+            canonical_existing_dir(path)
         }
-        WorkScopeKind::HostBound | WorkScopeKind::AdHoc => Ok(adapter_work_dir.to_path_buf()),
+        WorkScopeKind::HostBound => match bound_root {
+            Some(path) => canonical_existing_dir(path),
+            None => Ok(adapter_work_dir.to_path_buf()),
+        },
+        WorkScopeKind::AdHoc => Ok(adapter_work_dir.to_path_buf()),
     }
 }
 
-/// §5.1: `argv_template` entries are literals or the `{work_scope_root}`
-/// token. No `WorkScope.bindings` subsystem exists, so a repository/root
-/// work-scope root is never available to substitute; a manifest that
-/// declares the token fails closed rather than spawning with a literal,
-/// unexpanded placeholder.
-fn expand_argv(argv_template: &[String]) -> Result<Vec<String>, LaunchResolutionFailure> {
+fn path_is_within(root: &Path, candidate: &Path) -> bool {
+    match (root.canonicalize(), candidate.canonicalize()) {
+        (Ok(root), Ok(candidate)) => candidate.starts_with(&root),
+        _ => false,
+    }
+}
+
+fn expand_token(token: &str, bound_root: &Path) -> Result<String, LaunchResolutionFailure> {
+    let rest = token
+        .strip_prefix(WORK_SCOPE_ROOT_TOKEN)
+        .ok_or(LaunchResolutionFailure::UnresolvedWorkScopeToken)?;
+    let candidate = if rest.is_empty() {
+        bound_root.to_path_buf()
+    } else {
+        let rest = rest.strip_prefix('/').unwrap_or(rest);
+        bound_root.join(rest)
+    };
+    if !path_is_within(bound_root, &candidate) {
+        return Err(LaunchResolutionFailure::EscapedBoundRoot);
+    }
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|_| LaunchResolutionFailure::EscapedBoundRoot)?;
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+fn expand_argv(
+    argv_template: &[String],
+    cwd_policy: CwdPolicy,
+    bound_root: Option<&Path>,
+) -> Result<Vec<String>, LaunchResolutionFailure> {
     let mut argv = Vec::with_capacity(argv_template.len());
     for token in argv_template {
-        if token == WORK_SCOPE_ROOT_TOKEN {
-            return Err(LaunchResolutionFailure::UnresolvedWorkScopeToken);
+        if token.contains(WORK_SCOPE_ROOT_TOKEN) {
+            if cwd_policy != CwdPolicy::WorkScopeRoot {
+                return Err(LaunchResolutionFailure::UnresolvedWorkScopeToken);
+            }
+            let Some(root) = bound_root else {
+                return Err(LaunchResolutionFailure::UnresolvedWorkScopeToken);
+            };
+            argv.push(expand_token(token, root)?);
+        } else {
+            argv.push(token.clone());
         }
-        argv.push(token.clone());
     }
     Ok(argv)
 }
@@ -93,9 +134,6 @@ fn resolve_env(
     let mut env = Vec::with_capacity(env_allowlist.len() + 2);
     for name in env_allowlist {
         if name == ENV_RUN_ID || name == ENV_BINDING_GENERATION {
-            // Backend-injected identity refs below always win; an operator
-            // listing them in env_allowlist does not source them from the
-            // daemon's own process environment instead.
             continue;
         }
         if let Some(value) = lookup(name) {
@@ -113,7 +151,8 @@ fn resolve_env(
 /// Resolves the exact [`LaunchDescriptor`] passed to
 /// `SessionExecutionHost::start`, from the manifest frozen at
 /// `adapter_manifest_generation` and the dispatching run's `WorkScope`
-/// kind. Creates `AdapterWorkDir` on disk when cwd resolves to it.
+/// kind plus optional durable bound root. Creates `AdapterWorkDir` on disk
+/// when cwd resolves to it.
 pub fn resolve_launch_descriptor(
     launch: &LaunchDescriptorTemplate,
     kind: WorkScopeKind,
@@ -121,14 +160,20 @@ pub fn resolve_launch_descriptor(
     adapter_id: AdapterId,
     run_id: AgentRunId,
     binding_generation: BindingGeneration,
+    bound_root: Option<&Path>,
 ) -> Result<LaunchDescriptor, LaunchResolutionFailure> {
     let work_dir = adapter_work_dir(adapter_work_root, adapter_id);
-    let cwd = resolve_cwd(kind, &work_dir)?;
+    let cwd = resolve_cwd(kind, &work_dir, bound_root)?;
     if cwd == work_dir {
         std::fs::create_dir_all(&work_dir)
             .map_err(|_| LaunchResolutionFailure::AdapterWorkDirUnavailable)?;
     }
-    let argv = expand_argv(&launch.argv_template)?;
+    let argv_root = match kind {
+        WorkScopeKind::Repository | WorkScopeKind::Project => Some(cwd.as_path()),
+        WorkScopeKind::HostBound if bound_root.is_some() => Some(cwd.as_path()),
+        _ => None,
+    };
+    let argv = expand_argv(&launch.argv_template, launch.cwd_policy, argv_root)?;
     let env = resolve_env(&launch.env_allowlist, run_id, binding_generation, |name| {
         std::env::var(name).ok()
     });
@@ -143,7 +188,6 @@ pub fn resolve_launch_descriptor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use seyal_agent_store::CwdPolicy;
 
     fn template(cwd_policy: CwdPolicy) -> LaunchDescriptorTemplate {
         LaunchDescriptorTemplate::new("/bin/echo", cwd_policy).with_argv(["hello"])
@@ -158,6 +202,32 @@ mod tests {
         (run, domain.agent_run(run).unwrap().binding_generation())
     }
 
+    fn resolve(
+        launch: &LaunchDescriptorTemplate,
+        kind: WorkScopeKind,
+        adapter_work_root: &Path,
+        adapter_id: AdapterId,
+        run_id: AgentRunId,
+        generation: BindingGeneration,
+        bound: Option<&Path>,
+    ) -> Result<LaunchDescriptor, LaunchResolutionFailure> {
+        resolve_launch_descriptor(
+            launch,
+            kind,
+            adapter_work_root,
+            adapter_id,
+            run_id,
+            generation,
+            bound,
+        )
+    }
+
+    #[test]
+    fn work_scope_stays_copy_without_a_path_field() {
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<seyal_agent_core::WorkScope>();
+    }
+
     #[test]
     fn adhoc_resolves_to_adapter_work_dir_and_creates_it() {
         let root = std::env::temp_dir().join(format!(
@@ -167,13 +237,14 @@ mod tests {
         ));
         let adapter_id = AdapterId::new();
         let (run, generation) = run_and_generation();
-        let descriptor = resolve_launch_descriptor(
+        let descriptor = resolve(
             &template(CwdPolicy::AdapterWorkDir),
             WorkScopeKind::AdHoc,
             &root,
             adapter_id,
             run,
             generation,
+            None,
         )
         .unwrap();
         assert_eq!(descriptor.cwd, adapter_work_dir(&root, adapter_id));
@@ -195,13 +266,14 @@ mod tests {
         ));
         let adapter_id = AdapterId::new();
         let (run, generation) = run_and_generation();
-        let descriptor = resolve_launch_descriptor(
+        let descriptor = resolve(
             &template(CwdPolicy::AdapterWorkDir),
             WorkScopeKind::HostBound,
             &root,
             adapter_id,
             run,
             generation,
+            None,
         )
         .unwrap();
         assert_eq!(descriptor.cwd, adapter_work_dir(&root, adapter_id));
@@ -213,13 +285,14 @@ mod tests {
         let adapter_id = AdapterId::new();
         let (run, generation) = run_and_generation();
         assert_eq!(
-            resolve_launch_descriptor(
+            resolve(
                 &template(CwdPolicy::WorkScopeRoot),
                 WorkScopeKind::Repository,
                 Path::new("/tmp/unused"),
                 adapter_id,
                 run,
                 generation,
+                None,
             ),
             Err(LaunchResolutionFailure::MissingBoundRoot)
         );
@@ -230,13 +303,14 @@ mod tests {
         let adapter_id = AdapterId::new();
         let (run, generation) = run_and_generation();
         assert_eq!(
-            resolve_launch_descriptor(
+            resolve(
                 &template(CwdPolicy::WorkScopeRoot),
                 WorkScopeKind::Project,
                 Path::new("/tmp/unused"),
                 adapter_id,
                 run,
                 generation,
+                None,
             ),
             Err(LaunchResolutionFailure::MissingBoundRoot)
         );
@@ -249,16 +323,122 @@ mod tests {
         let launch = LaunchDescriptorTemplate::new("/bin/echo", CwdPolicy::WorkScopeRoot)
             .with_argv(["{work_scope_root}"]);
         assert_eq!(
-            resolve_launch_descriptor(
+            resolve(
                 &launch,
                 WorkScopeKind::AdHoc,
                 Path::new("/tmp/unused-root"),
                 adapter_id,
                 run,
                 generation,
+                None,
             ),
             Err(LaunchResolutionFailure::UnresolvedWorkScopeToken)
         );
+    }
+
+    #[test]
+    fn repository_bound_root_is_launch_cwd_and_expands_the_token() {
+        let bound =
+            std::env::temp_dir().join(format!("seyal-launch-bound-root-{}", std::process::id()));
+        std::fs::create_dir_all(&bound).unwrap();
+        let adapter_id = AdapterId::new();
+        let (run, generation) = run_and_generation();
+        let launch = LaunchDescriptorTemplate::new("/bin/echo", CwdPolicy::WorkScopeRoot)
+            .with_argv(["{work_scope_root}"]);
+        let descriptor = resolve(
+            &launch,
+            WorkScopeKind::Repository,
+            Path::new("/tmp/unused-adapter"),
+            adapter_id,
+            run,
+            generation,
+            Some(&bound),
+        )
+        .unwrap();
+        let canonical = bound.canonicalize().unwrap();
+        assert_eq!(descriptor.cwd, canonical);
+        assert_eq!(
+            descriptor.argv,
+            vec![canonical.to_string_lossy().into_owned()]
+        );
+        let _ = std::fs::remove_dir_all(&bound);
+    }
+
+    #[test]
+    fn deleted_bound_root_fails_closed_at_dispatch() {
+        let bound =
+            std::env::temp_dir().join(format!("seyal-launch-deleted-root-{}", std::process::id()));
+        std::fs::create_dir_all(&bound).unwrap();
+        std::fs::remove_dir_all(&bound).unwrap();
+        let adapter_id = AdapterId::new();
+        let (run, generation) = run_and_generation();
+        assert_eq!(
+            resolve(
+                &template(CwdPolicy::WorkScopeRoot),
+                WorkScopeKind::Repository,
+                Path::new("/tmp/unused"),
+                adapter_id,
+                run,
+                generation,
+                Some(&bound),
+            ),
+            Err(LaunchResolutionFailure::MissingBoundRoot)
+        );
+    }
+
+    #[test]
+    fn argv_traversal_from_bound_root_is_rejected() {
+        let bound = std::env::temp_dir().join(format!(
+            "seyal-launch-traversal-root-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&bound).unwrap();
+        let adapter_id = AdapterId::new();
+        let (run, generation) = run_and_generation();
+        let launch = LaunchDescriptorTemplate::new("/bin/echo", CwdPolicy::WorkScopeRoot)
+            .with_argv(["{work_scope_root}/../escape"]);
+        assert_eq!(
+            resolve(
+                &launch,
+                WorkScopeKind::Repository,
+                Path::new("/tmp/unused"),
+                adapter_id,
+                run,
+                generation,
+                Some(&bound),
+            ),
+            Err(LaunchResolutionFailure::EscapedBoundRoot)
+        );
+        let _ = std::fs::remove_dir_all(&bound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn argv_symlink_escape_from_bound_root_is_rejected() {
+        let parent =
+            std::env::temp_dir().join(format!("seyal-launch-symlink-{}", std::process::id()));
+        let bound = parent.join("root");
+        let outside = parent.join("outside");
+        std::fs::create_dir_all(&bound).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, bound.join("escape")).unwrap();
+        let adapter_id = AdapterId::new();
+        let (run, generation) = run_and_generation();
+        let launch = LaunchDescriptorTemplate::new("/bin/echo", CwdPolicy::WorkScopeRoot)
+            .with_argv(["{work_scope_root}/escape"]);
+        assert_eq!(
+            resolve(
+                &launch,
+                WorkScopeKind::Repository,
+                Path::new("/tmp/unused"),
+                adapter_id,
+                run,
+                generation,
+                Some(&bound),
+            ),
+            Err(LaunchResolutionFailure::EscapedBoundRoot)
+        );
+        let _ = std::fs::remove_dir_all(&parent);
     }
 
     #[test]
@@ -280,8 +460,6 @@ mod tests {
             "SEYAL_TEST_LAUNCH_RESOLUTION_VAR".to_string(),
             "backend-policy-value".to_string()
         )));
-        // SEYAL_RUN_ID is backend-injected, not sourced through `lookup`,
-        // even though it was also listed in env_allowlist.
         assert_eq!(env.iter().filter(|(name, _)| name == ENV_RUN_ID).count(), 1);
         assert!(env.contains(&(ENV_RUN_ID.to_string(), run.to_string())));
     }

@@ -204,7 +204,7 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         commandPalette.onDismissed = { [weak self] in
-            self?.routeFocus()
+            self?.commandPaletteDidDismiss()
         }
 
         pane.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -316,7 +316,7 @@ final class ProductChromeHostView: NSView {
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
         }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
-            self?.composer.focusEditor()
+            self?.requestComposerFocusIfPaletteAllows() ?? false
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
@@ -347,6 +347,9 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
             let accepted = result.code == .accepted || result.code == .unsupported
             self?.composer.applyComposerResult(requestID: result.requestID, accepted: accepted)
+            if !accepted {
+                self?.composer.presentAdmissionFailure(result.code)
+            }
             self?.reconcileChrome()
         }
         pane.inputSurface.onComposerStatusChanged = { [weak self] status in
@@ -562,6 +565,9 @@ final class ProductChromeHostView: NSView {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
+        // Revoke Metal IME/AX before focusing the composer so Flow never keeps
+        // a competing terminal first responder (#866).
+        inputSurface.syncInputRoutePresentation()
         let snapshot = seyal_app_snapshot(pane.appHandle)
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
@@ -587,8 +593,11 @@ final class ProductChromeHostView: NSView {
         splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
         splitDownButton.isHidden = splitRightButton.isHidden
         closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
-        configureStructuralCloseButtons(shell)
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
         closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
+        closePaneButton.idLo = shell.focused_pane_lo
+        closePaneButton.idHi = shell.focused_pane_hi
     }
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {

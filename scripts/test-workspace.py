@@ -20,6 +20,7 @@ EXPECTED_CRATES = {
     "seyal-agent-core": "crates/seyal-agent-core",
     "seyal-agent-protocol": "crates/seyal-agent-protocol",
     "seyal-agent-store": "crates/seyal-agent-store",
+    "seyal-agent-context": "crates/seyal-agent-context",
     "seyal-agent-backend": "crates/seyal-agent-backend",
     "seyal-agent-client": "crates/seyal-agent-client",
 }
@@ -89,7 +90,15 @@ expected_portable_dependencies = {
     "seyal-client": {"seyal-core", "seyal-protocol", "seyal-render"},
     "seyal-agent-core": set(),
     "seyal-agent-protocol": {"seyal-agent-core"},
-    "seyal-agent-store": {"rusqlite", "seyal-agent-core"},
+    # MemoryStore (#1273): blake3 keyed suppression tokens + Unicode NFC for
+    # SPEC-012 semantic-key profile; neither is architecture authority.
+    "seyal-agent-store": {
+        "blake3",
+        "rusqlite",
+        "seyal-agent-core",
+        "unicode-normalization",
+    },
+    "seyal-agent-context": {"seyal-agent-core", "seyal-agent-store"},
     "seyal-agent-backend": {
         "seyal-agent-core", "seyal-agent-protocol", "seyal-agent-store"
     },
@@ -132,6 +141,14 @@ if store_sqlite.get("default-features") is not False:
     fail("seyal-agent-store rusqlite must disable default features")
 if store_sqlite.get("features") != ["bundled"]:
     fail("seyal-agent-store rusqlite must enable only the bundled SQLite feature")
+store_blake3 = manifests["seyal-agent-store"].get("dependencies", {}).get("blake3")
+if not isinstance(store_blake3, str) or not store_blake3.startswith("1.8."):
+    fail("seyal-agent-store must pin blake3 1.8.x for keyed suppression tokens")
+store_unicode = manifests["seyal-agent-store"].get("dependencies", {}).get(
+    "unicode-normalization"
+)
+if not isinstance(store_unicode, str) or not store_unicode.startswith("0.1."):
+    fail("seyal-agent-store must pin unicode-normalization 0.1.x for semantic-key NFC")
 client_dev_dependencies = manifests["seyal-client"].get("dev-dependencies", {})
 if set(client_dev_dependencies) != {"seyal-exec", "seyal-runtime"}:
     fail("seyal-client integration tests may depend exactly on seyal-exec and seyal-runtime")

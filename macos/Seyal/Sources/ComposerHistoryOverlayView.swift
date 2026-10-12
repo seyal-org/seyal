@@ -158,7 +158,7 @@ final class ComposerHistoryOverlayView: NSView, NSTextFieldDelegate {
         action.kind = kind
         action.applySnapshotFence(snapshot)
         action.reserved = reserved
-        action.target_generation = epoch
+        action.target_pty_generation = epoch
         let utf8 = Array((payload ?? "").utf8)
         utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress

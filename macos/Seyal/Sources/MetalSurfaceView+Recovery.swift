@@ -95,7 +95,7 @@ extension MetalSurfaceView {
     guard recoveryAppHandle != 0 else { return }
     let now = runtimeRecoveryNowMillis()
     _ = applyRuntimeRecoveryAction(recoveryAppHandle, kind: SEYAL_APP_ACTION_BEGIN_RECOVERY) {
-      $0.target_generation = now
+      $0.target_pty_generation = now
     }
     onRecoveryEffectsPending?()
   }
@@ -135,9 +135,7 @@ extension MetalSurfaceView {
     }
 
     let afterRestore = seyal_app_snapshot(recoveryAppHandle).recovery_stage
-    guard shouldRender,
-      afterRestore != UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
-    else {
+    guard shouldRender else {
       if afterRestore == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue) {
         recoveryPresentationPending = false
       }

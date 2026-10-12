@@ -23,6 +23,9 @@ impl ProvisioningSession {
         pane: PaneId,
         execution: ExecutionId,
     ) -> Result<Vec<ProvisioningEffect>, ProvisioningFailure> {
+        if self.has_pending_operation_for_execution(execution) {
+            return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
+        }
         if self.pane_pending.contains_key(&pane) || self.recorded_bindings.contains_key(&pane) {
             return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
         }
@@ -30,7 +33,7 @@ impl ProvisioningSession {
         let owner = self.claim_connection(pane);
         let request_id = self.allocate_request_id()?;
         let intent = PendingIntent {
-            pane,
+            pane: Some(pane),
             owner,
             request_id,
             geometry: PaneGeometry {
@@ -55,25 +58,16 @@ impl ProvisioningSession {
     /// catalog entry stays until [`Self::apply_terminate_result`].
     pub fn begin_unpresented_dispose(
         &mut self,
-        pane: PaneId,
         execution: ExecutionId,
     ) -> Result<Vec<ProvisioningEffect>, ProvisioningFailure> {
-        if self.pending_by_key.values().any(|intent| {
-            matches!(
-                intent.phase,
-                IntentPhase::Disposing {
-                    execution: pending,
-                    ..
-                } if pending == execution
-            )
-        }) {
+        if self.has_pending_operation_for_execution(execution) {
             return Err(ProvisioningFailure::CreateRejected(ErrorCode::InvalidState));
         }
         self.unreferenced.insert(execution);
-        let owner = self.claim_connection(pane);
+        let owner = self.allocate_connection_owner();
         let request_id = self.allocate_request_id()?;
         let intent = PendingIntent {
-            pane,
+            pane: None,
             owner,
             request_id,
             geometry: PaneGeometry {
@@ -89,7 +83,6 @@ impl ProvisioningSession {
             attachment: None,
         };
         self.insert_pending(owner, request_id, PendingKind::DisposeAttach, intent);
-        self.pane_pending.entry(pane).or_insert(request_id);
         Ok(vec![ProvisioningEffect::AttachController {
             owner,
             execution,

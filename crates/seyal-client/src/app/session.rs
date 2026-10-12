@@ -51,7 +51,9 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
-        crate::ffi::set_focused_display_handle(handle);
+        if self.shell.snapshot().focused_pane == fence.pane {
+            crate::ffi::set_focused_display_handle(handle);
+        }
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
@@ -140,6 +142,8 @@ impl ApplicationRoot {
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
+        #[cfg(target_os = "macos")]
+        self.poll_unpresented_inventory_refresh();
         let display_handle = self
             .authority
             .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
@@ -194,11 +198,25 @@ impl ApplicationRoot {
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;
         self.poll_unfocused_pane_clients();
+        self.poll_dispose_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn poll_dispose_clients(&mut self) {
+        let lost: Vec<_> = self
+            .dispose_clients
+            .iter_mut()
+            .filter_map(|(owner, client)| client.poll_prepare().is_err().then_some(*owner))
+            .collect();
+        for owner in lost {
+            self.dispose_clients.remove(&owner);
+            self.provisioning.on_connection_lost(owner, None);
+        }
     }
 
     /// Ensure the create connection has flushed/read control frames when it is
@@ -457,17 +475,21 @@ impl ApplicationRoot {
     }
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub(crate) fn window_encode_key(&self) -> (u64, u16, u64) {
+    pub(crate) fn window_encode_key(&self) -> (u64, u16, u64, u32) {
         (
             self.snapshot_generation,
             self.pending_effects.len() as u16,
             self.shell.containment_generation(),
+            self.shell
+                .last_error()
+                .map(crate::shell::ShellError::error_number)
+                .unwrap_or(0),
         )
     }
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
+pub(crate) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
     use seyal_runtime::display::DisplayCellRole;
     let mut text = String::new();
     for (index, cell) in cache.cells.iter().enumerate() {

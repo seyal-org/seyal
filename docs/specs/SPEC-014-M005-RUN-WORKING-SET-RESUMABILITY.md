@@ -6,6 +6,7 @@
 - **Parent refinement:** #838
 - **Implementation consumer:** #681
 - **Sibling contracts:** SPEC-012 / #847 and SPEC-013 / #854
+- **Production calibration:** [`../evidence/m005-context-memory-production-calibration.md`](../evidence/m005-context-memory-production-calibration.md) (#1244; SPEC-014 §18 budgets + measurement procedure frozen before #681 Ready)
 
 ## 1. Purpose and scope
 

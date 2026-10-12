@@ -18,7 +18,7 @@ use crate::provisioning::{ConnectionOwner, ProvisioningEffect, ProvisioningFailu
 pub(super) struct PendingLiveAttach {
     pub owner: ConnectionOwner,
     pub request_id: u64,
-    pub pane: PaneId,
+    pub pane: Option<PaneId>,
     pub rx: mpsc::Receiver<Result<LocalDisplayClient, ClientError>>,
 }
 
@@ -61,8 +61,7 @@ impl ApplicationRoot {
             .ok_or(AppError::ProvisioningRejected)?;
         let pane = self
             .provisioning
-            .pending_intent_for_request(request_id)
-            .map(|intent| intent.pane)
+            .pending_attach_pane_by_request_id(request_id)
             .ok_or(AppError::ProvisioningRejected)?;
 
         if self.inject_live_attach_failures > 0 {
@@ -137,7 +136,15 @@ impl ApplicationRoot {
         let pending = self.pending_live_attach.take().expect("pending attach");
         let completed = match result {
             Ok(client) => {
-                self.complete_live_controller_attach(pending.pane, pending.request_id, client)
+                if let Some(pane) = pending.pane {
+                    self.complete_live_controller_attach(pane, pending.request_id, client)
+                } else {
+                    self.complete_dispose_controller_attach(
+                        pending.owner,
+                        pending.request_id,
+                        client,
+                    )
+                }
             }
             Err(error) => self.fail_live_controller_attach(
                 pending.owner,
@@ -223,7 +230,7 @@ impl ApplicationRoot {
         &mut self,
         owner: crate::provisioning::ConnectionOwner,
         request_id: u64,
-        pane: PaneId,
+        pane: Option<PaneId>,
         error: ClientError,
     ) -> Result<(), AppError> {
         let failure = match error {
@@ -235,11 +242,35 @@ impl ApplicationRoot {
             .provisioning
             .apply_attach_failure(owner, request_id, still_listed);
         if effects.is_empty() {
-            self.provisioning.note_rejected_without_retry(pane, failure);
+            if let Some(pane) = pane {
+                self.provisioning.note_rejected_without_retry(pane, failure);
+            }
         } else {
             self.dispatch_live_provisioning_effects(effects)?;
         }
         Err(map_client_error(error))
+    }
+
+    fn complete_dispose_controller_attach(
+        &mut self,
+        owner: ConnectionOwner,
+        request_id: u64,
+        client: LocalDisplayClient,
+    ) -> Result<(), AppError> {
+        if client.role() != Role::Controller {
+            return self.fail_live_controller_attach(
+                owner,
+                request_id,
+                None,
+                ClientError::UnsupportedInteractiveCapability,
+            );
+        }
+        let attachment = client.attachment_id();
+        self.dispose_clients.insert(owner, client);
+        let effects = self
+            .provisioning
+            .apply_attach_success(owner, request_id, attachment);
+        self.dispatch_live_provisioning_effects(effects)
     }
 
     /// Install or replace per-pane Controller authority; activate when focused.
@@ -283,69 +314,6 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Switch active authority/presentation to the focused tab's bound pane.
-    /// When the focused pane has no live authority (attach in flight or failed),
-    /// fail closed: clear prior authority/display handle so input cannot reach
-    /// another tab's execution while chrome shows the unbound tab.
-    pub(super) fn activate_focused_pane_authority(&mut self) {
-        let focused = self.shell.snapshot().focused_pane;
-        let Some(authority) = self.pane_authorities.get(&focused).copied() else {
-            self.authority = None;
-            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
-            self.sync_composer_presentation();
-            self.output_utf8.clear();
-            self.clear_focused_display_handle_if_owned();
-            return;
-        };
-        if self.authority == Some(authority) {
-            if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
-                crate::ffi::set_focused_display_handle(raw);
-            }
-            return;
-        }
-        let Some(identity) =
-            PresentationIdentity::new(authority.execution, authority.pty_generation)
-        else {
-            return;
-        };
-        let _ = self.presentation.apply(PresentationAction::ClearIdentity);
-        let _ = self
-            .presentation
-            .apply(PresentationAction::BindIdentity(identity));
-        self.authority = Some(authority);
-        let alternate = self
-            .pane_client_raws
-            .get(&focused)
-            .and_then(|handle| {
-                crate::ffi::with_client(*handle, |client| client.cache().alternate_screen)
-            })
-            .unwrap_or(false);
-        let _ = self.derive_presentation(alternate);
-        self.sync_composer_presentation();
-        self.refresh_output_from_pane_client(focused);
-        if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
-            crate::ffi::set_focused_display_handle(raw);
-        }
-    }
-
-    /// Fail-closed input is process-wide TLS. Only the root that owns the
-    /// current display handle may clear it — a second XCTest `ApplicationRoot`
-    /// CreateTab must not blank the launched surface's frame/eligibility.
-    fn clear_focused_display_handle_if_owned(&self) {
-        let focused = crate::ffi::focused_registry_handle();
-        if focused == 0 {
-            return;
-        }
-        let owned = self.pane_client_raws.values().any(|raw| *raw == focused)
-            || self
-                .client_handle
-                .as_ref()
-                .is_some_and(|handle| handle.raw() == focused);
-        if owned {
-            crate::ffi::set_focused_display_handle(0);
-        }
-    }
-
     /// Drop a lost registry client without unbinding the pane.
     /// Socket EOF is not CloseTab: keep shell/provisioning identity so terminate
     /// can retry after reconnect. Fail-closed input uses a zero display handle
@@ -370,7 +338,7 @@ impl ApplicationRoot {
         }
     }
 
-    fn refresh_output_from_pane_client(&mut self, pane: PaneId) {
+    pub(super) fn refresh_output_from_pane_client(&mut self, pane: PaneId) {
         let Some(handle) = self.pane_client_raws.get(&pane).copied() else {
             return;
         };

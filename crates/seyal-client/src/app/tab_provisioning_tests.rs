@@ -1,6 +1,6 @@
 //! Issue #1149 / M003 C2 — headed tab creation on the C1 provisioning route.
 
-use seyal_core::{AttachmentId, ExecutionId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId};
 use seyal_protocol::framing::ErrorCode;
 use seyal_runtime::local_ipc::framing::{
     CreateExecutionResult, CreateExecutionResultCode, MessageType, TerminateExecutionResult,
@@ -8,10 +8,10 @@ use seyal_runtime::local_ipc::framing::{
 };
 
 use super::provisioning_apply::negotiated_provisioning_client;
-use super::{
-    AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility, SplitAxis,
+use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, PresentationEligibility};
+use crate::provisioning::{
+    CreateOutcome, ProvisioningEffect, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS,
 };
-use crate::provisioning::{CreateOutcome, ProvisioningFailure, BOOTSTRAP_COLUMNS, BOOTSTRAP_ROWS};
 
 fn exec(byte: u8) -> ExecutionId {
     ExecutionId::from_bytes([byte; 16])
@@ -19,6 +19,96 @@ fn exec(byte: u8) -> ExecutionId {
 
 fn attachment(byte: u8) -> AttachmentId {
     AttachmentId::from_bytes([byte; 16])
+}
+
+fn bound_root_with_wire_client(execution: ExecutionId) -> (ApplicationRoot, PaneId) {
+    let mut shell = crate::shell::ShellState::m001_local("local");
+    shell
+        .apply_product_create_tab()
+        .expect("create focused second tab");
+    let mut root = ApplicationRoot::with_shell(shell);
+    assert_eq!(root.shell.snapshot().tabs.len(), 2);
+    let pane = root.fence().pane;
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution,
+            attachment: attachment(31),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .expect("bind focused pane");
+    root.install_wire_client(negotiated_provisioning_client())
+        .expect("install wire client");
+    (root, pane)
+}
+
+fn drive_unpresented_dispose_to_result(
+    root: &mut ApplicationRoot,
+    execution: ExecutionId,
+    result_code: TerminateExecutionResultCode,
+) {
+    let workspace = root.snapshot().shell.active_workspace;
+    root.apply(AppAction::RecordUnpresented {
+        execution,
+        workspace,
+    })
+    .expect("record unpresented execution");
+    root.apply(AppAction::TerminateUnpresented { execution })
+        .expect("begin unpresented disposal");
+    let [ProvisioningEffect::AttachController {
+        owner,
+        execution: attached,
+    }] = root.pending_wire_effects()
+    else {
+        panic!("expected one dispose-only Controller attach");
+    };
+    assert_eq!(*attached, execution);
+    let attached_id = root.wire_client().unwrap().attachment_id();
+    let request_id = root
+        .provisioning()
+        .pending_attach_request_id(*owner, execution)
+        .expect("pending dispose attach");
+    assert_eq!(
+        root.provisioning()
+            .pending_attach_pane_by_request_id(request_id),
+        Some(None),
+        "dispose attach has no shell Pane association"
+    );
+    assert_ne!(
+        root.provisioning().owner_for_pane(root.fence().pane),
+        Some(*owner),
+        "dispose uses a synthetic connection owner"
+    );
+    root.complete_create_attach_and_bind(request_id, attached_id)
+        .expect("complete dispose-only attach");
+
+    let terminate_request_id = root
+        .provisioning()
+        .pending_terminate_by_request_id(request_id + 1)
+        .map(|intent| intent.request_id)
+        .or_else(|| {
+            (1..=16).find_map(|id| {
+                root.provisioning()
+                    .pending_terminate_by_request_id(id)
+                    .map(|intent| intent.request_id)
+            })
+        })
+        .expect("pending terminate request");
+    root.wire_client_mut()
+        .unwrap()
+        .accept_terminate_result(TerminateExecutionResult {
+            attachment_id: attached_id,
+            request_id: terminate_request_id,
+            result_code,
+            detail_code: 0,
+        })
+        .expect("accept terminate result");
+    root.absorb_wire_terminate_result(true)
+        .expect("absorb terminate result")
+        .expect("terminate result present");
 }
 
 /// CreateTab → admitted type-36 on the wire client → create result → attach → bind.
@@ -117,6 +207,70 @@ fn create_tab_seeds_request_id_past_bootstrap_floor() {
         request_id >= 2,
         "CreateTab must not reuse bootstrap request_id 1; got {request_id}"
     );
+}
+
+#[test]
+fn dispose_unpresented_success_does_not_release_focused_pane_authority() {
+    let execution_a = exec(201);
+    let execution_b = exec(202);
+    let (mut root, pane_a) = bound_root_with_wire_client(execution_a);
+    let authority_before = root.authority;
+    let presentation_before = root.presentation.snapshot().identity;
+    let owner_a = root
+        .provisioning()
+        .owner_for_pane(pane_a)
+        .expect("focused pane connection");
+
+    drive_unpresented_dispose_to_result(
+        &mut root,
+        execution_b,
+        TerminateExecutionResultCode::TerminationRequested,
+    );
+
+    assert_eq!(
+        root.shell.pane_execution(pane_a).unwrap(),
+        Some(execution_a)
+    );
+    assert_eq!(
+        root.provisioning().recorded_execution(pane_a),
+        Some(execution_a)
+    );
+    assert_eq!(root.provisioning().owner_for_pane(pane_a), Some(owner_a));
+    assert_eq!(root.authority, authority_before);
+    assert_eq!(root.presentation.snapshot().identity, presentation_before);
+    assert!(root.live_unpresented().is_empty());
+}
+
+#[test]
+fn failed_dispose_unpresented_preserves_catalog_and_focused_pane_authority() {
+    let execution_a = exec(203);
+    let execution_b = exec(204);
+    let (mut root, pane_a) = bound_root_with_wire_client(execution_a);
+    let authority_before = root.authority;
+    let presentation_before = root.presentation.snapshot().identity;
+    let owner_a = root
+        .provisioning()
+        .owner_for_pane(pane_a)
+        .expect("focused pane connection");
+
+    drive_unpresented_dispose_to_result(
+        &mut root,
+        execution_b,
+        TerminateExecutionResultCode::Error(ErrorCode::InvalidState),
+    );
+
+    assert_eq!(
+        root.shell.pane_execution(pane_a).unwrap(),
+        Some(execution_a)
+    );
+    assert_eq!(
+        root.provisioning().recorded_execution(pane_a),
+        Some(execution_a)
+    );
+    assert_eq!(root.provisioning().owner_for_pane(pane_a), Some(owner_a));
+    assert_eq!(root.authority, authority_before);
+    assert_eq!(root.presentation.snapshot().identity, presentation_before);
+    assert_eq!(root.live_unpresented(), vec![execution_b]);
 }
 
 #[test]
@@ -226,18 +380,12 @@ fn create_result_is_absorbed_from_registry_client_without_install_wire_client() 
 }
 
 #[test]
-fn production_composition_enables_tab_creation_and_keeps_splits_fail_closed() {
-    let mut root = ApplicationRoot::new();
+fn production_composition_enables_tab_creation_alongside_pane_splitting() {
+    let root = ApplicationRoot::new();
     let snap = root.snapshot();
-    // C2b / #1175: production CreateTab enabled with live attach driver; splits stay off.
+    // C2b / #1175 + C3 / #1217: CreateTab and SplitFocused share the live C1 path.
     assert!(snap.shell.allows_tab_creation);
-    assert!(!snap.shell.allows_pane_splitting);
-    assert_eq!(
-        root.apply(AppAction::SplitFocused {
-            axis: SplitAxis::Right,
-        }),
-        Err(AppError::PaneSplitUnavailable)
-    );
+    assert!(snap.shell.allows_pane_splitting);
 }
 
 #[test]
@@ -717,5 +865,18 @@ fn palette_lists_new_tab_under_production_policy() {
             .iter()
             .any(|row| row.label == "New Tab"),
         "production composition enables CreateTab in the palette"
+    );
+    root.apply(AppAction::SetPaletteQuery {
+        fence: root.fence(),
+        query: "Terminate Execution".into(),
+    })
+    .unwrap();
+    assert!(
+        root.snapshot()
+            .palette
+            .rows
+            .iter()
+            .any(|row| row.label == "Terminate Execution"),
+        "P4 terminate is a palette product action, distinct from Close Tab"
     );
 }
