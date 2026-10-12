@@ -10,6 +10,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
+    /// Closed windows remain strongly held until the current AppKit display
+    /// cycle has flushed Touch Bar/window observers. `close()` removes the
+    /// window from NSApp immediately; releasing the Swift reference in the same
+    /// turn can deallocate AppKit's observer map during that flush.
+    private var closingWindows: [NSWindow] = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
 
@@ -129,7 +134,12 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             // In production AppDelegate keeps Seyal running after the last
             // window closes. Remove the NSWindow from AppKit's window list so
             // last-window-close and Dock reopen observe the true zero-window state.
+            closingWindows.append(window)
             window.close()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak window] in
+                guard let self, let window else { return }
+                self.closingWindows.removeAll { $0 === window }
+            }
         } else {
             // Some component-test hosts lack AppDelegate; ordering out avoids
             // XCTest termination while still removing the realization.
