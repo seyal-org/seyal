@@ -10,10 +10,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
-    /// Closed windows remain strongly held until the current AppKit display
-    /// cycle has flushed Touch Bar/window observers. `close()` removes the
-    /// window from NSApp immediately; releasing the Swift reference in the same
-    /// turn can deallocate AppKit's observer map during that flush.
+    /// Closed windows remain strongly held while AppKit finishes close-time
+    /// callbacks. Window ownership stays with Swift ARC; AppKit's default
+    /// release-on-close must be disabled in `makeSeyalWindow`.
     private var closingWindows: [NSWindow] = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
@@ -201,6 +200,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
+        // NSWindow defaults to releasing itself when closed. Apple documents
+        // that ARC clients must disable this to avoid over-release; this host
+        // owns each window through `realizations` / `closingWindows` instead.
+        window.isReleasedWhenClosed = false
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
         window.tabbingMode = .disallowed
