@@ -1,5 +1,17 @@
 use super::*;
 
+impl ApplicationRoot {
+    pub(crate) fn apply_shell(
+        &mut self,
+        action: crate::shell::ShellAction,
+    ) -> Result<(), crate::shell::ShellError> {
+        self.shell.apply(action)?;
+        self.drain_shell_effects();
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+        Ok(())
+    }
+}
+
 #[test]
 fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     let mut root = ApplicationRoot::new();

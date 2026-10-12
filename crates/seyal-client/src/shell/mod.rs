@@ -8,6 +8,7 @@
 mod action_types;
 mod actions;
 mod effects;
+mod focus_direction;
 mod focus_history;
 mod inventory;
 mod pane_ops;
@@ -19,6 +20,8 @@ mod workspace;
 mod pt1_tests;
 #[cfg(test)]
 mod pt2_tests;
+#[cfg(test)]
+mod pt3_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -32,6 +35,7 @@ use crate::pane_layout::SplitRatio;
 
 pub use action_types::{CycleDirection, ShellAction};
 pub use effects::ShellNativeEffect;
+pub use focus_direction::FocusDirection;
 pub use inventory::{
     NavigationInventory, PaneNavItem, SessionNavItem, TabNavItem, WorkspaceNavItem,
 };
@@ -66,6 +70,7 @@ pub enum ShellError {
     /// disposition (ADR-017 §6.1) and no longer produced by [`ShellState`].
     CannotCloseBoundPane,
     NoSplitDivider,
+    NoDirectionalNeighbor,
     ExecutionAlreadyBound,
     EmptyShell,
     EmptyWindow,
@@ -97,6 +102,7 @@ impl ShellError {
             Self::CannotCloseLastPane => "The last Pane cannot be closed.",
             Self::CannotCloseBoundPane => "A Pane bound to an execution cannot be closed.",
             Self::NoSplitDivider => "This Pane does not lead a split divider.",
+            Self::NoDirectionalNeighbor => "There is no Pane in that direction.",
             Self::ExecutionAlreadyBound => "This Pane is already bound to an execution.",
             Self::EmptyShell => "Shell requires at least one Workspace.",
             Self::EmptyWindow => "A Window requires at least one Tab.",
@@ -681,6 +687,7 @@ impl ShellState {
             } => self
                 .require_containment_generation(containment_generation)
                 .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
+            ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
         }

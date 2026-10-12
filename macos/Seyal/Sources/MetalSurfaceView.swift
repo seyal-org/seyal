@@ -468,6 +468,12 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       }
       forceNextFrame = true
       startAutomaticBridgeRecoveryIfNeeded()
+      // A connected recovery can reach Restoring before AppKit accepts its
+      // first-responder/IME handoff. Retry that deferred presentation step on
+      // later visibility/activation changes, even when no new PTY frame lands.
+      if recoveryPresentationPending, hasPreparedState {
+        _ = advanceRecoveryPresentationIfReady()
+      }
     } else {
       invalidateMetalDisplayLink()
       invalidatePreparedPresentation()

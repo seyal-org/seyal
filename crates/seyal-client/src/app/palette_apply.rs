@@ -2,9 +2,10 @@
 
 use super::*;
 use crate::navigation::{
-    navigate, EmptyExecutionInventory, NavigationPrincipal, NavigationRejection, ResourceAddress,
+    navigate, EmptyExecutionInventory, NavigateHistory, NavigationPrincipal, NavigationRejection,
+    ResourceAddress,
 };
-use crate::palette::{PaletteAction, PaletteCommand, PaletteRunTarget};
+use crate::palette::{PaletteAction, PaletteCommand, PaletteError, PaletteRunTarget};
 
 impl ApplicationRoot {
     pub(super) fn open_palette(&mut self, fence: AppFence) -> Result<(), AppError> {
@@ -111,9 +112,11 @@ impl ApplicationRoot {
             &mut self.shell,
             &EmptyExecutionInventory,
             NavigationPrincipal::local_user(),
+            NavigateHistory::Record(&mut self.focus_history),
         )
         .map_err(navigation_error)?;
         self.drain_shell_effects();
+        self.activate_focused_pane_authority();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -138,6 +141,7 @@ impl ApplicationRoot {
             PaletteCommand::OpenAttention(id) => self.open_attention(fence, id),
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
             PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
+            PaletteCommand::TerminateExecution => self.terminate_execution(fence),
         }
     }
 }
@@ -154,5 +158,7 @@ pub(super) fn navigation_error(error: NavigationRejection) -> AppError {
         NavigationRejection::TargetTerminated => AppError::NavigationTargetTerminated,
         NavigationRejection::TargetUnbound => AppError::NavigationTargetUnbound,
         NavigationRejection::AmbiguousTarget => AppError::NavigationAmbiguousTarget,
+        NavigationRejection::StaleHistoryCursor => AppError::NavigationStaleHistoryCursor,
+        NavigationRejection::HistoryUnavailable => AppError::NavigationHistoryUnavailable,
     }
 }

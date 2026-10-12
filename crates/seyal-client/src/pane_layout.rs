@@ -38,6 +38,11 @@ impl SplitRatio {
     pub fn fraction(self) -> f32 {
         f32::from(self.0) / 10_000.0
     }
+
+    /// Stored first-child share in ten-thousandths of the Split's extent.
+    pub(crate) const fn basis_points(self) -> u16 {
+        self.0
+    }
 }
 
 /// A pointer coordinate along one divider's axis, in Tab unit space (x for a
@@ -594,11 +599,25 @@ mod root_tests {
             "unbound focus hosts no surface"
         );
 
-        // The snapshot fence stays on the bound execution while another leaf
-        // is focused, so fenced terminal actions keep landing.
+        // Fail-closed: the new leaf is focused and has no execution, so fenced
+        // terminal actions cannot reach the other leaf's bound execution.
         let snap = root.snapshot();
-        assert_eq!(snap.pane, bound);
         assert_eq!(snap.shell.focused_pane, created);
+        assert_eq!(root.provisioning().recorded_execution(created), None);
+        assert_eq!(
+            snap.pane, created,
+            "the unbound focused Pane is the fenced target"
+        );
+        assert_eq!(
+            snap.execution, None,
+            "unbound focus must not inherit sibling execution authority"
+        );
+        assert_eq!(
+            root.provisioning().recorded_execution(bound),
+            Some(bound_evidence.execution),
+            "the sibling binding remains available when focus returns"
+        );
+        assert!(!root.pane_regions()[1].live);
         root.apply(AppAction::Refresh {
             fence: root.fence(),
             alternate_screen: false,
