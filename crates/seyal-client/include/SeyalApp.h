@@ -19,7 +19,7 @@ extern "C" {
  * Product snapshots and Candidate-D prepared frames are separate transfers.
  */
 
-#define SEYAL_APP_ABI_VERSION 1u
+#define SEYAL_APP_ABI_VERSION 2u
 
 enum SeyalAppActionKind {
     SEYAL_APP_ACTION_FOCUS = 0,

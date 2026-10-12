@@ -13,7 +13,7 @@
     } while (0)
 
 int main(void) {
-    REQUIRE(SEYAL_APP_ABI_VERSION == 1);
+    REQUIRE(SEYAL_APP_ABI_VERSION == 2);
     REQUIRE(sizeof(SeyalAppAction) == 120);
     REQUIRE(offsetof(SeyalAppAction, version) == 0);
     REQUIRE(offsetof(SeyalAppAction, payload) == 104);

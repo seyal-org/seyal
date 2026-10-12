@@ -305,6 +305,11 @@ fn version_and_size_mismatch_fail_closed() {
     );
     assert_eq!(seyal_app_record_compatible(APP_ABI_VERSION, 4, 1), -3);
     assert_eq!(
+        seyal_app_record_compatible(1, 56, 3),
+        -2,
+        "pre-mode W3 leaf record must be rejected"
+    );
+    assert_eq!(
         seyal_app_record_compatible(APP_ABI_VERSION, 32, 4),
         -3,
         "pre-ratio pane-tree node size must fail closed"
@@ -456,9 +461,12 @@ fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
     let expected = shell.snapshot();
     install_shell(handle, shell);
 
-    assert_eq!(seyal_app_pane_leaf(handle, 0, 0, 0).presentation_mode, 0);
-    assert_eq!(seyal_app_pane_leaf(handle, 0, 0, 1).presentation_mode, 1);
-    assert_eq!(seyal_app_pane_leaf(handle, 1, 0, 0).presentation_mode, 2);
+    for (window, pane, mode) in [(0, 0, 0), (0, 1, 1), (1, 0, 2)] {
+        let record = seyal_app_pane_leaf(handle, window, 0, pane);
+        assert_eq!(record.version, APP_ABI_VERSION);
+        assert_eq!(record.size as usize, size_of::<SeyalAppPaneLeaf>());
+        assert_eq!(record.presentation_mode, mode);
+    }
     assert_eq!(
         expected.windows[0].tabs[0].panes[0].presentation_mode,
         PresentationMode::Flow

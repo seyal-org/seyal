@@ -72,7 +72,7 @@ use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
 use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
-pub const APP_ABI_VERSION: u16 = 1;
+pub const APP_ABI_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppError {

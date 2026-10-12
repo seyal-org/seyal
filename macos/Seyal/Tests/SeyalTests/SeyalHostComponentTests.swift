@@ -17,6 +17,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     func testApplicationRootABIMatchesPublishedHeader() {
+        XCTAssertEqual(SEYAL_APP_ABI_VERSION, 2)
         XCTAssertEqual(MemoryLayout<SeyalAppAction>.size, Int(MemoryLayout<SeyalAppAction>.stride))
         XCTAssertGreaterThanOrEqual(MemoryLayout<SeyalAppAction>.size, 80)
         XCTAssertGreaterThanOrEqual(MemoryLayout<SeyalAppSnapshot>.size, 64)
