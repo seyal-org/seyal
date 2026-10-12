@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1091
+ceiling_loc = 1095
 issue = 1220
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1220 adds Hidden delivery sync after successful apply without splitting the façade."
+responsibility = "ApplicationRoot keeps W4a/W4b window dispatch and W3 effects with W2b typed close disposition in close_apply.rs; #1220 adds Hidden delivery sync after successful apply without splitting the façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,9 +77,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented a
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1083
+ceiling_loc = 1054
 issue = 1158
-responsibility = "App quit/native-effect proofs stay with window seeds; #1158 keeps W4a QuitCleanupComplete ack ordering beside W3 OrderFront coalescing. C2 cases stay in tab_provisioning_tests.rs."
+responsibility = "Application quit, native-effect, window-seed and W4b close/re-entry proofs stay beside their existing test authority; C2 cases remain in tab_provisioning_tests.rs and structural close cases in close_disposition_tests.rs."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -251,9 +251,9 @@ reason = "SPEC-024 §14 K2 matrix stays one keybinding table-load test module; #
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 707
+acknowledged_loc = 712
 issue = 1220
-reason = "ABI action decode stays one match surface; #1220 packs occlusion-hidden into REPORT_WINDOW_EVENT reserved so Rust can compute Hidden without a host-owned tier."
+reason = "ABI action decode stays one match surface; W2b CloseWindow carries the observed containment-generation fence and #1220 packs occlusion-hidden into REPORT_WINDOW_EVENT so Rust computes Hidden without host-owned tier state."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"

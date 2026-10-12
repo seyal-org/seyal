@@ -1,7 +1,7 @@
 //! ApplicationRoot create/close/terminate coordination with portable provisioning
 //! and the existing LocalDisplayClient create/terminate wire helpers.
 
-use seyal_core::{AttachmentId, ExecutionId, PaneId, TabId};
+use seyal_core::{AttachmentId, ExecutionId, PaneId};
 use seyal_protocol::framing::ErrorCode;
 #[cfg(target_os = "macos")]
 use seyal_protocol::local_ipc::framing::{
@@ -11,7 +11,7 @@ use seyal_protocol::local_ipc::framing::{
 
 #[cfg(all(test, target_os = "macos"))]
 use super::BindingEvidence;
-use super::{close_pane_error, close_tab_error, AppError, AppFence, ApplicationRoot};
+use super::{AppError, AppFence, ApplicationRoot};
 use crate::chrome::ChromeAction;
 use crate::composer::ComposerAction;
 #[cfg(target_os = "macos")]
@@ -19,7 +19,7 @@ use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
 use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
-use crate::shell::{ShellAction, ShellError};
+use crate::shell::ShellAction;
 
 impl ApplicationRoot {
     /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
@@ -94,152 +94,6 @@ impl ApplicationRoot {
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
-        Ok(())
-    }
-
-    /// Remove a Window's chrome. Bound panes detach only; executions stay live
-    /// and enumerable. Outstanding create intents are marked dead for §6.3.
-    pub(super) fn close_window(&mut self, id: seyal_core::WindowId) -> Result<(), AppError> {
-        let generation = self.shell.containment_generation();
-        self.apply_shell(ShellAction::CloseWindow {
-            id,
-            containment_generation: generation,
-        })
-        .map_err(|error| match error {
-            ShellError::StaleContainment => AppError::StalePane,
-            _ => AppError::UnknownWindow,
-        })?;
-        let removed = self.shell.take_removed_tab_panes();
-        let mut effects = Vec::new();
-        for pane in removed {
-            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                !pane_effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "removing a window must not terminate a bound execution"
-            );
-            effects.extend(pane_effects);
-            self.clear_authority_for_pane(pane);
-        }
-        let _ = self.dispatch_wire_effects(
-            effects,
-            WireDispatchContext {
-                workspace_id: 0,
-                launch_profile: 0,
-            },
-        );
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
-    /// Remove a Tab's chrome. Bound panes detach only; executions stay live
-    /// and enumerable. Outstanding create intents are marked dead for §6.3.
-    pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
-        let generation = self.shell.containment_generation();
-        self.apply_shell(ShellAction::CloseTab {
-            id,
-            containment_generation: generation,
-        })
-        .map_err(close_tab_error)?;
-        let removed = self.shell.take_removed_tab_panes();
-        let workspace = self.shell.snapshot().active_workspace;
-        let mut effects = Vec::new();
-        for pane in removed {
-            let released = self.provisioning.recorded_execution(pane);
-            let pane_effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                !pane_effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "removing a tab must not terminate a bound execution"
-            );
-            effects.extend(pane_effects);
-            self.clear_authority_for_pane(pane);
-            if let Some(execution) = released {
-                let _ = self.record_unpresented(execution, workspace);
-            }
-        }
-        let _ = self.dispatch_wire_effects(
-            effects,
-            WireDispatchContext {
-                workspace_id: 0,
-                launch_profile: 0,
-            },
-        );
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        Ok(())
-    }
-
-    /// Close a Pane. A previously bound execution is released as an
-    /// unreferenced live record (ADR-017 §6.1 detach-only); it is never
-    /// terminated as a side effect of presentation close.
-    pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
-        let generation = self.shell.containment_generation();
-        self.apply_shell(ShellAction::ClosePane {
-            id,
-            containment_generation: generation,
-        })
-        .map_err(close_pane_error)?;
-        let workspace = self.shell.snapshot().active_workspace;
-        let removed = self.shell.take_removed_tab_panes();
-        if !removed.is_empty() {
-            // Hierarchical sole-pane close cascaded through tab/window removal.
-            let mut effects = Vec::new();
-            for pane in removed {
-                let pane_effects = self.provisioning.on_bound_pane_closed(pane);
-                debug_assert!(
-                    !pane_effects
-                        .iter()
-                        .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                    "removing presentation must not terminate a bound execution"
-                );
-                effects.extend(pane_effects);
-                self.clear_authority_for_pane(pane);
-            }
-            if let Some((_, execution)) = self.shell.take_released_execution() {
-                let _ = self.record_unpresented(execution, workspace);
-            }
-            let _ = self.dispatch_wire_effects(
-                effects,
-                WireDispatchContext {
-                    workspace_id: 0,
-                    launch_profile: 0,
-                },
-            );
-        } else if let Some((pane, execution)) = self.shell.take_released_execution() {
-            let effects = self.provisioning.on_bound_pane_closed(pane);
-            debug_assert!(
-                self.provisioning.is_unreferenced(execution),
-                "bound close must retain an unreferenced live record"
-            );
-            debug_assert!(
-                !effects
-                    .iter()
-                    .any(|effect| matches!(effect, ProvisioningEffect::SendTerminate { .. })),
-                "closing a pane must not terminate a bound execution"
-            );
-            self.clear_authority_for_pane(pane);
-            let _ = self.record_unpresented(execution, workspace);
-            let _ = self.dispatch_wire_effects(
-                effects,
-                WireDispatchContext {
-                    workspace_id: 0,
-                    launch_profile: 0,
-                },
-            );
-        } else {
-            // Outstanding create for this pane: keep the request until the
-            // result arrives, then §6.3 disposition.
-            self.provisioning.mark_intent_dead(id);
-        }
-        let _ = self
-            .chrome
-            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
     }
 
@@ -577,7 +431,7 @@ impl ApplicationRoot {
         )
     }
 
-    fn dispatch_wire_effects(
+    pub(super) fn dispatch_wire_effects(
         &mut self,
         effects: Vec<ProvisioningEffect>,
         ctx: WireDispatchContext,
@@ -794,9 +648,9 @@ impl ApplicationRoot {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-struct WireDispatchContext {
-    workspace_id: u128,
-    launch_profile: u16,
+pub(super) struct WireDispatchContext {
+    pub(super) workspace_id: u128,
+    pub(super) launch_profile: u16,
 }
 
 fn provisioning_app_error(failure: ProvisioningFailure) -> AppError {

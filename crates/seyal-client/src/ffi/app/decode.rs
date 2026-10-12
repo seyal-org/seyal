@@ -79,7 +79,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                     action.target_attachment_hi,
                 )?),
                 controller: action.flags & FLAG_TARGET_CONTROLLER != 0,
-                pty_generation: action.target_pty_generation,
+                pty_generation: action.target_generation,
                 alternate_screen: action.flags & FLAG_ALTERNATE_SCREEN != 0,
             },
         }),
@@ -94,27 +94,27 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         4 => Ok(AppAction::Quit),
         5 => Ok(AppAction::AckEffect),
         6 => Ok(AppAction::BeginRecovery {
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
         }),
         7 => Ok(AppAction::CompleteRecovery {
             generation: action.target_execution_lo,
             outcome: decode_outcome(action.reserved, action.target_attachment_lo)?,
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
             launch: decode_launch(action.reserved),
         }),
         8 => Ok(AppAction::FireScheduledRecovery {
             generation: action.target_execution_lo,
-            now: Duration::from_millis(action.target_pty_generation),
+            now: Duration::from_millis(action.target_generation),
         }),
         9 => Ok(AppAction::AckRecoveryEffect),
         10 => Ok(AppAction::SetComposerDraft {
             fence,
             text: read_payload(action.payload, action.payload_len)?,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         11 => Ok(AppAction::SubmitComposer {
             fence,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         12 => Ok(AppAction::ApplyComposerResult {
             fence,
@@ -183,6 +183,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         25 => Ok(AppAction::SplitFocused {
             axis: if action.reserved == 1 {
@@ -196,6 +197,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {
@@ -208,7 +210,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
         }),
         43 => Ok(AppAction::SelectComposerHistory {
             fence,
-            composer_epoch: action.target_pty_generation,
+            composer_epoch: action.target_generation,
         }),
         44 => Ok(AppAction::CloseComposerHistory { fence }),
         45 => Ok(AppAction::SelectBlock {
@@ -336,14 +338,21 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             event: decode_window_event(action.reserved & 0xff)?,
             occluded: action.reserved & 0x100 != 0,
         }),
+        // ADR-018 structural close: target_execution_* carries WindowId and
+        // target_generation is the observed shell containment generation.
         67 => Ok(AppAction::CloseWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_generation,
         }),
         _ => Err(-6),
     }
+}
+
+fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
+    crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
 }
 
 fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i32> {
@@ -361,10 +370,6 @@ fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i
         9 => ScreenOrScaleChanged,
         _ => return Err(-6),
     })
-}
-
-fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
-    crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
 }
 
 /// Payload layout for an optional address: empty → None; otherwise
@@ -544,7 +549,7 @@ mod reconstruction_facts_tests {
             target_execution_hi: execution.high,
             target_attachment_lo: attachment.low,
             target_attachment_hi: attachment.high,
-            target_pty_generation: 0,
+            target_generation: 0,
             payload: std::ptr::null(),
             payload_len: 0,
             reserved,

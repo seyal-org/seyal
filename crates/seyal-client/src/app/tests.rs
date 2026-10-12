@@ -114,35 +114,6 @@ fn split_focused_fails_closed_while_create_tab_is_enabled() {
 }
 
 #[test]
-fn close_unknown_ids_reject_and_sole_tab_removes_window() {
-    // Unknown identities reject without retarget. The sole Tab of the
-    // production Window removes that Window (ADR-018 §3.2), replacing the
-    // older last-tab refusal.
-    let mut root = ApplicationRoot::new();
-    let snap = root.snapshot();
-    let only_tab = snap.shell.tabs[0].id;
-    let only_pane = snap.shell.panes[0].id;
-
-    assert_eq!(
-        root.apply(AppAction::CloseTab { id: TabId::new() }),
-        Err(AppError::UnknownChromeTab)
-    );
-    assert_eq!(
-        root.apply(AppAction::ClosePane { id: PaneId::new() }),
-        Err(AppError::UnknownPane)
-    );
-    assert_eq!(root.snapshot().shell.tabs.len(), 1);
-    assert_eq!(root.snapshot().shell.panes.len(), 1);
-    assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
-    assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
-
-    root.apply(AppAction::CloseTab { id: only_tab })
-        .expect("sole tab removes window");
-    assert!(root.snapshot().shell.windows.is_empty());
-    assert_eq!(root.snapshot().shell.active_window, None);
-}
-
-#[test]
 fn unbound_cannot_authorize_flow_or_composer() {
     let mut root = ApplicationRoot::new();
     let fence = root.fence();

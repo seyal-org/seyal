@@ -10,6 +10,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
+    /// Closed windows remain strongly held while AppKit finishes close-time
+    /// callbacks. Window ownership stays with Swift ARC; AppKit's default
+    /// release-on-close must be disabled in `makeSeyalWindow`.
+    private var closingWindows: [NSWindow] = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
 
@@ -129,7 +133,12 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             // In production AppDelegate keeps Seyal running after the last
             // window closes. Remove the NSWindow from AppKit's window list so
             // last-window-close and Dock reopen observe the true zero-window state.
+            closingWindows.append(window)
             window.close()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak window] in
+                guard let self, let window else { return }
+                self.closingWindows.removeAll { $0 === window }
+            }
         } else {
             // Some component-test hosts lack AppDelegate; ordering out avoids
             // XCTest termination while still removing the realization.
@@ -191,6 +200,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
+        // NSWindow defaults to releasing itself when closed. Apple documents
+        // that ARC clients must disable this to avoid over-release; this host
+        // owns each window through `realizations` / `closingWindows` instead.
+        window.isReleasedWhenClosed = false
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
         window.tabbingMode = .disallowed
@@ -332,6 +345,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_WINDOW.rawValue)
         action.target_execution_lo = key.lo
         action.target_execution_hi = key.hi
+        action.target_generation = seyal_app_shell(appHandle).containment_generation
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
     }

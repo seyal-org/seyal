@@ -980,7 +980,17 @@ final class SeyalHostUITests: XCTestCase {
         waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
         app.typeKey("w", modifierFlags: .command)
         waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
+        // NSWindow close can enqueue AppKit Touch Bar work for the next display
+        // cycle; stay alive through that flush, not only until AX reports zero.
+        RunLoop.current.run(until: Date().addingTimeInterval(2))
         XCTAssertEqual(app.state, .runningForeground, "last-window close must not quit")
+        XCTAssertTrue(
+            newWindow.waitForExistence(timeout: 5),
+            "File → New Window stays available after the last window closes"
+        )
+        XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
+        newWindow.click()
+        waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
         let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
         if splitRight.exists {
             XCTAssertFalse(splitRight.isHittable, "splits stay fail-closed until C3")

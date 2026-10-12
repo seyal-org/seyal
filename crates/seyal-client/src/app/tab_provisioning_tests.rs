@@ -301,7 +301,11 @@ fn removing_a_tab_detaches_only_and_leaves_unrelated_executions() {
         alternate_screen: false,
     })
     .unwrap();
-    root.apply(AppAction::CloseTab { id: tab_b }).unwrap();
+    root.apply(AppAction::CloseTab {
+        id: tab_b,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert_eq!(root.snapshot().shell.tabs.len(), 2);
     assert!(root.provisioning().is_unreferenced(exec_b));
     assert!(!root.provisioning().is_unreferenced(exec_a));

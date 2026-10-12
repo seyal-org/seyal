@@ -267,6 +267,10 @@ final class MultiWindowHostTests: XCTestCase {
         guard let key = host.orderedKeys.first, let window = host.realizedWindow(for: key) else {
             return XCTFail("expected bootstrap window")
         }
+        XCTAssertFalse(
+            window.isReleasedWhenClosed,
+            "Swift ARC owns realized windows; AppKit must not release them on close"
+        )
         XCTAssertFalse(host.windowShouldClose(window))
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
