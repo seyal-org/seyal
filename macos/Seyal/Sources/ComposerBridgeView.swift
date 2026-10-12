@@ -323,7 +323,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
         action.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         action.applySnapshotFence(snapshot)
-        action.target_pty_generation = composer.epoch
+        action.target_generation = composer.epoch
         let utf8 = Array(textView.string.utf8)
         utf8.withUnsafeBufferPointer { buffer in
             action.payload = buffer.baseAddress
@@ -343,7 +343,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
         action.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         action.applySnapshotFence(snapshot)
-        action.target_pty_generation = composer.epoch
+        action.target_generation = composer.epoch
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
         var status = onSubmitComposer?(command) ?? -10
         if status == -12 {

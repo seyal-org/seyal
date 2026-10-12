@@ -53,9 +53,9 @@ reason = "Metal update/present lifecycle stays one main-queue presenter after ty
 # and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1025
+ceiling_loc = 1029
 issue = 1153
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1153 adds CloseWindow action and maps StaleContainment on close paths. Close apply logic remains in provisioning_apply.rs."
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1153 carries the host-observed containment generation through typed close actions. Close apply logic lives in close_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -77,9 +77,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented a
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1055
+ceiling_loc = 1026
 issue = 1108
-responsibility = "N2 navigate and palette address proofs stay in the app tests module with W1 window seeds; #1108 adds OrderFrontMakeKey coalescing evidence beside quit native-effect proofs. C2 acceptance cases stay in tab_provisioning_tests.rs."
+responsibility = "N2 navigation and palette address proofs stay with W1 window seeds; #1108 adds OrderFrontMakeKey coalescing evidence beside quit native-effect proofs. Structural close acceptance lives in close_disposition_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -248,4 +248,3 @@ path = "crates/seyal-client/src/keybinding/tests.rs"
 acknowledged_loc = 701
 issue = 1106
 reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
-

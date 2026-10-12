@@ -190,8 +190,11 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    root.apply(AppAction::ClosePane { id: pane })
-        .expect("presentation removal");
+    root.apply(AppAction::ClosePane {
+        id: pane,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("presentation removal");
     assert!(root
         .snapshot()
         .pending_effects

@@ -25,8 +25,12 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.close_pane_with_disposition(id)
+    pub(super) fn close_pane(
+        &mut self,
+        id: PaneId,
+        containment_generation: u64,
+    ) -> Result<(), AppError> {
+        self.close_pane_with_disposition(id, containment_generation)
     }
 
     pub(super) fn set_left_panel(&mut self, mode: LeftPanelMode) -> Result<(), AppError> {

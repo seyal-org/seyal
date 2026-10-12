@@ -86,7 +86,7 @@ pub struct SeyalAppAction {
     pub target_execution_hi: u64,
     pub target_attachment_lo: u64,
     pub target_attachment_hi: u64,
-    pub target_pty_generation: u64,
+    pub target_generation: u64,
     pub payload: *const u8,
     pub payload_len: u32,
     pub reserved: u32,

@@ -8,6 +8,7 @@
 
 mod accessibility;
 mod chrome_apply;
+mod close_apply;
 mod composer_apply;
 mod goto_apply;
 mod keybinding_apply;
@@ -271,9 +272,11 @@ pub enum AppAction {
     CreateTab,
     CloseWindow {
         id: WindowId,
+        containment_generation: u64,
     },
     CloseTab {
         id: TabId,
+        containment_generation: u64,
     },
     TerminateExecution {
         fence: AppFence,
@@ -302,6 +305,7 @@ pub enum AppAction {
     },
     ClosePane {
         id: PaneId,
+        containment_generation: u64,
     },
     FocusPane {
         id: PaneId,
@@ -879,8 +883,9 @@ impl ApplicationRoot {
                 }
                 self.create_tab()
             }
-            AppAction::CloseWindow { id } => self.close_window(id),
-            AppAction::CloseTab { id } => self.close_tab(id),
+            action @ (AppAction::CloseWindow { .. }
+            | AppAction::CloseTab { .. }
+            | AppAction::ClosePane { .. }) => self.apply_close(action),
             AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
             AppAction::Adopt { fence, evidence } => self.adopt(fence, evidence),
             AppAction::SyncLiveUnpresented { entries } => self.sync_live_unpresented(entries),
@@ -890,7 +895,6 @@ impl ApplicationRoot {
             } => self.record_unpresented(execution, workspace),
             AppAction::TerminateUnpresented { execution } => self.terminate_unpresented(execution),
             AppAction::SplitFocused { axis } => self.split_focused(axis),
-            AppAction::ClosePane { id } => self.close_pane(id),
             AppAction::FocusPane { id } => self.focus_pane(id),
             AppAction::MoveSplitDivider { pane, position } => {
                 self.move_split_divider(pane, position)
