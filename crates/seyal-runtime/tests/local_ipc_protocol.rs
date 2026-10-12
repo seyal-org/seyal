@@ -610,8 +610,8 @@ fn suspend_delivery_drops_deltas_keeps_attachment_and_pty_progress() {
 #[test]
 fn child_exit_while_hidden_still_finalizes() {
     let mut harness = Harness::new("w5-exit-hidden");
-    let execution_id =
-        harness.spawn(CommandSpec::new("/bin/sh").args(["-c", "printf bye; exit 0"]));
+    let execution_id = harness
+        .spawn(CommandSpec::new("/bin/sh").args(["-c", "IFS= read -r _; printf bye; exit 0"]));
     let mut client = harness.connect();
     harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
     let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Controller);
@@ -620,6 +620,15 @@ fn child_exit_while_hidden_still_finalizes() {
         MessageType::SuspendDelivery,
         &SuspendDelivery {
             attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: attached.attachment_id,
+            bytes: b"exit\n",
         }
         .encode(),
     );
