@@ -8,6 +8,7 @@
 use std::time::Instant;
 
 use seyal_client::app::{AppAction, ApplicationRoot, WindowNativeEvent, QUIT_CLEANUP_DEADLINE_MS};
+use seyal_client::performance::nearest_rank_percentile;
 use seyal_client::shell::PresentationTier;
 use seyal_core::TabId;
 
@@ -41,22 +42,14 @@ fn print_host_metadata() {
     );
 }
 
-fn percentile_us(sorted: &[u64], percentile: u8) -> u64 {
-    if sorted.is_empty() {
-        return 0;
-    }
-    let rank = (usize::from(percentile) * sorted.len()) / 100;
-    sorted[rank.min(sorted.len() - 1)]
-}
-
 fn report(name: &str, samples: &mut [u64]) {
     samples.sort_unstable();
     println!(
         "{name} evidence_class=controlled-host sample_count={} p50_us={} p95_us={} p99_us={} max_us={} {PERFORMANCE_CLAIM}",
         samples.len(),
-        percentile_us(samples, 50),
-        percentile_us(samples, 95),
-        percentile_us(samples, 99),
+        nearest_rank_percentile(samples, 50),
+        nearest_rank_percentile(samples, 95),
+        nearest_rank_percentile(samples, 99),
         samples.last().copied().unwrap_or(0),
     );
 }
@@ -204,17 +197,12 @@ fn measure_presentation_scaling_shell_only() {
 }
 
 fn print_quit_cleanup_derivation() {
-    // SPEC-009 detach cleanup p99 ≈ 250µs (Pass 9 controlled baseline).
-    // Headroom 2000× for renderer/GPU release across ≤16 attachments:
-    // 250µs × 2000 = 500_000µs = 500ms. Recorded in native_effect.rs and here.
-    const SPEC009_DETACH_P99_US: u64 = 250;
-    const HEADROOM: u64 = 2000;
-    const MAX_ATTACHMENTS_ASSUMED: u64 = 16;
-    let derived_ms = (SPEC009_DETACH_P99_US * HEADROOM) / 1000;
-    assert_eq!(derived_ms, 500);
-    assert_eq!(QUIT_CLEANUP_DEADLINE_MS, derived_ms);
+    // The existing 500 ms implementation constant has no accepted derivation
+    // for this W7 quit path; SPEC-009's detach measurement does not establish
+    // renderer/GPU cleanup headroom or a 16-attachment product bound.
     println!(
-        "m003_w7_quit_cleanup_deadline derived_ms={derived_ms} formula=spec009_detach_p99_us_{SPEC009_DETACH_P99_US}_x_headroom_{HEADROOM}_for_up_to_{MAX_ATTACHMENTS_ASSUMED}_attachments evidence_class=controlled-host skill=performance-gate {PERFORMANCE_CLAIM}"
+        "m003_w7_quit_cleanup_deadline configured_ms={} evidence_class=PLATFORM_LIMITED reason=no_accepted_derivation_for_quit_cleanup_headroom {PERFORMANCE_CLAIM}",
+        QUIT_CLEANUP_DEADLINE_MS
     );
 }
 

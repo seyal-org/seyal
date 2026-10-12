@@ -61,9 +61,11 @@ fn inverse_window_close_without_execution_death() {
     assert_eq!(root.live_unpresented(), vec![execution]);
 }
 
-/// Inverse: execution death (TerminateUnpresented) without window close.
+/// Disposing a live-unpresented execution begins without closing its Window.
+/// This proves the attach-for-dispose request only; Runtime finalization is
+/// covered by the P4/runtime termination tests and is not simulated here.
 #[test]
-fn inverse_execution_terminate_without_window_close() {
+fn unpresented_dispose_begins_without_window_close() {
     let mut root = ApplicationRoot::new();
     drain_effects(&mut root);
     let window = root.snapshot().shell.active_window.expect("window");
@@ -75,11 +77,6 @@ fn inverse_execution_terminate_without_window_close() {
     .unwrap();
     root.apply(AppAction::TerminateUnpresented { execution })
         .unwrap();
-    assert!(root
-        .snapshot()
-        .pending_effects
-        .iter()
-        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
     assert!(root.pending_wire_effects().iter().any(|effect| matches!(
         effect,
         crate::provisioning::ProvisioningEffect::AttachController { execution: id, .. }
@@ -335,13 +332,13 @@ fn app_action_has_no_text_driven_window_authority() {
     }
 }
 
-/// Quit-cleanup deadline constant matches the recorded derivation (500 ms).
+/// Quit-cleanup carries the configured implementation deadline to the host.
 #[test]
-fn quit_cleanup_deadline_matches_recorded_derivation() {
+fn quit_cleanup_deadline_remains_the_configured_500ms() {
     assert_eq!(
         crate::app::native_effect::QUIT_CLEANUP_DEADLINE_MS,
         500,
-        "revise only with performance-gate evidence; see docs/evidence/m003-w7-1221-measurements.md"
+        "the current value is not performance-qualified; see docs/evidence/m003-w7-1221-measurements.md"
     );
     let mut root = ApplicationRoot::new();
     drain_effects(&mut root);

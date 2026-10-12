@@ -19,6 +19,7 @@ pub mod live_tail;
 pub mod navigation;
 pub mod palette;
 pub mod pane_layout;
+pub mod performance;
 pub mod presentation;
 pub mod provisioning;
 pub mod recovery;
