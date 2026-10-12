@@ -118,14 +118,19 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .expect("test receiver");
 
         let deadline = Instant::now() + Duration::from_secs(8);
-        while runtime.execution_count() > 1 && Instant::now() < deadline {
+        while (runtime.execution(anchor).is_some() && runtime.execution(unpresented).is_some())
+            && Instant::now() < deadline
+        {
             runtime
                 .poll_once(Some(Duration::from_millis(5)))
                 .expect("Runtime poll");
         }
-        if runtime.execution_count() == 1 {
-            finalized_tx.send(()).expect("finalization receiver");
-        }
+        finalized_tx
+            .send((
+                runtime.execution(anchor).is_some(),
+                runtime.execution(unpresented).is_some(),
+            ))
+            .expect("finalization receiver");
         let _ = stop_rx.recv_timeout(Duration::from_secs(10));
         runtime.begin_shutdown().expect("begin shutdown");
         runtime
@@ -194,7 +199,15 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
                 .any(|window| window.id == open_window),
             "disposing an unpresented execution must preserve the open window"
         );
-        if finalized_rx.try_recv().is_ok() {
+        if let Ok((anchor_alive, unpresented_alive)) = finalized_rx.try_recv() {
+            assert!(
+                anchor_alive,
+                "closing the anchor window must preserve that exact Runtime execution"
+            );
+            assert!(
+                !unpresented_alive,
+                "disposing the unpresented execution must finalize that exact Runtime execution"
+            );
             runtime_finalized = true;
         }
         if runtime_finalized && !root.live_unpresented().contains(&unpresented) {
