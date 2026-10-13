@@ -282,3 +282,24 @@ Policy may rebuild context or create one new RoutingDecision within a bounded re
 12. bounded compile failure reroutes once per policy;
 13. adapter crash does not kill still-live Seyal TerminalExecution;
 14. harness/request load does not materially regress terminal latency.
+
+## 17. SPEC-030 frozen task-to-harness request reconciliation (PROPOSED — not yet normative)
+
+This candidate amendment under [#1327](https://github.com/seyal-org/seyal/issues/1327) preserves §§1–16 and the three `RequestAssemblyAuthority` classifications.
+
+```text
+authorized WorkItemInputVersion + Attempt snapshot
++ ContextBundle / RunWorkingSet + privacy/source/policy fence
++ one accepted SPEC-020 RoutingDecision / RouteOffering
+    -> RunInputPackage (single sealed backend dispatch envelope)
+        -> ProviderNeutralRequestPlan       [BackendCompiled]
+        -> ContextDeliveryPlan/HarnessInputPackage [harness-compiled]
+        -> manifest-verified encoder/InputTransport
+```
+
+- The `RunInputPackage` is not an event payload, second prompt state machine or second router. It records refs, required/optional segments, media, delivery permissions, binding generation and immutable route/fence; authorized materialization occurs only for that dispatch.
+- `HarnessInputPackage` is a delivery projection, **not another durable input version**. External Claude/Codex/ACP may reorder or enrich inputs. Hidden final prompt/session/model/cache state remains Unknown and must not be asserted as backend-controlled.
+- Existing `AdapterManifestV1` grows a *versioned* capability profile for `input_transport`, `stream_decoder`, agent/CLI protocol range, auth method and parser limits; the default for legacy manifests is `ObservationOnly` (ineligible for real-task routing), not inferred from process spawn or output text.
+- Guaranteed prompt delivery eligibility requires installed/enabled adapter, exact principal `adapter.execute` grant, compatible parser/input mode, bounded required content, enforced policy conditions, and capability-appropriate media. Mandatory input may not be silently compacted or omitted.
+- Typed rejection distinguishes input-required, unsupported transport/modality, stale source/policy fence, protocol version mismatch, invalid permission control and output decode failure. Vendor stream JSON is an observation requiring validation/binding before persistence, not Action authorization.
+- Pricing/retention: #1339 may supply measured SPEC-020 cost evidence but does not gate safe input delivery. Unknown subscription-priced CLI usage, provider-native cache hit and cross-agent session portability stay Unknown; avoid duplicate benchmark runs.
