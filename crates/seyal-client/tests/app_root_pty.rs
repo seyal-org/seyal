@@ -2,6 +2,7 @@
 
 use std::{
     path::PathBuf,
+    process::Command,
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -84,8 +85,12 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
     let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
     let runtime_dir = std::env::temp_dir().join(format!("s1269d-{suffix:x}"));
     let singleton_path = std::env::temp_dir().join(format!("s1269-{suffix:x}.lock"));
+    let anchor_pid_path = runtime_dir.join("anchor.pid");
+    let anchor_pid_for_runtime = anchor_pid_path.clone();
     let (ready_tx, ready_rx) = mpsc::channel();
     let (finalized_tx, finalized_rx) = mpsc::channel();
+    let (verify_anchor_tx, verify_anchor_rx) = mpsc::channel();
+    let (anchor_alive_tx, anchor_alive_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
     let runtime = thread::spawn(move || {
         let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
@@ -97,9 +102,16 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         config.forced_reap = Duration::from_millis(250);
         config.final_drain = Duration::from_millis(100);
         let mut runtime = Runtime::new(config).expect("Runtime");
+        let anchor_script = format!(
+            "printf '%s' \"$$\" > '{}'; exec sleep 30",
+            anchor_pid_for_runtime
+                .display()
+                .to_string()
+                .replace('\'', "'\\''")
+        );
         let anchor = runtime
             .create_execution(
-                CommandSpec::new("/bin/sh").args(["-c", "sleep 30"]),
+                CommandSpec::new("/bin/sh").args(["-c", &anchor_script]),
                 WindowSize::cells(80, 24).expect("geometry"),
             )
             .expect("anchor execution");
@@ -109,6 +121,16 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
                 WindowSize::cells(80, 24).expect("geometry"),
             )
             .expect("unpresented execution");
+        let pid_deadline = Instant::now() + Duration::from_secs(2);
+        while !anchor_pid_for_runtime.exists() && Instant::now() < pid_deadline {
+            runtime
+                .poll_once(Some(Duration::from_millis(5)))
+                .expect("wait for anchor process to start");
+        }
+        assert!(
+            anchor_pid_for_runtime.exists(),
+            "anchor child wrote its pid"
+        );
         let socket_path = runtime
             .local_ipc_socket_path()
             .expect("local IPC socket")
@@ -131,6 +153,22 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
                 runtime.execution(unpresented).is_some(),
             ))
             .expect("finalization receiver");
+        if verify_anchor_rx
+            .recv_timeout(Duration::from_secs(10))
+            .is_ok()
+        {
+            // Give Runtime multiple turns to reap an incorrectly terminated
+            // child. Registry presence alone is insufficient until this poll.
+            let deadline = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < deadline {
+                runtime
+                    .poll_once(Some(Duration::from_millis(5)))
+                    .expect("poll Runtime after anchor window close");
+            }
+            anchor_alive_tx
+                .send(runtime.execution(anchor).is_some())
+                .expect("anchor liveness receiver");
+        }
         let _ = stop_rx.recv_timeout(Duration::from_secs(10));
         runtime.begin_shutdown().expect("begin shutdown");
         runtime
@@ -226,6 +264,27 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
     while !root.snapshot().pending_effects.is_empty() {
         root.apply(AppAction::AckEffect).expect("ack close effect");
     }
+    verify_anchor_tx
+        .send(())
+        .expect("Runtime anchor liveness request");
+    assert!(
+        anchor_alive_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("Runtime anchor liveness result"),
+        "closing the bound window must leave that exact Runtime execution registered after polling"
+    );
+    let anchor_pid = std::fs::read_to_string(&anchor_pid_path)
+        .expect("anchor child pid")
+        .parse::<u32>()
+        .expect("valid anchor child pid");
+    assert!(
+        Command::new("/bin/kill")
+            .args(["-0", &anchor_pid.to_string()])
+            .status()
+            .expect("check anchor process")
+            .success(),
+        "closing the bound window must leave the exact OS child alive"
+    );
     assert!(
         root.snapshot()
             .shell
