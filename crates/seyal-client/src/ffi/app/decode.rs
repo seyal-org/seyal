@@ -2,7 +2,7 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use seyal_protocol::framing::{CommandBlock, CommandBlockState};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
@@ -313,8 +313,52 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
+        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
+        // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
+        // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
+        // ActionUnavailable (50).
+        63 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryBack {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
+        64 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryForward {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
+        // W4a window host intents (ADR-018 §2.2 / §2.3), following N3.
+        65 => Ok(AppAction::SelectWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        66 => Ok(AppAction::CycleWindow {
+            direction: if action.reserved == 0 {
+                crate::shell::CycleDirection::Next
+            } else {
+                crate::shell::CycleDirection::Previous
+            },
+        }),
+        67 => Ok(AppAction::CreateWindow),
+        68 => Ok(AppAction::ReportWindowEvent {
+            window: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            event: decode_window_event(action.reserved)?,
+        }),
         // Block Rerun (#1010): loads the Block command into an empty draft.
-        63 => Ok(AppAction::RerunBlock {
+        69 => Ok(AppAction::RerunBlock {
             fence,
             id: BlockId::from_bytes(id16(
                 action.target_execution_lo,
@@ -326,8 +370,42 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
     }
 }
 
+fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i32> {
+    use crate::app::WindowNativeEvent::*;
+    Ok(match reserved {
+        0 => BecameKey,
+        1 => ResignedKey,
+        2 => BecameMain,
+        3 => ResignedMain,
+        4 => OcclusionChanged,
+        5 => Miniaturized,
+        6 => Deminiaturized,
+        7 => EnteredFullscreen,
+        8 => ExitedFullscreen,
+        9 => ScreenOrScaleChanged,
+        10 => ActivationFailed,
+        _ => return Err(-6),
+    })
+}
+
 fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
     crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
+}
+
+fn decode_focus_seq(
+    payload: *const u8,
+    payload_len: u32,
+) -> Result<crate::navigation::FocusSeq, i32> {
+    if payload_len != 8 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — payload_len bytes are readable.
+    let bytes = unsafe { slice::from_raw_parts(payload, 8) };
+    let mut raw = [0_u8; 8];
+    raw.copy_from_slice(bytes);
+    Ok(crate::navigation::FocusSeq::from_raw(u64::from_le_bytes(
+        raw,
+    )))
 }
 
 /// Payload layout for an optional address: empty → None; otherwise

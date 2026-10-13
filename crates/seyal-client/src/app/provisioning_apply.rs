@@ -19,7 +19,7 @@ use crate::local::{ClientError, LocalDisplayClient};
 #[cfg(target_os = "macos")]
 use crate::provisioning::TerminateOutcome;
 use crate::provisioning::{CreateOutcome, ProvisioningEffect, ProvisioningFailure};
-use crate::shell::ShellAction;
+use crate::shell::{ShellAction, SplitAxis};
 
 impl ApplicationRoot {
     /// Install the cold-path [`LocalDisplayClient`] used to admit create/terminate
@@ -44,7 +44,7 @@ impl ApplicationRoot {
     /// admits the resulting type-36 create on the wire client (same request id).
     pub(super) fn create_tab(&mut self) -> Result<(), AppError> {
         self.shell
-            .apply(ShellAction::CreateTab)
+            .apply_product_create_tab()
             .map_err(|_| AppError::TabCreationUnavailable)?;
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
@@ -56,7 +56,10 @@ impl ApplicationRoot {
         let effect = match self.provisioning.begin_intent(pane, None) {
             Ok(effect) => effect,
             Err(failure) => {
-                let _ = self.shell.apply(ShellAction::CloseTab { id: tab });
+                let _ = self.shell.apply(ShellAction::CloseTab {
+                    id: tab,
+                    containment_generation: self.shell.containment_generation(),
+                });
                 let _ = self.shell.take_removed_tab_panes();
                 self.provisioning.note_rejected_without_retry(pane, failure);
                 return Err(provisioning_app_error(failure));
@@ -69,7 +72,10 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         ) {
-            let _ = self.shell.apply(ShellAction::CloseTab { id: tab });
+            let _ = self.shell.apply(ShellAction::CloseTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            });
             let _ = self.shell.take_removed_tab_panes();
             if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
                 let _ = self.provisioning.apply_create_result(
@@ -83,16 +89,88 @@ impl ApplicationRoot {
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
-        #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
+        // CreateTab focuses the new leaf; record as a user-initiated commit.
+        self.record_focused_pane_commit();
         Ok(())
+    }
+
+    /// Split the focused terminal leaf and begin one C1 provisioning intent for
+    /// the new terminal leaf (ADR-017 §4.4 / C3). Sibling bindings are untouched.
+    pub(super) fn split_focused(&mut self, axis: SplitAxis) -> Result<(), AppError> {
+        self.shell
+            .apply(ShellAction::SplitFocused {
+                axis,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|_| AppError::PaneSplitUnavailable)?;
+        let snap = self.shell.snapshot();
+        let pane = snap.focused_pane;
+        // SPEC-004 §18.2 / ADR-017 §5.2: M003 create admits only workspace_id 0.
+        let workspace_id = 0u128;
+        self.seed_provisioning_request_floor_from_wire();
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let effect = match self.provisioning.begin_intent(pane, None) {
+            Ok(effect) => effect,
+            Err(failure) => {
+                self.rollback_failed_split(pane);
+                self.provisioning.note_rejected_without_retry(pane, failure);
+                return Err(provisioning_app_error(failure));
+            }
+        };
+        if let Err(error) = self.dispatch_wire_effects(
+            vec![effect],
+            WireDispatchContext {
+                workspace_id,
+                launch_profile: 0,
+            },
+        ) {
+            self.rollback_failed_split(pane);
+            if let Some(intent) = self.provisioning.pending_intent(pane).cloned() {
+                let _ = self.provisioning.apply_create_result(
+                    intent.owner,
+                    intent.request_id,
+                    CreateOutcome::Failed(ErrorCode::InvalidState),
+                );
+            }
+            return Err(error);
+        }
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        // The focused leaf is unbound until attach+bind completes. Clear the
+        // active input authority while retaining every sibling's pane binding.
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
+        Ok(())
+    }
+
+    fn rollback_failed_split(&mut self, pane: PaneId) {
+        if self
+            .shell
+            .apply(ShellAction::ClosePane {
+                id: pane,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .is_ok()
+        {
+            let _ = self.shell.take_released_execution();
+            // R6.7a: purge the transient leaf and commit the restored focused
+            // successor in this same rollback transition.
+            self.record_destroyed_pane_focus(pane, true);
+        }
     }
 
     /// Remove a Tab's chrome. Bound panes detach only; executions stay live
     /// and enumerable. Outstanding create intents are marked dead for §6.3.
     pub(super) fn close_tab(&mut self, id: TabId) -> Result<(), AppError> {
+        let focus_before = self.shell.focus_checkpoint();
+        let was_active = focus_before.active_tab == id;
         self.shell
-            .apply(ShellAction::CloseTab { id })
+            .apply(ShellAction::CloseTab {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(close_tab_error)?;
         let removed = self.shell.take_removed_tab_panes();
         let mut effects = Vec::new();
@@ -114,6 +192,12 @@ impl ApplicationRoot {
                 launch_profile: 0,
             },
         );
+        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a): one call on the
+        // product close path — surfaces do not scan history themselves.
+        self.record_destroyed_tab_focus(id, was_active);
+        if was_active {
+            self.activate_focused_pane_authority();
+        }
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -124,8 +208,13 @@ impl ApplicationRoot {
     /// unreferenced live record (ADR-017 §6.1 detach-only); it is never
     /// terminated as a side effect of presentation close.
     pub(super) fn close_pane_with_disposition(&mut self, id: PaneId) -> Result<(), AppError> {
+        let focus_before = self.shell.focus_checkpoint();
+        let was_focused = focus_before.focused_pane == id;
         self.shell
-            .apply(ShellAction::ClosePane { id })
+            .apply(ShellAction::ClosePane {
+                id,
+                containment_generation: self.shell.containment_generation(),
+            })
             .map_err(close_pane_error)?;
         if let Some((pane, execution)) = self.shell.take_released_execution() {
             let effects = self.provisioning.on_bound_pane_closed(pane);
@@ -151,6 +240,13 @@ impl ApplicationRoot {
             // Outstanding create for this pane: keep the request until the
             // result arrives, then §6.3 disposition.
             self.provisioning.mark_intent_dead(id);
+        }
+        // Authoritative destroy hook (SPEC-022 R6.7 / R6.7a).
+        self.record_destroyed_pane_focus(id, was_focused);
+        if was_focused {
+            // Closing an unbound in-flight leaf changes focus too. Restore any
+            // retained authority for the shell-selected successor immediately.
+            self.activate_focused_pane_authority();
         }
         let _ = self
             .chrome
@@ -449,7 +545,6 @@ impl ApplicationRoot {
             // ADR-017 §6.1: keep the create Controller registered so remaining
             // tabs can still admit create. Extra per-pane Controllers are
             // unregistered above; create-client unregister is quit/replace/drop.
-            #[cfg(target_os = "macos")]
             self.activate_focused_pane_authority();
         }
     }

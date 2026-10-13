@@ -218,7 +218,9 @@ fn session_client_hello_work_run_snapshot_replay_against_daemon_binary() {
     let socket_for_client = socket.clone();
     let worker = thread::spawn(move || {
         let mut client = SessionClient::connect(&socket_for_client).unwrap();
-        let scope = client.create_work_scope(WorkScopeKind::Repository).unwrap();
+        // Qualification seeds a singleton adapter; SPEC-027 §6 Repository/Project
+        // fail closed without WorkScope.bindings (#1226). AdHoc is the success path.
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc).unwrap();
         let item = client.create_work_item(scope).unwrap();
         let attempt = client.create_attempt(item).unwrap();
         let started = client.start_agent_run(attempt).unwrap();

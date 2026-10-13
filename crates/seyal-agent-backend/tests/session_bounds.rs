@@ -48,7 +48,7 @@ fn slow_subscriber_is_dropped_and_resyncs_from_cursor() {
     let socket = daemon.socket_path();
     let creator = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -149,7 +149,7 @@ fn subscribe_fails_explicitly_when_one_event_cannot_fit() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect_limits(&socket, 512, 32);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.start_agent_run(attempt);
@@ -190,12 +190,13 @@ fn unreplayable_observation_is_never_persisted() {
     let socket = daemon.socket_path();
     let client = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        let scope = client.create_work_scope(WorkScopeKind::Repository);
+        let scope = client.create_work_scope(WorkScopeKind::AdHoc);
         let item = client.create_work_item(scope);
         let attempt = client.create_attempt(item);
         let started = client.command(&Command::StartAgentRun {
             session_id: client.session_id,
             attempt_id: attempt,
+            route_offering_id: None,
         });
         (client.session_id, started)
     });
@@ -233,7 +234,7 @@ fn repeated_store_faults_fail_bounded_and_recover() {
         for _ in 0..5 {
             results.push(client.command(&Command::CreateWorkScope {
                 session_id: client.session_id,
-                kind: WorkScopeKind::Repository,
+                kind: WorkScopeKind::AdHoc,
             }));
         }
         results
@@ -248,7 +249,7 @@ fn repeated_store_faults_fail_bounded_and_recover() {
     let socket = daemon.socket_path();
     let created = thread::spawn(move || {
         let mut client = TestClient::connect(&socket);
-        client.create_work_scope(WorkScopeKind::Repository)
+        client.create_work_scope(WorkScopeKind::AdHoc)
     });
     daemon.serve_one().unwrap();
     let _ = created.join().unwrap();

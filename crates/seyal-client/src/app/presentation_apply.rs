@@ -21,6 +21,7 @@ impl ApplicationRoot {
         };
         let current = self.presentation.snapshot();
         if current.mode == desired {
+            self.sync_focused_presentation_mode();
             self.sync_composer_presentation();
             return Ok(());
         }
@@ -34,6 +35,7 @@ impl ApplicationRoot {
                 epoch: current.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.sync_focused_presentation_mode();
         self.clear_chord_prefix();
         self.sync_composer_presentation();
         Ok(())
@@ -64,5 +66,11 @@ impl ApplicationRoot {
     /// `Some` only while a Pane is bound. The bool is the explicit Raw latch.
     pub(super) fn resting_palette_choice(&self) -> Option<bool> {
         self.authority.map(|_| self.explicit_raw)
+    }
+
+    pub(super) fn sync_focused_presentation_mode(&mut self) {
+        let pane = self.shell.snapshot().focused_pane;
+        let mode = self.presentation.snapshot().mode;
+        let _ = self.shell.set_presentation_mode(pane, mode);
     }
 }

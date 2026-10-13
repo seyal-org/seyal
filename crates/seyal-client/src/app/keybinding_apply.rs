@@ -149,10 +149,21 @@ impl ApplicationRoot {
             }
             // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
             WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
-            // Catalog builtins/projection omit FocusHistory until N3 (#1117 / tip B).
-            // Custom TOML / FFI ids 19–20 stay parseable and return unavailable.
-            WorkspaceCommandId::FocusHistoryBack | WorkspaceCommandId::FocusHistoryForward => {
-                Err(AppError::ActionUnavailable)
+            // N3 owns history actions; default catalog chords remain K8 (#1132).
+            // Custom TOML / FFI ids 19–20 dispatch through the Rust cursor seq.
+            WorkspaceCommandId::FocusHistoryBack => {
+                let observed = self
+                    .focus_history
+                    .cursor_seq()
+                    .ok_or(AppError::NavigationHistoryUnavailable)?;
+                self.history_back(observed)
+            }
+            WorkspaceCommandId::FocusHistoryForward => {
+                let observed = self
+                    .focus_history
+                    .cursor_seq()
+                    .ok_or(AppError::NavigationHistoryUnavailable)?;
+                self.history_forward(observed)
             }
             WorkspaceCommandId::AppQuit => self.quit(),
         }
@@ -202,6 +213,7 @@ impl ApplicationRoot {
                 epoch: snap.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.sync_focused_presentation_mode();
         self.clear_chord_prefix();
         Ok(())
     }

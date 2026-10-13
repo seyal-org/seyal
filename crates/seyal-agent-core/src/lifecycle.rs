@@ -3,7 +3,8 @@
 //! Consumes SPEC-014 resumability classifications and SPEC-019 disposition /
 //! outcome values without restating their evaluation semantics.
 
-use crate::{AgentRunId, AttemptId};
+use crate::execution_host::ExecutionHostKind;
+use crate::{AdapterId, AgentRunId, AttemptId, RouteOfferingId};
 
 /// WorkItem lifecycle (SPEC-026 §4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,6 +159,9 @@ pub enum AgentRunLineage {
 }
 
 /// Opaque routing-decision reference set when Prepared (SPEC-020).
+///
+/// Content/generation pointer into [`crate::AgentDomain`]'s immutable
+/// `RoutingDecision` history (SPEC-027 §4.2). Never a second router.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RoutingDecisionRef(u64);
 
@@ -169,6 +173,54 @@ impl RoutingDecisionRef {
     pub const fn get(self) -> u64 {
         self.0
     }
+}
+
+/// How the bound RouteOffering was selected (SPEC-027 §4.2–§4.3).
+///
+/// `RouterV1` is produced only by the replaceable SPEC-020 V1 soft-ranking
+/// stage inside the existing routing envelope ([`crate::resolve_with_v1_ranking`]).
+/// Pin/singleton remain valid hard/selection kinds. There is no second router.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionKind {
+    /// Client presented `route_offering_id` and it resolved to an enabled,
+    /// hard-constraint-satisfying offering (SPEC-027 §4.3 step 1).
+    Pinned,
+    /// No pin; exactly one enabled, hard-constraint-satisfying offering
+    /// existed (SPEC-027 §4.3 step 2).
+    Singleton,
+    /// Soft-ranked among multiple hard-eligible offerings (SPEC-020 V1).
+    RouterV1,
+}
+
+/// Content-address placeholder for the resolved, manifest-owned launch
+/// descriptor frozen at Prepared (SPEC-027 §4.2 / §5.1).
+///
+/// Opaque until a real content-addressed descriptor store exists; equality
+/// is what fencing relies on, not a specific byte encoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LaunchDescriptorRef(u64);
+
+impl LaunchDescriptorRef {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Immutable execution-target binding recorded at `Created → Prepared`
+/// (SPEC-027 §4.2). Never mutated once recorded; retried/forked/fallback
+/// runs mint a new [`RoutingDecision`] rather than editing this one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoutingDecision {
+    pub adapter_id: AdapterId,
+    pub adapter_manifest_generation: u64,
+    pub route_offering_id: RouteOfferingId,
+    pub execution_host_kind: ExecutionHostKind,
+    pub launch_descriptor_ref: LaunchDescriptorRef,
+    pub selection_kind: SelectionKind,
 }
 
 /// Opaque execution-host reference for binding / detection (SPEC-018).
@@ -190,6 +242,28 @@ impl ExecutionRef {
 pub struct ExternalIdentityKey {
     pub execution_ref: ExecutionRef,
     pub external_identity: u64,
+}
+
+/// Opaque adapter-scoped upstream session/thread/conversation reference
+/// (ADR-012). Never a Seyal `WorkItem` / `Attempt` / `AgentRun` identity.
+///
+/// Adapters may store vendor thread/session IDs here as resumability metadata
+/// only. Core lifecycle authorities remain Seyal-owned.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HarnessSessionRef {
+    /// First-party adapter label (e.g. `codex-cli`), not a vendor product ID.
+    pub adapter_label: String,
+    /// Opaque upstream token (Codex thread id, Claude session id, …).
+    pub upstream_ref: String,
+}
+
+impl HarnessSessionRef {
+    pub fn new(adapter_label: impl Into<String>, upstream_ref: impl Into<String>) -> Self {
+        Self {
+            adapter_label: adapter_label.into(),
+            upstream_ref: upstream_ref.into(),
+        }
+    }
 }
 
 /// Ephemeral client attachment access (SPEC-026 §8). Not durable identity.
@@ -368,6 +442,23 @@ pub mod codes {
             WorkItemOutcome::Rejected => 2,
             WorkItemOutcome::Unresolved => 3,
             WorkItemOutcome::Abandoned => 4,
+        }
+    }
+
+    pub const fn selection_kind(value: SelectionKind) -> u8 {
+        match value {
+            SelectionKind::Pinned => 1,
+            SelectionKind::Singleton => 2,
+            SelectionKind::RouterV1 => 3,
+        }
+    }
+
+    pub const fn selection_kind_from(code: u8) -> Option<SelectionKind> {
+        match code {
+            1 => Some(SelectionKind::Pinned),
+            2 => Some(SelectionKind::Singleton),
+            3 => Some(SelectionKind::RouterV1),
+            _ => None,
         }
     }
 

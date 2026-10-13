@@ -126,8 +126,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         fatalError("ComposerBridgeView is programmatic")
     }
 
-    func focusEditor() {
-        window?.makeFirstResponder(textView)
+    @discardableResult
+    func focusEditor() -> Bool {
+        window?.makeFirstResponder(textView) ?? false
     }
 
     func apply(theme: NativeTheme) {
@@ -146,7 +147,13 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let snapshot = seyal_app_snapshot(appHandle)
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        isHidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        let hidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        // Presentation/epoch transitions revoke composer IME ownership: cancel
+        // uncommitted marked text without submitting (SPEC-008 / #866).
+        if (direct || hidden || composer.epoch != lastEpoch), hasMarkedText() {
+            textView.inputContext?.discardMarkedText()
+        }
+        isHidden = hidden
         let available = composer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available
@@ -382,6 +389,24 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.reserved = accepted ? 1 : 0
         _ = seyal_app_apply(appHandle, &action)
         reconcile()
+    }
+
+    /// Native projection of a failed Runtime admission. Rust keeps the draft;
+    /// the host only announces the failure (no secret-bearing text).
+    func presentAdmissionFailure(_ code: NativeComposerResult.Code) {
+        let message: String
+        switch code {
+        case .busy:
+            message = "Command not accepted: shell is busy."
+        case .backpressure:
+            message = "Command not accepted: terminal is busy. Retry."
+        case .invalid:
+            message = "Command not accepted."
+        case .accepted, .unsupported:
+            return
+        }
+        setAccessibilityValue(message)
+        SeyalAccessibilityAnnouncement.post(message, element: self)
     }
 }
 

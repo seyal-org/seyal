@@ -1,6 +1,7 @@
 use super::*;
 use crate::presentation::InputRoute;
 mod close_disposition_tests;
+mod window_effect_tests;
 pub(super) fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
@@ -94,10 +95,11 @@ fn new_root_is_one_unbound_pane() {
 }
 
 #[test]
-fn split_focused_fails_closed_while_create_tab_is_enabled() {
-    // C2b / #1175: production CreateTab is enabled; splits stay fail-closed until C3.
+fn split_focused_begins_provisioning_under_production_policy() {
+    // C3 / #1217: production SplitFocused uses the same C1 create intent path.
     let mut root = ApplicationRoot::new();
     assert!(root.snapshot().shell.allows_tab_creation);
+    assert!(root.snapshot().shell.allows_pane_splitting);
     root.apply(AppAction::CreateTab)
         .expect("production root allows tab creation");
     assert_eq!(root.snapshot().shell.tabs.len(), 2);
@@ -105,12 +107,15 @@ fn split_focused_fails_closed_while_create_tab_is_enabled() {
         .provisioning()
         .pending_intent(root.snapshot().shell.focused_pane)
         .is_some());
-    assert_eq!(
-        root.apply(AppAction::SplitFocused {
-            axis: SplitAxis::Right,
-        }),
-        Err(AppError::PaneSplitUnavailable)
-    );
+    root.apply(AppAction::SplitFocused {
+        axis: SplitAxis::Right,
+    })
+    .expect("production root allows pane splitting");
+    assert_eq!(root.snapshot().shell.panes.len(), 2);
+    assert!(root
+        .provisioning()
+        .pending_intent(root.snapshot().shell.focused_pane)
+        .is_some());
 }
 
 #[test]
@@ -361,12 +366,18 @@ fn tui_controller_without_client_is_authorized_but_has_no_second_pty() {
 #[test]
 fn quit_freezes_and_emits_one_native_effect() {
     let mut root = ApplicationRoot::new();
+    // Drain bootstrap RealizeWindow / OrderFrontMakeKey from with_shell.
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
     root.apply(AppAction::Quit).unwrap();
     let snap = root.snapshot();
     assert!(snap.frozen);
     assert_eq!(
-        snap.pending_effect,
-        NativeEffect::BoundedDetachThenTerminate
+        snap.pending_effects.as_slice(),
+        &[NativeEffect::BoundedDetachThenTerminate {
+            deadline_ms: crate::app::native_effect::QUIT_CLEANUP_DEADLINE_MS
+        }]
     );
     assert_eq!(
         root.apply(AppAction::Focus {
@@ -375,7 +386,57 @@ fn quit_freezes_and_emits_one_native_effect() {
         Err(AppError::Frozen)
     );
     root.apply(AppAction::AckEffect).unwrap();
-    assert_eq!(root.snapshot().pending_effect, NativeEffect::None);
+    assert_eq!(
+        root.snapshot().pending_effects.as_slice(),
+        &[NativeEffect::QuitCleanupComplete]
+    );
+    root.apply(AppAction::AckEffect).unwrap();
+    assert!(root.snapshot().pending_effects.is_empty());
+}
+
+#[test]
+fn repeated_same_window_selection_keeps_effect_queue_bounded() {
+    let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation_for_test(true);
+    let workspace = root.snapshot().shell.active_workspace;
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply_shell_for_test(crate::shell::ShellAction::CreateWindow {
+        workspace,
+        containment_generation: generation,
+    })
+    .unwrap();
+    let first = root.snapshot().shell.windows[0].id;
+    let second = root.snapshot().shell.windows[1].id;
+    let generation = root.snapshot().shell.containment_generation;
+    for i in 0..32 {
+        let window = if i % 2 == 0 { first } else { second };
+        root.apply_shell_for_test(crate::shell::ShellAction::SelectWindow {
+            id: window,
+            containment_generation: generation,
+        })
+        .unwrap();
+    }
+    let effects = root.snapshot().pending_effects;
+    assert!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. }))
+            .count()
+            <= 1,
+        "OrderFrontMakeKey must stay coalesced, got {effects:?}"
+    );
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert!(
+        snap.pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
+        "quit effect must remain present after prior selections"
+    );
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
 }
 
 #[test]
@@ -507,12 +568,12 @@ fn palette_open_filter_run_is_fenced_and_omits_disallowed_commands() {
     );
     let opened = production;
     assert!(
-        !opened
+        opened
             .palette
             .rows
             .iter()
             .any(|row| row.label.starts_with("Split Pane")),
-        "splits stay omitted until C3"
+        "production composition lists Split Pane commands after C3 enablement"
     );
     assert!(!opened.palette.rows.is_empty());
 
@@ -637,6 +698,7 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -645,11 +707,7 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
         evidence: evidence(1, true, false),
     })
     .unwrap();
-    let before = root.snapshot();
-    let epoch = before.presentation_epoch;
-    let execution = before.execution;
-    let attachment = before.attachment;
-    let focused = before.shell.focused_pane;
+    let focused = root.snapshot().shell.focused_pane;
 
     // Rejected navigate leaves focus unchanged.
     assert_eq!(
@@ -678,9 +736,8 @@ fn navigate_preserves_presentation_epoch_and_rejected_leaves_focus() {
     let after = root.snapshot();
     assert_eq!(after.shell.active_workspace, w2);
     assert_eq!(after.shell.focused_pane, p2);
-    assert_eq!(after.presentation_epoch, epoch);
-    assert_eq!(after.execution, execution);
-    assert_eq!(after.attachment, attachment);
+    assert!(after.execution.is_none());
+    assert!(after.attachment.is_none());
 }
 
 #[test]
@@ -732,6 +789,7 @@ fn palette_run_by_address_not_rebinding_ordinal() {
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -978,14 +1036,14 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
             name: "Reviewer".into(),
             activity: AgentActivity::Attention,
         }],
-        attention: vec![AttentionItem {
-            id: AttentionId::new("att-1"),
-            title: "Need review".into(),
-            detail: "diff".into(),
-            workspace: Some(workspace),
-            tab: Some(tab),
-            agent: Some(AgentId::new("agent-1")),
-        }],
+        attention: vec![AttentionItem::projection(
+            AttentionId::new("att-1"),
+            "Need review",
+            "diff",
+            Some(workspace),
+            Some(tab),
+            Some(AgentId::new("agent-1")),
+        )],
     })
     .unwrap();
     root.apply(AppAction::SetLeftPanel {
@@ -1010,7 +1068,7 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
     })
     .unwrap();
     let after = root.snapshot();
-    assert!(after.chrome.attention_items.is_empty());
+    assert_eq!(after.chrome.attention_items.len(), 1);
     assert_eq!(after.shell.active_workspace, workspace);
     assert_eq!(after.shell.active_tab, tab);
     assert_eq!(
@@ -1020,4 +1078,18 @@ fn chrome_inspector_and_attention_do_not_invent_identities() {
         }),
         Err(AppError::UnknownAttention)
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn install_quit_fixture_attaches_probe_clients() {
+    let mut root = ApplicationRoot::new();
+    root.install_quit_fixture(3).expect("fixture");
+    assert_eq!(root.live_attachment_count(), 3);
+    assert_eq!(root.snapshot().shell.windows.len(), 3);
+    root.apply(AppAction::Quit).unwrap();
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    assert_eq!(root.live_attachment_count(), 0);
 }

@@ -4,7 +4,7 @@ use std::ptr;
 
 use seyal_core::{AttachmentId, ExecutionId};
 
-use crate::app::{AppSnapshot, NativeEffect, PresentationEligibility, APP_ABI_VERSION};
+use crate::app::{AppSnapshot, PresentationEligibility, APP_ABI_VERSION};
 use crate::recovery::{RecoveryEffect, RecoveryStage};
 
 use super::{
@@ -72,10 +72,11 @@ pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnap
         attachment_hi: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
         epoch: snap.presentation_epoch,
         last_error: snap.last_error.map(error_number).unwrap_or(0) as u32,
-        pending_effect: match snap.pending_effect {
-            NativeEffect::None => 0,
-            NativeEffect::BoundedDetachThenTerminate => 1,
-        },
+        pending_effect: snap
+            .pending_effects
+            .first()
+            .map(|effect| effect.kind_code())
+            .unwrap_or(0),
         output_utf8: if output.is_empty() {
             ptr::null()
         } else {
@@ -297,15 +298,15 @@ pub(super) fn encode_chrome_rows(state: &mut AppHandle) {
 /// would be quadratic in the Block count.
 pub(super) fn encode_block_rows(state: &mut AppHandle) {
     let generation = state.root.snapshot_generation();
-    if state.block_rows_generation == generation {
+    if state.block_actions.generation == generation {
         return;
     }
-    state.block_rows_generation = generation;
+    state.block_actions.generation = generation;
     state.block_text.clear();
     state.block_rows.clear();
-    state.block_action_text.clear();
-    state.block_action_rows.clear();
-    state.block_action_spans.clear();
+    state.block_actions.text.clear();
+    state.block_actions.rows.clear();
+    state.block_actions.spans.clear();
     let snapshot = state.root.snapshot();
     let Some(composer) = snapshot.composer else {
         return;
@@ -323,15 +324,15 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
         if selected == Some(block.id) {
             flags |= BLOCK_SELECTED;
         }
-        let first = state.block_action_rows.len() as u32;
+        let first = state.block_actions.rows.len() as u32;
         for action in crate::composer::block_actions(block, composer_available) {
             let mut action_flags = (action.placement as u16) << BLOCK_ACTION_PLACEMENT_SHIFT;
             if action.enabled {
                 action_flags |= BLOCK_ACTION_ENABLED;
             }
             push_row(
-                &mut state.block_action_rows,
-                &mut state.block_action_text,
+                &mut state.block_actions.rows,
+                &mut state.block_actions.text,
                 RowDraft {
                     kind: action.kind as u16,
                     index: index as u32,
@@ -343,8 +344,8 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
                 },
             );
         }
-        let count = state.block_action_rows.len() as u32 - first;
-        state.block_action_spans.push((first, count));
+        let count = state.block_actions.rows.len() as u32 - first;
+        state.block_actions.spans.push((first, count));
         push_row(
             &mut state.block_rows,
             &mut state.block_text,
@@ -361,8 +362,8 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
     }
     relocate_row_pointers(&mut state.block_rows, state.block_text.as_ptr());
     relocate_row_pointers(
-        &mut state.block_action_rows,
-        state.block_action_text.as_ptr(),
+        &mut state.block_actions.rows,
+        state.block_actions.text.as_ptr(),
     );
 }
 

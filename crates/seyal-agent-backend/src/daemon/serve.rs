@@ -10,8 +10,8 @@ use std::{
 
 use seyal_agent_core::{BackendInstanceId, ClientPrincipalId};
 use seyal_agent_protocol::{
-    decode_hello, encode_ack, encode_handshake_error, negotiate_hello, FrameKind, HandshakeError,
-    Hello, HelloAck,
+    decode_hello, encode_ack, encode_handshake_error, negotiate_hello_with_capabilities,
+    ExecutionHostKind, FrameKind, HandshakeError, Hello, HelloAck,
 };
 
 use super::DaemonError;
@@ -24,6 +24,11 @@ pub(super) struct Handshake {
     pub(super) event_window: u32,
     pub(super) session_idle_timeout: Duration,
     pub(super) session_write_timeout: Duration,
+    /// SPEC-027 §8.2 advertisement: the daemon's actually-composed host kind
+    /// and durable catalog generation, never defaulted to hostless `None`
+    /// when a host is in fact composed.
+    pub(super) execution_host_kind: ExecutionHostKind,
+    pub(super) adapter_catalog_generation: Option<u64>,
 }
 
 /// Read Hello from an admitted peer, validate its evidence, and negotiate
@@ -49,11 +54,13 @@ pub(super) fn negotiate(
             handshake.max_frame_size,
         ));
     }
-    match negotiate_hello(
+    match negotiate_hello_with_capabilities(
         &hello,
         handshake.instance_id,
         handshake.max_frame_size,
         handshake.event_window,
+        handshake.execution_host_kind,
+        handshake.adapter_catalog_generation,
     ) {
         Ok(ack) => Ok((hello, ack)),
         Err(error) => Err(reject(stream, error, handshake.max_frame_size)),

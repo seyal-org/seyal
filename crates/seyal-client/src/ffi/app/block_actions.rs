@@ -1,4 +1,4 @@
-//! Block quick-action rows and Rust-owned Block copy FFI exports (#1010).
+//! Block rows, quick-action rows and Rust-owned Block copy FFI exports (#1010).
 //!
 //! Rust owns the action set, order, labels, shortcut hints and availability
 //! (`composer::block_actions`); rows are encoded with the Block rows once per
@@ -10,6 +10,33 @@ use crate::ffi::{error_code, with_display_client_mut};
 use super::encode::encode_block_rows;
 use super::{SeyalAppRow, APPS};
 
+/// Quick-action rows for every Block, flat, with each Block's `(first, count)`
+/// span. `generation` is the root generation `block_rows` and these rows were
+/// encoded for, so hosts reading every row per rebuild never re-encode.
+#[derive(Default)]
+pub(super) struct BlockActionRows {
+    pub(super) rows: Vec<SeyalAppRow>,
+    pub(super) text: Vec<u8>,
+    pub(super) spans: Vec<(u32, u32)>,
+    pub(super) generation: u64,
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_block_row(handle: u64, index: u32) -> SeyalAppRow {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return SeyalAppRow::empty();
+        };
+        encode_block_rows(state);
+        state
+            .block_rows
+            .get(index as usize)
+            .copied()
+            .unwrap_or_else(SeyalAppRow::empty)
+    })
+}
+
 /// Number of quick actions for the Block at `block_index` (#1010).
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_block_action_count(handle: u64, block_index: u32) -> u32 {
@@ -20,7 +47,8 @@ pub extern "C" fn seyal_app_block_action_count(handle: u64, block_index: u32) ->
         };
         encode_block_rows(state);
         state
-            .block_action_spans
+            .block_actions
+            .spans
             .get(block_index as usize)
             .map_or(0, |span| span.1)
     })
@@ -41,14 +69,15 @@ pub extern "C" fn seyal_app_block_action_row(
             return SeyalAppRow::empty();
         };
         encode_block_rows(state);
-        let Some(&(first, count)) = state.block_action_spans.get(block_index as usize) else {
+        let Some(&(first, count)) = state.block_actions.spans.get(block_index as usize) else {
             return SeyalAppRow::empty();
         };
         if action_index >= count {
             return SeyalAppRow::empty();
         }
         state
-            .block_action_rows
+            .block_actions
+            .rows
             .get((first + action_index) as usize)
             .copied()
             .unwrap_or_else(SeyalAppRow::empty)
@@ -236,12 +265,12 @@ mod tests {
         );
 
         let bound = seyal_app_snapshot(handle);
-        let mut rerun = identity_fence(63, &bound);
+        let mut rerun = identity_fence(69, &bound);
         rerun.target_execution_lo = running.id_lo;
         rerun.target_execution_hi = running.id_hi;
         rerun.target_pty_generation = seyal_app_composer(handle).epoch;
         assert_eq!(unsafe { seyal_app_apply(handle, &rerun) }, -4);
-        assert_eq!(seyal_app_last_error(handle), 51, "BlockRunning");
+        assert_eq!(seyal_app_last_error(handle), 56, "BlockRunning");
 
         rerun.target_execution_lo = done.id_lo;
         rerun.target_execution_hi = done.id_hi;

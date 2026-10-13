@@ -9,6 +9,7 @@ pub(super) fn open_with_script(store_path: PathBuf, script: Vec<ScriptStep>) -> 
     let mut host = FakeExecutionHost::new(1024).expect("host");
     host.set_script(script);
     service.install_execution_host(Box::new(host));
+    service.install_default_adapter_catalog_for_tests();
     service
 }
 
@@ -22,5 +23,6 @@ pub(super) fn open_with_script_instance(
     let mut host = FakeExecutionHost::new(1024).expect("host");
     host.set_script(script);
     service.install_execution_host(Box::new(host));
+    service.install_default_adapter_catalog_for_tests();
     service
 }

@@ -3,6 +3,20 @@
 use super::AgentDaemon;
 
 impl AgentDaemon {
+    pub fn shutdown_execution_host(&mut self) {
+        if let Some(service) = self.integration.as_ref() {
+            service
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .shutdown_hosted_runs();
+        }
+    }
+
+    pub fn listener_raw_fd(&self) -> Option<i32> {
+        use std::os::fd::AsRawFd;
+        self.listener.as_ref().map(|listener| listener.as_raw_fd())
+    }
+
     /// Install a host on the bound integration service (qualification / tests).
     pub fn install_execution_host(&mut self, host: Box<dyn crate::SessionExecutionHost>) {
         if let Some(service) = self.integration.as_ref() {
@@ -10,6 +24,20 @@ impl AgentDaemon {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .install_execution_host(host);
+        }
+    }
+
+    /// Qualification/test-only: seed one enabled, non-TTY adapter + offering
+    /// on the bound integration service so SPEC-027 §4.3 unpinned resolution
+    /// has a Singleton target. See `IntegrationService::
+    /// install_default_adapter_catalog_for_tests` for the invariants modeled.
+    #[cfg(feature = "fixture-host")]
+    pub fn seed_default_adapter_catalog_for_tests(&mut self) {
+        if let Some(service) = self.integration.as_ref() {
+            service
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .install_default_adapter_catalog_for_tests();
         }
     }
 
@@ -40,6 +68,7 @@ impl AgentDaemon {
             crate::FakeExecutionHost::new(1024).map_err(|_| super::DaemonError::Unavailable)?;
         host.set_script(script);
         daemon.install_execution_host(Box::new(host));
+        daemon.seed_default_adapter_catalog_for_tests();
         Ok(daemon)
     }
 }

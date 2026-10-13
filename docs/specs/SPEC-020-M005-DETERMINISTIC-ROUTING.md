@@ -1,11 +1,12 @@
 # SPEC-020 — M005 deterministic routing and fallback
 
-- **Status:** Accepted on merge
-- **Issue:** #838
+- **Status:** Accepted on merge; BaselineCalibrationArtifact / §20 procedure frozen by #1294
+- **Issue:** #838 architecture/spec; #1294 baseline calibration evidence
 - **Research:** #55
 - **Architecture:** ADR-016
 - **Consumes:** SPEC-017, SPEC-018, SPEC-019, SPEC-021, SPEC-013–015
 - **Consumer:** #681
+- **Production calibration:** [`../evidence/m005-spec020-baseline-calibration.md`](../evidence/m005-spec020-baseline-calibration.md) (artifact [`../evidence/m005-spec020-baseline-calibration-artifact-v1.toml`](../evidence/m005-spec020-baseline-calibration-artifact-v1.toml))
 
 ## 1. Goal
 

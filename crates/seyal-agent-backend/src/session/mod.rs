@@ -4,7 +4,10 @@
 //! `ClientSession` in place. A new process mints a new `BackendInstanceId` and
 //! therefore rejects every session opened by the previous process.
 
+mod action_ops;
+mod approval_ops;
 mod frame_io;
+mod launch_resolution;
 mod lifecycle_ops;
 mod recovery;
 mod wire;
@@ -14,15 +17,17 @@ mod fixture_support;
 #[cfg(test)]
 mod hostless_tests;
 #[cfg(all(test, feature = "fixture-host"))]
+mod spec027_catalog_tests;
+#[cfg(all(test, feature = "fixture-host"))]
 mod tests;
 
 pub(crate) use frame_io::{read_session_frame, SessionRead};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use seyal_agent_core::{
-    AgentRunId, AttemptId, BindingGeneration, ClientPrincipalId, ClientSessionId,
-    ControlGeneration, DomainError, WorkItemId, WorkScopeId, WorkScopeKind,
+    AgentRunId, AgentRunLifecycle, AttemptId, BindingGeneration, ClientPrincipalId,
+    ClientSessionId, ControlGeneration, DomainError, WorkItemId, WorkScopeId, WorkScopeKind,
 };
 use seyal_agent_protocol::{
     decode_command, encode_result, AggregateRef, Command, CommandError, CommandResult, Frame,
@@ -60,6 +65,25 @@ pub struct IntegrationService {
     authority: ObservationAuthority,
     store: AgentStore,
     host: Option<Box<dyn SessionExecutionHost>>,
+    /// SPEC-027 §6 `AdapterWorkDir` parent: backend-owned, derived from the
+    /// daemon's own private runtime directory (never `$HOME`, never a
+    /// client-supplied path). Per-adapter subdirectories are created lazily
+    /// at dispatch.
+    adapter_work_root: PathBuf,
+    /// Runs with a live host handle still worth draining (SPEC-027 §9.1/§9.4):
+    /// `start_agent_run` only observes once synchronously; a real host's
+    /// background reader keeps buffering after that call returns, so a run
+    /// stays mapped here until a later drain sees terminal exit evidence.
+    /// Removed on `KnownTerminated`/`UnknownAfterCrash` — nothing further to
+    /// usefully drain from the host for either outcome.
+    active_hosted_runs: std::collections::HashMap<AgentRunId, crate::HostHandle>,
+    #[cfg(test)]
+    last_resolved_launch: Option<seyal_agent_core::LaunchDescriptor>,
+    /// Test-only: after mint/Prepared→Dispatching, bump the adapter catalog
+    /// so the frozen generation is unreachable before `host.start` (SPEC-027
+    /// fixture 11 / AC11). Production always leaves this false.
+    #[cfg(test)]
+    invalidate_frozen_manifest_after_mint: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +100,33 @@ impl IntegrationService {
         let mut auth = AuthorizationRepository::default();
         let (owner_principal_id, observer_principal_id) =
             load_or_seed_principals(&store, &mut auth)?;
+        // SPEC-027 §7 step 5 / D3: `adapter.execute` is durable (same trusted
+        // admin-tool write path as the catalog itself, §5.2) but enforced
+        // in-memory; re-apply every durable grant on each open. A grant for
+        // a non-first-party principal (e.g. the observer) was never written
+        // by `grant_adapter_execute`'s own first-party gating, but even if
+        // present it is inert here — `AuthorizationRepository::
+        // grant_adapter_execute` still refuses it.
+        // SPEC-027 §5.2: same posture for durable `admin.adapters`.
+        for principal_id in [owner_principal_id, observer_principal_id] {
+            if store.has_admin_adapters(principal_id).unwrap_or(false) {
+                let _ = auth.grant_admin_adapters(principal_id);
+            }
+            let Ok(grants) = store.adapter_execute_grants(principal_id) else {
+                continue;
+            };
+            for adapter_id in grants {
+                let _ = auth.grant_adapter_execute(principal_id, adapter_id);
+            }
+        }
         let mut authority = ObservationAuthority::new(seyal_agent_core::AgentDomain::new());
         restore_identities(&store, &mut authority, &mut auth)?;
+        let adapter_work_root = config
+            .store_path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("adapter-work");
         Ok(Self {
             instance_id,
             owner_principal_id,
@@ -86,11 +135,135 @@ impl IntegrationService {
             authority,
             store,
             host: None,
+            adapter_work_root,
+            active_hosted_runs: std::collections::HashMap::new(),
+            #[cfg(test)]
+            last_resolved_launch: None,
+            #[cfg(test)]
+            invalidate_frozen_manifest_after_mint: false,
         })
     }
 
     pub fn install_execution_host(&mut self, host: Box<dyn SessionExecutionHost>) {
         self.host = Some(host);
+    }
+
+    /// Test-only: next `StartAgentRun` removes the frozen generation after
+    /// mint so fixture 11 can prove post-Prepared fail-closed.
+    #[cfg(test)]
+    pub fn invalidate_frozen_manifest_after_mint_for_tests(&mut self) {
+        self.invalidate_frozen_manifest_after_mint = true;
+    }
+
+    /// Trusted first-party bind of a WorkScope root (SPEC-027 §6). Not a
+    /// client command and not authorization. Canonicalizes to an existing
+    /// directory before the store write.
+    pub fn bind_work_scope_root(
+        &self,
+        work_scope_id: WorkScopeId,
+        path: &Path,
+    ) -> Result<(), ServiceError> {
+        let canonical = path.canonicalize().map_err(|_| ServiceError::Failed)?;
+        if !canonical.is_dir() {
+            return Err(ServiceError::Failed);
+        }
+        let text = canonical.to_str().ok_or(ServiceError::Failed)?;
+        self.store
+            .bind_work_scope_root(work_scope_id, text)
+            .map_err(|_| ServiceError::Failed)
+    }
+
+    /// Grant durable `admin.adapters` to a first-party principal (SPEC-027
+    /// §5.2). Persist then apply in-memory. Not a client Command.
+    pub fn grant_admin_adapters(
+        &mut self,
+        principal: seyal_agent_core::ClientPrincipalId,
+    ) -> Result<(), ServiceError> {
+        self.auth
+            .grant_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .grant_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)
+    }
+
+    /// First-party catalog install/update requiring `admin.adapters`
+    /// (SPEC-027 §5.2 / D2). No client Command.
+    pub fn install_or_update_adapter(
+        &mut self,
+        principal: seyal_agent_core::ClientPrincipalId,
+        adapter_id: seyal_agent_core::AdapterId,
+        execution_host_kind: u8,
+        enabled: bool,
+        launch: &seyal_agent_store::LaunchDescriptorTemplate,
+    ) -> Result<u64, ServiceError> {
+        self.auth
+            .authorize_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .install_or_update_adapter(adapter_id, execution_host_kind, enabled, launch)
+            .map_err(|_| ServiceError::Failed)
+    }
+
+    /// First-party set-enabled requiring `admin.adapters` (SPEC-027 §5.2).
+    pub fn set_adapter_enabled(
+        &mut self,
+        principal: seyal_agent_core::ClientPrincipalId,
+        adapter_id: seyal_agent_core::AdapterId,
+        enabled: bool,
+    ) -> Result<(), ServiceError> {
+        self.auth
+            .authorize_admin_adapters(principal)
+            .map_err(|_| ServiceError::Failed)?;
+        self.store
+            .set_adapter_enabled(adapter_id, enabled)
+            .map_err(|_| ServiceError::Failed)
+    }
+
+    /// HelloAck advertisement inputs (SPEC-027 §8.2): the composed host kind
+    /// (never authorization) and the durable catalog generation. `Fake`
+    /// (qualification/fixture-host builds only, never production) advertises
+    /// as `StandaloneProcess` since it simulates that host's observable
+    /// contract; a hostless service advertises `None`.
+    pub(crate) fn server_capabilities(
+        &self,
+    ) -> (seyal_agent_protocol::ExecutionHostKind, Option<u64>) {
+        let kind = match self.host.as_ref().map(|host| host.kind()) {
+            Some(seyal_agent_core::ExecutionHostKind::StandaloneProcess)
+            | Some(seyal_agent_core::ExecutionHostKind::Fake) => {
+                seyal_agent_protocol::ExecutionHostKind::StandaloneProcess
+            }
+            None => seyal_agent_protocol::ExecutionHostKind::None,
+        };
+        (kind, self.store.adapter_catalog_generation().ok())
+    }
+
+    /// Install one enabled, non-TTY adapter + RouteOffering so SPEC-027
+    /// §4.3 unpinned resolution has exactly one eligible target
+    /// (`Singleton`), and grant `adapter.execute` to the owner principal so
+    /// §7 step 5 passes. Qualification/test composition only — SPEC-027
+    /// §5.2 install/enable is a first-party `admin.adapters` action, never a
+    /// client-reachable command, and this helper models that trusted path.
+    #[cfg(feature = "fixture-host")]
+    pub fn install_default_adapter_catalog_for_tests(&mut self) -> seyal_agent_core::AdapterId {
+        let adapter_id = seyal_agent_core::AdapterId::new();
+        let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+            "/bin/echo",
+            seyal_agent_store::CwdPolicy::AdapterWorkDir,
+        )
+        .with_argv(["fixture-host-default"]);
+        let owner = self.owner_principal_id;
+        self.grant_admin_adapters(owner)
+            .expect("grant admin.adapters");
+        self.install_or_update_adapter(owner, adapter_id, 0, true, &launch)
+            .expect("install adapter");
+        self.store
+            .add_route_offering(seyal_agent_core::RouteOfferingId::new(), adapter_id, false)
+            .expect("add offering");
+        self.auth
+            .grant_adapter_execute(owner, adapter_id)
+            .expect("grant adapter.execute");
+        adapter_id
     }
 
     pub fn set_principal_status(
@@ -179,7 +352,8 @@ impl IntegrationService {
             Command::StartAgentRun {
                 session_id,
                 attempt_id,
-            } => self.start_agent_run(principal_id, session_id, attempt_id),
+                route_offering_id,
+            } => self.start_agent_run(principal_id, session_id, attempt_id, route_offering_id),
             Command::GetSnapshot {
                 session_id,
                 aggregate,
@@ -210,6 +384,13 @@ impl IntegrationService {
             ),
             Command::ReadRun { session_id, run_id } => {
                 self.read_run(principal_id, session_id, run_id)
+            }
+            Command::CancelRun {
+                session_id,
+                run_id,
+                control_generation,
+            } => {
+                self.cancel_agent_run_command(principal_id, session_id, run_id, control_generation)
             }
         }
     }
@@ -558,6 +739,14 @@ impl IntegrationService {
         {
             return CommandResult::Error(error);
         }
+        // §9.1/§9.4: a real host's background reader keeps buffering after
+        // `start_agent_run`'s single synchronous `observe` returns; a client
+        // reading run status is a natural, non-blocking point to drain
+        // whatever has accumulated since (never blocks on child I/O itself —
+        // `observe` only drains an already-filled queue).
+        if let Err(error) = self.drain_host_observations(run_id) {
+            return CommandResult::Error(error);
+        }
         let Some(run) = self.authority.domain().agent_run(run_id) else {
             return CommandResult::Error(CommandError::NotFound);
         };
@@ -566,6 +755,48 @@ impl IntegrationService {
             control_generation: run.control_generation().get(),
             liveness: liveness_code(self.authority.liveness(run_id)),
         }
+    }
+
+    /// Drains already-buffered host observations for `run_id` if a live host
+    /// handle is still tracked for it (no-op otherwise: hostless runs,
+    /// already-terminal runs, and runs with no host composed all return
+    /// `Ok(())` immediately). See `active_hosted_runs` doc comment.
+    fn drain_host_observations(&mut self, run_id: AgentRunId) -> Result<(), CommandError> {
+        let Some(&handle) = self.active_hosted_runs.get(&run_id) else {
+            return Ok(());
+        };
+        let Some(host) = self.host.as_mut() else {
+            return Ok(());
+        };
+        let observations = match host.observe(handle) {
+            Ok(observations) => observations,
+            Err(()) => return Err(CommandError::Failed),
+        };
+        self.commit_observation_batch(observations)?;
+        if matches!(
+            self.authority.liveness(run_id),
+            RunLiveness::KnownTerminated | RunLiveness::UnknownAfterCrash
+        ) {
+            // SPEC-026 §9.2: terminal host evidence completes a cancel that
+            // was waiting in Terminating.
+            if self
+                .authority
+                .domain()
+                .agent_run(run_id)
+                .is_some_and(|run| run.lifecycle() == AgentRunLifecycle::Terminating)
+            {
+                let _ = self
+                    .authority
+                    .domain_mut()
+                    .confirm_cancel_termination(run_id);
+            }
+            if let Some(handle) = self.active_hosted_runs.remove(&run_id)
+                && let Some(host) = self.host.as_mut()
+            {
+                let _ = host.reap(handle);
+            }
+        }
+        Ok(())
     }
 
     /// Run snapshots and replays use the same target gate as `ReadRun`.

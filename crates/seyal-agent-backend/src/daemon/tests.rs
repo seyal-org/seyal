@@ -452,6 +452,55 @@ fn read_prefix(stream: &mut UnixStream) -> Vec<u8> {
 }
 
 #[test]
+fn hello_ack_advertises_hostless_none_without_a_composed_host() {
+    let dir = TempDir::new();
+    let daemon =
+        AgentDaemon::bind_integration(dir.path(), qualification_config(dir.path())).unwrap();
+    let path = daemon.socket_path();
+    let client = thread::spawn(move || connect_hello(&path, &hello(), 4096));
+    let ack = daemon.accept_hello().unwrap();
+    assert_eq!(
+        ack.capabilities.execution_host_kind,
+        seyal_agent_protocol::ExecutionHostKind::None
+    );
+    assert_eq!(ack.capabilities.adapter_catalog_generation, Some(0));
+    client.join().unwrap().unwrap();
+}
+
+#[test]
+fn hello_ack_advertises_standalone_process_and_catalog_generation_once_composed() {
+    let dir = TempDir::new();
+    let mut daemon =
+        AgentDaemon::bind_integration(dir.path(), qualification_config(dir.path())).unwrap();
+    let host =
+        crate::StandaloneProcessHost::new(crate::StandaloneProcessConfig::new(1024).unwrap());
+    daemon.install_execution_host(Box::new(host));
+    // Installing a host does not itself bump the catalog generation; drive
+    // it the same way a trusted `admin.adapters` write would (directly
+    // against the durable store), independent of host composition.
+    {
+        let store = AgentStore::open(dir.path().join("agent.db")).unwrap();
+        let adapter_id = seyal_agent_core::AdapterId::new();
+        let launch = seyal_agent_store::LaunchDescriptorTemplate::new(
+            "/bin/echo",
+            seyal_agent_store::CwdPolicy::AdapterWorkDir,
+        );
+        store
+            .install_or_update_adapter(adapter_id, 1, true, &launch)
+            .unwrap();
+    }
+    let path = daemon.socket_path();
+    let client = thread::spawn(move || connect_hello(&path, &hello(), 4096));
+    let ack = daemon.accept_hello().unwrap();
+    assert_eq!(
+        ack.capabilities.execution_host_kind,
+        seyal_agent_protocol::ExecutionHostKind::StandaloneProcess
+    );
+    assert_eq!(ack.capabilities.adapter_catalog_generation, Some(1));
+    client.join().unwrap().unwrap();
+}
+
+#[test]
 fn poisoned_service_fails_closed_before_hello_ack() {
     let dir = TempDir::new();
     let mut daemon =

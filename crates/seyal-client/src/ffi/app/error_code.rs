@@ -56,9 +56,14 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::GotoNoSelection => 48,
         AppError::GotoUnsupportedScope => 49,
         AppError::ActionUnavailable => 50,
+        AppError::NavigationStaleHistoryCursor => 51,
+        AppError::NavigationHistoryUnavailable => 52,
+        AppError::WindowActivationFailed => 53,
+        AppError::UnknownWindow => 54,
+        AppError::WindowCreationUnavailable => 55,
         // #1010 Block Rerun.
-        AppError::BlockRunning => 51,
-        AppError::ComposerUnavailable => 52,
-        AppError::ComposerDraftOccupied => 53,
+        AppError::BlockRunning => 56,
+        AppError::ComposerUnavailable => 57,
+        AppError::ComposerDraftOccupied => 58,
     }
 }
