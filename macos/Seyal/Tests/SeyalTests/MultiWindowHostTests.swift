@@ -366,7 +366,7 @@ final class MultiWindowHostTests: XCTestCase {
         let liveWindow = host.liveHost.window
         XCTAssertNotNil(liveWindow)
         host.createWindow(nil)
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 52, "WindowCreationUnavailable")
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 55, "WindowCreationUnavailable")
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
         XCTAssertTrue(host.liveHost.window === liveWindow)
         XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
@@ -388,7 +388,7 @@ final class MultiWindowHostTests: XCTestCase {
             action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
             action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
             XCTAssertEqual(seyal_app_apply(host.appHandle, &action), -4)
-            XCTAssertEqual(seyal_app_last_error(host.appHandle), 52, "WindowCreationUnavailable")
+            XCTAssertEqual(seyal_app_last_error(host.appHandle), 55, "WindowCreationUnavailable")
             host.applyPendingEffectsAndReconcile()
             XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
             XCTAssertTrue(host.liveHost.window === liveWindow)

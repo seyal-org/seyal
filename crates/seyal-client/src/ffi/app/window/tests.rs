@@ -79,7 +79,10 @@ fn apply_on_handle(handle: u64, action: ShellAction) {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let state = apps.get_mut(&handle).expect("handle");
-        state.root.apply_shell(action).expect("shell action");
+        state
+            .root
+            .apply_shell_for_test(action)
+            .expect("shell action");
     });
 }
 

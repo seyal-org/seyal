@@ -130,9 +130,9 @@ pub enum AppError {
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
-    /// Unknown WindowId for select/cycle/report (W4a). ABI 51.
+    /// Unknown WindowId for select/cycle/report (W4a). ABI 54.
     UnknownWindow,
-    /// Extra Window create rejected until close exists (W4a). ABI 52.
+    /// Extra Window create rejected until close exists (W4a). ABI 55.
     WindowCreationUnavailable,
     /// Native WindowActivation failed after bounded retry. ABI 53.
     WindowActivationFailed,

@@ -40,11 +40,11 @@ acknowledged_loc = 834
 issue = 1117
 reason = "SPEC-022 §6 focus history store and its state-transition proofs stay together as one cohesive reducer. #1117 adds generated navigation and destruction sequences checked after every operation against an independent reference model; further splitting would separate invariants from the behavior they verify."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1054
-issue = 1144
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions and native events, and #1144 adds WindowActivationFailed and ActivationFailed beside the W4a apply table."
+ceiling_loc = 1051
+issue = 1123
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, and #1144 adds activation-failure routing beside the existing action table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -66,15 +66,15 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1100
+ceiling_loc = 1095
 issue = 1123
 responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 992
-issue = 1117
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/; #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; #1117 adds the scalar focus-history sequence accessor without changing the v1 snapshot layout."
+ceiling_loc = 1091
+issue = 1123
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures and #1144 extends activation-failure event wiring while preserving the typed Rust authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -221,19 +221,19 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1154
+ceiling_loc = 1155
 issue = 1122
 responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through Split/Close, W2a adds Window-aware fixtures, #1117 records history policy and integration tests, and #1123 adds W4a fixture admission coverage."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 879
+acknowledged_loc = 880
 issue = 1092
 reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries containment generation through window-aware actions, #1175 adds the P4 Terminate Execution verb, and #1123 keeps W4a fixture admission policy in the Rust shell."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 938
+acknowledged_loc = 944
 issue = 1092
 reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, and #1144 adds the Tab-to-Window activation lookup. Snapshot encoding stays in shell/snapshot.rs."
 
@@ -253,7 +253,7 @@ reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one key
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 701
+acknowledged_loc = 739
 issue = 1123
 reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, and #1144 adds the ActivationFailed event without splitting the ABI table."
 

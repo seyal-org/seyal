@@ -400,7 +400,7 @@ fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     root.shell.set_allows_window_creation_for_test(true);
     let workspace = root.snapshot().shell.active_workspace;
     let generation = root.snapshot().shell.containment_generation;
-    root.apply_shell(crate::shell::ShellAction::CreateWindow {
+    root.apply_shell_for_test(crate::shell::ShellAction::CreateWindow {
         workspace,
         containment_generation: generation,
     })
@@ -410,7 +410,7 @@ fn repeated_same_window_selection_keeps_effect_queue_bounded() {
     let generation = root.snapshot().shell.containment_generation;
     for i in 0..32 {
         let window = if i % 2 == 0 { first } else { second };
-        root.apply_shell(crate::shell::ShellAction::SelectWindow {
+        root.apply_shell_for_test(crate::shell::ShellAction::SelectWindow {
             id: window,
             containment_generation: generation,
         })
