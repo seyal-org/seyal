@@ -64,6 +64,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         orderedKeys.compactMap { realizations[$0]?.tabbingMode }
     }
 
+    func realizedWindowForTests(_ key: WindowKey) -> NSWindow? {
+        realizations[key]
+    }
+
     func applyPendingEffects() {
         // Drain window effects only. Quit effects stay queued for §4.
         while true {

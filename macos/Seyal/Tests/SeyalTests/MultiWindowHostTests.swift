@@ -31,9 +31,8 @@ final class MultiWindowHostTests: XCTestCase {
     func testSeedWindowsOnlyInstallsSnapshotWindows() {
         let handle = seyal_app_create()
         defer { _ = seyal_app_destroy(handle) }
-        // Headed XCTest shares the process CLIENTS TLS with the live AppDelegate
-        // host; probe-client registration is covered by Rust
-        // `install_quit_fixture_attaches_probe_clients` instead.
+        // Probe-client registration with three windows is covered by Rust
+        // `install_quit_fixture_attaches_probe_clients`.
         XCTAssertEqual(seyal_app_test_seed_windows_only(handle, 3), 0)
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
     }
@@ -153,23 +152,19 @@ final class MultiWindowHostTests: XCTestCase {
     }
 
     func testEventForwardingReportsBecameKey() {
-        let host = MultiWindowHostController()
+        let host = seededQuitHost(windows: 2)
         defer { host.performQuitCleanup() }
-        host.bootstrapAfterLaunch()
-        guard let key = host.orderedKeys.first else {
-            return XCTFail("expected bootstrap window")
+        let target = host.orderedKeys[1]
+        guard let targetWindow = host.realizedWindowForTests(target) else {
+            return XCTFail("expected second realized window")
         }
-        // Drive the typed event path directly (same as NSWindowDelegate).
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_REPORT_WINDOW_EVENT.rawValue)
-        action.target_execution_lo = key.lo
-        action.target_execution_hi = key.hi
-        action.reserved = SEYAL_APP_WINDOW_EVENT_BECAME_KEY
-        XCTAssertEqual(seyal_app_apply(host.appHandle, &action), 0)
-        // Host derives no product state: window count unchanged.
-        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+        host.windowDidBecomeKey(
+            Notification(name: NSWindow.didBecomeKeyNotification, object: targetWindow)
+        )
+        let shell = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(shell.window_count, 2)
+        XCTAssertEqual(shell.active_window_lo, target.lo)
+        XCTAssertEqual(shell.active_window_hi, target.hi)
     }
 
     func testHostHasNoWritableWindowModelTypes() {
@@ -216,8 +211,16 @@ final class MultiWindowHostTests: XCTestCase {
                 .appendingPathComponent("Sources/AppDelegate.swift"),
             encoding: .utf8
         )
+        XCTAssertTrue(source.contains("projectedItem("))
+        XCTAssertTrue(source.contains("KeybindingShortcutRealization.tabCreate"))
         XCTAssertTrue(source.contains("keyEquivalent: \"n\""))
-        XCTAssertTrue(source.contains("keyEquivalent: \"t\""))
+        XCTAssertTrue(source.contains("newWindow.keyEquivalentModifierMask = [.command, .shift]"))
+        for command in [
+            "paneSplitRight", "paneSplitDown", "presentationToggleRaw",
+            "presentationToggleTui", "gotoOpen", "tabSelectPrevious", "tabSelectNext"
+        ] {
+            XCTAssertTrue(source.contains("KeybindingShortcutRealization.\(command)"))
+        }
         XCTAssertTrue(source.contains("[.command, .option]"))
         XCTAssertFalse(source.contains("keyDown"))
     }

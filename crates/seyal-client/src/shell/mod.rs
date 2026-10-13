@@ -656,6 +656,7 @@ impl ShellState {
             ShellAction::CreateWindow { .. }
             | ShellAction::ActivateWorkspace { .. }
             | ShellAction::SelectWindow { .. }
+            | ShellAction::ObserveWindowBecameKey { .. }
             | ShellAction::SelectTab { .. }
             | ShellAction::CreateTab { .. }
             | ShellAction::CycleWindow { .. }

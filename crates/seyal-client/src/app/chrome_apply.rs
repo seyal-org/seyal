@@ -383,10 +383,14 @@ impl ApplicationRoot {
         {
             return Err(AppError::UnknownWindow);
         }
-        // Disposable presentation input only — never mutates window/tab/pane product state.
+        // Preserve the native event for host observability.
         self.last_window_event = Some((window, event));
         if event == WindowNativeEvent::ActivationFailed {
             return Err(AppError::WindowActivationFailed);
+        }
+        if event == WindowNativeEvent::BecameKey {
+            self.apply_shell(ShellAction::ObserveWindowBecameKey { id: window })
+                .map_err(|_| AppError::UnknownWindow)?;
         }
         Ok(())
     }

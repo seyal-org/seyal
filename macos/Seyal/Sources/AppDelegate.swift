@@ -44,15 +44,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(MultiWindowHostController.createWindow(_:)),
             keyEquivalent: "n"
         )
+        newWindow.keyEquivalentModifierMask = [.command, .shift]
         newWindow.target = host
         fileMenu.addItem(newWindow)
-        let newTab = NSMenuItem(
-            title: "New Tab",
-            action: #selector(MultiWindowHostController.createTab(_:)),
-            keyEquivalent: "t"
-        )
-        newTab.target = host
-        fileMenu.addItem(newTab)
+        fileMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabCreate,
+            host: host.liveHost
+        ))
+        fileMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabCloseFocused,
+            host: host.liveHost
+        ))
         fileItem.submenu = fileMenu
 
         let editItem = NSMenuItem()
@@ -66,18 +68,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
-        let paletteItem = NSMenuItem(
-            title: "Command Palette",
-            action: #selector(ProductChromeHostView.openCommandPalette),
-            keyEquivalent: "k"
-        )
-        paletteItem.target = host.liveHost
-        viewMenu.addItem(paletteItem)
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.commandPaletteOpen,
+            host: host.liveHost
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.paneSplitRight,
+            host: host.liveHost
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.paneSplitDown,
+            host: host.liveHost
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.presentationToggleRaw,
+            host: host.liveHost
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.presentationToggleTui,
+            host: host.liveHost
+        ))
+        viewMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.gotoOpen,
+            host: host.liveHost
+        ))
         viewItem.submenu = viewMenu
 
         let windowItem = NSMenuItem()
         mainMenu.addItem(windowItem)
         let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabSelectPrevious,
+            host: host.liveHost
+        ))
+        windowMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabSelectNext,
+            host: host.liveHost
+        ))
         let cycleNext = NSMenuItem(
             title: "Cycle Next Window",
             action: #selector(MultiWindowHostController.cycleWindowNext(_:)),
@@ -110,5 +137,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowItem.submenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    private func projectedItem(commandId: UInt16, host: ProductChromeHostView) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        item.target = host
+        KeybindingShortcutRealization.realize(item, commandId: commandId)
+        return item
     }
 }
