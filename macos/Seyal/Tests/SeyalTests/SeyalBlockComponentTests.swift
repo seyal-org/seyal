@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import XCTest
 
 @testable import Seyal
@@ -83,6 +84,9 @@ final class SeyalBlockComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalAppTheme>.size, 36)
         XCTAssertNotEqual(theme.block_focus, theme.accent, "Block focus is its own Rust role")
         XCTAssertEqual(dark.blockFocus, NativeThemeRealization.color(theme.block_focus))
+        XCTAssertEqual(dark.blockBorderRest, NativeThemeRealization.color(theme.block_border_rest))
+        XCTAssertEqual(dark.blockBorderHover, NativeThemeRealization.color(theme.block_border_hover))
+        XCTAssertNotEqual(dark.blockBorderRest, dark.seam, "Block border is not the Swift-derived seam")
         XCTAssertEqual(dark.blockSuccess, NativeThemeRealization.color(theme.success))
         XCTAssertEqual(dark.blockDanger, NativeThemeRealization.color(theme.danger))
         XCTAssertEqual(theme.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), "default signals allow motion")
@@ -90,11 +94,11 @@ final class SeyalBlockComponentTests: XCTestCase {
         XCTAssertEqual(reduced.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), 0, "reduce_motion clears allows_motion")
     }
 
-    func testRestBlockHidesActionsAndUsesRestSeam() {
+    func testRestBlockHidesActionsAndUsesRestBorder() {
         let view = block()
         XCTAssertFalse(view.actionsVisible, "actions are hidden at rest (board rule 3)")
         XCTAssertEqual(view.layer?.borderWidth, 1)
-        XCTAssertEqual(view.layer?.borderColor, dark.blockSeamRest.cgColor)
+        XCTAssertEqual(view.layer?.borderColor, dark.blockBorderRest.cgColor)
         XCTAssertEqual(view.layer?.backgroundColor, dark.canvas.cgColor, "surface equals Metal canvas")
         XCTAssertEqual(view.accessibilityValue() as? String, "")
     }
@@ -108,14 +112,14 @@ final class SeyalBlockComponentTests: XCTestCase {
         XCTAssertEqual(view.accessibilityLabel(), "ls /")
     }
 
-    func testHoverRevealsActionsAndHoverSeam() {
+    func testHoverRevealsActionsAndHoverBorder() {
         let view = block()
         view.mouseEntered(with: click)
         XCTAssertTrue(view.actionsVisible)
-        XCTAssertEqual(view.layer?.borderColor, dark.blockSeamHover.cgColor)
+        XCTAssertEqual(view.layer?.borderColor, dark.blockBorderHover.cgColor)
         view.mouseExited(with: click)
         XCTAssertFalse(view.actionsVisible)
-        XCTAssertEqual(view.layer?.borderColor, dark.blockSeamRest.cgColor)
+        XCTAssertEqual(view.layer?.borderColor, dark.blockBorderRest.cgColor)
     }
 
     func testStatusFollowsRustBlockState() {
@@ -138,6 +142,11 @@ final class SeyalBlockComponentTests: XCTestCase {
             "running hides the status icon")
         let spinner = descendant(running, "seyal-block-status", as: NSProgressIndicator.self)
         XCTAssertEqual(spinner?.accessibilityLabel(), "Rust:Running", "the spinner carries the status")
+        // Design §3/§8: running spinner tint is the Rust BlockFocus role.
+        let rgba = { (color: CIColor?) in color.map { [$0.red, $0.green, $0.blue, $0.alpha] } }
+        let tint = rgba(spinner?.contentFilters.first?.value(forKey: "inputColor0") as? CIColor)
+        XCTAssertEqual(tint, rgba(CIColor(color: dark.blockFocus)), "spinner tinted with BlockFocus")
+        XCTAssertNotEqual(tint, rgba(CIColor(color: dark.accent)), "not the purple shell Focus")
     }
 
     func testReduceMotionStopsRunningSpinner() {
@@ -145,8 +154,8 @@ final class SeyalBlockComponentTests: XCTestCase {
             canvas: dark.canvas, container: dark.container, utility: dark.utility,
             elevated: dark.elevated, text: dark.text, secondary: dark.secondary, muted: dark.muted,
             accent: dark.accent, seam: dark.seam, success: dark.success, warning: dark.warning,
-            danger: dark.danger, blockFocus: dark.blockFocus, blockSeamRest: dark.blockSeamRest,
-            blockSeamHover: dark.blockSeamHover, blockSuccess: dark.blockSuccess,
+            danger: dark.danger, blockFocus: dark.blockFocus, blockBorderRest: dark.blockBorderRest,
+            blockBorderHover: dark.blockBorderHover, blockSuccess: dark.blockSuccess,
             blockDanger: dark.blockDanger, allowsMotion: false, appearance: dark.appearance,
             uiFontSize: dark.uiFontSize, terminalFontSize: dark.terminalFontSize,
             windowPadding: dark.windowPadding, terminalPadding: dark.terminalPadding,
@@ -271,7 +280,7 @@ final class SeyalBlockComponentTests: XCTestCase {
                 pixels.append(try XCTUnwrap(view.layer?.borderColor))
             }
             XCTAssertEqual(pixels[2], theme.blockFocus.cgColor, "\(appearanceName) selected border")
-            XCTAssertEqual(pixels[1], theme.blockSeamHover.cgColor, "\(appearanceName) hover border")
+            XCTAssertEqual(pixels[1], theme.blockBorderHover.cgColor, "\(appearanceName) hover border")
         }
         XCTAssertNotEqual(
             NativeThemeRealization.theme(for: NSAppearance(named: .aqua)!).canvas,

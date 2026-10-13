@@ -84,11 +84,13 @@ pub extern "C" fn seyal_app_block_action_row(
     })
 }
 
-/// Start a Rust-owned Block pasteboard copy (#1010). Resolves the Block's
-/// history span and command from the application root, then asks the active
-/// display client to fetch and compose one final UTF-8 string. The host only
-/// writes that string to the pasteboard when `seyal_bridge_take_block_copy`
-/// returns it. Returns 0 on accept, negative on refuse.
+/// Start a Rust-owned Block pasteboard copy (#1010). `kind` is a
+/// `SEYAL_APP_BLOCK_ACTION_COPY_*` value. Resolves the Block's history span
+/// and command from the application root, then asks the active display client
+/// to fetch and compose one final UTF-8 string. Copy command completes at
+/// once without a history request. The host only writes that string to the
+/// pasteboard when `seyal_bridge_take_block_copy` returns it. Returns 0 on
+/// accept, negative on refuse.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, kind: u16) -> i32 {
     use crate::history_text::BlockCopyKind;
@@ -101,15 +103,19 @@ pub extern "C" fn seyal_app_request_block_copy(handle: u64, block_index: u32, ki
         let snap = state.root.snapshot();
         let composer = snap.composer?;
         let block = composer.blocks.get(block_index as usize)?;
-        if block.start_line == 0 {
+        // Copy command needs no history; output kinds need the Block anchor.
+        let output_range = if copy_kind == BlockCopyKind::Command {
+            None
+        } else if block.start_line == 0 {
             return None;
-        }
-        // Running: through the current tail, no line cap (design §6).
-        // Finished before its start: no output rows.
-        let output_range = match block.end_line {
-            None => Some((block.start_line, u64::MAX)),
-            Some(end) if end >= block.start_line => Some((block.start_line, end)),
-            Some(_) => None,
+        } else {
+            // Running: through the current tail, no line cap (design §6).
+            // Finished before its start: no output rows.
+            match block.end_line {
+                None => Some((block.start_line, u64::MAX)),
+                Some(end) if end >= block.start_line => Some((block.start_line, end)),
+                Some(_) => None,
+            }
         };
         let bytes = block.id.to_bytes();
         let block_id = u64::from_le_bytes(bytes[..8].try_into().ok()?);
@@ -279,6 +285,46 @@ mod tests {
         let draft =
             unsafe { slice::from_raw_parts(composer.draft_utf8, composer.draft_utf8_len as usize) };
         assert_eq!(draft, b"ls /");
+
+        // Design §6: an occupied draft disables both Rerun rows, and the
+        // projection agrees with the reducer's ComposerDraftOccupied (58).
+        let rerun_rows = |block: u32| {
+            (0..seyal_app_block_action_count(handle, block))
+                .map(|index| seyal_app_block_action_row(handle, block, index))
+                .filter(|row| row.kind == 5)
+                .map(|row| row.flags & BLOCK_ACTION_ENABLED != 0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rerun_rows(0), [false, false], "draft occupied");
+        let mut again = identity_fence(69, &seyal_app_snapshot(handle));
+        again.target_execution_lo = done.id_lo;
+        again.target_execution_hi = done.id_hi;
+        again.target_pty_generation = seyal_app_composer(handle).epoch;
+        assert_eq!(unsafe { seyal_app_apply(handle, &again) }, -4);
+        assert_eq!(seyal_app_last_error(handle), 58, "ComposerDraftOccupied");
+        assert_eq!(
+            seyal_app_composer(handle).draft_utf8_len,
+            4,
+            "refused Rerun leaves the draft"
+        );
+
+        let epoch = seyal_app_composer(handle).epoch;
+        APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let root = &mut apps.get_mut(&handle).unwrap().root;
+            let fence = root.fence();
+            root.apply(AppAction::SetComposerDraft {
+                fence,
+                text: String::new(),
+                composer_epoch: epoch,
+            })
+            .unwrap();
+        });
+        assert_eq!(
+            rerun_rows(0),
+            [true, true],
+            "cleared draft re-enables Rerun"
+        );
         assert_eq!(seyal_app_destroy(handle), 0);
     }
 }

@@ -52,8 +52,8 @@ pub struct SeyalAppTheme {
     /// Block Component roles (#1010): focus border, rest/hover seam and
     /// status colors. Resolved here so the host never invents palette values.
     pub block_focus: u32,
-    pub seam_rest: u32,
-    pub seam_hover: u32,
+    pub block_border_rest: u32,
+    pub block_border_hover: u32,
     pub success: u32,
     pub danger: u32,
 }
@@ -183,8 +183,8 @@ pub extern "C" fn seyal_app_theme(appearance: u16, accessibility_flags: u16) -> 
             0
         },
         block_focus: pack_srgb(visual.colors.get(ColorRole::BlockFocus)),
-        seam_rest: pack_srgb(visual.colors.get(ColorRole::SeamRest)),
-        seam_hover: pack_srgb(visual.colors.get(ColorRole::SeamHover)),
+        block_border_rest: pack_srgb(visual.colors.get(ColorRole::BlockBorderRest)),
+        block_border_hover: pack_srgb(visual.colors.get(ColorRole::BlockBorderHover)),
         success: pack_srgb(visual.colors.get(ColorRole::Success)),
         danger: pack_srgb(visual.colors.get(ColorRole::Danger)),
     }
@@ -336,13 +336,21 @@ mod tests {
                 pack_srgb(visual.colors.get(ColorRole::BlockFocus))
             );
             assert_eq!(
-                theme.seam_rest,
-                pack_srgb(visual.colors.get(ColorRole::SeamRest))
+                theme.block_border_rest,
+                pack_srgb(visual.colors.get(ColorRole::BlockBorderRest))
             );
             assert_eq!(
-                theme.seam_hover,
-                pack_srgb(visual.colors.get(ColorRole::SeamHover))
+                theme.block_border_hover,
+                pack_srgb(visual.colors.get(ColorRole::BlockBorderHover))
             );
+            // Design §3: Block borders are their own roles, never the shell
+            // seam palette.
+            for seam in [ColorRole::SeamRest, ColorRole::SeamHover] {
+                let seam = pack_srgb(visual.colors.get(seam));
+                assert_ne!(theme.block_border_rest, seam);
+                assert_ne!(theme.block_border_hover, seam);
+            }
+            assert_ne!(theme.block_border_rest, theme.block_border_hover);
             assert_eq!(
                 theme.success,
                 pack_srgb(visual.colors.get(ColorRole::Success))
@@ -356,6 +364,28 @@ mod tests {
                 "Block focus is its own role"
             );
         }
+    }
+
+    #[test]
+    fn block_border_roles_take_rust_increase_contrast() {
+        use super::{pack_srgb, seyal_app_theme};
+        use crate::theme::{canonical, AccessibilitySignals, ColorRole, ResolvedAppearance};
+        // accessibility_flags bit 2 = increase_contrast.
+        let theme = seyal_app_theme(0, 4);
+        let signals = AccessibilitySignals {
+            increase_contrast: true,
+            ..AccessibilitySignals::default()
+        };
+        let visual = canonical(ResolvedAppearance::Dark, signals);
+        assert_eq!(
+            theme.block_border_rest,
+            pack_srgb(visual.colors.get(ColorRole::BlockBorderRest))
+        );
+        assert_ne!(
+            theme.block_border_rest,
+            seyal_app_theme(0, 0).block_border_rest,
+            "Increase Contrast adjusts the Block border in Rust"
+        );
     }
 
     #[test]

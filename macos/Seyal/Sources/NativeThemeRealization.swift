@@ -16,8 +16,8 @@ struct NativeTheme {
     let danger: NSColor
     /// Block Component roles (#1010), resolved by Rust.
     let blockFocus: NSColor
-    let blockSeamRest: NSColor
-    let blockSeamHover: NSColor
+    let blockBorderRest: NSColor
+    let blockBorderHover: NSColor
     let blockSuccess: NSColor
     let blockDanger: NSColor
     /// Rust-resolved motion: false under Reduce Motion (design §8).
@@ -110,8 +110,8 @@ enum NativeThemeRealization {
             danger: NSColor(srgbRed: 0.98, green: 0.44, blue: 0.40, alpha: 1),
             // Block roles from Rust seyal_app_theme (same resolve_process_visual as #993).
             blockFocus: color(blockPacked.block_focus),
-            blockSeamRest: color(blockPacked.seam_rest),
-            blockSeamHover: color(blockPacked.seam_hover),
+            blockBorderRest: color(blockPacked.block_border_rest),
+            blockBorderHover: color(blockPacked.block_border_hover),
             blockSuccess: color(blockPacked.success),
             blockDanger: color(blockPacked.danger),
             allowsMotion: blockPacked.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION) != 0,

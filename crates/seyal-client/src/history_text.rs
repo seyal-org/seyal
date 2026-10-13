@@ -17,10 +17,12 @@ use seyal_protocol::local_ipc::framing::{HistoryRangeSnapshot, HISTORY_CELL_CONT
 /// byte cap. A range that would exceed it fails closed instead of growing.
 pub(crate) const MAX_BLOCK_COPY_BYTES: usize = 32 * 1024 * 1024;
 
-/// Copy kind matching `SEYAL_APP_BLOCK_ACTION_COPY_*` for output-bearing copies.
+/// Copy kind matching `SEYAL_APP_BLOCK_ACTION_COPY_*`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub(crate) enum BlockCopyKind {
+    /// The Block's Runtime-recorded command only; needs no history.
+    Command = 2,
     Output = 3,
     CommandAndOutput = 4,
 }
@@ -28,6 +30,7 @@ pub(crate) enum BlockCopyKind {
 impl BlockCopyKind {
     pub(crate) fn from_u16(value: u16) -> Option<Self> {
         match value {
+            2 => Some(Self::Command),
             3 => Some(Self::Output),
             4 => Some(Self::CommandAndOutput),
             _ => None,
@@ -139,6 +142,7 @@ pub(crate) fn plain_text(range: &HistoryRangeSnapshot) -> String {
 /// with a single `\n` when both sides are non-empty.
 pub(crate) fn compose_block_copy(kind: BlockCopyKind, command: &str, output: String) -> String {
     match kind {
+        BlockCopyKind::Command => command.to_string(),
         BlockCopyKind::Output => output,
         BlockCopyKind::CommandAndOutput => {
             if output.is_empty() {
@@ -327,6 +331,10 @@ mod tests {
         assert_eq!(
             compose_block_copy(BlockCopyKind::Output, "true", "out".into()),
             "out"
+        );
+        assert_eq!(
+            compose_block_copy(BlockCopyKind::Command, "true", "out".into()),
+            "true"
         );
     }
 }

@@ -312,7 +312,7 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
         return;
     };
     let selected = snapshot.chrome.selected_block;
-    let composer_available = composer.mode == crate::composer::ComposerMode::Available;
+    let admits_rerun = crate::composer::composer_admits_rerun(&composer);
     for (index, block) in composer.blocks.iter().enumerate() {
         let mut flags: u16 = match block.state {
             crate::composer::BlockPresentationState::Running => 1,
@@ -325,7 +325,7 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
             flags |= BLOCK_SELECTED;
         }
         let first = state.block_actions.rows.len() as u32;
-        for action in crate::composer::block_actions(block, composer_available) {
+        for action in crate::composer::block_actions(block, admits_rerun) {
             let mut action_flags = (action.placement as u16) << BLOCK_ACTION_PLACEMENT_SHIFT;
             if action.enabled {
                 action_flags |= BLOCK_ACTION_ENABLED;

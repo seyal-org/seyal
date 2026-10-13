@@ -485,8 +485,8 @@ typedef struct SeyalAppTheme {
     uint16_t flags;
     /* Block Component roles (#1010), packed RGBA like the fields above. */
     uint32_t block_focus;
-    uint32_t seam_rest;
-    uint32_t seam_hover;
+    uint32_t block_border_rest;
+    uint32_t block_border_hover;
     uint32_t success;
     uint32_t danger;
 } SeyalAppTheme;
@@ -878,9 +878,10 @@ typedef struct SeyalAppBlockSpan {
 SeyalAppBlockSpan seyal_app_block_span(uint64_t handle, uint32_t index);
 uint32_t seyal_app_block_action_count(uint64_t handle, uint32_t block_index);
 SeyalAppRow seyal_app_block_action_row(uint64_t handle, uint32_t block_index, uint32_t action_index);
-/* Rust-owned Block pasteboard copy (#1010). kind = COPY_OUTPUT or
- * COPY_COMMAND_AND_OUTPUT. Resolves span/command in Rust; final text arrives
- * via seyal_bridge_take_block_copy after poll. */
+/* Rust-owned Block pasteboard copy (#1010). kind = COPY_COMMAND, COPY_OUTPUT
+ * or COPY_COMMAND_AND_OUTPUT. Resolves span/command in Rust; final text
+ * arrives via seyal_bridge_take_block_copy (at once for COPY_COMMAND, after
+ * poll for output kinds). */
 int32_t seyal_app_request_block_copy(uint64_t handle, uint32_t block_index, uint16_t kind);
 
 /* #865 Flow output projection. Hosts must not invent start+511 ranges.

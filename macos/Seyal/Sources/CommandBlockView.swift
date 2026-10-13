@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 
 /// One Rust-projected quick action (`seyal_app_block_action_row`, #1010).
 /// Rust owns the set, order, placement, label, shortcut hint and
@@ -83,6 +84,9 @@ final class CommandBlockView: NSView {
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
         spinner.translatesAutoresizingMaskIntoConstraints = false
+        // AppKit spinners have no tint; a content filter carries BlockFocus.
+        spinner.wantsLayer = true
+        spinner.layerUsesCoreImageFilters = true
         // While running the spinner replaces the icon, so it carries the same
         // status identity for VoiceOver (a hidden icon leaves the AX tree).
         spinner.setAccessibilityElement(true)
@@ -235,7 +239,7 @@ final class CommandBlockView: NSView {
             layer?.borderColor = theme.blockFocus.cgColor
             layer?.borderWidth = Metrics.focusBorder
         } else {
-            layer?.borderColor = (isHovered ? theme.blockSeamHover : theme.blockSeamRest).cgColor
+            layer?.borderColor = (isHovered ? theme.blockBorderHover : theme.blockBorderRest).cgColor
             layer?.borderWidth = Metrics.border
         }
         command.textColor = theme.muted
@@ -249,6 +253,8 @@ final class CommandBlockView: NSView {
     private func applyStatus(_ theme: NativeTheme) {
         guard row.state != UInt16(SEYAL_APP_BLOCK_STATE_RUNNING) else {
             statusIcon.isHidden = true
+            // Design §3/§8: the running spinner is tinted with Rust BlockFocus.
+            spinner.contentFilters = Self.spinnerTint(theme.blockFocus)
             // Design §8: spinner stops under Reduce Motion (Rust-projected).
             if theme.allowsMotion {
                 spinner.isDisplayedWhenStopped = false
@@ -272,6 +278,16 @@ final class CommandBlockView: NSView {
             systemSymbolName: symbol, accessibilityDescription: row.statusLabel)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
         statusIcon.contentTintColor = tint
+    }
+
+    /// Maps every spinner pixel to `color`, keeping its alpha.
+    static func spinnerTint(_ color: NSColor) -> [CIFilter] {
+        guard let tint = CIColor(color: color), let filter = CIFilter(name: "CIFalseColor") else {
+            return []
+        }
+        filter.setValue(tint, forKey: "inputColor0")
+        filter.setValue(tint, forKey: "inputColor1")
+        return [filter]
     }
 
     /// Seam buttons either open a Rust-listed menu or report their kind.

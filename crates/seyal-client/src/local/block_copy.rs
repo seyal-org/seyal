@@ -324,4 +324,23 @@ mod tests {
         assert!(client.history_requests.is_empty(), "no history request");
         assert_eq!(client.take_block_copy(), Some((9, "true".to_string())));
     }
+
+    #[test]
+    fn copy_command_is_rust_built_and_supersedes_a_pending_output_copy() {
+        let (client_stream, _server) = UnixStream::pair().expect("socket pair");
+        let mut client = test_client(client_stream);
+        assert_eq!(BlockCopyKind::from_u16(2), Some(BlockCopyKind::Command));
+        client
+            .begin_block_copy(9, BlockCopyKind::Output, String::new(), Some((4, 8)))
+            .unwrap();
+        assert!(client.history_requests.contains_key(&1));
+        // Copy command: the Runtime-recorded command, no history request, and
+        // the earlier output copy is abandoned rather than left in flight.
+        client
+            .begin_block_copy(7, BlockCopyKind::Command, "ls /".into(), None)
+            .unwrap();
+        assert!(client.history_requests.is_empty(), "output copy forgotten");
+        assert_eq!(client.take_block_copy(), Some((7, "ls /".to_string())));
+        assert!(client.take_block_copy().is_none(), "slot cleared");
+    }
 }

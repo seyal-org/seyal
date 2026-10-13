@@ -63,10 +63,14 @@ pub enum ColorRole {
     RemoteDegraded,
     /// Focused/selected Block border (Seyal Block Component, #1010).
     BlockFocus,
+    /// Block border at rest and on hover (#1010). Block chrome never paints
+    /// from the shell `Seam*` palette.
+    BlockBorderRest,
+    BlockBorderHover,
 }
 
 impl ColorRole {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 27] = [
         Self::Canvas,
         Self::Container,
         Self::UtilityReceded,
@@ -92,6 +96,8 @@ impl ColorRole {
         Self::AgentActivity,
         Self::RemoteDegraded,
         Self::BlockFocus,
+        Self::BlockBorderRest,
+        Self::BlockBorderHover,
     ];
 }
 
@@ -144,6 +150,8 @@ fn dark(role: ColorRole) -> Srgb {
         ColorRole::AgentActivity => Srgb::from_u8(132.0, 100.0, 232.0),
         ColorRole::RemoteDegraded => Srgb::from_u8(245.0, 165.0, 36.0),
         ColorRole::BlockFocus => Srgb::from_u8(59.0, 130.0, 246.0),
+        ColorRole::BlockBorderRest => Srgb::from_u8(38.0, 46.0, 60.0),
+        ColorRole::BlockBorderHover => Srgb::from_u8(62.0, 72.0, 90.0),
     }
 }
 
@@ -174,6 +182,8 @@ fn light(role: ColorRole) -> Srgb {
         ColorRole::AgentActivity => Srgb::from_u8(92.0, 70.0, 180.0),
         ColorRole::RemoteDegraded => Srgb::from_u8(180.0, 110.0, 12.0),
         ColorRole::BlockFocus => Srgb::from_u8(37.0, 99.0, 235.0),
+        ColorRole::BlockBorderRest => Srgb::from_u8(222.0, 226.0, 232.0),
+        ColorRole::BlockBorderHover => Srgb::from_u8(192.0, 199.0, 210.0),
     }
 }
 
@@ -199,7 +209,10 @@ fn contrast_adjusted(color: Srgb, appearance: ResolvedAppearance, role: ColorRol
                 }
             }
         }
-        ColorRole::SeamRest | ColorRole::SeamHover => {
+        ColorRole::SeamRest
+        | ColorRole::SeamHover
+        | ColorRole::BlockBorderRest
+        | ColorRole::BlockBorderHover => {
             if appearance == ResolvedAppearance::Dark {
                 Srgb {
                     red: (color.red + 0.12).min(1.0),

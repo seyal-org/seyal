@@ -119,8 +119,10 @@ extension ProductChromeHostView {
     }
 
     /// Routes a Rust action kind. Availability was already decided by Rust;
-    /// disabled actions are never delivered by the view. Copy output kinds go
-    /// through `seyal_app_request_block_copy` so span/composition stay in Rust.
+    /// disabled actions are never delivered by the view. Every Copy kind goes
+    /// through `seyal_app_request_block_copy` so the text is built in Rust;
+    /// Copy command completes at once, so it is collected without waiting for
+    /// the next display poll.
     private func performBlockAction(
         _ kind: UInt16,
         blockIndex: UInt32,
@@ -129,8 +131,9 @@ extension ProductChromeHostView {
     ) {
         switch UInt32(kind) {
         case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND:
-            let row = seyal_app_block_row(pane.appHandle, blockIndex)
-            writePasteboard(productChromeCopyUTF8(row.title, row.title_len) ?? "")
+            if seyal_app_request_block_copy(pane.appHandle, blockIndex, kind) == 0 {
+                pane.inputSurface.bridge?.publishBlockCopy()
+            }
         case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT:
             _ = seyal_app_request_block_copy(pane.appHandle, blockIndex, kind)
         case SEYAL_APP_BLOCK_ACTION_RERUN:

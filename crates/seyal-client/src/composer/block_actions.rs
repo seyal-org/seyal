@@ -3,7 +3,7 @@
 //! they sit, their labels, shortcut hints and availability (ADR-015); hosts
 //! only draw them and route the chosen kind back.
 
-use super::{BlockPresentationState, BlockProjection};
+use super::{BlockPresentationState, BlockProjection, ComposerMode, ComposerSnapshot};
 
 /// Stable action identity carried across the host ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,19 +42,26 @@ pub struct BlockActionProjection {
     pub enabled: bool,
 }
 
+/// Whether the Pane composer can take a Rerun (design §6): it is eligible
+/// and holds no draft, because Rerun never overwrites a user's draft. The
+/// projection and the `RerunBlock` reducer share the same composer facts.
+pub fn composer_admits_rerun(composer: &ComposerSnapshot) -> bool {
+    composer.mode == ComposerMode::Available && composer.draft.is_empty()
+}
+
 /// The quick actions for one Block, in presentation order.
 ///
 /// Copy output needs the Block's history anchor. Rerun needs a finished
-/// Block and an available composer: it submits through the ordinary
-/// composer path, which Runtime admits only at a prompt.
+/// Block and a composer that admits it (`composer_admits_rerun`): it submits
+/// through the ordinary composer path, which Runtime admits only at a prompt.
 pub fn block_actions(
     block: &BlockProjection,
-    composer_available: bool,
+    composer_admits_rerun: bool,
 ) -> Vec<BlockActionProjection> {
     use BlockActionKind as K;
     use BlockActionPlacement as P;
     let has_output_anchor = block.start_line > 0;
-    let can_rerun = composer_available && block.state != BlockPresentationState::Running;
+    let can_rerun = composer_admits_rerun && block.state != BlockPresentationState::Running;
     let action = |kind, placement, label, shortcut, enabled| BlockActionProjection {
         kind,
         placement,
