@@ -435,3 +435,27 @@ Pairing / identity-evidence amendment (#1191) additionally requires, once implem
 - PTY ownership;
 - M006 workflow semantics;
 - choosing a persistence engine/table layout here.
+
+## 17. SPEC-030 task-input protocol reconciliation (PROPOSED — not yet normative)
+
+This candidate amendment is reviewed under [#1327](https://github.com/seyal-org/seyal/issues/1327). Sections 1–16 remain accepted and unchanged until an independent non-author review accepts the extension. The existing `AGB1`/Protocol V1 command catalog and 64-KiB absolute frame cap are not silently rewritten.
+
+**Negotiated V2 command / response shape** (final numeric tags, fixed binary codecs and compatibility tests belong to #1330 implementation after acceptance):
+
+```text
+SubmitWorkItemInput {
+  session_id, work_item_id, expected_work_item_revision, request_id,
+  payload: InlineTask(<=32KiB) | AuthorizedPrivateTaskRef,
+  attachment_refs[]          // capped, backend-validated
+}
+-> WorkItemInputAdmitted { work_item_id, input_version, new_revision, input_ref }
+CreateAttemptV2 { session_id, work_item_id, input_version }
+-> Attempt { id }
+```
+
+- `runs.create`, per-WorkItem/WorkScope principal rights and attachment grants are necessary; `adapter.execute` remains separately necessary at dispatch (SPEC-027 §7). A scoped, idempotent request ID does not grant authority. Same ID/same input returns same version; collision with different input is a typed rejection.
+- Commit the immutable version, WorkItem revision and **opaque metadata-only** WorkItem event transactionally. Reject empty/oversized input, conflict, foreign refs, finalized WorkItem, missing encryption protection and revoked source without partial commit or secret-bearing event. Preserve per-aggregate event sequences and restart/replay.
+- New typed error families distinguish `InputRequired`, `InputRevisionConflict`, `InputUnauthorized`, `InputInvalid`, `InputTooLarge`, `InputRevoked`, `InputCapabilityUnavailable`, and `ProtectedStorageUnavailable`; do not overload `ExecutionTargetUnavailable` or generic `Failed`. Error payloads never include source bytes or unredacted paths.
+- V1 clients and unversioned Attempts cannot claim prompt delivery. Hello/HelloAck advertise supported version and prompt-capability separately from host presence. Unknown mandatory capability/version cannot downgrade to ObservationOnly and appear successful. V2 `StartAgentRun` still carries no arbitrary launch descriptors.
+- Attempt creation freezes exactly one existing authorized input version. Before each dispatch recheck privacy/source/policy revocation and route eligibility, commit fenced request identity with state, and on partial/unknown send preserve reconcile-before-retry semantics. Revocation after delivery cannot revoke what the external child already read.
+- Private task/media bytes live in scoped protected content storage, never ordinary Agent DB, RunEvent, SelectionTrace, log or snapshot; no plaintext-at-rest fallback. Retention/erase respects existing privacy authority (SPEC-015) and cannot falsely promise erasure from an upstream harness.
