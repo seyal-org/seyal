@@ -439,7 +439,7 @@ fn application_root_registry_handle_is_thread_affine() {
     // Inverse of the B2 Send leak: ClientRegistryHandle is !Send/!Sync, so the
     // root cannot migrate to another executor. TLS affinity is proven by
     // registering on a worker and observing the handle absent on this thread.
-    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-B2'; sleep 1");
+    let (socket_path, execution_id, runtime) = start_runtime("printf 'SEYAL-B2'; sleep 30");
     let (ready_tx, ready_rx) = mpsc::channel();
     let (done_tx, done_rx) = mpsc::channel();
     let worker = thread::spawn(move || {
