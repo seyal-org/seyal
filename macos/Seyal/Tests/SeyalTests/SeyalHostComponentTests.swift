@@ -17,6 +17,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     func testApplicationRootABIMatchesPublishedHeader() {
+        XCTAssertEqual(SEYAL_APP_ABI_VERSION, 2)
         XCTAssertEqual(MemoryLayout<SeyalAppAction>.size, Int(MemoryLayout<SeyalAppAction>.stride))
         XCTAssertGreaterThanOrEqual(MemoryLayout<SeyalAppAction>.size, 80)
         XCTAssertGreaterThanOrEqual(MemoryLayout<SeyalAppSnapshot>.size, 64)
@@ -41,7 +42,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 40)
         XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
-        XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 64)
+        XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 120)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
         let live = seyal_app_create()
         // Core Terminal chrome is visible by default (#922).

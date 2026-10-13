@@ -4,7 +4,7 @@ use std::ptr;
 
 use seyal_core::{AttachmentId, ExecutionId};
 
-use crate::app::{AppSnapshot, NativeEffect, PresentationEligibility, APP_ABI_VERSION};
+use crate::app::{AppSnapshot, PresentationEligibility, APP_ABI_VERSION};
 use crate::recovery::{RecoveryEffect, RecoveryStage};
 
 use super::{
@@ -68,10 +68,11 @@ pub(super) fn encode_snapshot(snap: &AppSnapshot, output: &[u8]) -> SeyalAppSnap
         attachment_hi: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
         epoch: snap.presentation_epoch,
         last_error: snap.last_error.map(error_number).unwrap_or(0) as u32,
-        pending_effect: match snap.pending_effect {
-            NativeEffect::None => 0,
-            NativeEffect::BoundedDetachThenTerminate => 1,
-        },
+        pending_effect: snap
+            .pending_effects
+            .first()
+            .map(|effect| effect.kind_code())
+            .unwrap_or(0),
         output_utf8: if output.is_empty() {
             ptr::null()
         } else {

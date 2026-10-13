@@ -115,6 +115,7 @@ impl ApplicationRoot {
             NavigateHistory::Record(&mut self.focus_history),
         )
         .map_err(navigation_error)?;
+        self.drain_shell_effects();
         self.activate_focused_pane_authority();
         let _ = self
             .chrome

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::presentation::PresentationMode;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::tree::PaneTree;
@@ -13,6 +14,7 @@ pub(super) struct Pane {
     pub(super) title: String,
     pub(super) execution: Option<ExecutionId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
+    pub(super) presentation_mode: PresentationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +124,7 @@ impl Workspace {
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
+                        presentation_mode: PresentationMode::Flow,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;
@@ -288,8 +291,10 @@ impl Workspace {
         let removed = self.windows[window_index].tabs.remove(tab_index);
         if self.windows[window_index].tabs.is_empty() {
             let destroyed = self.windows.remove(window_index).id;
+            // Leave product-active unset so the caller’s `activate_window`
+            // observes a real change and emits OrderFrontMakeKey (ADR-018 §6.1).
             if self.active_window == Some(destroyed) {
-                self.active_window = self.windows.first().map(|window| window.id);
+                self.active_window = None;
             }
             return Ok((removed, Some(destroyed)));
         }
@@ -319,7 +324,8 @@ impl Workspace {
     }
 
     pub(super) fn push_window(&mut self, window: Window) {
-        self.active_window = Some(window.id);
+        // Do not mark product-active here — callers use `activate_window` so
+        // OrderFrontMakeKey emits when the product-active Window actually changes.
         self.windows.push(window);
     }
 
@@ -329,6 +335,26 @@ impl Workspace {
             .iter()
             .find(|window| window.id == id)
             .map(|window| window.workspace_id)
+    }
+}
+
+impl super::ShellState {
+    pub(crate) fn set_presentation_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode: PresentationMode,
+    ) -> Result<(), ShellError> {
+        for workspace in &mut self.workspaces {
+            for window in &mut workspace.windows {
+                for tab in &mut window.tabs {
+                    if let Some(pane) = tab.panes.get_mut(&pane_id) {
+                        pane.presentation_mode = mode;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(ShellError::UnknownPane)
     }
 }
 
