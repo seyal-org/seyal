@@ -147,6 +147,15 @@ extension ProductChromeHostView {
         closePaneButton.action = #selector(closeFocusedPane(_:))
     }
 
+    func configureCloseButtons(shell: SeyalAppShell) {
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
+        closeTabButton.containmentGeneration = shell.containment_generation
+        closePaneButton.idLo = shell.focused_pane_lo
+        closePaneButton.idHi = shell.focused_pane_hi
+        closePaneButton.containmentGeneration = shell.containment_generation
+    }
+
     func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {
         button.setButtonType(.toggle)
         button.bezelStyle = .inline
