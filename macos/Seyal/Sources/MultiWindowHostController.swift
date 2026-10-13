@@ -508,6 +508,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             completeWindowActivation(key, generation: activationGeneration, succeeded: true)
         }
         reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_BECAME_KEY)
+        if let key = key(for: window), isProductActive(key), liveKey != key {
+            installLiveHost(in: window, key: key)
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {

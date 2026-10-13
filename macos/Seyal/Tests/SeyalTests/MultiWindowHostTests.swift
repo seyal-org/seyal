@@ -185,6 +185,7 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(shell.window_count, 2)
         XCTAssertEqual(shell.active_window_lo, target.lo)
         XCTAssertEqual(shell.active_window_hi, target.hi)
+        XCTAssertTrue(host.liveHost.window === targetWindow)
     }
 
     func testHostHasNoWritableWindowModelTypes() {
