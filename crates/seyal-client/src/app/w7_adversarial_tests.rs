@@ -181,10 +181,10 @@ fn close_requesting_tab_while_provisioning_in_flight() {
     assert_eq!(root.provisioning().recorded_execution(pane), None);
 }
 
-/// Termination invariant (client): after close→Unpresented, TerminateUnpresented
-/// still queues ADR-005 TerminateExecution regardless of prior Hidden/occlusion.
+/// Client-side contract: after Hidden→Unpresented, TerminateUnpresented
+/// requests a Controller attachment so Runtime can perform disposal.
 #[test]
-fn terminate_path_survives_hidden_then_unpresented() {
+fn terminate_unpresented_requests_attach_for_dispose_after_hidden() {
     let mut root = ApplicationRoot::new();
     drain_effects(&mut root);
     let window = root.snapshot().shell.active_window.expect("window");

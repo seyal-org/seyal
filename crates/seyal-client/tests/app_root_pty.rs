@@ -82,7 +82,8 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
     let _lock = override_test_lock();
     reset_explicit_runtime_dir();
     let _reset = RuntimeDirReset;
-    let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+    // Avoid reusing a stale Runtime socket from an earlier test process.
+    let suffix = (u64::from(std::process::id()) << 32) | COUNTER.fetch_add(1, Ordering::Relaxed);
     let runtime_dir = std::env::temp_dir().join(format!("s1269d-{suffix:x}"));
     let singleton_path = std::env::temp_dir().join(format!("s1269-{suffix:x}.lock"));
     let anchor_pid_path = runtime_dir.join("anchor.pid");
@@ -91,6 +92,8 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
     let (finalized_tx, finalized_rx) = mpsc::channel();
     let (verify_anchor_tx, verify_anchor_rx) = mpsc::channel();
     let (anchor_alive_tx, anchor_alive_rx) = mpsc::channel();
+    let (terminate_anchor_tx, terminate_anchor_rx) = mpsc::channel();
+    let (anchor_terminated_tx, anchor_terminated_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
     let runtime = thread::spawn(move || {
         let mut config = RuntimeConfig::m001().expect("M001 Runtime config");
@@ -121,6 +124,12 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
                 WindowSize::cells(80, 24).expect("geometry"),
             )
             .expect("unpresented execution");
+        let driver = runtime
+            .create_execution(
+                CommandSpec::new("/bin/sh").args(["-c", "sleep 30"]),
+                WindowSize::cells(80, 24).expect("geometry"),
+            )
+            .expect("sibling event-loop execution");
         let pid_deadline = Instant::now() + Duration::from_secs(2);
         while !anchor_pid_for_runtime.exists() && Instant::now() < pid_deadline {
             runtime
@@ -136,7 +145,7 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .expect("local IPC socket")
             .to_path_buf();
         ready_tx
-            .send((socket_path, anchor, unpresented))
+            .send((socket_path, anchor, unpresented, driver))
             .expect("test receiver");
 
         let deadline = Instant::now() + Duration::from_secs(8);
@@ -169,13 +178,40 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
                 .send(runtime.execution(anchor).is_some())
                 .expect("anchor liveness receiver");
         }
+        let attach_deadline = Instant::now() + Duration::from_secs(10);
+        let mut terminate_anchor = false;
+        while Instant::now() < attach_deadline {
+            match terminate_anchor_rx.try_recv() {
+                Ok(()) => {
+                    terminate_anchor = true;
+                    break;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(mpsc::TryRecvError::Empty) => {
+                    runtime
+                        .poll_once(Some(Duration::from_millis(5)))
+                        .expect("poll Runtime while sibling client connects");
+                }
+            }
+        }
+        if terminate_anchor {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while runtime.execution(anchor).is_some() && Instant::now() < deadline {
+                runtime
+                    .poll_once(Some(Duration::from_millis(5)))
+                    .expect("poll Runtime after unpresented termination request");
+            }
+            anchor_terminated_tx
+                .send(runtime.execution(anchor).is_none())
+                .expect("anchor termination receiver");
+        }
         let _ = stop_rx.recv_timeout(Duration::from_secs(10));
         runtime.begin_shutdown().expect("begin shutdown");
         runtime
             .run_until_empty(Instant::now() + Duration::from_secs(2))
             .expect("shutdown");
     });
-    let (socket_path, anchor, unpresented) = ready_rx
+    let (socket_path, anchor, unpresented, driver) = ready_rx
         .recv_timeout(Duration::from_secs(2))
         .expect("Runtime ready");
     set_explicit_runtime_dir(
@@ -256,6 +292,25 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .any(|window| window.id == anchor_window),
         "the bound anchor window must remain open while the unbound focused window is active"
     );
+    root.apply(AppAction::ReportWindowEvent {
+        window: anchor_window,
+        event: seyal_client::app::WindowNativeEvent::OcclusionChanged,
+        occluded: true,
+    })
+    .expect("hide anchor window before close");
+    assert_eq!(
+        root.snapshot()
+            .shell
+            .windows
+            .iter()
+            .find(|window| window.id == anchor_window)
+            .expect("hidden anchor window")
+            .tabs[0]
+            .panes[0]
+            .presentation_tier,
+        seyal_client::shell::PresentationTier::Hidden,
+        "occlusion must put the live anchor pane in Hidden before it becomes Unpresented"
+    );
     root.apply(AppAction::CloseWindow {
         id: anchor_window,
         containment_generation: root.snapshot().shell.containment_generation,
@@ -285,6 +340,11 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
             .success(),
         "closing the bound window must leave the exact OS child alive"
     );
+    let driver_client =
+        LocalDisplayClient::connect_execution(&socket_path, driver, Role::Controller)
+            .expect("sibling event-loop Controller");
+    root.attach_client(root.fence(), driver_client)
+        .expect("bind sibling event-loop execution");
     assert!(
         root.snapshot()
             .shell
@@ -297,6 +357,51 @@ fn window_close_preserves_live_child_and_unpresented_disposal_preserves_window()
         root.live_unpresented(),
         vec![anchor],
         "the closed window's Runtime child must remain live after the other child is disposed"
+    );
+
+    // Complete the full Hidden → Unpresented → Runtime finalize path. The
+    // client-only adversarial test below verifies the attach-for-dispose
+    // request; this test proves that Runtime receives and finalizes it.
+    assert_eq!(root.live_unpresented(), vec![anchor]);
+    root.apply(AppAction::TerminateUnpresented { execution: anchor })
+        .expect("request Runtime-backed disposal");
+    terminate_anchor_tx
+        .send(())
+        .expect("Runtime termination request");
+    let deadline = Instant::now() + Duration::from_secs(7);
+    let mut runtime_terminated = false;
+    while Instant::now() < deadline {
+        if let Err(error) = root.poll_client(root.fence()) {
+            panic!(
+                "drive Runtime-backed unpresented termination: {error:?}; extra_clients={}; snapshot={:?}",
+                root.extra_pane_client_count(),
+                root.snapshot()
+            );
+        }
+        if let Ok(terminated) = anchor_terminated_rx.try_recv() {
+            assert!(
+                terminated,
+                "Runtime must finalize the exact anchor execution"
+            );
+            runtime_terminated = true;
+        }
+        if runtime_terminated && !root.live_unpresented().contains(&anchor) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        runtime_terminated,
+        "Runtime must finalize the disposed anchor"
+    );
+    assert!(!root.live_unpresented().contains(&anchor));
+    assert!(
+        root.snapshot()
+            .shell
+            .windows
+            .iter()
+            .any(|window| window.id == open_window),
+        "disposing the unpresented anchor must preserve the unrelated open window"
     );
     let _ = stop_tx.send(());
     runtime.join().expect("Runtime thread");

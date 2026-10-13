@@ -29,7 +29,7 @@
 | Last Window closes while the App remains running | `SeyalHostUITests::testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit` (W4b/W7; closes the final live-PTY Window and asserts zero windows plus foreground process) |
 | Quit × create in flight | `app::w7_adversarial_tests::quit_while_create_tab_provisioning_in_flight` |
 | Close requesting Tab × create in flight | `app::w7_adversarial_tests::close_requesting_tab_while_provisioning_in_flight` |
-| Terminate after Hidden → Unpresented | `app::w7_adversarial_tests::terminate_path_survives_hidden_then_unpresented` |
+| Terminate after Hidden → Unpresented | `app::w7_adversarial_tests::terminate_unpresented_requests_attach_for_dispose_after_hidden` (client contract: requests a Controller attach for disposal) + `app_root_pty::window_close_preserves_live_child_and_unpresented_disposal_preserves_window` (Runtime integration: asserts Hidden before close, exact child remains alive while Unpresented, then Runtime finalizes it without closing the sibling Window) |
 | PTY EOF while child alive | `runtime_adversarial::pty_eof_from_live_children_*` (existing) |
 | Child exit while Hidden | `local_ipc_protocol::child_exit_while_hidden_still_finalizes` (W5) |
 | Terminate while delivery Suspended | `local_ipc_protocol::terminate_while_delivery_suspended_still_reaps` (W7) |
