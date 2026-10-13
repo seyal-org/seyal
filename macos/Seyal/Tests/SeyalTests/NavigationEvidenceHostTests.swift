@@ -251,6 +251,44 @@ final class NavigationEvidenceHostTests: XCTestCase {
         XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
     }
 
+    /// K8 / #1132: cmd+[ / cmd+] route through the catalog and dispatch N3
+    /// HistoryBack/Forward (ABI 67/68) with the committed FocusSeq. The N6
+    /// SeyalTests harness can observe focused Pane; headed XCUI cannot because
+    /// CreateWindow admission is still off and AX has no second-pane identity.
+    func testCmdBracketsDispatchHistoryBackAndForward() {
+        let handle = makeHandle()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        _ = seedSecondWindow(handle)
+        bindSyntheticExecution(handle)
+        let paneA = focusedPane(handle)
+        let paneB = otherWindowPane(handle)
+
+        navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi)
+        navigateGotoToPane(handle, paneLo: paneB.lo, paneHi: paneB.hi)
+        XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
+        XCTAssertEqual(focusedPane(handle).hi, paneB.hi)
+
+        let bracketOpen: UInt32 = 0x5b // '['
+        let bracketClose: UInt32 = 0x5d // ']'
+        XCTAssertEqual(
+            seyal_app_route_keystroke(handle, 1, 0, bracketOpen, 0, 0, 0),
+            1,
+            "cmd+[ must match focus_history.back"
+        )
+        ackPendingEffects(handle)
+        XCTAssertEqual(focusedPane(handle).lo, paneA.lo)
+        XCTAssertEqual(focusedPane(handle).hi, paneA.hi)
+
+        XCTAssertEqual(
+            seyal_app_route_keystroke(handle, 1, 0, bracketClose, 0, 0, 0),
+            1,
+            "cmd+] must match focus_history.forward"
+        )
+        ackPendingEffects(handle)
+        XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
+        XCTAssertEqual(focusedPane(handle).hi, paneB.hi)
+    }
+
     /// Cross-window Navigate still emits one WindowActivation (N5 path on this stack).
     func testCrossWindowGotoEmitsWindowActivation() {
         let handle = makeHandle()

@@ -160,9 +160,9 @@ fn goto_open_projects_with_stable_menu_id() {
     assert!(round_trip.ordinal.is_none());
 }
 
-/// Focus-history stays out of the menu catalog until N3 / tip B (K8 review risk).
+/// Focus-history remains key-only in M003 (not a menu-visible K5 row).
 #[test]
-fn focus_history_omitted_from_menu_projection_until_n3() {
+fn focus_history_omitted_from_menu_projection() {
     let table = load_keybinding_table(None);
     let route = route_context_set(false, PresentationMode::Flow, false);
     let projection = project_shortcuts(&table, route);
