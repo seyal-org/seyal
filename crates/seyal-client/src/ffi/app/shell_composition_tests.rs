@@ -40,7 +40,7 @@ fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
 }
 
 #[test]
-fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
+fn shell_composition_actions_decode_and_hierarchical_close_reaches_zero_windows() {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);
 
@@ -73,36 +73,68 @@ fn shell_composition_actions_decode_and_reach_shell_state_and_fail_closed() {
 
     let mut split = identity_fence(25, &seyal_app_snapshot(handle));
     split.reserved = 1;
-    assert_eq!(unsafe { seyal_app_apply(handle, &split) }, -4);
-    assert_eq!(seyal_app_last_error(handle), 29, "PaneSplitUnavailable");
+    assert_eq!(unsafe { seyal_app_apply(handle, &split) }, 0);
+    let after_split = seyal_app_shell(handle);
+    assert_eq!(after_split.pane_count, 2);
+    assert_ne!(
+        after_split.flags & SHELL_FLAG_ALLOWS_PANE_SPLITTING,
+        0,
+        "production composition advertises pane splitting after C3"
+    );
 
-    // ClosePane on the sole Pane of the active Tab removes that Tab.
-    let active_pane = seyal_app_shell_row(handle, 2, 0);
+    let created_pane = seyal_app_shell_row(handle, 2, 1);
     let mut close_pane = identity_fence(26, &seyal_app_snapshot(handle));
-    close_pane.target_execution_lo = active_pane.id_lo;
-    close_pane.target_execution_hi = active_pane.id_hi;
+    close_pane.target_execution_lo = created_pane.id_lo;
+    close_pane.target_execution_hi = created_pane.id_hi;
     close_pane.target_generation = seyal_app_shell(handle).containment_generation;
     assert_eq!(unsafe { seyal_app_apply(handle, &close_pane) }, 0);
+    assert_eq!(seyal_app_shell(handle).pane_count, 1);
+
+    let sole_pane = seyal_app_shell_row(handle, 2, 0);
+    let mut close_last_pane = identity_fence(26, &seyal_app_snapshot(handle));
+    close_last_pane.target_execution_lo = sole_pane.id_lo;
+    close_last_pane.target_execution_hi = sole_pane.id_hi;
+    close_last_pane.target_generation = seyal_app_shell(handle).containment_generation;
+    assert_eq!(unsafe { seyal_app_apply(handle, &close_last_pane) }, 0);
     assert_eq!(seyal_app_shell(handle).tab_count, 2);
 
-    // Closing the remaining sole Tab removes the Window (hierarchical close).
-    let remaining = seyal_app_shell_row(handle, 1, 0);
-    let mut close_last = identity_fence(24, &seyal_app_snapshot(handle));
-    close_last.target_execution_lo = remaining.id_lo;
-    close_last.target_execution_hi = remaining.id_hi;
-    close_last.target_generation = seyal_app_shell(handle).containment_generation;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_last) }, 0);
-    assert_eq!(seyal_app_shell(handle).tab_count, 1);
-    let remaining = seyal_app_shell_row(handle, 1, 0);
-    let mut close_final = identity_fence(24, &seyal_app_snapshot(handle));
-    close_final.target_execution_lo = remaining.id_lo;
-    close_final.target_execution_hi = remaining.id_hi;
-    close_final.target_generation = seyal_app_shell(handle).containment_generation;
-    assert_eq!(unsafe { seyal_app_apply(handle, &close_final) }, 0);
+    // Close the other pre-existing Tab, then the last Tab; the final close
+    // removes the Window (hierarchical close).
+    for expected_tabs in [1, 0] {
+        let remaining = seyal_app_shell_row(handle, 1, 0);
+        let mut close_tab = identity_fence(24, &seyal_app_snapshot(handle));
+        close_tab.target_execution_lo = remaining.id_lo;
+        close_tab.target_execution_hi = remaining.id_hi;
+        close_tab.target_generation = seyal_app_shell(handle).containment_generation;
+        assert_eq!(unsafe { seyal_app_apply(handle, &close_tab) }, 0);
+        assert_eq!(seyal_app_shell(handle).tab_count, expected_tabs);
+    }
+
     let shell = seyal_app_shell(handle);
     assert_eq!(shell.window_count, 0);
+    assert_eq!(shell.active_window_lo, 0);
+    assert_eq!(shell.active_window_hi, 0);
     assert_eq!(shell.tab_count, 0);
     assert_eq!(shell.pane_count, 0);
+
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn ffi_close_rejects_stale_containment_generation_without_mutation() {
+    let handle = seyal_app_create();
+    let initial = seyal_app_shell(handle);
+    let tab = seyal_app_shell_row(handle, 1, 0);
+    let mut close = identity_fence(24, &seyal_app_snapshot(handle));
+    close.target_execution_lo = tab.id_lo;
+    close.target_execution_hi = tab.id_hi;
+    close.target_generation = initial.containment_generation.saturating_add(1);
+
+    assert_eq!(unsafe { seyal_app_apply(handle, &close) }, -4);
+    let after = seyal_app_shell(handle);
+    assert_eq!(after.containment_generation, initial.containment_generation);
+    assert_eq!(after.window_count, initial.window_count);
+    assert_eq!(after.tab_count, initial.tab_count);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -114,9 +146,12 @@ fn shell_projection_is_one_local_workspace() {
     assert_eq!(shell.tab_count, 1);
     assert_eq!(shell.pane_count, 1);
     assert_eq!(
-        shell.flags & 3,
-        SHELL_FLAG_ALLOWS_TAB_CREATION,
-        "production advertises tab creation after C2b; splits stay off"
+        shell.flags,
+        SHELL_FLAG_ALLOWS_TAB_CREATION
+            | SHELL_FLAG_ALLOWS_PANE_SPLITTING
+            | SHELL_FLAG_ALLOWS_TAB_CLOSE
+            | SHELL_FLAG_ALLOWS_PANE_CLOSE,
+        "production advertises tab creation and pane splitting after C2b/C3"
     );
     assert_ne!(
         shell.flags & 12,

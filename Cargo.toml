@@ -10,8 +10,10 @@ members = [
     "crates/seyal-agent-core",
     "crates/seyal-agent-protocol",
     "crates/seyal-agent-store",
+    "crates/seyal-agent-context",
     "crates/seyal-agent-backend",
     "crates/seyal-agent-client",
+    "benches/m005_spec013_terminal_isolation",
 ]
 resolver = "3"
 

@@ -155,6 +155,363 @@ fn foreign_session_is_rejected_not_failed_when_hostless() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn prepare_action_persists_intent_without_starting_a_host() {
+    use seyal_agent_core::{
+        ActionId, ActionIntent, ArgumentFingerprint, AuthorizationClass, CapabilityRef,
+        EffectClass, PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
+        RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let intent = ActionIntent::prepare(
+        ActionId::new(),
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"mkdir"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        service.prepare_action(&intent).unwrap(),
+        seyal_agent_store::PrepareOutcome::NewlyPrepared
+    );
+    assert!(service.host.is_none());
+    let loaded = service
+        .store
+        .actions()
+        .get(intent.action_id())
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded, intent);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn recover_action_does_not_start_a_host_and_never_retries_unknown_effects() {
+    use seyal_agent_core::{
+        ActionId, ActionIntent, ActionLifecycle, ArgumentFingerprint, AuthorizationClass,
+        CapabilityRef, CrashBoundary, EffectClass, PrivacyDependencyId, RecoveryEvidence,
+        RequestProvenance, ResourceIdentity, RevocationFence, RevocationFenceMember,
+        RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let action_id = ActionId::new();
+    let intent = ActionIntent::prepare(
+        action_id,
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"rm -rf"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    service.prepare_action(&intent).unwrap();
+    service
+        .store
+        .actions()
+        .fixture_mark_authorized(action_id)
+        .unwrap();
+    service
+        .store
+        .actions()
+        .fixture_mark_dispatching(action_id, 3)
+        .unwrap();
+    let decision = service
+        .recover_action(
+            action_id,
+            CrashBoundary::AfterEffectBeforeResultPersist,
+            &RecoveryEvidence::none(),
+        )
+        .unwrap();
+    assert_eq!(decision.runtime.lifecycle, ActionLifecycle::EffectUnknown);
+    assert!(!decision.may_retry_effect);
+    assert!(service.host.is_none());
+    let digest_before = intent.digest();
+    let loaded = service.store.actions().get(action_id).unwrap().unwrap();
+    assert_eq!(loaded.digest(), digest_before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn approval_binding_seam_does_not_start_a_host() {
+    use seyal_agent_core::{
+        ApprovalVerdict, ArgumentFingerprint, CapabilityRef, ConsumptionWitness, ControlMode,
+        DecisionAuthority, EffectClass, ResourceIdentity, RevocationFence, RevocationFenceMember,
+        RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+    use seyal_agent_store::DecideInput;
+
+    let (dir, service, _principal) = open_hostless();
+    let run = AgentRunId::new();
+    let request = service
+        .record_approval_request(
+            seyal_agent_core::ApprovalRequestSpec {
+                approval_id: seyal_agent_core::ApprovalId::new(),
+                action_id: Some(seyal_agent_core::ActionId::new()),
+                action_intent_digest: Some([3; 32]),
+                agent_run_id: Some(run),
+                capability: Some(CapabilityRef::new(b"fs.write").unwrap()),
+                resource: Some(ResourceIdentity::new(b"file", [1; 16], [2; 16], [4; 32]).unwrap()),
+                argument_fingerprint: Some(ArgumentFingerprint::of(b"mkdir")),
+                effect_class: Some(EffectClass::NonReplayable),
+                policy_generation: Some(1),
+                revocation_fence: Some(
+                    RevocationFence::new(vec![RevocationFenceMember {
+                        scope: ScopeIdentity::new(ScopeKind::Workspace, [5; 16]),
+                        generation: RevocationGeneration::FIRST,
+                    }])
+                    .unwrap(),
+                ),
+                expires_at_unix_ms: None,
+                requested_at_unix_ms: 1,
+                attention_id: None,
+                control_mode: ControlMode::SeyalControlled,
+            },
+            "write file",
+        )
+        .unwrap();
+    let decided = service
+        .decide_approval(DecideInput {
+            approval_id: request.approval_id,
+            action_id: request.action_id,
+            agent_run_id: request.agent_run_id,
+            verdict: ApprovalVerdict::Approved,
+            authority: DecisionAuthority::User,
+            decision_policy_generation: 1,
+            decision_principal_id: None,
+            require_session: false,
+            client_session: None,
+            session_valid: true,
+            has_approval_decide_scope: true,
+            now_unix_ms: Some(2),
+        })
+        .unwrap();
+    assert_eq!(decided.decision, ApprovalVerdict::Approved);
+    service
+        .consume_approval_exact(
+            request.approval_id,
+            &ConsumptionWitness::from_request(&request),
+            3,
+        )
+        .unwrap();
+    assert!(service.host.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn persist_pause_does_not_start_a_host_or_gate_terminal_progress() {
+    use seyal_agent_core::{
+        ActionId, ActionIntent, ArgumentFingerprint, AuthorizationClass, CapabilityRef,
+        EffectClass, PersistHealth, PrivacyDependencyId, RequestProvenance, ResourceIdentity,
+        RevocationFence, RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+
+    let (dir, mut service, principal) = open_hostless();
+    let _ = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let action_id = ActionId::new();
+    let intent = ActionIntent::prepare(
+        action_id,
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"ok"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    service.prepare_action(&intent).unwrap();
+    assert_eq!(service.action_persist_health(), PersistHealth::Healthy);
+    assert!(!service.action_persist_health().may_gate_terminal_progress());
+    let resumed = service.resume_action_persist(action_id).unwrap();
+    assert!(resumed.fences_current);
+    assert!(service.host.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dispatch_action_consumes_approval_without_starting_a_host() {
+    use seyal_agent_core::{
+        ActionId, ActionIntent, ActionLifecycle, ApprovalId, ApprovalRequestSpec, ApprovalVerdict,
+        ArgumentFingerprint, AuthorizationClass, CapabilityRef, ControlMode, DecisionAuthority,
+        EffectClass, PrivacyDependencyId, RequestProvenance, ResourceIdentity, RevocationFence,
+        RevocationFenceMember, RevocationGeneration, ScopeIdentity, ScopeKind,
+    };
+    use seyal_agent_store::{DecideInput, DispatchInput};
+
+    let (dir, mut service, principal) = open_hostless();
+    let session_id = seed_attempt(&mut service, principal);
+    let attempt_id = service.store.attempts().unwrap()[0].0;
+    let run = AgentRunId::new();
+    service
+        .store
+        .mutate_agent_run_and_append(run, attempt_id, 1, 1, 1, b"run")
+        .unwrap();
+    let foreign = ClientSessionId::new();
+    let intent = ActionIntent::prepare(
+        ActionId::new(),
+        run,
+        CapabilityRef::new(b"fs.write").unwrap(),
+        ResourceIdentity::new(b"file", [1; 16], [2; 16], [3; 32]).unwrap(),
+        ArgumentFingerprint::of(b"mkdir"),
+        EffectClass::NonReplayable,
+        1,
+        PrivacyDependencyId([9; 16]),
+        RevocationFence::new(vec![RevocationFenceMember {
+            scope: ScopeIdentity::new(ScopeKind::Workspace, [4; 16]),
+            generation: RevocationGeneration::FIRST,
+        }])
+        .unwrap(),
+        RequestProvenance::AgentBackend,
+        AuthorizationClass::HumanApproval,
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        service.prepare_action_for_run(principal, foreign, &intent, 1),
+        Err(seyal_agent_store::ActionError::CallerRunDenied)
+    );
+    service.prepare_action(&intent).unwrap();
+    let request = service
+        .record_approval_request(
+            ApprovalRequestSpec {
+                approval_id: ApprovalId::new(),
+                action_id: Some(intent.action_id()),
+                action_intent_digest: Some(intent.digest()),
+                agent_run_id: Some(run),
+                capability: Some(intent.capability().clone()),
+                resource: Some(intent.resource().clone()),
+                argument_fingerprint: Some(intent.argument_fingerprint()),
+                effect_class: Some(intent.effect_class()),
+                policy_generation: Some(1),
+                revocation_fence: Some(intent.revocation_fence().clone()),
+                expires_at_unix_ms: None,
+                requested_at_unix_ms: 2,
+                attention_id: None,
+                control_mode: ControlMode::SeyalControlled,
+            },
+            "write",
+        )
+        .unwrap();
+    service
+        .decide_approval(DecideInput {
+            approval_id: request.approval_id,
+            action_id: request.action_id,
+            agent_run_id: request.agent_run_id,
+            verdict: ApprovalVerdict::Approved,
+            authority: DecisionAuthority::User,
+            decision_policy_generation: 1,
+            decision_principal_id: None,
+            require_session: false,
+            client_session: None,
+            session_valid: true,
+            has_approval_decide_scope: true,
+            now_unix_ms: Some(3),
+        })
+        .unwrap();
+    assert!(service
+        .decide_approval_for_session(
+            principal,
+            foreign,
+            DecideInput {
+                approval_id: request.approval_id,
+                action_id: request.action_id,
+                agent_run_id: request.agent_run_id,
+                verdict: ApprovalVerdict::Approved,
+                authority: DecisionAuthority::User,
+                decision_policy_generation: 1,
+                decision_principal_id: None,
+                require_session: true,
+                client_session: Some(foreign),
+                session_valid: true,
+                has_approval_decide_scope: true,
+                now_unix_ms: Some(4),
+            },
+        )
+        .is_err());
+    let _ = session_id;
+    service.authorize_action(intent.action_id(), 5).unwrap();
+    let outcome = service
+        .dispatch_action(
+            intent.action_id(),
+            DispatchInput {
+                now_ms: 6,
+                current_policy_generation: 1,
+                expected_binding_generation: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(outcome.dispatch_generation, 1);
+    let record = service
+        .store
+        .actions()
+        .get_record(intent.action_id())
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.runtime.lifecycle, ActionLifecycle::Dispatching);
+    assert!(service.host.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[cfg(feature = "fixture-host")]
 #[test]
 fn start_agent_run_uses_injected_host_script_via_collect_observations() {

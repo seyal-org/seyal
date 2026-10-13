@@ -2,9 +2,17 @@
 
 use seyal_core::{AttachmentId, ExecutionId, WorkspaceId};
 
-use super::{AppAction, AppError, ApplicationRoot, BindingEvidence, NativeEffect};
+use super::{AppAction, AppError, ApplicationRoot, BindingEvidence};
 use crate::palette::PaletteCommand;
 use crate::provisioning::ProvisioningEffect;
+
+fn root_with_bootstrap_effects_drained() -> ApplicationRoot {
+    let mut root = ApplicationRoot::new();
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    root
+}
 
 fn evidence(execution: ExecutionId, attachment: AttachmentId) -> BindingEvidence {
     BindingEvidence {
@@ -14,19 +22,6 @@ fn evidence(execution: ExecutionId, attachment: AttachmentId) -> BindingEvidence
         pty_generation: 1,
         alternate_screen: false,
     }
-}
-
-fn product_effects(root: &ApplicationRoot) -> Vec<NativeEffect> {
-    root.snapshot()
-        .pending_effects
-        .into_iter()
-        .filter(|effect| {
-            !matches!(
-                effect,
-                NativeEffect::RealizeWindow { .. } | NativeEffect::OrderFrontMakeKey { .. }
-            )
-        })
-        .collect()
 }
 
 #[test]
@@ -72,7 +67,7 @@ fn adopt_keeps_execution_id_and_uses_fresh_attachment() {
 
 #[test]
 fn terminate_queues_adr005_effect_not_from_close() {
-    let mut root = ApplicationRoot::new();
+    let mut root = root_with_bootstrap_effects_drained();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::new();
     root.apply(AppAction::RecordUnpresented {
@@ -83,9 +78,7 @@ fn terminate_queues_adr005_effect_not_from_close() {
     root.apply(AppAction::TerminateUnpresented { execution })
         .unwrap();
     assert!(
-        !product_effects(&root)
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })),
+        root.snapshot().pending_effects.is_empty(),
         "dispose must not emit NativeEffect TerminateExecution"
     );
     assert!(
@@ -118,6 +111,11 @@ fn palette_lists_unpresented_without_auto_select() {
 
     let fence = root.fence();
     root.apply(AppAction::OpenPalette { fence }).unwrap();
+    root.apply(AppAction::SetPaletteQuery {
+        fence: root.fence(),
+        query: "Adopt Unpresented".to_owned(),
+    })
+    .unwrap();
     let rows = root.snapshot().palette.rows;
     let adopt: Vec<_> = rows
         .iter()
@@ -131,7 +129,7 @@ fn palette_lists_unpresented_without_auto_select() {
 
 #[test]
 fn palette_terminate_dispatches_typed_action() {
-    let mut root = ApplicationRoot::new();
+    let mut root = root_with_bootstrap_effects_drained();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::from_bytes([0x33; 16]);
     root.apply(AppAction::RecordUnpresented {
@@ -151,9 +149,7 @@ fn palette_terminate_dispatches_typed_action() {
         address: None,
     })
     .unwrap();
-    assert!(!product_effects(&root)
-        .iter()
-        .any(|effect| matches!(effect, NativeEffect::TerminateExecution { .. })));
+    assert!(root.snapshot().pending_effects.is_empty());
     assert!(matches!(
         root.pending_wire_effects(),
         [ProvisioningEffect::AttachController { execution: parked, .. }]
@@ -192,6 +188,47 @@ fn sync_drops_retired_and_bound() {
 }
 
 #[test]
+fn runtime_inventory_reconciles_unpresented_catalog_and_keeps_workspace_scope() {
+    let mut root = ApplicationRoot::new();
+    let workspace = WorkspaceId::m001_default();
+    let other_workspace = WorkspaceId::from_bytes([0x44; 16]);
+    let live_here = ExecutionId::from_bytes([0x11; 16]);
+    let exited_here = ExecutionId::from_bytes([0x22; 16]);
+    let live_elsewhere = ExecutionId::from_bytes([0x33; 16]);
+
+    root.sync_live_unpresented(vec![
+        (live_here, workspace),
+        (exited_here, workspace),
+        (live_elsewhere, other_workspace),
+    ])
+    .unwrap();
+
+    // Runtime reports two live executions and omits the naturally exited one.
+    root.reconcile_live_unpresented(&[live_here, live_elsewhere]);
+
+    assert_eq!(root.live_unpresented(), vec![live_here]);
+    assert_eq!(
+        root.shell.live_unpresented(other_workspace),
+        vec![live_elsewhere],
+        "reconciliation keeps the Workspace association while removing exited ids"
+    );
+}
+
+#[test]
+fn runtime_inventory_imports_survivors_into_a_fresh_shell_catalog() {
+    let mut root = ApplicationRoot::new();
+    let first = ExecutionId::from_bytes([0x51; 16]);
+    let second = ExecutionId::from_bytes([0x52; 16]);
+
+    // A restarted GUI has no prior shell catalog. Runtime still owns these
+    // live executions, and its current M001 association is the stable default
+    // Workspace (SPEC-004 §18.2; ADR-007 §2).
+    root.reconcile_live_unpresented(&[second, first]);
+
+    assert_eq!(root.live_unpresented(), vec![first, second]);
+}
+
+#[test]
 fn close_actions_do_not_emit_terminate_execution() {
     let mut root = ApplicationRoot::new();
     let execution = ExecutionId::new();
@@ -216,14 +253,52 @@ fn close_actions_do_not_emit_terminate_execution() {
         .snapshot()
         .pending_effects
         .iter()
-        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
+        .all(|effect| !matches!(
+            effect,
+            super::NativeEffect::BoundedDetachThenTerminate { .. }
+        )));
     assert_eq!(root.live_unpresented(), vec![execution]);
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
 
 #[test]
-fn palette_adopt_emits_attach_intent_without_binding() {
+fn close_window_releases_bound_execution_into_live_unpresented_catalog() {
     let mut root = ApplicationRoot::new();
+    let execution = ExecutionId::from_bytes([0x78; 16]);
+    let window = root
+        .snapshot()
+        .shell
+        .active_window
+        .expect("initial product window");
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x79; 16])),
+    })
+    .expect("bind execution");
+    let generation = root.snapshot().shell.containment_generation;
+
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation: generation,
+    })
+    .expect("close presentation");
+
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert_eq!(root.live_unpresented(), vec![execution]);
+    assert!(root.provisioning().is_unreferenced(execution));
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(
+            effect,
+            super::NativeEffect::BoundedDetachThenTerminate { .. }
+        )));
+}
+
+#[test]
+fn palette_adopt_emits_attach_intent_without_binding() {
+    let mut root = root_with_bootstrap_effects_drained();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::from_bytes([0xcd; 16]);
     root.apply(AppAction::RecordUnpresented {
@@ -256,9 +331,7 @@ fn palette_adopt_emits_attach_intent_without_binding() {
     .unwrap();
 
     assert!(
-        !product_effects(&root)
-            .iter()
-            .any(|effect| matches!(effect, NativeEffect::RequestAdoptAttach { .. })),
+        root.snapshot().pending_effects.is_empty(),
         "adopt must not emit NativeEffect RequestAdoptAttach"
     );
     assert!(matches!(
@@ -311,36 +384,32 @@ fn adopt_rejects_cross_workspace_and_retired() {
 }
 
 #[test]
-fn close_window_keeps_bound_execution_enumerable_without_terminate() {
+fn failed_unpresented_record_does_not_change_provisioning_ledger() {
     let mut root = ApplicationRoot::new();
-    let execution = ExecutionId::from_bytes([0x44; 16]);
-    let window = root
-        .snapshot()
-        .shell
-        .active_window
-        .expect("bootstrap window");
-    root.apply(AppAction::Bind {
+    let workspace = WorkspaceId::m001_default();
+    let execution = ExecutionId::from_bytes([0xa5; 16]);
+
+    root.apply(AppAction::RecordUnpresented {
+        execution,
+        workspace,
+    })
+    .expect("catalog the live execution");
+    root.apply(AppAction::Adopt {
         fence: root.fence(),
-        evidence: evidence(execution, AttachmentId::from_bytes([0x45; 16])),
+        evidence: evidence(execution, AttachmentId::from_bytes([0xb6; 16])),
     })
-    .unwrap();
-    let containment_generation = root.snapshot().shell.containment_generation;
-    root.apply(AppAction::CloseWindow {
-        id: window,
-        containment_generation,
-    })
-    .expect("W4b CloseWindow");
-    assert!(root.snapshot().shell.windows.is_empty());
-    assert!(root.snapshot().shell.active_window.is_none());
-    assert!(root
-        .snapshot()
-        .pending_effects
-        .iter()
-        .any(|effect| matches!(effect, NativeEffect::DestroyWindowRealization { .. })));
-    assert!(root
-        .snapshot()
-        .pending_effects
-        .iter()
-        .all(|effect| !matches!(effect, NativeEffect::TerminateExecution { .. })));
-    assert_eq!(root.live_unpresented(), vec![execution]);
+    .expect("bind the same execution");
+
+    assert!(!root.provisioning().is_unreferenced(execution));
+    assert_eq!(
+        root.apply(AppAction::RecordUnpresented {
+            execution,
+            workspace,
+        }),
+        Err(AppError::AlreadyBound)
+    );
+    assert!(
+        !root.provisioning().is_unreferenced(execution),
+        "a rejected catalog update must not leave a phantom unreferenced ledger entry"
+    );
 }

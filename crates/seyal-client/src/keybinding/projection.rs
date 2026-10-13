@@ -49,14 +49,14 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneSplitDown
         | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
-        | WorkspaceCommandId::GotoOpen
-        | WorkspaceCommandId::AppCloseFocused
+        | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
+        WorkspaceCommandId::AppCloseFocused
         | WorkspaceCommandId::WindowNew
         | WorkspaceCommandId::WindowClose
         | WorkspaceCommandId::WindowCycleNext
         | WorkspaceCommandId::WindowCyclePrevious => command.ordinal.is_none(),
-        // Ordinal tabs/windows are key-only; not separate menu rows in M003.
-        // Focus-history menus land with N3 / tip B (no dead catalog entries).
+        // Ordinal tabs are key-only; not separate menu rows in M003.
+        // Focus-history is key-only in M003 (K8); not a K5 menu row.
         WorkspaceCommandId::TabSelectOrdinal
         | WorkspaceCommandId::WindowSelectOrdinal
         | WorkspaceCommandId::CommandPaletteClose
@@ -89,9 +89,9 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::AppCloseFocused => "Close",
         WorkspaceCommandId::WindowNew => "New Window",
         WorkspaceCommandId::WindowClose => "Close Window",
-        WorkspaceCommandId::WindowCycleNext => "Cycle Next Window",
-        WorkspaceCommandId::WindowCyclePrevious => "Cycle Previous Window",
-        // Focus-history titles land with N3 / tip B; keep out of the menu catalog until then.
+        WorkspaceCommandId::WindowCycleNext => "Next Window",
+        WorkspaceCommandId::WindowCyclePrevious => "Previous Window",
+        // Focus-history remains key-only in M003 (K8); not a K5 menu title.
         other => other.as_str(),
     }
 }

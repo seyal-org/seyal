@@ -66,7 +66,9 @@ pub enum IntentPhase {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingIntent {
-    pub pane: PaneId,
+    /// The Pane associated with this intent, if it provisions/adopts one.
+    /// Dispose-only operations use a synthetic connection and have no Pane.
+    pub pane: Option<PaneId>,
     pub owner: ConnectionOwner,
     pub request_id: u64,
     pub geometry: PaneGeometry,

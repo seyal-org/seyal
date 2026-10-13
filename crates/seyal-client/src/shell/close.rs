@@ -36,6 +36,11 @@ impl ShellState {
         if was_product_active {
             if let Some(successor) = self.successor_after_close(workspace_id) {
                 self.activate_window(successor)?;
+                if !self.pending_effects.iter().any(|effect| {
+                    matches!(effect, ShellNativeEffect::OrderFrontMakeKey { window } if *window == successor)
+                }) {
+                    self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window: successor });
+                }
             }
             // Zero-Window: last_active_workspace stays unchanged (ADR-018 §3.2 / §3.3a).
         } else {
@@ -61,11 +66,16 @@ impl ShellState {
             .tabs
             .len()
             == 1;
+        let was_product_active_tab = self.product_active_window_id() == Some(window_id)
+            && self
+                .workspace(workspace_id)?
+                .window(window_id)
+                .is_some_and(|window| window.active_tab == id);
         if only_tab {
             return self.close_window(window_id, containment_generation);
         }
 
-        let removed = {
+        let (removed, successor_focus) = {
             let window = self
                 .workspace_mut(workspace_id)?
                 .window_mut(window_id)
@@ -76,7 +86,15 @@ impl ShellState {
                 let replacement = tab_index.min(window.tabs.len() - 1);
                 window.active_tab = window.tabs[replacement].id;
             }
-            removed
+            let successor_focus = was_product_active_tab.then(|| {
+                window
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.id == window.active_tab)
+                    .expect("Window retains an active Tab")
+                    .focused
+            });
+            (removed, successor_focus)
         };
         self.last_removed_tab_panes = removed.panes.keys().copied().collect();
         self.last_released_execution = None;
@@ -86,6 +104,9 @@ impl ShellState {
             }
         }
         self.purge_missing_panes();
+        if let Some(pane) = successor_focus {
+            self.focus_history.record(pane);
+        }
 
         self.bump_containment_generation();
         Ok(())
@@ -100,6 +121,7 @@ impl ShellState {
         let (workspace_id, _window_id, tab_id) = self
             .find_pane_location(pane_id)
             .ok_or(ShellError::UnknownPane)?;
+        let was_product_focused = self.focused_pane_id().ok() == Some(pane_id);
         let only_pane = {
             let tab = self
                 .workspace(workspace_id)?
@@ -111,25 +133,32 @@ impl ShellState {
             return self.close_tab(tab_id, containment_generation);
         }
 
-        let released = {
+        let (released, focus_successor) = {
             let tab = self.tab_mut(workspace_id, tab_id)?;
             let Some(pane) = tab.panes.get_mut(&pane_id) else {
                 return Err(ShellError::UnknownPane);
             };
             let released = pane.execution.take();
+            let sibling_successor = tab.root.sibling_first_leaf(pane_id);
             let Some(root) = tab.root.removing(pane_id) else {
                 return Err(ShellError::UnknownPane);
             };
             tab.root = root;
             tab.panes.remove(&pane_id);
+            if tab.zoomed == Some(pane_id) {
+                tab.zoomed = None;
+            }
+            let mut focus_successor = None;
             if tab.focused == pane_id || !tab.panes.contains_key(&tab.focused) {
                 // Surviving sibling subtree's pre-order first leaf (ADR-021 / §3.2).
                 tab.focused = tab
                     .root
                     .first_pane()
+                    .and_then(|_| sibling_successor.or_else(|| tab.root.first_pane()))
                     .expect("remaining Pane tree must contain a Pane");
+                focus_successor = was_product_focused.then_some(tab.focused);
             }
-            released
+            (released, focus_successor)
         };
         self.last_removed_tab_panes.clear();
         self.last_released_execution = released.map(|execution| (pane_id, execution));
@@ -137,6 +166,9 @@ impl ShellState {
             self.unpresented.insert(execution, workspace_id);
         }
         self.purge_missing_panes();
+        if let Some(pane) = focus_successor {
+            self.focus_history.record(pane);
+        }
 
         self.bump_containment_generation();
         Ok(())
@@ -243,10 +275,7 @@ impl ShellState {
     }
 
     pub(super) fn product_active_window_id(&self) -> Option<WindowId> {
-        self.workspace(self.active_workspace)
-            .ok()
-            .and_then(|workspace| workspace.active_window)
-            .filter(|window| self.find_window(*window).is_some())
+        self.product_active_window().map(|window| window.id)
     }
 
     pub(super) fn dispatch_close(&mut self, action: super::ShellAction) -> Result<(), ShellError> {

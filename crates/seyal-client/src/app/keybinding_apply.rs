@@ -94,8 +94,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::CommandPaletteClose => self.close_palette(fence),
             WorkspaceCommandId::TabCreate => self.create_tab(),
             WorkspaceCommandId::TabCloseFocused => {
-                let shell = self.shell.snapshot();
-                self.close_tab(shell.active_tab, shell.containment_generation)
+                let id = self.shell.snapshot().active_tab;
+                self.close_tab(id, self.shell.containment_generation())
             }
             WorkspaceCommandId::TabSelectPrevious => self.select_tab_relative(-1),
             WorkspaceCommandId::TabSelectNext => self.select_tab_relative(1),
@@ -112,8 +112,8 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneSplitRight => self.split_focused(SplitAxis::Right),
             WorkspaceCommandId::PaneSplitDown => self.split_focused(SplitAxis::Down),
             WorkspaceCommandId::PaneCloseFocused => {
-                let shell = self.shell.snapshot();
-                self.close_pane(shell.focused_pane, shell.containment_generation)
+                let id = self.shell.snapshot().focused_pane;
+                self.close_pane(id, self.shell.containment_generation())
             }
             WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
             WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),
@@ -149,10 +149,21 @@ impl ApplicationRoot {
             }
             // SPEC-024 §5.5 / K8: same N4 surface and default Panes scope as the menu.
             WorkspaceCommandId::GotoOpen => self.open_goto(fence, GotoScope::Panes),
-            // Catalog builtins/projection omit FocusHistory until N3 (#1117 / tip B).
-            // Custom TOML / FFI ids 19–20 stay parseable and return unavailable.
-            WorkspaceCommandId::FocusHistoryBack | WorkspaceCommandId::FocusHistoryForward => {
-                Err(AppError::ActionUnavailable)
+            // N3 owns history actions; default catalog chords remain K8 (#1132).
+            // Custom TOML / FFI ids 19–20 dispatch through the Rust cursor seq.
+            WorkspaceCommandId::FocusHistoryBack => {
+                let observed = self
+                    .focus_history
+                    .cursor_seq()
+                    .ok_or(AppError::NavigationHistoryUnavailable)?;
+                self.history_back(observed)
+            }
+            WorkspaceCommandId::FocusHistoryForward => {
+                let observed = self
+                    .focus_history
+                    .cursor_seq()
+                    .ok_or(AppError::NavigationHistoryUnavailable)?;
+                self.history_forward(observed)
             }
             WorkspaceCommandId::AppQuit => self.quit(),
             WorkspaceCommandId::AppCloseFocused => {
@@ -227,6 +238,7 @@ impl ApplicationRoot {
                 epoch: snap.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.sync_focused_presentation_mode();
         self.clear_chord_prefix();
         Ok(())
     }

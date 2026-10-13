@@ -73,7 +73,8 @@ pub struct SeyalAppPaneLeaf {
     pub execution_hi: u64,
     pub title: *const u8,
     pub title_len: u32,
-    pub reserved: u32,
+    pub presentation_mode: u16,
+    pub reserved: u16,
 }
 
 #[repr(C)]
@@ -87,6 +88,8 @@ pub struct SeyalAppPaneTreeNode {
     pub pane_hi: u64,
     pub first: u32,
     pub second: u32,
+    pub ratio: f32,
+    pub reserved2: u32,
 }
 
 #[repr(C)]
@@ -153,6 +156,7 @@ impl SeyalAppPaneLeaf {
             execution_hi: 0,
             title: ptr::null(),
             title_len: 0,
+            presentation_mode: 0,
             reserved: 0,
         }
     }
@@ -169,6 +173,8 @@ impl SeyalAppPaneTreeNode {
             pane_hi: 0,
             first: 0,
             second: 0,
+            ratio: 0.0,
+            reserved2: 0,
         }
     }
 }
@@ -194,7 +200,7 @@ pub(in crate::ffi) struct WindowEncodeScratch {
     pub tree_nodes: Vec<(u16, u16, u16, SeyalAppPaneTreeNode)>,
     pub effects: Vec<SeyalAppNativeEffect>,
     pub header: SeyalAppShell,
-    cache_key: Option<(u64, u16, u64)>,
+    cache_key: Option<(u64, u16, u64, u32)>,
     #[cfg(test)]
     encode_count: u32,
 }
@@ -342,6 +348,7 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
                         execution_hi,
                         title: title.0 as *const u8,
                         title_len: title.1,
+                        presentation_mode: presentation_mode_code(pane.presentation_mode),
                         reserved: 0,
                     },
                 ));
@@ -352,7 +359,7 @@ pub(super) fn encode_window_snapshot(state: &mut AppHandle) {
         state.window_scratch.effects.push(encode_effect(*effect));
     }
     relocate_window_pointers(state);
-    state.window_scratch.header = fill_shell_header_from(state, &snap.shell);
+    state.window_scratch.header = fill_shell_header_from(state, &snap.shell, snap.generation);
     state.window_scratch.cache_key = Some(key);
 }
 
@@ -376,24 +383,20 @@ fn relocate_window_pointers(state: &mut AppHandle) {
 }
 
 fn encode_effect(effect: NativeEffect) -> SeyalAppNativeEffect {
-    // kind 1 BoundedDetachThenTerminate: window_lo carries relative deadline_ms.
-    // kinds 5/6: window_* slots carry ExecutionId.
-    let (window_lo, window_hi) = match effect {
-        NativeEffect::BoundedDetachThenTerminate { deadline_ms } => (deadline_ms, 0),
-        other => match other.window() {
-            Some(window) => split_id(window.to_bytes()),
-            None => match other.execution() {
-                Some(execution) => split_id(execution.to_bytes()),
-                None => (0, 0),
-            },
-        },
+    let (window_lo, window_hi) = match effect.window() {
+        Some(window) => split_id(window.to_bytes()),
+        None => (0, 0),
     };
     SeyalAppNativeEffect {
         version: APP_ABI_VERSION,
         size: size_of::<SeyalAppNativeEffect>() as u16,
         kind: effect.kind_code() as u16,
         reserved: 0,
-        window_lo,
+        window_lo: if matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. }) {
+            effect.deadline_ms()
+        } else {
+            window_lo
+        },
         window_hi,
     }
 }
@@ -422,6 +425,8 @@ fn encode_tree(
                     pane_hi,
                     first: 0,
                     second: 0,
+                    ratio: 0.0,
+                    reserved2: 0,
                 },
             ));
         }
@@ -429,7 +434,7 @@ fn encode_tree(
             axis,
             first,
             second,
-            ..
+            ratio,
         } => {
             let slot = out.len();
             out.push((
@@ -448,6 +453,8 @@ fn encode_tree(
                     pane_hi: 0,
                     first: 0,
                     second: 0,
+                    ratio: ratio.fraction(),
+                    reserved2: 0,
                 },
             ));
             let first_i = encode_tree(first, wi, ti, base, out);
@@ -476,9 +483,18 @@ fn tier_code(tier: PresentationTier) -> u16 {
     }
 }
 
+fn presentation_mode_code(mode: crate::presentation::PresentationMode) -> u16 {
+    match mode {
+        crate::presentation::PresentationMode::Flow => 0,
+        crate::presentation::PresentationMode::Raw => 1,
+        crate::presentation::PresentationMode::Tui => 2,
+    }
+}
+
 pub(super) fn fill_shell_header_from(
     state: &AppHandle,
     shell: &crate::shell::ShellSnapshot,
+    shell_generation: u64,
 ) -> SeyalAppShell {
     let workspace = split_id(shell.active_workspace.to_bytes());
     let last_workspace = split_id(shell.last_active_workspace.to_bytes());
@@ -525,6 +541,7 @@ pub(super) fn fill_shell_header_from(
         active_window_hi: window.1,
         last_active_workspace_lo: last_workspace.0,
         last_active_workspace_hi: last_workspace.1,
+        shell_generation,
     }
 }
 

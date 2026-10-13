@@ -2,15 +2,6 @@ import AppKit
 
 @MainActor
 extension ProductChromeHostView {
-    func configureStructuralCloseButtons(_ shell: SeyalAppShell) {
-        closeTabButton.setShellIdentity(
-            shell.active_tab_lo, shell.active_tab_hi, shell.containment_generation
-        )
-        closePaneButton.setShellIdentity(
-            shell.focused_pane_lo, shell.focused_pane_hi, shell.containment_generation
-        )
-    }
-
     @objc func showWorkspaces() {
         applyChromeKind(UInt16(SEYAL_APP_ACTION_SET_LEFT_PANEL.rawValue), reserved: 0)
     }
@@ -93,8 +84,6 @@ extension ProductChromeHostView {
         if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
             || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
         {
-            // Structural actions must carry the generation from the shell
-            // snapshot that produced this button. Rust rejects stale chrome.
             action.target_generation = tagged.containmentGeneration
         }
         _ = seyal_app_apply(pane.appHandle, &action)
@@ -156,6 +145,15 @@ extension ProductChromeHostView {
         closePaneButton.setAccessibilityIdentifier("seyal-close-pane")
         closePaneButton.target = self
         closePaneButton.action = #selector(closeFocusedPane(_:))
+    }
+
+    func configureCloseButtons(shell: SeyalAppShell) {
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
+        closeTabButton.containmentGeneration = shell.containment_generation
+        closePaneButton.idLo = shell.focused_pane_lo
+        closePaneButton.idHi = shell.focused_pane_hi
+        closePaneButton.containmentGeneration = shell.containment_generation
     }
 
     func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {

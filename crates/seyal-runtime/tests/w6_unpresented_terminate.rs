@@ -175,7 +175,8 @@ fn n_times_reap_failure_stays_bounded_while_sibling_progresses() {
         .damage_generation();
 
     // Persistent unreapability: bounded retries, no fixed-frequency hot loop.
-    exec_fault::fail_times(ExecFaultPoint::ChildTryWait, 64);
+    const INJECTED_REAP_FAILURES: usize = 64;
+    exec_fault::fail_times(ExecFaultPoint::ChildTryWait, INJECTED_REAP_FAILURES);
     runtime.request_termination(target).expect("terminate");
 
     let failed_deadline = Instant::now() + Duration::from_secs(3);
@@ -209,6 +210,13 @@ fn n_times_reap_failure_stays_bounded_while_sibling_progresses() {
     assert!(
         sibling_advanced,
         "sibling PTY work stalled during bounded reap-failure retries"
+    );
+    let remaining_failures = exec_fault::remaining(ExecFaultPoint::ChildTryWait);
+    assert!(
+        remaining_failures >= INJECTED_REAP_FAILURES - 16,
+        "termination failure consumed more than 16 reap attempts: {} of {} injected failures remain",
+        remaining_failures,
+        INJECTED_REAP_FAILURES
     );
 
     exec_fault::fail_times(ExecFaultPoint::ChildTryWait, 0);

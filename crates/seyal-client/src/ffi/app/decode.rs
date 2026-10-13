@@ -199,6 +199,13 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             containment_generation: action.target_generation,
         }),
+        67 => Ok(AppAction::CloseWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {
             fence,
@@ -315,37 +322,49 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
-        // W4a window host intents (ADR-018 §2.2 / §2.3). Numbers follow tip A goto.
-        63 => Ok(AppAction::SelectWindow {
+        68 => Ok(AppAction::SelectWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
         }),
-        64 => Ok(AppAction::CycleWindow {
+        69 => Ok(AppAction::CycleWindow {
             direction: if action.reserved == 0 {
                 crate::shell::CycleDirection::Next
             } else {
                 crate::shell::CycleDirection::Previous
             },
         }),
-        65 => Ok(AppAction::CreateWindow),
-        66 => Ok(AppAction::ReportWindowEvent {
+        70 => Ok(AppAction::CreateWindow),
+        71 => Ok(AppAction::ReportWindowEvent {
             window: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
             event: decode_window_event(action.reserved)?,
         }),
-        // ADR-018 structural close: target_execution_* carries WindowId and
-        // target_generation is the observed shell containment generation.
-        67 => Ok(AppAction::CloseWindow {
-            id: WindowId::from_bytes(id16(
-                action.target_execution_lo,
-                action.target_execution_hi,
-            )?),
-            containment_generation: action.target_generation,
-        }),
+        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
+        // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
+        // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
+        // ActionUnavailable (50).
+        63 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryBack {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
+        64 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryForward {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
         _ => Err(-6),
     }
 }
@@ -369,6 +388,22 @@ fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i
         9 => ScreenOrScaleChanged,
         _ => return Err(-6),
     })
+}
+
+fn decode_focus_seq(
+    payload: *const u8,
+    payload_len: u32,
+) -> Result<crate::navigation::FocusSeq, i32> {
+    if payload_len != 8 {
+        return Err(-6);
+    }
+    // SAFETY: caller contract — payload_len bytes are readable.
+    let bytes = unsafe { slice::from_raw_parts(payload, 8) };
+    let mut raw = [0_u8; 8];
+    raw.copy_from_slice(bytes);
+    Ok(crate::navigation::FocusSeq::from_raw(u64::from_le_bytes(
+        raw,
+    )))
 }
 
 /// Payload layout for an optional address: empty → None; otherwise

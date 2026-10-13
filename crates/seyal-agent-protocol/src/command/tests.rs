@@ -41,6 +41,11 @@ fn commands_round_trip_and_trailing_bytes_fail() {
             attempt_id: AttemptId::new(),
             route_offering_id: Some(RouteOfferingId::new()),
         },
+        Command::CancelRun {
+            session_id: session,
+            run_id: AgentRunId::new(),
+            control_generation: 1,
+        },
     ];
     for command in commands {
         let frame = encode_command(&command, 4096).unwrap();

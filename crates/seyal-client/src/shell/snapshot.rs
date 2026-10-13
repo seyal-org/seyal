@@ -31,7 +31,7 @@ pub struct WindowTabSnapshot {
     pub layout: LayoutDescription,
 }
 
-/// One Pane leaf with presentation tier and execution binding.
+/// One Pane leaf with presentation mode/tier and execution binding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneLeafSnapshot {
     pub id: PaneId,
@@ -39,21 +39,21 @@ pub struct PaneLeafSnapshot {
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
     pub presentation_tier: PresentationTier,
+    pub presentation_mode: crate::presentation::PresentationMode,
 }
 
 impl ShellState {
     pub(super) fn build_snapshot(&self) -> ShellSnapshot {
-        let product_window = self.product_active_window_id();
+        let product_window = self.product_active_window().map(|window| window.id);
+        let active_workspace = self.active_workspace_id();
         let workspace = self
-            .workspace(self.active_workspace)
+            .workspace(active_workspace)
             .expect("active Workspace must exist");
-        let window_and_tab = product_window.and_then(|id| {
-            let ws = self.find_window(id)?;
-            let window = ws.window(id)?;
-            let tab = ws.tab(window.active_tab)?;
+        let active = product_window.and_then(|id| {
+            let window = workspace.window(id)?;
+            let tab = workspace.tab(window.active_tab)?;
             Some((window, tab))
         });
-
         let nil_tab = TabId::from_bytes([0; 16]);
         let nil_pane = PaneId::from_bytes([0; 16]);
         let (
@@ -65,9 +65,17 @@ impl ShellState {
             layout,
             allows_tab_close,
             allows_pane_close,
-        ) = if let Some((window, tab)) = window_and_tab {
+        ) = if let Some((window, tab)) = active {
             (
-                self.tabs_for_workspace_projection(workspace),
+                workspace
+                    .tabs()
+                    .map(|item| TabSnapshot {
+                        id: item.id,
+                        title: item.title.clone(),
+                        attention: item.attention,
+                        pane_count: item.panes.len(),
+                    })
+                    .collect(),
                 window.active_tab,
                 tab.focused,
                 tab.root
@@ -94,12 +102,11 @@ impl ShellState {
                 nil_pane,
                 Vec::new(),
                 PaneTree::Leaf(nil_pane),
-                LayoutDescription::Single,
+                super::tree::LayoutDescription::Single,
                 false,
                 false,
             )
         };
-
         ShellSnapshot {
             workspaces: self
                 .workspaces
@@ -113,35 +120,24 @@ impl ShellState {
                 })
                 .collect(),
             windows: self.ordered_window_snapshots(product_window),
-            active_workspace: self.active_workspace,
+            active_workspace,
             last_active_workspace: self.last_active_workspace,
             active_window: product_window,
             containment_generation: self.containment_generation,
             tabs,
             active_tab,
             focused_pane,
+            zoomed: active.map(|(_, tab)| tab.zoomed).unwrap_or(None),
             panes,
             tree,
             layout,
             last_error: self.last_error,
-            allows_tab_creation: self.allows_tab_creation && product_window.is_some(),
+            allows_tab_creation: self.allows_tab_creation,
             allows_window_creation: self.allows_window_creation,
-            allows_pane_splitting: self.allows_pane_splitting && product_window.is_some(),
+            allows_pane_splitting: self.allows_pane_splitting,
             allows_tab_close,
             allows_pane_close,
         }
-    }
-
-    fn tabs_for_workspace_projection(&self, workspace: &Workspace) -> Vec<TabSnapshot> {
-        workspace
-            .tabs()
-            .map(|item| TabSnapshot {
-                id: item.id,
-                title: item.title.clone(),
-                attention: item.attention,
-                pane_count: item.panes.len(),
-            })
-            .collect()
     }
 
     fn ordered_window_snapshots(&self, product_window: Option<WindowId>) -> Vec<WindowSnapshot> {
@@ -213,6 +209,7 @@ fn leaf_snapshot(
         execution: pane.execution,
         allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
         presentation_tier: tier_for_leaf(pane.id, tab, window, product_window),
+        presentation_mode: pane.presentation_mode,
     }
 }
 
@@ -226,7 +223,7 @@ fn tier_for_leaf(
     if tab.id != window.active_tab {
         return PresentationTier::Hidden;
     }
-    if product_window == Some(window.id) && pane == tab.focused {
+    if Some(window.id) == product_window && pane == tab.focused {
         PresentationTier::Focused
     } else {
         PresentationTier::Visible
@@ -254,9 +251,12 @@ impl ShellError {
             Self::StaleContainment => 14,
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
-            Self::CrossWorkspaceAdopt => 18,
-            Self::ExecutionNotUnpresented => 19,
-            Self::WindowCreationUnavailable => 20,
+            Self::NotZoomed => 18,
+            Self::InvalidMoveTarget => 19,
+            Self::NoDirectionalNeighbor => 20,
+            Self::CrossWorkspaceAdopt => 21,
+            Self::ExecutionNotUnpresented => 22,
+            Self::WindowCreationUnavailable => 23,
         }
     }
 }

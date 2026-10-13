@@ -58,7 +58,7 @@ fn production_default_admits_extra_window() {
     let mut shell = ShellState::m001_local("local");
     assert!(shell.allows_window_creation());
     assert!(shell.allows_tab_creation());
-    assert!(!shell.allows_pane_splitting());
+    assert!(shell.allows_pane_splitting());
     let generation = shell.containment_generation();
     shell
         .apply(ShellAction::CreateWindow {
@@ -88,7 +88,7 @@ fn occupied_workspace_rejects_create_when_admission_is_off() {
     );
     assert_eq!(
         shell.last_error().expect("error").error_number(),
-        20,
+        23,
         "shell snapshot error number"
     );
     assert_eq!(shell.snapshot().windows.len(), windows);

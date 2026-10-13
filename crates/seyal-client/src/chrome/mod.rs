@@ -14,7 +14,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use seyal_core::{BlockId, TabId, WorkspaceId};
+mod open;
+
+use seyal_core::{BlockId, PaneId, TabId, WorkspaceId};
 
 use crate::composer::{BlockPresentationState, BlockProjection};
 use crate::shell::{LayoutDescription, ShellSnapshot};
@@ -101,6 +103,12 @@ pub struct AttentionItem {
     pub workspace: Option<WorkspaceId>,
     pub tab: Option<TabId>,
     pub agent: Option<AgentId>,
+    /// Projection of store `requires_spatial_focus` (SPEC-028 §4.1).
+    pub requires_spatial_focus: bool,
+    /// Packed SPEC-022 ResourceAddress bytes from the Attention store.
+    pub resource_address: Option<Vec<u8>>,
+    /// Host-projected in-stack Approve eligibility; ignored when spatial.
+    pub in_stack_approve: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +163,16 @@ pub enum ChromeAction {
     ReplaceAttention {
         items: Vec<AttentionItem>,
     },
+    /// Unread/open counts. Must not reorder Workspace/Tab/Pane lists (SY-009).
+    SetAttentionBadges {
+        workspace: Vec<(WorkspaceId, u32)>,
+        tab: Vec<(TabId, u32)>,
+        pane: Vec<(PaneId, u32)>,
+    },
+    /// OS banner dismiss is presentation-only (SPEC-028 §8.1).
+    DismissOsBanner {
+        id: AttentionId,
+    },
     /// Host applied a Workspace/Tab/Pane navigation action. Clears agent and
     /// Block selection without inventing new composition identities.
     ContextNavigated,
@@ -195,6 +213,11 @@ pub struct ChromeSnapshot {
     pub inspector_rows: Vec<InspectorRow>,
     pub visible_inspector_rows: Vec<InspectorRow>,
     pub attention_items: Vec<AttentionItem>,
+    pub workspace_badges: Vec<(WorkspaceId, u32)>,
+    pub tab_badges: Vec<(TabId, u32)>,
+    pub pane_badges: Vec<(PaneId, u32)>,
+    pub last_retain_details: bool,
+    pub last_in_stack_approve: bool,
     pub last_error: Option<ChromeError>,
 }
 
@@ -212,6 +235,12 @@ pub struct ChromeState {
     mode_before_block: Option<InspectorMode>,
     agents: HashMap<WorkspaceId, Vec<AgentRecord>>,
     attention: Vec<AttentionItem>,
+    workspace_badges: Vec<(WorkspaceId, u32)>,
+    tab_badges: Vec<(TabId, u32)>,
+    pane_badges: Vec<(PaneId, u32)>,
+    pending_reveal: Option<Vec<u8>>,
+    last_retain_details: bool,
+    last_in_stack_approve: bool,
     last_error: Option<ChromeError>,
 }
 
@@ -228,6 +257,12 @@ impl Default for ChromeState {
             mode_before_block: None,
             agents: HashMap::new(),
             attention: Vec::new(),
+            workspace_badges: Vec::new(),
+            tab_badges: Vec::new(),
+            pane_badges: Vec::new(),
+            pending_reveal: None,
+            last_retain_details: false,
+            last_in_stack_approve: false,
             last_error: None,
         }
     }
@@ -286,6 +321,18 @@ impl ChromeState {
             }
             ChromeAction::ReplaceAttention { items } => {
                 self.attention = items;
+                Ok(ChromeEffect::default())
+            }
+            ChromeAction::SetAttentionBadges {
+                workspace,
+                tab,
+                pane,
+            } => {
+                self.apply_attention_badges(workspace, tab, pane);
+                Ok(ChromeEffect::default())
+            }
+            ChromeAction::DismissOsBanner { id } => {
+                self.dismiss_os_banner(&id);
                 Ok(ChromeEffect::default())
             }
             ChromeAction::ContextNavigated => {
@@ -348,56 +395,13 @@ impl ChromeState {
             inspector_rows,
             visible_inspector_rows,
             attention_items: self.attention.clone(),
+            workspace_badges: self.workspace_badges.clone(),
+            tab_badges: self.tab_badges.clone(),
+            pane_badges: self.pane_badges.clone(),
+            last_retain_details: self.last_retain_details,
+            last_in_stack_approve: self.last_in_stack_approve,
             last_error: self.last_error,
         }
-    }
-
-    fn open_attention(
-        &mut self,
-        id: &AttentionId,
-        shell: &ShellSnapshot,
-    ) -> Result<ChromeEffect, ChromeError> {
-        let index = self
-            .attention
-            .iter()
-            .position(|item| item.id == *id)
-            .ok_or_else(|| {
-                self.last_error = Some(ChromeError::UnknownAttention);
-                ChromeError::UnknownAttention
-            })?;
-        let item = self.attention[index].clone();
-        if let Some(workspace) = item.workspace
-            && !shell.workspaces.iter().any(|row| row.id == workspace)
-        {
-            return self.fail(ChromeError::UnknownWorkspace);
-        }
-        if let Some(tab) = item.tab {
-            let tab_known = match item.workspace {
-                Some(workspace) if workspace != shell.active_workspace => true,
-                _ => shell.tabs.iter().any(|row| row.id == tab),
-            };
-            if !tab_known && item.workspace.is_none() {
-                return self.fail(ChromeError::UnknownTab);
-            }
-        }
-        if let Some(agent) = &item.agent {
-            let workspace = item.workspace.unwrap_or(shell.active_workspace);
-            if !self
-                .agents_for(workspace)
-                .iter()
-                .any(|row| row.id == *agent)
-            {
-                return self.fail(ChromeError::UnknownAgent);
-            }
-            self.selected_agent = Some(agent.clone());
-        } else {
-            self.selected_agent = None;
-        }
-        self.attention.remove(index);
-        Ok(ChromeEffect {
-            select_workspace: item.workspace,
-            select_tab: item.tab,
-        })
     }
 
     /// Whether the selected Block is still in the authoritative list.
@@ -509,7 +513,7 @@ impl ChromeState {
         ]
     }
 
-    fn agents_for(&self, workspace: WorkspaceId) -> &[AgentRecord] {
+    pub(super) fn agents_for(&self, workspace: WorkspaceId) -> &[AgentRecord] {
         self.agents.get(&workspace).map_or(&[], Vec::as_slice)
     }
 

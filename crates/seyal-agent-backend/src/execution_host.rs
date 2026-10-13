@@ -155,6 +155,9 @@ pub struct FakeExecutionHost {
     /// Observations already materialized for a live handle, drained in order
     /// by `observe` to model off-lock, non-blocking delivery.
     pending: std::collections::HashMap<u64, std::collections::VecDeque<HostObservation>>,
+    /// Identity + next ordinal for each live handle after the initial observe
+    /// drain (so `signal_cancel` can enqueue terminal evidence).
+    live: std::collections::HashMap<u64, (AgentRunId, BindingGeneration, u64)>,
     /// Last descriptor passed to `start`, for tests asserting the backend
     /// resolved program/argv/env/cwd correctly before calling the host.
     last_descriptor: Option<LaunchDescriptor>,
@@ -172,6 +175,7 @@ impl FakeExecutionHost {
             next_handle: 1,
             start_outcome: None,
             pending: std::collections::HashMap::new(),
+            live: std::collections::HashMap::new(),
             last_descriptor: None,
         })
     }
@@ -338,6 +342,12 @@ impl SessionExecutionHost for FakeExecutionHost {
         let observations = self
             .execute(run_id, binding_generation, &self.script)
             .unwrap_or_default();
+        let next_ordinal = observations
+            .last()
+            .map(|observation| observation.ordinal.saturating_add(1))
+            .unwrap_or(1);
+        self.live
+            .insert(handle, (run_id, binding_generation, next_ordinal));
         self.pending
             .insert(handle, observations.into_iter().collect());
         HostStartOutcome::Started(HostHandle::new(handle))
@@ -348,13 +358,27 @@ impl SessionExecutionHost for FakeExecutionHost {
         Ok(queue.drain(..).collect())
     }
 
-    fn signal_cancel(&mut self, _handle: HostHandle) -> Result<(), ()> {
+    fn signal_cancel(&mut self, handle: HostHandle) -> Result<(), ()> {
+        // Fixture model of cancel evidence: enqueue terminal failure so the
+        // session cancel path can observe KnownTerminated after Terminating.
+        let (run_id, binding, ordinal) = *self.live.get(&handle.get()).ok_or(())?;
+        let queue = self.pending.entry(handle.get()).or_default();
+        queue.push_back(HostObservation {
+            run_id,
+            binding_generation: binding,
+            ordinal,
+            kind: HostObservationKind::KnownFailure,
+        });
+        self.live
+            .insert(handle.get(), (run_id, binding, ordinal.saturating_add(1)));
         Ok(())
     }
 
-    fn reap(&mut self, _handle: HostHandle) -> Result<HostExitEvidence, ()> {
+    fn reap(&mut self, handle: HostHandle) -> Result<HostExitEvidence, ()> {
+        self.live.remove(&handle.get());
+        self.pending.remove(&handle.get());
         Ok(HostExitEvidence {
-            kind: HostExitKind::Completed,
+            kind: HostExitKind::Failed,
         })
     }
 }
@@ -508,7 +532,10 @@ mod tests {
             Vec::new()
         );
         let evidence = SessionExecutionHost::reap(&mut host, handle).unwrap();
-        assert_eq!(evidence.kind, HostExitKind::Completed);
+        // Fixture SessionExecutionHost::reap returns Failed (known-terminated
+        // path shared with cancel/AC13). Success is observed via KnownSuccess
+        // in the drained script, not via a Completed exit kind.
+        assert_eq!(evidence.kind, HostExitKind::Failed);
     }
 
     #[test]

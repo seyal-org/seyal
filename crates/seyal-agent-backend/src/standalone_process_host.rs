@@ -124,12 +124,20 @@ impl StandaloneProcessHost {
     }
 
     fn classify_exit(status: ExitStatus) -> HostExitKind {
+        Self::classify_exit_with_cancel(status, false)
+    }
+
+    /// Intentional cancel maps signal death to `Failed` so observation yields
+    /// `KnownTerminated` (fixture 13 / FakeExecutionHost cancel model), not
+    /// harness-crash `UnknownAfterCrash`.
+    fn classify_exit_with_cancel(status: ExitStatus, intentional_cancel: bool) -> HostExitKind {
         if status.success() {
             HostExitKind::Completed
-        } else if status.code().is_some() {
+        } else if intentional_cancel || status.code().is_some() {
+            // Cancel maps signal death to Failed (KnownTerminated on observe).
             HostExitKind::Failed
         } else {
-            // Signal death (e.g. SIGKILL) is crash evidence, not a clean terminate.
+            // Unsolicited signal death (e.g. SIGKILL) is crash evidence.
             HostExitKind::Crashed
         }
     }
@@ -290,27 +298,57 @@ impl StandaloneProcessHost {
             );
             *ordinal = ordinal.saturating_add(1);
         };
+        let push_terminal = |kind: HostExitKind, ordinal: &mut u64| {
+            push(
+                match kind {
+                    HostExitKind::Completed => HostObservationKind::KnownSuccess,
+                    HostExitKind::Failed => HostObservationKind::KnownFailure,
+                    HostExitKind::Crashed => HostObservationKind::HarnessCrashed,
+                    HostExitKind::Unknown => HostObservationKind::UnknownLiveness,
+                },
+                ordinal,
+                true,
+            );
+            *exit_evidence.lock().unwrap() = Some(HostExitEvidence { kind });
+        };
+        let resolve_exit = |cancelled: bool| -> Option<HostExitKind> {
+            let grace = if cancelled {
+                disconnect_grace.max(Duration::from_secs(2))
+            } else {
+                disconnect_grace
+            };
+            let resolved = Self::wait_for_exit(child.as_ref(), grace);
+            resolved.map(|kind| {
+                if cancelled && matches!(kind, HostExitKind::Crashed | HostExitKind::Unknown) {
+                    HostExitKind::Failed
+                } else {
+                    kind
+                }
+            })
+        };
         loop {
             if shutdown.load(Ordering::Relaxed) {
+                // Cancel/shutdown must still publish terminal evidence; do not
+                // drop the reader without a KnownFailure/KnownSuccess ordinal.
+                match resolve_exit(true) {
+                    Some(kind) => push_terminal(kind, &mut next_ordinal),
+                    None => {
+                        Self::kill_pid(child.lock().unwrap().id());
+                        match resolve_exit(true) {
+                            Some(kind) => push_terminal(kind, &mut next_ordinal),
+                            None => {
+                                push_terminal(HostExitKind::Failed, &mut next_ordinal);
+                            }
+                        }
+                    }
+                }
                 break;
             }
             match stdout.read(&mut buf) {
                 Ok(0) => {
-                    let resolved = Self::wait_for_exit(child.as_ref(), disconnect_grace);
-                    match resolved {
-                        Some(kind) => {
-                            push(
-                                match kind {
-                                    HostExitKind::Completed => HostObservationKind::KnownSuccess,
-                                    HostExitKind::Failed => HostObservationKind::KnownFailure,
-                                    HostExitKind::Crashed => HostObservationKind::HarnessCrashed,
-                                    HostExitKind::Unknown => HostObservationKind::UnknownLiveness,
-                                },
-                                &mut next_ordinal,
-                                true,
-                            );
-                            *exit_evidence.lock().unwrap() = Some(HostExitEvidence { kind });
-                        }
+                    let cancelled = shutdown.load(Ordering::Relaxed);
+                    match resolve_exit(cancelled) {
+                        Some(kind) => push_terminal(kind, &mut next_ordinal),
                         None => {
                             push(
                                 HostObservationKind::ObservationDisconnected,
@@ -330,13 +368,22 @@ impl StandaloneProcessHost {
                     );
                 }
                 Err(_) => {
-                    push(
-                        HostObservationKind::ObservationDisconnected,
-                        &mut next_ordinal,
-                        true,
-                    );
-                    Self::kill_pid(child.lock().unwrap().id());
-                    Self::spawn_exit_waiter(Arc::clone(child), Arc::clone(exit_evidence));
+                    let cancelled = shutdown.load(Ordering::Relaxed);
+                    if cancelled {
+                        Self::kill_pid(child.lock().unwrap().id());
+                        match resolve_exit(true) {
+                            Some(kind) => push_terminal(kind, &mut next_ordinal),
+                            None => push_terminal(HostExitKind::Failed, &mut next_ordinal),
+                        }
+                    } else {
+                        push(
+                            HostObservationKind::ObservationDisconnected,
+                            &mut next_ordinal,
+                            true,
+                        );
+                        Self::kill_pid(child.lock().unwrap().id());
+                        Self::spawn_exit_waiter(Arc::clone(child), Arc::clone(exit_evidence));
+                    }
                     break;
                 }
             }
@@ -421,7 +468,7 @@ impl StandaloneProcessHost {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         *supervised.exit_evidence.lock().unwrap() = Some(HostExitEvidence {
-                            kind: Self::classify_exit(status),
+                            kind: Self::classify_exit_with_cancel(status, true),
                         });
                         break;
                     }
@@ -429,7 +476,7 @@ impl StandaloneProcessHost {
                         let _ = child.kill();
                         if let Ok(status) = child.wait() {
                             *supervised.exit_evidence.lock().unwrap() = Some(HostExitEvidence {
-                                kind: Self::classify_exit(status),
+                                kind: Self::classify_exit_with_cancel(status, true),
                             });
                         }
                         break;
@@ -730,6 +777,14 @@ mod tests {
         std::thread::sleep(Duration::from_millis(20));
         host.signal_cancel(handle).unwrap();
 
+        let observations = observe_until_terminal(&mut host, handle, Duration::from_secs(2));
+        assert!(
+            observations
+                .iter()
+                .any(|o| matches!(o.kind, HostObservationKind::KnownFailure)),
+            "cancel must publish KnownFailure terminal evidence, got {observations:?}"
+        );
+
         let started = Instant::now();
         let evidence = host.reap(handle).unwrap();
         assert!(
@@ -737,6 +792,7 @@ mod tests {
             "reap must be bounded, not an indefinite wait"
         );
         assert_ne!(evidence.kind, HostExitKind::Completed);
+        assert_eq!(evidence.kind, HostExitKind::Failed);
     }
 
     #[test]

@@ -21,6 +21,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', slug: 'developer' },
             { label: 'Architecture', slug: 'developer/architecture' },
+            { label: 'Local Context Engine', slug: 'developer/local-context-engine' },
             { label: 'Contributing', slug: 'developer/contributing' }
           ]
         }

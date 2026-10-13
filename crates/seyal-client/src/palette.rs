@@ -38,6 +38,9 @@ pub enum PaletteCommand {
     AdoptUnpresented(ExecutionId),
     /// ADR-018 §3.3: explicit terminate of a live-unpresented execution.
     TerminateUnpresented(ExecutionId),
+    /// P4 terminate of the focused Controller execution (C2b / #1175).
+    /// Distinct from Close Tab, which detaches only.
+    TerminateExecution,
 }
 
 /// What Run executes for the current selection (never a re-resolved ordinal).
@@ -496,6 +499,14 @@ fn build_commands(
             command: Some(PaletteCommand::TerminateUnpresented(*execution)),
         });
     }
+    // Destructive P4 verb: always in the catalog, discovered by query so it
+    // does not crowd the empty-query visible window (PALETTE_VISIBLE_ROWS).
+    entries.push(PaletteEntry {
+        label: "Terminate Execution".to_owned(),
+        category: "Terminal",
+        address: None,
+        command: Some(PaletteCommand::TerminateExecution),
+    });
 
     entries
 }
@@ -751,6 +762,16 @@ mod tests {
                 SplitAxis::Down
             )))
         );
+        palette
+            .apply(PaletteAction::SetQuery("terminate execution".into()), 0)
+            .unwrap();
+        palette.rebuild(&shell, &chrome, true, true, None, &[]);
+        assert_eq!(
+            palette.selected_target(),
+            Some(PaletteRunTarget::Command(
+                PaletteCommand::TerminateExecution
+            ))
+        );
         palette.close();
         assert!(!palette.is_open());
         assert!(palette.selected_target().is_none());
@@ -791,14 +812,14 @@ mod tests {
         chrome
             .apply(
                 ChromeAction::ReplaceAttention {
-                    items: vec![AttentionItem {
-                        id: AttentionId::new("att-1"),
-                        title: "Build failed".into(),
-                        detail: "exit 1".into(),
-                        workspace: None,
-                        tab: None,
-                        agent: None,
-                    }],
+                    items: vec![AttentionItem::projection(
+                        AttentionId::new("att-1"),
+                        "Build failed",
+                        "exit 1",
+                        None,
+                        None,
+                        None,
+                    )],
                 },
                 &shell,
             )
@@ -870,7 +891,10 @@ mod tests {
             .find(|id| *id != core)
             .expect("other tab");
         shell
-            .apply(ShellAction::SelectTab { id: other })
+            .apply(ShellAction::SelectTab {
+                id: other,
+                containment_generation: shell.containment_generation(),
+            })
             .expect("select");
         // Frozen selection still carries the original address.
         assert_eq!(

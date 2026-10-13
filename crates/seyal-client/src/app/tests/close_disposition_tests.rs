@@ -4,6 +4,40 @@ use super::super::*;
 use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis};
 use seyal_core::WindowId;
 
+#[test]
+fn close_unknown_ids_reject_and_sole_tab_removes_window() {
+    let mut root = ApplicationRoot::new();
+    let snap = root.snapshot();
+    let only_tab = snap.shell.tabs[0].id;
+    let only_pane = snap.shell.panes[0].id;
+    let generation = snap.shell.containment_generation;
+
+    assert_eq!(
+        root.apply(AppAction::CloseTab {
+            id: TabId::new(),
+            containment_generation: generation,
+        }),
+        Err(AppError::UnknownChromeTab)
+    );
+    assert_eq!(
+        root.apply(AppAction::ClosePane {
+            id: PaneId::new(),
+            containment_generation: generation,
+        }),
+        Err(AppError::UnknownPane)
+    );
+    assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
+    assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
+
+    root.apply(AppAction::CloseTab {
+        id: only_tab,
+        containment_generation: generation,
+    })
+    .expect("sole tab removes window");
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert_eq!(root.snapshot().shell.active_window, None);
+}
+
 fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
     BindingEvidence {
         execution: ExecutionId::from_bytes([tag; 16]),
@@ -91,6 +125,13 @@ fn closing_bound_authority_pane_clears_presentation_for_rebind() {
     .unwrap();
     assert!(root.authority.is_none());
     assert_eq!(root.presentation.snapshot().identity, None);
+    let successor = root.snapshot().shell.focused_pane;
+    assert!(root
+        .snapshot()
+        .shell
+        .panes
+        .iter()
+        .any(|candidate| candidate.id == successor));
 
     let second = evidence(5, true, false);
     root.apply(AppAction::Bind {
@@ -171,44 +212,6 @@ fn stale_host_close_actions_reject_the_observed_generation() {
         after_stale_pane_close.containment_generation,
         before_stale_pane_close.containment_generation
     );
-}
-
-#[test]
-fn close_unknown_ids_reject_and_sole_tab_removes_window() {
-    // Unknown identities reject without retarget. The sole Tab of the
-    // production Window removes that Window (ADR-018 §3.2), replacing the
-    // older last-tab refusal.
-    let mut root = ApplicationRoot::new();
-    let snap = root.snapshot();
-    let only_tab = snap.shell.tabs[0].id;
-    let only_pane = snap.shell.panes[0].id;
-
-    assert_eq!(
-        root.apply(AppAction::CloseTab {
-            id: TabId::new(),
-            containment_generation: snap.shell.containment_generation,
-        }),
-        Err(AppError::UnknownChromeTab)
-    );
-    assert_eq!(
-        root.apply(AppAction::ClosePane {
-            id: PaneId::new(),
-            containment_generation: snap.shell.containment_generation,
-        }),
-        Err(AppError::UnknownPane)
-    );
-    assert_eq!(root.snapshot().shell.tabs.len(), 1);
-    assert_eq!(root.snapshot().shell.panes.len(), 1);
-    assert_eq!(root.snapshot().shell.tabs[0].id, only_tab);
-    assert_eq!(root.snapshot().shell.panes[0].id, only_pane);
-
-    root.apply(AppAction::CloseTab {
-        id: only_tab,
-        containment_generation: snap.shell.containment_generation,
-    })
-    .expect("sole tab removes window");
-    assert!(root.snapshot().shell.windows.is_empty());
-    assert_eq!(root.snapshot().shell.active_window, None);
 }
 
 #[test]

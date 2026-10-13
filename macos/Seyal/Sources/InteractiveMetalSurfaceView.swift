@@ -4,6 +4,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private let appHandle: UInt64
     private let optionAsAlt: Bool
     private var composition = CompositionDocument()
+    /// When true, `unmarkText` clears preedit without PTY admission (#866).
+    private var discardingMark = false
     private var interpretingEscape = false
     private var escapeNeedsTerminalEncoding = false
     private var nextKeyboardActionID: UInt32 = 1
@@ -11,12 +13,13 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var heldKeyboardKinds: [UInt16: TerminalNativeKeyV2] = [:]
     static let maxHeldKeyboardKinds = 256
     var onBridgeBecameUsable: (() -> Void)?
-    var onRequestComposerFocus: (() -> Void)?
+    var onRequestComposerFocus: (() -> Bool)?
     /// A Rust table match already changed product state. The chrome host projects it.
     var onCommandConsumed: (() -> Void)?
     var observedAlternateScreen = false
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
+    private var composerRecoveryFocusRetryScheduled = false
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
         self.appHandle = appHandle
@@ -24,18 +27,59 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         super.init(frame: frameRect, paneID: "m001-pane")
         wantsLayer = true
         setAccessibilityIdentifier("terminal-input")
-        setAccessibilityRole(.textArea)
-        setAccessibilityElement(true)
+        // Flow/unbound: composer owns IME. Raw/TUI uses a textArea role.
+        // The identifier stays in the AX tree so attach diagnostics remain
+        // observable (`connection=usable`) without becoming an IME target.
+        syncInputRoutePresentation()
     }
 
     override var recoveryAppHandle: UInt64 { appHandle }
 
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
-        if seyal_app_snapshot(appHandle).eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
-            onRequestComposerFocus?()
-            return true
+        syncInputRoutePresentation()
+        if !allowsDirectTerminalInput {
+            discardUncommittedMark()
+            return requestComposerFocusForRecovery()
         }
         return window?.makeFirstResponder(self) ?? false
+    }
+
+    @discardableResult
+    func requestComposerFocusForRecovery() -> Bool {
+        requestComposerFocusForRecovery(
+            focus: { [weak self] in self?.onRequestComposerFocus?() ?? false },
+            onAccepted: { [weak self] in
+                guard let self else { return }
+                _ = self.advanceRecoveryPresentationIfReady()
+            }
+        )
+    }
+
+    @discardableResult
+    func requestComposerFocusForRecovery(
+        focus: @escaping () -> Bool,
+        onAccepted: @escaping () -> Void
+    ) -> Bool {
+        let focused = focus()
+        guard !focused,
+            recoveryPresentationPending,
+            !composerRecoveryFocusRetryScheduled
+        else { return focused }
+
+        // A recovery callback can run during chrome reconciliation, before
+        // AppKit has completed the current responder/layout transaction. Make
+        // one deferred attempt after that turn; do not poll or claim Usable
+        // until the composer actually accepts first responder.
+        composerRecoveryFocusRetryScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.composerRecoveryFocusRetryScheduled = false
+            guard self.recoveryPresentationPending,
+                focus()
+            else { return }
+            onAccepted()
+        }
+        return false
     }
 
     override func terminalBridgeStatusDidChange() {
@@ -50,18 +94,40 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             heldKeyboardKinds.removeAll(keepingCapacity: true)
             nextKeyboardActionID = 1
             nextMouseActionID = 1
-            composition.clear()
+            discardUncommittedMark()
         }
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    /// Consumes Rust eligibility: Metal is first-responder/IME/AX only for
+    /// Raw/TUI direct route. Flow and unbound keep the Pane composer exclusive.
+    func syncInputRoutePresentation() {
+        let direct = allowsDirectTerminalInput
+        setAccessibilityElement(true)
+        setAccessibilityRole(direct ? .textArea : .group)
+        if !direct {
+            discardUncommittedMark()
+            if window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { allowsDirectTerminalInput }
 
     override func becomeFirstResponder() -> Bool {
+        guard allowsDirectTerminalInput else { return false }
         let became = super.becomeFirstResponder()
         if became {
             inputContext?.activate()
         }
         return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        if !allowsDirectTerminalInput {
+            discardUncommittedMark()
+        }
+        return super.resignFirstResponder()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -307,7 +373,19 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         guard composition.hasMarkedText else { return }
         let text = composition.text
         composition.clear()
-        submitIfAllowed(text)
+        if !discardingMark {
+            submitIfAllowed(text)
+        }
+        inputContext?.invalidateCharacterCoordinates()
+    }
+
+    /// Cancel marked/preedit without PTY submission. Used when Rust revokes
+    /// the direct-terminal route (Flow/unbound/transition) or the bridge drops.
+    func discardUncommittedMark() {
+        discardingMark = true
+        composition.clear()
+        inputContext?.discardMarkedText()
+        discardingMark = false
         inputContext?.invalidateCharacterCoordinates()
     }
 

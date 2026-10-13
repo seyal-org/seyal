@@ -197,6 +197,7 @@ fn close_pane_unbinds_collapses_and_keeps_sibling_focus() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: containment_gen(&shell),
         })
         .unwrap();
     let created = shell.snapshot().focused_pane;
@@ -245,7 +246,12 @@ fn close_tab_unbinds_all_leaves_and_selects_successor() {
     let (mut shell, _w1, _w2, t1, t2, _t3) = seed_two_windows();
     let execution = ExecutionId::new();
     // Bind on t1's pane, then select t1 and close it while t2 follows.
-    shell.apply(ShellAction::SelectTab { id: t1 }).unwrap();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: t1,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     let pane = shell.snapshot().focused_pane;
     shell
         .apply(ShellAction::BindExecution { pane, execution })
@@ -260,16 +266,18 @@ fn close_tab_unbinds_all_leaves_and_selects_successor() {
     let snap = shell.snapshot();
     assert_eq!(snap.active_tab, t2);
     assert_eq!(shell.live_unpresented(workspace_a()), vec![execution]);
-    assert!(shell
-        .take_effects()
-        .iter()
-        .all(|effect| !matches!(effect, ShellNativeEffect::TerminateExecution { .. })));
+    let _ = shell.take_effects(); // ShellNativeEffect has no execution-termination variant.
 }
 
 #[test]
 fn close_non_active_tab_leaves_active_tab_unchanged() {
     let (mut shell, _w1, _w2, t1, t2, _t3) = seed_two_windows();
-    shell.apply(ShellAction::SelectTab { id: t1 }).unwrap();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: t1,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     shell
         .apply(ShellAction::CloseTab {
             id: t2,
@@ -304,8 +312,18 @@ fn close_tab_of_only_tab_is_close_window_not_last_tab_refusal() {
 fn close_active_window_activates_mru_successor_with_destroy_before_order_front() {
     let (mut shell, w1, w2, _t1, _t2, t3) = seed_two_windows();
     // Touch w2 so it is most-recent after w1 is closed.
-    shell.apply(ShellAction::SelectWindow { id: w2 }).unwrap();
-    shell.apply(ShellAction::SelectWindow { id: w1 }).unwrap();
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: w2,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: w1,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     let _ = shell.take_effects();
     let execution = ExecutionId::new();
     let pane = shell.snapshot().focused_pane;
@@ -334,7 +352,12 @@ fn close_active_window_activates_mru_successor_with_destroy_before_order_front()
 #[test]
 fn close_non_active_window_leaves_product_active_unchanged() {
     let (mut shell, w1, w2, t1, _t2, _t3) = seed_two_windows();
-    shell.apply(ShellAction::SelectWindow { id: w1 }).unwrap();
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: w1,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     let _ = shell.take_effects();
     shell
         .apply(ShellAction::CloseWindow {
@@ -475,8 +498,18 @@ fn close_active_window_prefers_same_workspace_mru_then_any() {
         true,
     )
     .unwrap();
-    shell.apply(ShellAction::SelectWindow { id: w_a2 }).unwrap();
-    shell.apply(ShellAction::SelectWindow { id: w_a1 }).unwrap();
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: w_a2,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: w_a1,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     let _ = shell.take_effects();
     shell
         .apply(ShellAction::CloseWindow {
@@ -577,11 +610,16 @@ fn structural_close_rejects_stale_generation_atomically() {
 }
 
 #[test]
-fn no_removal_variant_emits_terminate_execution() {
+fn close_variants_keep_bound_executions_live_and_unpresented() {
     let (mut shell, w1, w2, t1, t2, _t3) = seed_two_windows();
     let e1 = ExecutionId::from_bytes([0x01; 16]);
     let e2 = ExecutionId::from_bytes([0x02; 16]);
-    shell.apply(ShellAction::SelectTab { id: t1 }).unwrap();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: t1,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     let p1 = shell.snapshot().focused_pane;
     shell
         .apply(ShellAction::BindExecution {
@@ -589,7 +627,12 @@ fn no_removal_variant_emits_terminate_execution() {
             execution: e1,
         })
         .unwrap();
-    shell.apply(ShellAction::SelectTab { id: t2 }).unwrap();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: t2,
+            containment_generation: containment_gen(&shell),
+        })
+        .unwrap();
     let p2 = shell.snapshot().focused_pane;
     shell
         .apply(ShellAction::BindExecution {
@@ -605,10 +648,7 @@ fn no_removal_variant_emits_terminate_execution() {
             containment_generation: containment_gen(&shell),
         })
         .unwrap();
-    assert!(shell
-        .take_effects()
-        .iter()
-        .all(|effect| !matches!(effect, ShellNativeEffect::TerminateExecution { .. })));
+    let _ = shell.take_effects(); // ShellNativeEffect has no execution-termination variant.
 
     shell
         .apply(ShellAction::CloseTab {
@@ -616,10 +656,7 @@ fn no_removal_variant_emits_terminate_execution() {
             containment_generation: containment_gen(&shell),
         })
         .unwrap();
-    assert!(shell
-        .take_effects()
-        .iter()
-        .all(|effect| !matches!(effect, ShellNativeEffect::TerminateExecution { .. })));
+    let _ = shell.take_effects(); // ShellNativeEffect has no execution-termination variant.
 
     shell
         .apply(ShellAction::CloseWindow {
@@ -628,12 +665,11 @@ fn no_removal_variant_emits_terminate_execution() {
         })
         .unwrap();
     let effects = shell.take_effects();
-    assert!(effects
-        .iter()
-        .all(|effect| !matches!(effect, ShellNativeEffect::TerminateExecution { .. })));
+    // The type can only represent presentation/window operations, never termination.
     assert!(effects
         .iter()
         .any(|effect| matches!(effect, ShellNativeEffect::DestroyWindowRealization { .. })));
+    assert_eq!(shell.live_unpresented(workspace_a()), vec![e1, e2]);
     let _ = w1;
 }
 
@@ -648,6 +684,7 @@ fn close_enablement_admits_hierarchical_removal_while_a_window_exists() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: containment_gen(&shell),
         })
         .expect("splits allowed");
     let two_panes = shell.snapshot();
@@ -675,6 +712,7 @@ fn select_create_close_tabs_are_authoritative() {
     shell
         .apply(ShellAction::SelectTab {
             id: before.active_tab,
+            containment_generation: containment_gen(&shell),
         })
         .expect("select original");
     assert_eq!(shell.snapshot().active_tab, before.active_tab);
@@ -710,6 +748,7 @@ fn split_focus_and_close_panes() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: containment_gen(&shell),
         })
         .expect("split");
     let snap = shell.snapshot();
@@ -725,6 +764,7 @@ fn split_focus_and_close_panes() {
         .apply(ShellAction::SplitPane {
             id: original,
             axis: SplitAxis::Down,
+            containment_generation: containment_gen(&shell),
         })
         .expect("nested split");
     assert_eq!(shell.snapshot().tabs[0].pane_count, 3);
@@ -777,6 +817,7 @@ fn execution_bound_pane_close_unbinds_without_terminate() {
     shell
         .apply(ShellAction::SplitFocused {
             axis: SplitAxis::Right,
+            containment_generation: containment_gen(&shell),
         })
         .expect("split");
     let created = shell.snapshot().focused_pane;
@@ -794,8 +835,5 @@ fn execution_bound_pane_close_unbinds_without_terminate() {
     assert_eq!(shell.snapshot().tabs[0].pane_count, 1);
     assert_eq!(shell.snapshot().focused_pane, created);
     assert_eq!(shell.live_unpresented(workspace), vec![execution]);
-    assert!(shell
-        .take_effects()
-        .iter()
-        .all(|effect| !matches!(effect, ShellNativeEffect::TerminateExecution { .. })));
+    let _ = shell.take_effects(); // ShellNativeEffect has no execution-termination variant.
 }
