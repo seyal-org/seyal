@@ -1,0 +1,95 @@
+use super::*;
+
+impl ApplicationRoot {
+    pub(crate) fn apply_shell_for_test(
+        &mut self,
+        action: crate::shell::ShellAction,
+    ) -> Result<(), crate::shell::ShellError> {
+        self.shell.apply(action)?;
+        self.drain_shell_effects();
+        self.snapshot_generation = self.snapshot_generation.saturating_add(1);
+        Ok(())
+    }
+}
+
+#[test]
+fn repeated_same_window_selection_keeps_effect_queue_bounded() {
+    let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation_for_test(true);
+    let workspace = root.snapshot().shell.active_workspace;
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply_shell_for_test(crate::shell::ShellAction::CreateWindow {
+        workspace,
+        containment_generation: generation,
+    })
+    .unwrap();
+    let first = root.snapshot().shell.windows[0].id;
+    let second = root.snapshot().shell.windows[1].id;
+    let generation = root.snapshot().shell.containment_generation;
+    for i in 0..32 {
+        let window = if i % 2 == 0 { first } else { second };
+        root.apply_shell_for_test(crate::shell::ShellAction::SelectWindow {
+            id: window,
+            containment_generation: generation,
+        })
+        .unwrap();
+    }
+    let effects = root.snapshot().pending_effects;
+    assert!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. }))
+            .count()
+            <= 1,
+        "OrderFrontMakeKey must stay coalesced, got {effects:?}"
+    );
+    root.apply(AppAction::Quit).unwrap();
+    let snap = root.snapshot();
+    assert!(snap.frozen);
+    assert!(
+        snap.pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. })),
+        "quit effect must remain present after prior selections"
+    );
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+}
+
+#[test]
+fn native_became_key_updates_rust_active_window_without_ordering_loop() {
+    let mut root = ApplicationRoot::new();
+    root.shell.set_allows_window_creation_for_test(true);
+    let workspace = root.snapshot().shell.active_workspace;
+    let generation = root.snapshot().shell.containment_generation;
+    root.apply_shell_for_test(crate::shell::ShellAction::CreateWindow {
+        workspace,
+        containment_generation: generation,
+    })
+    .unwrap();
+    let first = root.snapshot().shell.windows[0].id;
+    let second = root.snapshot().shell.windows[1].id;
+
+    root.apply_shell_for_test(crate::shell::ShellAction::SelectWindow {
+        id: first,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+
+    root.report_window_event(second, crate::app::WindowNativeEvent::BecameKey)
+        .unwrap();
+
+    let snapshot = root.snapshot();
+    assert_eq!(snapshot.shell.active_window, second);
+    assert!(
+        !snapshot
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect, NativeEffect::OrderFrontMakeKey { .. })),
+        "native key acknowledgement must not request another key transition"
+    );
+}

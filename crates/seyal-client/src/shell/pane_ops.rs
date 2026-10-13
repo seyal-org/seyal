@@ -38,7 +38,7 @@ impl ShellState {
         if a == b {
             return Err(ShellError::InvalidMoveTarget);
         }
-        let workspace = self.workspace_mut(self.active_workspace)?;
+        let workspace = self.workspace_mut(self.active_workspace_id())?;
         let tab = workspace.active_tab_mut()?;
         if !tab.panes.contains_key(&a) || !tab.panes.contains_key(&b) {
             return Err(ShellError::UnknownPane);
@@ -60,7 +60,7 @@ impl ShellState {
             return Err(ShellError::InvalidMoveTarget);
         }
         let neighbor_exists = self.location_of_pane(neighbor).is_some();
-        let workspace = self.workspace_mut(self.active_workspace)?;
+        let workspace = self.workspace_mut(self.active_workspace_id())?;
         let tab = workspace.active_tab_mut()?;
         if !tab.panes.contains_key(&pane) {
             return Err(ShellError::UnknownPane);

@@ -3,6 +3,8 @@ mod discovery;
 mod display_apply;
 mod input_resize;
 mod provisioning_wire;
+#[cfg(any(test, target_os = "macos"))]
+mod quit_probe;
 mod viewport_line_ids;
 
 use std::{
@@ -37,6 +39,10 @@ pub use discovery::DiscoveryFailure;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
 };
+#[cfg(test)]
+pub(crate) use quit_probe::reconstruction_probe_client;
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) use quit_probe::try_reconstruction_probe_client_with_peer;
 
 pub(crate) const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_BUFFERED_BYTES: usize = (MAX_FRAME_PAYLOAD as usize + HEADER_LEN) * 2;
@@ -160,6 +166,19 @@ pub struct LocalDisplayClient {
 }
 
 impl LocalDisplayClient {
+    /// One nonblocking `Detach` write. Does not wait for `Detached` (SPEC-009 §6)
+    /// and does not retry. The caller drops the client immediately after.
+    pub fn request_bounded_detach(&mut self) {
+        use std::io::Write;
+        let payload = seyal_runtime::local_ipc::framing::Detach {
+            attachment_id: self.attachment_id,
+        }
+        .encode();
+        let frame = encode_frame(MessageType::Detach, &payload);
+        let _ = self.stream.set_nonblocking(true);
+        let _ = self.stream.write_all(&frame);
+    }
+
     pub fn socket_fd(&self) -> i32 {
         self.stream.as_raw_fd()
     }
@@ -615,10 +634,9 @@ pub(crate) fn validate_composer_status(
         && current.is_none_or(|current| status.revision > current.revision)
 }
 
-/// In-process client for reconstruction-fact tests. Rows and columns are the
-/// same gate `finish_attach` uses for a committed snapshot (`> 0`).
-#[cfg(test)]
-pub(crate) fn reconstruction_probe_client(
+#[cfg(any(test, target_os = "macos"))]
+fn reconstruction_probe_client_with_stream(
+    stream: UnixStream,
     role: Role,
     rows: u16,
     columns: u16,
@@ -626,7 +644,6 @@ pub(crate) fn reconstruction_probe_client(
     execution_id: ExecutionId,
     attachment_id: AttachmentId,
 ) -> LocalDisplayClient {
-    let (stream, _peer) = UnixStream::pair().expect("probe socket");
     let mut cache = seyal_runtime::display::empty_cache();
     cache.rows = rows;
     cache.columns = columns;

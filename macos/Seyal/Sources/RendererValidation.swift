@@ -254,6 +254,7 @@ enum RendererValidation {
             // lifecycle cleanup, and the production CAMetalLayer path itself.
             guard atlasPressureSelfTest(device: device),
                   retainedDefaultColorsFollowThemeOffscreenSelfTest(),
+                  fullGridClearFollowsThemeOffscreenSelfTest(),
                   try repeatedLifecycleSelfTest(device: device),
                   try productionLayerPresentSelfTest(device: device),
                   historyPrepareDefersWhileFrameInFlightSelfTest(),

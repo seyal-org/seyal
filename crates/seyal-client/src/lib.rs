@@ -66,14 +66,15 @@ pub use ffi::{
     seyal_app_accessibility, seyal_app_apply, seyal_app_block_projection, seyal_app_block_row,
     seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer,
     seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_invoke_workspace_command,
-    seyal_app_last_error, seyal_app_option_as_alt, seyal_app_palette, seyal_app_palette_row,
-    seyal_app_pane_divider, seyal_app_pane_region, seyal_app_recovery_param,
-    seyal_app_route_keystroke, seyal_app_shell, seyal_app_shell_row, seyal_app_shortcut_count,
-    seyal_app_shortcut_enabled, seyal_app_shortcut_item, seyal_app_snapshot,
+    seyal_app_last_error, seyal_app_native_effect, seyal_app_option_as_alt, seyal_app_palette,
+    seyal_app_palette_row, seyal_app_pane_divider, seyal_app_pane_leaf, seyal_app_pane_region,
+    seyal_app_record_compatible, seyal_app_recovery_param, seyal_app_route_keystroke,
+    seyal_app_shell, seyal_app_shell_row, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
+    seyal_app_shortcut_item, seyal_app_snapshot, seyal_app_tab, seyal_app_tab_tree_node,
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
-    seyal_app_visual_warning, seyal_bridge_adopt_handle, seyal_bridge_disconnect_handle,
-    seyal_bridge_ensure_prepared, seyal_bridge_flush_writable_for, seyal_bridge_frame,
-    seyal_bridge_next_handle, seyal_bridge_poll, seyal_bridge_poll_for,
+    seyal_app_visual_warning, seyal_app_window, seyal_bridge_adopt_handle,
+    seyal_bridge_disconnect_handle, seyal_bridge_ensure_prepared, seyal_bridge_flush_writable_for,
+    seyal_bridge_frame, seyal_bridge_next_handle, seyal_bridge_poll, seyal_bridge_poll_for,
     seyal_bridge_provisioning_wakeup_fd, seyal_bridge_select, seyal_bridge_set_runtime_dir,
     seyal_bridge_socket_fd_for, seyal_bridge_wants_write_for, seyal_launch_policy_failure_copy,
     seyal_launch_policy_warning_copy, test_register_pending_client,
@@ -89,11 +90,23 @@ pub use ffi::focused_registry_handle as ffi_test_focused_registry_handle;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
+pub use ffi::claim_focused_display_if_unset_for_test as ffi_test_claim_focused_display_if_unset;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
 pub use ffi::force_registry_client_eof as ffi_test_force_registry_client_eof;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use ffi::submit_utf8_for_test as ffi_test_submit_utf8;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::submit_utf8_on_handle_for_test as ffi_test_submit_utf8_on_handle;
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use ffi::registry_cache_contains_for_test as ffi_test_registry_cache_contains;
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]

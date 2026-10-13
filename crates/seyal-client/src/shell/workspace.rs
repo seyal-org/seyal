@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::presentation::PresentationMode;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::tree::PaneTree;
@@ -13,6 +14,7 @@ pub(super) struct Pane {
     pub(super) title: String,
     pub(super) execution: Option<ExecutionId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
+    pub(super) presentation_mode: PresentationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,7 +47,7 @@ pub(super) struct Workspace {
     pub(super) detail: Option<String>,
     pub(super) attention: bool,
     pub(super) windows: Vec<Window>,
-    pub(super) active_window: WindowId,
+    pub(super) active_window: Option<WindowId>,
 }
 
 /// Constructor input for tests and future hosts. Not a persistence schema.
@@ -101,13 +103,14 @@ impl Window {
             active_tab,
         })
     }
+
+    pub(super) fn tab_index(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
 }
 
 impl Workspace {
     pub(super) fn from_seed(seed: ShellWorkspaceSeed) -> Result<Self, ShellError> {
-        if seed.windows.is_empty() {
-            return Err(ShellError::EmptyWindow);
-        }
         let mut windows = Vec::with_capacity(seed.windows.len());
         for window in seed.windows {
             let tabs = window
@@ -121,6 +124,7 @@ impl Workspace {
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
+                        presentation_mode: PresentationMode::Flow,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;
@@ -134,15 +138,20 @@ impl Workspace {
                 window.active_tab,
             )?);
         }
-        if !windows.iter().any(|window| window.id == seed.active_window) {
-            return Err(ShellError::UnknownWindow);
-        }
+        let active_window = if windows.is_empty() {
+            None
+        } else {
+            if !windows.iter().any(|window| window.id == seed.active_window) {
+                return Err(ShellError::UnknownWindow);
+            }
+            Some(seed.active_window)
+        };
         Ok(Self {
             id: seed.id,
             name: seed.name,
             detail: seed.detail,
             attention: seed.attention,
-            active_window: seed.active_window,
+            active_window,
             windows,
         })
     }
@@ -160,6 +169,18 @@ impl Workspace {
         self.tabs().find(|tab| tab.id == id)
     }
 
+    pub(super) fn window(&self, id: WindowId) -> Option<&Window> {
+        self.windows.iter().find(|window| window.id == id)
+    }
+
+    pub(super) fn window_mut(&mut self, id: WindowId) -> Option<&mut Window> {
+        self.windows.iter_mut().find(|window| window.id == id)
+    }
+
+    pub(super) fn window_index(&self, id: WindowId) -> Option<usize> {
+        self.windows.iter().position(|window| window.id == id)
+    }
+
     #[cfg(test)]
     pub(super) fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.windows
@@ -167,29 +188,31 @@ impl Workspace {
             .find_map(|window| window.tabs.iter_mut().find(|tab| tab.id == id))
     }
 
-    pub(super) fn active_window(&self) -> &Window {
-        self.windows
-            .iter()
-            .find(|window| window.id == self.active_window)
-            .expect("active Window must exist")
+    pub(super) fn active_window(&self) -> Option<&Window> {
+        let id = self.active_window?;
+        self.windows.iter().find(|window| window.id == id)
     }
 
     pub(super) fn active_window_mut(&mut self) -> Result<&mut Window, ShellError> {
-        let id = self.active_window;
+        let id = self.active_window.ok_or(ShellError::UnknownWindow)?;
         self.windows
             .iter_mut()
             .find(|window| window.id == id)
             .ok_or(ShellError::UnknownWindow)
     }
 
-    pub(super) fn active_tab_id(&self) -> TabId {
-        self.active_window().active_tab
+    pub(super) fn active_tab_id(&self) -> Result<TabId, ShellError> {
+        Ok(self
+            .active_window()
+            .ok_or(ShellError::UnknownWindow)?
+            .active_tab)
     }
 
     /// The active Window's last Tab cannot be closed. Closing it would leave a
     /// zero-Tab Window, which is not a W1 close-window path.
     pub(super) fn allows_tab_close(&self) -> bool {
-        self.active_window().tabs.len() > 1
+        self.active_window()
+            .is_some_and(|window| window.tabs.len() > 1)
     }
 
     pub(super) fn select_tab(&mut self, id: TabId) -> Result<(), ShellError> {
@@ -199,13 +222,17 @@ impl Workspace {
             .find(|window| window.tabs.iter().any(|tab| tab.id == id))
             .map(|window| window.id)
             .ok_or(ShellError::UnknownTab)?;
-        self.active_window = window_id;
+        self.active_window = Some(window_id);
         self.active_window_mut()?.active_tab = id;
         Ok(())
     }
 
-    pub(super) fn push_tab_on_active_window(&mut self, tab: Tab) -> Result<(), ShellError> {
-        let window = self.active_window_mut()?;
+    pub(super) fn push_tab_on_window(
+        &mut self,
+        window: WindowId,
+        tab: Tab,
+    ) -> Result<(), ShellError> {
+        let window = self.window_mut(window).ok_or(ShellError::UnknownWindow)?;
         window.active_tab = tab.id;
         window.tabs.push(tab);
         Ok(())
@@ -243,12 +270,63 @@ impl Workspace {
     }
 
     pub(super) fn active_tab_mut(&mut self) -> Result<&mut Tab, ShellError> {
-        let tab_id = self.active_tab_id();
+        let tab_id = self.active_tab_id()?;
         self.active_window_mut()?
             .tabs
             .iter_mut()
             .find(|tab| tab.id == tab_id)
             .ok_or(ShellError::UnknownTab)
+    }
+
+    /// Remove `tab`. If it was the Window's only Tab, destroy that Window.
+    pub(super) fn take_tab(&mut self, tab: TabId) -> Result<(Tab, Option<WindowId>), ShellError> {
+        let window_index = self
+            .windows
+            .iter()
+            .position(|window| window.tabs.iter().any(|item| item.id == tab))
+            .ok_or(ShellError::UnknownTab)?;
+        let tab_index = self.windows[window_index]
+            .tab_index(tab)
+            .ok_or(ShellError::UnknownTab)?;
+        let removed = self.windows[window_index].tabs.remove(tab_index);
+        if self.windows[window_index].tabs.is_empty() {
+            let destroyed = self.windows.remove(window_index).id;
+            // Leave product-active unset so the caller’s `activate_window`
+            // observes a real change and emits OrderFrontMakeKey (ADR-018 §6.1).
+            if self.active_window == Some(destroyed) {
+                self.active_window = None;
+            }
+            return Ok((removed, Some(destroyed)));
+        }
+        if self.windows[window_index].active_tab == tab {
+            let replacement = tab_index.min(self.windows[window_index].tabs.len() - 1);
+            self.windows[window_index].active_tab = self.windows[window_index].tabs[replacement].id;
+        }
+        Ok((removed, None))
+    }
+
+    pub(super) fn insert_tab_before(
+        &mut self,
+        window_id: WindowId,
+        tab: Tab,
+        before: Option<TabId>,
+    ) -> Result<(), ShellError> {
+        let window = self
+            .window_mut(window_id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let index = match before {
+            None => window.tabs.len(),
+            Some(before_id) => window.tab_index(before_id).ok_or(ShellError::UnknownTab)?,
+        };
+        window.active_tab = tab.id;
+        window.tabs.insert(index, tab);
+        Ok(())
+    }
+
+    pub(super) fn push_window(&mut self, window: Window) {
+        // Do not mark product-active here — callers use `activate_window` so
+        // OrderFrontMakeKey emits when the product-active Window actually changes.
+        self.windows.push(window);
     }
 
     #[cfg(test)]
@@ -257,6 +335,26 @@ impl Workspace {
             .iter()
             .find(|window| window.id == id)
             .map(|window| window.workspace_id)
+    }
+}
+
+impl super::ShellState {
+    pub(crate) fn set_presentation_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode: PresentationMode,
+    ) -> Result<(), ShellError> {
+        for workspace in &mut self.workspaces {
+            for window in &mut workspace.windows {
+                for tab in &mut window.tabs {
+                    if let Some(pane) = tab.panes.get_mut(&pane_id) {
+                        pane.presentation_mode = mode;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(ShellError::UnknownPane)
     }
 }
 
@@ -348,6 +446,7 @@ mod tests {
                 ],
             }],
             workspace_id,
+            false,
             false,
             false,
         )

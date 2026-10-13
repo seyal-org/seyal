@@ -126,8 +126,9 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         fatalError("ComposerBridgeView is programmatic")
     }
 
-    func focusEditor() {
-        window?.makeFirstResponder(textView)
+    @discardableResult
+    func focusEditor() -> Bool {
+        window?.makeFirstResponder(textView) ?? false
     }
 
     func apply(theme: NativeTheme) {
