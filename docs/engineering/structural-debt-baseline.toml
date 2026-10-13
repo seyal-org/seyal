@@ -233,9 +233,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 944
-issue = 1092
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, and #1144 adds the Tab-to-Window activation lookup. Snapshot encoding stays in shell/snapshot.rs."
+acknowledged_loc = 956
+issue = 1218
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, and #1218 adds two equalize dispatch arms. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"

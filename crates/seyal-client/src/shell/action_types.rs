@@ -110,6 +110,12 @@ pub enum ShellAction {
         pane: PaneId,
         ratio: SplitRatio,
     },
+    EqualizeTab {
+        containment_generation: u64,
+    },
+    EqualizeFocused {
+        containment_generation: u64,
+    },
     BindExecution {
         pane: PaneId,
         execution: ExecutionId,
