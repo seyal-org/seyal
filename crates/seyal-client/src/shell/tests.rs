@@ -80,8 +80,8 @@ fn production_shell_enables_tab_creation_and_pane_splitting() {
     // C2b / #1175 + C3 / #1217: production CreateTab and SplitFocused are enabled.
     assert!(shell.allows_tab_creation());
     assert!(shell.allows_pane_splitting());
-    assert!(!snap.allows_tab_close);
-    assert!(!snap.allows_pane_close);
+    assert!(snap.allows_tab_close);
+    assert!(snap.allows_pane_close);
     shell
         .apply_product_create_tab()
         .expect("production shell admits CreateTab");
@@ -102,13 +102,13 @@ fn production_shell_enables_tab_creation_and_pane_splitting() {
 fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
     let mut shell = seed_two_workspaces();
     let single = shell.snapshot();
-    assert!(!single.allows_tab_close);
-    assert!(!single.allows_pane_close);
+    assert!(single.allows_tab_close);
+    assert!(single.allows_pane_close);
 
     shell.apply_product_create_tab().expect("tabs allowed");
     let two_tabs = shell.snapshot();
     assert!(two_tabs.allows_tab_close);
-    assert!(!two_tabs.allows_pane_close);
+    assert!(two_tabs.allows_pane_close);
 
     shell
         .apply(ShellAction::SplitFocused {
@@ -125,7 +125,7 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
             containment_generation: shell.containment_generation(),
         })
         .expect("close split pane");
-    assert!(!shell.snapshot().allows_pane_close);
+    assert!(shell.snapshot().allows_pane_close);
     shell
         .apply(ShellAction::CloseTab {
             id: two_tabs.active_tab,
@@ -133,21 +133,15 @@ fn close_enablement_is_projected_from_the_same_rule_close_enforces() {
         })
         .expect("close created tab");
     let closed = shell.snapshot();
-    assert!(!closed.allows_tab_close);
-    assert_eq!(
-        shell.apply(ShellAction::CloseTab {
+    assert!(closed.allows_tab_close);
+    shell
+        .apply(ShellAction::CloseTab {
             id: closed.active_tab,
             containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::CannotCloseLastTab)
-    );
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane {
-            id: closed.focused_pane,
-            containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::CannotCloseLastPane)
-    );
+        })
+        .expect("last Tab closes its Window");
+    assert_eq!(shell.snapshot().windows.len(), 1);
+    assert!(shell.snapshot().active_window.is_some());
 }
 
 #[test]
@@ -174,13 +168,14 @@ fn select_create_close_tabs_are_authoritative() {
         .expect("close created");
     assert_eq!(shell.snapshot().tabs.len(), 1);
     assert_eq!(shell.snapshot().active_tab, before.active_tab);
-    assert_eq!(
-        shell.apply(ShellAction::CloseTab {
+    shell
+        .apply(ShellAction::CloseTab {
             id: before.active_tab,
             containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::CannotCloseLastTab)
-    );
+        })
+        .expect("last Tab closes its Window");
+    assert_eq!(shell.snapshot().windows.len(), 1);
+    assert!(shell.snapshot().active_window.is_some());
 }
 
 #[test]
@@ -252,13 +247,14 @@ fn split_focus_and_close_panes() {
     let snap = shell.snapshot();
     assert_eq!(snap.layout, LayoutDescription::Single);
     assert_eq!(snap.focused_pane, original);
-    assert_eq!(
-        shell.apply(ShellAction::ClosePane {
+    shell
+        .apply(ShellAction::ClosePane {
             id: original,
             containment_generation: shell.containment_generation(),
-        }),
-        Err(ShellError::CannotCloseLastPane)
-    );
+        })
+        .expect("last Pane closes its Tab and Window");
+    assert_eq!(shell.snapshot().windows.len(), 1);
+    assert!(shell.snapshot().active_window.is_some());
 }
 
 #[test]

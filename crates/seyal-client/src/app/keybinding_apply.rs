@@ -95,7 +95,7 @@ impl ApplicationRoot {
             WorkspaceCommandId::TabCreate => self.create_tab(),
             WorkspaceCommandId::TabCloseFocused => {
                 let id = self.shell.snapshot().active_tab;
-                self.close_tab(id)
+                self.close_tab(id, self.shell.containment_generation())
             }
             WorkspaceCommandId::TabSelectPrevious => self.select_tab_relative(-1),
             WorkspaceCommandId::TabSelectNext => self.select_tab_relative(1),
@@ -113,7 +113,7 @@ impl ApplicationRoot {
             WorkspaceCommandId::PaneSplitDown => self.split_focused(SplitAxis::Down),
             WorkspaceCommandId::PaneCloseFocused => {
                 let id = self.shell.snapshot().focused_pane;
-                self.close_pane(id)
+                self.close_pane(id, self.shell.containment_generation())
             }
             WorkspaceCommandId::PaneFocusNext => self.focus_pane_relative(1),
             WorkspaceCommandId::PaneFocusPrevious => self.focus_pane_relative(-1),

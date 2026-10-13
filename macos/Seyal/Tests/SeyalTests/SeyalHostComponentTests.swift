@@ -380,27 +380,59 @@ final class SeyalHostComponentTests: XCTestCase {
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // C2b/C3 enable production tab creation and pane splitting. With a sole
-        // Tab/Pane, close controls remain omitted.
+        // W2b enables hierarchical close, including the final Tab/Pane that
+        // collapses the containing Window. These capabilities remain Rust-owned.
         let shell = seyal_app_shell(view.pane.appHandle)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
-        for bit in [
-            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
-            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
-        ] {
-            XCTAssertEqual(shell.flags & UInt16(bit), 0)
-        }
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
+        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
         let newTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-new-tab"))
         XCTAssertFalse(newTab.isHidden, "seyal-new-tab is shown when Rust allows CreateTab")
         for identifier in ["seyal-split-right", "seyal-split-down"] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertFalse(control.isHidden, "\(identifier) is shown when Rust allows SplitFocused")
         }
-        for identifier in ["seyal-close-tab", "seyal-close-pane"] {
-            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
-            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
-        }
+        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        let closePane = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-pane"))
+        XCTAssertFalse(closeTab.isHidden, "Rust permits hierarchical tab close")
+        XCTAssertFalse(closePane.isHidden, "Rust permits hierarchical pane close")
+        XCTAssertEqual(view.closeTabButton.containmentGeneration, shell.containment_generation)
+        XCTAssertEqual(view.closePaneButton.containmentGeneration, shell.containment_generation)
+    }
+
+    @MainActor
+    func testCloseTabUsesSnapshotContainmentFence() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 2)
+        let currentGeneration = shell.containment_generation
+        XCTAssertEqual(view.closeTabButton.containmentGeneration, currentGeneration)
+
+        view.closeTabButton.containmentGeneration = currentGeneration &- 1
+        view.closeActiveTab(view.closeTabButton)
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count,
+            2,
+            "a stale close control must not remove the current Tab"
+        )
+
+        view.closeTabButton.containmentGeneration = currentGeneration
+        view.closeActiveTab(view.closeTabButton)
+        XCTAssertEqual(
+            seyal_app_shell(handle).tab_count,
+            1,
+            "a current close control carries the exact Rust containment fence"
+        )
     }
 
     @MainActor

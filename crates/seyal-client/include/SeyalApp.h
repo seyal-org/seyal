@@ -50,7 +50,9 @@ enum SeyalAppActionKind {
      * begins one C1 provisioning intent per new terminal leaf. CLOSE_TAB /
      * CLOSE_PANE detach presentation only (ADR-017 §6.1). SPLIT_FOCUSED
      * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
-     * target_execution_lo/hi = TabId/PaneId. SPLIT_FOCUSED: reserved = 0
+     * target_execution_lo/hi = TabId/PaneId; close actions carry the
+     * containment_generation observed in the shell snapshot in
+     * target_pty_generation. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
@@ -61,6 +63,8 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
     SEYAL_APP_ACTION_SPLIT_FOCUSED = 25,
     SEYAL_APP_ACTION_CLOSE_PANE = 26,
+    /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 67,
     /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.

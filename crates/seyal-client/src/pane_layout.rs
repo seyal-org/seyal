@@ -549,7 +549,11 @@ mod root_tests {
 
         // Collapsing the inner Split keeps the outer ratio; last-pane rules
         // are unchanged.
-        root.apply(AppAction::ClosePane { id: c }).unwrap();
+        root.apply(AppAction::ClosePane {
+            id: c,
+            containment_generation: root.snapshot().shell.containment_generation,
+        })
+        .unwrap();
         assert_eq!(root.pane_dividers().len(), 1);
         assert_eq!(root.pane_dividers()[0].ratio, quarter);
         assert_eq!(
@@ -632,7 +636,11 @@ mod root_tests {
         assert_eq!(root.snapshot().shell.focused_pane, bound);
 
         // Bound Pane close is detach-only: execution stays unreferenced/live.
-        root.apply(AppAction::ClosePane { id: bound }).unwrap();
+        root.apply(AppAction::ClosePane {
+            id: bound,
+            containment_generation: root.snapshot().shell.containment_generation,
+        })
+        .unwrap();
         assert!(root
             .provisioning()
             .is_unreferenced(bound_evidence.execution));
@@ -647,10 +655,12 @@ mod root_tests {
             root.apply(AppAction::FocusPane { id: bound }),
             Err(AppError::UnknownPane)
         );
-        assert_eq!(
-            root.apply(AppAction::ClosePane { id: created }),
-            Err(AppError::CannotCloseLastPane)
-        );
-        assert_eq!(root.pane_regions(), regions);
+        // Sole remaining Pane closes the Tab/Window hierarchically.
+        root.apply(AppAction::ClosePane {
+            id: created,
+            containment_generation: root.snapshot().shell.containment_generation,
+        })
+        .expect("sole pane removes window");
+        assert!(root.snapshot().shell.windows.is_empty());
     }
 }

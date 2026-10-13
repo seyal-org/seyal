@@ -61,6 +61,10 @@ pub enum ShellAction {
         tab: TabId,
         containment_generation: u64,
     },
+    CloseWindow {
+        id: WindowId,
+        containment_generation: u64,
+    },
     CloseTab {
         id: TabId,
         containment_generation: u64,

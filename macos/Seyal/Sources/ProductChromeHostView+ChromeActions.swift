@@ -81,6 +81,11 @@ extension ProductChromeHostView {
         action.kind = kind
         action.target_execution_lo = tagged.idLo
         action.target_execution_hi = tagged.idHi
+        if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
+            || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        {
+            action.target_pty_generation = tagged.containmentGeneration
+        }
         _ = seyal_app_apply(pane.appHandle, &action)
         reconcileChrome()
     }
@@ -140,6 +145,15 @@ extension ProductChromeHostView {
         closePaneButton.setAccessibilityIdentifier("seyal-close-pane")
         closePaneButton.target = self
         closePaneButton.action = #selector(closeFocusedPane(_:))
+    }
+
+    func configureCloseButtons(shell: SeyalAppShell) {
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
+        closeTabButton.containmentGeneration = shell.containment_generation
+        closePaneButton.idLo = shell.focused_pane_lo
+        closePaneButton.idHi = shell.focused_pane_hi
+        closePaneButton.containmentGeneration = shell.containment_generation
     }
 
     func styleSwitcher(_ button: NSButton, identifier: String, action: Selector) {

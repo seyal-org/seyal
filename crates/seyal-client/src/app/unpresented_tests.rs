@@ -222,9 +222,6 @@ fn runtime_inventory_imports_survivors_into_a_fresh_shell_catalog() {
 
 #[test]
 fn close_actions_do_not_emit_terminate_execution() {
-    // Production shell is single-pane; close fails as last-pane before bound
-    // checks. Either way no TerminateExecution effect is queued — destruction
-    // paths that could unbind are W2b/W4b and do not exist on this branch.
     let mut root = ApplicationRoot::new();
     let execution = ExecutionId::new();
     let workspace = WorkspaceId::m001_default();
@@ -239,12 +236,50 @@ fn close_actions_do_not_emit_terminate_execution() {
     })
     .unwrap();
     let pane = root.fence().pane;
-    assert!(matches!(
-        root.apply(AppAction::ClosePane { id: pane }),
-        Err(AppError::CannotCloseLastPane) | Err(AppError::CannotCloseBoundPane)
-    ));
-    assert!(root.snapshot().pending_effects.is_empty());
+    root.apply(AppAction::ClosePane {
+        id: pane,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .expect("presentation removal");
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, super::NativeEffect::BoundedDetachThenTerminate)));
+    assert_eq!(root.live_unpresented(), vec![execution]);
     let _ = PaletteCommand::TerminateUnpresented(execution);
+}
+
+#[test]
+fn close_window_releases_bound_execution_into_live_unpresented_catalog() {
+    let mut root = ApplicationRoot::new();
+    let execution = ExecutionId::from_bytes([0x78; 16]);
+    let window = root
+        .snapshot()
+        .shell
+        .active_window
+        .expect("initial product window");
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: evidence(execution, AttachmentId::from_bytes([0x79; 16])),
+    })
+    .expect("bind execution");
+    let generation = root.snapshot().shell.containment_generation;
+
+    root.apply(AppAction::CloseWindow {
+        id: window,
+        containment_generation: generation,
+    })
+    .expect("close presentation");
+
+    assert!(root.snapshot().shell.windows.is_empty());
+    assert_eq!(root.live_unpresented(), vec![execution]);
+    assert!(root.provisioning().is_unreferenced(execution));
+    assert!(root
+        .snapshot()
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, super::NativeEffect::BoundedDetachThenTerminate)));
 }
 
 #[test]

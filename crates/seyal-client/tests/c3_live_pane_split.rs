@@ -211,8 +211,12 @@ fn split_live_close_pane_detaches_only_and_leaves_siblings() {
         .recorded_execution(third)
         .expect("third bound");
 
-    root.apply(AppAction::ClosePane { id: third })
-        .expect("close split leaf");
+    let containment_generation = root.snapshot().shell.containment_generation;
+    root.apply(AppAction::ClosePane {
+        id: third,
+        containment_generation,
+    })
+    .expect("close split leaf");
     assert!(root.provisioning().is_unreferenced(third_execution));
     assert_eq!(
         root.provisioning().recorded_execution(second),

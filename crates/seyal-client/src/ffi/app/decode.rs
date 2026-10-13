@@ -2,7 +2,7 @@
 
 use std::{slice, str, time::Duration};
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 use seyal_protocol::framing::{CommandBlock, CommandBlockState};
 
 use crate::app::{AppAction, AppFence, BindingEvidence};
@@ -183,6 +183,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_pty_generation,
         }),
         25 => Ok(AppAction::SplitFocused {
             axis: if action.reserved == 1 {
@@ -196,6 +197,14 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
+            containment_generation: action.target_pty_generation,
+        }),
+        67 => Ok(AppAction::CloseWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_pty_generation,
         }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {

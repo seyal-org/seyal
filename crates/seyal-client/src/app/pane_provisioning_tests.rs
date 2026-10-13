@@ -254,7 +254,11 @@ fn closing_one_pane_detaches_only_and_leaves_sibling_executions() {
     let exec_second = root.provisioning().recorded_execution(second).unwrap();
     let exec_third = root.provisioning().recorded_execution(third).unwrap();
 
-    root.apply(AppAction::ClosePane { id: third }).unwrap();
+    root.apply(AppAction::ClosePane {
+        id: third,
+        containment_generation: root.snapshot().shell.containment_generation,
+    })
+    .unwrap();
     assert!(root.provisioning().is_unreferenced(exec_third));
     assert_eq!(
         root.provisioning().recorded_execution(second),

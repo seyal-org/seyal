@@ -17,6 +17,7 @@ pub(super) fn chrome_error(error: ChromeError) -> AppError {
 pub(super) fn close_tab_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
+        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownChromeTab,
     }
 }
@@ -25,6 +26,7 @@ pub(super) fn close_pane_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
         ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
+        ShellError::StaleContainment => AppError::StalePane,
         _ => AppError::UnknownPane,
     }
 }
