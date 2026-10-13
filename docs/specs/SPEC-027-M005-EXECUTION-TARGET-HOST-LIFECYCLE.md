@@ -312,3 +312,26 @@ AB-1.9 production path: no host, `StartAgentRun` → `Failed`, no mint. After th
 - **§9** (IPC is not authorization): preserved. Host advertisement is not a grant; `adapter.execute` is an additional scope on an authenticated principal.
 
 No ADR is created, amended, reopened or superseded.
+
+## 15. SPEC-030 supervised task transport reconciliation (PROPOSED — not yet normative)
+
+Candidate extension under [#1327](https://github.com/seyal-org/seyal/issues/1327); §§1–14 and existing launch authority remain accepted unchanged until independent review. Reuse one `StandaloneProcessHost`, one `ExecutionHost` seam and the SPEC-026 lifecycle.
+
+```text
+InputTransport = ObservationOnly | OneShotStdin | FramedBidirectionalStdio
+
+Host.start(run, binding_generation, frozen_manifest_launch)
+  -> supervised HostHandle / spawn evidence (NOT task delivery)
+Host.deliver(handle, authorized RunInputPackage, mode)
+  -> nonblocking admission to bounded writer (NOT completion)
+Host.observe(handle) -> bounded output + delivery + liveness observations
+Host.signal_cancel(handle) / Host.reap(handle) -> exact child/process-group evidence
+```
+
+- `ObservationOnly` is the default for all older manifests and never qualifies to execute newly submitted user tasks. The backend alone chooses the transport/profile from the enabled generation-frozen manifest; the client never provides raw spawn args, env, cwd or stdin bytes outside typed task admission.
+- One-shot: transmit the entire already-frozen, bounded request through a backpressured writer, handle EINTR/short writes/EPIPE, close stdin after success; record `NotSent`, `PartiallySent`, `WrittenAndClosed`, or `DeliveryUnknown` with fenced run identity. Written-and-closed is not proof of agent acceptance, nor is exit status 0 alone proof of structured task success.
+- Framed duplex: per-run protocol version/capability negotiation, frame/request-ID limits, concurrent read/write fairness, bounded queued bytes, deadlines, state validation, cancel/reap and no infinite retries. ACP JSON-RPC is parsed/authorized in one protocol module owned by #1334, not in another process manager.
+- Child stderr is sanitized, separately bounded diagnostic evidence; stdout is not approval truth. On opaque/malformed vendor output, record observation/parse failure rather than invent successful progress/outcome. Never persist raw auth/config details.
+- Retain `env_clear` and resolve narrowly approved manifest environment variables through the backend, including same-user CLI config dirs only with reviewed evidence; no wholesale inherited env or token scraping. Do not inject unsafe bypass flags into Codex/Claude.
+- No synchronous I/O, waiting, JSON parsing, terminal interaction or blocking process-group signaling under the IntegrationService mutex. Bounded shutdown/cancellation includes blocked stdin, output floods, permission wait, client detach, daemon exit and descendants. Reap is based on OS child handle, never recycled PID or presentation loss.
+- A child that may have started is effect-ambiguous after communication loss. Subsequent retry/fallback must use SPEC-026 reconciliation and explicit new Attempt/snapshot, not blind task re-send.
