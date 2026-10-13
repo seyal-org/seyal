@@ -552,9 +552,9 @@ pub struct ApplicationRoot {
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,
-    /// Extra live display attachments owned by this root (quit detaches all).
+    /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
-    live_attachments: Vec<crate::ffi::ClientRegistryHandle>,
+    live_attachments: Vec<session::QuitProbeAttachment>,
 }
 
 impl Default for ApplicationRoot {

@@ -37,6 +37,26 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
     }
 
+    func testQuitWithThreeWindowsAndAttachmentsRepliesOnce() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 3), 0)
+        XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 3)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(host.orderedKeys.count, 3)
+        let replies = QuitReplyCounter()
+        let reply = host.quitCoordinatorForTests.beginTerminateLater(
+            forwardRequestQuit: { host.forwardRequestQuit() },
+            performNativeCleanup: { host.performQuitCleanup() },
+            ackUntilCleanupComplete: { host.ackUntilQuitCleanupComplete() },
+            reply: { replies.increment() }
+        )
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertEqual(replies.count, 1)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 0)
+    }
+
     func testTerminateLaterRepliesOnceOnCleanupComplete() {
         let host = seededQuitHost(windows: 3)
         defer { host.performQuitCleanup() }

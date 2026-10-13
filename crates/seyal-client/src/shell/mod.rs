@@ -119,9 +119,7 @@ impl ShellError {
             Self::CrossWorkspaceMove => "A Tab cannot move across Workspaces.",
             Self::NotZoomed => "The Tab is not zoomed.",
             Self::InvalidMoveTarget => "Invalid pane move or swap target.",
-            Self::WindowCreationUnavailable => {
-                "Creating another Window is unavailable until window close exists."
-            }
+            Self::WindowCreationUnavailable => "Window creation is unavailable until close exists.",
         }
     }
 }

@@ -3,6 +3,12 @@
 use super::*;
 
 #[cfg(target_os = "macos")]
+pub(super) type QuitProbeAttachment = (
+    crate::ffi::ClientRegistryHandle,
+    std::os::unix::net::UnixStream,
+);
+
+#[cfg(target_os = "macos")]
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
         self.release_live_attachments();
@@ -231,7 +237,7 @@ impl ApplicationRoot {
             let tag = u8::try_from(index + 1).map_err(|_| ())?;
             let execution = ExecutionId::from_bytes([tag; 16]);
             let attachment = AttachmentId::from_bytes([tag; 16]);
-            let client = crate::local::try_reconstruction_probe_client(
+            let (client, peer) = crate::local::try_reconstruction_probe_client_with_peer(
                 Role::Controller,
                 24,
                 80,
@@ -240,7 +246,7 @@ impl ApplicationRoot {
                 attachment,
             )?;
             let registered = crate::ffi::register_app_client(client).map_err(|_| ())?;
-            self.live_attachments.push(registered);
+            self.live_attachments.push((registered, peer));
         }
         Ok(())
     }
@@ -251,7 +257,7 @@ impl ApplicationRoot {
             raws.push(handle.raw());
         }
         for handle in &self.live_attachments {
-            let raw = handle.raw();
+            let raw = handle.0.raw();
             if !raws.contains(&raw) {
                 raws.push(raw);
             }
@@ -595,7 +601,7 @@ impl ApplicationRoot {
             let primary = self.client_handle.take().map(|handle| handle.raw());
             let extras = std::mem::take(&mut self.live_attachments);
             let mut raws = Vec::new();
-            for handle in extras {
+            for (handle, _) in &extras {
                 raws.push(handle.raw());
             }
             for (_, handle) in self.extra_pane_clients.drain() {
