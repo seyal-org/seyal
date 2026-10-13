@@ -33,6 +33,12 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             context: APP,
         },
         BuiltinRow {
+            keys_notation: "cmd+n",
+            id: WorkspaceCommandId::TabCreate,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
             keys_notation: "cmd+t",
             id: WorkspaceCommandId::TabCreate,
             ordinal: None,

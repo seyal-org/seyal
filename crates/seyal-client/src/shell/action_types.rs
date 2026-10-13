@@ -30,6 +30,11 @@ pub enum ShellAction {
         id: WindowId,
         containment_generation: u64,
     },
+    /// AppKit observed this existing Window become key; update product focus
+    /// without requesting a second native order-front transition.
+    ObserveWindowBecameKey {
+        id: WindowId,
+    },
     SelectTab {
         id: TabId,
         containment_generation: u64,

@@ -4,7 +4,7 @@ use std::{mem::size_of, slice};
 
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
-use crate::app::{ApplicationRoot, APP_ABI_VERSION};
+use crate::app::{AppAction, ApplicationRoot, APP_ABI_VERSION};
 use crate::pane_layout::SplitRatio;
 use crate::presentation::PresentationMode;
 use crate::shell::{
@@ -61,6 +61,7 @@ fn seed_n_windows(n: usize) -> ShellState {
         workspace,
         true,
         true,
+        true,
     )
     .expect("seeded shell")
 }
@@ -78,7 +79,10 @@ fn apply_on_handle(handle: u64, action: ShellAction) {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let state = apps.get_mut(&handle).expect("handle");
-        state.root.apply_shell(action).expect("shell action");
+        state
+            .root
+            .apply_shell_for_test(action)
+            .expect("shell action");
     });
 }
 
@@ -209,6 +213,7 @@ fn pane_tree_split_ratio_round_trips_through_ffi() {
         workspace,
         true,
         true,
+        false,
     )
     .expect("splittable shell");
     let initial = shell.snapshot();
@@ -384,6 +389,14 @@ fn effects_emit_in_commit_order() {
         ]
     );
     install_shell(handle, seed_n_windows(1));
+    // Drain with_shell bootstrap Realize/OrderFront so this case measures CreateWindow.
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        while !state.root.snapshot().pending_effects.is_empty() {
+            state.root.apply(AppAction::AckEffect).unwrap();
+        }
+    });
     let generation = seyal_app_shell(handle).containment_generation;
     apply_on_handle(
         handle,
@@ -575,7 +588,7 @@ fn shell_header_refreshes_after_rejected_and_successful_actions() {
 }
 
 #[test]
-fn navigate_to_other_window_tab_drains_order_front() {
+fn navigate_to_other_window_tab_emits_window_activation() {
     use crate::app::AppAction;
     use crate::navigation::ResourceAddress;
 
@@ -584,6 +597,9 @@ fn navigate_to_other_window_tab_drains_order_front() {
     let other_tab = shell.snapshot().windows[1].tabs[0].id;
     let other_window = shell.snapshot().windows[1].id;
     let mut root = ApplicationRoot::with_shell(shell);
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Tab {
@@ -593,15 +609,67 @@ fn navigate_to_other_window_tab_drains_order_front() {
     })
     .expect("navigate");
     assert_eq!(root.snapshot().shell.active_window, other_window);
-    assert!(
-        root.snapshot()
-            .pending_effects
-            .iter()
-            .any(|effect| matches!(
-                effect,
-                crate::app::NativeEffect::OrderFrontMakeKey { window } if *window == other_window
-            )),
-        "Navigate must drain OrderFrontMakeKey, got {:?}",
-        root.snapshot().pending_effects
+    assert_eq!(
+        root.snapshot().pending_effects,
+        [crate::app::NativeEffect::WindowActivation {
+            window: other_window,
+        }],
+        "Navigate must emit exactly one typed WindowActivation"
     );
+}
+
+#[test]
+fn navigate_encodes_one_window_activation_effect() {
+    use crate::app::{AppAction, NativeEffect};
+    use crate::navigation::ResourceAddress;
+
+    let handle = seyal_app_create();
+    let shell = seed_n_windows(2);
+    let snap = shell.snapshot();
+    let target_window = snap.windows[1].id;
+    let target_tab = snap.windows[1].tabs[0].id;
+    let target_pane = snap.windows[1].tabs[0].focused_pane;
+    let workspace = snap.active_workspace;
+    install_shell(handle, shell);
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        while !state.root.snapshot().pending_effects.is_empty() {
+            state.root.apply(AppAction::AckEffect).unwrap();
+        }
+        state
+            .root
+            .apply(AppAction::Navigate {
+                fence: state.root.fence(),
+                address: ResourceAddress::Pane {
+                    workspace,
+                    tab: target_tab,
+                    pane: target_pane,
+                },
+            })
+            .unwrap();
+        let effects = state.root.snapshot().pending_effects;
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, NativeEffect::WindowActivation { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            effects.last(),
+            Some(&NativeEffect::WindowActivation {
+                window: target_window
+            })
+        );
+    });
+    let header = seyal_app_shell(handle);
+    assert_eq!(header.effect_count, 1);
+    let effect = seyal_app_native_effect(handle, 0);
+    assert_eq!(effect.kind, 6, "WindowActivation");
+    assert_eq!(
+        (effect.window_lo, effect.window_hi),
+        split(target_window.to_bytes())
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
 }

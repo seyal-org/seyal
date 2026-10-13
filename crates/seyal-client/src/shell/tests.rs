@@ -62,6 +62,7 @@ fn seed_two_workspaces() -> ShellState {
         first,
         true,
         true,
+        false,
     )
     .expect("fixture")
 }
@@ -364,7 +365,8 @@ fn snapshots_are_deterministic_for_identical_state() {
 #[test]
 fn empty_shell_is_rejected() {
     assert_eq!(
-        ShellState::from_workspaces(Vec::new(), WorkspaceId::m001_default(), true, true).err(),
+        ShellState::from_workspaces(Vec::new(), WorkspaceId::m001_default(), true, true, false)
+            .err(),
         Some(ShellError::EmptyShell)
     );
 }
