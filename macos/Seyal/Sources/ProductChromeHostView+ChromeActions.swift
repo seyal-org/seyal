@@ -81,6 +81,11 @@ extension ProductChromeHostView {
         action.kind = kind
         action.target_execution_lo = tagged.idLo
         action.target_execution_hi = tagged.idHi
+        if kind == UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
+            || kind == UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        {
+            action.target_pty_generation = tagged.containmentGeneration
+        }
         _ = seyal_app_apply(pane.appHandle, &action)
         reconcileChrome()
     }

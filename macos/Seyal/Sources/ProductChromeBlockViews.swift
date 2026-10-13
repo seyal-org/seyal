@@ -8,6 +8,7 @@ final class IdentityButton: NSButton {
     var kind: UInt16 = 0
     var idLo: UInt64 = 0
     var idHi: UInt64 = 0
+    var containmentGeneration: UInt64 = 0
 }
 
 final class CommandBlockView: NSView {
