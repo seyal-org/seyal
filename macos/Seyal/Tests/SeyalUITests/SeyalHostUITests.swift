@@ -976,6 +976,14 @@ final class SeyalHostUITests: XCTestCase {
             "post-reconnect keys must enter the composer; editor=\(editor.firstMatch.value ?? "nil")"
         )
         XCTAssertTrue(composer.firstMatch.isHittable)
+        // #1344 regression: a later chrome/recovery handoff must leave Rust
+        // connected *after* the native editor has actually accepted text.
+        // This is not satisfied by a PTY AX "connection=usable" alone.
+        XCTAssertEqual(
+            recovery.firstMatch.value as? String,
+            "connected",
+            "native composer focus/IME restore must not strand Rust recovery in Restoring"
+        )
         assertFlowBlocksOrFail(in: app)
     }
 
