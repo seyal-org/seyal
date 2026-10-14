@@ -338,6 +338,11 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   override func viewWillMove(toWindow newWindow: NSWindow?) {
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSApplication.didBecomeActiveNotification,
+      object: NSApp
+    )
     if let window {
       NotificationCenter.default.removeObserver(
         self,
@@ -384,6 +389,12 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       isDetachingRuntimeConnection = false
     }
     if let window {
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(windowActivationChanged),
+        name: NSApplication.didBecomeActiveNotification,
+        object: NSApp
+      )
       NotificationCenter.default.addObserver(
         self,
         selector: #selector(windowOcclusionChanged),
