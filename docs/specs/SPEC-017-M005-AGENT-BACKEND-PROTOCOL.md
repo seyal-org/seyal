@@ -1,6 +1,6 @@
 # SPEC-017 — M005 independent Agent Backend protocol, security and event replay
 
-- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment is not Accepted.** PR #1270 (`92d9a00`) was squash-merged by author `@mahboobmonnamd` with zero reviews; that merge is not the non-author Accepted stamp. **Accepted on merge of PR #1316 by a non-author maintainer (`@anulalbs` / `@crdileep82`) under #1191.** An author or agent comment or merge is not that acceptance. Pairing amendment text is unchanged. This is not an implemented-behavior claim.
+- **Status:** Base SPEC-017 Accepted under #838 / ADR-016. **§5–§6 pairing amendment remains PROPOSED, not independently Accepted.** PR #1270 (`92d9a00`) and the later restamp PR #1316 (`3ced201`) were merged, but neither has a recorded non-author approval in GitHub reviews; author-account comments are not acceptance. The #1316 restamp therefore did not satisfy its explicit non-author acceptance gate. A new standalone #1191 architecture-review vehicle must receive an actual non-author maintainer APPROVE and, only with explicit maintainer authorization, a non-author merge before pairing becomes Accepted. Pairing amendment text is unchanged; this is not implemented-behavior evidence.
 - **Issue:** #838 (base contract); pairing amendment #1191
 - **Architecture:** ADR-012, ADR-013, ADR-014, ADR-015 (pairing approval UX ownership), ADR-016 (no ADR create/amend; §9 boundary unchanged)
 - **Consumers:** #678, #679, #680, #681, #1190, #1191, #1192
