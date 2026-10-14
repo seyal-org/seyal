@@ -43,6 +43,12 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         super.updateVisibility()
     }
 
+    func composerFocusEligibilityDidChange() {
+        guard recoveryPresentationPending else { return }
+        resetComposerRecoveryFocusRetries()
+        _ = advanceRecoveryPresentationIfReady()
+    }
+
     override func windowActivationChanged() {
         resetComposerRecoveryFocusRetries()
         super.windowActivationChanged()

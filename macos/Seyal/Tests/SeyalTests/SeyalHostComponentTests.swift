@@ -1301,6 +1301,81 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testRecoveryFocusRestartsWhenComposerBecomesEligible() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "initial bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        view.composerFocusEligibilityDidChange()
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testComposerEligibilityCallbackDropsStaleReconcileTransition() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        let composer = ComposerBridgeView(appHandle: handle)
+        composer.reconcile()
+        var callbacks = 0
+        let staleCallback = expectation(description: "busy composer invalidates queued callback")
+        staleCallback.isInverted = true
+        composer.onFocusEligibilityChanged = { callbacks += 1; staleCallback.fulfill() }
+
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        composer.reconcile() // hidden -> available queues a callback
+        XCTAssertTrue(composer.isFocusEligibleForRecovery)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
+        composer.reconcile() // available -> busy invalidates that callback before delivery
+        XCTAssertFalse(composer.isFocusEligibleForRecovery)
+        await fulfillment(of: [staleCallback], timeout: 0.2)
+        XCTAssertEqual(callbacks, 0)
+
+        let currentCallback = expectation(description: "current available transition is delivered")
+        composer.onFocusEligibilityChanged = { callbacks += 1; currentCallback.fulfill() }
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 3), 0)
+        composer.reconcile()
+        await fulfillment(of: [currentCallback], timeout: 1)
+        XCTAssertEqual(callbacks, 1)
+    }
+
+    @MainActor
     func testRecoveryFocusRetryFromPriorGenerationIsDiscarded() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
