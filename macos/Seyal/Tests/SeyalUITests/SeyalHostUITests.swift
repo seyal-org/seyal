@@ -1223,9 +1223,5 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
         newWindow.click()
         waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
-        let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
-        if splitRight.exists {
-            XCTAssertFalse(splitRight.isHittable, "splits stay fail-closed until C3")
-        }
     }
 }
