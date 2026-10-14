@@ -436,9 +436,9 @@ Pairing / identity-evidence amendment (#1191) additionally requires, once implem
 - M006 workflow semantics;
 - choosing a persistence engine/table layout here.
 
-## 17. SPEC-030 task-input protocol reconciliation (PROPOSED — not yet normative)
+## 17. SPEC-030 task-input protocol reconciliation (conditional acceptance via PR #1340)
 
-This candidate amendment is reviewed under [#1327](https://github.com/seyal-org/seyal/issues/1327). Sections 1–16 remain accepted and unchanged until an independent non-author review accepts the extension. The existing `AGB1`/Protocol V1 command catalog and 64-KiB absolute frame cap are not silently rewritten.
+This candidate amendment is reviewed under [#1327](https://github.com/seyal-org/seyal/issues/1327). Sections 1–16 retain their existing accepted authority. This extension is Proposed until PR #1340 receives an independent non-author APPROVE **and** an explicit user-authorized non-author merge; only then is §17 Accepted under #1327. Pairing §5–§6 remains a **separate** #1191 acceptance gate. The existing `AGB1`/Protocol V1 command catalog and 64-KiB absolute frame cap are not silently rewritten.
 
 **Negotiated V2 command / response shape** (final numeric tags, fixed binary codecs and compatibility tests belong to #1330 implementation after acceptance):
 
