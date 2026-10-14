@@ -425,11 +425,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var shouldRender: Bool {
     guard shouldAttachRuntime else { return false }
     guard let window else { return false }
-    // AppKit may lag occlusion updates after a headed reconnect. A genuinely
-    // key foreground window is renderable even when that hint is still stale.
-    // Do not render a background/minimized window on the key-window fallback.
-    return window.occlusionState.contains(.visible)
-      || (window.isKeyWindow && NSApp.keyWindow === window)
+    return window.occlusionState.contains(.visible) || (NSApp.keyWindow === window)
   }
 
   /// Runtime attachment is a lifecycle concern, not a Metal presentation
