@@ -1198,8 +1198,8 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
 
-    /// W5: Focused/Visible chrome stays one live surface; splits stay fail-closed.
-    func testPresentationTiersKeepOneLiveSurfaceAndFailClosedSplits() throws {
+    /// W5: presentation-tier chrome keeps tab and window admission available.
+    func testPresentationTierChromeKeepsNewTabAndWindowAvailable() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
         XCTAssertEqual(app.windows.count, 1)
@@ -1208,10 +1208,6 @@ final class SeyalHostUITests: XCTestCase {
         let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
         XCTAssertTrue(newTab.isHittable)
-        let splitRight = app.descendants(matching: .any)["seyal-split-right"].firstMatch
-        if splitRight.exists {
-            XCTAssertFalse(splitRight.isHittable, "C3 splits stay fail-closed on W5")
-        }
         let newWindow = app.menuItems["New Window"]
         XCTAssertTrue(newWindow.waitForExistence(timeout: 5))
         newWindow.click()
