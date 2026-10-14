@@ -433,6 +433,7 @@ final class ProductChromeHostView: NSView {
             historyOverlay.reconcile()
             commandPalette.reconcile()
             driveRecovery()
+            retryPendingRecoveryPresentationOnChromeEvent()
             recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
             return
         }
@@ -462,11 +463,25 @@ final class ProductChromeHostView: NSView {
         historyOverlay.reconcile()
         commandPalette.reconcile()
         driveRecovery()
-        recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
         if eligibilityChanged {
             routeFocus()
         }
+        // Recovery may have adopted a usable PTY while AppKit had not yet
+        // accepted composer first responder. Every subsequent real chrome
+        // reconciliation (including a focus/eligibility transition) is a
+        // bounded, event-driven opportunity to finish native restoration.
+        // Rust remains the only owner of the Usable/Connected transition.
+        retryPendingRecoveryPresentationOnChromeEvent()
+        recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
         applyTheme()
+    }
+
+    private func retryPendingRecoveryPresentationOnChromeEvent() {
+        // Do not poll snapshots/attempt native focus at steady state. The
+        // existing method verifies bridge, prepared renderer, palette focus,
+        // and actual AppKit first-responder acceptance before signaling Rust.
+        guard pane.inputSurface.recoveryPresentationPending else { return }
+        _ = pane.inputSurface.advanceRecoveryPresentationIfReady()
     }
 
     /// Global keyboard-first command palette (#932): the menu action target.
