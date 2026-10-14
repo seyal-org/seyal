@@ -226,6 +226,12 @@ impl Runtime {
             );
             return;
         }
+        if let Some(state) = self.local_ipc.as_mut() {
+            let _ = state.attachments.set_delivery(
+                resync.attachment_id,
+                crate::local_ipc::attachment::DeliveryState::Delivering,
+            );
+        }
 
         self.schedule_snapshot_recovery(token);
     }
@@ -338,6 +344,7 @@ impl Runtime {
                             ErrorCode::DisplayUnavailable,
                             MessageType::Resync as u16,
                         );
+                        self.schedule_snapshot_recovery(token);
                         None
                     }
                 }

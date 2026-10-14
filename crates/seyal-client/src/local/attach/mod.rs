@@ -44,6 +44,7 @@ impl FinishAttachError {
     }
 }
 
+use super::delivery_wire::delivery_control_negotiated;
 use super::provisioning_wire::provisioning_negotiated;
 
 use crate::block_cache::{is_epoch_quarantined, BlockCache};
@@ -486,6 +487,8 @@ impl LocalDisplayClient {
         if created_bootstrap {
             client.next_provisioning_request_id = 2;
         }
+        client.delivery_control_negotiated =
+            delivery_control_negotiated(server_hello.server_capabilities);
         Ok(client)
     }
 
@@ -539,7 +542,7 @@ impl LocalDisplayClient {
         let block_metadata_negotiated =
             server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
                 && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
-        Self::finish_attach_with_deadline(
+        let mut client = Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
@@ -552,7 +555,10 @@ impl LocalDisplayClient {
             1,
             deadline,
         )
-        .map_err(|failure| failure.error)
+        .map_err(|failure| failure.error)?;
+        client.delivery_control_negotiated =
+            delivery_control_negotiated(server_hello.server_capabilities);
+        Ok(client)
     }
 
     /// Benchmark-only control connection that preserves the exact Pass 7
@@ -574,7 +580,7 @@ impl LocalDisplayClient {
             false,
             deadline,
         )?;
-        Self::finish_attach_with_deadline(
+        let mut client = Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
@@ -587,7 +593,10 @@ impl LocalDisplayClient {
             1,
             deadline,
         )
-        .map_err(|failure| failure.error)
+        .map_err(|failure| failure.error)?;
+        client.delivery_control_negotiated =
+            delivery_control_negotiated(server_hello.server_capabilities);
+        Ok(client)
     }
 
     #[cfg(test)]
@@ -873,6 +882,8 @@ impl LocalDisplayClient {
             highest_v2_error_id: 0,
             last_admitted_mouse_action_id: 0,
             execution_provisioning_negotiated,
+            delivery_control_negotiated: false,
+            delivery_suspended: false,
             next_provisioning_request_id: 1,
             harness_probe: false,
             pending_create_requests: std::collections::HashSet::new(),

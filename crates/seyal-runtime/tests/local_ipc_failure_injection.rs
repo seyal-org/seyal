@@ -17,8 +17,8 @@ use seyal_runtime::{
         connection::MAX_CONNECTIONS,
         discovery::CONTROL_SOCKET_NAME,
         framing::{
-            encode_frame, Attach, Attached, ClientHello, FrameHeader, MessageType, Role,
-            ServerHello, HEADER_LEN,
+            encode_frame, Attach, Attached, ClientHello, FrameHeader, MessageType, ResumeDelivery,
+            Role, ServerHello, SuspendDelivery, CAP_ATTACHMENT_DELIVERY_CONTROL, HEADER_LEN,
         },
     },
     test_fault::{self, FaultPoint},
@@ -704,4 +704,83 @@ fn connection_capacity_is_fully_recovered_after_disconnecting_all_connections() 
         baseline_fds,
         "connection saturate/drain cycling must not leak descriptors"
     );
+}
+
+#[test]
+fn resume_resync_n_times_display_encode_fault_stays_bounded() {
+    let _guard = serialized();
+    let mut runtime = Runtime::new(config()).unwrap();
+    let execution_id = runtime
+        .create_execution(
+            CommandSpec::new("/bin/cat"),
+            WindowSize::new(80, 24, 0, 0).unwrap(),
+        )
+        .unwrap();
+    let mut stream = connect(&mut runtime);
+    send(
+        &mut runtime,
+        &mut stream,
+        MessageType::ClientHello,
+        &ClientHello {
+            client_capabilities: CAP_ATTACHMENT_DELIVERY_CONTROL,
+        }
+        .encode(),
+    );
+    let (kind, _) = frame(&mut runtime, &mut stream).unwrap();
+    assert_eq!(kind, MessageType::ServerHello);
+    attach(&mut runtime, &mut stream, execution_id);
+    let (kind, payload) = frame(&mut runtime, &mut stream).expect("Attached");
+    assert_eq!(kind, MessageType::Attached);
+    let attached = Attached::decode(&payload).unwrap();
+    // Drain the attach snapshot so resume resync can encode.
+    let drain_until = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < drain_until {
+        pump(&mut runtime);
+        let mut buf = [0u8; 8192];
+        match stream.read(&mut buf) {
+            Ok(0) | Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("{error}"),
+        }
+    }
+
+    send(
+        &mut runtime,
+        &mut stream,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    test_fault::fail_times(FaultPoint::DisplayEncode, 5);
+    send(
+        &mut runtime,
+        &mut stream,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while test_fault::remaining(FaultPoint::DisplayEncode) > 0 && Instant::now() < deadline {
+        pump(&mut runtime);
+        let mut buf = [0u8; 8192];
+        match stream.read(&mut buf) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("{error}"),
+        }
+    }
+    assert_eq!(
+        test_fault::remaining(FaultPoint::DisplayEncode),
+        0,
+        "bounded resync retries must consume the injected encode faults"
+    );
+    assert_eq!(runtime.lookup(execution_id).unwrap().attachment_count, 1);
+    runtime.begin_shutdown().unwrap();
+    runtime
+        .run_until_empty(Instant::now() + Duration::from_secs(3))
+        .unwrap();
 }

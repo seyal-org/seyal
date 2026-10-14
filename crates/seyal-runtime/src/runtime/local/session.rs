@@ -3,7 +3,10 @@ use seyal_protocol::pass8::{encode_block_state_frame, CAP_BLOCK_METADATA};
 use crate::{
     display,
     local_ipc::{
-        attachment::MAX_LIVE_ATTACHMENTS,
+        attachment::{
+            MAX_ATTACHMENTS_PER_CONNECTION, MAX_ATTACHMENTS_PER_CONNECTION_LEGACY,
+            MAX_LIVE_ATTACHMENTS,
+        },
         connection::ConnectionState as LocalIpcConnState,
         framing::{
             self, Attach as WireAttach, Attached as WireAttached, ErrorCode, ExecutionList,
@@ -44,6 +47,14 @@ impl Runtime {
         }
         if kind == MessageType::TerminateExecutionRequest {
             self.handle_terminate_execution_request(token, payload);
+            return;
+        }
+        if kind == MessageType::SuspendDelivery {
+            self.handle_suspend_delivery(token, payload);
+            return;
+        }
+        if kind == MessageType::ResumeDelivery {
+            self.handle_resume_delivery(token, payload);
             return;
         }
         if kind == MessageType::ViewportLineIds {
@@ -113,7 +124,8 @@ impl Runtime {
                 | framing::CAP_GRAPHEME_DISPLAY
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_EXECUTION_PROVISIONING
-                | framing::CAP_VIEWPORT_LINE_IDS)
+                | framing::CAP_VIEWPORT_LINE_IDS
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL)
             != 0
         {
             self.send_error(
@@ -134,7 +146,8 @@ impl Runtime {
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
                 | CAP_EXECUTION_PROVISIONING
-                | framing::CAP_VIEWPORT_LINE_IDS,
+                | framing::CAP_VIEWPORT_LINE_IDS
+                | framing::CAP_ATTACHMENT_DELIVERY_CONTROL,
             max_frame_payload: framing::MAX_FRAME_PAYLOAD,
             max_input_payload: framing::MAX_INPUT_BYTES,
         };
@@ -219,12 +232,28 @@ impl Runtime {
             self.send_error(token, ErrorCode::ControllerBusy, MessageType::Attach as u16);
             return;
         }
-        if state
-            .connections
-            .get(&token)
-            .and_then(|meta| meta.attachment)
-            .is_some()
+        let delivery_control = state.connections.get(&token).is_some_and(|meta| {
+            meta.client_capabilities & framing::CAP_ATTACHMENT_DELIVERY_CONTROL != 0
+        });
+        let on_connection = state.attachments.attachments_on_connection(token).len();
+        let per_connection_max = if delivery_control {
+            MAX_ATTACHMENTS_PER_CONNECTION
+        } else {
+            MAX_ATTACHMENTS_PER_CONNECTION_LEGACY
+        };
+        if on_connection >= per_connection_max {
+            self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
+            return;
+        }
+        if on_connection > 0
+            && state
+                .attachments
+                .delivering_on_connection(token)
+                .iter()
+                .any(|(_, execution)| *execution != attach.execution_id)
         {
+            // Display frames are connection-scoped (§10.4); two delivering
+            // executions on one socket cannot be demultiplexed.
             self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
             return;
         }
@@ -315,7 +344,9 @@ impl Runtime {
                 },
             );
         }
-        if let Some(meta) = state.connections.get_mut(&token) {
+        if let Some(meta) = state.connections.get_mut(&token)
+            && meta.attachment.is_none()
+        {
             meta.attachment = Some(attachment_id);
         }
         state.server.set_state(token, LocalIpcConnState::Attached);
@@ -364,11 +395,16 @@ impl Runtime {
             return;
         }
         if let Some(state) = self.local_ipc.as_mut() {
-            state.pending_resync_set.remove(&token);
-            if let Some(meta) = state.connections.get_mut(&token) {
-                meta.attachment = None;
+            let remaining = state.attachments.attachments_on_connection(token);
+            if let Some(meta) = state.connections.get_mut(&token)
+                && meta.attachment == Some(detach.attachment_id)
+            {
+                meta.attachment = remaining.first().copied();
             }
-            state.server.set_state(token, LocalIpcConnState::Ready);
+            if remaining.is_empty() {
+                state.pending_resync_set.remove(&token);
+                state.server.set_state(token, LocalIpcConnState::Ready);
+            }
             if state.attachments.attachments_for_execution(execution_id) == 0 {
                 state.published.remove(&execution_id);
             }

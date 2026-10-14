@@ -39,6 +39,7 @@ pub(crate) enum OutboundKind {
     TerminateExecution {
         request_id: u64,
     },
+    DeliveryControl,
 }
 
 #[derive(Debug)]

@@ -1,4 +1,5 @@
 mod attach;
+mod delivery_wire;
 mod discovery;
 mod display_apply;
 mod input_resize;
@@ -146,6 +147,9 @@ pub struct LocalDisplayClient {
     pub(crate) last_admitted_mouse_action_id: u32,
     /// SPEC-004 §18 capability bit 10 negotiated with Runtime.
     pub(crate) execution_provisioning_negotiated: bool,
+    /// SPEC-004 §19 capability bit 11.
+    pub(crate) delivery_control_negotiated: bool,
+    pub(crate) delivery_suspended: bool,
     /// Shared connection-local request-id space for types 36 and 38.
     pub(crate) next_provisioning_request_id: u64,
     /// In-process harness probe (`UnixStream::pair`); never drives live
@@ -732,6 +736,8 @@ fn reconstruction_probe_client_with_stream(
         highest_v2_error_id: 0,
         last_admitted_mouse_action_id: 0,
         execution_provisioning_negotiated: false,
+        delivery_control_negotiated: false,
+        delivery_suspended: false,
         next_provisioning_request_id: 1,
         harness_probe: true,
         pending_create_requests: std::collections::HashSet::new(),

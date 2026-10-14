@@ -223,7 +223,7 @@ impl Runtime {
         self.local_ipc.as_ref().map_or_else(Vec::new, |state| {
             state
                 .attachments
-                .attachments_with_connections_for_execution(execution_id)
+                .delivering_viewers_for_execution(execution_id)
                 .into_iter()
                 .map(|(_, token)| {
                     let grapheme = state

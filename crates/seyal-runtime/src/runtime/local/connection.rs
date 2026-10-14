@@ -70,19 +70,26 @@ impl Runtime {
 
     pub(super) fn close_local_connection(&mut self, token: u64) {
         self.drop_pending_creates_for_connection(token);
-        let (reactor_token, attachment) = {
+        let (reactor_token, attachments) = {
             let Some(state) = self.local_ipc.as_mut() else {
                 return;
             };
+            let extras = state.attachments.attachments_on_connection(token);
             state.server.close(token);
             state.pending_resync_set.remove(&token);
             let Some(meta) = state.connections.remove(&token) else {
                 return;
             };
             state.reactor_connections.remove(&meta.reactor_token);
-            (meta.reactor_token, meta.attachment)
+            let mut ids = extras;
+            if let Some(primary) = meta.attachment
+                && !ids.contains(&primary)
+            {
+                ids.push(primary);
+            }
+            (meta.reactor_token, ids)
         };
-        if let Some(attachment_id) = attachment {
+        for attachment_id in attachments {
             self.release_local_attachment(attachment_id);
         }
         let _ = self.reactor.deregister(reactor_token);

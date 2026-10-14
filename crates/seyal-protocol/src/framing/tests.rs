@@ -52,6 +52,25 @@ fn control_payloads_round_trip() {
         attachment_id: attach_id(),
     };
     assert_eq!(Resync::decode(&resync.encode()).unwrap(), resync);
+    let suspend = SuspendDelivery {
+        attachment_id: attach_id(),
+    };
+    assert_eq!(suspend.encode().len(), 24);
+    assert_eq!(SuspendDelivery::decode(&suspend.encode()).unwrap(), suspend);
+    let resume = ResumeDelivery {
+        attachment_id: attach_id(),
+    };
+    assert_eq!(ResumeDelivery::decode(&resume.encode()).unwrap(), resume);
+    let mut reserved = suspend.encode();
+    reserved[16] = 1;
+    assert_eq!(
+        SuspendDelivery::decode(&reserved),
+        Err(FramingError::MalformedPayload)
+    );
+    assert_eq!(
+        ResumeDelivery::decode(&resume.encode()[..16]),
+        Err(FramingError::ExactLengthMismatch)
+    );
 }
 
 #[test]
@@ -76,6 +95,11 @@ fn display_message_ids_replace_candidate_b_projection_messages() {
         MessageType::from_u16(35),
         Some(MessageType::ViewportLineIds)
     );
+    assert_eq!(
+        MessageType::from_u16(40),
+        Some(MessageType::SuspendDelivery)
+    );
+    assert_eq!(MessageType::from_u16(41), Some(MessageType::ResumeDelivery));
 }
 
 #[test]
