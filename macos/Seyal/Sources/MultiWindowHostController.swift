@@ -333,6 +333,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
         action.target_execution_lo = shell.focused_pane_lo
         action.target_execution_hi = shell.focused_pane_hi
+        action.target_generation = shell.containment_generation
         _ = seyal_app_apply(appHandle, &action)
         applyPendingEffectsAndReconcile()
     }
