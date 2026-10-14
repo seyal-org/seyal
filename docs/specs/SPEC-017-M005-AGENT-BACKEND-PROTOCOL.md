@@ -120,17 +120,19 @@ Transport admission (same-UID Unix socket / named pipe) remains necessary but ne
 ```text
 FirstPartyEvidenceV1 {
   principal_kind: FirstPartySeyal | FirstPartyCLI
-  credential_ref   // CredentialStore-backed install credential
-  // optional platform peer attestation may constrain which process may
-  // present credential_ref; peer UID alone is never sufficient
+  credential_ref   // CredentialStore locator only; not a bearer proof
+  proof_ref        // fresh challenge-bound signature/MAC or OS-attested proof
+  // platform peer attestation and CredentialStore caller access control
+  // must establish the permitted first-party install; peer UID alone is insufficient
 }
 ```
 
 Requirements:
 
-- Evidence material lives in CredentialStore (§7), not in ordinary Agent DB rows, aggregate events, SelectionTrace, logs, or normal frontend IPC.
-- Repository content, environment variables, and world-readable files must not be able to register or forge a first-party principal.
-- A distinct first-party install credential may be rotated/revoked without revoking provider/harness ConnectionProfile credentials.
+- `credential_ref` is **only a public-equivalent lookup selector**. Its possession, knowledge, replay or appearance in ordinary Agent DB, logs, local IPC or event metadata is **never** authenticated identity evidence. Establish fresh **proof of possession** of the corresponding secret/private key or a separately reviewed OS-attested equivalent, bound to a backend-issued one-use nonce, exact intended principal/install, BackendInstanceId, authenticated local connection and bounded expiry. Verify the proof before creating a privileged ClientSession.
+- The required pre-authorization challenge/proof exchange is **versioned and fail-closed**: replayed, stale, malformed, mismatched-connection or downgraded proofs cannot mint sessions, and a legacy V1 Hello/fixed token cannot bypass the required proof. Define its bounded wire framing and numeric codecs as a reviewed #1191 Ready prerequisite, not by changing existing V1 command tags in place. The secret/private key never enters ordinary IPC, source-controlled config, logs, agent metadata or generic app environment; signature/MAC proofs are redacted from diagnostics.
+- For `FirstPartySeyal`/`FirstPartyCLI`, use independently verified **install-bound OS signing/attestation or OS-secure credential access control** capable of distinguishing the permitted installation from an arbitrary same-UID executable. A same-UID process merely invoking the first-party executable cannot thereby mint `admin.clients` without a trusted approval path. **If the OS/platform cannot establish this boundary, privileged first-party enrollment fails closed** rather than falling back to a UID check or public ref.
+- Repository content, environment variables, world-readable files and untrusted harness output must not register, forge or renew a first-party principal. A distinct first-party install credential may be rotated/revoked without revoking provider/harness ConnectionProfile credentials.
 
 Until first-party install evidence and pairing are implemented, production claims that rely on SPEC-017 §15.3–15.5 third-party / UserApprovedLocalClient behavior remain out of scope for M005 exit.
 
@@ -206,14 +208,14 @@ On Approve:
 
 1. mark the challenge Consumed;
 2. mint or reactivate a `ClientPrincipal` of the requested kind with `granted_scopes`;
-3. create a pairing credential exclusively through CredentialStore (§7) and store only `pairing_credential_ref` on the principal;
-4. return `PairingComplete` without embedding the raw secret in events, logs, or ordinary IPC payloads.
+3. create a pairing credential exclusively through CredentialStore (§7) and store only `pairing_credential_ref` on the principal; **provision proof-of-possession material to the approved exact client/install through a trusted access-controlled channel** (never a world-readable/ref-only alias). No successful pairing response precedes completed protected provisioning;
+4. return `PairingComplete` without embedding the raw secret in events, logs, or ordinary IPC payloads; a returned credential reference is a selector only, **not authorization**. If provisioning fails, no Active privileged principal or reusable grant is committed.
 
 On Deny or expiry: no principal privilege is created or widened; any pending challenge material is invalidated.
 
 ### 6.4 Subsequent Hello with paired evidence
 
-After pairing, the client presents CredentialStore-backed pairing evidence in `Hello.client_principal_evidence` (opaque to logs). The backend resolves `pairing_credential_ref` through CredentialStore, verifies the principal is Active, and then opens a `ClientSession` under §5.1.
+After pairing, the client presents CredentialStore-backed pairing evidence (opaque to logs), **including a fresh authenticated challenge-bound proof rather than only `pairing_credential_ref`**. The backend resolves the reference through CredentialStore, verifies possession using the versioned §5.2 proof exchange, checks the exact installation/client grant plus Active principal state and **only then** opens a `ClientSession` under §5.1. Replaying a reference or previously accepted proof across backend restarts, clients, connections or principals fails closed.
 
 Revoking the pairing credential or setting the principal to Suspended/Revoked denies subsequent Hellos and does not revoke unrelated provider/harness ConnectionProfile credentials.
 
@@ -236,6 +238,7 @@ PairingRejected
 - remote/team identity providers;
 - changing ADR-016 §9 (local IPC remains a security boundary; this amendment supplies the ClientPrincipal evidence/pairing mechanism inside that boundary);
 - shipping production pairing code before #1191 is Ready.
+- using an opaque credential reference as a bearer password, claiming OS process isolation solely from matching Unix UID, or silently treating versionless/legacy Hello as privileged first-party proof.
 
 ## 7. ConnectionProfile and credentials
 
