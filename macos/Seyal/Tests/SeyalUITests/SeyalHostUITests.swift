@@ -1208,9 +1208,11 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
-        app.typeKey("w", modifierFlags: .command)
+        let close = app.menuItems["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.click()
         waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
-        app.typeKey("w", modifierFlags: .command)
+        close.click()
         waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
         // NSWindow close can enqueue AppKit Touch Bar work for the next display
         // cycle; stay alive through that flush, not only until AX reports zero.
