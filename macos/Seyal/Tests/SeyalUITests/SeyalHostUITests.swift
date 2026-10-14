@@ -963,6 +963,10 @@ final class SeyalHostUITests: XCTestCase {
             editor.waitForExistence(timeout: 5) && editor.firstMatch.isHittable,
             "reconnect must restore a hittable composer editor, not Metal IME"
         )
+        XCTAssertTrue(
+            editor.firstMatch.hasFocus,
+            "reconnect must not report Connected before the composer accepts focus"
+        )
         editor.firstMatch.click()
         let token = "seyal-866-re-\(String(UUID().uuidString.prefix(8)))"
         editor.firstMatch.typeText(token)
