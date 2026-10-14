@@ -104,6 +104,20 @@ fn history_traversal_actions_reject_nonzero_reserved() {
     }
 }
 
+#[test]
+fn window_event_rejects_unknown_reserved_bits_and_misplaced_occlusion_flag() {
+    let root = ApplicationRoot::new();
+    let mut action = fence_action(71, &root);
+    action.reserved = 4 | 0x100; // OcclusionChanged + fully occluded.
+    assert!(super::decode::decode_action(&action).is_ok());
+
+    action.reserved = 4 | 0x200; // Unknown reserved bit.
+    assert_eq!(super::decode::decode_action(&action), Err(-6));
+
+    action.reserved = 5 | 0x100; // Miniaturized cannot carry occlusion state.
+    assert_eq!(super::decode::decode_action(&action), Err(-6));
+}
+
 fn bound_handle() -> (u64, SeyalAppSnapshot) {
     let handle = seyal_app_create();
     let snap = seyal_app_snapshot(handle);

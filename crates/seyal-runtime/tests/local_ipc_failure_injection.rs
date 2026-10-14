@@ -778,6 +778,16 @@ fn resume_resync_n_times_display_encode_fault_stays_bounded() {
         0,
         "bounded resync retries must consume the injected encode faults"
     );
+    let (kind, _) = frame(&mut runtime, &mut stream)
+        .expect("the final transient failure is reported before recovery");
+    assert_eq!(kind, MessageType::Error);
+    let (kind, _) = frame(&mut runtime, &mut stream)
+        .expect("the attachment must recover with a snapshot after transient encode failures");
+    assert_eq!(
+        kind,
+        MessageType::DisplaySnapshot,
+        "reveal recovery must return to the current snapshot baseline"
+    );
     assert_eq!(runtime.lookup(execution_id).unwrap().attachment_count, 1);
     runtime.begin_shutdown().unwrap();
     runtime

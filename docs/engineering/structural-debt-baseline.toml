@@ -55,9 +55,9 @@ reason = "The app-level action regression suite stays together around product-st
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 747
+acknowledged_loc = 759
 issue = 1220
-reason = "The versioned ABI action decoder remains one fail-closed boundary; #1158 appends window select/cycle/create/event action kinds, while #1220 packs occlusion-hidden into REPORT_WINDOW_EVENT so Rust computes Hidden without host-owned tier state."
+reason = "The versioned ABI action decoder remains one fail-closed boundary; #1158 appends window select/cycle/create/event action kinds, while #1220 packs occlusion-hidden into REPORT_WINDOW_EVENT and rejects unknown or misplaced flag bits so Rust computes Hidden without host-owned tier state."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
 acknowledged_loc = 884
