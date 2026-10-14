@@ -1,6 +1,6 @@
-# SPEC-030 (PROPOSED) — M005 agent task admission, execution input and adapter transport
+# SPEC-030 — M005 agent task admission, execution input and adapter transport (conditional acceptance)
 
-- **Status:** Proposed under [#1327](https://github.com/seyal-org/seyal/issues/1327); **not Accepted** and **not authorization for production implementation**.
+- **Status:** **Proposed until PR #1340 receives a recorded independent non-author architecture/security APPROVE and an explicit user-authorized merge by a non-author maintainer; only after both conditions is SPEC-030 Accepted under #1327.** PR #1329's merged proposal is not an acceptance stamp. No production feature/behavior is claimed by specification acceptance.
 - **Product completion tracker:** [#1328](https://github.com/seyal-org/seyal/issues/1328), M005 [#667](https://github.com/seyal-org/seyal/issues/667).
 - **Authorities preserved:** ADR-012 (agent identity), ADR-013 (context/memory/privacy), ADR-014 (Action/effects), ADR-015 (Rust UI authority), ADR-016 (one independent backend), SPEC-012–021/026–028.
 - **Normative updates required before implementation:** SPEC-017 (new typed task-input command, principal and event schemas), SPEC-027 (host input capability/transport and bounded I/O), SPEC-018 (input package and per-adapter capability mapping). These are **architecture/spec-only** updates, separate from production implementation.
@@ -158,7 +158,7 @@ Tests use simulated deterministic agents in default CI **plus** opt-in (and mand
 
 ## 11. Review / acceptance gates
 
-This proposal is not an Accepted specification just because the PR merges. Required:
+This proposal becomes Accepted **only** when PR #1340 records an independent non-author APPROVE **and** is merged by a non-author maintainer with explicit user authorization; neither author comments nor a merge alone qualify. Required:
 
 1. Independent non-author architectural review accepts input-ownership and host protocol changes; confirm ADR-016 suffices (no competing authority).
 2. Necessary **spec-only** amendments to SPEC-017/018/027 reconcile new input and host transport details; no ADR+implementation mixing.
@@ -177,7 +177,7 @@ This proposal is not an Accepted specification just because the PR merges. Requi
 
 ## 13. Reconciled contract decisions — candidate amendment for #1327
 
-**Status of this section:** Proposed until independent non-author architecture/security review accepts this PR. It does not retroactively accept the merged proposal #1329. The accepted ADR-016 authority remains sufficient **provided** this work remains a typed extension of the existing Agent Backend: one WorkItem/Attempt/AgentRun writer, one existing scoped IPC/credential boundary, and one host supervisor. If a reviewer finds a new writer, public trust boundary, PTY ownership, or cross-store transaction, stop and file a separate ADR issue/PR.
+**Status of this section:** Proposed until the non-author recorded APPROVE plus explicit user-authorized non-author merge of PR #1340; then this normative amendment is Accepted. It does not retroactively accept the merged proposal #1329. The accepted ADR-016 authority remains sufficient **provided** this work remains a typed extension of the existing Agent Backend: one WorkItem/Attempt/AgentRun writer, one existing scoped IPC/credential boundary, and one host supervisor. If a reviewer finds a new writer, public trust boundary, PTY ownership, or cross-store transaction, stop and file a separate ADR issue/PR.
 
 ### R1. Input ownership, version and idempotency (SPEC-017 extension)
 
