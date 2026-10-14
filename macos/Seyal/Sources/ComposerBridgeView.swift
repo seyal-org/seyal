@@ -34,11 +34,12 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private var heightConstraint: NSLayoutConstraint!
     private var lastEpoch: UInt64 = 0
     private var focusEligibilityGeneration: UInt64 = 0
+    private var hasReconciledComposerState = false
     private var theme: NativeTheme?
     private var editing = false
 
     var isFocusEligibleForRecovery: Bool {
-        !isHidden && textView.isEditable
+        hasReconciledComposerState && !isHidden && textView.isEditable && window != nil
     }
 
     init(appHandle: UInt64) {
@@ -137,6 +138,13 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(textView) ?? false
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        focusEligibilityGeneration &+= 1
+        guard isFocusEligibleForRecovery else { return }
+        enqueueFocusEligibilityChange(generation: focusEligibilityGeneration)
+    }
+
     func apply(theme: NativeTheme) {
         self.theme = theme
         placeholder.textColor = theme.muted
@@ -164,7 +172,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let available = composer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available
-        let isNowFocusEligible = !hidden && available
+        hasReconciledComposerState = true
+        let isNowFocusEligible = isFocusEligibleForRecovery
         execute.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_EXECUTE))
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0
         let recall = seyal_app_composer_history(appHandle)
@@ -194,14 +203,17 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             focusEligibilityGeneration &+= 1
         } else if isNowFocusEligible, !wasFocusEligible {
             focusEligibilityGeneration &+= 1
-            let generation = focusEligibilityGeneration
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.focusEligibilityGeneration == generation,
-                      self.isFocusEligibleForRecovery
-                else { return }
-                self.onFocusEligibilityChanged?()
-            }
+            enqueueFocusEligibilityChange(generation: focusEligibilityGeneration)
+        }
+    }
+
+    private func enqueueFocusEligibilityChange(generation: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.focusEligibilityGeneration == generation,
+                  self.isFocusEligibleForRecovery
+            else { return }
+            self.onFocusEligibilityChanged?()
         }
     }
 

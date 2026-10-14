@@ -22,6 +22,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var composerRecoveryFocusRetryScheduled = false
     private var composerRecoveryFocusAttempts = 0
     private var composerRecoveryFocusGeneration: UInt64 = 0
+    private var composerFocusEligibilityChangedBeforeRecovery = false
     private static let maxComposerRecoveryFocusAttempts = 8
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
@@ -44,9 +45,18 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     func composerFocusEligibilityDidChange() {
-        guard recoveryPresentationPending else { return }
+        guard recoveryPresentationPending else {
+            composerFocusEligibilityChangedBeforeRecovery = true
+            return
+        }
         resetComposerRecoveryFocusRetries()
         _ = advanceRecoveryPresentationIfReady()
+    }
+
+    func consumeComposerFocusEligibilityChangeBeforeRecovery() {
+        guard composerFocusEligibilityChangedBeforeRecovery else { return }
+        composerFocusEligibilityChangedBeforeRecovery = false
+        resetComposerRecoveryFocusRetries()
     }
 
     override func windowActivationChanged() {

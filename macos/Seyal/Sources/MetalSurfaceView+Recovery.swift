@@ -106,8 +106,8 @@ extension MetalSurfaceView {
     bridge?.continuityAppHandle = recoveryAppHandle
     let adopted = bridge?.adoptRecoveredHandle(opened) ?? false
     if adopted {
-      (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
       recoveryPresentationPending = true
+      (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
     }
     return adopted
   }
@@ -119,6 +119,7 @@ extension MetalSurfaceView {
   @discardableResult
   func advanceRecoveryPresentationIfReady() -> Bool {
     guard recoveryPresentationPending else { return true }
+    (self as? InteractiveMetalSurfaceView)?.consumeComposerFocusEligibilityChangeBeforeRecovery()
     guard recoveryAppHandle != 0,
       bridge?.isConnected == true,
       hasPreparedState

@@ -1334,6 +1334,42 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testComposerEligibilityChangeBeforeRecoveryPendingResetsNextFocusBurst() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "prior bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        view.recoveryPresentationPending = false
+        view.composerFocusEligibilityDidChange() // readiness arrives before adoption
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
     func testComposerEligibilityCallbackDropsStaleReconcileTransition() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -1352,6 +1388,19 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = composer
+        defer {
+            composer.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
         composer.reconcile()
         var callbacks = 0
         let staleCallback = expectation(description: "busy composer invalidates queued callback")
@@ -1373,6 +1422,49 @@ final class SeyalHostComponentTests: XCTestCase {
         composer.reconcile()
         await fulfillment(of: [currentCallback], timeout: 1)
         XCTAssertEqual(callbacks, 1)
+    }
+
+    @MainActor
+    func testComposerEligibilityCallbackFiresWhenAlreadyAvailableViewAttachesToWindow() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+
+        let composer = ComposerBridgeView(appHandle: handle)
+        let attached = expectation(description: "already-available composer becomes window-focusable")
+        composer.onFocusEligibilityChanged = { attached.fulfill() }
+        composer.reconcile()
+        XCTAssertFalse(composer.isFocusEligibleForRecovery, "an unattached view cannot accept first responder")
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = composer
+        defer {
+            composer.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+
+        await fulfillment(of: [attached], timeout: 1)
+        XCTAssertTrue(composer.isFocusEligibleForRecovery)
     }
 
     @MainActor
