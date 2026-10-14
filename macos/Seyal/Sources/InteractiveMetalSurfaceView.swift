@@ -22,7 +22,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var composerRecoveryFocusRetryScheduled = false
     private var composerRecoveryFocusAttempts = 0
     private var composerRecoveryFocusGeneration: UInt64 = 0
-    private static let maxComposerRecoveryFocusAttempts = 4
+    private static let maxComposerRecoveryFocusAttempts = 8
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
         self.appHandle = appHandle
@@ -37,6 +37,11 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     override var recoveryAppHandle: UInt64 { appHandle }
+
+    override func updateVisibility() {
+        if shouldRender, !renderable, recoveryPresentationPending { resetComposerRecoveryFocusRetries() }
+        super.updateVisibility()
+    }
 
     override func windowActivationChanged() {
         resetComposerRecoveryFocusRetries()
@@ -85,7 +90,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         // on a bounded backoff so the window and composer can finish becoming
         // key and laid out; never claim Usable until focus is accepted.
         composerRecoveryFocusRetryScheduled = true
-        let delay = 0.05 * Double(1 << (composerRecoveryFocusAttempts - 1))
+        let delay = min(0.05 * Double(1 << (composerRecoveryFocusAttempts - 1)), 0.5)
         let generation = composerRecoveryFocusGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }

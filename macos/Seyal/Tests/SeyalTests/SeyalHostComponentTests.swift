@@ -1176,12 +1176,12 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1
-                return attempts == 4
+                return attempts == 8
             },
             onAccepted: { accepted.fulfill() }
         ))
-        await fulfillment(of: [accepted], timeout: 2)
-        XCTAssertEqual(attempts, 4)
+        await fulfillment(of: [accepted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
         XCTAssertTrue(view.recoveryPresentationPending)
     }
 
@@ -1211,13 +1211,13 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1
-                if attempts == 4 { exhausted.fulfill() }
+                if attempts == 8 { exhausted.fulfill() }
                 return false
             },
             onAccepted: {}
         ))
-        await fulfillment(of: [exhausted], timeout: 2)
-        XCTAssertEqual(attempts, 4)
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
 
         // Repeated presentation advances during persistent failure do not
         // reopen the retry budget; activation or palette dismissal does.
@@ -1230,7 +1230,7 @@ final class SeyalHostComponentTests: XCTestCase {
                 onAccepted: {}
             ))
         }
-        XCTAssertEqual(attempts, 4)
+        XCTAssertEqual(attempts, 8)
 
         view.windowActivationChanged()
         XCTAssertTrue(view.requestComposerFocusForRecovery(
@@ -1240,7 +1240,64 @@ final class SeyalHostComponentTests: XCTestCase {
             },
             onAccepted: {}
         ))
-        XCTAssertEqual(attempts, 5)
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testRecoveryFocusRestartsWhenSurfaceBecomesRenderable() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        let activationSettled = expectation(description: "initial window activation settled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            activationSettled.fulfill()
+        }
+        await fulfillment(of: [activationSettled], timeout: 1)
+
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "initial bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        // Model an AppKit visibility/occlusion transition without another
+        // key-window notification. Becoming renderable opens one fresh,
+        // bounded attempt burst for pending restoration.
+        view.renderable = false
+        view.updateVisibility()
+        XCTAssertTrue(view.renderable)
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
     }
 
     @MainActor
