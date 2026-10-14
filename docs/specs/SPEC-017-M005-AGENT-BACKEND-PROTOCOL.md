@@ -143,7 +143,7 @@ Exact resource/run authorization is **per principal**, not broadcast:
 - Granting observe/control/interact on an `AgentRunId` (or non-run aggregate) requires an explicit grant to that `principal_id`.
 - A production authorization path must not grant a target to “every principal that holds `runs.observe`” (or equivalent broadcast). Historical harness helpers that did so are not production authority.
 - Non-run aggregates (WorkItem, Attempt, Connection, Attention, Action metadata) likewise require explicit target authorization for non-owner principals.
-- Session scope may narrow principal scope; it never widens it and never invents target grants.
+- Session scope may narrow principal scope; it never widens it and never invents target grants. **Every privileged command and new handoff revalidates the current Active principal/grant generation and exact resource target.** A suspension, revocation or grant removal immediately invalidates older privileged ClientSession/binding generations for future commands, including on already-open sockets; denial is not deferred until a new Hello. In-flight effects that crossed an authorized handoff before revoke follow SPEC-016/SPEC-015 reconciliation, not false rollback.
 
 `admin.clients` (or an equally privileged first-party admin scope) may mint, suspend, revoke, or retarget grants. Ordinary observe-only sessions cannot self-escalate.
 
@@ -206,10 +206,10 @@ PairingCompleteV1 {
 
 On Approve:
 
-1. mark the challenge Consumed;
-2. mint or reactivate a `ClientPrincipal` of the requested kind with `granted_scopes`;
-3. create a pairing credential exclusively through CredentialStore (§7) and store only `pairing_credential_ref` on the principal; **provision proof-of-possession material to the approved exact client/install through a trusted access-controlled channel** (never a world-readable/ref-only alias). No successful pairing response precedes completed protected provisioning;
-4. return `PairingComplete` without embedding the raw secret in events, logs, or ordinary IPC payloads; a returned credential reference is a selector only, **not authorization**. If provisioning fails, no Active privileged principal or reusable grant is committed.
+1. Authenticate the current `admin.clients` decision authority and reserve the still-Pending, unexpired, single-use challenge **without minting an Active principal or grant**. A competing approval, Deny, expiry or admin revocation cannot win the same challenge.
+2. Create a **pending/inactive** pairing credential exclusively through CredentialStore (§7). Provision its proof-of-possession material to the exact approved client/install through a trusted access-controlled channel (never a world-readable/ref-only alias), and verify that the client can prove possession. If provisioning/proof fails, revoke the pending credential and leave no reusable privileged grant.
+3. Under the **existing Agent Backend writer**, revalidate the deciding admin's current scopes and principal state, challenge generation/expiry and exact requested/granted scope subset. One **Agent DB transaction** consumes the challenge, mints/reactivates the Active ClientPrincipal, binds the credential reference and grant generation, and records metadata-only audit evidence. This DB transaction alone is the authorization linearization point; **no atomic transaction spanning CredentialStore and Agent DB is required** (ADR-016 §7–§8). On DB failure, deny success and revoke/GC the orphan credential. A bounded pending lease prevents GC from deleting credentials while a valid commit is possible.
+4. Only after that commit, return `PairingComplete` with opaque selector metadata, **never** a raw secret in events, logs or ordinary IPC; a returned `pairing_credential_ref` is not authentication. Concurrent competing decisions and retries are bounded and idempotent by challenge ID/generation; no two Active principals can result from one challenge.
 
 On Deny or expiry: no principal privilege is created or widened; any pending challenge material is invalidated.
 
@@ -217,7 +217,7 @@ On Deny or expiry: no principal privilege is created or widened; any pending cha
 
 After pairing, the client presents CredentialStore-backed pairing evidence (opaque to logs), **including a fresh authenticated challenge-bound proof rather than only `pairing_credential_ref`**. The backend resolves the reference through CredentialStore, verifies possession using the versioned §5.2 proof exchange, checks the exact installation/client grant plus Active principal state and **only then** opens a `ClientSession` under §5.1. Replaying a reference or previously accepted proof across backend restarts, clients, connections or principals fails closed.
 
-Revoking the pairing credential or setting the principal to Suspended/Revoked denies subsequent Hellos and does not revoke unrelated provider/harness ConnectionProfile credentials.
+Revoking the pairing credential or setting the principal to Suspended/Revoked **advances the principal/grant generation and denies new privileged operations on existing ClientSessions immediately**, as well as all subsequent Hellos; it does not revoke unrelated provider/harness ConnectionProfile credentials. Stale in-flight privileged handoffs require SPEC-015/SPEC-016 use-time fences and truthful effect reconciliation.
 
 ### 6.5 Wire surface (normative names; codecs in implementation)
 
