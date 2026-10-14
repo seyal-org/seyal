@@ -26,10 +26,13 @@ mod session;
 mod unpresented_apply;
 
 use accessibility::accessibility_nodes;
-use errors::{chrome_error, close_pane_error, close_tab_error, composer_error, palette_error};
+use errors::{
+    chrome_error, close_pane_error, close_tab_error, close_window_error, composer_error,
+    palette_error,
+};
 
-pub use action_types::AppAction;
-pub use native_effect::NativeEffect;
+pub use action_types::{AppAction, WindowNativeEvent};
+pub use native_effect::{NativeEffect, QUIT_CLEANUP_DEADLINE_MS};
 
 #[cfg(test)]
 mod focus_history_tests;
@@ -39,6 +42,8 @@ mod keybinding_apply_tests;
 mod pane_provisioning_tests;
 #[cfg(test)]
 mod presentation_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod quit_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(all(test, target_os = "macos"))]
@@ -142,6 +147,10 @@ pub enum AppError {
     CrossWorkspaceAdopt,
     /// Adopt/terminate of an id that is not live-unpresented in this session.
     ExecutionNotUnpresented,
+    /// Unknown WindowId for select/cycle/report/close (W4a/W4b). ABI 55.
+    UnknownWindow,
+    /// New Window rejected because admission is disabled. ABI 56.
+    WindowCreationUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,6 +311,13 @@ pub struct ApplicationRoot {
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
+    /// Last forwarded window presentation event (not product state).
+    last_window_event: Option<(WindowId, WindowNativeEvent)>,
+    /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
+    quit_deadline: Option<std::time::Instant>,
+    /// Extra live display attachments owned by this root (quit detaches all).
+    #[cfg(target_os = "macos")]
+    live_attachments: Vec<crate::ffi::ClientRegistryHandle>,
 }
 
 impl Default for ApplicationRoot {
@@ -324,7 +340,8 @@ impl ApplicationRoot {
     }
 
     pub(crate) fn with_shell(shell: ShellState) -> Self {
-        let pane = shell.snapshot().focused_pane;
+        let snap = shell.snapshot();
+        let pane = snap.focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
@@ -332,6 +349,14 @@ impl ApplicationRoot {
             mode: PresentationMode::Flow,
             input_route: InputRoute::Frozen,
         });
+        // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
+        let mut pending_effects = Vec::new();
+        for window in &snap.windows {
+            pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
+        }
+        if let Some(window) = snap.active_window {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey { window });
+        }
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
@@ -344,7 +369,7 @@ impl ApplicationRoot {
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
-            pending_effects: Vec::new(),
+            pending_effects,
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
@@ -377,6 +402,10 @@ impl ApplicationRoot {
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
             live_attach_gate: None,
+            last_window_event: None,
+            quit_deadline: None,
+            #[cfg(target_os = "macos")]
+            live_attachments: Vec::new(),
         }
     }
 
@@ -738,6 +767,12 @@ impl ApplicationRoot {
             AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
             AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
             AppAction::CloseGoto { fence } => self.close_goto(fence),
+            AppAction::SelectWindow { id } => self.select_window(id),
+            AppAction::CycleWindow { direction } => self.cycle_window(direction),
+            AppAction::CreateWindow => self.create_window(),
+            AppAction::ReportWindowEvent { window, event } => {
+                self.report_window_event(window, event)
+            }
         };
         match result {
             Ok(()) => {

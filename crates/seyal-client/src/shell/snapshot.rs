@@ -133,6 +133,7 @@ impl ShellState {
             layout,
             last_error: self.last_error,
             allows_tab_creation: self.allows_tab_creation,
+            allows_window_creation: self.allows_window_creation,
             allows_pane_splitting: self.allows_pane_splitting,
             allows_tab_close,
             allows_pane_close,
@@ -255,6 +256,7 @@ impl ShellError {
             Self::NoDirectionalNeighbor => 20,
             Self::CrossWorkspaceAdopt => 21,
             Self::ExecutionNotUnpresented => 22,
+            Self::WindowCreationUnavailable => 23,
         }
     }
 }

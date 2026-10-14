@@ -392,7 +392,11 @@ fn encode_effect(effect: NativeEffect) -> SeyalAppNativeEffect {
         size: size_of::<SeyalAppNativeEffect>() as u16,
         kind: effect.kind_code() as u16,
         reserved: 0,
-        window_lo,
+        window_lo: if matches!(effect, NativeEffect::BoundedDetachThenTerminate { .. }) {
+            effect.deadline_ms()
+        } else {
+            window_lo
+        },
         window_hi,
     }
 }

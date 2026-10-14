@@ -68,6 +68,7 @@ fn seed_two_workspaces() -> ShellState {
         first,
         true,
         true,
+        true,
     )
     .expect("fixture")
 }
@@ -318,6 +319,7 @@ fn spec025_8_move_neighbor_in_another_tab_is_invalid_target() {
             }],
         }],
         workspace,
+        true,
         true,
         true,
     )
