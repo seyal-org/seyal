@@ -1186,6 +1186,18 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testStaleRecoveryTimerCallbackIsDiscardedBeforeRustAction() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let generation = seyal_app_snapshot(view.pane.appHandle).recovery_generation &+ 1
+        view.recoveryTimerGeneration = generation
+
+        view.fireRecovery(generation: generation)
+
+        XCTAssertEqual(seyal_app_last_error(view.pane.appHandle), 0)
+        XCTAssertEqual(view.recoveryTimerGeneration, 0)
+    }
+
+    @MainActor
     func testRecoveryFocusRestartsOnlyAfterEligibilityChanges() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }

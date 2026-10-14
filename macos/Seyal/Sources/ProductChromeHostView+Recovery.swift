@@ -72,6 +72,7 @@ extension ProductChromeHostView {
         if recoveryTimer != nil, recoveryTimerGeneration != snapshot.recovery_generation {
             recoveryTimer?.invalidate()
             recoveryTimer = nil
+            recoveryTimerGeneration = 0
         }
         switch snapshot.recovery_effect {
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue):
@@ -240,6 +241,8 @@ extension ProductChromeHostView {
     func fireRecovery(generation: UInt64) {
         guard recoveryTimerGeneration == generation else { return }
         recoveryTimer = nil
+        recoveryTimerGeneration = 0
+        guard seyal_app_snapshot(pane.appHandle).recovery_generation == generation else { return }
         let now = runtimeRecoveryNowMillis()
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_FIRE_RECOVERY) {
             $0.target_execution_lo = generation
