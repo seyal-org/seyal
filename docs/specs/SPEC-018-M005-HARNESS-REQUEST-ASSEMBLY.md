@@ -283,9 +283,9 @@ Policy may rebuild context or create one new RoutingDecision within a bounded re
 13. adapter crash does not kill still-live Seyal TerminalExecution;
 14. harness/request load does not materially regress terminal latency.
 
-## 17. SPEC-030 frozen task-to-harness request reconciliation (PROPOSED — not yet normative)
+## 17. SPEC-030 frozen task-to-harness request reconciliation (conditional acceptance via PR #1340)
 
-This candidate amendment under [#1327](https://github.com/seyal-org/seyal/issues/1327) preserves §§1–16 and the three `RequestAssemblyAuthority` classifications.
+This candidate amendment under [#1327](https://github.com/seyal-org/seyal/issues/1327) preserves §§1–16 and the three `RequestAssemblyAuthority` classifications. §17 is Proposed until independent non-author APPROVE plus explicit user-authorized non-author merge of PR #1340; only after both conditions is this extension Accepted.
 
 ```text
 authorized WorkItemInputVersion + Attempt snapshot
