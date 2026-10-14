@@ -172,7 +172,7 @@ PairingChallengeV1 {
 
 Requirements:
 
-- Challenges are single-use and expire on a short bound (implementation chooses the concrete TTL; production must keep it short enough that an abandoned challenge is not a standing capability).
+- Challenges are single-use and expire on a short bound (implementation chooses the concrete TTL; production must keep it short enough that an abandoned challenge is not a standing capability). **Unauthenticated/minimally admitted `BeginPairing` is also a resource-exhaustion boundary:** enforce measured global/per-peer pending-challenge and issue-rate limits, bounded stored metadata, expiry cleanup and no unbounded queued approval UX; an over-capacity client is rejected without granting authority or introducing an unaccepted privileged error. #1192 bounds active socket workers but does not substitute for challenge-state quotas.
 - Expired, already-Consumed, Denied, or unknown `pairing_challenge_id` / `nonce` pairs fail closed.
 - Requested scopes are a proposal only; approval may narrow them and must never widen beyond what the deciding principal is authorized to grant.
 
