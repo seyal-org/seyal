@@ -1150,7 +1150,10 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testHiddenProductTierReleasesDedicatedGpu() {
+    func testHiddenProductTierReleasesDedicatedGpu() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal unavailable")
+        }
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         let view = InteractiveMetalSurfaceView(
@@ -1170,9 +1173,41 @@ final class SeyalHostComponentTests: XCTestCase {
             view.removeFromSuperview()
             window.close()
         }
+        window.makeKeyAndOrderFront(nil)
         view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+        // Drive one visible-frame update through the production renderer. The
+        // component harness does not own a desktop occlusion surface, so it
+        // explicitly models the focused renderer visibility transition.
+        view.renderer.setVisible(true)
+
+        var cell = SeyalPreparedCell()
+        cell.scalar = UInt32(ascii: "A")
+        cell.foreground = 0xffff_ffff
+        cell.background = 0xff10_0d0b
+        var damage = DamageMask()
+        damage.markAll(rows: 1)
+        XCTAssertEqual(
+            try [cell].withUnsafeBufferPointer { cells in
+                try view.renderer.update(
+                    frame: NativePreparedFrame(
+                        cells: cells,
+                        generation: 1,
+                        rows: 1,
+                        columns: 1,
+                        damage: damage
+                    ),
+                    backingScale: 1,
+                    forceFullRebuild: true
+                )
+            },
+            .updated
+        )
+        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertGreaterThan(view.renderer.estimatedDedicatedGPUBytes, 0)
+
         view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_HIDDEN))
         XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
+        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
         XCTAssertFalse(view.shouldRender)
     }
 
