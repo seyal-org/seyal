@@ -419,6 +419,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   @objc func windowActivationChanged() {
+    (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
     updateVisibility()
   }
 

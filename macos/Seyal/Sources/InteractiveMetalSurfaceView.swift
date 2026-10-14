@@ -20,6 +20,9 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
     private var composerRecoveryFocusRetryScheduled = false
+    private var composerRecoveryFocusAttempts = 0
+    private var composerRecoveryFocusGeneration: UInt64 = 0
+    private static let maxComposerRecoveryFocusAttempts = 4
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
         self.appHandle = appHandle
@@ -60,26 +63,41 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         focus: @escaping () -> Bool,
         onAccepted: @escaping () -> Void
     ) -> Bool {
+        guard recoveryPresentationPending else { return focus() }
+        guard !composerRecoveryFocusRetryScheduled,
+            composerRecoveryFocusAttempts < Self.maxComposerRecoveryFocusAttempts
+        else { return false }
+
+        composerRecoveryFocusAttempts += 1
         let focused = focus()
-        guard !focused,
-            recoveryPresentationPending,
-            !composerRecoveryFocusRetryScheduled
-        else { return focused }
+        guard !focused else { return true }
+        guard composerRecoveryFocusAttempts < Self.maxComposerRecoveryFocusAttempts else {
+            return false
+        }
 
         // A recovery callback can run during chrome reconciliation, before
-        // AppKit has completed the current responder/layout transaction. Make
-        // one deferred attempt after that turn; do not poll or claim Usable
-        // until the composer actually accepts first responder.
+        // AppKit has completed the current responder/layout transaction. Retry
+        // on a bounded backoff so the window and composer can finish becoming
+        // key and laid out; never claim Usable until focus is accepted.
         composerRecoveryFocusRetryScheduled = true
-        DispatchQueue.main.async { [weak self] in
+        let delay = 0.05 * Double(1 << (composerRecoveryFocusAttempts - 1))
+        let generation = composerRecoveryFocusGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
+            guard self.composerRecoveryFocusGeneration == generation else { return }
             self.composerRecoveryFocusRetryScheduled = false
-            guard self.recoveryPresentationPending,
-                focus()
-            else { return }
-            onAccepted()
+            guard self.recoveryPresentationPending else { return }
+            if self.requestComposerFocusForRecovery(focus: focus, onAccepted: onAccepted) {
+                onAccepted()
+            }
         }
         return false
+    }
+
+    func resetComposerRecoveryFocusRetries() {
+        composerRecoveryFocusGeneration &+= 1
+        composerRecoveryFocusAttempts = 0
+        composerRecoveryFocusRetryScheduled = false
     }
 
     override func terminalBridgeStatusDidChange() {

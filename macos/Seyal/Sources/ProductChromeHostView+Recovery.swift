@@ -19,7 +19,25 @@ extension ProductChromeHostView {
             return
         }
         pane.inputSurface.syncInputRoutePresentation()
-        _ = pane.inputSurface.requestComposerFocusForRecovery()
+        pane.inputSurface.resetComposerRecoveryFocusRetries()
+        _ = advanceRecoveryAfterPaletteFocus(
+            requestFocus: { [weak self] in
+                self?.pane.inputSurface.requestComposerFocusForRecovery() ?? false
+            },
+            advanceRecovery: { [weak self] in
+                _ = self?.pane.inputSurface.advanceRecoveryPresentationIfReady()
+            }
+        )
+    }
+
+    @discardableResult
+    func advanceRecoveryAfterPaletteFocus(
+        requestFocus: () -> Bool,
+        advanceRecovery: () -> Void
+    ) -> Bool {
+        guard requestFocus() else { return false }
+        advanceRecovery()
+        return true
     }
 
     func recoveryText(_ snapshot: SeyalAppSnapshot) -> String {

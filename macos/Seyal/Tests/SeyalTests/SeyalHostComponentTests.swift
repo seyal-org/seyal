@@ -1163,7 +1163,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testRecoveryRetriesDeferredComposerFocusOnNextAppKitTurn() async throws {
+    func testRecoveryRetriesDeferredComposerFocusUntilAccepted() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         let view = InteractiveMetalSurfaceView(
@@ -1176,13 +1176,108 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1
-                return attempts == 2
+                return attempts == 4
             },
             onAccepted: { accepted.fulfill() }
         ))
-        await fulfillment(of: [accepted], timeout: 1)
-        XCTAssertEqual(attempts, 2)
+        await fulfillment(of: [accepted], timeout: 2)
+        XCTAssertEqual(attempts, 4)
         XCTAssertTrue(view.recoveryPresentationPending)
+    }
+
+    @MainActor
+    func testRecoveryFocusRestartsOnlyAfterEligibilityChanges() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 4 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 2)
+        XCTAssertEqual(attempts, 4)
+
+        // Repeated presentation advances during persistent failure do not
+        // reopen the retry budget; activation or palette dismissal does.
+        for _ in 0..<3 {
+            XCTAssertFalse(view.requestComposerFocusForRecovery(
+                focus: {
+                    attempts += 1
+                    return false
+                },
+                onAccepted: {}
+            ))
+        }
+        XCTAssertEqual(attempts, 4)
+
+        view.resetComposerRecoveryFocusRetries()
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 5)
+    }
+
+    @MainActor
+    func testRecoveryFocusRetryFromPriorGenerationIsDiscarded() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let staleRetry = expectation(description: "stale retry must not run")
+        staleRetry.isInverted = true
+        var oldGenerationAttempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                oldGenerationAttempts += 1
+                if oldGenerationAttempts > 1 { staleRetry.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(oldGenerationAttempts, 1)
+
+        view.resetComposerRecoveryFocusRetries()
+        view.recoveryPresentationPending = false
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.requestComposerFocusForRecovery(focus: { true }, onAccepted: {}))
+
+        await fulfillment(of: [staleRetry], timeout: 0.2)
+        XCTAssertEqual(oldGenerationAttempts, 1)
+    }
+
+    @MainActor
+    func testPaletteFocusAcceptanceAdvancesPendingRecoveryImmediately() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        var advances = 0
+
+        XCTAssertTrue(view.advanceRecoveryAfterPaletteFocus(
+            requestFocus: { true },
+            advanceRecovery: { advances += 1 }
+        ))
+        XCTAssertEqual(advances, 1)
+
+        XCTAssertFalse(view.advanceRecoveryAfterPaletteFocus(
+            requestFocus: { false },
+            advanceRecovery: { advances += 1 }
+        ))
+        XCTAssertEqual(advances, 1)
     }
 
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
