@@ -1220,7 +1220,7 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         XCTAssertEqual(attempts, 4)
 
-        view.resetComposerRecoveryFocusRetries()
+        view.windowActivationChanged()
         XCTAssertTrue(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1

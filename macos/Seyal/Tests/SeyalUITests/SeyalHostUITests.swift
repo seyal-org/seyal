@@ -963,12 +963,9 @@ final class SeyalHostUITests: XCTestCase {
             editor.waitForExistence(timeout: 5) && editor.firstMatch.isHittable,
             "reconnect must restore a hittable composer editor, not Metal IME"
         )
-        XCTAssertTrue(
-            editor.firstMatch.hasFocus,
-            "reconnect must not report Connected before the composer accepts focus"
-        )
-        editor.firstMatch.click()
         let token = "seyal-866-re-\(String(UUID().uuidString.prefix(8)))"
+        // typeText requires the target element (or a descendant) to already
+        // have keyboard focus; deliberately do not click to establish it.
         editor.firstMatch.typeText(token)
         let landed = NSPredicate(format: "value CONTAINS %@", token)
         XCTAssertEqual(

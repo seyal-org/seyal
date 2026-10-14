@@ -38,6 +38,11 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
 
     override var recoveryAppHandle: UInt64 { appHandle }
 
+    override func windowActivationChanged() {
+        resetComposerRecoveryFocusRetries()
+        super.windowActivationChanged()
+    }
+
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
         syncInputRoutePresentation()
         if !allowsDirectTerminalInput {
