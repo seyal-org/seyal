@@ -1203,20 +1203,23 @@ final class SeyalHostComponentTests: XCTestCase {
             return attempts == 3
         }
         let deferredTurn = expectation(description: "first deferred focus attempt ran")
-        let accepted = expectation(description: "later focus readiness accepted")
+        var deferredAccepted = false
         XCTAssertFalse(view.requestComposerFocusForRecovery(
             focus: focus,
-            onAccepted: { accepted.fulfill() }
+            onAccepted: { deferredAccepted = true }
         ))
         DispatchQueue.main.async { deferredTurn.fulfill() }
         await fulfillment(of: [deferredTurn], timeout: 1)
         XCTAssertEqual(attempts, 2, "immediate and one deferred attempt both reject")
+        XCTAssertFalse(deferredAccepted, "rejected native focus cannot report acceptance")
         XCTAssertTrue(view.recoveryPresentationPending, "never report Connected on denied focus")
+        // Direct acceptance returns true to the caller. The onAccepted callback
+        // is reserved for an asynchronously accepted *deferred* attempt.
         XCTAssertTrue(view.requestComposerFocusForRecovery(
             focus: focus,
-            onAccepted: { accepted.fulfill() }
+            onAccepted: { deferredAccepted = true }
         ))
-        await fulfillment(of: [accepted], timeout: 1)
+        XCTAssertFalse(deferredAccepted, "immediate success must not be double-reported")
         XCTAssertEqual(attempts, 3, "later focus-ready event reoffers once")
     }
 
