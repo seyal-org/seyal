@@ -2,6 +2,56 @@ import AppKit
 import Foundation
 
 extension MetalSurfaceView {
+  func addWindowLifecycleObservers(for window: NSWindow) {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowActivationChanged),
+      name: NSApplication.didBecomeActiveNotification,
+      object: NSApp
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowOcclusionChanged),
+      name: NSWindow.didChangeOcclusionStateNotification,
+      object: window
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowActivationChanged),
+      name: NSWindow.didBecomeKeyNotification,
+      object: window
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowActivationChanged),
+      name: NSWindow.didBecomeMainNotification,
+      object: window
+    )
+  }
+
+  func removeWindowLifecycleObservers(from window: NSWindow) {
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSApplication.didBecomeActiveNotification,
+      object: NSApp
+    )
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSWindow.didChangeOcclusionStateNotification,
+      object: window
+    )
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSWindow.didBecomeKeyNotification,
+      object: window
+    )
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSWindow.didBecomeMainNotification,
+      object: window
+    )
+  }
+
   /// Recovery remains pinned to the accepted execution after its transport
   /// disconnects. An implicit first attach is only a bootstrap; its accepted
   /// identity must not be forgotten and replaced with whichever execution is
