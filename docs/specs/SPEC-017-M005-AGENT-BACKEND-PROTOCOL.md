@@ -1,6 +1,6 @@
 # SPEC-017 — M005 independent Agent Backend protocol, security and event replay
 
-- **Status:** Base SPEC-017 Accepted under #838 / ADR-016. **§5–§6 pairing amendment is Proposed until [PR #1342](https://github.com/seyal-org/seyal/pull/1342) is independently APPROVED by a non-author maintainer and, only after explicit user authorization, MERGED by a non-author maintainer; upon both conditions the unchanged amendment is Accepted under #1191.** Earlier PR #1270 (`92d9a00`) and restamp PR #1316 (`3ced201`) were merged with no recorded non-author APPROVE; neither constitutes acceptance. Author comments are not approval. This status is not implemented-behavior evidence.
+- **Status:** Base SPEC-017 Accepted under #838 / ADR-016. **§5–§6 pairing amendment is Proposed until [PR #1342](https://github.com/seyal-org/seyal/pull/1342) is independently APPROVED by a non-author maintainer and, only after explicit user authorization, MERGED by a non-author maintainer; upon both conditions the unchanged amendment is Accepted under #1191.** Earlier PR #1270 (`92d9a00`) and restamp PR #1316 (`3ced201`) were merged with no recorded non-author APPROVE; neither constitutes acceptance. Author comments are not approval. §5.2/§6.3–§6.4 additionally require challenge-bound proof of possession; `credential_ref` alone never authenticates. This is not implemented-behavior evidence.
 - **Issue:** #838 (base contract); pairing amendment #1191
 - **Architecture:** ADR-012, ADR-013, ADR-014, ADR-015 (pairing approval UX ownership), ADR-016 (no ADR create/amend; §9 boundary unchanged)
 - **Consumers:** #678, #679, #680, #681, #1190, #1191, #1192
@@ -121,7 +121,7 @@ Transport admission (same-UID Unix socket / named pipe) remains necessary but ne
 FirstPartyEvidenceV1 {
   principal_kind: FirstPartySeyal | FirstPartyCLI
   credential_ref   // CredentialStore locator only; not a bearer proof
-  proof_ref        // fresh challenge-bound signature/MAC or OS-attested proof
+  auth_proof       // fresh challenge-bound signature/MAC or OS-attested proof
   // platform peer attestation and CredentialStore caller access control
   // must establish the permitted first-party install; peer UID alone is insufficient
 }
