@@ -45,12 +45,18 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     func composerFocusEligibilityDidChange() {
+        recoveryFocusReadinessDidChange { [weak self] in
+            _ = self?.advanceRecoveryPresentationIfReady()
+        }
+    }
+
+    func recoveryFocusReadinessDidChange(advance: () -> Void) {
         guard recoveryPresentationPending else {
             composerFocusEligibilityChangedBeforeRecovery = true
             return
         }
         resetComposerRecoveryFocusRetries()
-        _ = advanceRecoveryPresentationIfReady()
+        advance()
     }
 
     func consumeComposerFocusEligibilityChangeBeforeRecovery() {
@@ -60,8 +66,13 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     }
 
     override func windowActivationChanged() {
-        resetComposerRecoveryFocusRetries()
+        let wasRecoveryPending = recoveryPresentationPending
         super.windowActivationChanged()
+        if recoveryPresentationPending || !wasRecoveryPending {
+            recoveryFocusReadinessDidChange { [weak self] in
+                _ = self?.advanceRecoveryPresentationIfReady()
+            }
+        }
     }
 
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
