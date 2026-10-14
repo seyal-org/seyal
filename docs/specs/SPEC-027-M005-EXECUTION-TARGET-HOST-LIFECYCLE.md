@@ -313,9 +313,9 @@ AB-1.9 production path: no host, `StartAgentRun` → `Failed`, no mint. After th
 
 No ADR is created, amended, reopened or superseded.
 
-## 15. SPEC-030 supervised task transport reconciliation (PROPOSED — not yet normative)
+## 15. SPEC-030 supervised task transport reconciliation (conditional acceptance via PR #1340)
 
-Candidate extension under [#1327](https://github.com/seyal-org/seyal/issues/1327); §§1–14 and existing launch authority remain accepted unchanged until independent review. Reuse one `StandaloneProcessHost`, one `ExecutionHost` seam and the SPEC-026 lifecycle.
+Candidate extension under [#1327](https://github.com/seyal-org/seyal/issues/1327); §§1–14 and existing launch authority remain Accepted and unchanged. §15 is Proposed until PR #1340 records independent non-author APPROVE plus explicit user-authorized non-author merge, when this extension becomes Accepted. Reuse one `StandaloneProcessHost`, one `ExecutionHost` seam and the SPEC-026 lifecycle.
 
 ```text
 InputTransport = ObservationOnly | OneShotStdin | FramedBidirectionalStdio
