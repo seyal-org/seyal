@@ -546,7 +546,12 @@ fn bounded_daemon_counts_recoverable_fault_toward_budget() {
     let socket = dir.join("agent.sock");
     let mut child = spawn_daemon_opts(&dir, Some(60), Some(1), true);
     let markers = daemon_markers(&mut child);
-    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "recoverable-ready");
+    await_daemon_marker(
+        &markers,
+        DaemonMarker::Ready,
+        Duration::from_secs(10),
+        "recoverable-ready",
+    );
     let started = Instant::now();
     let mut stream = loop {
         match UnixStream::connect(&socket) {
