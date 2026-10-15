@@ -253,6 +253,12 @@ pub fn serve(
     let limit = options.max_connections;
     let supervisor = thread::spawn(move || supervise(exits, limit));
 
+    // Startup readiness means IntegrationService and the worker-exit
+    // supervisor are initialized, not merely that bind() created a socket.
+    // Keep the signal non-secret and ahead of the first accept, so bounded
+    // subprocess E2E can distinguish startup from worker/shutdown timing.
+    eprintln!("seyal-agent-backend: ready for connections");
+
     let mut accepted = 0u64;
     loop {
         if ACCEPT_SHUTDOWN.load(Ordering::SeqCst) {
