@@ -25,6 +25,20 @@ impl AgentDaemon {
             BackendInstanceId,
         ) -> Result<Option<crate::session::IntegrationService>, DaemonError>,
     ) -> Result<Self, DaemonError> {
+        let mut daemon = Self::prepare_with_initialization(directory, config, initialize)?;
+        daemon.publish_listener()?;
+        Ok(daemon)
+    }
+
+    /// Keep the socket unpublished while initializing under singleton ownership.
+    /// Production performs final host/catalog setup before calling publish_listener.
+    fn prepare_with_initialization(
+        directory: impl Into<PathBuf>,
+        config: DaemonConfig,
+        initialize: impl FnOnce(
+            BackendInstanceId,
+        ) -> Result<Option<crate::session::IntegrationService>, DaemonError>,
+    ) -> Result<Self, DaemonError> {
         if config.max_frame_size == 0
             || config.max_frame_size > ABSOLUTE_MAX_FRAME_SIZE
             || config.event_window == 0
@@ -57,34 +71,8 @@ impl AgentDaemon {
                 return Err(error);
             }
         };
-        let listener = match UnixListener::bind(&socket_path) {
-            Ok(listener) => listener,
-            Err(_) => {
-                release_lock_file(lock, &directory);
-                return Err(DaemonError::Io);
-            }
-        };
-        let mut permissions = match fs::metadata(&socket_path) {
-            Ok(meta) => meta.permissions(),
-            Err(_) => {
-                let _ = fs::remove_file(&socket_path);
-                release_lock_file(lock, &directory);
-                return Err(DaemonError::Io);
-            }
-        };
-        permissions.set_mode(0o600);
-        if fs::set_permissions(&socket_path, permissions).is_err() {
-            let _ = fs::remove_file(&socket_path);
-            release_lock_file(lock, &directory);
-            return Err(DaemonError::Io);
-        }
-        if listener.set_nonblocking(false).is_err() {
-            let _ = fs::remove_file(&socket_path);
-            release_lock_file(lock, &directory);
-            return Err(DaemonError::Io);
-        }
         Ok(Self {
-            listener: Some(listener),
+            listener: None,
             instance_id,
             directory,
             lock: Some(lock),
@@ -93,6 +81,37 @@ impl AgentDaemon {
             our_uid,
             integration: service.map(|service| Arc::new(Mutex::new(service))),
             exit_report: None,
+        })
+    }
+
+    /// Publish the canonical listener exactly once, after store, host, catalog
+    /// and supervisor have been made ready. Drop cleans up socket/lock on error.
+    pub(crate) fn publish_listener(&mut self) -> Result<(), DaemonError> {
+        if self.listener.is_some() {
+            return Ok(());
+        }
+        let socket_path = self.socket_path();
+        let listener = UnixListener::bind(&socket_path).map_err(|_| DaemonError::Io)?;
+        let mut permissions = fs::metadata(&socket_path)
+            .map_err(|_| DaemonError::Io)?
+            .permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&socket_path, permissions).map_err(|_| DaemonError::Io)?;
+        listener.set_nonblocking(false).map_err(|_| DaemonError::Io)?;
+        self.listener = Some(listener);
+        Ok(())
+    }
+
+    /// Production-only two-phase setup; conventional bind_integration still
+    /// publishes before returning for unit/qualification clients.
+    pub(crate) fn prepare_integration(
+        directory: impl Into<PathBuf>,
+        integration: crate::session::IntegrationConfig,
+    ) -> Result<Self, DaemonError> {
+        Self::prepare_with_initialization(directory, DaemonConfig::default(), |instance_id| {
+            crate::session::IntegrationService::open(instance_id, &integration)
+                .map(Some)
+                .map_err(|_| DaemonError::Unavailable)
         })
     }
 
