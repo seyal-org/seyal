@@ -508,7 +508,11 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, "Rust hid the inspector before selection")
     }
 
-    private func waitForUsablePty(in app: XCUIApplication, timeout: TimeInterval = 20) {
+    private func waitForUsablePty(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        phase: String = "initial"
+    ) {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let terminal = app.descendants(matching: .any)["terminal-input"]
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "terminal surface missing")
@@ -537,7 +541,7 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [recoveryArrived], timeout: min(timeout, 10)),
             .completed,
-            "Rust recovery stage never reached Connected; seyal-recovery AX=\(recovery.value ?? "nil")"
+            "Rust recovery stage never reached Connected in \(phase); seyal-recovery AX=\(recovery.value ?? "nil"); terminal AX=\(terminal.value ?? "nil")"
         )
         assertFlowBlocksOrFail(in: app)
     }
@@ -944,11 +948,11 @@ final class SeyalHostUITests: XCTestCase {
     /// with composer-exclusive IME/AX (SPEC-009 reconstruction).
     func testReconnectRestoresComposerExclusiveIME() throws {
         let app = hostedApp()
-        waitForUsablePty(in: app)
+        waitForUsablePty(in: app, phase: "initial")
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 8))
         app.launch()
-        waitForUsablePty(in: app)
+        waitForUsablePty(in: app, phase: "relaunch")
         let composer = app.descendants(matching: .any)["seyal-composer"]
         let editor = app.descendants(matching: .any)["seyal-composer-editor"]
         let terminal = app.descendants(matching: .any)["terminal-input"]
@@ -976,6 +980,14 @@ final class SeyalHostUITests: XCTestCase {
             "post-reconnect keys must enter the composer; editor=\(editor.firstMatch.value ?? "nil")"
         )
         XCTAssertTrue(composer.firstMatch.isHittable)
+        // #1344 regression: a later chrome/recovery handoff must leave Rust
+        // connected *after* the native editor has actually accepted text.
+        // This is not satisfied by a PTY AX "connection=usable" alone.
+        XCTAssertEqual(
+            recovery.firstMatch.value as? String,
+            "connected",
+            "native composer focus/IME restore must not strand Rust recovery in Restoring"
+        )
         assertFlowBlocksOrFail(in: app)
     }
 
