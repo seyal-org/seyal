@@ -425,7 +425,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var shouldRender: Bool {
     guard shouldAttachRuntime else { return false }
     guard let window else { return false }
-    return window.occlusionState.contains(.visible)
+    return window.occlusionState.contains(.visible) || (NSApp.keyWindow === window)
   }
 
   /// Runtime attachment is a lifecycle concern, not a Metal presentation
