@@ -681,6 +681,23 @@ fn resume_rejects_second_delivering_execution_on_connection() {
 
     harness.send(
         &mut client,
+        MessageType::Attach,
+        &Attach {
+            execution_id: first_execution,
+            requested_role: Role::Observer,
+        }
+        .encode(),
+    );
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::Error as u16);
+    assert_eq!(
+        ErrorMessage::decode(&payload).unwrap().error_code,
+        ErrorCode::InvalidState as u16
+    );
+
+    harness.send(
+        &mut client,
         MessageType::SuspendDelivery,
         &SuspendDelivery {
             attachment_id: first.attachment_id,

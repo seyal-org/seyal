@@ -52,8 +52,8 @@ impl Runtime {
                 .attachments
                 .execution_for_connection(token, attachment_id)
         });
-        let execution_id = match lookup {
-            Some(Ok(execution_id)) => execution_id,
+        match lookup {
+            Some(Ok(_)) => {}
             Some(Err(AttachmentError::StaleIdentity))
             | Some(Err(AttachmentError::UnknownAttachment)) => {
                 self.send_error(token, ErrorCode::StaleIdentity, kind as u16);
@@ -63,7 +63,7 @@ impl Runtime {
                 self.send_error(token, ErrorCode::StaleIdentity, kind as u16);
                 return;
             }
-        };
+        }
 
         match kind {
             MessageType::SuspendDelivery => {
@@ -86,7 +86,7 @@ impl Runtime {
                             .attachments
                             .delivering_on_connection(token)
                             .iter()
-                            .any(|(_, current_execution)| *current_execution != execution_id)
+                            .any(|(current_id, _)| *current_id != attachment_id)
                     });
                 if conflicts_with_delivering_execution {
                     self.send_error(token, ErrorCode::InvalidState, kind as u16);
@@ -99,6 +99,13 @@ impl Runtime {
                         .ok()
                 });
                 if previous == Some(DeliveryState::Suspended) {
+                    if let Some(meta) = self
+                        .local_ipc
+                        .as_mut()
+                        .and_then(|state| state.connections.get_mut(&token))
+                    {
+                        meta.attachment = Some(attachment_id);
+                    }
                     self.schedule_snapshot_recovery(token);
                 }
             }

@@ -245,15 +245,10 @@ impl Runtime {
             self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
             return;
         }
-        if on_connection > 0
-            && state
-                .attachments
-                .delivering_on_connection(token)
-                .iter()
-                .any(|(_, execution)| *execution != attach.execution_id)
-        {
-            // Display frames are connection-scoped (§10.4); two delivering
-            // executions on one socket cannot be demultiplexed.
+        if !state.attachments.delivering_on_connection(token).is_empty() {
+            // Presentation frames are connection-scoped (§10.4) and have no
+            // attachment identity; a connection can have only one delivering
+            // attachment, even when both attachments name the same execution.
             self.send_error(token, ErrorCode::InvalidState, MessageType::Attach as u16);
             return;
         }
@@ -344,9 +339,7 @@ impl Runtime {
                 },
             );
         }
-        if let Some(meta) = state.connections.get_mut(&token)
-            && meta.attachment.is_none()
-        {
+        if let Some(meta) = state.connections.get_mut(&token) {
             meta.attachment = Some(attachment_id);
         }
         state.server.set_state(token, LocalIpcConnState::Attached);
