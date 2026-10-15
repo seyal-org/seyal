@@ -126,12 +126,13 @@ extension MetalSurfaceView {
     let stage = seyal_app_snapshot(recoveryAppHandle).recovery_stage
 
     if stage == UInt16(SEYAL_APP_RECOVERY_RECONSTRUCTING.rawValue) {
-      _ = applyRuntimeRecoveryAction(
+      let advanced = applyRuntimeRecoveryAction(
         recoveryAppHandle,
         kind: SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE
       ) {
         $0.reserved = UInt32(SEYAL_APP_RECOVERY_RESTORING.rawValue)
       }
+      guard advanced == 0 else { return false }
     }
 
     let afterRestore = seyal_app_snapshot(recoveryAppHandle).recovery_stage
@@ -145,12 +146,20 @@ extension MetalSurfaceView {
     guard restoreNativeInteractionAfterRendererReady() else {
       return false
     }
-    _ = applyRuntimeRecoveryAction(
+    // Native focus acceptance is necessary but not sufficient: the Rust
+    // coordinator must actually commit Usable before we retire this handoff.
+    // A denied stage transition (for example, a stale recovery generation)
+    // must remain pending so a later real chrome/activation event can retry.
+    let advanced = applyRuntimeRecoveryAction(
       recoveryAppHandle,
       kind: SEYAL_APP_ACTION_ADVANCE_RECOVERY_STAGE
     ) {
       $0.reserved = UInt32(SEYAL_APP_RECOVERY_USABLE.rawValue)
     }
+    guard advanced == 0,
+      seyal_app_snapshot(recoveryAppHandle).recovery_stage
+        == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
+    else { return false }
     recoveryPresentationPending = false
     refreshRecoveryAccessibilityValue()
     onRecoveryEffectsPending?()
