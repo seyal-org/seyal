@@ -143,6 +143,19 @@ fn cmsg_len(payload_bytes: usize) -> usize {
     unsafe { libc::CMSG_LEN(payload_bytes) as usize }
 }
 
+
+/// Retry a syscall only when the kernel reports EINTR. An interrupted IPC
+/// syscall has not consumed bytes and must not tear down a live session.
+/// Genuine framing, credential, and transport errors remain fatal.
+fn retry_interrupted<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    loop {
+        match operation() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
+}
+
 /// Sends `bytes` on `socket`, optionally attaching exactly one file
 /// descriptor as an `SCM_RIGHTS` ancillary message in the same stream send.
 ///
@@ -165,18 +178,21 @@ pub fn send_with_fd(socket: RawFd, bytes: &[u8], fd: Option<RawFd>) -> io::Resul
         // `socket` is a live caller-owned descriptor.
         #[cfg(feature = "benchmark-instrumentation")]
         BENCH_SEND_SYSCALLS.fetch_add(1, Ordering::Relaxed);
-        let result = unsafe {
-            libc::send(
-                socket,
-                bytes.as_ptr().cast::<libc::c_void>(),
-                bytes.len(),
-                0,
-            )
-        };
-        if result < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        return Ok(result as usize);
+        return retry_interrupted(|| {
+            let result = unsafe {
+                libc::send(
+                    socket,
+                    bytes.as_ptr().cast::<libc::c_void>(),
+                    bytes.len(),
+                    0,
+                )
+            };
+            if result < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(result as usize)
+            }
+        });
     };
 
     let control_len = cmsg_space_for_fd_count(1);
@@ -221,11 +237,14 @@ pub fn send_with_fd(socket: RawFd, bytes: &[u8], fd: Option<RawFd>) -> io::Resul
     // the caller.
     #[cfg(feature = "benchmark-instrumentation")]
     BENCH_SENDMSG_SYSCALLS.fetch_add(1, Ordering::Relaxed);
-    let result = unsafe { libc::sendmsg(socket, &msg, 0) };
-    if result < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(result as usize)
+    retry_interrupted(|| {
+        let result = unsafe { libc::sendmsg(socket, &msg, 0) };
+        if result < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    })
 }
 
 /// Receives into `buffer`, returning the byte count and at most one
@@ -245,12 +264,14 @@ pub fn recv_with_fd(socket: RawFd, buffer: &mut [u8]) -> io::Result<(usize, Recv
         if slot.is_none() {
             *slot = Some(ReceiveAncillaryBuffer::for_process_fd_table()?);
         }
-        recv_with_buffer(
-            socket,
-            buffer,
-            slot.as_mut()
-                .expect("receive ancillary buffer was initialized above"),
-        )
+        retry_interrupted(|| {
+            recv_with_buffer(
+                socket,
+                buffer,
+                slot.as_mut()
+                    .expect("receive ancillary buffer was initialized above"),
+            )
+        })
     })
 }
 
@@ -483,6 +504,35 @@ mod tests {
         } else {
             Ok(result as usize)
         }
+    }
+
+    #[test]
+    fn interrupted_ipc_syscall_retries_without_hiding_hard_failure() {
+        let mut calls = 0;
+        let value = retry_interrupted(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(io::Error::from(io::ErrorKind::Interrupted))
+            } else {
+                Ok(42)
+            }
+        })
+        .expect("EINTR is retried");
+        assert_eq!(value, 42);
+        assert_eq!(calls, 3);
+
+        let mut calls = 0;
+        let err = retry_interrupted(|| {
+            calls += 1;
+            if calls == 1 {
+                Err(io::Error::from(io::ErrorKind::Interrupted))
+            } else {
+                Err::<(), _>(io::Error::from(io::ErrorKind::BrokenPipe))
+            }
+        })
+        .expect_err("hard error remains fatal");
+        assert_eq!(calls, 2);
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
     }
 
     #[test]
