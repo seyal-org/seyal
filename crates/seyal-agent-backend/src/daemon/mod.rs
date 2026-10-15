@@ -116,6 +116,20 @@ impl AgentDaemon {
         directory: impl Into<PathBuf>,
         config: DaemonConfig,
     ) -> Result<Self, DaemonError> {
+        Self::bind_with_initialization(directory, config, |_| Ok(None))
+    }
+
+    /// Serialize service initialization under the singleton lock *before*
+    /// publishing the canonical socket. A bound socket is already connectable
+    /// while the backend store is still opening; a premature client handshake
+    /// can otherwise consume the only bounded admission before serve starts.
+    fn bind_with_initialization(
+        directory: impl Into<PathBuf>,
+        config: DaemonConfig,
+        initialize: impl FnOnce(
+            BackendInstanceId,
+        ) -> Result<Option<crate::session::IntegrationService>, DaemonError>,
+    ) -> Result<Self, DaemonError> {
         if config.max_frame_size == 0
             || config.max_frame_size > ABSOLUTE_MAX_FRAME_SIZE
             || config.event_window == 0
@@ -140,6 +154,14 @@ impl AgentDaemon {
             release_lock_file(lock, &directory);
             return Err(error);
         }
+        let instance_id = BackendInstanceId::new();
+        let service = match initialize(instance_id) {
+            Ok(service) => service,
+            Err(error) => {
+                release_lock_file(lock, &directory);
+                return Err(error);
+            }
+        };
         let listener = match UnixListener::bind(&socket_path) {
             Ok(listener) => listener,
             Err(_) => {
@@ -168,13 +190,13 @@ impl AgentDaemon {
         }
         Ok(Self {
             listener: Some(listener),
-            instance_id: BackendInstanceId::new(),
+            instance_id,
             directory,
             lock: Some(lock),
             config,
             cleanup: true,
             our_uid,
-            integration: None,
+            integration: service.map(|service| Arc::new(Mutex::new(service))),
             exit_report: None,
         })
     }
@@ -191,11 +213,11 @@ impl AgentDaemon {
         config: DaemonConfig,
         integration: crate::session::IntegrationConfig,
     ) -> Result<Self, DaemonError> {
-        let mut daemon = Self::bind_with(directory, config)?;
-        let service = crate::session::IntegrationService::open(daemon.instance_id, &integration)
-            .map_err(|_| DaemonError::Unavailable)?;
-        daemon.integration = Some(Arc::new(Mutex::new(service)));
-        Ok(daemon)
+        Self::bind_with_initialization(directory, config, |instance_id| {
+            crate::session::IntegrationService::open(instance_id, &integration)
+                .map(Some)
+                .map_err(|_| DaemonError::Unavailable)
+        })
     }
 
     pub fn instance_id(&self) -> BackendInstanceId {
