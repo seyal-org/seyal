@@ -108,118 +108,6 @@ pub struct DaemonSample {
 }
 
 impl AgentDaemon {
-    pub fn bind(directory: impl Into<PathBuf>) -> Result<Self, DaemonError> {
-        Self::bind_with(directory, DaemonConfig::default())
-    }
-
-    pub fn bind_with(
-        directory: impl Into<PathBuf>,
-        config: DaemonConfig,
-    ) -> Result<Self, DaemonError> {
-        Self::bind_with_initialization(directory, config, |_| Ok(None))
-    }
-
-    /// Serialize service initialization under the singleton lock *before*
-    /// publishing the canonical socket. A bound socket is already connectable
-    /// while the backend store is still opening; a premature client handshake
-    /// can otherwise consume the only bounded admission before serve starts.
-    fn bind_with_initialization(
-        directory: impl Into<PathBuf>,
-        config: DaemonConfig,
-        initialize: impl FnOnce(
-            BackendInstanceId,
-        ) -> Result<Option<crate::session::IntegrationService>, DaemonError>,
-    ) -> Result<Self, DaemonError> {
-        if config.max_frame_size == 0
-            || config.max_frame_size > ABSOLUTE_MAX_FRAME_SIZE
-            || config.event_window == 0
-            || config.session_idle_timeout.is_zero()
-            || config.session_write_timeout.is_zero()
-        {
-            return Err(DaemonError::Handshake(HandshakeError::InvalidLimit));
-        }
-        let directory = directory.into();
-        let our_uid = current_uid().map_err(|_| DaemonError::Io)?;
-        prepare_directory(&directory, our_uid)?;
-        let socket_path = directory.join(SOCKET_NAME);
-        // Reject unsafe leaves before taking the lock so a bad leaf cannot
-        // pin a lock file; reclaim only after ownership is proven.
-        reject_unsafe_endpoint(&socket_path, our_uid)?;
-        let lock = acquire_lock(&directory, our_uid)?;
-        // After owning the lock, only unlink a socket that fails a connect
-        // probe — never treat a live endpoint as stale (pathname TOCTOU).
-        // If probe/bind fails after we created the lock, drop it so we do not
-        // leak a lock file bearing our PID.
-        if let Err(error) = remove_verified_stale_socket(&socket_path, our_uid) {
-            release_lock_file(lock, &directory);
-            return Err(error);
-        }
-        let instance_id = BackendInstanceId::new();
-        let service = match initialize(instance_id) {
-            Ok(service) => service,
-            Err(error) => {
-                release_lock_file(lock, &directory);
-                return Err(error);
-            }
-        };
-        let listener = match UnixListener::bind(&socket_path) {
-            Ok(listener) => listener,
-            Err(_) => {
-                release_lock_file(lock, &directory);
-                return Err(DaemonError::Io);
-            }
-        };
-        let mut permissions = match fs::metadata(&socket_path) {
-            Ok(meta) => meta.permissions(),
-            Err(_) => {
-                let _ = fs::remove_file(&socket_path);
-                release_lock_file(lock, &directory);
-                return Err(DaemonError::Io);
-            }
-        };
-        permissions.set_mode(0o600);
-        if fs::set_permissions(&socket_path, permissions).is_err() {
-            let _ = fs::remove_file(&socket_path);
-            release_lock_file(lock, &directory);
-            return Err(DaemonError::Io);
-        }
-        if listener.set_nonblocking(false).is_err() {
-            let _ = fs::remove_file(&socket_path);
-            release_lock_file(lock, &directory);
-            return Err(DaemonError::Io);
-        }
-        Ok(Self {
-            listener: Some(listener),
-            instance_id,
-            directory,
-            lock: Some(lock),
-            config,
-            cleanup: true,
-            our_uid,
-            integration: service.map(|service| Arc::new(Mutex::new(service))),
-            exit_report: None,
-        })
-    }
-
-    pub fn bind_integration(
-        directory: impl Into<PathBuf>,
-        integration: crate::session::IntegrationConfig,
-    ) -> Result<Self, DaemonError> {
-        Self::bind_integration_with(directory, DaemonConfig::default(), integration)
-    }
-
-    pub fn bind_integration_with(
-        directory: impl Into<PathBuf>,
-        config: DaemonConfig,
-        integration: crate::session::IntegrationConfig,
-    ) -> Result<Self, DaemonError> {
-        Self::bind_with_initialization(directory, config, |instance_id| {
-            crate::session::IntegrationService::open(instance_id, &integration)
-                .map(Some)
-                .map_err(|_| DaemonError::Unavailable)
-        })
-    }
-
     pub fn instance_id(&self) -> BackendInstanceId {
         self.instance_id
     }
@@ -721,6 +609,7 @@ pub(super) fn map_io(error: io::Error) -> DaemonError {
     }
 }
 
+mod bootstrap;
 mod host_bind;
 mod serve;
 mod supervision;
