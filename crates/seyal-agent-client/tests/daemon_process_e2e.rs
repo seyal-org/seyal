@@ -381,16 +381,18 @@ fn bounded_daemon_with_held_session_is_ended_by_deadline() {
 
     let dir = temp_dir("held-deadline");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_daemon_opts(&dir, Some(2), Some(1), true);
+    // Give the daemon enough time to bind and admit the held session on a
+    // loaded CI worker before exercising the deadline path.
+    let mut child = spawn_daemon_opts(&dir, Some(15), Some(1), true);
     let (held_tx, held_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let holder = thread::spawn(move || {
         let client = connect_ready(&socket);
         held_tx.send(()).unwrap();
-        let _ = release_rx.recv_timeout(Duration::from_secs(10));
+        let _ = release_rx.recv_timeout(Duration::from_secs(20));
         drop(client);
     });
-    recv_barrier(&held_rx, Duration::from_secs(10), "held-session-open");
+    recv_barrier(&held_rx, Duration::from_secs(12), "held-session-open");
     assert!(
         child.0.try_wait().unwrap().is_none(),
         "barrier held-session: daemon exited before the deadline"

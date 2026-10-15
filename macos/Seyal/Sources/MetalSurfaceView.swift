@@ -339,21 +339,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   override func viewWillMove(toWindow newWindow: NSWindow?) {
     if let window {
-      NotificationCenter.default.removeObserver(
-        self,
-        name: NSWindow.didChangeOcclusionStateNotification,
-        object: window
-      )
-      NotificationCenter.default.removeObserver(
-        self,
-        name: NSWindow.didBecomeKeyNotification,
-        object: window
-      )
-      NotificationCenter.default.removeObserver(
-        self,
-        name: NSWindow.didBecomeMainNotification,
-        object: window
-      )
+      removeWindowLifecycleObservers(from: window)
     }
     if newWindow == nil {
       // Suppress status-driven reconnect before stop() publishes its
@@ -384,24 +370,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       isDetachingRuntimeConnection = false
     }
     if let window {
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(windowOcclusionChanged),
-        name: NSWindow.didChangeOcclusionStateNotification,
-        object: window
-      )
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(windowActivationChanged),
-        name: NSWindow.didBecomeKeyNotification,
-        object: window
-      )
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(windowActivationChanged),
-        name: NSWindow.didBecomeMainNotification,
-        object: window
-      )
+      addWindowLifecycleObservers(for: window)
     }
     updateDrawableSize()
     updateVisibility()
@@ -420,6 +389,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   @objc func windowActivationChanged() {
     updateVisibility()
+  }
+
+  @objc func windowActivationNotificationReceived() {
+    windowActivationChanged()
   }
 
   var shouldRender: Bool {
