@@ -66,6 +66,57 @@ fn hello() -> Hello {
 }
 
 #[test]
+fn integration_endpoint_is_unreachable_until_service_initialization_finishes() {
+    let dir = TempDir::new();
+    let path = dir.path().to_path_buf();
+    let socket = path.join(SOCKET_NAME);
+    let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+    let (release_tx, release_rx) = mpsc::sync_channel(1);
+    let worker = thread::spawn(move || {
+        let config = qualification_config(&path);
+        AgentDaemon::bind_with_initialization(path, DaemonConfig::default(), |instance_id| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            crate::session::IntegrationService::open(instance_id, &config)
+                .map(Some)
+                .map_err(|_| DaemonError::Unavailable)
+        })
+    });
+
+    entered_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("backend initialized under the singleton lock");
+    assert!(
+        !socket.exists(),
+        "socket must not be published before the integration store is ready"
+    );
+    assert!(
+        UnixStream::connect(&socket).is_err(),
+        "a client must not consume a bounded admission during store startup"
+    );
+    release_tx.send(()).unwrap();
+    let daemon = worker.join().unwrap().unwrap();
+    assert!(socket.exists(), "endpoint published after service initialization");
+    assert!(UnixStream::connect(&socket).is_ok());
+    drop(daemon);
+}
+
+#[test]
+fn failed_integration_initialization_never_publishes_socket_or_keeps_lock() {
+    let dir = TempDir::new();
+    let result = AgentDaemon::bind_with_initialization(
+        dir.path(),
+        DaemonConfig::default(),
+        |_| Err(DaemonError::Unavailable),
+    );
+    assert!(matches!(result, Err(DaemonError::Unavailable)));
+    assert!(!dir.path().join(SOCKET_NAME).exists());
+    assert!(!dir.path().join(LOCK_NAME).exists());
+    // A failed startup cannot hold a stale singleton owner.
+    assert!(AgentDaemon::bind(dir.path()).is_ok());
+}
+
+#[test]
 fn simultaneous_startup_keeps_one_owner_and_restart_changes_instance_id() {
     let dir = TempDir::new();
     let path = dir.path().to_path_buf();
