@@ -361,12 +361,32 @@ final class MultiWindowHostTests: XCTestCase {
         }
         host.keyWindowStatusForTests = { _ in targetBecameKey }
 
-        applyAndWaitForActivation(host)
-        wait(for: [delayedKeyAcknowledgement], timeout: 1.0)
+        // WindowActivation completion is its own typed outcome. The shared
+        // AppRoot last_error can separately record a stale-generation
+        // recovery timer (15) while the AppKit run loop is pumping, and is
+        // not evidence that native window activation failed.
+        let activationSettled = expectation(description: "named window activation completed")
+        var activationSucceeded: Bool?
+        host.activationCompletionForTests = { succeeded in
+            activationSucceeded = succeeded
+            activationSettled.fulfill()
+        }
+        host.applyPendingEffects()
+        wait(for: [activationSettled, delayedKeyAcknowledgement], timeout: 1.0)
+        host.activationCompletionForTests = nil
 
+        XCTAssertEqual(activationSucceeded, true, "named activation must be positively acknowledged")
         XCTAssertEqual(requests, 1)
         XCTAssertEqual(host.lastActivationAttempts, 1)
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 0)
+        XCTAssertNotEqual(
+            seyal_app_last_error(host.appHandle), 53,
+            "a failed WindowActivation must not be misclassified as success"
+        )
+        XCTAssertNotEqual(
+            seyal_app_window(host.appHandle, 1).flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE),
+            0,
+            "Rust-owned active Window must stay committed"
+        )
         XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
     }
 
