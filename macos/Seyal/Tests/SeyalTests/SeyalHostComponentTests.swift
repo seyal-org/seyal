@@ -377,6 +377,38 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testAcceptedLaterComposerFocusDoesNotFabricateRustRecoveryUsable() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.pane.inputSurface.recoveryPresentationPending = true
+        window.makeKeyAndOrderFront(nil)
+        XCTAssertTrue(view.focusComposerAndAdvancePendingRecovery())
+        let editor = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(window.firstResponder === editor)
+        // Focus acceptance alone is insufficient: without a connected,
+        // reconstructed and prepared bridge, Rust must stay non-Usable.
+        XCTAssertTrue(view.pane.inputSurface.recoveryPresentationPending)
+        XCTAssertNotEqual(
+            seyal_app_snapshot(view.pane.appHandle).recovery_stage,
+            UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
+        )
+    }
+
+    @MainActor
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
