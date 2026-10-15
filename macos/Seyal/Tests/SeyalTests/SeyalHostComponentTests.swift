@@ -377,6 +377,38 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testAcceptedLaterComposerFocusDoesNotFabricateRustRecoveryUsable() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 80, width: 800, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.pane.inputSurface.recoveryPresentationPending = true
+        window.makeKeyAndOrderFront(nil)
+        XCTAssertTrue(view.focusComposerAndAdvancePendingRecovery())
+        let editor = try XCTUnwrap(
+            accessibilityChild(view, identifier: "seyal-composer-editor")
+        )
+        XCTAssertTrue(window.firstResponder === editor)
+        // Focus acceptance alone is insufficient: without a connected,
+        // reconstructed and prepared bridge, Rust must stay non-Usable.
+        XCTAssertTrue(view.pane.inputSurface.recoveryPresentationPending)
+        XCTAssertNotEqual(
+            seyal_app_snapshot(view.pane.appHandle).recovery_stage,
+            UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue)
+        )
+    }
+
+    @MainActor
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
@@ -1183,6 +1215,44 @@ final class SeyalHostComponentTests: XCTestCase {
         await fulfillment(of: [accepted], timeout: 1)
         XCTAssertEqual(attempts, 2)
         XCTAssertTrue(view.recoveryPresentationPending)
+    }
+
+    // #1344: One deferred AppKit turn may run before window/chrome focus
+    // eligibility is ready. A *later* real chrome event must be able to
+    // re-offer focus, not leave a usable PTY permanently Rust-Restoring.
+    @MainActor
+    func testRecoveryReoffersFocusOnLaterChromeEventAfterTwoRejections() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        var attempts = 0
+        let focus: () -> Bool = {
+            attempts += 1
+            return attempts == 3
+        }
+        let deferredTurn = expectation(description: "first deferred focus attempt ran")
+        var deferredAccepted = false
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: focus,
+            onAccepted: { deferredAccepted = true }
+        ))
+        DispatchQueue.main.async { deferredTurn.fulfill() }
+        await fulfillment(of: [deferredTurn], timeout: 1)
+        XCTAssertEqual(attempts, 2, "immediate and one deferred attempt both reject")
+        XCTAssertFalse(deferredAccepted, "rejected native focus cannot report acceptance")
+        XCTAssertTrue(view.recoveryPresentationPending, "never report Connected on denied focus")
+        // Direct acceptance returns true to the caller. The onAccepted callback
+        // is reserved for an asynchronously accepted *deferred* attempt.
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: focus,
+            onAccepted: { deferredAccepted = true }
+        ))
+        XCTAssertFalse(deferredAccepted, "immediate success must not be double-reported")
+        XCTAssertEqual(attempts, 3, "later focus-ready event reoffers once")
     }
 
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
