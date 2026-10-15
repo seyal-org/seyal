@@ -162,15 +162,9 @@ acknowledged_loc = 711
 issue = 1300
 reason = "MemoryStore SPEC-012/014/015 fixtures stay one suite beside MemoryAuthority; #1300 adds the scope-wide revocation use-time denial regression without a second test façade or partN split."
 
-# #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
-# generation sit on the daemon handshake façade; session façade grows
-# ServerCapabilities projection. Tests stay beside those façades.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 709
-issue = 1224
-reason = "Daemon bind/listen/handshake stay one process façade; #1224 threads composed ExecutionHostKind and adapter_catalog_generation into HelloAck without splitting listen from handshake."
-
+# #1343 extracted singleton-listener bootstrap from daemon/mod.rs, shrinking the
+# main façade below the 700-line structural threshold. Retain the #1224
+# acknowledgement only for its still-cohesive process boundary test suite.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/daemon/tests.rs"
 acknowledged_loc = 714
