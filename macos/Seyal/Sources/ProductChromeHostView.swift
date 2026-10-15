@@ -573,7 +573,7 @@ final class ProductChromeHostView: NSView {
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),
            composerSnap.mode != UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
         {
-            composer.focusEditor()
+            focusComposerAndAdvancePendingRecovery()
         } else if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         {
