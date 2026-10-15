@@ -16,7 +16,7 @@ use seyal_runtime::{
     display::{decode_chunk, empty_cache, DecodedDisplayChunk, DisplayCache},
     local_ipc::framing::{
         encode_frame, Attach, Attached, ClientHello, ErrorCode, ErrorMessage, FrameHeader,
-        InputRef, MessageType, Resize as WireResize, ResumeDelivery, Role, ServerHello,
+        InputRef, MessageType, Resize as WireResize, ResumeDelivery, Resync, Role, ServerHello,
         SuspendDelivery, CAP_ATTACHMENT_DELIVERY_CONTROL, HEADER_LEN,
     },
     ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
@@ -227,6 +227,30 @@ impl Harness {
             );
         }
         cache.apply_chunks(&chunks).expect("display apply");
+    }
+
+    fn assert_no_display_for(&mut self, client: &mut Client, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            self.pump();
+            let mut chunk = [0u8; 4096];
+            match client.stream.read(&mut chunk) {
+                Ok(0) => panic!("connection closed while delivery was suspended"),
+                Ok(count) => client.buffered.extend_from_slice(&chunk[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("client read failed: {error}"),
+            }
+            while client.buffered.len() >= HEADER_LEN {
+                let header = FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                let total = HEADER_LEN + header.payload_len as usize;
+                if client.buffered.len() < total {
+                    break;
+                }
+                assert_ne!(header.message_type, MessageType::DisplaySnapshot as u16);
+                assert_ne!(header.message_type, MessageType::DisplayDelta as u16);
+                client.buffered.drain(..total);
+            }
+        }
     }
 
     fn wait_for_row(
@@ -603,6 +627,82 @@ fn suspend_delivery_drops_deltas_keeps_attachment_and_pty_progress() {
         "reveal resync must include PTY progress accumulated while Hidden"
     );
     assert_eq!(attached.attachment_id, attachment);
+}
+
+#[test]
+fn resync_does_not_resume_suspended_delivery() {
+    let mut harness = Harness::new("w5-resync-stays-suspended");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Observer);
+
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.send(
+        &mut client,
+        MessageType::Resync,
+        &Resync {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.assert_no_display_for(&mut client, Duration::from_millis(150));
+
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.expect_display_batch(
+        &mut client,
+        MessageType::DisplaySnapshot,
+        Instant::now() + Duration::from_secs(3),
+    );
+}
+
+#[test]
+fn resume_rejects_second_delivering_execution_on_connection() {
+    let mut harness = Harness::new("w5-resume-connection-demux");
+    let first_execution = harness.spawn(CommandSpec::new("/bin/cat"));
+    let second_execution = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (first, _first_cache) = harness.attach(&mut client, first_execution, Role::Observer);
+
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: first.attachment_id,
+        }
+        .encode(),
+    );
+    let (_second, _second_cache) = harness.attach(&mut client, second_execution, Role::Observer);
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: first.attachment_id,
+        }
+        .encode(),
+    );
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::Error as u16);
+    assert_eq!(
+        ErrorMessage::decode(&payload).unwrap().error_code,
+        ErrorCode::InvalidState as u16
+    );
 }
 
 #[test]

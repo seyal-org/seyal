@@ -229,7 +229,7 @@ extension ProductChromeHostView {
             }
         }
         if !matched {
-            pane.inputSurface.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
+            pane.inputSurface.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_UNPRESENTED))
         }
     }
 }

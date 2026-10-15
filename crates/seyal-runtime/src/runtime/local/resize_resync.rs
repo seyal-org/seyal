@@ -226,11 +226,13 @@ impl Runtime {
             );
             return;
         }
-        if let Some(state) = self.local_ipc.as_mut() {
-            let _ = state.attachments.set_delivery(
-                resync.attachment_id,
-                crate::local_ipc::attachment::DeliveryState::Delivering,
-            );
+        let delivery = self
+            .local_ipc
+            .as_ref()
+            .and_then(|state| state.attachments.delivery_of(resync.attachment_id).ok());
+        if delivery == Some(crate::local_ipc::attachment::DeliveryState::Suspended) {
+            self.send_error(token, ErrorCode::InvalidState, MessageType::Resync as u16);
+            return;
         }
 
         self.schedule_snapshot_recovery(token);
