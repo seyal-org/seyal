@@ -391,6 +391,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     updateVisibility()
   }
 
+  @objc func windowActivationNotificationReceived() {
+    windowActivationChanged()
+  }
+
   var shouldRender: Bool {
     guard shouldAttachRuntime else { return false }
     guard let window else { return false }

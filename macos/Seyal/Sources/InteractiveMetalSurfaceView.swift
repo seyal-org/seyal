@@ -23,6 +23,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var composerRecoveryFocusAttempts = 0
     private var composerRecoveryFocusGeneration: UInt64 = 0
     private var composerFocusEligibilityChangedBeforeRecovery = false
+    private var activationRecoveryNotificationScheduled = false
     private static let maxComposerRecoveryFocusAttempts = 8
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
@@ -72,6 +73,16 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             recoveryFocusReadinessDidChange { [weak self] in
                 _ = self?.advanceRecoveryPresentationIfReady()
             }
+        }
+    }
+
+    override func windowActivationNotificationReceived() {
+        guard !activationRecoveryNotificationScheduled else { return }
+        activationRecoveryNotificationScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.activationRecoveryNotificationScheduled = false
+            self.windowActivationChanged()
         }
     }
 

@@ -5,7 +5,7 @@ extension MetalSurfaceView {
   func addWindowLifecycleObservers(for window: NSWindow) {
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(windowActivationChanged),
+      selector: #selector(windowActivationNotificationReceived),
       name: NSApplication.didBecomeActiveNotification,
       object: NSApp
     )
@@ -17,13 +17,13 @@ extension MetalSurfaceView {
     )
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(windowActivationChanged),
+      selector: #selector(windowActivationNotificationReceived),
       name: NSWindow.didBecomeKeyNotification,
       object: window
     )
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(windowActivationChanged),
+      selector: #selector(windowActivationNotificationReceived),
       name: NSWindow.didBecomeMainNotification,
       object: window
     )

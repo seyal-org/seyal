@@ -1426,8 +1426,6 @@ final class SeyalHostComponentTests: XCTestCase {
             view.removeFromSuperview()
             window.close()
         }
-        window.makeKeyAndOrderFront(nil)
-
         view.recoveryPresentationPending = true
         let exhausted = expectation(description: "bounded focus burst exhausted")
         var attempts = 0
@@ -1442,7 +1440,16 @@ final class SeyalHostComponentTests: XCTestCase {
         await fulfillment(of: [exhausted], timeout: 5)
         XCTAssertEqual(attempts, 8)
 
+        view.recoveryPresentationPending = false
+        let activationHandled = expectation(description: "application activation observed")
         NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        DispatchQueue.main.async {
+            activationHandled.fulfill()
+        }
+        await fulfillment(of: [activationHandled], timeout: 1)
+
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
         XCTAssertTrue(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1
