@@ -10,6 +10,7 @@
 
 use std::{
     env, fs,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::mpsc,
@@ -183,6 +184,78 @@ fn recv_barrier<T>(rx: &mpsc::Receiver<T>, timeout: Duration, barrier: &str) -> 
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DaemonMarker {
+    Ready,
+    RecoverableFault,
+    Deadline,
+}
+
+fn classify_daemon_marker(line: &str) -> Option<DaemonMarker> {
+    if line == "seyal-agent-backend: ready for connections" {
+        Some(DaemonMarker::Ready)
+    } else if line.contains("seyal-agent-backend: client serve ended: Malformed") {
+        Some(DaemonMarker::RecoverableFault)
+    } else if line.contains("seyal-agent-backend child_deadline_exceeded") {
+        Some(DaemonMarker::Deadline)
+    } else {
+        None
+    }
+}
+
+/// A bounded test-only observation stream, never an extra daemon connection.
+/// Socket existence/connectability alone precedes IntegrationService readiness
+/// and must not start the post-worker shutdown deadline.
+fn daemon_markers(child: &mut ChildDaemon) -> mpsc::Receiver<DaemonMarker> {
+    let stderr = child.0.stderr.take().expect("captured daemon stderr");
+    let (tx, rx) = mpsc::sync_channel(4);
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            if let Some(marker) = classify_daemon_marker(&line)
+                && tx.send(marker).is_err()
+            {
+                break;
+            }
+        }
+    });
+    rx
+}
+
+fn await_daemon_marker(
+    rx: &mpsc::Receiver<DaemonMarker>,
+    expected: DaemonMarker,
+    timeout: Duration,
+    barrier: &str,
+) {
+    let started = Instant::now();
+    loop {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        let observed = recv_barrier(rx, remaining, barrier);
+        if observed == expected {
+            return;
+        }
+        assert_ne!(observed, DaemonMarker::Deadline, "{barrier}: daemon deadline expired");
+    }
+}
+
+#[test]
+fn daemon_markers_distinguish_ready_from_socket_bind_and_worker_completion() {
+    assert_eq!(classify_daemon_marker("bound agent.sock"), None);
+    assert_eq!(
+        classify_daemon_marker("seyal-agent-backend: ready for connections"),
+        Some(DaemonMarker::Ready)
+    );
+    assert_eq!(
+        classify_daemon_marker("seyal-agent-backend: client serve ended: Malformed"),
+        Some(DaemonMarker::RecoverableFault)
+    );
+    assert_eq!(
+        classify_daemon_marker("seyal-agent-backend child_deadline_exceeded seconds=2"),
+        Some(DaemonMarker::Deadline)
+    );
+}
+
 fn probe_hello() -> Hello {
     Hello {
         supported_versions: vec![ProtocolVersion::V1],
@@ -310,7 +383,9 @@ fn daemon_binary_exits_cleanly_after_bounded_connections() {
     let socket = dir.join("agent.sock");
     // One admitted connection (the SessionClient) then exit 0.
     // Do not Hello-probe first; that would consume the single admission.
-    let mut child = spawn_production(&dir, Some(1));
+    let mut child = spawn_daemon_opts(&dir, Some(60), Some(1), true);
+    let markers = daemon_markers(&mut child);
+    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "bounded-ready");
     let started = Instant::now();
     let mut client = loop {
         match SessionClient::connect(&socket) {
@@ -335,7 +410,9 @@ fn daemon_binary_exits_cleanly_after_bounded_connections() {
 fn bounded_daemon_exits_zero_after_two_concurrent_sessions() {
     let dir = temp_dir("two-bounded");
     let socket = dir.join("agent.sock");
-    let mut child = spawn_production(&dir, Some(2));
+    let mut child = spawn_daemon_opts(&dir, Some(60), Some(2), true);
+    let markers = daemon_markers(&mut child);
+    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "two-ready");
     let (live_tx, live_rx) = mpsc::channel();
     let (go_a_tx, go_a_rx) = mpsc::channel();
     let (go_b_tx, go_b_rx) = mpsc::channel();
@@ -382,6 +459,8 @@ fn bounded_daemon_with_held_session_is_ended_by_deadline() {
     let dir = temp_dir("held-deadline");
     let socket = dir.join("agent.sock");
     let mut child = spawn_daemon_opts(&dir, Some(2), Some(1), true);
+    let markers = daemon_markers(&mut child);
+    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "held-ready");
     let (held_tx, held_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let holder = thread::spawn(move || {
@@ -401,17 +480,8 @@ fn bounded_daemon_with_held_session_is_ended_by_deadline() {
         Some(2),
         "barrier child_deadline_exceeded: {status}"
     );
-    let mut stderr = String::new();
-    child
-        .0
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap();
-    assert!(
-        stderr.contains("child_deadline_exceeded"),
-        "barrier child_deadline_exceeded: stderr={stderr}"
+    await_daemon_marker(
+        &markers, DaemonMarker::Deadline, Duration::from_secs(2), "held-deadline-evidence",
     );
     release_tx.send(()).unwrap();
     holder.join().unwrap();
@@ -475,6 +545,8 @@ fn bounded_daemon_counts_recoverable_fault_toward_budget() {
     let dir = temp_dir("recoverable-budget");
     let socket = dir.join("agent.sock");
     let mut child = spawn_daemon_opts(&dir, Some(60), Some(1), true);
+    let markers = daemon_markers(&mut child);
+    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "recoverable-ready");
     let started = Instant::now();
     let mut stream = loop {
         match UnixStream::connect(&socket) {
@@ -496,6 +568,15 @@ fn bounded_daemon_counts_recoverable_fault_toward_budget() {
     stream.write_all(b"BAD!\x00\x00\x00\x00\x00\x00").unwrap();
     stream.flush().unwrap();
     stream.shutdown(std::net::Shutdown::Write).unwrap();
+    // The accepted AB-1.8 contract is <=2s AFTER worker completion, not
+    // <=2s after a client wrote bytes into a possibly unaccepted socket.
+    // This earlier bounded gate fails if the daemon never serves the fault.
+    await_daemon_marker(
+        &markers,
+        DaemonMarker::RecoverableFault,
+        Duration::from_secs(10),
+        "recoverable-worker-completed",
+    );
     let ended = Instant::now();
     let status = loop {
         if let Some(status) = child.0.try_wait().unwrap() {
@@ -512,18 +593,6 @@ fn bounded_daemon_counts_recoverable_fault_toward_budget() {
         ended.elapsed() <= Duration::from_secs(2),
         "barrier recoverable-budget took {:?}",
         ended.elapsed()
-    );
-    let mut stderr = String::new();
-    child
-        .0
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap();
-    assert!(
-        stderr.contains("client serve ended: Malformed"),
-        "barrier recoverable-budget: stderr={stderr}"
     );
     let _ = fs::remove_dir_all(dir);
 }
