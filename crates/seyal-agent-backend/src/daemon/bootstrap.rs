@@ -200,6 +200,28 @@ mod tests {
     }
 
     #[test]
+    fn production_preparation_keeps_socket_unpublished_until_explicit_ready() {
+        let dir = TempBootstrapDir::new();
+        let socket = dir.0.join(SOCKET_NAME);
+        let mut daemon = AgentDaemon::prepare_integration(
+            &dir.0,
+            crate::session::IntegrationConfig {
+                store_path: dir.0.join("agent.db"),
+            },
+        )
+        .unwrap();
+        assert!(
+            !socket.exists(),
+            "a prepared service cannot advertise readiness before host/supervisor setup"
+        );
+        assert!(UnixStream::connect(&socket).is_err());
+        let _exits = daemon.install_exit_report();
+        daemon.publish_listener().unwrap();
+        assert!(socket.exists());
+        assert!(UnixStream::connect(&socket).is_ok());
+    }
+
+    #[test]
     fn failed_integration_initialization_never_publishes_socket_or_keeps_lock() {
         let dir = TempBootstrapDir::new();
         let result = AgentDaemon::bind_with_initialization(
