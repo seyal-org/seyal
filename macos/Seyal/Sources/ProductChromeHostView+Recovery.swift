@@ -13,6 +13,19 @@ extension ProductChromeHostView {
         return composer.focusEditor()
     }
 
+    /// A later eligibility/window-focus route can finally accept composer
+    /// first responder after the original recovery callback was rejected.
+    /// Report that actual AppKit acceptance to the *existing* Rust-owned
+    /// presentation gate; never claim Usable solely because focus succeeded.
+    @discardableResult
+    func focusComposerAndAdvancePendingRecovery() -> Bool {
+        guard !commandPalette.isOpen, composer.focusEditor() else { return false }
+        if pane.inputSurface.recoveryPresentationPending {
+            _ = pane.inputSurface.advanceRecoveryPresentationIfReady()
+        }
+        return true
+    }
+
     /// A usable PTY can precede AppKit composer-focus acceptance. Retry only
     /// during a real chrome reconciliation while native recovery is pending;
     /// no new timer, steady-state polling or Swift-owned Connected transition.
