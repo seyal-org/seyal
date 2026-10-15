@@ -468,8 +468,6 @@ fn bounded_daemon_exits_zero_after_two_concurrent_sessions() {
 
 #[test]
 fn bounded_daemon_with_held_session_is_ended_by_deadline() {
-    use std::io::Read;
-
     let dir = temp_dir("held-deadline");
     let socket = dir.join("agent.sock");
     let mut child = spawn_daemon_opts(&dir, Some(2), Some(1), true);
@@ -561,7 +559,7 @@ fn bounded_daemon_requires_deadline() {
 
 #[test]
 fn bounded_daemon_counts_recoverable_fault_toward_budget() {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::os::unix::net::UnixStream;
 
     let dir = temp_dir("recoverable-budget");
