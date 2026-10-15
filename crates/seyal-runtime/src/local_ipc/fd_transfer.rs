@@ -143,7 +143,6 @@ fn cmsg_len(payload_bytes: usize) -> usize {
     unsafe { libc::CMSG_LEN(payload_bytes) as usize }
 }
 
-
 /// Retry a syscall only when the kernel reports EINTR. An interrupted IPC
 /// syscall has not consumed bytes and must not tear down a live session.
 /// Genuine framing, credential, and transport errors remain fatal.
