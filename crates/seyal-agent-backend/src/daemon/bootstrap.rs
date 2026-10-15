@@ -23,7 +23,8 @@ impl AgentDaemon {
         config: DaemonConfig,
         initialize: impl FnOnce(
             BackendInstanceId,
-        ) -> Result<Option<crate::session::IntegrationService>, DaemonError>,
+        )
+            -> Result<Option<crate::session::IntegrationService>, DaemonError>,
     ) -> Result<Self, DaemonError> {
         let mut daemon = Self::prepare_with_initialization(directory, config, initialize)?;
         daemon.publish_listener()?;
@@ -37,7 +38,8 @@ impl AgentDaemon {
         config: DaemonConfig,
         initialize: impl FnOnce(
             BackendInstanceId,
-        ) -> Result<Option<crate::session::IntegrationService>, DaemonError>,
+        )
+            -> Result<Option<crate::session::IntegrationService>, DaemonError>,
     ) -> Result<Self, DaemonError> {
         if config.max_frame_size == 0
             || config.max_frame_size > ABSOLUTE_MAX_FRAME_SIZE
@@ -97,7 +99,9 @@ impl AgentDaemon {
             .permissions();
         permissions.set_mode(0o600);
         fs::set_permissions(&socket_path, permissions).map_err(|_| DaemonError::Io)?;
-        listener.set_nonblocking(false).map_err(|_| DaemonError::Io)?;
+        listener
+            .set_nonblocking(false)
+            .map_err(|_| DaemonError::Io)?;
         self.listener = Some(listener);
         Ok(())
     }
@@ -133,7 +137,6 @@ impl AgentDaemon {
                 .map_err(|_| DaemonError::Unavailable)
         })
     }
-
 }
 
 #[cfg(test)]
@@ -194,7 +197,10 @@ mod tests {
         );
         release_tx.send(()).unwrap();
         let daemon = worker.join().unwrap().unwrap();
-        assert!(socket.exists(), "endpoint published after service initialization");
+        assert!(
+            socket.exists(),
+            "endpoint published after service initialization"
+        );
         assert!(UnixStream::connect(&socket).is_ok());
         drop(daemon);
     }
@@ -224,11 +230,9 @@ mod tests {
     #[test]
     fn failed_integration_initialization_never_publishes_socket_or_keeps_lock() {
         let dir = TempBootstrapDir::new();
-        let result = AgentDaemon::bind_with_initialization(
-            &dir.0,
-            DaemonConfig::default(),
-            |_| Err(DaemonError::Unavailable),
-        );
+        let result = AgentDaemon::bind_with_initialization(&dir.0, DaemonConfig::default(), |_| {
+            Err(DaemonError::Unavailable)
+        });
         assert!(matches!(result, Err(DaemonError::Unavailable)));
         assert!(!dir.0.join(SOCKET_NAME).exists());
         assert!(!dir.0.join(LOCK_NAME).exists());
