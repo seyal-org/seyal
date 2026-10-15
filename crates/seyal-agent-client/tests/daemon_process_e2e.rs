@@ -235,7 +235,11 @@ fn await_daemon_marker(
         if observed == expected {
             return;
         }
-        assert_ne!(observed, DaemonMarker::Deadline, "{barrier}: daemon deadline expired");
+        assert_ne!(
+            observed,
+            DaemonMarker::Deadline,
+            "{barrier}: daemon deadline expired"
+        );
     }
 }
 
@@ -385,7 +389,12 @@ fn daemon_binary_exits_cleanly_after_bounded_connections() {
     // Do not Hello-probe first; that would consume the single admission.
     let mut child = spawn_daemon_opts(&dir, Some(60), Some(1), true);
     let markers = daemon_markers(&mut child);
-    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "bounded-ready");
+    await_daemon_marker(
+        &markers,
+        DaemonMarker::Ready,
+        Duration::from_secs(10),
+        "bounded-ready",
+    );
     let started = Instant::now();
     let mut client = loop {
         match SessionClient::connect(&socket) {
@@ -412,7 +421,12 @@ fn bounded_daemon_exits_zero_after_two_concurrent_sessions() {
     let socket = dir.join("agent.sock");
     let mut child = spawn_daemon_opts(&dir, Some(60), Some(2), true);
     let markers = daemon_markers(&mut child);
-    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "two-ready");
+    await_daemon_marker(
+        &markers,
+        DaemonMarker::Ready,
+        Duration::from_secs(10),
+        "two-ready",
+    );
     let (live_tx, live_rx) = mpsc::channel();
     let (go_a_tx, go_a_rx) = mpsc::channel();
     let (go_b_tx, go_b_rx) = mpsc::channel();
@@ -460,7 +474,12 @@ fn bounded_daemon_with_held_session_is_ended_by_deadline() {
     let socket = dir.join("agent.sock");
     let mut child = spawn_daemon_opts(&dir, Some(2), Some(1), true);
     let markers = daemon_markers(&mut child);
-    await_daemon_marker(&markers, DaemonMarker::Ready, Duration::from_secs(10), "held-ready");
+    await_daemon_marker(
+        &markers,
+        DaemonMarker::Ready,
+        Duration::from_secs(10),
+        "held-ready",
+    );
     let (held_tx, held_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let holder = thread::spawn(move || {
@@ -481,7 +500,10 @@ fn bounded_daemon_with_held_session_is_ended_by_deadline() {
         "barrier child_deadline_exceeded: {status}"
     );
     await_daemon_marker(
-        &markers, DaemonMarker::Deadline, Duration::from_secs(2), "held-deadline-evidence",
+        &markers,
+        DaemonMarker::Deadline,
+        Duration::from_secs(2),
+        "held-deadline-evidence",
     );
     release_tx.send(()).unwrap();
     holder.join().unwrap();
