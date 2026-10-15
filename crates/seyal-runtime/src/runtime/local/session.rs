@@ -71,7 +71,17 @@ impl Runtime {
                     | MessageType::ComposerCommand
                     | MessageType::HistoryRangeRequest
             );
-        if !pass7_attached && current_state.validate_incoming(kind).is_err() {
+        let delivery_control_attach = current_state == LocalIpcConnState::Attached
+            && kind == MessageType::Attach
+            && self.local_ipc.as_ref().is_some_and(|state| {
+                state.connections.get(&token).is_some_and(|meta| {
+                    meta.client_capabilities & framing::CAP_ATTACHMENT_DELIVERY_CONTROL != 0
+                })
+            });
+        if !pass7_attached
+            && !delivery_control_attach
+            && current_state.validate_incoming(kind).is_err()
+        {
             if kind == MessageType::TerminalKeyV2 {
                 // SPEC-006 §21.5: unnegotiated / pre-attachment type-29 is
                 // connection-fatal after at most one bounded generic error.
