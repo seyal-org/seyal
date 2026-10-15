@@ -25,7 +25,9 @@ use seyal_runtime::{
     AttachmentId, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
 };
 
-static FD_SERIAL: Mutex<()> = Mutex::new(());
+// These tests exercise process-heavy runtime paths; overlapping them can let
+// host process pressure distort the streamer test and its measured baseline.
+static RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
 
 fn config() -> RuntimeConfig {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -372,6 +374,9 @@ impl Harness {
 /// progressing. Records spawn cost and whether ADR-017 §16 fairness is tripped.
 #[test]
 fn provisioning_burst_preserves_streamer_fairness() {
+    let _guard = RUNTIME_SERIAL
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let (mut h, streamer) = Harness::with_streamer();
     h.hello(0);
 
@@ -489,7 +494,7 @@ fn provisioning_burst_preserves_streamer_fairness() {
 /// At least 100 provision/dispose cycles return named counters to baseline.
 #[test]
 fn one_hundred_provision_dispose_cycles_return_to_baseline() {
-    let _guard = FD_SERIAL
+    let _guard = RUNTIME_SERIAL
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let mut h = Harness::empty();
