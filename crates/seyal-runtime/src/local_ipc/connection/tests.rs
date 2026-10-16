@@ -191,6 +191,7 @@ fn mandatory_frame_waits_for_a_partially_written_display_frame() {
             }]),
             frame_index: 0,
             sent: 1,
+            started: true,
         }),
         pending_display: None,
         display_generation: 1,
@@ -366,6 +367,7 @@ fn suspend_keeps_partially_written_display_frame_for_framing() {
     let batch = encode_snapshot(&snapshot(1)).unwrap();
     let mut inflight = DisplayItem::new(batch.into_transport_batches().into());
     inflight.sent = 1;
+    inflight.started = true;
     connection.display_inflight = Some(inflight);
 
     connection.drop_not_yet_started_presentation();
@@ -374,6 +376,37 @@ fn suspend_keeps_partially_written_display_frame_for_framing() {
         connection.display_inflight.as_ref().map(|item| item.sent),
         Some(1),
         "a partial frame must finish before suspension takes effect"
+    );
+}
+
+#[test]
+fn suspend_keeps_started_batch_between_frames() {
+    let mut connection = connection();
+    let batch = EncodedDisplayBatch {
+        kind: DisplayKind::Snapshot,
+        schema: 2,
+        generation: 1,
+        base_generation: 0,
+        rows: 1,
+        columns: 1,
+        frames: vec![Arc::<[u8]>::from([1u8]), Arc::<[u8]>::from([2u8])],
+        total_bytes: 2,
+    };
+    let mut inflight = DisplayItem::new(batch.into_transport_batches().into());
+    inflight.frame_index = 1;
+    inflight.started = true;
+    connection.display_inflight = Some(inflight);
+
+    connection.drop_not_yet_started_presentation();
+
+    assert_eq!(
+        connection.display_inflight.as_ref().map(|item| (
+            item.frame_index,
+            item.sent,
+            item.started
+        )),
+        Some((1, 0, true)),
+        "once a logical batch starts, its remaining frames must finish"
     );
 }
 

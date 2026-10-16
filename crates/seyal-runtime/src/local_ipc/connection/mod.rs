@@ -176,6 +176,8 @@ pub(in crate::local_ipc::connection) struct DisplayItem {
     pub(in crate::local_ipc::connection) batches: VecDeque<EncodedDisplayBatch>,
     pub(in crate::local_ipc::connection) frame_index: usize,
     pub(in crate::local_ipc::connection) sent: usize,
+    /// True after any byte from this logical display item reaches the peer.
+    pub(in crate::local_ipc::connection) started: bool,
 }
 
 impl DisplayItem {
@@ -190,6 +192,7 @@ impl DisplayItem {
             batches,
             frame_index: 0,
             sent: 0,
+            started: false,
         }
     }
 

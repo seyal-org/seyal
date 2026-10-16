@@ -62,7 +62,7 @@ impl Connection {
         if self
             .display_inflight
             .as_ref()
-            .is_some_and(|item| item.sent == 0)
+            .is_some_and(|item| !item.started)
         {
             self.display_inflight = None;
         }
@@ -344,6 +344,7 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
         match flush_bytes(connection.stream.as_raw_fd(), &frame, &mut item.sent)? {
             FlushProgress::WouldBlock => return Ok(()),
             FlushProgress::Progress => {
+                item.started = true;
                 if item.sent == frame_len {
                     item.frame_index += 1;
                     item.sent = 0;
