@@ -13,6 +13,15 @@ extension ProductChromeHostView {
         return composer.focusEditor()
     }
 
+    /// A usable PTY can precede AppKit composer-focus acceptance. Retry only
+    /// during a real chrome reconciliation while native recovery is pending;
+    /// no new timer, steady-state polling or Swift-owned Connected transition.
+    func driveRecoveryAndAdvancePendingPresentation() {
+        driveRecovery()
+        guard pane.inputSurface.recoveryPresentationPending else { return }
+        _ = pane.inputSurface.advanceRecoveryPresentationIfReady()
+    }
+
     func commandPaletteDidDismiss() {
         guard pane.inputSurface.recoveryPresentationPending else {
             routeFocus()

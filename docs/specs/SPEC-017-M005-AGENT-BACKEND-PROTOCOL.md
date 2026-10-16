@@ -438,3 +438,27 @@ Pairing / identity-evidence amendment (#1191) additionally requires, once implem
 - PTY ownership;
 - M006 workflow semantics;
 - choosing a persistence engine/table layout here.
+
+## 17. SPEC-030 task-input protocol reconciliation (conditional acceptance via PR #1340)
+
+This candidate amendment is reviewed under [#1327](https://github.com/seyal-org/seyal/issues/1327). Sections 1–16 retain their existing accepted authority. This extension is Proposed until PR #1340 receives an independent non-author APPROVE **and** an explicit user-authorized non-author merge; only then is §17 Accepted under #1327. Pairing §5–§6 remains a **separate** #1191 acceptance gate. The existing `AGB1`/Protocol V1 command catalog and 64-KiB absolute frame cap are not silently rewritten.
+
+**Negotiated V2 command / response shape** (final numeric tags, fixed binary codecs and compatibility tests belong to #1330 implementation after acceptance):
+
+```text
+SubmitWorkItemInput {
+  session_id, work_item_id, expected_work_item_revision, request_id,
+  payload: InlineTask(<=32KiB) | AuthorizedPrivateTaskRef,
+  attachment_refs[]          // capped, backend-validated
+}
+-> WorkItemInputAdmitted { work_item_id, input_version, new_revision, input_ref }
+CreateAttemptV2 { session_id, work_item_id, input_version }
+-> Attempt { id }
+```
+
+- `runs.create`, per-WorkItem/WorkScope principal rights and attachment grants are necessary; `adapter.execute` remains separately necessary at dispatch (SPEC-027 §7). A request ID does not grant authority. **After authentication and exact WorkItem/WorkScope authorization, consult a durable `(principal_id, request_id)` idempotency record before revision checking.** A same-key hit with the exact original canonical request tuple (including original submitted revision and source/attachment refs) returns the original `WorkItemInputAdmitted` **even when** its submitted `expected_work_item_revision` is now stale, without another mutation or event, **provided current principal/source/privacy and attachment access still permit disclosure**; an ineligible/revoked replay returns a typed non-disclosing rejection. A same-key/different-payload hit yields a typed collision and does not advance the WorkItem revision or create another idempotency record. Only a cache miss checks the expected revision and other admission predicates. The durable record outlives ClientSession restarts; it is never keyed by session. Payload comparison uses protected canonical identity/policy-aware keyed fingerprint, not public raw task hashes.
+- For an idempotency miss that passes initial validation, first stage protected task/media bytes under a bounded pending lease in the existing scoped private content store. **At the Agent DB commit boundary, within the existing backend-owned authoritative serialization domain, revalidate the complete SPEC-015 source/privacy/policy fence, current WorkItem CAS, principal/resource/attachment rights and staged-blob availability.** Only then atomically commit the immutable input version, principal/request idempotency result, WorkItem revision and **opaque metadata-only** WorkItem event in the **Agent DB transaction only**. That DB commit is the admission linearization point; if it fails, no `WorkItemInputVersion` exists, no success is reported, and unreferenced staged bytes are reclaimed by bounded post-lease GC. GC must not collect pending staged bytes while a valid admission commit is possible, or live bytes referenced by a committed version. **No required cross-store transaction** is introduced (ADR-016 §7). Reject empty/oversized input, stale revision on misses, key collision, foreign refs, finalized WorkItem, missing protection and revoked source without partial DB mutation. Preserve per-aggregate sequences, concurrent uniqueness, restart/replay and non-secret snapshots.
+- New typed error families distinguish `InputRequired`, `InputRevisionConflict`, `InputIdempotencyConflict`, `InputUnauthorized`, `InputInvalid`, `InputTooLarge`, `InputRevoked`, `InputCapabilityUnavailable`, and `ProtectedStorageUnavailable`; do not overload `ExecutionTargetUnavailable` or generic `Failed`. Error payloads never include source bytes or unredacted paths. A replay cannot bypass current principal authorization or a privacy revoke to disclose protected refs/content.
+- V1 clients and unversioned Attempts cannot claim prompt delivery. Hello/HelloAck advertise supported version and prompt-capability separately from host presence. Unknown mandatory capability/version cannot downgrade to ObservationOnly and appear successful. V2 `StartAgentRun` still carries no arbitrary launch descriptors.
+- Attempt creation freezes exactly one existing authorized input version. Before each dispatch recheck privacy/source/policy revocation and route eligibility, commit fenced request identity with state, and **enforce SPEC-015 §8's single serialized backend privacy handoff gate at the actual irreversible transport boundary** (not at earlier queue submission alone). Revocation before that gate denies send; a handoff that wins the serial order is durably effect-possible. On partial/unknown send preserve reconcile-before-retry semantics. Revocation after delivery cannot revoke what the external child already read.
+- Private task/media bytes live in scoped protected content storage, never ordinary Agent DB, RunEvent, SelectionTrace, log or snapshot; no plaintext-at-rest fallback. Retention/erase respects existing privacy authority (SPEC-015) and cannot falsely promise erasure from an upstream harness.

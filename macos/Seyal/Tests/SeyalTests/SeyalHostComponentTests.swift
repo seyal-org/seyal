@@ -1607,6 +1607,45 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(advances, 1)
     }
 
+    // #1344: One deferred AppKit turn may run before window/chrome focus
+    // eligibility is ready. A *later* real chrome event must be able to
+    // re-offer focus, not leave a usable PTY permanently Rust-Restoring.
+    @MainActor
+    func testRecoveryReoffersFocusOnLaterChromeEventAfterTwoRejections() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        var attempts = 0
+        let focus: () -> Bool = {
+            attempts += 1
+            return attempts == 3
+        }
+        let deferredTurn = expectation(description: "first deferred focus attempt ran")
+        var deferredAccepted = false
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: focus,
+            onAccepted: { deferredAccepted = true }
+        ))
+        DispatchQueue.main.async { deferredTurn.fulfill() }
+        await fulfillment(of: [deferredTurn], timeout: 1)
+        XCTAssertEqual(attempts, 2, "immediate and one deferred attempt both reject")
+        XCTAssertFalse(deferredAccepted, "rejected native focus cannot report acceptance")
+        XCTAssertTrue(view.recoveryPresentationPending, "never report Connected on denied focus")
+        // Direct acceptance returns true to the caller. The onAccepted callback
+        // is reserved for an asynchronously accepted *deferred* attempt.
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: focus,
+            onAccepted: { deferredAccepted = true }
+        ))
+        XCTAssertFalse(deferredAccepted, "immediate success must not be double-reported")
+        XCTAssertEqual(attempts, 3, "later focus-ready event reoffers once")
+    }
+
+
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.
