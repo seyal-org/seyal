@@ -671,6 +671,36 @@ fn resync_does_not_resume_suspended_delivery() {
 }
 
 #[test]
+fn resume_then_suspend_before_publication_sends_no_snapshot() {
+    let mut harness = Harness::new("w5-resume-suspend-before-publish");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Observer);
+
+    // Deliver both controls in one client write and one Runtime poll so the
+    // pending recovery cannot be serviced between ResumeDelivery and Suspend.
+    let mut controls = encode_frame(
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    controls.extend_from_slice(&encode_frame(
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    ));
+    client.stream.write_all(&controls).expect("write controls");
+    harness.pump();
+
+    harness.assert_no_display_for(&mut client, Duration::from_millis(150));
+}
+
+#[test]
 fn resume_rejects_second_delivering_execution_on_connection() {
     let mut harness = Harness::new("w5-resume-connection-demux");
     let first_execution = harness.spawn(CommandSpec::new("/bin/cat"));

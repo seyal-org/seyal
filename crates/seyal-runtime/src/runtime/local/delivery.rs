@@ -77,6 +77,10 @@ impl Runtime {
                     && let Some(state) = self.local_ipc.as_mut()
                 {
                     state.server.drop_not_yet_started_presentation(token);
+                    // Resume may have queued recovery in this same input batch.
+                    // Leave its queue node stale so publication cannot revive a
+                    // suspended attachment after this control has been handled.
+                    state.pending_resync_set.remove(&token);
                 }
             }
             MessageType::ResumeDelivery => {

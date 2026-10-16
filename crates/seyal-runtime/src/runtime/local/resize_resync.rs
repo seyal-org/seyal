@@ -276,6 +276,17 @@ impl Runtime {
                 continue;
             }
 
+            let delivery = self.local_ipc.as_ref().and_then(|state| {
+                let attachment_id = state.connections.get(&token)?.attachment?;
+                state.attachments.delivery_of(attachment_id).ok()
+            });
+            if delivery != Some(crate::local_ipc::attachment::DeliveryState::Delivering) {
+                if let Some(state) = self.local_ipc.as_mut() {
+                    state.pending_resync_set.remove(&token);
+                }
+                continue;
+            }
+
             let snapshot_active = self
                 .local_ipc
                 .as_ref()

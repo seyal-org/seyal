@@ -57,6 +57,21 @@ fn drop_unsent_viewport_line_ids(
 }
 
 impl Connection {
+    pub(in crate::local_ipc::connection) fn drop_not_yet_started_presentation(&mut self) {
+        self.pending_display = None;
+        if self
+            .display_inflight
+            .as_ref()
+            .is_some_and(|item| item.sent == 0)
+        {
+            self.display_inflight = None;
+        }
+        if self.attach_snapshot_pin {
+            self.attach_snapshot_pin = false;
+            self.deferred_after_attach = None;
+        }
+    }
+
     pub(in crate::local_ipc::connection) fn queue_snapshot(
         &mut self,
         snapshot: EncodedDisplayBatch,
@@ -253,7 +268,7 @@ impl LocalIpcServer {
     /// Drop not-yet-started presentation. In-flight frames complete (SPEC-004 §11 / §19).
     pub fn drop_not_yet_started_presentation(&mut self, token: u64) {
         if let Some(connection) = self.connections.get_mut(&token) {
-            connection.pending_display = None;
+            connection.drop_not_yet_started_presentation();
         }
     }
 }

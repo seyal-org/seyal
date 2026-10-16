@@ -348,3 +348,56 @@ fn viewport_line_ids_coalesce_preserves_block_state_and_composer_status() {
     assert_eq!(queued[1].bytes, status);
     assert_eq!(queued[2].bytes, fresh_line_ids);
 }
+
+#[test]
+fn suspend_drops_zero_byte_inflight_display() {
+    let mut connection = connection();
+    let batch = encode_snapshot(&snapshot(1)).unwrap();
+    connection.display_inflight = Some(DisplayItem::new(batch.into_transport_batches().into()));
+
+    connection.drop_not_yet_started_presentation();
+
+    assert!(connection.display_inflight.is_none());
+}
+
+#[test]
+fn suspend_keeps_partially_written_display_frame_for_framing() {
+    let mut connection = connection();
+    let batch = encode_snapshot(&snapshot(1)).unwrap();
+    let mut inflight = DisplayItem::new(batch.into_transport_batches().into());
+    inflight.sent = 1;
+    connection.display_inflight = Some(inflight);
+
+    connection.drop_not_yet_started_presentation();
+
+    assert_eq!(
+        connection.display_inflight.as_ref().map(|item| item.sent),
+        Some(1),
+        "a partial frame must finish before suspension takes effect"
+    );
+}
+
+#[test]
+fn suspend_clears_attach_snapshot_pin_for_later_recovery() {
+    let mut connection = connection();
+    let attach_snapshot = encode_snapshot(&snapshot(1)).unwrap();
+    let deferred = encode_snapshot(&snapshot(2)).unwrap();
+    connection.pending_display = Some(attach_snapshot.into_transport_batches().into());
+    connection.attach_snapshot_pin = true;
+    connection.deferred_after_attach = Some(deferred);
+
+    connection.drop_not_yet_started_presentation();
+    connection.queue_snapshot(encode_snapshot(&snapshot(3)).unwrap());
+
+    assert!(!connection.attach_snapshot_pin);
+    assert!(connection.deferred_after_attach.is_none());
+    assert_eq!(
+        connection
+            .pending_display
+            .as_ref()
+            .and_then(|batches| batches.front())
+            .map(|batch| batch.generation),
+        Some(3),
+        "resume snapshot must be made writable after suspend drops attach work"
+    );
+}
