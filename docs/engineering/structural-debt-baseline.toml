@@ -162,15 +162,9 @@ acknowledged_loc = 711
 issue = 1300
 reason = "MemoryStore SPEC-012/014/015 fixtures stay one suite beside MemoryAuthority; #1300 adds the scope-wide revocation use-time denial regression without a second test façade or partN split."
 
-# #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
-# generation sit on the daemon handshake façade; session façade grows
-# ServerCapabilities projection. Tests stay beside those façades.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 709
-issue = 1224
-reason = "Daemon bind/listen/handshake stay one process façade; #1224 threads composed ExecutionHostKind and adapter_catalog_generation into HelloAck without splitting listen from handshake."
-
+# #1343 extracted secure singleton bootstrap from daemon/mod.rs, shrinking
+# that façade below the structural threshold. Preserve only the separate
+# #1224 acknowledgement for the existing cohesive process-boundary test suite.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/daemon/tests.rs"
 acknowledged_loc = 714
@@ -233,15 +227,15 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 944
-issue = 1092
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, and #1144 adds the Tab-to-Window activation lookup. Snapshot encoding stays in shell/snapshot.rs."
+acknowledged_loc = 956
+issue = 1218
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, and #1218 adds two equalize dispatch arms. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 776
-issue = 866
-reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and projects failed composer admission as a native announcement without moving draft/admission policy into Swift."
+acknowledged_loc = 780
+issue = 1218
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]

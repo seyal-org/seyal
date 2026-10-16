@@ -25,7 +25,9 @@ use seyal_runtime::{
     AttachmentId, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
 };
 
-static FD_SERIAL: Mutex<()> = Mutex::new(());
+// These tests exercise process-heavy runtime paths; overlapping them can let
+// host process pressure distort the streamer test and its measured baseline.
+static RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
 
 fn config() -> RuntimeConfig {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -81,6 +83,7 @@ struct Client {
 struct Harness {
     runtime: Runtime,
     clients: Vec<Client>,
+    phase: String,
 }
 
 impl Drop for Harness {
@@ -108,6 +111,7 @@ impl Harness {
         let mut harness = Self {
             runtime,
             clients: Vec::new(),
+            phase: "streamer startup".into(),
         };
         harness.connect();
         (harness, streamer)
@@ -118,6 +122,7 @@ impl Harness {
         let mut harness = Self {
             runtime,
             clients: Vec::new(),
+            phase: "runtime startup".into(),
         };
         harness.connect();
         harness
@@ -196,7 +201,13 @@ impl Harness {
             }
             let mut chunk = [0u8; 8192];
             match self.clients[client].stream.read(&mut chunk) {
-                Ok(0) => panic!("connection closed while awaiting frame"),
+                Ok(0) => panic!(
+                    "connection closed while awaiting frame (phase={}, buffered_bytes={}, executions={}, attachments={})",
+                    self.phase,
+                    self.clients[client].buffered.len(),
+                    self.runtime.execution_count(),
+                    self.total_attachment_count(),
+                ),
                 Ok(count) => self.clients[client]
                     .buffered
                     .extend_from_slice(&chunk[..count]),
@@ -372,6 +383,9 @@ impl Harness {
 /// progressing. Records spawn cost and whether ADR-017 §16 fairness is tripped.
 #[test]
 fn provisioning_burst_preserves_streamer_fairness() {
+    let _guard = RUNTIME_SERIAL
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let (mut h, streamer) = Harness::with_streamer();
     h.hello(0);
 
@@ -489,7 +503,7 @@ fn provisioning_burst_preserves_streamer_fairness() {
 /// At least 100 provision/dispose cycles return named counters to baseline.
 #[test]
 fn one_hundred_provision_dispose_cycles_return_to_baseline() {
-    let _guard = FD_SERIAL
+    let _guard = RUNTIME_SERIAL
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let mut h = Harness::empty();
@@ -516,6 +530,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
     let mut next_request = 3u64;
     const CYCLES: usize = 100;
     for cycle in 0..CYCLES {
+        h.phase = format!("cycle {cycle} request {next_request} create");
         let (created, _) = h.create_timed(0, next_request);
         next_request += 1;
         assert_eq!(
@@ -528,6 +543,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
             baseline_workspaces + 1,
             "cycle {cycle} workspace association"
         );
+        h.phase = format!("cycle {cycle} request {next_request} attach");
         let attached = h.attach(0, created.execution_id, Role::Controller);
         assert_eq!(
             h.runtime
@@ -537,6 +553,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
             1
         );
         assert_eq!(h.controller_lease_count(), baseline_controllers + 1);
+        h.phase = format!("cycle {cycle} request {next_request} terminate");
         let result = h.terminate(
             0,
             attached.attachment_id,
@@ -548,6 +565,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
             result.result_code,
             TerminateExecutionResultCode::TerminationRequested
         );
+        h.phase = format!("cycle {cycle} awaiting finalized lifecycle");
         h.wait_lifecycle_finalized(0, created.execution_id);
         assert_eq!(
             h.runtime.execution_count(),

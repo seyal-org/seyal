@@ -299,7 +299,8 @@ final class MultiWindowHostTests: XCTestCase {
         host.activationFailBudget = 8
         applyAndWaitForActivation(host)
         XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.result, -4)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.error, 53)
         let after = seyal_app_window(host.appHandle, 1)
         XCTAssertNotEqual(after.flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE), 0)
         XCTAssertTrue(host.liveHost.window === liveBefore)
@@ -366,7 +367,7 @@ final class MultiWindowHostTests: XCTestCase {
 
         XCTAssertEqual(requests, 1)
         XCTAssertEqual(host.lastActivationAttempts, 1)
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 0)
+        XCTAssertNil(host.lastActivationFailureReportForTests)
         XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
     }
 

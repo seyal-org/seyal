@@ -172,6 +172,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     var activationCompletionForTests: ((Bool) -> Void)?
     /// Attempts spent on the last `WindowActivation` effect (tests).
     private(set) var lastActivationAttempts: Int = 0
+    /// Captures the native failure report at its synchronous FFI boundary (tests).
+    private(set) var lastActivationFailureReportForTests: (result: Int32, error: Int32)?
     private static let activationAcknowledgementDelay: TimeInterval = 0.05
     private var activationGeneration: UInt64 = 0
     private var activationWorkItem: DispatchWorkItem?
@@ -182,6 +184,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         cancelPendingActivation()
         let generation = activationGeneration
         lastActivationAttempts = 0
+        lastActivationFailureReportForTests = nil
         pendingActivationKey = key
         scheduleActivationAttempt(key, generation: generation)
     }
@@ -291,7 +294,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.target_execution_lo = key.lo
         action.target_execution_hi = key.hi
         action.reserved = SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED
-        _ = seyal_app_apply(appHandle, &action)
+        let result = seyal_app_apply(appHandle, &action)
+        lastActivationFailureReportForTests = (result, seyal_app_last_error(appHandle))
     }
 
     private func installLiveHost(in window: NSWindow, key: WindowKey) {

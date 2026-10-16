@@ -1,6 +1,6 @@
 # SPEC-017 — M005 independent Agent Backend protocol, security and event replay
 
-- **Status:** Accepted on merge under #838 / ADR-016. **§5–§6 pairing amendment is not Accepted.** PR #1270 (`92d9a00`) was squash-merged by author `@mahboobmonnamd` with zero reviews; that merge is not the non-author Accepted stamp. **Accepted on merge of PR #1316 by a non-author maintainer (`@anulalbs` / `@crdileep82`) under #1191.** An author or agent comment or merge is not that acceptance. Pairing amendment text is unchanged. This is not an implemented-behavior claim.
+- **Status:** Base SPEC-017 Accepted under #838 / ADR-016. **§5–§6 pairing amendment is Proposed until [PR #1348](https://github.com/seyal-org/seyal/pull/1348) is independently APPROVED by a non-author maintainer and, only after explicit user authorization, MERGED by a non-author maintainer; upon both conditions the unchanged amendment is Accepted under #1191.** Earlier PR #1270 (`92d9a00`) and restamp PR #1316 (`3ced201`) were merged with no recorded non-author APPROVE; neither constitutes acceptance. Author comments are not approval. §5.2/§6.3–§6.4 additionally require challenge-bound proof of possession; `credential_ref` alone never authenticates. This is not implemented-behavior evidence.
 - **Issue:** #838 (base contract); pairing amendment #1191
 - **Architecture:** ADR-012, ADR-013, ADR-014, ADR-015 (pairing approval UX ownership), ADR-016 (no ADR create/amend; §9 boundary unchanged)
 - **Consumers:** #678, #679, #680, #681, #1190, #1191, #1192
@@ -120,17 +120,19 @@ Transport admission (same-UID Unix socket / named pipe) remains necessary but ne
 ```text
 FirstPartyEvidenceV1 {
   principal_kind: FirstPartySeyal | FirstPartyCLI
-  credential_ref   // CredentialStore-backed install credential
-  // optional platform peer attestation may constrain which process may
-  // present credential_ref; peer UID alone is never sufficient
+  credential_ref   // CredentialStore locator only; not a bearer proof
+  auth_proof       // fresh challenge-bound signature/MAC or OS-attested proof
+  // platform peer attestation and CredentialStore caller access control
+  // must establish the permitted first-party install; peer UID alone is insufficient
 }
 ```
 
 Requirements:
 
-- Evidence material lives in CredentialStore (§7), not in ordinary Agent DB rows, aggregate events, SelectionTrace, logs, or normal frontend IPC.
-- Repository content, environment variables, and world-readable files must not be able to register or forge a first-party principal.
-- A distinct first-party install credential may be rotated/revoked without revoking provider/harness ConnectionProfile credentials.
+- `credential_ref` is **only a public-equivalent lookup selector**. Its possession, knowledge, replay or appearance in ordinary Agent DB, logs, local IPC or event metadata is **never** authenticated identity evidence. Establish fresh **proof of possession** of the corresponding secret/private key or a separately reviewed OS-attested equivalent, bound to a backend-issued one-use nonce, exact intended principal/install, BackendInstanceId, authenticated local connection and bounded expiry. Verify the proof before creating a privileged ClientSession.
+- The required pre-authorization challenge/proof exchange is **versioned and fail-closed**: replayed, stale, malformed, mismatched-connection or downgraded proofs cannot mint sessions, and a legacy V1 Hello/fixed token cannot bypass the required proof. Define its bounded wire framing and numeric codecs as a reviewed #1191 Ready prerequisite, not by changing existing V1 command tags in place. The secret/private key never enters ordinary IPC, source-controlled config, logs, agent metadata or generic app environment; signature/MAC proofs are redacted from diagnostics.
+- For `FirstPartySeyal`/`FirstPartyCLI`, use independently verified **install-bound OS signing/attestation or OS-secure credential access control** capable of distinguishing the permitted installation from an arbitrary same-UID executable. A same-UID process merely invoking the first-party executable cannot thereby mint `admin.clients` without a trusted approval path. **If the OS/platform cannot establish this boundary, privileged first-party enrollment fails closed** rather than falling back to a UID check or public ref.
+- Repository content, environment variables, world-readable files and untrusted harness output must not register, forge or renew a first-party principal. A distinct first-party install credential may be rotated/revoked without revoking provider/harness ConnectionProfile credentials.
 
 Until first-party install evidence and pairing are implemented, production claims that rely on SPEC-017 §15.3–15.5 third-party / UserApprovedLocalClient behavior remain out of scope for M005 exit.
 
@@ -141,7 +143,7 @@ Exact resource/run authorization is **per principal**, not broadcast:
 - Granting observe/control/interact on an `AgentRunId` (or non-run aggregate) requires an explicit grant to that `principal_id`.
 - A production authorization path must not grant a target to “every principal that holds `runs.observe`” (or equivalent broadcast). Historical harness helpers that did so are not production authority.
 - Non-run aggregates (WorkItem, Attempt, Connection, Attention, Action metadata) likewise require explicit target authorization for non-owner principals.
-- Session scope may narrow principal scope; it never widens it and never invents target grants.
+- Session scope may narrow principal scope; it never widens it and never invents target grants. **Every privileged command and new handoff revalidates the current Active principal/grant generation and exact resource target.** A suspension, revocation or grant removal immediately invalidates older privileged ClientSession/binding generations for future commands, including on already-open sockets; denial is not deferred until a new Hello. In-flight effects that crossed an authorized handoff before revoke follow SPEC-016/SPEC-015 reconciliation, not false rollback.
 
 `admin.clients` (or an equally privileged first-party admin scope) may mint, suspend, revoke, or retarget grants. Ordinary observe-only sessions cannot self-escalate.
 
@@ -170,7 +172,7 @@ PairingChallengeV1 {
 
 Requirements:
 
-- Challenges are single-use and expire on a short bound (implementation chooses the concrete TTL; production must keep it short enough that an abandoned challenge is not a standing capability).
+- Challenges are single-use and expire on a short bound (implementation chooses the concrete TTL; production must keep it short enough that an abandoned challenge is not a standing capability). **Unauthenticated/minimally admitted `BeginPairing` is also a resource-exhaustion boundary:** enforce measured global/per-peer pending-challenge and issue-rate limits, bounded stored metadata, expiry cleanup and no unbounded queued approval UX; an over-capacity client is rejected without granting authority or introducing an unaccepted privileged error. #1192 bounds active socket workers but does not substitute for challenge-state quotas.
 - Expired, already-Consumed, Denied, or unknown `pairing_challenge_id` / `nonce` pairs fail closed.
 - Requested scopes are a proposal only; approval may narrow them and must never widen beyond what the deciding principal is authorized to grant.
 
@@ -204,18 +206,18 @@ PairingCompleteV1 {
 
 On Approve:
 
-1. mark the challenge Consumed;
-2. mint or reactivate a `ClientPrincipal` of the requested kind with `granted_scopes`;
-3. create a pairing credential exclusively through CredentialStore (§7) and store only `pairing_credential_ref` on the principal;
-4. return `PairingComplete` without embedding the raw secret in events, logs, or ordinary IPC payloads.
+1. Authenticate the current `admin.clients` decision authority and reserve the still-Pending, unexpired, single-use challenge **without minting an Active principal or grant**. A competing approval, Deny, expiry or admin revocation cannot win the same challenge.
+2. Create a **pending/inactive** pairing credential exclusively through CredentialStore (§7). Provision its proof-of-possession material to the exact approved client/install through a trusted access-controlled channel (never a world-readable/ref-only alias), and verify that the client can prove possession. If provisioning/proof fails, revoke the pending credential and leave no reusable privileged grant.
+3. Under the **existing Agent Backend writer**, revalidate the deciding admin's current scopes and principal state, challenge generation/expiry and exact requested/granted scope subset. One **Agent DB transaction** consumes the challenge, mints/reactivates the Active ClientPrincipal, binds the credential reference and grant generation, and records metadata-only audit evidence. This DB transaction alone is the authorization linearization point; **no atomic transaction spanning CredentialStore and Agent DB is required** (ADR-016 §7–§8). On DB failure, deny success and revoke/GC the orphan credential. A bounded pending lease prevents GC from deleting credentials while a valid commit is possible.
+4. Only after that commit, return `PairingComplete` with opaque selector metadata, **never** a raw secret in events, logs or ordinary IPC; a returned `pairing_credential_ref` is not authentication. Concurrent competing decisions and retries are bounded and idempotent by challenge ID/generation; no two Active principals can result from one challenge.
 
 On Deny or expiry: no principal privilege is created or widened; any pending challenge material is invalidated.
 
 ### 6.4 Subsequent Hello with paired evidence
 
-After pairing, the client presents CredentialStore-backed pairing evidence in `Hello.client_principal_evidence` (opaque to logs). The backend resolves `pairing_credential_ref` through CredentialStore, verifies the principal is Active, and then opens a `ClientSession` under §5.1.
+After pairing, the client presents CredentialStore-backed pairing evidence (opaque to logs), **including a fresh authenticated challenge-bound proof rather than only `pairing_credential_ref`**. The backend resolves the reference through CredentialStore, verifies possession using the versioned §5.2 proof exchange, checks the exact installation/client grant plus Active principal state and **only then** opens a `ClientSession` under §5.1. Replaying a reference or previously accepted proof across backend restarts, clients, connections or principals fails closed.
 
-Revoking the pairing credential or setting the principal to Suspended/Revoked denies subsequent Hellos and does not revoke unrelated provider/harness ConnectionProfile credentials.
+Revoking the pairing credential or setting the principal to Suspended/Revoked **advances the principal/grant generation and denies new privileged operations on existing ClientSessions immediately**, as well as all subsequent Hellos; it does not revoke unrelated provider/harness ConnectionProfile credentials. Stale in-flight privileged handoffs require SPEC-015/SPEC-016 use-time fences and truthful effect reconciliation.
 
 ### 6.5 Wire surface (normative names; codecs in implementation)
 
@@ -236,6 +238,7 @@ PairingRejected
 - remote/team identity providers;
 - changing ADR-016 §9 (local IPC remains a security boundary; this amendment supplies the ClientPrincipal evidence/pairing mechanism inside that boundary);
 - shipping production pairing code before #1191 is Ready.
+- using an opaque credential reference as a bearer password, claiming OS process isolation solely from matching Unix UID, or silently treating versionless/legacy Hello as privileged first-party proof.
 
 ## 7. ConnectionProfile and credentials
 
