@@ -83,6 +83,7 @@ struct Client {
 struct Harness {
     runtime: Runtime,
     clients: Vec<Client>,
+    phase: String,
 }
 
 impl Drop for Harness {
@@ -110,6 +111,7 @@ impl Harness {
         let mut harness = Self {
             runtime,
             clients: Vec::new(),
+            phase: "streamer startup".into(),
         };
         harness.connect();
         (harness, streamer)
@@ -120,6 +122,7 @@ impl Harness {
         let mut harness = Self {
             runtime,
             clients: Vec::new(),
+            phase: "runtime startup".into(),
         };
         harness.connect();
         harness
@@ -198,7 +201,13 @@ impl Harness {
             }
             let mut chunk = [0u8; 8192];
             match self.clients[client].stream.read(&mut chunk) {
-                Ok(0) => panic!("connection closed while awaiting frame"),
+                Ok(0) => panic!(
+                    "connection closed while awaiting frame (phase={}, buffered_bytes={}, executions={}, attachments={})",
+                    self.phase,
+                    self.clients[client].buffered.len(),
+                    self.runtime.execution_count(),
+                    self.total_attachment_count(),
+                ),
                 Ok(count) => self.clients[client]
                     .buffered
                     .extend_from_slice(&chunk[..count]),
@@ -521,6 +530,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
     let mut next_request = 3u64;
     const CYCLES: usize = 100;
     for cycle in 0..CYCLES {
+        h.phase = format!("cycle {cycle} request {next_request} create");
         let (created, _) = h.create_timed(0, next_request);
         next_request += 1;
         assert_eq!(
@@ -533,6 +543,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
             baseline_workspaces + 1,
             "cycle {cycle} workspace association"
         );
+        h.phase = format!("cycle {cycle} request {next_request} attach");
         let attached = h.attach(0, created.execution_id, Role::Controller);
         assert_eq!(
             h.runtime
@@ -542,6 +553,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
             1
         );
         assert_eq!(h.controller_lease_count(), baseline_controllers + 1);
+        h.phase = format!("cycle {cycle} request {next_request} terminate");
         let result = h.terminate(
             0,
             attached.attachment_id,
@@ -553,6 +565,7 @@ fn one_hundred_provision_dispose_cycles_return_to_baseline() {
             result.result_code,
             TerminateExecutionResultCode::TerminationRequested
         );
+        h.phase = format!("cycle {cycle} awaiting finalized lifecycle");
         h.wait_lifecycle_finalized(0, created.execution_id);
         assert_eq!(
             h.runtime.execution_count(),
