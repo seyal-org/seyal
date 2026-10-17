@@ -319,6 +319,10 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
             self?.requestComposerFocusIfPaletteAllows() ?? false
         }
+        composer.onFocusEligibilityChanged = { [weak self] in
+            guard let self, self.composer.isFocusEligibleForRecovery else { return }
+            self.pane.inputSurface.composerFocusEligibilityDidChange()
+        }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
         }

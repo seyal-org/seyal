@@ -910,18 +910,34 @@ fn controller_connection_loss_after_termination_requested_still_finalizes() {
     let _guard = hold_fd_serial();
     let mut h = Harness::empty();
     h.hello(0, CAP_EXECUTION_PROVISIONING);
-    let created = h.create(0, 1, 24, 80);
-    assert_eq!(created.result_code, CreateExecutionResultCode::Created);
-    let attached = h.attach(0, created.execution_id, Role::Controller);
+    // This is a controller-loss lifecycle test, not a CreateExecutionRequest
+    // codec test (covered above). A default login shell can exit and finalize
+    // before we observe TerminatingGraceful on a loaded runner. Use the same
+    // TERM-resistant fixture as the §18.5 disposition test, and observe its
+    // readiness before requesting termination; never accept early finalization
+    // as evidence of a mid-termination controller disconnect.
+    let execution_id = h
+        .runtime
+        .create_execution(
+            CommandSpec::new("/bin/sh").args([
+                "-c",
+                "trap '' TERM; printf ready; while :; do sleep 1; done",
+            ]),
+            WindowSize::cells(80, 24).expect("size"),
+        )
+        .expect("TERM-resistant execution");
+    let attached = h.attach(0, execution_id, Role::Controller);
+    h.wait_row_contains(execution_id, "ready");
 
-    let result = h.terminate(0, attached.attachment_id, created.execution_id, 2);
+    let result = h.terminate(0, attached.attachment_id, execution_id, 2);
     assert_eq!(
         result.result_code,
         TerminateExecutionResultCode::TerminationRequested
     );
     assert_eq!(
-        h.runtime.lookup(created.execution_id).unwrap().lifecycle,
-        ExecutionLifecycle::TerminatingGraceful
+        h.runtime.lookup(execution_id).unwrap().lifecycle,
+        ExecutionLifecycle::TerminatingGraceful,
+        "the controller must still own a live terminating execution before disconnect"
     );
 
     // Inverse regression: peer disappears mid-termination. §11 must continue
@@ -933,7 +949,7 @@ fn controller_connection_loss_after_termination_requested_still_finalizes() {
     let mut saw_forced_or_drain = false;
     while Instant::now() < deadline {
         h.pump_for_deadlines();
-        match h.runtime.lookup(created.execution_id).map(|s| s.lifecycle) {
+        match h.runtime.lookup(execution_id).map(|s| s.lifecycle) {
             None => {
                 // Finalized.
                 break;
@@ -948,14 +964,14 @@ fn controller_connection_loss_after_termination_requested_still_finalizes() {
         }
     }
     assert!(
-        h.runtime.lookup(created.execution_id).is_none(),
+        h.runtime.lookup(execution_id).is_none(),
         "execution must finalize after controller loss mid-termination"
     );
     let _ = saw_forced_or_drain;
     for _ in 0..20 {
         h.pump_for_deadlines();
         assert!(
-            h.runtime.lookup(created.execution_id).is_none(),
+            h.runtime.lookup(execution_id).is_none(),
             "must finalize exactly once"
         );
     }
