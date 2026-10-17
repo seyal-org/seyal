@@ -59,7 +59,7 @@ fn drop_unsent_viewport_line_ids(
 }
 
 impl Connection {
-    fn presentation_slot(
+    pub(super) fn presentation_slot(
         &mut self,
         attachment_id: AttachmentId,
     ) -> &mut super::AttachmentPresentationSlot {
@@ -156,7 +156,8 @@ impl Connection {
                 || slot
                     .viewport_line_ids
                     .as_ref()
-                    .is_some_and(|item| item.sent > 0))
+                    .is_some_and(|item| item.sent > 0)
+                || slot.after_display.front().is_some_and(|item| item.sent > 0))
         {
             slot.remove_after_partial_frame = true;
             slot.drop_after_partial_frame = true;
@@ -176,9 +177,28 @@ impl Connection {
                     .queued_viewport_line_ids_bytes
                     .saturating_sub(item.remaining_len());
             }
+            while slot.after_display.len() > 1
+                || slot
+                    .after_display
+                    .front()
+                    .is_some_and(|item| item.sent == 0)
+            {
+                let Some(item) = slot.after_display.pop_back() else {
+                    break;
+                };
+                self.queued_control_bytes = self
+                    .queued_control_bytes
+                    .saturating_sub(item.remaining_len());
+            }
             return;
         }
         if let Some(slot) = self.presentation_slots.remove(&attachment_id) {
+            self.queued_control_bytes = self.queued_control_bytes.saturating_sub(
+                slot.after_display
+                    .iter()
+                    .map(OutboundItem::remaining_len)
+                    .sum(),
+            );
             self.queued_viewport_line_ids_bytes =
                 self.queued_viewport_line_ids_bytes.saturating_sub(
                     slot.viewport_line_ids
@@ -194,6 +214,9 @@ impl Connection {
             .retain(|candidate| *candidate != attachment_id);
         if self.partial_display_attachment == Some(attachment_id) {
             self.partial_display_attachment = None;
+        }
+        if self.partial_after_display_attachment == Some(attachment_id) {
+            self.partial_after_display_attachment = None;
         }
         if self.display_round_robin_after == Some(attachment_id) {
             self.display_round_robin_after = None;
@@ -319,34 +342,6 @@ impl LocalIpcServer {
 
     pub fn enqueue_after_display(&mut self, token: u64, bytes: Vec<u8>) -> io::Result<()> {
         self.enqueue_control(token, bytes, true)
-    }
-
-    /// Queue attachment-scoped metadata behind display work on the same
-    /// connection. The frame already carries the negotiated attachment/epoch
-    /// envelope, so this ordered queue remains safe across multiple attachments.
-    pub fn enqueue_attachment_after_display(
-        &mut self,
-        token: u64,
-        attachment_id: AttachmentId,
-        bytes: Vec<u8>,
-    ) -> io::Result<()> {
-        let Some(connection) = self.connections.get_mut(&token) else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "connection is closed",
-            ));
-        };
-        let new_total = connection
-            .queued_control_bytes
-            .checked_add(bytes.len())
-            .ok_or_else(|| io::Error::other("control queue length overflow"))?;
-        if new_total > MAX_OUTBOUND_QUEUE_BYTES {
-            return Err(io::Error::other("outbound control queue capacity exceeded"));
-        }
-        connection.queued_control_bytes = new_total;
-        connection.presentation_slot(attachment_id);
-        connection.after_display.push_back(OutboundItem::new(bytes));
-        Ok(())
     }
 
     pub fn enqueue_attach_transaction(

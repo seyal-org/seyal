@@ -1047,6 +1047,26 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
 }
 
 #[test]
+fn negotiated_connection_retains_one_hundred_attachments() {
+    let mut harness = Harness::new("w5-one-hundred-attachments-one-connection");
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+
+    let mut attachment_ids = std::collections::HashSet::new();
+    for count in 1..=100 {
+        let execution_id = harness.spawn(CommandSpec::new("/bin/sh").args(["-c", "sleep 120"]));
+        let (attached, _) = harness.attach(&mut client, execution_id, Role::Observer);
+        assert!(
+            attachment_ids.insert(attached.attachment_id),
+            "each retained leaf has a distinct AttachmentId at count {count}"
+        );
+        if matches!(count, 1 | 10 | 50 | 100) {
+            assert_eq!(attachment_ids.len(), count);
+        }
+    }
+}
+
+#[test]
 fn child_exit_while_hidden_still_finalizes() {
     let mut harness = Harness::new("w5-exit-hidden");
     let execution_id = harness

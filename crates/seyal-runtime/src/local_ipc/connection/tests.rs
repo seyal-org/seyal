@@ -72,6 +72,7 @@ fn connection() -> Connection {
         presentation_slots: HashMap::new(),
         presentation_order: VecDeque::new(),
         partial_display_attachment: None,
+        partial_after_display_attachment: None,
         display_round_robin_after: None,
     }
 }
@@ -211,6 +212,7 @@ fn mandatory_frame_waits_for_a_partially_written_display_frame() {
         presentation_slots: HashMap::new(),
         presentation_order: VecDeque::new(),
         partial_display_attachment: None,
+        partial_after_display_attachment: None,
         display_round_robin_after: None,
     };
 
@@ -261,6 +263,7 @@ fn partial_after_display_frame_finishes_before_mandatory_and_display_work() {
         presentation_slots: HashMap::new(),
         presentation_order: VecDeque::new(),
         partial_display_attachment: None,
+        partial_after_display_attachment: None,
         display_round_robin_after: None,
     };
 
@@ -390,6 +393,54 @@ fn retired_attachment_final_snapshot_drains_before_lifecycle_metadata() {
     assert!(!connection.presentation_slots.contains_key(&attachment_id));
 }
 
+#[test]
+fn attachment_lifecycle_is_not_blocked_by_another_attachments_display_queue() {
+    let (stream, mut peer) = UnixStream::pair().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let mut connection = connection();
+    connection.stream = stream;
+    let attachment_a = crate::AttachmentId::from_bytes([10; 16]);
+    let attachment_b = crate::AttachmentId::from_bytes([11; 16]);
+    let backlog = Arc::<[u8]>::from(vec![0xA5; 32 * 1024]);
+    let mut slot_a = AttachmentPresentationSlot::new();
+    slot_a.display_generation = 1;
+    slot_a.pending_display = Some(VecDeque::from([EncodedDisplayBatch {
+        kind: DisplayKind::Snapshot,
+        schema: 2,
+        generation: 1,
+        base_generation: 0,
+        rows: 1,
+        columns: 1,
+        frames: vec![backlog],
+        total_bytes: 32 * 1024,
+    }]));
+    let slot_b = AttachmentPresentationSlot::new();
+    connection.presentation_slots.insert(attachment_a, slot_a);
+    connection.presentation_slots.insert(attachment_b, slot_b);
+    connection
+        .presentation_order
+        .extend([attachment_a, attachment_b]);
+    let lifecycle = encode_frame(MessageType::Lifecycle, &[3, 4]);
+    connection.queued_control_bytes = lifecycle.len();
+    connection
+        .presentation_slots
+        .get_mut(&attachment_b)
+        .unwrap()
+        .after_display
+        .push_back(OutboundItem::new(lifecycle.clone()));
+
+    super::attachment_outbound::flush_attachment_outbound(&mut connection).unwrap();
+
+    let mut output = vec![0; lifecycle.len()];
+    let read = peer.read(&mut output).unwrap();
+    assert_eq!(&output[..read], lifecycle.as_slice());
+    assert!(connection
+        .presentation_slots
+        .get(&attachment_a)
+        .is_some_and(AttachmentPresentationSlot::has_display));
+}
+
 fn composer_status_frame(marker: u8) -> Vec<u8> {
     // Minimal well-framed ComposerStatus-typed bytes; coalesce only peeks the
     // message type, so the payload need not decode as ComposerStatus.
@@ -430,6 +481,7 @@ fn viewport_line_ids_coalesce_preserves_block_state_and_composer_status() {
             presentation_slots: HashMap::new(),
             presentation_order: VecDeque::new(),
             partial_display_attachment: None,
+            partial_after_display_attachment: None,
             display_round_robin_after: None,
         },
     );

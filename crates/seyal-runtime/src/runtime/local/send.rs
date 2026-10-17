@@ -66,6 +66,33 @@ impl Runtime {
         )
     }
 
+    /// Queue an un-enveloped frame behind one negotiated attachment's own
+    /// presentation output. Lifecycle carries its ExecutionId directly; its
+    /// transport ordering, rather than a presentation envelope, scopes it.
+    pub(super) fn send_attachment_lifecycle_after_display_frame(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        bytes: Vec<u8>,
+    ) -> bool {
+        let negotiated = self.connection_has_delivery_control(token);
+        let queued = self.local_ipc.as_mut().is_some_and(|state| {
+            if negotiated {
+                state
+                    .server
+                    .enqueue_attachment_after_display(token, attachment_id, bytes)
+                    .is_ok()
+            } else {
+                state.server.enqueue_after_display(token, bytes).is_ok()
+            }
+        });
+        if !queued {
+            self.close_local_connection(token);
+            return false;
+        }
+        self.sync_local_writable(token)
+    }
+
     pub(super) fn send_attachment_after_display_frame_at_sequence(
         &mut self,
         token: u64,

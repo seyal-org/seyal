@@ -136,10 +136,18 @@ impl Runtime {
                 execution_id,
                 lifecycle: framing::Lifecycle::Finalized,
             };
-            if self.send_after_display_frame(
-                token,
-                framing::encode_frame(MessageType::Lifecycle, &message.encode()),
-            ) && let Some(state) = self.local_ipc.as_mut()
+            let lifecycle_frame = framing::encode_frame(MessageType::Lifecycle, &message.encode());
+            let sent = if delivery_control {
+                self.send_attachment_lifecycle_after_display_frame(
+                    token,
+                    attachment_id,
+                    lifecycle_frame,
+                )
+            } else {
+                self.send_after_display_frame(token, lifecycle_frame)
+            };
+            if sent
+                && let Some(state) = self.local_ipc.as_mut()
                 && state
                     .attachments
                     .attachments_on_connection(token)

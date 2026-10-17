@@ -244,6 +244,9 @@ pub(in crate::local_ipc::connection) struct AttachmentPresentationSlot {
     /// Latest type-35 replacement admitted while `viewport_line_ids` is
     /// already partially written and therefore must finish intact.
     pub(in crate::local_ipc::connection) deferred_viewport_line_ids: Option<OutboundItem>,
+    /// Ordered metadata (notably BlockState then Lifecycle) released after
+    /// this attachment's own presentation queue drains.
+    pub(in crate::local_ipc::connection) after_display: VecDeque<OutboundItem>,
     pub(in crate::local_ipc::connection) drop_after_partial_frame: bool,
     pub(in crate::local_ipc::connection) remove_after_partial_frame: bool,
     /// Final lifecycle drain is queued after an authoritative final snapshot;
@@ -261,6 +264,7 @@ impl AttachmentPresentationSlot {
             deferred_after_attach: None,
             viewport_line_ids: None,
             deferred_viewport_line_ids: None,
+            after_display: VecDeque::new(),
             drop_after_partial_frame: false,
             remove_after_partial_frame: false,
             retire_after_drain: false,
@@ -298,6 +302,9 @@ pub(in crate::local_ipc::connection) struct Connection {
     /// Attachment whose current wire frame is partial. Only this frame may
     /// write until its header+payload boundary is complete.
     pub(in crate::local_ipc::connection) partial_display_attachment: Option<AttachmentId>,
+    /// Attachment whose after-display metadata frame is partially written.
+    /// The stream must finish it before any other frame can begin.
+    pub(in crate::local_ipc::connection) partial_after_display_attachment: Option<AttachmentId>,
     pub(in crate::local_ipc::connection) display_round_robin_after: Option<AttachmentId>,
 }
 
@@ -457,6 +464,7 @@ impl LocalIpcServer {
                     slot.display_inflight.is_some()
                         || slot.pending_display.is_some()
                         || slot.viewport_line_ids.is_some()
+                        || !slot.after_display.is_empty()
                 })
         })
     }

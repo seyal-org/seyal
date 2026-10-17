@@ -79,6 +79,7 @@ impl LocalIpcServer {
                             presentation_slots: HashMap::new(),
                             presentation_order: VecDeque::new(),
                             partial_display_attachment: None,
+                            partial_after_display_attachment: None,
                             display_round_robin_after: None,
                         },
                     );
