@@ -61,5 +61,9 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::WindowActivationFailed => 53,
         AppError::UnknownWindow => 54,
         AppError::WindowCreationUnavailable => 55,
+        // #1010 Block Rerun.
+        AppError::BlockRunning => 56,
+        AppError::ComposerUnavailable => 57,
+        AppError::ComposerDraftOccupied => 58,
     }
 }

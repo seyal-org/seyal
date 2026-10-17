@@ -7,7 +7,7 @@ use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
-fn test_client(stream: UnixStream) -> LocalDisplayClient {
+pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
         stream,
         buffered: Vec::new(),
@@ -57,6 +57,9 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         history_requests: HashMap::new(),
         next_history_request_id: 1,
         copied_text: Vec::new(),
+        history_copy_text: String::new(),
+        pending_block_copy: None,
+        completed_block_copy: None,
         last_admitted_v2_action_id: 0,
         last_sent_v2_action_id: 0,
         highest_v2_error_id: 0,

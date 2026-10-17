@@ -357,6 +357,15 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             event: decode_window_event(action.reserved)?,
         }),
+        // Block Rerun (#1010): loads the Block command into an empty draft.
+        69 => Ok(AppAction::RerunBlock {
+            fence,
+            id: BlockId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            composer_epoch: action.target_pty_generation,
+        }),
         _ => Err(-6),
     }
 }

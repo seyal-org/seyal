@@ -31,6 +31,9 @@ mod goto_tests;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod block_cache;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod history_text;
+
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
 mod v2_error;
 
