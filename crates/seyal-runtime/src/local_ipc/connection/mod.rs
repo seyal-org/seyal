@@ -7,6 +7,8 @@ mod io;
 mod outbound;
 
 #[cfg(test)]
+mod attachment_outbound_tests;
+#[cfg(test)]
 mod tests;
 
 use std::{
