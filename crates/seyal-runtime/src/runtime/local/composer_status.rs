@@ -31,10 +31,18 @@ impl Runtime {
                     .iter()
                     .filter_map(|(&token, meta)| {
                         let supports_blocks = meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
-                        let attachment = meta.attachment?;
-                        let attached_here =
-                            state.attachments.execution_of(attachment).ok() == Some(execution_id);
-                        (supports_blocks && attached_here).then_some((token, attachment))
+                        if !supports_blocks {
+                            return None;
+                        }
+                        state
+                            .attachments
+                            .attachments_on_connection(token)
+                            .into_iter()
+                            .find(|attachment| {
+                                state.attachments.execution_of(*attachment).ok()
+                                    == Some(execution_id)
+                            })
+                            .map(|attachment| (token, attachment))
                     })
                     .collect::<Vec<_>>()
             })

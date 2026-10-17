@@ -195,6 +195,18 @@ impl PendingDisplayBatch {
 }
 
 impl LocalDisplayClient {
+    pub(crate) fn clear_presentation_state(&mut self) {
+        self.pending_batch.clear();
+        self.cache = seyal_runtime::display::empty_cache();
+        self.prepared = PreparedSurface::default();
+        // An empty fenced cache cannot be prepared. The matching resumed
+        // snapshot is prepared in the ordinary committed-display path.
+        self.needs_initial_prepare = false;
+        self.viewport_line_ids.clear();
+        self.viewport_line_ids_generation = 0;
+        self.resume_fenced = true;
+    }
+
     pub fn ensure_prepared_surface(&mut self) -> Result<PreparationResult, ClientError> {
         if !self.needs_initial_prepare {
             return Ok(self.last_preparation);
@@ -287,6 +299,7 @@ impl LocalDisplayClient {
 
         match first_kind {
             DisplayKind::Snapshot => {
+                self.resume_fenced = false;
                 *damage = RowDamage::full(self.cache.rows);
                 *full_invalidation = true;
             }
