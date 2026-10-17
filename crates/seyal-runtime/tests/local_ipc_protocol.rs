@@ -335,6 +335,46 @@ impl Harness {
         }
     }
 
+    fn assert_no_display_for_attachment(
+        &mut self,
+        client: &mut Client,
+        attachment_id: AttachmentId,
+        duration: Duration,
+    ) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            self.pump();
+            let mut chunk = [0u8; 4096];
+            match client.stream.read(&mut chunk) {
+                Ok(0) => panic!("connection closed while delivery was suspended"),
+                Ok(count) => client.buffered.extend_from_slice(&chunk[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("client read failed: {error}"),
+            }
+            while client.buffered.len() >= HEADER_LEN {
+                let header = FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                let total = HEADER_LEN + header.payload_len as usize;
+                if client.buffered.len() < total {
+                    break;
+                }
+                let frame = client.buffered.drain(..total).collect::<Vec<_>>();
+                if matches!(header.message_type, 12 | 13) {
+                    let envelope = decode_presentation_envelope(&frame)
+                        .expect("negotiated display presentation envelope");
+                    assert_ne!(
+                        envelope.attachment_id, attachment_id,
+                        "suspended attachment received display data"
+                    );
+                    client
+                        .deferred_presentation_frames
+                        .entry(envelope.attachment_id)
+                        .or_default()
+                        .push_back((header.message_type, envelope.payload.to_vec()));
+                }
+            }
+        }
+    }
+
     fn wait_for_row(
         &mut self,
         client: &mut Client,
@@ -962,7 +1002,11 @@ fn negotiated_connection_routes_multiple_attachments_independently() {
         }
         .encode(),
     );
-    harness.assert_no_display_for(&mut client, Duration::from_millis(100));
+    harness.assert_no_display_for_attachment(
+        &mut client,
+        first.attachment_id,
+        Duration::from_millis(100),
+    );
 
     harness.send(
         &mut client,

@@ -158,11 +158,11 @@ fn fuzz_attachment_recovery(data: &[u8]) {
 }
 
 #[cfg(target_os = "macos")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ClientState {
     token: u64,
     state: ConnectionState,
-    attachment: Option<AttachmentId>,
+    attachments: Vec<AttachmentId>,
 }
 
 #[cfg(target_os = "macos")]
@@ -171,7 +171,7 @@ impl ClientState {
         Self {
             token,
             state: ConnectionState::AwaitHello,
-            attachment: None,
+            attachments: Vec::new(),
         }
     }
 }
@@ -185,7 +185,7 @@ fn fuzz_state_machine(data: &[u8]) {
     let mut recovery_queue = VecDeque::new();
     let mut recovery_pending = HashSet::new();
 
-    for operation in data.chunks(4).take(128) {
+    for (step, operation) in data.chunks(4).take(128).enumerate() {
         if operation.len() < 4 {
             break;
         }
@@ -213,7 +213,7 @@ fn fuzz_state_machine(data: &[u8]) {
                         Role::Controller
                     };
                     if let Ok(id) = registry.create_attachment(execution, role, client.token) {
-                        client.attachment = Some(id);
+                        client.attachments.push(id);
                         client.state = ConnectionState::Attached;
                     }
                 }
@@ -224,9 +224,7 @@ fn fuzz_state_machine(data: &[u8]) {
             2 => {
                 if client.state.validate_incoming(MessageType::Resync).is_ok() {
                     let id = if operation[2] & 1 == 0 {
-                        client
-                            .attachment
-                            .unwrap_or_else(|| forged_attachment(operation[3]))
+                        client.attachments.last().copied().unwrap_or_else(|| forged_attachment(operation[3]))
                     } else {
                         forged_attachment(operation[3])
                     };
@@ -249,16 +247,16 @@ fn fuzz_state_machine(data: &[u8]) {
             3 => {
                 if client.state.validate_incoming(MessageType::Detach).is_ok() {
                     let id = if operation[2] & 1 == 0 {
-                        client
-                            .attachment
-                            .unwrap_or_else(|| forged_attachment(operation[3]))
+                        client.attachments.last().copied().unwrap_or_else(|| forged_attachment(operation[3]))
                     } else {
                         forged_attachment(operation[3])
                     };
                     if registry.detach_for_connection(client.token, id).is_ok() {
-                        if client.attachment == Some(id) {
+                        if client.attachments.contains(&id) {
                             recovery_pending.remove(&(client.token, id));
-                            client.attachment = None;
+                            client.attachments.retain(|attachment| *attachment != id);
+                        }
+                        if client.attachments.is_empty() {
                             client.state = ConnectionState::Ready;
                         }
                     }
@@ -269,9 +267,7 @@ fn fuzz_state_machine(data: &[u8]) {
             4 => {
                 if client.state.validate_incoming(MessageType::Input).is_ok() {
                     let id = if operation[2] & 1 == 0 {
-                        client
-                            .attachment
-                            .unwrap_or_else(|| forged_attachment(operation[3]))
+                        client.attachments.last().copied().unwrap_or_else(|| forged_attachment(operation[3]))
                     } else {
                         forged_attachment(operation[3])
                     };
@@ -282,7 +278,7 @@ fn fuzz_state_machine(data: &[u8]) {
             // recovery requirement, then assign a new connection token so old
             // identities cannot acquire authority.
             5 => {
-                if let Some(id) = client.attachment.take() {
+                for id in client.attachments.drain(..) {
                     let _ = registry.detach_for_connection(client.token, id);
                     recovery_pending.remove(&(client.token, id));
                 }
@@ -295,10 +291,10 @@ fn fuzz_state_machine(data: &[u8]) {
             6 => {
                 registry.remove_all_for_execution(execution);
                 for state in &mut clients {
-                    if let Some(id) = state.attachment {
+                    for id in state.attachments.drain(..) {
+                        let _ = registry.detach_for_connection(state.token, id);
                         recovery_pending.remove(&(state.token, id));
                     }
-                    state.attachment = None;
                     if state.state == ConnectionState::Attached {
                         state.state = ConnectionState::Ready;
                     }
@@ -310,13 +306,13 @@ fn fuzz_state_machine(data: &[u8]) {
             // mismatch rejection/atomicity; this operation fuzzes the server's
             // per-attachment recovery requirement and repeated-gap coalescing.
             7 => {
-                if client.state == ConnectionState::Attached && client.attachment.is_some() {
+                if client.state == ConnectionState::Attached && !client.attachments.is_empty() {
                     if operation[2] & 1 == 0 {
                         schedule_recovery_twice(
                             &mut recovery_queue,
                             &mut recovery_pending,
                             client.token,
-                            client.attachment.expect("attached client has identity"),
+                            *client.attachments.last().expect("attached client has identity"),
                         );
                     } else {
                         // Model completion/materialization of the current
@@ -324,7 +320,7 @@ fn fuzz_state_machine(data: &[u8]) {
                         // any queued stale token is intentionally tolerated.
                         recovery_pending.remove(&(
                             client.token,
-                            client.attachment.expect("attached client has identity"),
+                            *client.attachments.last().expect("attached client has identity"),
                         ));
                     }
                 }
@@ -347,18 +343,24 @@ fn fuzz_state_machine(data: &[u8]) {
         // in the fuzz harness. A logical recovery requirement can only remain
         // for a currently attached connection.
         for state in &clients {
-            if let Some(id) = state.attachment {
+            if !state.attachments.is_empty() {
+                for id in &state.attachments {
                 assert_eq!(
-                    registry.execution_for_connection(state.token, id),
+                    registry.execution_for_connection(state.token, *id),
                     Ok(execution)
                 );
+                }
             } else {
-                assert!(!recovery_pending
-                    .iter()
-                    .any(|(pending_token, _)| pending_token == &state.token));
+                assert!(
+                    !recovery_pending
+                        .iter()
+                        .any(|(pending_token, _)| pending_token == &state.token),
+                    "client without an attachment retained recovery for token {} at step {step} ({operation:?}): {recovery_pending:?}",
+                    state.token,
+                );
             }
         }
-        assert!(recovery_pending.len() <= clients.len());
+        assert!(recovery_pending.len() <= clients.iter().map(|client| client.attachments.len()).sum());
     }
 }
 
