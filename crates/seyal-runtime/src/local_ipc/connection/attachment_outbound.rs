@@ -329,7 +329,12 @@ fn flush_one_attachment_after_display(
         connection.partial_after_display_attachment = None;
         return Ok(true);
     };
-    if slot.has_display() {
+    // Once any bytes of the metadata frame have reached the peer, finish that
+    // frame before starting newly queued display work. Display may supersede
+    // an unstarted metadata item, but it cannot safely interrupt a frame on
+    // the shared byte stream.
+    let partial_after_display = slot.after_display.front().is_some_and(|item| item.sent > 0);
+    if slot.has_display() && !partial_after_display {
         return Ok(true);
     }
     let Some(item) = slot.after_display.front_mut() else {

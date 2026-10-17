@@ -147,7 +147,7 @@ impl Connection {
         }
     }
 
-    fn remove_attachment_presentation(&mut self, attachment_id: AttachmentId) {
+    pub(super) fn remove_attachment_presentation(&mut self, attachment_id: AttachmentId) {
         if let Some(slot) = self.presentation_slots.get_mut(&attachment_id)
             && (slot
                 .display_inflight
