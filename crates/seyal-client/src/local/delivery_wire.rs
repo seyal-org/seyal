@@ -20,6 +20,15 @@ impl LocalDisplayClient {
         if !self.delivery_control_negotiated || self.delivery_suspended == suspend {
             return Ok(());
         }
+        let resume_sequence = if suspend {
+            None
+        } else {
+            Some(
+                self.resume_sequence
+                    .checked_add(1)
+                    .ok_or(ClientError::Protocol)?,
+            )
+        };
         let payload = if suspend {
             SuspendDelivery {
                 attachment_id: self.attachment_id,
@@ -28,6 +37,7 @@ impl LocalDisplayClient {
         } else {
             ResumeDelivery {
                 attachment_id: self.attachment_id,
+                resume_sequence: resume_sequence.expect("resume transition has a sequence"),
             }
             .encode()
         };
@@ -39,8 +49,11 @@ impl LocalDisplayClient {
         let frame = encode_frame(kind, &payload);
         self.admit_frame(frame, OutboundKind::DeliveryControl)?;
         self.delivery_suspended = suspend;
-        let _ = self.flush_control_write();
-        Ok(())
+        if let Some(sequence) = resume_sequence {
+            self.resume_sequence = sequence;
+        }
+        self.clear_presentation_state();
+        self.flush_control_write()
     }
 }
 

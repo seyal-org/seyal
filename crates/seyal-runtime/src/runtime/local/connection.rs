@@ -76,7 +76,9 @@ impl Runtime {
             };
             let extras = state.attachments.attachments_on_connection(token);
             state.server.close(token);
-            state.pending_resync_set.remove(&token);
+            state
+                .pending_resync_set
+                .retain(|(pending_token, _)| *pending_token != token);
             let Some(meta) = state.connections.remove(&token) else {
                 return;
             };

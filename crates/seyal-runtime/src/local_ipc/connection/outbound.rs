@@ -20,13 +20,14 @@ use crate::{
         fd_transfer,
         framing::{FrameHeader, MessageType},
     },
+    AttachmentId,
 };
 #[cfg(feature = "benchmark-instrumentation")]
 use std::sync::atomic::Ordering;
 use std::{collections::VecDeque, io, os::fd::AsRawFd, sync::Arc};
 
 /// True when `bytes` is a complete type-35 `ViewportLineIds` frame.
-fn is_viewport_line_ids_frame(bytes: &[u8]) -> bool {
+pub(super) fn is_viewport_line_ids_frame(bytes: &[u8]) -> bool {
     FrameHeader::decode(bytes)
         .ok()
         .is_some_and(|header| header.message_type == MessageType::ViewportLineIds as u16)
@@ -37,7 +38,7 @@ fn is_viewport_line_ids_frame(bytes: &[u8]) -> bool {
 /// BlockTimeline, …) must survive latest-wins LineIds replacement.
 fn drop_unsent_viewport_line_ids(
     after_display: &mut VecDeque<OutboundItem>,
-    queued_control_bytes: &mut usize,
+    queued_viewport_line_ids_bytes: &mut usize,
 ) {
     let mut index = 0;
     while index < after_display.len() {
@@ -49,7 +50,8 @@ fn drop_unsent_viewport_line_ids(
             let item = after_display
                 .remove(index)
                 .expect("index was in after_display");
-            *queued_control_bytes = queued_control_bytes.saturating_sub(item.remaining_len());
+            *queued_viewport_line_ids_bytes =
+                queued_viewport_line_ids_bytes.saturating_sub(item.remaining_len());
         } else {
             index += 1;
         }
@@ -57,8 +59,160 @@ fn drop_unsent_viewport_line_ids(
 }
 
 impl Connection {
+    fn presentation_slot(
+        &mut self,
+        attachment_id: AttachmentId,
+    ) -> &mut super::AttachmentPresentationSlot {
+        if !self.presentation_slots.contains_key(&attachment_id) {
+            self.presentation_order.push_back(attachment_id);
+            self.presentation_slots
+                .insert(attachment_id, super::AttachmentPresentationSlot::new());
+        }
+        self.presentation_slots
+            .get_mut(&attachment_id)
+            .expect("slot inserted above")
+    }
+
+    fn queue_attachment_snapshot(
+        &mut self,
+        attachment_id: AttachmentId,
+        snapshot: EncodedDisplayBatch,
+    ) {
+        let slot = self.presentation_slot(attachment_id);
+        if slot.attach_snapshot_pin {
+            slot.deferred_after_attach = Some(snapshot);
+            return;
+        }
+        slot.display_generation = snapshot.generation;
+        slot.pending_display = Some(snapshot.into_transport_batches().into());
+    }
+
+    fn try_queue_attachment_delta(
+        &mut self,
+        attachment_id: AttachmentId,
+        delta: EncodedDisplayBatch,
+    ) -> DeltaEnqueueResult {
+        let slot = self.presentation_slot(attachment_id);
+        if delta.generation <= slot.display_generation {
+            return DeltaEnqueueResult::Skipped;
+        }
+        if slot.display_generation != delta.base_generation || slot.has_display() {
+            return DeltaEnqueueResult::NeedSnapshot;
+        }
+        slot.display_generation = delta.generation;
+        slot.pending_display = Some(delta.into_transport_batches().into());
+        DeltaEnqueueResult::Queued
+    }
+
+    fn drop_attachment_presentation(&mut self, attachment_id: AttachmentId) {
+        if let Some(slot) = self.presentation_slots.get_mut(&attachment_id) {
+            slot.pending_display = None;
+            let partial_display = slot
+                .display_inflight
+                .as_ref()
+                .is_some_and(|item| item.sent > 0);
+            let partial_line_ids = slot
+                .viewport_line_ids
+                .as_ref()
+                .is_some_and(|item| item.sent > 0);
+            if partial_display || partial_line_ids {
+                slot.drop_after_partial_frame = true;
+                if !partial_line_ids && let Some(item) = slot.viewport_line_ids.take() {
+                    self.queued_viewport_line_ids_bytes = self
+                        .queued_viewport_line_ids_bytes
+                        .saturating_sub(item.remaining_len());
+                }
+                if let Some(item) = slot.deferred_viewport_line_ids.take() {
+                    self.queued_viewport_line_ids_bytes = self
+                        .queued_viewport_line_ids_bytes
+                        .saturating_sub(item.remaining_len());
+                }
+            } else {
+                slot.display_inflight = None;
+                if let Some(item) = slot.viewport_line_ids.take() {
+                    self.queued_viewport_line_ids_bytes = self
+                        .queued_viewport_line_ids_bytes
+                        .saturating_sub(item.remaining_len());
+                }
+                if let Some(item) = slot.deferred_viewport_line_ids.take() {
+                    self.queued_viewport_line_ids_bytes = self
+                        .queued_viewport_line_ids_bytes
+                        .saturating_sub(item.remaining_len());
+                }
+            }
+            if slot.attach_snapshot_pin {
+                slot.attach_snapshot_pin = false;
+                slot.deferred_after_attach = None;
+            }
+        }
+    }
+
+    fn remove_attachment_presentation(&mut self, attachment_id: AttachmentId) {
+        if let Some(slot) = self.presentation_slots.get_mut(&attachment_id)
+            && (slot
+                .display_inflight
+                .as_ref()
+                .is_some_and(|item| item.sent > 0)
+                || slot
+                    .viewport_line_ids
+                    .as_ref()
+                    .is_some_and(|item| item.sent > 0))
+        {
+            slot.remove_after_partial_frame = true;
+            slot.drop_after_partial_frame = true;
+            slot.pending_display = None;
+            if slot
+                .viewport_line_ids
+                .as_ref()
+                .is_some_and(|item| item.sent == 0)
+                && let Some(item) = slot.viewport_line_ids.take()
+            {
+                self.queued_viewport_line_ids_bytes = self
+                    .queued_viewport_line_ids_bytes
+                    .saturating_sub(item.remaining_len());
+            }
+            if let Some(item) = slot.deferred_viewport_line_ids.take() {
+                self.queued_viewport_line_ids_bytes = self
+                    .queued_viewport_line_ids_bytes
+                    .saturating_sub(item.remaining_len());
+            }
+            return;
+        }
+        if let Some(slot) = self.presentation_slots.remove(&attachment_id) {
+            self.queued_viewport_line_ids_bytes =
+                self.queued_viewport_line_ids_bytes.saturating_sub(
+                    slot.viewport_line_ids
+                        .as_ref()
+                        .map_or(0, OutboundItem::remaining_len)
+                        + slot
+                            .deferred_viewport_line_ids
+                            .as_ref()
+                            .map_or(0, OutboundItem::remaining_len),
+                );
+        }
+        self.presentation_order
+            .retain(|candidate| *candidate != attachment_id);
+        if self.partial_display_attachment == Some(attachment_id) {
+            self.partial_display_attachment = None;
+        }
+        if self.display_round_robin_after == Some(attachment_id) {
+            self.display_round_robin_after = None;
+        }
+    }
+
+    fn retire_attachment_presentation_after_drain(&mut self, attachment_id: AttachmentId) {
+        let Some(slot) = self.presentation_slots.get_mut(&attachment_id) else {
+            return;
+        };
+        slot.retire_after_drain = true;
+    }
+
     pub(in crate::local_ipc::connection) fn drop_not_yet_started_presentation(&mut self) {
         self.pending_display = None;
+        drop_unsent_viewport_line_ids(
+            &mut self.after_display,
+            &mut self.queued_viewport_line_ids_bytes,
+        );
         if self
             .display_inflight
             .as_ref()
@@ -148,7 +302,12 @@ impl LocalIpcServer {
             self.close_with_event(token, &mut events);
             return events;
         }
-        if flush_outbound(connection).is_err() {
+        let result = if connection.presentation_slots.is_empty() {
+            flush_outbound(connection)
+        } else {
+            super::attachment_outbound::flush_attachment_outbound(connection)
+        };
+        if result.is_err() {
             self.close_with_event(token, &mut events);
         }
         events
@@ -160,6 +319,34 @@ impl LocalIpcServer {
 
     pub fn enqueue_after_display(&mut self, token: u64, bytes: Vec<u8>) -> io::Result<()> {
         self.enqueue_control(token, bytes, true)
+    }
+
+    /// Queue attachment-scoped metadata behind display work on the same
+    /// connection. The frame already carries the negotiated attachment/epoch
+    /// envelope, so this ordered queue remains safe across multiple attachments.
+    pub fn enqueue_attachment_after_display(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        bytes: Vec<u8>,
+    ) -> io::Result<()> {
+        let Some(connection) = self.connections.get_mut(&token) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "connection is closed",
+            ));
+        };
+        let new_total = connection
+            .queued_control_bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| io::Error::other("control queue length overflow"))?;
+        if new_total > MAX_OUTBOUND_QUEUE_BYTES {
+            return Err(io::Error::other("outbound control queue capacity exceeded"));
+        }
+        connection.queued_control_bytes = new_total;
+        connection.presentation_slot(attachment_id);
+        connection.after_display.push_back(OutboundItem::new(bytes));
+        Ok(())
     }
 
     pub fn enqueue_attach_transaction(
@@ -199,6 +386,46 @@ impl LocalIpcServer {
         Ok(())
     }
 
+    /// Admit a negotiated attach independently from every other attachment's
+    /// display queue on the same socket.
+    pub fn enqueue_attachment_attach_transaction(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        attached: Vec<u8>,
+        snapshot: EncodedDisplayBatch,
+    ) -> io::Result<()> {
+        #[cfg(feature = "test-fault-injection")]
+        if test_fault::take(FaultPoint::AttachAdmission) {
+            return Err(io::Error::other("injected attach admission failure"));
+        }
+        let Some(connection) = self.connections.get_mut(&token) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "connection is closed",
+            ));
+        };
+        if connection.presentation_slots.contains_key(&attachment_id) {
+            return Err(io::Error::other(
+                "attachment presentation slot already exists",
+            ));
+        }
+        let new_total = connection
+            .queued_control_bytes
+            .checked_add(attached.len())
+            .ok_or_else(|| io::Error::other("control queue length overflow"))?;
+        if new_total > MAX_OUTBOUND_QUEUE_BYTES {
+            return Err(io::Error::other("outbound control queue capacity exceeded"));
+        }
+        connection.queued_control_bytes = new_total;
+        connection.mandatory.push_back(OutboundItem::new(attached));
+        let slot = connection.presentation_slot(attachment_id);
+        slot.display_generation = snapshot.generation;
+        slot.pending_display = Some(snapshot.into_transport_batches().into());
+        slot.attach_snapshot_pin = true;
+        Ok(())
+    }
+
     fn enqueue_control(
         &mut self,
         token: u64,
@@ -217,12 +444,25 @@ impl LocalIpcServer {
             // work is never dropped for LineIds replacement (#865 / attach).
             drop_unsent_viewport_line_ids(
                 &mut connection.after_display,
-                &mut connection.queued_control_bytes,
+                &mut connection.queued_viewport_line_ids_bytes,
             );
+        }
+        let optional_line_ids = after_display && is_viewport_line_ids_frame(&bytes);
+        if optional_line_ids {
+            let new_total = connection
+                .queued_viewport_line_ids_bytes
+                .checked_add(bytes.len())
+                .ok_or_else(|| io::Error::other("type-35 queue length overflow"))?;
+            if new_total > super::MAX_VIEWPORT_LINE_IDS_QUEUE_BYTES {
+                // Type 35 is replaceable metadata. Capacity pressure drops
+                // this optional vector; it must never reject mandatory output.
+                return Ok(());
+            }
+            connection.queued_viewport_line_ids_bytes = new_total;
         }
         let new_total = connection
             .queued_control_bytes
-            .checked_add(bytes.len())
+            .checked_add(if optional_line_ids { 0 } else { bytes.len() })
             .ok_or_else(|| io::Error::other("control queue length overflow"))?;
         if new_total > MAX_OUTBOUND_QUEUE_BYTES {
             return Err(io::Error::other("outbound control queue capacity exceeded"));
@@ -251,6 +491,70 @@ impl LocalIpcServer {
         Ok(())
     }
 
+    pub fn enqueue_attachment_snapshot(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        snapshot: EncodedDisplayBatch,
+    ) -> io::Result<()> {
+        let Some(connection) = self.connections.get_mut(&token) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "connection is closed",
+            ));
+        };
+        connection.queue_attachment_snapshot(attachment_id, snapshot);
+        Ok(())
+    }
+
+    pub fn enqueue_attachment_viewport_line_ids(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        bytes: Vec<u8>,
+    ) -> io::Result<()> {
+        let Some(connection) = self.connections.get_mut(&token) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "connection is closed",
+            ));
+        };
+        let replacing_deferred = connection
+            .presentation_slots
+            .get(&attachment_id)
+            .and_then(|slot| slot.viewport_line_ids.as_ref())
+            .is_some_and(|item| item.sent > 0);
+        let old = if replacing_deferred {
+            connection
+                .presentation_slots
+                .get(&attachment_id)
+                .and_then(|slot| slot.deferred_viewport_line_ids.as_ref())
+                .map_or(0, OutboundItem::remaining_len)
+        } else {
+            connection
+                .presentation_slots
+                .get(&attachment_id)
+                .and_then(|slot| slot.viewport_line_ids.as_ref())
+                .map_or(0, OutboundItem::remaining_len)
+        };
+        let new_total = connection
+            .queued_viewport_line_ids_bytes
+            .saturating_sub(old)
+            .checked_add(bytes.len())
+            .ok_or_else(|| io::Error::other("type-35 queue length overflow"))?;
+        if new_total > super::MAX_VIEWPORT_LINE_IDS_QUEUE_BYTES {
+            return Ok(());
+        }
+        connection.queued_viewport_line_ids_bytes = new_total;
+        let slot = connection.presentation_slot(attachment_id);
+        if replacing_deferred {
+            slot.deferred_viewport_line_ids = Some(OutboundItem::new(bytes));
+        } else {
+            slot.viewport_line_ids = Some(OutboundItem::new(bytes));
+        }
+        Ok(())
+    }
+
     pub fn try_enqueue_delta(
         &mut self,
         token: u64,
@@ -265,10 +569,47 @@ impl LocalIpcServer {
         Ok(connection.try_queue_delta(delta))
     }
 
+    pub fn try_enqueue_attachment_delta(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+        delta: EncodedDisplayBatch,
+    ) -> io::Result<DeltaEnqueueResult> {
+        let Some(connection) = self.connections.get_mut(&token) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "connection is closed",
+            ));
+        };
+        Ok(connection.try_queue_attachment_delta(attachment_id, delta))
+    }
+
     /// Drop not-yet-started presentation. In-flight frames complete (SPEC-004 §11 / §19).
     pub fn drop_not_yet_started_presentation(&mut self, token: u64) {
         if let Some(connection) = self.connections.get_mut(&token) {
             connection.drop_not_yet_started_presentation();
+        }
+    }
+
+    pub fn drop_attachment_presentation(&mut self, token: u64, attachment_id: AttachmentId) {
+        if let Some(connection) = self.connections.get_mut(&token) {
+            connection.drop_attachment_presentation(attachment_id);
+        }
+    }
+
+    pub fn remove_attachment_presentation(&mut self, token: u64, attachment_id: AttachmentId) {
+        if let Some(connection) = self.connections.get_mut(&token) {
+            connection.remove_attachment_presentation(attachment_id);
+        }
+    }
+
+    pub fn retire_attachment_presentation_after_drain(
+        &mut self,
+        token: u64,
+        attachment_id: AttachmentId,
+    ) {
+        if let Some(connection) = self.connections.get_mut(&token) {
+            connection.retire_attachment_presentation_after_drain(attachment_id);
         }
     }
 }
@@ -392,14 +733,21 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
     }
 
     while let Some(item) = connection.after_display.front_mut() {
+        let optional_line_ids = is_viewport_line_ids_frame(&item.bytes);
         let before = item.remaining_len();
         match flush_bytes(connection.stream.as_raw_fd(), &item.bytes, &mut item.sent)? {
             FlushProgress::WouldBlock => return Ok(()),
             FlushProgress::Progress => {
                 let after = item.remaining_len();
-                connection.queued_control_bytes = connection
-                    .queued_control_bytes
-                    .saturating_sub(before.saturating_sub(after));
+                let written = before.saturating_sub(after);
+                if optional_line_ids {
+                    connection.queued_viewport_line_ids_bytes = connection
+                        .queued_viewport_line_ids_bytes
+                        .saturating_sub(written);
+                } else {
+                    connection.queued_control_bytes =
+                        connection.queued_control_bytes.saturating_sub(written);
+                }
                 if after == 0 {
                     connection.after_display.pop_front();
                 }
@@ -409,11 +757,14 @@ pub(in crate::local_ipc::connection) fn flush_outbound(
     Ok(())
 }
 
+/// Shared writer for negotiated multi-attachment connections. It completes a
+/// partially written physical frame before rotating attachment slots, while
+/// allowing complete frames from independent logical updates to take turns.
 /// Flush all queued mandatory frames, returning `false` when the socket would
 /// block with one still pending. This helper is called both before and after
 /// display work so control frames never overtake partial display bytes and are
 /// never left behind a completed display batch.
-fn flush_mandatory(connection: &mut Connection) -> io::Result<bool> {
+pub(super) fn flush_mandatory(connection: &mut Connection) -> io::Result<bool> {
     while let Some(item) = connection.mandatory.front_mut() {
         let before = item.remaining_len();
         match flush_bytes(connection.stream.as_raw_fd(), &item.bytes, &mut item.sent)? {
@@ -436,14 +787,21 @@ fn flush_one_after_display(connection: &mut Connection) -> io::Result<bool> {
     let Some(item) = connection.after_display.front_mut() else {
         return Ok(true);
     };
+    let optional_line_ids = is_viewport_line_ids_frame(&item.bytes);
     let before = item.remaining_len();
     match flush_bytes(connection.stream.as_raw_fd(), &item.bytes, &mut item.sent)? {
         FlushProgress::WouldBlock => Ok(false),
         FlushProgress::Progress => {
             let after = item.remaining_len();
-            connection.queued_control_bytes = connection
-                .queued_control_bytes
-                .saturating_sub(before.saturating_sub(after));
+            let written = before.saturating_sub(after);
+            if optional_line_ids {
+                connection.queued_viewport_line_ids_bytes = connection
+                    .queued_viewport_line_ids_bytes
+                    .saturating_sub(written);
+            } else {
+                connection.queued_control_bytes =
+                    connection.queued_control_bytes.saturating_sub(written);
+            }
             if after == 0 {
                 connection.after_display.pop_front();
             }
@@ -452,12 +810,12 @@ fn flush_one_after_display(connection: &mut Connection) -> io::Result<bool> {
     }
 }
 
-enum FlushProgress {
+pub(super) enum FlushProgress {
     Progress,
     WouldBlock,
 }
 
-fn flush_bytes(
+pub(super) fn flush_bytes(
     socket: std::os::fd::RawFd,
     bytes: &[u8],
     sent: &mut usize,

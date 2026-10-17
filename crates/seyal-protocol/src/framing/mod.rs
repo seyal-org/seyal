@@ -8,6 +8,7 @@ mod envelope;
 mod execution;
 mod message;
 mod payload;
+mod presentation;
 
 #[cfg(test)]
 mod tests;
@@ -41,6 +42,10 @@ pub use message::{decode_message, encode_frame, Message, MessageType};
 pub use payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList,
     ExecutionListEntry, HostSearch, HostSelection, HostSelectionAction, InputRef, Lifecycle,
-    LifecycleMessage, Resize, ResumeDelivery, Resync, Role, ServerHello, SuspendDelivery,
-    TerminalMouse, TerminalMouseKind,
+    LifecycleMessage, Resize, Resync, Role, ServerHello, TerminalMouse, TerminalMouseKind,
+};
+
+pub use presentation::{
+    decode_presentation_envelope, envelope_presentation_frame, PresentationEnvelope,
+    ResumeDelivery, SuspendDelivery,
 };

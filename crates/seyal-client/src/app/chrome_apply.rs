@@ -405,7 +405,7 @@ impl ApplicationRoot {
 
 #[cfg(target_os = "macos")]
 impl ApplicationRoot {
-    pub(super) fn sync_attachment_delivery(&mut self) {
+    pub(super) fn sync_attachment_delivery(&mut self) -> bool {
         use crate::shell::PresentationTier;
         let snap = self.shell.snapshot();
         let mut hidden = std::collections::HashMap::new();
@@ -427,11 +427,15 @@ impl ApplicationRoot {
             .iter()
             .map(|(pane, raw)| (*pane, *raw))
             .collect();
+        let mut all_admitted = true;
         for (pane, handle) in handles {
             let suspend = hidden.get(&pane).copied().unwrap_or(true);
-            let _ = crate::ffi::with_client_mut(handle, |client| {
+            match crate::ffi::with_client_mut(handle, |client| {
                 client.set_delivery_suspended(suspend)
-            });
+            }) {
+                Some(Ok(())) => {}
+                Some(Err(_)) | None => all_admitted = false,
+            }
         }
         if let Some(client) = self.wire_client.as_mut() {
             let execution = client.execution_id();
@@ -448,7 +452,10 @@ impl ApplicationRoot {
                     )
                 })
                 .unwrap_or(false);
-            let _ = client.set_delivery_suspended(suspend);
+            if client.set_delivery_suspended(suspend).is_err() {
+                all_admitted = false;
+            }
         }
+        all_admitted
     }
 }

@@ -10,7 +10,7 @@ use seyal_exec::{ExecutionReactor, RegistrationToken};
 use crate::test_fault::{self, FaultPoint};
 use crate::{
     local_ipc::{attachment::AttachmentRegistry, connection::LocalIpcServer, discovery},
-    ExecutionId, RuntimeError,
+    AttachmentId, ExecutionId, RuntimeError,
 };
 
 use connection::ConnectionMeta;
@@ -44,8 +44,8 @@ pub(super) struct LocalIpcState {
     pub(super) connections: HashMap<u64, ConnectionMeta>,
     pub(super) reactor_connections: HashMap<RegistrationToken, u64>,
     pub(super) published: HashMap<ExecutionId, PublishedDisplay>,
-    pub(super) pending_resync: VecDeque<u64>,
-    pub(super) pending_resync_set: HashSet<u64>,
+    pub(super) pending_resync: VecDeque<(u64, AttachmentId)>,
+    pub(super) pending_resync_set: HashSet<(u64, AttachmentId)>,
     pub(super) pending_creates: VecDeque<PendingCreate>,
     pub(super) outstanding_creates: usize,
 }

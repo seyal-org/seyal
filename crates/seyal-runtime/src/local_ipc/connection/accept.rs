@@ -70,11 +70,16 @@ impl LocalIpcServer {
                             mandatory: VecDeque::new(),
                             after_display: VecDeque::new(),
                             queued_control_bytes: 0,
+                            queued_viewport_line_ids_bytes: 0,
                             display_inflight: None,
                             pending_display: None,
                             display_generation: 0,
                             attach_snapshot_pin: false,
                             deferred_after_attach: None,
+                            presentation_slots: HashMap::new(),
+                            presentation_order: VecDeque::new(),
+                            partial_display_attachment: None,
+                            display_round_robin_after: None,
                         },
                     );
                     events.push(ServerEvent::Connected { token });

@@ -1,13 +1,16 @@
 use super::*;
 use seyal_runtime::local_ipc::framing::{
-    ErrorCode, ErrorMessage, ExecutionList, ExecutionListEntry, Lifecycle, LifecycleMessage,
-    MessageType,
+    encode_frame, envelope_presentation_frame, ErrorCode, ErrorMessage, ExecutionList,
+    ExecutionListEntry, FrameHeader, Lifecycle, LifecycleMessage, MessageType, ResumeDelivery,
 };
 use seyal_runtime::pass8::CAP_BLOCK_METADATA;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
-fn test_client(stream: UnixStream) -> LocalDisplayClient {
+#[path = "tests/delivery.rs"]
+mod delivery;
+
+pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
     LocalDisplayClient {
         stream,
         buffered: Vec::new(),
@@ -64,6 +67,8 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
         execution_provisioning_negotiated: false,
         delivery_control_negotiated: false,
         delivery_suspended: false,
+        resume_sequence: 0,
+        resume_fenced: false,
         next_provisioning_request_id: 1,
         harness_probe: true,
         pending_create_requests: std::collections::HashSet::new(),
@@ -75,7 +80,7 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
     }
 }
 
-fn v2_snapshot_chunk(
+pub(super) fn v2_snapshot_chunk(
     generation: u64,
     columns: u16,
     first_col: u16,

@@ -151,6 +151,7 @@ pub enum AppError {
     UnknownWindow,
     /// New Window rejected because admission is disabled. ABI 56.
     WindowCreationUnavailable,
+    DeliveryControlFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -781,7 +782,9 @@ impl ApplicationRoot {
                 self.last_error = None;
                 self.snapshot_generation = self.snapshot_generation.saturating_add(1);
                 #[cfg(target_os = "macos")]
-                self.sync_attachment_delivery();
+                if !self.sync_attachment_delivery() {
+                    self.last_error = Some(AppError::DeliveryControlFailed);
+                }
                 Ok(())
             }
             Err(error) => self.fail(error),

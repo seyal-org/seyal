@@ -235,7 +235,7 @@ impl Runtime {
             return;
         }
 
-        self.schedule_snapshot_recovery(token);
+        self.schedule_snapshot_recovery(token, resync.attachment_id);
     }
 
     pub(super) fn service_pending_resyncs(&mut self) {
@@ -248,7 +248,7 @@ impl Runtime {
         let mut shared_batches: HashMap<(ExecutionId, bool), EncodedDisplayBatch> = HashMap::new();
 
         while inspected < scan_limit {
-            let token = {
+            let target = {
                 let Some(state) = self.local_ipc.as_mut() else {
                     return;
                 };
@@ -265,41 +265,41 @@ impl Runtime {
                 }
                 next
             };
-            let Some(token) = token else {
+            let Some((token, attachment_id)) = target else {
                 break;
             };
 
             if !self.local_connection_exists(token) {
                 if let Some(state) = self.local_ipc.as_mut() {
-                    state.pending_resync_set.remove(&token);
+                    state.pending_resync_set.remove(&(token, attachment_id));
                 }
                 continue;
             }
 
-            let delivery = self.local_ipc.as_ref().and_then(|state| {
-                let attachment_id = state.connections.get(&token)?.attachment?;
-                state.attachments.delivery_of(attachment_id).ok()
-            });
-            if delivery != Some(crate::local_ipc::attachment::DeliveryState::Delivering) {
-                if let Some(state) = self.local_ipc.as_mut() {
-                    state.pending_resync_set.remove(&token);
-                }
-                continue;
-            }
-
-            let snapshot_active = self
+            let delivery = self
                 .local_ipc
                 .as_ref()
-                .is_some_and(|state| state.server.has_snapshot_delivery(token));
+                .and_then(|state| state.attachments.delivery_of(attachment_id).ok());
+            if delivery != Some(crate::local_ipc::attachment::DeliveryState::Delivering) {
+                if let Some(state) = self.local_ipc.as_mut() {
+                    state.pending_resync_set.remove(&(token, attachment_id));
+                }
+                continue;
+            }
+
+            let snapshot_active = self.local_ipc.as_ref().is_some_and(|state| {
+                state
+                    .server
+                    .has_attachment_snapshot_delivery(token, attachment_id)
+            });
             if snapshot_active {
                 if let Some(state) = self.local_ipc.as_mut() {
-                    state.pending_resync.push_back(token);
+                    state.pending_resync.push_back((token, attachment_id));
                 }
                 continue;
             }
 
             let execution_id = self.local_ipc.as_ref().and_then(|state| {
-                let attachment_id = state.connections.get(&token)?.attachment?;
                 state
                     .attachments
                     .execution_for_connection(token, attachment_id)
@@ -307,7 +307,7 @@ impl Runtime {
             });
             let Some(execution_id) = execution_id else {
                 if let Some(state) = self.local_ipc.as_mut() {
-                    state.pending_resync_set.remove(&token);
+                    state.pending_resync_set.remove(&(token, attachment_id));
                 }
                 continue;
             };
@@ -327,7 +327,7 @@ impl Runtime {
                 Some(batch.clone())
             } else if materialized >= RESYNC_SNAPSHOT_BUDGET_PER_POLL {
                 if let Some(state) = self.local_ipc.as_mut() {
-                    state.pending_resync.push_back(token);
+                    state.pending_resync.push_back((token, attachment_id));
                 }
                 continue;
             } else {
@@ -350,14 +350,14 @@ impl Runtime {
                     }
                     None => {
                         if let Some(state) = self.local_ipc.as_mut() {
-                            state.pending_resync_set.remove(&token);
+                            state.pending_resync_set.remove(&(token, attachment_id));
                         }
                         self.send_error(
                             token,
                             ErrorCode::DisplayUnavailable,
                             MessageType::Resync as u16,
                         );
-                        self.schedule_snapshot_recovery(token);
+                        self.schedule_snapshot_recovery(token, attachment_id);
                         None
                     }
                 }
@@ -369,18 +369,26 @@ impl Runtime {
             let generation = batch.generation;
             let rows = batch.rows;
             if let Some(state) = self.local_ipc.as_mut() {
-                state.pending_resync_set.remove(&token);
+                state.pending_resync_set.remove(&(token, attachment_id));
             }
-            if self.send_snapshot_batch(token, batch) {
-                self.maybe_send_viewport_line_ids(token, execution_id, generation, rows);
+            if self.send_snapshot_batch(token, attachment_id, batch) {
+                self.maybe_send_viewport_line_ids(
+                    token,
+                    attachment_id,
+                    execution_id,
+                    generation,
+                    rows,
+                );
             }
         }
 
         let ready_pending = self.local_ipc.as_ref().is_some_and(|state| {
-            state.pending_resync.iter().any(|token| {
-                state.pending_resync_set.contains(token)
+            state.pending_resync.iter().any(|(token, attachment_id)| {
+                state.pending_resync_set.contains(&(*token, *attachment_id))
                     && state.server.contains(*token)
-                    && !state.server.has_snapshot_delivery(*token)
+                    && !state
+                        .server
+                        .has_attachment_snapshot_delivery(*token, *attachment_id)
             })
         });
         if ready_pending {

@@ -760,6 +760,7 @@ fn resume_resync_n_times_display_encode_fault_stays_bounded() {
         MessageType::ResumeDelivery,
         &ResumeDelivery {
             attachment_id: attached.attachment_id,
+            resume_sequence: 1,
         }
         .encode(),
     );

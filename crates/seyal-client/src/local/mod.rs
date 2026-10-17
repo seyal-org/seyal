@@ -1,32 +1,32 @@
 mod attach;
+mod delivery_state;
 mod delivery_wire;
 mod discovery;
 mod display_apply;
 mod input_resize;
+mod poll;
 mod provisioning_wire;
 mod viewport_line_ids;
 
 use std::{
     collections::{HashMap, VecDeque},
-    io::Read,
     net::Shutdown,
     os::{fd::AsRawFd, unix::net::UnixStream},
 };
 
 use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
-    display::{decode_chunk, DisplayCache},
+    display::DisplayCache,
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
-        CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader, HistoryRangeRequest,
-        HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult, Role,
-        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
+        Lifecycle, MessageType, Role, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
-    pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
+    pass8::BlockState,
     AttachmentId, ExecutionId,
 };
 
-use crate::block_cache::{quarantine_epoch, BlockApply, BlockCache};
+use crate::block_cache::{quarantine_epoch, BlockCache};
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{
@@ -150,6 +150,10 @@ pub struct LocalDisplayClient {
     /// SPEC-004 §19 capability bit 11.
     pub(crate) delivery_control_negotiated: bool,
     pub(crate) delivery_suspended: bool,
+    /// Highest sequence requested on this attachment; zero before first resume.
+    pub(crate) resume_sequence: u64,
+    /// True until a complete snapshot commits for the current resume sequence.
+    pub(crate) resume_fenced: bool,
     /// Shared connection-local request-id space for types 36 and 38.
     pub(crate) next_provisioning_request_id: u64,
     /// In-process harness probe (`UnixStream::pair`); never drives live
@@ -321,274 +325,6 @@ impl LocalDisplayClient {
             .retain(|_, (block_id, _, _)| retained_block_ids.contains(block_id));
     }
 
-    pub fn poll_prepare(&mut self) -> Result<Option<PreparationResult>, ClientError> {
-        if self.needs_initial_prepare {
-            self.ensure_prepared_surface()?;
-        }
-
-        let mut committed_any = false;
-        let mut metadata_changed = false;
-        let mut damage = RowDamage::none();
-        let mut full_invalidation = false;
-        let mut parsed_frames = 0usize;
-        let mut bytes_read = 0usize;
-
-        loop {
-            while parsed_frames < MAX_FRAMES_PER_POLL {
-                let Some(frame_end) = self.complete_frame_end()? else {
-                    break;
-                };
-                let frame_start = self.read_offset;
-                let frame = &self.buffered[frame_start..frame_end];
-                let header = FrameHeader::decode(frame).map_err(|_| ClientError::Protocol)?;
-
-                // SPEC-007 type 20 is Runtime→client metadata, not a C→Runtime
-                // control message. Parse it before the control MessageType enum.
-                if header.message_type == BLOCK_STATE_MESSAGE_TYPE {
-                    if !self.block_metadata_negotiated {
-                        return Err(self.quarantine_block_metadata());
-                    }
-                    let incoming = match BlockState::decode(&frame[HEADER_LEN..]) {
-                        Ok(value) => value,
-                        Err(_) => return Err(self.quarantine_block_metadata()),
-                    };
-                    match self.block_cache.apply(self.execution_id, incoming) {
-                        Ok(BlockApply::Applied) => metadata_changed = true,
-                        Ok(BlockApply::Duplicate | BlockApply::Stale) => {}
-                        Err(_) => return Err(self.quarantine_block_metadata()),
-                    }
-                    self.read_offset = frame_end;
-                    parsed_frames += 1;
-                    continue;
-                }
-
-                let message_type =
-                    MessageType::from_u16(header.message_type).ok_or(ClientError::Protocol)?;
-
-                match message_type {
-                    MessageType::DisplaySnapshot
-                    | MessageType::DisplayDelta
-                    | MessageType::DisplaySnapshotV2
-                    | MessageType::DisplayDeltaV2 => {
-                        let chunk = match decode_chunk(frame) {
-                            Ok(chunk) => chunk,
-                            Err(_) => {
-                                // A malformed display frame is recoverable at
-                                // the disposable projection boundary. Consume
-                                // this complete frame, discard any partial
-                                // batch, and request one bounded authoritative
-                                // snapshot instead of surfacing ClientError::Display
-                                // (-8), which would stop the native bridge before
-                                // accept_display_chunk can resynchronize.
-                                self.pending_batch.clear();
-                                self.read_offset = frame_end;
-                                parsed_frames += 1;
-                                self.request_resync()?;
-                                continue;
-                            }
-                        };
-                        if self.accept_display_chunk(chunk, &mut damage, &mut full_invalidation)? {
-                            committed_any = true;
-                        }
-                    }
-                    MessageType::ResizeResult => {
-                        let payload = &frame[HEADER_LEN..];
-                        let result = ResizeResult::decode(payload).map_err(|_| {
-                            self.resize_failure = Some(ResizeFailure::Protocol);
-                            ClientError::ResizeProtocolFailure
-                        })?;
-                        self.accept_resize_result(result)?;
-                    }
-                    MessageType::BlockTimeline => {
-                        let timeline = BlockTimeline::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        if timeline.revision >= self.block_timeline.revision {
-                            metadata_changed = timeline.revision > self.block_timeline.revision;
-                            let retained =
-                                timeline.records.iter().map(|record| record.id).collect();
-                            self.purge_history_for_blocks(&retained);
-                            self.block_timeline = timeline;
-                        }
-                    }
-                    MessageType::ComposerResult => {
-                        let result = ComposerResult::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        if validate_composer_result(
-                            result,
-                            self.attachment_id,
-                            &self.pending_composer_requests,
-                        ) {
-                            self.pending_composer_requests.remove(&result.request_id);
-                            self.last_composer_result = Some(result);
-                        }
-                    }
-                    MessageType::ComposerStatus => {
-                        let status = ComposerStatus::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        if validate_composer_status(
-                            status,
-                            self.attachment_id,
-                            self.composer_status,
-                        ) {
-                            self.composer_status = Some(status);
-                        }
-                    }
-                    MessageType::HistoryRangeSnapshot => {
-                        let snapshot = HistoryRangeSnapshot::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        let Some((expected_block, _start, _end)) =
-                            self.history_requests.get(&snapshot.request_id).copied()
-                        else {
-                            continue;
-                        };
-                        if snapshot.block_id == 0 || snapshot.request_id == 0 {
-                            continue;
-                        }
-                        if snapshot.block_id != expected_block {
-                            continue;
-                        }
-                        let key = (snapshot.block_id, snapshot.request_id);
-                        if self
-                            .history_ranges
-                            .get(&key)
-                            .is_none_or(|old| old.revision <= snapshot.revision)
-                        {
-                            if self.history_ranges.len() >= 32
-                                && let Some(key) = self.history_ranges.keys().next().copied()
-                            {
-                                self.history_ranges.remove(&key);
-                            }
-                            self.history_ranges.insert(key, snapshot);
-                        }
-                    }
-                    MessageType::Error => {
-                        let payload = &frame[HEADER_LEN..];
-                        let error =
-                            seyal_runtime::local_ipc::framing::ErrorMessage::decode(payload)
-                                .map_err(|_| ClientError::Protocol)?;
-                        // Runtime backpressure is a per-action rejection, not
-                        // a broken transport. Consume the error and preserve
-                        // the connection so the native surface can expose the
-                        // bounded, retryable failure without dropping later
-                        // FIFO work. Other Error frames retain their fatal
-                        // protocol/authority semantics.
-                        if let Some(failure) = self.classify_incoming_error(error)? {
-                            self.input_failure = Some(failure);
-                        }
-                    }
-                    MessageType::Lifecycle => {
-                        let lifecycle =
-                            seyal_runtime::local_ipc::framing::LifecycleMessage::decode(
-                                &frame[HEADER_LEN..],
-                            )
-                            .map_err(|_| ClientError::Protocol)?;
-                        if lifecycle.execution_id != self.execution_id {
-                            return Err(ClientError::Protocol);
-                        }
-                        if lifecycle.lifecycle == Lifecycle::Finalized {
-                            // The Runtime orders the final display state (and
-                            // completed Block metadata, when negotiated) before
-                            // this lifecycle marker. The lifecycle event is the
-                            // terminal authority even if the disposable Block
-                            // cache is stale; keep final display/history and
-                            // end this client instead of waiting for a prompt.
-                            if self.block_metadata_negotiated
-                                && self
-                                    .block_cache
-                                    .visible()
-                                    .is_some_and(|block| block.state == BlockLifecycle::Current)
-                            {
-                                // Preserve SPEC-007's fail-closed rule for a
-                                // contradictory Block projection while still
-                                // reporting the stronger execution-ended fact.
-                                let _ = self.quarantine_block_metadata();
-                            }
-                            return Err(ClientError::NoRunningExecution);
-                        }
-                    }
-                    MessageType::CopiedText => {
-                        let copied = InputRef::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        if copied.attachment_id != self.attachment_id {
-                            return Err(ClientError::Protocol);
-                        }
-                        self.copied_text = copied.bytes.to_vec();
-                    }
-                    MessageType::CreateExecutionResult => {
-                        let result = CreateExecutionResult::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        self.accept_create_result(result)?;
-                    }
-                    MessageType::TerminateExecutionResult => {
-                        let result = TerminateExecutionResult::decode(&frame[HEADER_LEN..])
-                            .map_err(|_| ClientError::Protocol)?;
-                        self.accept_terminate_result(result)?;
-                    }
-                    MessageType::ViewportLineIds => {
-                        // Copy off the read buffer before mutating attachment state.
-                        let payload = frame[HEADER_LEN..].to_vec();
-                        metadata_changed |= self.apply_viewport_line_ids(&payload)?;
-                    }
-                    _ => return Err(ClientError::Protocol),
-                }
-                self.read_offset = frame_end;
-                parsed_frames += 1;
-            }
-
-            if parsed_frames >= MAX_FRAMES_PER_POLL || bytes_read >= MAX_BYTES_PER_POLL {
-                break;
-            }
-            if self.complete_frame_end()?.is_some() {
-                continue;
-            }
-
-            let mut chunk = [0u8; READ_CHUNK_BYTES];
-            match self.stream.read(&mut chunk) {
-                Ok(0) => {
-                    self.clear_viewport_line_ids();
-                    self.input_failure = Some(InputAdmissionFailure::Disconnected);
-                    self.resize_failure = Some(ResizeFailure::Disconnected);
-                    return Err(ClientError::Disconnected);
-                }
-                Ok(count) => {
-                    let live_bytes = self.buffered.len().saturating_sub(self.read_offset);
-                    if live_bytes
-                        .checked_add(count)
-                        .is_none_or(|total| total > MAX_BUFFERED_BYTES)
-                    {
-                        return Err(ClientError::Capacity);
-                    }
-                    if self.read_offset != 0 {
-                        self.compact_buffer();
-                    }
-                    self.buffered.extend_from_slice(&chunk[..count]);
-                    bytes_read = bytes_read.saturating_add(count);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(_) => return Err(ClientError::Io),
-            }
-        }
-
-        self.compact_buffer();
-        metadata_changed |= self.drop_unpaired_viewport_line_ids();
-        if !committed_any && !metadata_changed {
-            return Ok(None);
-        }
-
-        if !committed_any {
-            return Ok(Some(self.last_preparation));
-        }
-
-        let result = display_apply::prepare_cache(
-            &mut self.prepared,
-            &self.cache,
-            damage,
-            full_invalidation,
-        )?;
-        self.last_preparation = result;
-        Ok(Some(result))
-    }
-
     fn quarantine_block_metadata(&mut self) -> ClientError {
         self.block_cache.quarantine();
         quarantine_epoch(self.runtime_id, self.execution_id);
@@ -738,6 +474,8 @@ fn reconstruction_probe_client_with_stream(
         execution_provisioning_negotiated: false,
         delivery_control_negotiated: false,
         delivery_suspended: false,
+        resume_sequence: 0,
+        resume_fenced: false,
         next_provisioning_request_id: 1,
         harness_probe: true,
         pending_create_requests: std::collections::HashSet::new(),

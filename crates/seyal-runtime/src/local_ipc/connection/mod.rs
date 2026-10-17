@@ -2,6 +2,7 @@
 //! Control is ordered/bounded; display state is replaceable and never blocks PTY progress.
 
 mod accept;
+mod attachment_outbound;
 mod io;
 mod outbound;
 
@@ -20,10 +21,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::{
     display::{DisplayKind, EncodedDisplayBatch},
     local_ipc::framing::{MessageType, HEADER_LEN, MAX_FRAME_PAYLOAD},
+    AttachmentId,
 };
 
 pub const MAX_CONNECTIONS: usize = 16;
 pub const MAX_OUTBOUND_QUEUE_BYTES: usize = 262_144;
+/// SPEC-004 §11 budget for one pending type-35 vector per negotiated
+/// attachment at the §19.5 100-attachment maximum (including envelope/header).
+pub const MAX_VIEWPORT_LINE_IDS_QUEUE_BYTES: usize = 210_800;
 pub(in crate::local_ipc::connection) const MAX_RECEIVE_BUFFER_BYTES: usize =
     HEADER_LEN + MAX_FRAME_PAYLOAD as usize;
 pub(in crate::local_ipc::connection) const READ_CHUNK_BYTES: usize = HEADER_LEN * 32;
@@ -125,7 +130,8 @@ impl ConnectionState {
                 )
                 | (
                     Self::Attached,
-                    Input
+                    Attach
+                        | Input
                         | Paste
                         | HostSelection
                         | HostSearch
@@ -225,6 +231,47 @@ impl DisplayItem {
     }
 }
 
+/// Bounded presentation state for one negotiated attachment. The socket and
+/// mandatory control queue remain connection-owned; display ordering and
+/// latest-wins replacement are attachment-owned.
+pub(in crate::local_ipc::connection) struct AttachmentPresentationSlot {
+    pub(in crate::local_ipc::connection) display_inflight: Option<DisplayItem>,
+    pub(in crate::local_ipc::connection) pending_display: Option<VecDeque<EncodedDisplayBatch>>,
+    pub(in crate::local_ipc::connection) display_generation: u64,
+    pub(in crate::local_ipc::connection) attach_snapshot_pin: bool,
+    pub(in crate::local_ipc::connection) deferred_after_attach: Option<EncodedDisplayBatch>,
+    pub(in crate::local_ipc::connection) viewport_line_ids: Option<OutboundItem>,
+    /// Latest type-35 replacement admitted while `viewport_line_ids` is
+    /// already partially written and therefore must finish intact.
+    pub(in crate::local_ipc::connection) deferred_viewport_line_ids: Option<OutboundItem>,
+    pub(in crate::local_ipc::connection) drop_after_partial_frame: bool,
+    pub(in crate::local_ipc::connection) remove_after_partial_frame: bool,
+    /// Final lifecycle drain is queued after an authoritative final snapshot;
+    /// retain this slot until its presentation and type-35 work finish.
+    pub(in crate::local_ipc::connection) retire_after_drain: bool,
+}
+
+impl AttachmentPresentationSlot {
+    fn new() -> Self {
+        Self {
+            display_inflight: None,
+            pending_display: None,
+            display_generation: 0,
+            attach_snapshot_pin: false,
+            deferred_after_attach: None,
+            viewport_line_ids: None,
+            deferred_viewport_line_ids: None,
+            drop_after_partial_frame: false,
+            remove_after_partial_frame: false,
+            retire_after_drain: false,
+        }
+    }
+
+    fn has_display(&self) -> bool {
+        self.display_inflight.is_some() || self.pending_display.is_some()
+    }
+}
+
 pub(in crate::local_ipc::connection) struct Connection {
     pub(in crate::local_ipc::connection) stream: UnixStream,
     pub(in crate::local_ipc::connection) state: ConnectionState,
@@ -232,6 +279,7 @@ pub(in crate::local_ipc::connection) struct Connection {
     pub(in crate::local_ipc::connection) mandatory: VecDeque<OutboundItem>,
     pub(in crate::local_ipc::connection) after_display: VecDeque<OutboundItem>,
     pub(in crate::local_ipc::connection) queued_control_bytes: usize,
+    pub(in crate::local_ipc::connection) queued_viewport_line_ids_bytes: usize,
     pub(in crate::local_ipc::connection) display_inflight: Option<DisplayItem>,
     pub(in crate::local_ipc::connection) pending_display: Option<VecDeque<EncodedDisplayBatch>>,
     pub(in crate::local_ipc::connection) display_generation: u64,
@@ -244,6 +292,13 @@ pub(in crate::local_ipc::connection) struct Connection {
     /// Snapshot that arrived while [`Self::attach_snapshot_pin`] was held; applied
     /// once the attach snapshot starts inflight.
     pub(in crate::local_ipc::connection) deferred_after_attach: Option<EncodedDisplayBatch>,
+    pub(in crate::local_ipc::connection) presentation_slots:
+        HashMap<AttachmentId, AttachmentPresentationSlot>,
+    pub(in crate::local_ipc::connection) presentation_order: VecDeque<AttachmentId>,
+    /// Attachment whose current wire frame is partial. Only this frame may
+    /// write until its header+payload boundary is complete.
+    pub(in crate::local_ipc::connection) partial_display_attachment: Option<AttachmentId>,
+    pub(in crate::local_ipc::connection) display_round_robin_after: Option<AttachmentId>,
 }
 
 impl Connection {
@@ -274,6 +329,17 @@ impl Connection {
                 .as_ref()
                 .and_then(|batches| batches.front())
                 .is_some_and(|batch| batch.kind == DisplayKind::Snapshot)
+            || self.presentation_slots.values().any(|slot| {
+                slot.display_inflight
+                    .as_ref()
+                    .and_then(DisplayItem::current_batch)
+                    .is_some_and(|batch| batch.kind == DisplayKind::Snapshot)
+                    || slot
+                        .pending_display
+                        .as_ref()
+                        .and_then(|batches| batches.front())
+                        .is_some_and(|batch| batch.kind == DisplayKind::Snapshot)
+            })
     }
 
     #[cfg(feature = "benchmark-instrumentation")]
@@ -354,6 +420,27 @@ impl LocalIpcServer {
             .is_some_and(Connection::has_snapshot_delivery)
     }
 
+    pub fn has_attachment_snapshot_delivery(
+        &self,
+        token: u64,
+        attachment_id: AttachmentId,
+    ) -> bool {
+        self.connections
+            .get(&token)
+            .and_then(|connection| connection.presentation_slots.get(&attachment_id))
+            .is_some_and(|slot| {
+                slot.display_inflight
+                    .as_ref()
+                    .and_then(DisplayItem::current_batch)
+                    .is_some_and(|batch| batch.kind == DisplayKind::Snapshot)
+                    || slot
+                        .pending_display
+                        .as_ref()
+                        .and_then(|batches| batches.front())
+                        .is_some_and(|batch| batch.kind == DisplayKind::Snapshot)
+            })
+    }
+
     pub fn set_state(&mut self, token: u64, state: ConnectionState) {
         if let Some(connection) = self.connections.get_mut(&token) {
             connection.state = state;
@@ -366,6 +453,11 @@ impl LocalIpcServer {
                 || connection.display_inflight.is_some()
                 || connection.pending_display.is_some()
                 || !connection.after_display.is_empty()
+                || connection.presentation_slots.values().any(|slot| {
+                    slot.display_inflight.is_some()
+                        || slot.pending_display.is_some()
+                        || slot.viewport_line_ids.is_some()
+                })
         })
     }
 

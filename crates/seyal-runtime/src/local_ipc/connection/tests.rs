@@ -12,7 +12,12 @@ use seyal_protocol::pass8::{
     encode_block_state_frame, BlockKind, BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE,
 };
 use seyal_protocol::{BlockId, ExecutionId};
-use std::{collections::VecDeque, io::Read, os::unix::net::UnixStream, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    io::{Read, Write},
+    os::unix::net::UnixStream,
+    sync::Arc,
+};
 
 fn sample_cells(count: usize) -> Vec<ProjectionCell> {
     vec![ProjectionCell::lead_scalar('x', ProjectionAttributes::default()); count]
@@ -58,11 +63,16 @@ fn connection() -> Connection {
         mandatory: VecDeque::new(),
         after_display: VecDeque::new(),
         queued_control_bytes: 0,
+        queued_viewport_line_ids_bytes: 0,
         display_inflight: None,
         pending_display: None,
         display_generation: 1,
         attach_snapshot_pin: false,
         deferred_after_attach: None,
+        presentation_slots: HashMap::new(),
+        presentation_order: VecDeque::new(),
+        partial_display_attachment: None,
+        display_round_robin_after: None,
     }
 }
 
@@ -176,6 +186,7 @@ fn mandatory_frame_waits_for_a_partially_written_display_frame() {
         mandatory: VecDeque::from([OutboundItem::new(vec![9u8, 10])]),
         after_display: VecDeque::from([OutboundItem::new(vec![11u8, 12])]),
         queued_control_bytes: 4,
+        queued_viewport_line_ids_bytes: 0,
         display_inflight: Some(DisplayItem {
             #[cfg(feature = "benchmark-instrumentation")]
             kind: DisplayKind::Snapshot,
@@ -197,6 +208,10 @@ fn mandatory_frame_waits_for_a_partially_written_display_frame() {
         display_generation: 1,
         attach_snapshot_pin: false,
         deferred_after_attach: None,
+        presentation_slots: HashMap::new(),
+        presentation_order: VecDeque::new(),
+        partial_display_attachment: None,
+        display_round_robin_after: None,
     };
 
     outbound::flush_outbound(&mut connection).unwrap();
@@ -228,6 +243,7 @@ fn partial_after_display_frame_finishes_before_mandatory_and_display_work() {
             sent: 1,
         }]),
         queued_control_bytes: 5,
+        queued_viewport_line_ids_bytes: 0,
         display_inflight: None,
         pending_display: Some(VecDeque::from([EncodedDisplayBatch {
             kind: DisplayKind::Snapshot,
@@ -242,6 +258,10 @@ fn partial_after_display_frame_finishes_before_mandatory_and_display_work() {
         display_generation: 1,
         attach_snapshot_pin: false,
         deferred_after_attach: None,
+        presentation_slots: HashMap::new(),
+        presentation_order: VecDeque::new(),
+        partial_display_attachment: None,
+        display_round_robin_after: None,
     };
 
     outbound::flush_outbound(&mut connection).unwrap();
@@ -268,6 +288,106 @@ fn viewport_line_ids_frame(generation: u64, line_id: u64) -> Vec<u8> {
         }
         .encode(),
     )
+}
+
+#[test]
+fn partial_attachment_line_ids_frame_finishes_before_display_bytes() {
+    let (stream, mut peer) = UnixStream::pair().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let mut connection = connection();
+    connection.stream = stream;
+
+    let attachment_id = crate::AttachmentId::from_bytes([7; 16]);
+    let line_ids = viewport_line_ids_frame(9, 42);
+    let already_written = 11;
+    connection
+        .stream
+        .write_all(&line_ids[..already_written])
+        .unwrap();
+    let mut line_ids_item = OutboundItem::new(line_ids.clone());
+    line_ids_item.sent = already_written;
+    let slot = AttachmentPresentationSlot::new();
+    let mut slot = slot;
+    slot.viewport_line_ids = Some(line_ids_item);
+    slot.pending_display = Some(
+        encode_snapshot(&snapshot(9))
+            .unwrap()
+            .into_transport_batches()
+            .into(),
+    );
+    connection.presentation_slots.insert(attachment_id, slot);
+    connection.presentation_order.push_back(attachment_id);
+    connection.partial_display_attachment = Some(attachment_id);
+
+    super::attachment_outbound::flush_attachment_outbound(&mut connection).unwrap();
+    let mut first = vec![0; line_ids.len()];
+    let mut first_len = 0;
+    while first_len < first.len() {
+        match peer.read(&mut first[first_len..]) {
+            Ok(0) => break,
+            Ok(count) => first_len += count,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("read type-35 frame: {error}"),
+        }
+    }
+    assert_eq!(&first[..first_len], line_ids.as_slice());
+
+    super::attachment_outbound::flush_attachment_outbound(&mut connection).unwrap();
+    let expected_display = encode_snapshot(&snapshot(9)).unwrap().frames[0].clone();
+    let mut display = vec![0; expected_display.len()];
+    let mut display_len = 0;
+    while display_len < display.len() {
+        match peer.read(&mut display[display_len..]) {
+            Ok(0) => break,
+            Ok(count) => display_len += count,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("read display frame: {error}"),
+        }
+    }
+    assert_eq!(&display[..display_len], expected_display.as_ref());
+}
+
+#[test]
+fn retired_attachment_final_snapshot_drains_before_lifecycle_metadata() {
+    let (stream, mut peer) = UnixStream::pair().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let mut connection = connection();
+    connection.stream = stream;
+    let attachment_id = crate::AttachmentId::from_bytes([8; 16]);
+    let snapshot = encode_snapshot(&snapshot(10)).unwrap();
+    let expected_snapshot = snapshot.frames[0].clone();
+    let mut slot = AttachmentPresentationSlot::new();
+    slot.display_generation = 10;
+    slot.pending_display = Some(snapshot.into_transport_batches().into());
+    slot.retire_after_drain = true;
+    connection.presentation_slots.insert(attachment_id, slot);
+    connection.presentation_order.push_back(attachment_id);
+    let lifecycle = encode_frame(MessageType::Lifecycle, &[3, 4]);
+    connection.queued_control_bytes = lifecycle.len();
+    connection
+        .after_display
+        .push_back(OutboundItem::new(lifecycle.clone()));
+
+    super::attachment_outbound::flush_attachment_outbound(&mut connection).unwrap();
+
+    let mut output = vec![0; expected_snapshot.len() + lifecycle.len()];
+    let mut read = 0;
+    while read < output.len() {
+        match peer.read(&mut output[read..]) {
+            Ok(0) => break,
+            Ok(count) => read += count,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("read final drain: {error}"),
+        }
+    }
+    assert_eq!(
+        &output[..expected_snapshot.len()],
+        expected_snapshot.as_ref()
+    );
+    assert_eq!(&output[expected_snapshot.len()..read], lifecycle.as_slice());
+    assert!(!connection.presentation_slots.contains_key(&attachment_id));
 }
 
 fn composer_status_frame(marker: u8) -> Vec<u8> {
@@ -301,11 +421,16 @@ fn viewport_line_ids_coalesce_preserves_block_state_and_composer_status() {
             mandatory: VecDeque::new(),
             after_display: VecDeque::new(),
             queued_control_bytes: 0,
+            queued_viewport_line_ids_bytes: 0,
             display_inflight: None,
             pending_display: None,
             display_generation: 1,
             attach_snapshot_pin: false,
             deferred_after_attach: None,
+            presentation_slots: HashMap::new(),
+            presentation_order: VecDeque::new(),
+            partial_display_attachment: None,
+            display_round_robin_after: None,
         },
     );
 
@@ -348,6 +473,50 @@ fn viewport_line_ids_coalesce_preserves_block_state_and_composer_status() {
     );
     assert_eq!(queued[1].bytes, status);
     assert_eq!(queued[2].bytes, fresh_line_ids);
+}
+
+#[test]
+fn type_35_queue_does_not_consume_mandatory_control_capacity() {
+    let path =
+        std::env::temp_dir().join(format!("seyal-type35-budget-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut server = LocalIpcServer::bind(&path, 4).expect("bind");
+    let _ = std::fs::remove_file(&path);
+    let (stream, _peer) = UnixStream::pair().unwrap();
+    let token = 8u64;
+    let mut connection = connection();
+    connection.stream = stream;
+    server.connections.insert(token, connection);
+
+    for index in 0..100u8 {
+        server
+            .enqueue_attachment_viewport_line_ids(
+                token,
+                crate::AttachmentId::from_bytes([index.wrapping_add(1); 16]),
+                vec![0; 2_060],
+            )
+            .expect("optional type-35 vector is admitted within §19.5 budget");
+    }
+    assert_eq!(
+        server
+            .connections
+            .get(&token)
+            .unwrap()
+            .queued_viewport_line_ids_bytes,
+        206_000
+    );
+    assert_eq!(
+        server.connections.get(&token).unwrap().queued_control_bytes,
+        0
+    );
+
+    server
+        .enqueue_mandatory(token, vec![0; MAX_OUTBOUND_QUEUE_BYTES])
+        .expect("optional type-35 state must not reject mandatory output");
+    assert_eq!(
+        server.connections.get(&token).unwrap().queued_control_bytes,
+        MAX_OUTBOUND_QUEUE_BYTES
+    );
 }
 
 #[test]

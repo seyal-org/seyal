@@ -7,9 +7,9 @@ use super::execution::{
 };
 use super::payload::{
     Attach, Attached, ClientHello, Detach, Detached, ErrorMessage, ExecutionList, HostSearch,
-    HostSelection, InputRef, LifecycleMessage, Resize, ResumeDelivery, Resync, ServerHello,
-    SuspendDelivery, TerminalMouse,
+    HostSelection, InputRef, LifecycleMessage, Resize, Resync, ServerHello, TerminalMouse,
 };
+use super::presentation::{ResumeDelivery, SuspendDelivery};
 use super::{
     BlockTimeline, ComposerCommandRef, ComposerResult, ComposerStatus, HistoryRangeRequest,
     HistoryRangeSnapshot, ResizeRequest, ResizeResult, TerminalKey, TerminalKeyV2, ViewportLineIds,

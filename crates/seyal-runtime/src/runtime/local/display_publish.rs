@@ -40,20 +40,41 @@ impl Runtime {
                 .attachments_with_connections_for_execution(execution_id);
             let notifications = pairs
                 .iter()
-                .map(|(_, token)| {
-                    let block_capable = state
-                        .connections
-                        .get(token)
-                        .is_some_and(|meta| meta.client_capabilities & CAP_BLOCK_METADATA != 0);
-                    (*token, block_capable)
+                .map(|(attachment_id, token)| {
+                    let Some(meta) = state.connections.get(token) else {
+                        return (*token, *attachment_id, 0, false, false);
+                    };
+                    let block_capable = meta.client_capabilities & CAP_BLOCK_METADATA != 0;
+                    let delivery_control =
+                        meta.client_capabilities & framing::CAP_ATTACHMENT_DELIVERY_CONTROL != 0;
+                    let sequence = state
+                        .attachments
+                        .resume_sequence_of(*attachment_id)
+                        .unwrap_or(0);
+                    (
+                        *token,
+                        *attachment_id,
+                        sequence,
+                        block_capable,
+                        delivery_control,
+                    )
                 })
                 .collect::<Vec<_>>();
             state.attachments.remove_all_for_execution(execution_id);
             state.published.remove(&execution_id);
-            for (_, token) in &pairs {
-                state.pending_resync_set.remove(token);
-                if let Some(meta) = state.connections.get_mut(token) {
-                    meta.attachment = None;
+            for (attachment_id, token) in &pairs {
+                state.pending_resync_set.remove(&(*token, *attachment_id));
+                state
+                    .server
+                    .retire_attachment_presentation_after_drain(*token, *attachment_id);
+                if let Some(meta) = state.connections.get_mut(token)
+                    && meta.attachment == Some(*attachment_id)
+                {
+                    meta.attachment = state
+                        .attachments
+                        .attachments_on_connection(*token)
+                        .first()
+                        .copied();
                 }
             }
             notifications
@@ -80,7 +101,7 @@ impl Runtime {
             BlockCompletion::None => Ok(None),
         };
 
-        for (token, block_capable) in notifications {
+        for (token, attachment_id, sequence, block_capable, delivery_control) in notifications {
             if block_capable {
                 match &completion_frame {
                     Ok(Some(frame)) => {
@@ -89,7 +110,17 @@ impl Runtime {
                             self.close_local_connection(token);
                             continue;
                         }
-                        if !self.send_after_display_frame(token, frame.clone()) {
+                        let sent = if delivery_control {
+                            self.send_attachment_after_display_frame_at_sequence(
+                                token,
+                                attachment_id,
+                                sequence,
+                                frame.clone(),
+                            )
+                        } else {
+                            self.send_after_display_frame(token, frame.clone())
+                        };
+                        if !sent {
                             continue;
                         }
                     }
@@ -109,6 +140,10 @@ impl Runtime {
                 token,
                 framing::encode_frame(MessageType::Lifecycle, &message.encode()),
             ) && let Some(state) = self.local_ipc.as_mut()
+                && state
+                    .attachments
+                    .attachments_on_connection(token)
+                    .is_empty()
             {
                 state.server.set_state(token, LocalIpcConnState::Ready);
             }
@@ -127,7 +162,7 @@ impl Runtime {
             .get(&execution_id)
             .map(|entry| entry.execution.projection_snapshot())
         else {
-            for (token, _) in viewers {
+            for (token, _, _) in viewers {
                 self.close_local_connection(token);
             }
             return;
@@ -140,13 +175,14 @@ impl Runtime {
             None
         };
 
-        for (token, grapheme) in viewers {
+        for (token, attachment_id, grapheme) in viewers {
             let batch = if grapheme { v2.clone() } else { v1.clone() };
             match batch {
                 Some(batch) => {
-                    if self.send_snapshot_batch(token, batch) {
+                    if self.send_snapshot_batch(token, attachment_id, batch) {
                         self.maybe_send_viewport_line_ids(
                             token,
+                            attachment_id,
                             execution_id,
                             snapshot.source_damage_generation,
                             snapshot.rows,
@@ -219,33 +255,37 @@ impl Runtime {
         }
     }
 
-    fn viewer_caps(&self, execution_id: ExecutionId) -> Vec<(u64, bool)> {
+    fn viewer_caps(&self, execution_id: ExecutionId) -> Vec<(u64, crate::AttachmentId, bool)> {
         self.local_ipc.as_ref().map_or_else(Vec::new, |state| {
             state
                 .attachments
                 .delivering_viewers_for_execution(execution_id)
                 .into_iter()
-                .map(|(_, token)| {
+                .map(|(attachment_id, token)| {
                     let grapheme = state
                         .connections
                         .get(&token)
                         .is_some_and(|meta| meta.client_capabilities & CAP_GRAPHEME_DISPLAY != 0);
-                    (token, grapheme)
+                    (token, attachment_id, grapheme)
                 })
                 .collect()
         })
     }
 
-    fn fanout_snapshot(&mut self, execution_id: ExecutionId, viewers: &[(u64, bool)]) -> bool {
+    fn fanout_snapshot(
+        &mut self,
+        execution_id: ExecutionId,
+        viewers: &[(u64, crate::AttachmentId, bool)],
+    ) -> bool {
         #[cfg(feature = "test-fault-injection")]
         if test_fault::take(FaultPoint::DisplayEncode) {
-            for &(token, _) in viewers {
+            for &(token, attachment_id, _) in viewers {
                 self.send_error(
                     token,
                     ErrorCode::DisplayUnavailable,
                     MessageType::DisplaySnapshot as u16,
                 );
-                self.schedule_snapshot_recovery(token);
+                self.schedule_snapshot_recovery(token, attachment_id);
             }
             return false;
         }
@@ -255,19 +295,19 @@ impl Runtime {
             .get(&execution_id)
             .map(|entry| entry.execution.projection_snapshot())
         else {
-            for &(token, _) in viewers {
+            for &(token, attachment_id, _) in viewers {
                 self.send_error(
                     token,
                     ErrorCode::DisplayUnavailable,
                     MessageType::DisplaySnapshot as u16,
                 );
-                self.schedule_snapshot_recovery(token);
+                self.schedule_snapshot_recovery(token, attachment_id);
             }
             return false;
         };
 
-        let need_v2 = viewers.iter().any(|(_, g)| *g);
-        let need_v1 = viewers.iter().any(|(_, g)| !*g);
+        let need_v2 = viewers.iter().any(|(_, _, g)| *g);
+        let need_v1 = viewers.iter().any(|(_, _, g)| !*g);
         let v2 = if need_v2 {
             display::encode_snapshot_v2(&snapshot).ok()
         } else {
@@ -284,13 +324,14 @@ impl Runtime {
         };
 
         let mut any_ok = false;
-        for &(token, grapheme) in viewers {
+        for &(token, attachment_id, grapheme) in viewers {
             let batch = if grapheme { v2.clone() } else { v1.clone() };
             match batch {
                 Some(batch) => {
-                    if self.send_snapshot_batch(token, batch) {
+                    if self.send_snapshot_batch(token, attachment_id, batch) {
                         self.maybe_send_viewport_line_ids(
                             token,
+                            attachment_id,
                             execution_id,
                             snapshot.source_damage_generation,
                             snapshot.rows,
@@ -308,7 +349,7 @@ impl Runtime {
                             MessageType::DisplaySnapshot as u16
                         },
                     );
-                    self.schedule_snapshot_recovery(token);
+                    self.schedule_snapshot_recovery(token, attachment_id);
                 }
             }
         }
@@ -320,23 +361,23 @@ impl Runtime {
         execution_id: ExecutionId,
         update: &seyal_exec::TerminalProjectionUpdate,
         base_generation: u64,
-        viewers: &[(u64, bool)],
+        viewers: &[(u64, crate::AttachmentId, bool)],
     ) -> bool {
         #[cfg(feature = "test-fault-injection")]
         if test_fault::take(FaultPoint::DisplayEncode) {
-            for &(token, _) in viewers {
+            for &(token, attachment_id, _) in viewers {
                 self.send_error(
                     token,
                     ErrorCode::DisplayUnavailable,
                     MessageType::DisplayDelta as u16,
                 );
-                self.schedule_snapshot_recovery(token);
+                self.schedule_snapshot_recovery(token, attachment_id);
             }
             return false;
         }
 
-        let need_v2 = viewers.iter().any(|(_, g)| *g);
-        let need_v1 = viewers.iter().any(|(_, g)| !*g);
+        let need_v2 = viewers.iter().any(|(_, _, g)| *g);
+        let need_v1 = viewers.iter().any(|(_, _, g)| !*g);
         let v2 = if need_v2 {
             display::encode_delta_v2(update, base_generation).ok()
         } else {
@@ -353,19 +394,17 @@ impl Runtime {
         };
 
         let mut any_ok = false;
-        for &(token, grapheme) in viewers {
+        for &(token, attachment_id, grapheme) in viewers {
             let batch = if grapheme { v2.clone() } else { v1.clone() };
             match batch {
                 Some(delta) => {
-                    let result = self
-                        .local_ipc
-                        .as_mut()
-                        .and_then(|state| state.server.try_enqueue_delta(token, delta).ok());
+                    let result = self.enqueue_delta_batch(token, attachment_id, delta);
                     match result {
                         Some(DeltaEnqueueResult::Queued) => {
                             self.sync_local_writable(token);
                             self.maybe_send_viewport_line_ids(
                                 token,
+                                attachment_id,
                                 execution_id,
                                 update.source_damage_generation,
                                 update.rows,
@@ -377,7 +416,7 @@ impl Runtime {
                             any_ok = true;
                         }
                         Some(DeltaEnqueueResult::NeedSnapshot) => {
-                            self.schedule_snapshot_recovery(token);
+                            self.schedule_snapshot_recovery(token, attachment_id);
                         }
                         None => self.close_local_connection(token),
                     }
@@ -392,7 +431,7 @@ impl Runtime {
                             MessageType::DisplayDelta as u16
                         },
                     );
-                    self.schedule_snapshot_recovery(token);
+                    self.schedule_snapshot_recovery(token, attachment_id);
                 }
             }
         }
@@ -426,6 +465,7 @@ impl Runtime {
     pub(super) fn maybe_send_viewport_line_ids(
         &mut self,
         token: u64,
+        attachment_id: crate::AttachmentId,
         execution_id: ExecutionId,
         generation: u64,
         rows: u16,
@@ -449,10 +489,37 @@ impl Runtime {
             generation,
             line_ids,
         };
-        let _ = self.send_after_display_frame(
-            token,
-            framing::encode_frame(MessageType::ViewportLineIds, &message.encode()),
-        );
+        let frame = framing::encode_frame(MessageType::ViewportLineIds, &message.encode());
+        let frame = if self.connection_has_delivery_control(token) {
+            let Some(sequence) = self.resume_sequence(token, attachment_id) else {
+                return;
+            };
+            match framing::envelope_presentation_frame(&frame, attachment_id, sequence) {
+                Ok(frame) => frame,
+                Err(_) => {
+                    self.close_local_connection(token);
+                    return;
+                }
+            }
+        } else {
+            frame
+        };
+        let negotiated = self.connection_has_delivery_control(token);
+        let queued = self.local_ipc.as_mut().is_some_and(|state| {
+            if negotiated {
+                state
+                    .server
+                    .enqueue_attachment_viewport_line_ids(token, attachment_id, frame)
+                    .is_ok()
+            } else {
+                state.server.enqueue_after_display(token, frame).is_ok()
+            }
+        });
+        if queued {
+            self.sync_local_writable(token);
+        } else {
+            self.close_local_connection(token);
+        }
     }
 
     fn collect_viewport_line_ids(&self, execution_id: ExecutionId, rows: u16) -> Option<Vec<u64>> {

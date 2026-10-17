@@ -59,6 +59,7 @@ fn control_payloads_round_trip() {
     assert_eq!(SuspendDelivery::decode(&suspend.encode()).unwrap(), suspend);
     let resume = ResumeDelivery {
         attachment_id: attach_id(),
+        resume_sequence: 7,
     };
     assert_eq!(ResumeDelivery::decode(&resume.encode()).unwrap(), resume);
     let mut reserved = suspend.encode();
@@ -70,6 +71,66 @@ fn control_payloads_round_trip() {
     assert_eq!(
         ResumeDelivery::decode(&resume.encode()[..16]),
         Err(FramingError::ExactLengthMismatch)
+    );
+    let mut zero_sequence = resume.encode();
+    zero_sequence[16..24].fill(0);
+    assert_eq!(
+        ResumeDelivery::decode(&zero_sequence),
+        Err(FramingError::MalformedPayload)
+    );
+}
+
+#[test]
+fn negotiated_presentation_envelope_wraps_display_line_ids_and_block_timeline() {
+    let original = encode_frame(MessageType::DisplaySnapshot, &[1, 2, 3]);
+    let wrapped = envelope_presentation_frame(&original, attach_id(), 9).unwrap();
+    let envelope = decode_presentation_envelope(&wrapped).unwrap();
+    assert_eq!(envelope.attachment_id, attach_id());
+    assert_eq!(envelope.resume_sequence, 9);
+    assert_eq!(envelope.payload, &[1, 2, 3]);
+    assert_eq!(
+        FrameHeader::decode(&wrapped[..HEADER_LEN])
+            .unwrap()
+            .message_type,
+        MessageType::DisplaySnapshot as u16
+    );
+
+    let line_ids = encode_frame(MessageType::ViewportLineIds, &[4, 5]);
+    let wrapped = envelope_presentation_frame(&line_ids, attach_id(), 10).unwrap();
+    let envelope = decode_presentation_envelope(&wrapped).unwrap();
+    assert_eq!(envelope.resume_sequence, 10);
+    assert_eq!(envelope.payload, &[4, 5]);
+
+    let timeline = encode_frame(MessageType::BlockTimeline, &[6, 7]);
+    let wrapped = envelope_presentation_frame(&timeline, attach_id(), 11).unwrap();
+    let envelope = decode_presentation_envelope(&wrapped).unwrap();
+    assert_eq!(envelope.attachment_id, attach_id());
+    assert_eq!(envelope.resume_sequence, 11);
+    assert_eq!(envelope.payload, &[6, 7]);
+}
+
+#[test]
+fn negotiated_presentation_envelope_rejects_non_presentation_and_malformed_frames() {
+    let control = encode_frame(MessageType::Lifecycle, &[1]);
+    assert_eq!(
+        envelope_presentation_frame(&control, attach_id(), 0),
+        Err(FramingError::MalformedPayload)
+    );
+
+    let mut short = encode_frame(MessageType::DisplayDelta, &[1]);
+    short.truncate(HEADER_LEN + 23);
+    assert_eq!(
+        decode_presentation_envelope(&short),
+        Err(FramingError::TruncatedPayload)
+    );
+
+    let mut missing_prefix = FrameHeader::new(MessageType::DisplayDelta as u16, 23)
+        .encode()
+        .to_vec();
+    missing_prefix.extend_from_slice(&[0; 23]);
+    assert_eq!(
+        decode_presentation_envelope(&missing_prefix),
+        Err(FramingError::TruncatedPayload)
     );
 }
 
