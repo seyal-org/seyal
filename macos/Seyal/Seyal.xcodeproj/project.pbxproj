@@ -47,6 +47,8 @@
 		C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009 /* SeyalKeybindingUITests.swift */; };
 		C1000000000000000000000F /* SeyalDividerDragUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000F /* SeyalDividerDragUITests.swift */; };
 		C1000000000000000000000B /* SeyalC2bCreateTabUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B /* SeyalC2bCreateTabUITests.swift */; };
+		C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C /* PaneRegionProjectionTests.swift */; };
+		C1000000000000000000000D /* SeyalPaneSplitUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D /* SeyalPaneSplitUITests.swift */; };
 		C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007 /* IsolatedHostedRuntime.swift */; };
 		A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000050 /* TerminalCompositionDocument.swift */; };
 		A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */; };
@@ -120,6 +122,8 @@
 		C20000000000000000000009 /* SeyalKeybindingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalKeybindingUITests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000F /* SeyalDividerDragUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalDividerDragUITests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000B /* SeyalC2bCreateTabUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalC2bCreateTabUITests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000C /* PaneRegionProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneRegionProjectionTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000D /* SeyalPaneSplitUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalPaneSplitUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000007 /* IsolatedHostedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedHostedRuntime.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* RustDisplayBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustDisplayBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* GlyphAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphAtlas.swift; sourceTree = "<group>"; };
@@ -327,6 +331,7 @@
 				C20000000000000000000008 /* KeybindingEvidenceTests.swift */,
 				C2000000000000000000000E /* DividerDragProjectionTests.swift */,
 				C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */,
+				C2000000000000000000000C /* PaneRegionProjectionTests.swift */,
 			);
 			path = SeyalTests;
 			sourceTree = "<group>";
@@ -341,6 +346,7 @@
 				C20000000000000000000009 /* SeyalKeybindingUITests.swift */,
 				C2000000000000000000000F /* SeyalDividerDragUITests.swift */,
 				C2000000000000000000000B /* SeyalC2bCreateTabUITests.swift */,
+				C2000000000000000000000D /* SeyalPaneSplitUITests.swift */,
 			);
 			path = SeyalUITests;
 			sourceTree = "<group>";
@@ -542,6 +548,7 @@
 				C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */,
 				C1000000000000000000000E /* DividerDragProjectionTests.swift in Sources */,
 				C1000000000000000000000A /* AttentionOsNotificationAdapterTests.swift in Sources */,
+				C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -556,6 +563,7 @@
 				C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */,
 				C1000000000000000000000F /* SeyalDividerDragUITests.swift in Sources */,
 				C1000000000000000000000B /* SeyalC2bCreateTabUITests.swift in Sources */,
+				C1000000000000000000000D /* SeyalPaneSplitUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
