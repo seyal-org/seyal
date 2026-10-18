@@ -57,6 +57,14 @@ impl Runtime {
     }
     pub(super) fn service_reads(&mut self, id: ExecutionId) -> Result<(), RuntimeError> {
         let mut consumed = 0usize;
+        // One readable turn is one "PTY read" for Block timing: every chunk
+        // drained here was already buffered together, so a trusted C/D pair
+        // within it is coalesced and must stay untimed (ADR-009 duration
+        // amendment item 3; duration is quantized by reactor scheduling).
+        #[cfg(target_os = "macos")]
+        if let Some(entry) = self.entries.get_mut(&id) {
+            entry.pty_read_seq = entry.pty_read_seq.wrapping_add(1);
+        }
         let mut drain_complete = false;
         while consumed < self.config.read_dispatch_bytes {
             let remaining = self.config.read_dispatch_bytes - consumed;

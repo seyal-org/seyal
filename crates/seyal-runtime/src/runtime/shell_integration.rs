@@ -8,7 +8,7 @@
 use seyal_exec::ShellIntegrationEvent;
 
 #[cfg(target_os = "macos")]
-use crate::command_block_timeline::{CommandBlockId, MAX_COMMAND_BYTES};
+use crate::command_block_timeline::{BoundaryStamp, CommandBlockId, MAX_COMMAND_BYTES};
 #[cfg(target_os = "macos")]
 use crate::input::InputKind;
 use crate::{ExecutionId, RuntimeError};
@@ -174,6 +174,12 @@ impl Runtime {
     /// to TerminalState. Only markers carrying this execution's nonce are
     /// trusted; the rest are counted and ignored. This path never reads a
     /// prompt, row text, or terminal cell payload.
+    ///
+    /// Called after each PTY chunk is applied. Trusted markers carry the
+    /// current readable-turn number (`service_reads`) and one Runtime
+    /// monotonic stamp per call, so a `C`/`D` pair drained in the same turn is
+    /// never timed (ADR-009 duration amendment item 3). One clock read per
+    /// call, only when a trusted marker exists.
     #[cfg(target_os = "macos")]
     pub(super) fn observe_shell_integration_events(
         &mut self,
@@ -185,6 +191,8 @@ impl Runtime {
                 .entries
                 .get_mut(&id)
                 .ok_or(RuntimeError::UnknownExecution)?;
+            let read = entry.pty_read_seq;
+            let mut stamp = None;
             while let Some(event) = entry.execution.take_shell_integration_event() {
                 let (token, event) = match event {
                     ShellIntegrationEvent::PromptStarted { token } => {
@@ -206,7 +214,8 @@ impl Runtime {
                     entry.untrusted_markers = entry.untrusted_markers.saturating_add(1);
                     continue;
                 }
-                changed |= apply_integration_event(entry, event);
+                let at = *stamp.get_or_insert_with(std::time::Instant::now);
+                changed |= apply_integration_event(entry, event, Some(BoundaryStamp { at, read }));
             }
             // Canonical alternate-screen entry while the prompt gate is open
             // means a program owns the terminal (mechanism 5).
@@ -215,7 +224,8 @@ impl Runtime {
                 IntegrationState::AtPrompt | IntegrationState::Pending
             ) && entry.execution.terminal().modes().alternate_screen
             {
-                changed |= apply_integration_event(entry, IntegrationEvent::AlternateScreenEntered);
+                changed |=
+                    apply_integration_event(entry, IntegrationEvent::AlternateScreenEntered, None);
             }
             if changed {
                 entry.block_revision = entry.block_revision.saturating_add(1);
@@ -235,7 +245,7 @@ impl Runtime {
     pub(super) fn note_direct_input_admitted(&mut self, id: ExecutionId) {
         if let Some(entry) = self.entries.get_mut(&id) {
             // No Block effects are possible from this event.
-            let _ = apply_integration_event(entry, IntegrationEvent::DirectInputAdmitted);
+            let _ = apply_integration_event(entry, IntegrationEvent::DirectInputAdmitted, None);
         }
         self.publish_composer_status_if_changed(id);
     }
@@ -246,7 +256,8 @@ impl Runtime {
     pub(super) fn note_execution_ended(&mut self, id: ExecutionId) {
         let changed = match self.entries.get_mut(&id) {
             Some(entry) => {
-                let changed = apply_integration_event(entry, IntegrationEvent::ExecutionEnded);
+                let changed =
+                    apply_integration_event(entry, IntegrationEvent::ExecutionEnded, None);
                 if changed {
                     entry.block_revision = entry.block_revision.saturating_add(1);
                 }
@@ -305,8 +316,14 @@ pub(in crate::runtime) fn composer_eligibility(entry: &Entry) -> ComposerEligibi
 
 /// Apply one trusted event to the entry's integration state and carry out
 /// its Block effects. Returns whether published Block metadata changed.
+/// `stamp` is present only for a trusted marker drained from a PTY read;
+/// Runtime-originated events (direct input, execution end) carry none.
 #[cfg(target_os = "macos")]
-fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
+fn apply_integration_event(
+    entry: &mut Entry,
+    event: IntegrationEvent,
+    stamp: Option<BoundaryStamp>,
+) -> bool {
     let transition = entry.integration.on(event);
     entry.integration = transition.next;
     let mut changed = false;
@@ -318,7 +335,7 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                 };
                 if entry
                     .block_timeline
-                    .start(pending.block_id, pending.command, line.0)
+                    .start(pending.block_id, pending.command, line.0, stamp)
                     .is_ok()
                 {
                     entry.integration = entry.integration.block_started(pending.block_id);
@@ -343,13 +360,15 @@ fn apply_integration_event(entry: &mut Entry, event: IntegrationEvent) -> bool {
                         .map(|line| line.0)
                         .unwrap_or(1)
                 });
-                let exit_status = match exit {
-                    BlockExit::Code(code) => Some(code),
-                    BlockExit::Unknown => None,
+                // Only a trusted D carries an exit code; it alone may end
+                // the measured interval.
+                let (exit_status, ended) = match exit {
+                    BlockExit::Code(code) => (Some(code), stamp),
+                    BlockExit::Unknown => (None, None),
                 };
                 if entry
                     .block_timeline
-                    .complete(block_id, end_line, exit_status)
+                    .complete(block_id, end_line, exit_status, ended)
                     .is_ok()
                 {
                     changed = true;
