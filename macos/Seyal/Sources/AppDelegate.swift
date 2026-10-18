@@ -2,75 +2,30 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var window: NSWindow?
-    private var host: ProductChromeHostView?
+    private var host: MultiWindowHostController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let initialSize = initialWindowSize
-        let host = ProductChromeHostView(
-            frame: NSRect(origin: .zero, size: initialSize)
-        )
+        let host = MultiWindowHostController()
         self.host = host
-
-        let window = NSWindow(
-            contentRect: host.bounds,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Seyal"
-        window.minSize = NSSize(width: 960, height: 640)
-        // Appearance comes from Rust-resolved visual preference at host apply.
-        let platform = NSApp.effectiveAppearance
-        // Bounded non-secret diagnostics once per cold load — not on every chrome reconcile.
-        NativeThemeRealization.surfaceColdDiagnosticsOnce(for: platform)
-        let resolved = NativeThemeRealization.theme(for: platform)
-        window.appearance = resolved.appearance
-        window.contentView = host
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
-
-        installMenus(host: host)
-        host.activateAfterWindowPresentation()
-        NSApp.activate(ignoringOtherApps: true)
-
-        #if DEBUG
-        // AppKit may restore/zoom the previous window frame after launch. The
-        // multi-Pane UI test opts into a compact frame so both real Pane hit
-        // targets fit on the test display before it starts interacting.
-        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
-            DispatchQueue.main.async {
-                window.setContentSize(initialSize)
-                window.center()
-            }
-        }
-        #endif
-    }
-
-    private var initialWindowSize: NSSize {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
-            return NSSize(width: 1100, height: 760)
-        }
-        #endif
-        return NSSize(width: 1280, height: 800)
+        installMenus(targeting: host)
+        host.bootstrapAfterLaunch()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // ADR-018 §2.5: last-window-close never quits in M003 (W4b).
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        host?.requestQuit()
-        host?.detachForTermination()
-        return .terminateNow
+        guard let host else {
+            return .terminateNow
+        }
+        return host.applicationShouldTerminate()
     }
 
-    /// Reserved §4.2 Edit/AppKit items keep hardcoded equivalents; product items
-    /// realize Rust `KeybindingShortcutProjection` once at startup (R11.2–R11.3).
-    private func installMenus(host: ProductChromeHostView) {
+    private func installMenus(targeting host: MultiWindowHostController) {
         let mainMenu = NSMenu()
+
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
@@ -81,6 +36,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         appItem.submenu = appMenu
 
+        let fileItem = NSMenuItem()
+        mainMenu.addItem(fileItem)
+        let fileMenu = NSMenu(title: "File")
+        let newWindow = NSMenuItem(
+            title: "New Window",
+            action: #selector(MultiWindowHostController.createWindow(_:)),
+            keyEquivalent: "n"
+        )
+        newWindow.keyEquivalentModifierMask = [.command, .shift]
+        newWindow.target = host
+        fileMenu.addItem(newWindow)
+        fileMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabCreate,
+            host: host.liveHost
+        ))
+        fileMenu.addItem(projectedItem(
+            commandId: KeybindingShortcutRealization.tabCloseFocused,
+            host: host.liveHost
+        ))
+        fileItem.submenu = fileMenu
+
         let editItem = NSMenuItem()
         mainMenu.addItem(editItem)
         let editMenu = NSMenu(title: "Edit")
@@ -89,47 +65,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editItem.submenu = editMenu
 
-        let fileItem = NSMenuItem()
-        mainMenu.addItem(fileItem)
-        let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(projectedItem(
-            commandId: KeybindingShortcutRealization.tabCreate,
-            host: host
-        ))
-        fileMenu.addItem(projectedItem(
-            commandId: KeybindingShortcutRealization.tabCloseFocused,
-            host: host
-        ))
-        fileItem.submenu = fileMenu
-
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.commandPaletteOpen,
-            host: host
+            host: host.liveHost
         ))
         viewMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.paneSplitRight,
-            host: host
+            host: host.liveHost
         ))
         viewMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.paneSplitDown,
-            host: host
+            host: host.liveHost
         ))
         viewMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.presentationToggleRaw,
-            host: host
+            host: host.liveHost
         ))
         viewMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.presentationToggleTui,
-            host: host
+            host: host.liveHost
         ))
-        // R11.2 / R6.4.1: goto.open is a normal projected WorkspaceCommand —
-        // title, optional equivalent, enablement, and invoke all go through Rust.
         viewMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.gotoOpen,
-            host: host
+            host: host.liveHost
         ))
         viewItem.submenu = viewMenu
 
@@ -138,12 +99,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.tabSelectPrevious,
-            host: host
+            host: host.liveHost
         ))
         windowMenu.addItem(projectedItem(
             commandId: KeybindingShortcutRealization.tabSelectNext,
-            host: host
+            host: host.liveHost
         ))
+        let cycleNext = NSMenuItem(
+            title: "Cycle Next Window",
+            action: #selector(MultiWindowHostController.cycleWindowNext(_:)),
+            keyEquivalent: "`"
+        )
+        cycleNext.keyEquivalentModifierMask = [.command]
+        cycleNext.target = host
+        windowMenu.addItem(cycleNext)
+        let cyclePrev = NSMenuItem(
+            title: "Cycle Previous Window",
+            action: #selector(MultiWindowHostController.cycleWindowPrevious(_:)),
+            keyEquivalent: "`"
+        )
+        cyclePrev.keyEquivalentModifierMask = [.command, .shift]
+        cyclePrev.target = host
+        windowMenu.addItem(cyclePrev)
+        windowMenu.addItem(NSMenuItem.separator())
+        // ⌥⌘1…9 select by snapshot order — NSMenuItem key equivalents only.
+        for index in 1...9 {
+            let item = NSMenuItem(
+                title: "Select Window \(index)",
+                action: #selector(MultiWindowHostController.selectWindowByTag(_:)),
+                keyEquivalent: "\(index)"
+            )
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.tag = index - 1
+            item.target = host
+            windowMenu.addItem(item)
+        }
         windowItem.submenu = windowMenu
 
         NSApp.mainMenu = mainMenu

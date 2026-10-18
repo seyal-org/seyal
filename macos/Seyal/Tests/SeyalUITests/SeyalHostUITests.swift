@@ -355,6 +355,17 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertGreaterThan(secondBefore.0, 0)
         XCTAssertGreaterThan(secondBefore.1, 0)
 
+        // The second Pane was focused to submit its command. Return focus to
+        // the first Pane before resizing so the second Metal surface remains a
+        // genuinely unfocused sibling and must propose its own geometry.
+        app.typeKey(.leftArrow, modifierFlags: [.command, .option])
+        let firstPaneFocused = expectation(
+            for: NSPredicate(format: "value == 'focused'"),
+            evaluatedWith: firstRegion,
+            handler: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPaneFocused], timeout: 5), .completed)
+
         let oldWidth = window.frame.width
         // The compact test frame leaves enough display space for both panes
         // and a real native resize gesture.
@@ -1119,8 +1130,9 @@ final class SeyalHostUITests: XCTestCase {
             editor.waitForExistence(timeout: 5) && editor.firstMatch.isHittable,
             "reconnect must restore a hittable composer editor, not Metal IME"
         )
-        editor.firstMatch.click()
         let token = "seyal-866-re-\(String(UUID().uuidString.prefix(8)))"
+        // typeText requires the target element (or a descendant) to already
+        // have keyboard focus; deliberately do not click to establish it.
         editor.firstMatch.typeText(token)
         let landed = NSPredicate(format: "value CONTAINS %@", token)
         XCTAssertEqual(
@@ -1339,5 +1351,24 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["File"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["View"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
+    }
+
+    /// W4a: AppKit realizes the Rust snapshot; CreateWindow admission stays off.
+    func testNewWindowAdmissionStaysFailClosedOnW4aHost() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1, "bootstrap realizes exactly one headed window")
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5), "File → New Window is installed")
+        newWindow.click()
+        waitBriefly(0.4)
+        XCTAssertEqual(
+            app.windows.count,
+            1,
+            "W4a keeps CreateWindow fail-closed; the host must not locally spawn a second window"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+        let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
     }
 }

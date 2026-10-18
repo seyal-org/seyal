@@ -88,6 +88,7 @@ fn seed_two_workspaces() -> ShellState {
         first,
         false,
         true,
+        true,
     )
     .expect("fixture")
 }
@@ -174,6 +175,7 @@ fn activate_workspace_create_path_is_generation_fenced() {
         ],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .expect("empty workspace fixture");
@@ -337,6 +339,7 @@ fn initial_zero_window_reentry_workspace_is_first_workspace() {
         second,
         false,
         true,
+        false,
     )
     .expect("zero-window shell");
 
@@ -391,6 +394,7 @@ fn move_tab_before_uses_anchor_not_index() {
         WorkspaceId::m001_default(),
         false,
         true,
+        true,
     )
     .unwrap();
     let generation = shell.containment_generation();
@@ -427,6 +431,7 @@ fn same_window_order_noop_does_not_bump_generation() {
         }],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .unwrap();
@@ -471,6 +476,7 @@ fn last_tab_move_destroys_source_window_atomically() {
         }],
         WorkspaceId::m001_default(),
         false,
+        true,
         true,
     )
     .unwrap();
@@ -523,6 +529,7 @@ fn moving_last_tab_preserves_recency_for_its_live_panes() {
         workspace,
         true,
         true,
+        false,
     )
     .expect("fixture");
     let first_pane = shell.snapshot().focused_pane;
@@ -588,6 +595,14 @@ fn move_tab_to_new_window_when_sibling_exists() {
         .unwrap();
     let new_window = shell.product_window_id().unwrap();
     assert_ne!(new_window, original_window);
+    assert_eq!(
+        shell.take_effects(),
+        [
+            ShellNativeEffect::RealizeWindow { window: new_window },
+            ShellNativeEffect::OrderFrontMakeKey { window: new_window },
+        ],
+        "moving a Tab to a new Window must realize and activate that Window"
+    );
     assert_eq!(shell.snapshot().active_tab, created);
     assert_eq!(
         shell.snapshot().tabs.len(),
@@ -730,6 +745,7 @@ fn reorder_and_move_never_yield_zero_tab_window() {
         WorkspaceId::m001_default(),
         false,
         true,
+        true,
     )
     .unwrap();
     let windows = [window_a, window_b];
@@ -783,6 +799,7 @@ fn generated_reorder_and_window_move_sequences_preserve_structure_and_bindings()
             workspace,
             false,
             true,
+            false,
         )
         .expect("fixture")
     };
@@ -899,6 +916,7 @@ fn composed_reorder_and_move_sequence_fences_stale_action_atomically() {
         workspace,
         false,
         true,
+        false,
     )
     .expect("two-window fixture");
 
@@ -1224,5 +1242,39 @@ fn rejected_structural_actions_preserve_full_state() {
     assert_eq!(
         disabled, expected,
         "disabled CreateTab rejection changed state"
+    );
+}
+
+#[test]
+fn cross_window_select_tab_emits_order_front() {
+    let mut shell = seed_two_workspaces();
+    let original_window = shell.product_window_id().unwrap();
+    shell.apply_product_create_tab().unwrap();
+    let created = shell.snapshot().active_tab;
+    shell
+        .apply(ShellAction::MoveTabToNewWindow {
+            tab: created,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let new_window = shell.product_window_id().unwrap();
+    assert_ne!(new_window, original_window);
+    shell
+        .apply(ShellAction::SelectWindow {
+            id: original_window,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let _ = shell.take_effects();
+    shell
+        .apply(ShellAction::SelectTab {
+            id: created,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    assert_eq!(shell.product_window_id().unwrap(), new_window);
+    assert_eq!(
+        shell.take_effects(),
+        vec![ShellNativeEffect::OrderFrontMakeKey { window: new_window }]
     );
 }

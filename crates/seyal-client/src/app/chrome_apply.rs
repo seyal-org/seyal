@@ -1,6 +1,6 @@
 //! Shell tab/pane and chrome inspector apply paths.
 
-use seyal_core::{PaneId, TabId, WorkspaceId};
+use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{
@@ -14,6 +14,13 @@ use crate::presentation::{PresentationAction, PresentationIdentity};
 use crate::shell::{ShellAction, ShellError};
 
 impl ApplicationRoot {
+    pub(crate) fn apply_shell(&mut self, action: ShellAction) -> Result<(), ShellError> {
+        let result = self.shell.apply(action);
+        if result.is_ok() {
+            self.drain_shell_effects();
+        }
+        result
+    }
     pub(super) fn close_pane(&mut self, id: PaneId) -> Result<(), AppError> {
         self.close_pane_with_disposition(id)
     }
@@ -88,6 +95,7 @@ impl ApplicationRoot {
             if matches!(reveal, crate::navigation::AttentionReveal::Focused(_)) {
                 self.activate_focused_pane_authority();
             }
+            self.drain_shell_effects();
             let _ = self
                 .chrome
                 .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -97,19 +105,20 @@ impl ApplicationRoot {
             self.shell
                 .apply_activate_workspace(workspace)
                 .map_err(|_| AppError::UnknownChromeWorkspace)?;
+            self.drain_shell_effects();
         }
         if let Some(tab) = effect.select_tab {
-            self.shell
-                .apply(ShellAction::SelectTab {
-                    id: tab,
-                    containment_generation: self.shell.containment_generation(),
-                })
-                .map_err(|_| AppError::UnknownChromeTab)?;
+            self.apply_shell(ShellAction::SelectTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|_| AppError::UnknownChromeTab)?;
         }
         if effect.select_workspace.is_some() || effect.select_tab.is_some() {
             self.activate_focused_pane_authority();
             self.record_focused_pane_commit();
         }
+        self.drain_shell_effects();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -120,6 +129,7 @@ impl ApplicationRoot {
         self.shell
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.drain_shell_effects();
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
@@ -144,8 +154,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn focus_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::FocusPane { id })
+        self.apply_shell(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
@@ -157,6 +166,7 @@ impl ApplicationRoot {
 
     /// Record the focused Pane after a user focus transition (SPEC-022 R6.3).
     pub(super) fn record_focused_pane_commit(&mut self) {
+        self.drain_shell_effects();
         let focus = self.shell.focus_checkpoint();
         self.focus_history
             .record_user_commit(ResourceAddress::Pane {
@@ -196,6 +206,17 @@ impl ApplicationRoot {
             .presentation
             .apply(PresentationAction::BindIdentity(identity));
         self.authority = Some(authority);
+        let stored_mode = self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .flat_map(|window| &window.tabs)
+            .flat_map(|tab| &tab.panes)
+            .find(|pane| pane.id == focused)
+            .map(|pane| pane.presentation_mode);
+        self.explicit_raw = stored_mode == Some(crate::presentation::PresentationMode::Raw);
+        self.recompute_resting();
         let alternate = self.alternate_screen_for_pane(focused);
         let _ = self.derive_presentation(alternate);
         self.sync_composer_presentation();
@@ -265,8 +286,7 @@ impl ApplicationRoot {
             });
         };
         let ratio = divider.ratio_at(position).ok_or(AppError::NoSplitDivider)?;
-        self.shell
-            .apply(ShellAction::SetSplitRatio { pane, ratio })
+        self.apply_shell(ShellAction::SetSplitRatio { pane, ratio })
             .map_err(|error| match error {
                 ShellError::NoSplitDivider => AppError::NoSplitDivider,
                 _ => AppError::UnknownPane,
@@ -294,6 +314,90 @@ impl ApplicationRoot {
             .apply(ChromeAction::ReplaceAttention { items: attention }, &shell)
             .map(|_| ())
             .map_err(chrome_error)
+    }
+    pub(super) fn select_window(&mut self, id: WindowId) -> Result<(), AppError> {
+        let containment_generation = self.shell.snapshot().containment_generation;
+        self.apply_shell(ShellAction::SelectWindow {
+            id,
+            containment_generation,
+        })
+        .map_err(|_| AppError::UnknownWindow)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn cycle_window(
+        &mut self,
+        direction: crate::shell::CycleDirection,
+    ) -> Result<(), AppError> {
+        let containment_generation = self.shell.snapshot().containment_generation;
+        self.apply_shell(ShellAction::CycleWindow {
+            direction,
+            containment_generation,
+        })
+        .map_err(|_| AppError::UnknownWindow)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn create_window(&mut self) -> Result<(), AppError> {
+        // ADR-018 §2.2 / §3.3a: host sends target-free New Window; Rust picks
+        // the product-active Window's Workspace when any Window exists,
+        // otherwise `last_active_workspace` (zero-window re-entry / W4b).
+        let snap = self.shell.snapshot();
+        let workspace = if snap.windows.is_empty() {
+            snap.last_active_workspace
+        } else {
+            snap.active_workspace
+        };
+        let generation = snap.containment_generation;
+        self.apply_shell(ShellAction::CreateWindow {
+            workspace,
+            containment_generation: generation,
+        })
+        .map_err(|error| match error {
+            ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
+            _ => AppError::UnknownChromeWorkspace,
+        })?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn report_window_event(
+        &mut self,
+        window: WindowId,
+        event: WindowNativeEvent,
+    ) -> Result<(), AppError> {
+        if !self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .any(|entry| entry.id == window)
+        {
+            return Err(AppError::UnknownWindow);
+        }
+        // Preserve the native event for host observability.
+        self.last_window_event = Some((window, event));
+        if event == WindowNativeEvent::ActivationFailed {
+            return Err(AppError::WindowActivationFailed);
+        }
+        if event == WindowNativeEvent::BecameKey {
+            self.apply_shell(ShellAction::ObserveWindowBecameKey { id: window })
+                .map_err(|_| AppError::UnknownWindow)?;
+        }
+        Ok(())
+    }
+
+    /// Last forwarded window event (W4a tests / host observability).
+    pub fn last_window_event(&self) -> Option<(WindowId, WindowNativeEvent)> {
+        self.last_window_event
     }
 }
 

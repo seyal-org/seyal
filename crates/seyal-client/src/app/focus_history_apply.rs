@@ -59,6 +59,7 @@ impl ApplicationRoot {
     }
 
     fn after_history_focus_applied(&mut self) {
+        self.drain_shell_effects();
         self.activate_focused_pane_authority();
         // Authority activation can be a no-op when traversal lands on the
         // already-active binding; ensure the destination Pane's composer and

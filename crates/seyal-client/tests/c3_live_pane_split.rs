@@ -248,6 +248,29 @@ fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
     wait_for_geometry(first_handle, first_geometry, deadline);
     wait_for_geometry(second_handle, second_geometry, deadline);
 
+    // Resize away and return before polling the client. This exercises the
+    // real pane-scoped request/projection path under overlapping desired
+    // geometry changes; the final authoritative projection must converge to
+    // the latest target even if earlier resize results are still in flight.
+    let intermediate_geometry =
+        seyal_client::derive_grid_geometry(1001.0, 1001.0, 0.0, 0.0, 10.0, 20.0)
+            .expect("intermediate geometry");
+    assert_ne!(intermediate_geometry, first_geometry);
+    root.propose_pane_geometry(first_pane, 1001.0, 1001.0, 0.0, 0.0, 10.0, 20.0, true)
+        .expect("resize first execution away");
+    root.propose_pane_geometry(first_pane, 801.0, 641.0, 0.0, 0.0, 10.0, 20.0, true)
+        .expect("restore first execution geometry");
+    wait_for_geometry(
+        first_handle,
+        first_geometry,
+        Instant::now() + Duration::from_secs(5),
+    );
+    wait_for_geometry(
+        second_handle,
+        second_geometry,
+        Instant::now() + Duration::from_secs(5),
+    );
+
     // Invalid metrics and a closed Pane fail before submitting another
     // resize; neither may redirect geometry to the currently focused sibling.
     assert_eq!(

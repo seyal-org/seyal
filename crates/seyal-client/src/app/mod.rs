@@ -14,6 +14,7 @@ mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+mod native_effect;
 mod palette_apply;
 mod presentation_apply;
 mod provisioning_apply;
@@ -21,6 +22,8 @@ mod recovery_apply;
 mod session;
 
 use accessibility::accessibility_nodes;
+
+pub use native_effect::NativeEffect;
 
 #[cfg(test)]
 mod focus_history_tests;
@@ -42,7 +45,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::chrome::{
     AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
@@ -69,7 +72,7 @@ use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
 use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
-pub const APP_ABI_VERSION: u16 = 1;
+pub const APP_ABI_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppError {
@@ -127,6 +130,12 @@ pub enum AppError {
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
+    /// Unknown WindowId for select/cycle/report (W4a). ABI 54.
+    UnknownWindow,
+    /// Extra Window create rejected until close exists (W4a). ABI 55.
+    WindowCreationUnavailable,
+    /// Native WindowActivation failed after bounded retry. ABI 53.
+    WindowActivationFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,12 +144,6 @@ pub enum PresentationEligibility {
     Flow,
     Raw,
     Tui,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NativeEffect {
-    None,
-    BoundedDetachThenTerminate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -387,6 +390,38 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+    /// ADR-018 §2.2 window selection (W4a).
+    SelectWindow {
+        id: WindowId,
+    },
+    CycleWindow {
+        direction: crate::shell::CycleDirection,
+    },
+    /// Target-free New Window (ADR-018 §2.2 / §3.3a): Rust resolves Workspace.
+    CreateWindow,
+    /// Forwarded native window presentation input; host derives no product state.
+    ReportWindowEvent {
+        window: WindowId,
+        event: WindowNativeEvent,
+    },
+}
+
+/// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum WindowNativeEvent {
+    BecameKey = 0,
+    ResignedKey = 1,
+    BecameMain = 2,
+    ResignedMain = 3,
+    OcclusionChanged = 4,
+    Miniaturized = 5,
+    Deminiaturized = 6,
+    EnteredFullscreen = 7,
+    ExitedFullscreen = 8,
+    ScreenOrScaleChanged = 9,
+    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
+    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -423,7 +458,7 @@ pub struct AppSnapshot {
     pub composer_eligible: bool,
     pub frozen: bool,
     pub last_error: Option<AppError>,
-    pub pending_effect: NativeEffect,
+    pub pending_effects: Vec<NativeEffect>,
     pub output_utf8: String,
     pub shell: ShellSnapshot,
     pub accessibility: Vec<AccessibilityNode>,
@@ -469,7 +504,7 @@ pub struct ApplicationRoot {
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
-    pending_effect: NativeEffect,
+    pending_effects: Vec<NativeEffect>,
     frozen: bool,
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
@@ -513,6 +548,13 @@ pub struct ApplicationRoot {
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
+    /// Last forwarded window presentation event (not product state).
+    last_window_event: Option<(WindowId, WindowNativeEvent)>,
+    /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
+    quit_deadline: Option<std::time::Instant>,
+    /// Extra live display attachments and probe peers owned through quit cleanup.
+    #[cfg(target_os = "macos")]
+    live_attachments: Vec<session::QuitProbeAttachment>,
 }
 
 impl Default for ApplicationRoot {
@@ -535,7 +577,8 @@ impl ApplicationRoot {
     }
 
     pub(crate) fn with_shell(shell: ShellState) -> Self {
-        let pane = shell.snapshot().focused_pane;
+        let snap = shell.snapshot();
+        let pane = snap.focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
@@ -543,6 +586,16 @@ impl ApplicationRoot {
             mode: PresentationMode::Flow,
             input_route: InputRoute::Frozen,
         });
+        // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
+        let mut pending_effects = Vec::new();
+        for window in &snap.windows {
+            pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
+        }
+        if !snap.windows.is_empty() {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey {
+                window: snap.active_window,
+            });
+        }
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
@@ -555,7 +608,7 @@ impl ApplicationRoot {
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
-            pending_effect: NativeEffect::None,
+            pending_effects,
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
@@ -584,6 +637,10 @@ impl ApplicationRoot {
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
             live_attach_gate: None,
+            last_window_event: None,
+            quit_deadline: None,
+            #[cfg(target_os = "macos")]
+            live_attachments: Vec::new(),
         }
     }
 
@@ -722,7 +779,7 @@ impl ApplicationRoot {
             composer_eligible,
             frozen: self.frozen,
             last_error: self.last_error,
-            pending_effect: self.pending_effect,
+            pending_effects: self.pending_effects.clone(),
             output_utf8: self.output_utf8.clone(),
             accessibility: accessibility_nodes(
                 &shell,
@@ -924,6 +981,12 @@ impl ApplicationRoot {
             AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
             AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
             AppAction::CloseGoto { fence } => self.close_goto(fence),
+            AppAction::SelectWindow { id } => self.select_window(id),
+            AppAction::CycleWindow { direction } => self.cycle_window(direction),
+            AppAction::CreateWindow => self.create_window(),
+            AppAction::ReportWindowEvent { window, event } => {
+                self.report_window_event(window, event)
+            }
         };
         match result {
             Ok(()) => {

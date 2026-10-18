@@ -3,8 +3,15 @@
 use super::*;
 
 #[cfg(target_os = "macos")]
+pub(super) type QuitProbeAttachment = (
+    crate::ffi::ClientRegistryHandle,
+    std::os::unix::net::UnixStream,
+);
+
+#[cfg(target_os = "macos")]
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
+        self.release_live_attachments();
         let mut seen = std::collections::HashSet::new();
         if let Some(handle) = self.client_handle.take() {
             seen.insert(handle.raw());
@@ -137,6 +144,132 @@ impl ApplicationRoot {
         self.client_handle
             .as_ref()
             .map(crate::ffi::ClientRegistryHandle::raw)
+    }
+
+    /// Install `windows` shell windows + the same number of probe attachments.
+    ///
+    /// Builds a fresh shell composition and swaps only `shell` + effect queue
+    /// fields — never replaces `self` (replacing `ApplicationRoot` under a live
+    /// AppKit host aborts via nested Drop/registry work with panic=abort).
+    /// Admission stays off.
+    pub(crate) fn install_quit_fixture(&mut self, windows: usize) -> Result<(), ()> {
+        self.install_quit_fixture_shell(windows)?;
+        self.attach_probe_attachments(windows)
+    }
+
+    pub(crate) fn install_quit_fixture_windows_only(&mut self, windows: usize) -> Result<(), ()> {
+        self.install_quit_fixture_shell(windows)
+    }
+
+    fn install_quit_fixture_shell(&mut self, windows: usize) -> Result<(), ()> {
+        if !(1..=16).contains(&windows) {
+            return Err(());
+        }
+        let workspace = WorkspaceId::m001_default();
+        let mut window_seeds = Vec::with_capacity(windows);
+        let mut active = WindowId::new();
+        for index in 0..windows {
+            let window = WindowId::new();
+            if index == 0 {
+                active = window;
+            }
+            let tab = TabId::new();
+            let pane = PaneId::new();
+            window_seeds.push(crate::shell::ShellWindowSeed {
+                id: window,
+                active_tab: tab,
+                tabs: vec![crate::shell::ShellTabSeed {
+                    id: tab,
+                    title: format!("Terminal {}", index + 1),
+                    attention: false,
+                    pane: crate::shell::ShellPaneSeed {
+                        id: pane,
+                        title: "Pane 1".to_owned(),
+                        allows_implicit_execution_bootstrap: false,
+                    },
+                }],
+            });
+        }
+        let shell = crate::shell::ShellState::from_workspaces(
+            vec![crate::shell::ShellWorkspaceSeed {
+                id: workspace,
+                name: "Local".to_owned(),
+                detail: Some("local".to_owned()),
+                attention: false,
+                active_window: active,
+                windows: window_seeds,
+            }],
+            workspace,
+            false,
+            false,
+            false,
+        )
+        .map_err(|_| ())?;
+        self.release_live_attachments();
+        self.shell = shell;
+        self.frozen = false;
+        self.quit_deadline = None;
+        self.pending_effects.clear();
+        let snap = self.shell.snapshot();
+        for window in &snap.windows {
+            self.pending_effects
+                .push(NativeEffect::RealizeWindow { window: window.id });
+        }
+        if !snap.windows.is_empty() {
+            self.pending_effects.push(NativeEffect::OrderFrontMakeKey {
+                window: snap.active_window,
+            });
+        }
+        let pane = snap.focused_pane;
+        let _ = self.composer.apply(ComposerAction::EnsurePane { pane });
+        let _ = self.composer.apply(ComposerAction::ApplyPresentation {
+            pane,
+            mode: PresentationMode::Flow,
+            input_route: InputRoute::Frozen,
+        });
+        Ok(())
+    }
+
+    fn attach_probe_attachments(&mut self, count: usize) -> Result<(), ()> {
+        use seyal_runtime::local_ipc::framing::Role;
+        self.live_attachments.clear();
+        for index in 0..count {
+            let tag = u8::try_from(index + 1).map_err(|_| ())?;
+            let execution = ExecutionId::from_bytes([tag; 16]);
+            let attachment = AttachmentId::from_bytes([tag; 16]);
+            let (client, peer) = crate::local::try_reconstruction_probe_client_with_peer(
+                Role::Controller,
+                24,
+                80,
+                1,
+                execution,
+                attachment,
+            )?;
+            let registered = crate::ffi::register_app_client(client).map_err(|_| ())?;
+            self.live_attachments.push((registered, peer));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn live_attachment_count(&self) -> usize {
+        let mut raws = Vec::new();
+        if let Some(handle) = &self.client_handle {
+            raws.push(handle.raw());
+        }
+        for handle in &self.live_attachments {
+            let raw = handle.0.raw();
+            if !raws.contains(&raw) {
+                raws.push(raw);
+            }
+        }
+        for raw in self.pane_client_raws.values() {
+            if !raws.contains(raw) {
+                raws.push(*raw);
+            }
+        }
+        raws.into_iter()
+            .filter(|raw| crate::ffi::client_registry_contains(*raw))
+            .count()
     }
 
     /// Propose point-space geometry for one Pane through its own attached
@@ -484,7 +617,11 @@ impl ApplicationRoot {
 
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
-        self.pending_effect = NativeEffect::BoundedDetachThenTerminate;
+        let deadline_ms = crate::app::native_effect::QUIT_CLEANUP_DEADLINE_MS;
+        self.quit_deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(deadline_ms));
+        self.pending_effects
+            .push(NativeEffect::BoundedDetachThenTerminate { deadline_ms });
         self.clear_chord_prefix();
         // Frozen routes the composer to Hidden, which also closes any open
         // history overlay; the draft is preserved.
@@ -493,8 +630,95 @@ impl ApplicationRoot {
     }
 
     pub(super) fn ack_effect(&mut self) -> Result<(), AppError> {
-        self.pending_effect = NativeEffect::None;
+        if self.pending_effects.is_empty() {
+            return Ok(());
+        }
+        let removed = self.pending_effects.remove(0);
+        if let NativeEffect::BoundedDetachThenTerminate { deadline_ms } = removed {
+            self.complete_bounded_detach(deadline_ms);
+        }
         Ok(())
+    }
+
+    /// One bounded detach pass for every live attachment, then cleanup-complete.
+    fn complete_bounded_detach(&mut self, deadline_ms: u64) {
+        let deadline = self.quit_deadline.take().unwrap_or_else(|| {
+            std::time::Instant::now() + std::time::Duration::from_millis(deadline_ms)
+        });
+        let _remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        self.release_live_attachments();
+        self.pending_effects.push(NativeEffect::QuitCleanupComplete);
+    }
+
+    fn release_live_attachments(&mut self) -> usize {
+        #[cfg(target_os = "macos")]
+        {
+            let primary = self.client_handle.take().map(|handle| handle.raw());
+            let extras = std::mem::take(&mut self.live_attachments);
+            let mut raws = Vec::new();
+            for (handle, _) in &extras {
+                raws.push(handle.raw());
+            }
+            for (_, handle) in self.extra_pane_clients.drain() {
+                let raw = handle.raw();
+                if !raws.contains(&raw) {
+                    raws.push(raw);
+                }
+            }
+            for raw in self.pane_client_raws.values() {
+                if !raws.contains(raw) {
+                    raws.push(*raw);
+                }
+            }
+            self.pane_client_raws.clear();
+            if let Some(raw) = primary
+                && !raws.contains(&raw)
+            {
+                raws.push(raw);
+            }
+            let mut released = 0;
+            for raw in raws {
+                if let Some(mut client) = crate::ffi::unregister_client(raw) {
+                    client.request_bounded_detach();
+                    released += 1;
+                }
+            }
+            released
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            0
+        }
+    }
+
+    pub(super) fn drain_shell_effects(&mut self) {
+        for effect in self.shell.take_effects() {
+            let native = NativeEffect::from(effect);
+            // Coalesce activation raises: the shipping host generally does
+            // not ack OrderFrontMakeKey, so keep at most one pending raise.
+            if matches!(native, NativeEffect::OrderFrontMakeKey { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::OrderFrontMakeKey { .. }));
+            }
+            if matches!(native, NativeEffect::WindowActivation { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::WindowActivation { .. }));
+            }
+            self.pending_effects.push(native);
+        }
+    }
+
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn window_encode_key(&self) -> (u64, u16, u64, u32) {
+        (
+            self.snapshot_generation,
+            self.pending_effects.len() as u16,
+            self.shell.containment_generation(),
+            self.shell
+                .last_error()
+                .map(crate::shell::ShellError::error_number)
+                .unwrap_or(0),
+        )
     }
 }
 

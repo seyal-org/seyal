@@ -92,6 +92,53 @@ impl PaneTree {
         }
     }
 
+    /// Set every `Split.ratio` under this node to [`SplitRatio::HALF`]
+    /// (SPEC-025 §5.6 `EqualizeTab` / P3). Topology is unchanged.
+    pub(super) fn equalize_all(&mut self) {
+        match self {
+            Self::Leaf(_) => {}
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                *ratio = SplitRatio::HALF;
+                first.equalize_all();
+                second.equalize_all();
+            }
+        }
+    }
+
+    /// Equalize ratios in the subtree rooted at the nearest ancestor `Split`
+    /// of `focused` (SPEC-025 §5.6 `EqualizeFocused`). A single-leaf root is
+    /// a successful ratio no-op. Returns false when `focused` is not a leaf
+    /// in this tree.
+    pub(super) fn equalize_focused_scope(&mut self, focused: PaneId) -> bool {
+        match self {
+            Self::Leaf(id) => *id == focused,
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                let focused_is_direct_child = matches!(**first, Self::Leaf(id) if id == focused)
+                    || matches!(**second, Self::Leaf(id) if id == focused);
+                if focused_is_direct_child {
+                    // This is the nearest ancestor Split; normalize its subtree.
+                    *ratio = SplitRatio::HALF;
+                    first.equalize_all();
+                    second.equalize_all();
+                    return true;
+                }
+                // Search each nested branch at most once. This keeps focused
+                // lookup plus normalization O(leaves) even for skewed trees.
+                first.equalize_focused_scope(focused) || second.equalize_focused_scope(focused)
+            }
+        }
+    }
+
     pub(crate) fn last_pane(&self) -> PaneId {
         match self {
             Self::Leaf(id) => *id,

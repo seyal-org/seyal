@@ -95,10 +95,12 @@ final class PaneLayoutView: NSView {
                 continue
             }
             keep.insert(key)
+            let host: SecondaryLivePaneHost
             if let existing = secondaryLiveHosts[key] {
-                existing.updateDisplayHandle(binding.displayHandle)
+                host = existing
+                host.updateDisplayHandle(binding.displayHandle)
             } else {
-                let host = SecondaryLivePaneHost(
+                host = SecondaryLivePaneHost(
                     appHandle: appHandle,
                     paneLo: binding.paneLo,
                     paneHi: binding.paneHi,
@@ -110,6 +112,13 @@ final class PaneLayoutView: NSView {
                 secondaryLiveHosts[key] = host
                 addSubview(host, positioned: .above, relativeTo: liveContent)
                 host.noteRegistryPolled()
+            }
+            // Publish the target frame in the same reconciliation turn that
+            // installs the host. Waiting for a later parent layout pass leaves
+            // the AX button at its initial zero frame and unhittable to XCUI.
+            if let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi }) {
+                let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
+                host.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
             }
         }
         for key in secondaryLiveHosts.keys where !keep.contains(key) {

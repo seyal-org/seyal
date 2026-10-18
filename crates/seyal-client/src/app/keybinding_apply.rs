@@ -213,6 +213,7 @@ impl ApplicationRoot {
                 epoch: snap.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;
+        self.sync_focused_presentation_mode();
         self.clear_chord_prefix();
         Ok(())
     }
