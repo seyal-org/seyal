@@ -292,15 +292,35 @@ final class SeyalHostUITests: XCTestCase {
 
         let firstFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-a")
         let secondFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-b")
+        let firstShellPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-shell-\(UUID().uuidString)-a")
+        let secondShellPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-shell-\(UUID().uuidString)-b")
+        let firstWatcherPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-watcher-\(UUID().uuidString)-a")
+        let secondWatcherPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-watcher-\(UUID().uuidString)-b")
         defer {
-            try? FileManager.default.removeItem(at: firstFile)
-            try? FileManager.default.removeItem(at: secondFile)
+            for pidFile in [firstWatcherPIDFile, secondWatcherPIDFile] {
+                guard let value = try? String(contentsOf: pidFile, encoding: .utf8),
+                      let pid = Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+                else { continue }
+                let killer = Process()
+                killer.executableURL = URL(fileURLWithPath: "/bin/kill")
+                killer.arguments = ["\(pid)"]
+                try? killer.run()
+                killer.waitUntilExit()
+            }
+            for file in [
+                firstFile, secondFile, firstShellPIDFile, secondShellPIDFile,
+                firstWatcherPIDFile, secondWatcherPIDFile,
+            ] {
+                try? FileManager.default.removeItem(at: file)
+            }
         }
 
         func runSize(
             in region: XCUIElement,
             activating focusTarget: XCUIElement,
-            file: URL
+            file: URL,
+            shellPIDFile: URL,
+            watcherPIDFile: URL
         ) -> (rows: Int, columns: Int, shellPID: Int)? {
             let focused = NSPredicate(format: "value == 'focused'")
             if (region.value as? String) != "focused" {
@@ -325,16 +345,21 @@ final class SeyalHostUITests: XCTestCase {
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             guard editor.waitForExistence(timeout: 5) else { return nil }
             editor.click()
-            editor.typeText("stty size > \(file.path); printf ' %s\\n' \"$$\" >> \(file.path)")
+            let command = "printf '%s\\n' \"$$\" > \(shellPIDFile.path); "
+                + "while true; do stty size </dev/tty > \(file.path); sleep 0.1; done "
+                + "</dev/null >/dev/null 2>&1 & printf '%s\\n' \"$!\" > \(watcherPIDFile.path)"
+            editor.typeText(command)
             editor.typeKey("\r", modifierFlags: [])
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
-                if let output = try? String(contentsOf: file, encoding: .utf8) {
+                if let output = try? String(contentsOf: file, encoding: .utf8),
+                   let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8)
+                {
                     let fields = output.split(whereSeparator: \.isWhitespace)
-                    if fields.count == 3,
+                    if fields.count == 2,
                        let rows = Int(fields[0]),
                        let columns = Int(fields[1]),
-                       let shellPID = Int(fields[2])
+                       let shellPID = Int(shellPIDValue.trimmingCharacters(in: .whitespacesAndNewlines))
                     {
                         return (rows, columns, shellPID)
                     }
@@ -344,11 +369,23 @@ final class SeyalHostUITests: XCTestCase {
             return nil
         }
 
-        guard let firstBefore = runSize(in: firstRegion, activating: firstRegion, file: firstFile) else {
+        guard let firstBefore = runSize(
+            in: firstRegion,
+            activating: firstRegion,
+            file: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            watcherPIDFile: firstWatcherPIDFile
+        ) else {
             XCTFail("first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil")")
             return
         }
-        guard let secondBefore = runSize(in: secondRegion, activating: secondaryHost, file: secondFile) else {
+        guard let secondBefore = runSize(
+            in: secondRegion,
+            activating: secondaryHost,
+            file: secondFile,
+            shellPIDFile: secondShellPIDFile,
+            watcherPIDFile: secondWatcherPIDFile
+        ) else {
             XCTFail(
                 "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
             )
@@ -387,11 +424,50 @@ final class SeyalHostUITests: XCTestCase {
         }
         XCTAssertGreaterThan(window.frame.width, oldWidth + 20, "window must resize")
 
-        try? FileManager.default.removeItem(at: firstFile)
-        try? FileManager.default.removeItem(at: secondFile)
-        guard let firstAfter = runSize(in: firstRegion, activating: firstRegion, file: firstFile),
-              let secondAfter = runSize(in: secondRegion, activating: secondaryHost, file: secondFile) else {
-            XCTFail("both PTYs must report their size after the window resize")
+        func waitForResizedSize(
+            in region: XCUIElement,
+            file: URL,
+            previous: (rows: Int, columns: Int, shellPID: Int),
+            requireUnfocused: Bool
+        ) -> (rows: Int, columns: Int, shellPID: Int)? {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if let output = try? String(contentsOf: file, encoding: .utf8) {
+                    let fields = output.split(whereSeparator: \.isWhitespace)
+                    if fields.count == 2,
+                       let rows = Int(fields[0]),
+                       let columns = Int(fields[1]),
+                       (rows != previous.rows || columns != previous.columns)
+                    {
+                        if requireUnfocused {
+                            XCTAssertNotEqual(
+                                region.value as? String,
+                                "focused",
+                                "the secondary Pane must remain unfocused while its PTY resizes"
+                            )
+                        }
+                        return (rows, columns, previous.shellPID)
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            return nil
+        }
+
+        guard let firstAfter = waitForResizedSize(
+            in: firstRegion,
+            file: firstFile,
+            previous: firstBefore,
+            requireUnfocused: false
+        ),
+              let secondAfter = waitForResizedSize(
+                  in: secondRegion,
+                  file: secondFile,
+                  previous: secondBefore,
+                  requireUnfocused: true
+              )
+        else {
+            XCTFail("both PTYs must resize while the secondary Pane remains unfocused")
             return
         }
         XCTAssertNotEqual(firstAfter.1, firstBefore.1, "focused Pane PTY columns must follow layout")
@@ -407,6 +483,44 @@ final class SeyalHostUITests: XCTestCase {
             secondAfter.shellPID,
             "window resize must keep both commands attached to their distinct shell executions"
         )
+
+        let divider = app.descendants(matching: .any)["seyal-pane-divider-0"].firstMatch
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        XCTAssertTrue(divider.isHittable, "the Rust-projected split divider must be draggable")
+        guard let dividerRatioBefore = divider.value as? String else {
+            XCTFail("split divider must expose its Rust-projected ratio")
+            return
+        }
+        let dividerCenter = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        dividerCenter.click(
+            forDuration: 0.15,
+            thenDragTo: dividerCenter.withOffset(CGVector(dx: 100, dy: 0))
+        )
+        let dividerDeadline = Date().addingTimeInterval(5)
+        while Date() < dividerDeadline, (divider.value as? String) == dividerRatioBefore {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertNotEqual(divider.value as? String, dividerRatioBefore, "divider drag must update Rust's ratio")
+
+        guard let firstAfterDivider = waitForResizedSize(
+            in: firstRegion,
+            file: firstFile,
+            previous: firstAfter,
+            requireUnfocused: false
+        ),
+              let secondAfterDivider = waitForResizedSize(
+                  in: secondRegion,
+                  file: secondFile,
+                  previous: secondAfter,
+                  requireUnfocused: true
+              )
+        else {
+            XCTFail("both PTYs must follow the divider change while the secondary Pane stays unfocused")
+            return
+        }
+        XCTAssertNotEqual(firstAfterDivider.columns, secondAfterDivider.columns)
+        XCTAssertEqual(firstAfterDivider.shellPID, firstBefore.shellPID)
+        XCTAssertEqual(secondAfterDivider.shellPID, secondBefore.shellPID)
         XCTAssertEqual(app.state, .runningForeground, "resizing live panes must not crash Seyal.app")
     }
 
