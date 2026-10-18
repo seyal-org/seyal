@@ -137,5 +137,6 @@ final class SecondaryLivePaneHost: NSView {
         let frame = seyal_bridge_frame_for(displayHandle)
         guard frame.cells != nil, frame.cell_count > 0 else { return }
         surface.consumeBridgeFrame(frame)
+        setAccessibilityValue("rows=\(frame.rows) columns=\(frame.columns)")
     }
 }

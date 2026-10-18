@@ -286,6 +286,8 @@ final class SeyalHostUITests: XCTestCase {
         let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
         let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
         XCTAssertTrue(secondRegion.waitForExistence(timeout: 12))
+        let primarySurface = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(primarySurface.waitForExistence(timeout: 8))
         let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
         XCTAssertTrue(secondaryHost.waitForExistence(timeout: 12))
         XCTAssertTrue(secondaryHost.isEnabled, "secondary Pane focus target must be an enabled AX button")
@@ -369,6 +371,17 @@ final class SeyalHostUITests: XCTestCase {
             return nil
         }
 
+        func projectedSize(from element: XCUIElement) -> (rows: Int, columns: Int)? {
+            guard let value = element.value as? String else { return nil }
+            let fields = value.split(whereSeparator: \.isWhitespace)
+            guard let rowField = fields.first(where: { $0.hasPrefix("rows=") }),
+                  let columnField = fields.first(where: { $0.hasPrefix("columns=") }),
+                  let rows = Int(rowField.dropFirst("rows=".count)),
+                  let columns = Int(columnField.dropFirst("columns=".count))
+            else { return nil }
+            return (rows, columns)
+        }
+
         guard let firstBefore = runSize(
             in: firstRegion,
             activating: firstRegion,
@@ -400,6 +413,16 @@ final class SeyalHostUITests: XCTestCase {
             secondBefore.shellPID,
             "each Pane must run its command in a distinct live shell execution"
         )
+        guard let firstInitialProjection = projectedSize(from: primarySurface),
+              let secondInitialProjection = projectedSize(from: secondaryHost)
+        else {
+            XCTFail("both live surfaces must expose their current projected grid size")
+            return
+        }
+        XCTAssertEqual(firstInitialProjection.rows, firstBefore.rows)
+        XCTAssertEqual(firstInitialProjection.columns, firstBefore.columns)
+        XCTAssertEqual(secondInitialProjection.rows, secondBefore.rows)
+        XCTAssertEqual(secondInitialProjection.columns, secondBefore.columns)
 
         // The second Pane was focused to submit its command. Return focus to
         // the first Pane before resizing so the second Metal surface remains a
@@ -411,6 +434,7 @@ final class SeyalHostUITests: XCTestCase {
             handler: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [firstPaneFocused], timeout: 5), .completed)
+        XCTAssertNotEqual(secondRegion.value as? String, "focused")
 
         let oldWidth = window.frame.width
         // The compact test frame leaves enough display space for both panes
@@ -426,6 +450,7 @@ final class SeyalHostUITests: XCTestCase {
 
         func waitForResizedSize(
             in region: XCUIElement,
+            displayedBy displayElement: XCUIElement,
             file: URL,
             previous: (rows: Int, columns: Int, shellPID: Int),
             requireUnfocused: Bool
@@ -437,7 +462,10 @@ final class SeyalHostUITests: XCTestCase {
                     if fields.count == 2,
                        let rows = Int(fields[0]),
                        let columns = Int(fields[1]),
-                       (rows != previous.rows || columns != previous.columns)
+                       let projection = projectedSize(from: displayElement),
+                       (rows != previous.rows || columns != previous.columns),
+                       projection.rows == rows,
+                       projection.columns == columns
                     {
                         if requireUnfocused {
                             XCTAssertNotEqual(
@@ -456,12 +484,14 @@ final class SeyalHostUITests: XCTestCase {
 
         guard let firstAfter = waitForResizedSize(
             in: firstRegion,
+            displayedBy: primarySurface,
             file: firstFile,
             previous: firstBefore,
             requireUnfocused: false
         ),
               let secondAfter = waitForResizedSize(
                   in: secondRegion,
+                  displayedBy: secondaryHost,
                   file: secondFile,
                   previous: secondBefore,
                   requireUnfocused: true
@@ -501,15 +531,18 @@ final class SeyalHostUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
         XCTAssertNotEqual(divider.value as? String, dividerRatioBefore, "divider drag must update Rust's ratio")
+        XCTAssertNotEqual(secondRegion.value as? String, "focused")
 
         guard let firstAfterDivider = waitForResizedSize(
             in: firstRegion,
+            displayedBy: primarySurface,
             file: firstFile,
             previous: firstAfter,
             requireUnfocused: false
         ),
               let secondAfterDivider = waitForResizedSize(
                   in: secondRegion,
+                  displayedBy: secondaryHost,
                   file: secondFile,
                   previous: secondAfter,
                   requireUnfocused: true
