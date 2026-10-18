@@ -8,12 +8,16 @@ import XCTest
 /// re-projects regions and dividers from Rust.
 @MainActor
 final class DividerDragProjectionTests: XCTestCase {
-    /// Retains the offscreen host window for the test; each test method runs
-    /// on its own XCTestCase instance, and the window is never ordered front.
+    /// The offscreen host window, never ordered front. XCTest keeps every
+    /// test-case instance alive until the run ends, so each test detaches it
+    /// with `closeHost()`; a leaked window would hold a `ProductChromeHostView`
+    /// that later live-app tests could find in `NSApp.windows`.
     private var window: NSWindow?
+    private var hostWindowsBefore = 0
 
     /// A windowed host so divider drags convert real window coordinates.
     private func makeHost() -> ProductChromeHostView {
+        hostWindowsBefore = productHostWindowCount()
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         let window = NSWindow(
             contentRect: view.frame,
@@ -28,6 +32,23 @@ final class DividerDragProjectionTests: XCTestCase {
         return view
     }
 
+    /// Detaches and closes the host window. A closed window can stay in
+    /// `NSApp.windows`, so the host view is removed from it explicitly.
+    private func closeHost() {
+        guard let window else { return }
+        window.contentView = nil
+        window.close()
+        self.window = nil
+        XCTAssertEqual(
+            productHostWindowCount(), hostWindowsBefore,
+            "no test host window stays discoverable by live-app tests"
+        )
+    }
+
+    private func productHostWindowCount() -> Int {
+        NSApp.windows.filter { $0.contentView is ProductChromeHostView }.count
+    }
+
     private func reconcile(_ view: ProductChromeHostView) {
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
@@ -35,6 +56,7 @@ final class DividerDragProjectionTests: XCTestCase {
 
     func testDraggingDividerUpdatesRustRatioAndRegionFrames() throws {
         let view = makeHost()
+        defer { closeHost() }
         let handle = view.pane.appHandle
         try click(view, "seyal-split-right")
         reconcile(view)
@@ -65,6 +87,7 @@ final class DividerDragProjectionTests: XCTestCase {
 
     func testDragClampsToRustRatioBounds() throws {
         let view = makeHost()
+        defer { closeHost() }
         let handle = view.pane.appHandle
         try click(view, "seyal-split-right")
         reconcile(view)
@@ -87,6 +110,7 @@ final class DividerDragProjectionTests: XCTestCase {
 
     func testNestedDividerDragResizesOnlyItsOwnSplit() throws {
         let view = makeHost()
+        defer { closeHost() }
         let handle = view.pane.appHandle
         try click(view, "seyal-split-right")
         reconcile(view)
@@ -115,6 +139,7 @@ final class DividerDragProjectionTests: XCTestCase {
     /// drag keeps reaching Rust.
     func testDragContinuesWhenRegionsChangeMidGesture() throws {
         let view = makeHost()
+        defer { closeHost() }
         let handle = view.pane.appHandle
         try click(view, "seyal-split-right")
         reconcile(view)
@@ -142,6 +167,7 @@ final class DividerDragProjectionTests: XCTestCase {
     /// instead of growing the window or the Pane layout (ADR-015).
     func testNarrowLiveRegionNeverResizesTheWindow() throws {
         let view = makeHost()
+        defer { closeHost() }
         let window = try XCTUnwrap(view.window)
         try click(view, "seyal-split-right")
         reconcile(view)
@@ -167,6 +193,7 @@ final class DividerDragProjectionTests: XCTestCase {
 
     func testStaleDividerTargetFailsClosedAndLastPaneRulesHold() throws {
         let view = makeHost()
+        defer { closeHost() }
         let handle = view.pane.appHandle
         try click(view, "seyal-split-right")
         reconcile(view)
