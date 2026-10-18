@@ -301,7 +301,7 @@ final class SeyalHostUITests: XCTestCase {
             in region: XCUIElement,
             activating focusTarget: XCUIElement,
             file: URL
-        ) -> (Int, Int)? {
+        ) -> (rows: Int, columns: Int, shellPID: Int)? {
             let focused = NSPredicate(format: "value == 'focused'")
             if (region.value as? String) != "focused" {
                 guard focusTarget.waitForExistence(timeout: 5) else {
@@ -325,14 +325,18 @@ final class SeyalHostUITests: XCTestCase {
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             guard editor.waitForExistence(timeout: 5) else { return nil }
             editor.click()
-            editor.typeText("stty size > \(file.path)")
+            editor.typeText("stty size > \(file.path); printf ' %s\\n' \"$$\" >> \(file.path)")
             editor.typeKey("\r", modifierFlags: [])
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if let output = try? String(contentsOf: file, encoding: .utf8) {
                     let fields = output.split(whereSeparator: \.isWhitespace)
-                    if fields.count == 2, let rows = Int(fields[0]), let columns = Int(fields[1]) {
-                        return (rows, columns)
+                    if fields.count == 3,
+                       let rows = Int(fields[0]),
+                       let columns = Int(fields[1]),
+                       let shellPID = Int(fields[2])
+                    {
+                        return (rows, columns, shellPID)
                     }
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
@@ -354,6 +358,11 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertGreaterThan(firstBefore.1, 0)
         XCTAssertGreaterThan(secondBefore.0, 0)
         XCTAssertGreaterThan(secondBefore.1, 0)
+        XCTAssertNotEqual(
+            firstBefore.shellPID,
+            secondBefore.shellPID,
+            "each Pane must run its command in a distinct live shell execution"
+        )
 
         // The second Pane was focused to submit its command. Return focus to
         // the first Pane before resizing so the second Metal surface remains a
@@ -390,6 +399,13 @@ final class SeyalHostUITests: XCTestCase {
             secondAfter.1,
             secondBefore.1,
             "unfocused secondary Pane PTY columns must follow layout independently"
+        )
+        XCTAssertEqual(firstAfter.shellPID, firstBefore.shellPID)
+        XCTAssertEqual(secondAfter.shellPID, secondBefore.shellPID)
+        XCTAssertNotEqual(
+            firstAfter.shellPID,
+            secondAfter.shellPID,
+            "window resize must keep both commands attached to their distinct shell executions"
         )
         XCTAssertEqual(app.state, .runningForeground, "resizing live panes must not crash Seyal.app")
     }
