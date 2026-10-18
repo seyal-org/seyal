@@ -10,6 +10,37 @@ struct PaneLayoutGeometrySample: Equatable {
     }
 }
 
+struct PaneLayoutGeometryEpochTracker {
+    private struct PaneKey: Hashable {
+        let lo: UInt64
+        let hi: UInt64
+    }
+
+    private struct Observation {
+        let displayHandle: UInt64
+        let sample: PaneLayoutGeometrySample
+    }
+
+    private var observations: [PaneKey: Observation] = [:]
+
+    mutating func observe(
+        _ sample: PaneLayoutGeometrySample,
+        paneLo: UInt64,
+        paneHi: UInt64,
+        displayHandle: UInt64
+    ) -> Bool {
+        let key = PaneKey(lo: paneLo, hi: paneHi)
+        let previous = observations[key]
+        observations[key] = Observation(displayHandle: displayHandle, sample: sample)
+        guard previous?.displayHandle == displayHandle else { return true }
+        return sample.beginsMeaningfulEpoch(after: previous?.sample)
+    }
+
+    mutating func removePane(paneLo: UInt64, paneHi: UInt64) {
+        observations.removeValue(forKey: PaneKey(lo: paneLo, hi: paneHi))
+    }
+}
+
 /// Thin Metal host for a non-focused live Pane leaf (#936).
 ///
 /// The ApplicationRoot already owns the Controller in the bridge registry
@@ -25,6 +56,7 @@ final class SecondaryLivePaneHost: NSView {
     private(set) var displayHandle: UInt64
     private let surface: MetalSurfaceView
     private var lastObservedLayoutSample: PaneLayoutGeometrySample?
+    var beginsLayoutEpoch: ((PaneLayoutGeometrySample, UInt64) -> Bool)?
 
     init(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64) {
         self.appHandle = appHandle
@@ -100,7 +132,8 @@ final class SecondaryLivePaneHost: NSView {
         let cell = surface.terminalPresentationCellSize()
         guard cell.width > 0, cell.height > 0 else { return }
         let sample = PaneLayoutGeometrySample(viewport: rounded, cellSize: cell)
-        let beginsMeaningfulEpoch = sample.beginsMeaningfulEpoch(after: lastObservedLayoutSample)
+        let beginsMeaningfulEpoch = beginsLayoutEpoch?(sample, displayHandle)
+            ?? sample.beginsMeaningfulEpoch(after: lastObservedLayoutSample)
         lastObservedLayoutSample = sample
         // Only point-space viewport and permanent renderer metrics cross the
         // ABI. Rust derives the grid and verifies the Pane → ExecutionId before

@@ -59,6 +59,8 @@ final class PaneLayoutView: NSView {
     private var regionViews: [PaneRegionView] = []
     private var dividerViews: [PaneDividerView] = []
     private var secondaryLiveHosts: [PaneKey: SecondaryLivePaneHost] = [:]
+    private var layoutEpochTracker = PaneLayoutGeometryEpochTracker()
+    private var trackedLayoutEpochPanes: Set<PaneKey> = []
     private var theme: NativeTheme?
 
     private struct PaneKey: Hashable {
@@ -86,9 +88,18 @@ final class PaneLayoutView: NSView {
         bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool)]
     ) {
         var keep = Set<PaneKey>()
+        var currentLayoutEpochPanes = Set<PaneKey>()
         for binding in bindings {
             let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
-            guard binding.live, !binding.focused, binding.displayHandle != 0 else {
+            guard binding.live, binding.displayHandle != 0 else {
+                if let host = secondaryLiveHosts.removeValue(forKey: key) {
+                    host.removeFromSuperview()
+                }
+                layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
+                continue
+            }
+            currentLayoutEpochPanes.insert(key)
+            guard !binding.focused else {
                 if let host = secondaryLiveHosts.removeValue(forKey: key) {
                     host.removeFromSuperview()
                 }
@@ -109,6 +120,15 @@ final class PaneLayoutView: NSView {
                 host.onFocus = { [weak self] in
                     self?.onFocusPane?(key.lo, key.hi)
                 }
+                host.beginsLayoutEpoch = { [weak self] sample, displayHandle in
+                    guard let self else { return false }
+                    return self.layoutEpochTracker.observe(
+                        sample,
+                        paneLo: key.lo,
+                        paneHi: key.hi,
+                        displayHandle: displayHandle
+                    )
+                }
                 secondaryLiveHosts[key] = host
                 addSubview(host, positioned: .above, relativeTo: liveContent)
                 host.noteRegistryPolled()
@@ -124,6 +144,10 @@ final class PaneLayoutView: NSView {
         for key in secondaryLiveHosts.keys where !keep.contains(key) {
             secondaryLiveHosts.removeValue(forKey: key)?.removeFromSuperview()
         }
+        for key in trackedLayoutEpochPanes where !currentLayoutEpochPanes.contains(key) {
+            layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
+        }
+        trackedLayoutEpochPanes = currentLayoutEpochPanes
         needsLayout = true
     }
 

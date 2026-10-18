@@ -523,6 +523,8 @@ final class SeyalHostUITests: XCTestCase {
             XCTFail("both PTYs must resize while the secondary Pane remains unfocused")
             return
         }
+        XCTAssertTrue(processIsAlive(firstAfter.shellPID), "first shell must remain live after both PTY samples")
+        XCTAssertTrue(processIsAlive(secondAfter.shellPID), "second shell must remain live after both PTY samples")
         XCTAssertNotEqual(firstAfter.1, firstBefore.1, "focused Pane PTY columns must follow layout")
         XCTAssertNotEqual(
             secondAfter.1,
@@ -576,6 +578,14 @@ final class SeyalHostUITests: XCTestCase {
             XCTFail("both PTYs must follow the divider change while the secondary Pane stays unfocused")
             return
         }
+        XCTAssertTrue(
+            processIsAlive(firstAfterDivider.shellPID),
+            "first shell must remain live after both divider-resize samples"
+        )
+        XCTAssertTrue(
+            processIsAlive(secondAfterDivider.shellPID),
+            "second shell must remain live after both divider-resize samples"
+        )
         XCTAssertNotEqual(firstAfterDivider.columns, secondAfterDivider.columns)
         XCTAssertEqual(firstAfterDivider.shellPID, firstBefore.shellPID)
         XCTAssertEqual(secondAfterDivider.shellPID, secondBefore.shellPID)

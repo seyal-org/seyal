@@ -857,7 +857,11 @@ final class SeyalHostComponentTests: XCTestCase {
             viewport: CGRect(x: 0, y: 0, width: 500, height: 300),
             cellSize: CGSize(width: 10, height: 20)
         )
-        XCTAssertTrue(initial.beginsMeaningfulEpoch(after: nil))
+        var tracker = PaneLayoutGeometryEpochTracker()
+        XCTAssertTrue(tracker.observe(initial, paneLo: 1, paneHi: 2, displayHandle: 7))
+        // Removing/recreating a secondary host after a focus round trip must
+        // preserve the Pane's retry epoch for an identical layout sample.
+        XCTAssertFalse(tracker.observe(initial, paneLo: 1, paneHi: 2, displayHandle: 7))
         XCTAssertFalse(initial.beginsMeaningfulEpoch(after: initial))
 
         let resizedViewport = PaneLayoutGeometrySample(
@@ -865,6 +869,12 @@ final class SeyalHostComponentTests: XCTestCase {
             cellSize: initial.cellSize
         )
         XCTAssertTrue(resizedViewport.beginsMeaningfulEpoch(after: initial))
+        XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 7))
+        XCTAssertFalse(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 7))
+
+        XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 8))
+        tracker.removePane(paneLo: 1, paneHi: 2)
+        XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 8))
 
         let changedCellMetrics = PaneLayoutGeometrySample(
             viewport: initial.viewport,
