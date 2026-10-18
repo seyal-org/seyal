@@ -195,6 +195,7 @@ impl Runtime {
             .block_timeline
             .records()
             .map(|record| CommandBlock {
+                duration_ns: None,
                 id: record.id.raw(),
                 command: record.command.clone(),
                 start_line: record.start_line,

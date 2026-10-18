@@ -650,6 +650,7 @@ fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
 #[test]
 fn runtime_block_from_command_preserves_protocol_lifecycle() {
     let running = CommandBlock {
+        duration_ns: None,
         id: 7,
         command: "echo hi".into(),
         start_line: 3,
@@ -666,6 +667,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
     assert_eq!(projected.id, BlockId::from_bytes(expected));
 
     let failed = CommandBlock {
+        duration_ns: None,
         id: 8,
         command: "false".into(),
         start_line: 4,

@@ -20,9 +20,11 @@ pub const CAP_OBSERVER: u32 = 1 << 1;
 pub const CAP_COMMAND_BLOCKS: u32 = 1 << 4;
 /// Peer accepts Candidate-D grapheme display v2 (types 27/28, schema 2).
 pub const CAP_GRAPHEME_DISPLAY: u32 = 1 << 6;
+/// Peer accepts duration-capable `BlockTimeline` records (ADR-009 2026-09-19
+/// amendment, SPEC-008 §5.4). Valid only together with `CAP_COMMAND_BLOCKS`.
+pub const CAP_COMMAND_BLOCK_DURATION: u32 = 1 << 8;
 /// Peer accepts Runtime→client primary viewport LineId vectors (type 35) so
 /// Flow live-tail can map Block `start_line` onto prepared-frame rows.
-/// Bit 8 is reserved by accepted ADR-009 for `CAP_COMMAND_BLOCK_DURATION`.
 pub const CAP_VIEWPORT_LINE_IDS: u32 = 1 << 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
