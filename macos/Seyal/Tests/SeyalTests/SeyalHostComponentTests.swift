@@ -821,6 +821,38 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testSuppressedBridgeRecoveryKeepsSecondaryMetalPresentationEnabled() {
+        let view = MetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "secondary-live-test",
+            allowsImplicitExecutionBootstrap: false
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        view.bridge?.stop()
+        view.bridge = nil
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 160, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.orderFrontRegardless()
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.updateVisibility()
+
+        XCTAssertTrue(view.renderer.visible, "recovery suppression must not hide an attached live surface")
+        XCTAssertNotNil(view.metalDisplayLinkLease, "secondary live surface must keep its Metal presenter")
+        XCTAssertNil(view.bridge, "secondary host presentation must not create a Runtime bridge")
+    }
+
+    @MainActor
     private func withNativeIMEView(
         _ body: (InteractiveMetalSurfaceView, NSWindow) throws -> Void
     ) rethrows {
