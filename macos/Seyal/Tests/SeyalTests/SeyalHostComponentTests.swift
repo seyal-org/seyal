@@ -854,7 +854,7 @@ final class SeyalHostComponentTests: XCTestCase {
 
     func testPaneGeometryOnlyStartsANewEpochForChangedLayoutSamples() {
         let initial = PaneLayoutGeometrySample(
-            viewport: CGRect(x: 0, y: 0, width: 500, height: 300),
+            viewportSize: CGSize(width: 500, height: 300),
             cellSize: CGSize(width: 10, height: 20)
         )
         var tracker = PaneLayoutGeometryEpochTracker()
@@ -863,9 +863,14 @@ final class SeyalHostComponentTests: XCTestCase {
         // preserve the Pane's retry epoch for an identical layout sample.
         XCTAssertFalse(tracker.observe(initial, paneLo: 1, paneHi: 2, displayHandle: 7))
         XCTAssertFalse(initial.beginsMeaningfulEpoch(after: initial))
+        let movedWithoutResize = PaneLayoutGeometrySample(
+            viewportSize: initial.viewportSize,
+            cellSize: initial.cellSize
+        )
+        XCTAssertFalse(movedWithoutResize.beginsMeaningfulEpoch(after: initial))
 
         let resizedViewport = PaneLayoutGeometrySample(
-            viewport: CGRect(x: 0, y: 0, width: 600, height: 300),
+            viewportSize: CGSize(width: 600, height: 300),
             cellSize: initial.cellSize
         )
         XCTAssertTrue(resizedViewport.beginsMeaningfulEpoch(after: initial))
@@ -877,7 +882,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 8))
 
         let changedCellMetrics = PaneLayoutGeometrySample(
-            viewport: initial.viewport,
+            viewportSize: initial.viewportSize,
             cellSize: CGSize(width: 11, height: 20)
         )
         XCTAssertTrue(changedCellMetrics.beginsMeaningfulEpoch(after: initial))

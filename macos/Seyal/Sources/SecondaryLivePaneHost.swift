@@ -1,12 +1,12 @@
 import AppKit
 
 struct PaneLayoutGeometrySample: Equatable {
-    let viewport: CGRect
+    let viewportSize: CGSize
     let cellSize: CGSize
 
     func beginsMeaningfulEpoch(after previous: PaneLayoutGeometrySample?) -> Bool {
         guard let previous else { return true }
-        return viewport != previous.viewport || cellSize != previous.cellSize
+        return viewportSize != previous.viewportSize || cellSize != previous.cellSize
     }
 }
 
@@ -131,7 +131,10 @@ final class SecondaryLivePaneHost: NSView {
         let rounded = bounds.integral
         let cell = surface.terminalPresentationCellSize()
         guard cell.width > 0, cell.height > 0 else { return }
-        let sample = PaneLayoutGeometrySample(viewport: rounded, cellSize: cell)
+        let sample = PaneLayoutGeometrySample(
+            viewportSize: CGSize(width: rounded.width, height: rounded.height),
+            cellSize: cell
+        )
         let beginsMeaningfulEpoch = beginsLayoutEpoch?(sample, displayHandle)
             ?? sample.beginsMeaningfulEpoch(after: lastObservedLayoutSample)
         lastObservedLayoutSample = sample
