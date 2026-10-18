@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by #1041 (not normative until a separate acceptance PR)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment accepted on merge of its acceptance PR under #1041 (proposed by PR #1045)
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24, accepted 2026-10-18
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -54,7 +54,8 @@ that structured command entry is safe.
 
 In Flow:
 
-- terminal output is visible only inside the appropriate Block output regions;
+- terminal output is visible only inside the appropriate Block output regions
+  and, when that Block's `prompt_line` is `Some`, its context region;
 - the current/running command's live tail is rendered inside its running Block,
   not as an independent full-Pane primary-grid viewport;
 - the Pane composer owns supported structured command entry;
@@ -343,8 +344,10 @@ never causes a state transition or Block mutation.
   as the first statement of `precmd`.
 
 The `C` marker carries no command text. Runtime already owns the submitted
-text of the pending composer command and uses it as the Block header; the
-shell is not asked to repeat it. The parser accepts exactly these three
+text of the pending composer command and uses it as the Block's command
+identity; Flow shows it as a visible header only when the Block's
+`prompt_line` is `None` (2026-09-24 prompt-anchor amendment). The shell is not
+asked to repeat it. The parser accepts exactly these three
 shapes — one 32-hex-digit field for `A` and `C`, a 32-hex-digit field and a
 decimal field for `D` — and treats anything else under `133;` as deferred,
 as today. Hooks emit BEL as the terminator; the parser continues to accept
@@ -594,7 +597,8 @@ hostage by costs outside this mechanism:
    structured command-entry state and no active secret/raw/interactive/TUI state.
 8. Flow, Raw and TUI are mutually exclusive user-visible presentations of the
    same execution. No mode transition recreates the PTY/VT/ExecutionId.
-9. In Flow, terminal pixels are clipped/composed into Block output regions;
+9. In Flow, terminal pixels are clipped/composed into Block output regions
+   and, when that Block's `prompt_line` is `Some`, its context region;
    there is no independent full-Pane primary-grid viewport or raw cursor behind
    the transcript.
 10. In Flow, empty/noninteractive Block space must not route arbitrary keyboard,
@@ -655,7 +659,8 @@ correctness contracts.
 - disposable client Block cache keyed by `ExecutionId` and `BlockId`;
 - explicit Pane presentation state: `Flow | Raw | TUI`;
 - presentation/input epoch or equivalent stale-callback fence;
-- Flow compositor that clips terminal-derived pixels to Block output regions;
+- Flow compositor that clips terminal-derived pixels to Block output regions
+  and, when that Block's `prompt_line` is `Some`, its context region;
 - composer eligibility/focus state and explicit execute action;
 - Raw full-Pane input/render path without coexisting Block interaction;
 - TUI takeover transition driven by canonical alternate/full-screen state;
@@ -696,7 +701,8 @@ The presentation layer must be corrected so:
 - first-responder/IME/mouse/input ownership follows the active presentation and
   transitions through the required fence;
 - tests assert mode exclusivity, stale-event rejection and the absence of
-  terminal pixels/input outside Flow Block output regions.
+  terminal pixels/input outside Flow Block output regions and, when that
+  Block's `prompt_line` is `Some`, its context region.
 
 Issue #858 / PR #859 (`8d08f2f`) accepted this architecture correction.
 Production presentation implementation follows in separate TDD Issues after the
@@ -948,15 +954,12 @@ integration, or trusted remote-shell Blocks that would expand this boundary.
 
 ## 2026-09-24 amendment — Block prompt anchor and terminal-truth context line (#1041)
 
-**Status:** Proposed by #1041. This section is **not normative**, before or
-after the PR that adds it merges. Merging that PR records the proposal only.
-The section becomes accepted and normative only when a separate acceptance PR
-for #1041 records the evidence listed under "Acceptance gates", applies the
-accepted-text changes listed under "Accepted-text changes on acceptance", and
-changes this status line. Until then, the Decision, the Normative invariants
-(including invariant 9) and the Required seam above remain the only authority.
-Product code, wire changes and SPEC-008 edits stay out of scope until
-acceptance.
+**Status:** Accepted 2026-10-18 on merge of its acceptance PR under #1041
+(proposed by PR #1045). The acceptance gates below are met; the evidence,
+including corrected edge-case expectations and recorded limits, is in
+[`m003-1041-prompt-anchor-acceptance.md`](../evidence/m003-1041-prompt-anchor-acceptance.md).
+This section is normative. Product code, the wire capability and SPEC-008
+edits land under #1042.
 
 ### Problem
 
@@ -989,8 +992,9 @@ Keep the Block output range exactly as defined (`[start_line, end_line]` from
    becomes `None` if bounded history evicts that line.
 4. The rows `[prompt_line, start_line)` are the Block's **context region**.
    They contain the shell's prompt row(s) and the shell's own echo of the
-   submitted command line (including any continuation-prompt rows of a
-   multi-line command). Flow may present them as the same canonical rows,
+   submitted command line. A multi-line composer submission is sent as a
+   bracketed paste, which zsh echoes on one row, so no continuation-prompt
+   rows occur through the composer (acceptance evidence). Flow may present them as the same canonical rows,
    drawn by the same Pane Metal compositor into a second registered clip for
    that Block. They are never copied text, never a second grid, and never
    part of "copy output".
@@ -1035,6 +1039,10 @@ Keep the Block output range exactly as defined (`[start_line, end_line]` from
    top-screen-row case (`cursor.row == 0`) where the completion line cannot
    back up and would otherwise equal `start_line`. `output_empty` describes
    what the output region shows at `D`, not how many bytes were written.
+   With zsh's default `PROMPT_SP`, the shell blanks a row left by output
+   ending in a bare carriage return before `precmd` emits `D`, so `printf
+   'abc\r'` is empty there (`true`); with `PROMPT_SP` unset that row keeps
+   `abc` (`false`). The rule is the same in both cases.
    Output that is later erased (`printf 'abc\r\033[K'`) leaves nothing to
    present or copy, so it is also empty. The check is one bounded scan of one
    row at `D` recognition, not per-byte tracking. Clients then present a Block
@@ -1047,8 +1055,10 @@ encoding, and `output_empty: bool` for completed records (always `false` while
 running). It is negotiated exactly like the duration amendment: a
 ClientHello/ServerHello capability bit selects the extended record. Without the
 bit, Runtime sends the existing shape. A capability without command Blocks is a
-protocol error. Mixed-version fallback composes after the duration and
-extended-key fallbacks in that fixed order, adding at most one attempt.
+protocol error. Mixed-version fallback adds one step to the composed ClientHello
+chain (ADR-009 2026-10-18 amendment, #1355): the prompt-anchor bit is removed
+first, then the duration, viewport-LineIds and extended-key steps follow in
+their fixed order, adding at most one attempt.
 Per-record growth is bounded to one optional `LineId` and one flag byte.
 
 ### Invariants
@@ -1089,11 +1099,14 @@ that ADR-009 never states both rules at once:
 - Multi-line command submission (continuation-prompt rows inside the context
   region).
 - `PROMPT_SP` and partial-line output; output ending in a bare carriage
-  return (`printf 'abc\r'` must give `output_empty == false`; `printf
-  'abc\r\033[K'` gives `true`).
+  return (`printf 'abc\r'` gives `output_empty == false` with `PROMPT_SP`
+  unset and `true` under zsh's default `PROMPT_SP`, which blanks the row;
+  `printf 'abc\r\033[K'` gives `true`).
 - Transient and right prompts.
 - `clear` or `reset` between `A` and `C`.
-- `A`, `C` and `D` parsed in one PTY read.
+- `A`, `C` and `D` parsed in one PTY read (impossible by construction: a
+  composer submission is admitted only after Runtime has already observed the
+  trusted `A`, and a fresh `A` while `Pending` drops it).
 - Zero-output commands (`output_empty`, never a stuck Running Block),
   including one that starts on the top screen row.
 - Prompt row evicted from bounded history.
@@ -1103,7 +1116,7 @@ that ADR-009 never states both rules at once:
 
 ### Acceptance gates
 
-#1041 stays open, and this section stays Proposed, until:
+Met on acceptance (evidence linked in the Status line):
 
 - the edge-case experiments above have run;
 - the security review of forged or unauthenticated `A` is done;
@@ -1111,6 +1124,17 @@ that ADR-009 never states both rules at once:
   measured;
 - PR #1059 (Block Component design) has merged;
 - a human accepts the amendment in the acceptance PR.
+
+### Known limits (accepted)
+
+- A submission racing shell start is echoed by the kernel onto the stamped
+  row, because composer eligibility opens at `A` before zsh's line editor is
+  in raw mode; the context region then shows that stray canonical row. Tracked
+  separately in #1358.
+- A prompt that clears or redraws the screen can erase the command echo; the
+  context region then lacks the command text and decision 5 suppresses the
+  header. Copy command, Rerun and accessibility keep Runtime's command
+  identity. Detecting this would require prompt scraping.
 
 ### Alternatives considered
 
