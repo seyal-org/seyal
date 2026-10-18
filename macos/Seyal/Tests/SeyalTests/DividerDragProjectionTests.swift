@@ -8,13 +8,9 @@ import XCTest
 /// re-projects regions and dividers from Rust.
 @MainActor
 final class DividerDragProjectionTests: XCTestCase {
+    /// Retains the offscreen host window for the test; each test method runs
+    /// on its own XCTestCase instance, and the window is never ordered front.
     private var window: NSWindow?
-
-    override func tearDown() {
-        window?.orderOut(nil)
-        window = nil
-        super.tearDown()
-    }
 
     /// A windowed host so divider drags convert real window coordinates.
     private func makeHost() -> ProductChromeHostView {
