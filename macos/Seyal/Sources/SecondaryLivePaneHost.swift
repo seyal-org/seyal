@@ -1,5 +1,15 @@
 import AppKit
 
+struct PaneLayoutGeometrySample: Equatable {
+    let viewport: CGRect
+    let cellSize: CGSize
+
+    func beginsMeaningfulEpoch(after previous: PaneLayoutGeometrySample?) -> Bool {
+        guard let previous else { return true }
+        return viewport != previous.viewport || cellSize != previous.cellSize
+    }
+}
+
 /// Thin Metal host for a non-focused live Pane leaf (#936).
 ///
 /// The ApplicationRoot already owns the Controller in the bridge registry
@@ -14,8 +24,7 @@ final class SecondaryLivePaneHost: NSView {
     var onFocus: (() -> Void)?
     private(set) var displayHandle: UInt64
     private let surface: MetalSurfaceView
-    private var lastProposedGeometry = CGRect.null
-    private var lastProposedCellSize = CGSize.zero
+    private var lastObservedLayoutSample: PaneLayoutGeometrySample?
 
     init(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64) {
         self.appHandle = appHandle
@@ -89,12 +98,14 @@ final class SecondaryLivePaneHost: NSView {
               bounds.width > 8, bounds.height > 8 else { return }
         let rounded = bounds.integral
         let cell = surface.terminalPresentationCellSize()
-        guard cell.width > 0, cell.height > 0,
-              rounded != lastProposedGeometry || cell != lastProposedCellSize else { return }
+        guard cell.width > 0, cell.height > 0 else { return }
+        let sample = PaneLayoutGeometrySample(viewport: rounded, cellSize: cell)
+        let beginsMeaningfulEpoch = sample.beginsMeaningfulEpoch(after: lastObservedLayoutSample)
+        lastObservedLayoutSample = sample
         // Only point-space viewport and permanent renderer metrics cross the
         // ABI. Rust derives the grid and verifies the Pane → ExecutionId before
         // its own client submits the correlated SPEC-004 resize.
-        let result = seyal_app_propose_pane_geometry(
+        _ = seyal_app_propose_pane_geometry(
             appHandle,
             paneLo,
             paneHi,
@@ -104,12 +115,8 @@ final class SecondaryLivePaneHost: NSView {
             0,
             Double(cell.width),
             Double(cell.height),
-            1
+            beginsMeaningfulEpoch ? 1 : 0
         )
-        if result == 0 {
-            lastProposedGeometry = rounded
-            lastProposedCellSize = cell
-        }
     }
 
     @available(*, unavailable)
@@ -120,8 +127,7 @@ final class SecondaryLivePaneHost: NSView {
     func updateDisplayHandle(_ handle: UInt64) {
         guard handle != 0, handle != displayHandle else { return }
         displayHandle = handle
-        lastProposedGeometry = .null
-        lastProposedCellSize = .zero
+        lastObservedLayoutSample = nil
         needsLayout = true
         publishFrame()
     }

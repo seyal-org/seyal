@@ -852,6 +852,27 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNil(view.bridge, "secondary host presentation must not create a Runtime bridge")
     }
 
+    func testPaneGeometryOnlyStartsANewEpochForChangedLayoutSamples() {
+        let initial = PaneLayoutGeometrySample(
+            viewport: CGRect(x: 0, y: 0, width: 500, height: 300),
+            cellSize: CGSize(width: 10, height: 20)
+        )
+        XCTAssertTrue(initial.beginsMeaningfulEpoch(after: nil))
+        XCTAssertFalse(initial.beginsMeaningfulEpoch(after: initial))
+
+        let resizedViewport = PaneLayoutGeometrySample(
+            viewport: CGRect(x: 0, y: 0, width: 600, height: 300),
+            cellSize: initial.cellSize
+        )
+        XCTAssertTrue(resizedViewport.beginsMeaningfulEpoch(after: initial))
+
+        let changedCellMetrics = PaneLayoutGeometrySample(
+            viewport: initial.viewport,
+            cellSize: CGSize(width: 11, height: 20)
+        )
+        XCTAssertTrue(changedCellMetrics.beginsMeaningfulEpoch(after: initial))
+    }
+
     @MainActor
     private func withNativeIMEView(
         _ body: (InteractiveMetalSurfaceView, NSWindow) throws -> Void
