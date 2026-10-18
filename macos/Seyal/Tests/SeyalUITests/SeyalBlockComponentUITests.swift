@@ -88,6 +88,55 @@ final class SeyalBlockComponentUITests: XCTestCase {
     /// Keyboard reachability: select a Block via AX press (Rust SelectBlock),
     /// then confirm seam actions are labelled and in the accessibility tree.
     /// Block-to-Block ⌘↑/⌘↓ is deliberately not covered — deferred to SPEC-024.
+    /// #1010 Done gate (design §11): the headed Block-content matrix in both
+    /// appearances, with Metal-composited output cells painted in the same
+    /// Rust canvas colour as the Block surface (#1062 / PR #1305).
+    func testBlockContentMatrixInDarkAndLightAppearance() throws {
+        try requireZshLoginShell()
+        for appearance in ["dark", "light"] {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("seyal-1010-\(appearance)-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let config = dir.appendingPathComponent("config.toml")
+            try "[ui]\nappearance = \"\(appearance)\"\n".write(to: config, atomically: true, encoding: .utf8)
+
+            let app = XCUIApplication()
+            app.launchIsolatedHost(environment: ["SEYAL_CONFIG": config.path])
+            waitForUsablePty(in: app)
+            submitComposerCommand(app, "printf 'seyal-1010-alpha\\nseyal-1010-beta\\n'")
+            submitComposerCommand(app, "ls /seyal-1010-missing")
+            let success = app.descendants(matching: .any)["seyal-block-0"].firstMatch
+            let failed = app.descendants(matching: .any)["seyal-block-1"].firstMatch
+            XCTAssertTrue(success.waitForExistence(timeout: 10), "\(appearance): success Block missing")
+            XCTAssertTrue(failed.waitForExistence(timeout: 10), "\(appearance): failed Block missing")
+            waitBriefly(1.0)
+            assertMetalCellsMatchBlockCanvas(app, block: success, appearance: appearance)
+            attachScreenshot(app, name: "1010-content-\(appearance)-rest")
+
+            success.hover()
+            let copy = success.descendants(matching: .any)["seyal-block-action-copy"].firstMatch
+            XCTAssertTrue(copy.waitForExistence(timeout: 3), "\(appearance): hover reveals quick actions")
+            attachScreenshot(app, name: "1010-content-\(appearance)-hover")
+            copy.click()
+            attachScreenshot(app, name: "1010-content-\(appearance)-copy-menu")
+            app.typeKey(.escape, modifierFlags: [])
+
+            success.click()
+            let selected = expectation(
+                for: NSPredicate(format: "value == 'selected'"), evaluatedWith: success, handler: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 5), .completed)
+            attachScreenshot(app, name: "1010-content-\(appearance)-selected")
+
+            submitComposerCommand(app, "sleep 30")
+            let running = app.descendants(matching: .any)["seyal-block-2"].firstMatch
+            XCTAssertTrue(running.waitForExistence(timeout: 10), "\(appearance): running Block missing")
+            waitBriefly(0.5)
+            attachScreenshot(app, name: "1010-content-\(appearance)-running")
+            app.terminate()
+        }
+    }
+
     func testBlockKeyboardAndVoiceOverReachability() throws {
         try requireZshLoginShell()
         let app = XCUIApplication()
@@ -173,6 +222,47 @@ final class SeyalBlockComponentUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [usable], timeout: timeout), .completed,
             "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
+    }
+
+    /// Compare a Metal-composited output cell (an empty cell right of the
+    /// printed text on the Block's last output row) with the Block surface
+    /// (top-line padding, AppKit). Both must be the Rust canvas colour, and
+    /// the canvas brightness must match the requested appearance.
+    private func assertMetalCellsMatchBlockCanvas(
+        _ app: XCUIApplication, block: XCUIElement, appearance: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let window = app.windows.firstMatch
+        guard let image = window.screenshot().image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { return XCTFail("window screenshot unavailable", file: file, line: line) }
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        let frame = window.frame
+        let scale = CGFloat(image.width) / frame.width
+        func sample(_ point: CGPoint) -> NSColor? {
+            let x = Int(((point.x - frame.minX) * scale).rounded(.down))
+            let y = Int(((point.y - frame.minY) * scale).rounded(.down))
+            return bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+        }
+        let rect = block.frame
+        guard
+            let canvas = sample(CGPoint(x: rect.minX + 6, y: rect.minY + 6)),
+            let cell = sample(CGPoint(x: rect.minX + 14 + 260, y: rect.maxY - 14))
+        else { return XCTFail("pixels outside the screenshot", file: file, line: line) }
+        let delta = max(
+            abs(canvas.redComponent - cell.redComponent),
+            abs(canvas.greenComponent - cell.greenComponent),
+            abs(canvas.blueComponent - cell.blueComponent))
+        XCTAssertLessThanOrEqual(
+            delta, 8.0 / 255.0,
+            "\(appearance): Metal cell \(cell) must match the Block canvas \(canvas)",
+            file: file, line: line)
+        let luminance = 0.2126 * canvas.redComponent + 0.7152 * canvas.greenComponent
+            + 0.0722 * canvas.blueComponent
+        if appearance == "light" {
+            XCTAssertGreaterThan(luminance, 0.6, "light canvas expected; got \(canvas)", file: file, line: line)
+        } else {
+            XCTAssertLessThan(luminance, 0.4, "dark canvas expected; got \(canvas)", file: file, line: line)
+        }
     }
 
     private func attachScreenshot(_ app: XCUIApplication, name: String) {
