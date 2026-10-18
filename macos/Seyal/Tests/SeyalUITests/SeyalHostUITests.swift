@@ -382,6 +382,19 @@ final class SeyalHostUITests: XCTestCase {
             return (rows, columns)
         }
 
+        func processIsAlive(_ pid: Int) -> Bool {
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: "/bin/kill")
+            probe.arguments = ["-0", "\(pid)"]
+            do {
+                try probe.run()
+                probe.waitUntilExit()
+                return probe.terminationStatus == 0
+            } catch {
+                return false
+            }
+        }
+
         guard let firstBefore = runSize(
             in: firstRegion,
             activating: firstRegion,
@@ -452,6 +465,7 @@ final class SeyalHostUITests: XCTestCase {
             in region: XCUIElement,
             displayedBy displayElement: XCUIElement,
             file: URL,
+            shellPIDFile: URL,
             previous: (rows: Int, columns: Int, shellPID: Int),
             requireUnfocused: Bool
         ) -> (rows: Int, columns: Int, shellPID: Int)? {
@@ -459,10 +473,17 @@ final class SeyalHostUITests: XCTestCase {
             while Date() < deadline {
                 if let output = try? String(contentsOf: file, encoding: .utf8) {
                     let fields = output.split(whereSeparator: \.isWhitespace)
+                    let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8)
+                    let shellPID = shellPIDValue.flatMap {
+                        Int($0.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
                     if fields.count == 2,
                        let rows = Int(fields[0]),
                        let columns = Int(fields[1]),
                        let projection = projectedSize(from: displayElement),
+                       let shellPID,
+                       shellPID == previous.shellPID,
+                       processIsAlive(shellPID),
                        (rows != previous.rows || columns != previous.columns),
                        projection.rows == rows,
                        projection.columns == columns
@@ -486,6 +507,7 @@ final class SeyalHostUITests: XCTestCase {
             in: firstRegion,
             displayedBy: primarySurface,
             file: firstFile,
+            shellPIDFile: firstShellPIDFile,
             previous: firstBefore,
             requireUnfocused: false
         ),
@@ -493,6 +515,7 @@ final class SeyalHostUITests: XCTestCase {
                   in: secondRegion,
                   displayedBy: secondaryHost,
                   file: secondFile,
+                  shellPIDFile: secondShellPIDFile,
                   previous: secondBefore,
                   requireUnfocused: true
               )
@@ -537,6 +560,7 @@ final class SeyalHostUITests: XCTestCase {
             in: firstRegion,
             displayedBy: primarySurface,
             file: firstFile,
+            shellPIDFile: firstShellPIDFile,
             previous: firstAfter,
             requireUnfocused: false
         ),
@@ -544,6 +568,7 @@ final class SeyalHostUITests: XCTestCase {
                   in: secondRegion,
                   displayedBy: secondaryHost,
                   file: secondFile,
+                  shellPIDFile: secondShellPIDFile,
                   previous: secondAfter,
                   requireUnfocused: true
               )
