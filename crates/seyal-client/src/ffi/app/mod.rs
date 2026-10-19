@@ -1,6 +1,4 @@
-//! Versioned one-Pane application-root C ABI.
-//!
-//! C entry points stay here; decode/encode/pane_region/visual siblings keep each
+//! Versioned one-Pane application-root C ABI. Focused siblings keep each
 //! responsibility reviewable without changing published symbols.
 
 mod block_projection;
@@ -8,6 +6,7 @@ mod decode;
 mod encode;
 mod error_code;
 mod loss;
+pub mod pane_recovery;
 mod pane_region;
 mod shortcut;
 mod visual;

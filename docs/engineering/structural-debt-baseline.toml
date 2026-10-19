@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1091
+ceiling_loc = 1090
 issue = 1123
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps the typed per-Pane geometry and recovery ABI exports in pane_region.rs."
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
