@@ -61,16 +61,8 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
-        if self.pane_recovery.primary_pane.is_none() {
-            self.pane_recovery.primary_pane = Some(fence.pane);
-        }
         self.pane_client_raws.insert(fence.pane, handle);
-        self.pane_recovery
-            .runtime_ids
-            .insert(fence.pane, runtime_id);
-        if self.pane_recovery.primary_pane.is_none() {
-            self.pane_recovery.primary_pane = Some(fence.pane);
-        }
+        self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -99,9 +91,7 @@ impl ApplicationRoot {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
-        self.pane_recovery
-            .runtime_ids
-            .insert(fence.pane, runtime_id);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -146,12 +136,7 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
-        self.pane_recovery
-            .runtime_ids
-            .insert(fence.pane, runtime_id);
-        if self.pane_recovery.primary_pane.is_none() {
-            self.pane_recovery.primary_pane = Some(fence.pane);
-        }
+        self.remember_pane_runtime(fence.pane, runtime_id);
         crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
@@ -293,61 +278,6 @@ impl ApplicationRoot {
         raws.into_iter()
             .filter(|raw| crate::ffi::client_registry_contains(*raw))
             .count()
-    }
-
-    /// Propose point-space geometry for one Pane through its own attached
-    /// Controller. Rust resolves the active Pane binding, derives the grid,
-    /// and the existing client resize state machine fences Runtime results
-    /// against authoritative projections (SPEC-004 / SPEC-006).
-    #[allow(clippy::too_many_arguments)]
-    pub fn propose_pane_geometry(
-        &mut self,
-        pane: PaneId,
-        viewport_width: f64,
-        viewport_height: f64,
-        horizontal_insets: f64,
-        vertical_insets: f64,
-        cell_width: f64,
-        cell_height: f64,
-        meaningful_layout_epoch: bool,
-    ) -> Result<(), AppError> {
-        let geometry = crate::derive_grid_geometry(
-            viewport_width,
-            viewport_height,
-            horizontal_insets,
-            vertical_insets,
-            cell_width,
-            cell_height,
-        )
-        .ok_or(AppError::InvalidPayload)?;
-        let shell = self.shell.snapshot();
-        let execution = shell
-            .panes
-            .iter()
-            .find(|row| row.id == pane)
-            .ok_or(AppError::UnknownPane)?
-            .execution
-            .ok_or(AppError::UnboundUnauthorized)?;
-        let handle = self
-            .pane_client_raws
-            .get(&pane)
-            .copied()
-            .ok_or(AppError::NoLiveClient)?;
-        let Some(result) = crate::ffi::with_client_mut(handle, |client| {
-            if client.execution_id() != execution {
-                return Err(AppError::StaleExecution);
-            }
-            client
-                .set_desired_geometry_for_layout(geometry, meaningful_layout_epoch)
-                .map_err(|error| match error {
-                    crate::ClientError::LostController => AppError::NotController,
-                    crate::ClientError::InvalidGeometry => AppError::InvalidPayload,
-                    _ => AppError::NoLiveClient,
-                })
-        }) else {
-            return Err(AppError::NoLiveClient);
-        };
-        result
     }
 
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
@@ -540,9 +470,7 @@ impl ApplicationRoot {
         };
         self.pane_authorities.insert(fence.pane, authority);
         self.bind_pane_recovery(fence.pane, evidence.execution);
-        if self.pane_recovery.primary_pane.is_none() {
-            self.pane_recovery.primary_pane = Some(fence.pane);
-        }
+        self.remember_primary_pane(fence.pane);
         self.authority = Some(authority);
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();

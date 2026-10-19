@@ -184,7 +184,7 @@ impl ApplicationRoot {
             self.extra_pane_clients.insert(pane, registered);
         }
         self.pane_client_raws.insert(pane, raw);
-        self.pane_recovery.runtime_ids.insert(pane, runtime_id);
+        self.remember_pane_runtime(pane, runtime_id);
 
         let attach = self.complete_create_attach_and_bind(request_id, evidence.attachment);
         match attach {
@@ -255,9 +255,7 @@ impl ApplicationRoot {
             return Err(AppError::StaleExecution);
         }
         self.bind_pane_recovery(pane, evidence.execution);
-        if self.pane_recovery.primary_pane.is_none() {
-            self.pane_recovery.primary_pane = Some(pane);
-        }
+        self.remember_primary_pane(pane);
         let authority = PaneAuthority {
             pane,
             execution: evidence.execution,

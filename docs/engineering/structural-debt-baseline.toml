@@ -42,9 +42,9 @@ reason = "SPEC-022 §6 focus history store and its state-transition proofs stay 
 
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1043
+ceiling_loc = 1040
 issue = 1123
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, and #1144 adds activation-failure routing beside the existing action table."
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, #1144 adds activation-failure routing beside the existing action table, and #936 moves Pane projection and recovery state to cohesive modules."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -54,15 +54,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 833
-issue = 1092
-reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, #1108 drains native window realization effects without adding a second provisioning authority, #1117 adds split rollback plus close-path focus-history lifecycle hooks and active-close successor authority restoration through focus_history_apply.rs, and #936 adds Runtime-authoritative per-Pane geometry proposals."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/app/session.rs"
-acknowledged_loc = 742
+acknowledged_loc = 859
 issue = 936
-reason = "Session composition keeps the Pane geometry proposal adjacent to its existing session-owned projection and resize lifecycle until a dedicated session/resize boundary is warranted."
+reason = "The existing create/close/terminate/split adapter now also binds per-Pane recovery state and invalidates it at the pane lifecycle boundary; focused terminate retains authority after registry loss but still fails closed unless the Controller client is live."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -78,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1094
+ceiling_loc = 1091
 issue = 1123
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 adds per-Pane geometry proposals while preserving typed Rust authority."
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps the typed per-Pane geometry and recovery ABI exports in pane_region.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"

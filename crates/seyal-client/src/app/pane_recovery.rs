@@ -210,6 +210,17 @@ impl PaneRecoveryQueue {
 }
 
 impl ApplicationRoot {
+    pub(super) fn remember_pane_runtime(&mut self, pane: PaneId, runtime_id: u128) {
+        self.pane_recovery.runtime_ids.insert(pane, runtime_id);
+        self.remember_primary_pane(pane);
+    }
+
+    pub(super) fn remember_primary_pane(&mut self, pane: PaneId) {
+        if self.pane_recovery.primary_pane.is_none() {
+            self.pane_recovery.primary_pane = Some(pane);
+        }
+    }
+
     pub(super) fn bind_pane_recovery(
         &mut self,
         pane: PaneId,
