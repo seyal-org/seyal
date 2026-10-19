@@ -1,5 +1,72 @@
 use super::{ApplicationRoot, PaneRecoveryExpectation, PaneRecoveryQueue, PaneRecoveryTarget};
+use crate::app::{AppAction, BindingEvidence};
 use seyal_core::{AttachmentId, ExecutionId, PaneId};
+
+fn make_primary_usable(root: &mut ApplicationRoot) {
+    use crate::recovery::{AttemptOutcome, RecoveryStage};
+    use std::time::Duration;
+
+    root.apply(AppAction::Bind {
+        fence: root.fence(),
+        evidence: BindingEvidence {
+            execution: ExecutionId::from_bytes([0x41; 16]),
+            attachment: AttachmentId::from_bytes([0x42; 16]),
+            controller: true,
+            pty_generation: 1,
+            alternate_screen: false,
+        },
+    })
+    .unwrap();
+    root.apply(AppAction::BeginRecovery {
+        now: Duration::ZERO,
+    })
+    .unwrap();
+    let generation = root.snapshot().recovery_generation;
+    root.apply(AppAction::CompleteRecovery {
+        generation,
+        outcome: AttemptOutcome::Opened {
+            handle: 0x43,
+            adopted: true,
+        },
+        now: Duration::from_millis(1),
+        launch: None,
+    })
+    .unwrap();
+    root.apply(AppAction::AdvanceRecoveryStage {
+        stage: RecoveryStage::RestoringInteraction,
+    })
+    .unwrap();
+    root.apply(AppAction::AdvanceRecoveryStage {
+        stage: RecoveryStage::Usable,
+    })
+    .unwrap();
+    root.apply(AppAction::BeginReconstructionAttempt).unwrap();
+    root.apply(AppAction::CommitReconstruction {
+        runtime: crate::recovery::ContinuityIdentity { low: 1, high: 2 },
+        execution: crate::recovery::ContinuityIdentity { low: 3, high: 4 },
+        attachment: crate::recovery::ContinuityIdentity { low: 5, high: 6 },
+        controller_authority_committed: true,
+        authoritative_snapshot_committed: true,
+    })
+    .unwrap();
+    assert!(
+        root.snapshot().composer_eligible,
+        "focused primary Pane must be healthy"
+    );
+}
+
+fn queue_secondary_loss(root: &mut ApplicationRoot, secondary: PaneId) -> PaneRecoveryTarget {
+    let target = root.bind_pane_recovery(secondary, ExecutionId::from_bytes([0x55; 16]));
+    root.pane_recovery.expectations.insert(
+        secondary,
+        PaneRecoveryExpectation {
+            runtime_id: 31,
+            attachment_id: AttachmentId::from_bytes([0x56; 16]),
+        },
+    );
+    assert!(root.pane_recovery.record_loss(target));
+    target
+}
 
 fn target(pane: u8, execution: u8, generation: u64) -> PaneRecoveryTarget {
     PaneRecoveryTarget::new(
@@ -168,17 +235,21 @@ fn primary_recovery_supersedes_an_active_pane_episode_and_pane_restarts_afterwar
     );
     root.pane_recovery.record_loss(target);
     assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
-    let pane_generation = root.recovery.state().generation;
+    let pane_generation = root.pane_recovery_state().generation;
     assert_eq!(root.pane_recovery_target(), Some(target));
 
     root.begin_recovery(Duration::from_millis(1)).unwrap();
     let primary_generation = root.recovery.state().generation;
-    assert_ne!(primary_generation, pane_generation);
+    assert_eq!(
+        primary_generation, pane_generation,
+        "equal numeric generations in separate scopes must remain independent"
+    );
     assert_eq!(
         root.begin_next_pane_recovery(Duration::from_millis(2)),
         None
     );
-    assert_eq!(root.pane_recovery.active(), Some(target));
+    assert_eq!(root.pane_recovery.active(), None);
+    assert_eq!(root.pane_recovery.pending_len(), 1);
     assert_eq!(root.pane_recovery_target(), None);
 
     // Once the primary episode settles, the unchanged Pane binding is
@@ -188,8 +259,306 @@ fn primary_recovery_supersedes_an_active_pane_episode_and_pane_restarts_afterwar
         root.begin_next_pane_recovery(Duration::from_millis(3)),
         Some(target)
     );
-    assert_ne!(root.recovery.state().generation, primary_generation);
+    assert_ne!(root.pane_recovery_state().generation, primary_generation);
     assert_eq!(root.pane_recovery_target(), Some(target));
+}
+
+#[test]
+fn primary_supersession_rejects_late_pane_completion_without_advancing_primary() {
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x94; 16]));
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+
+    root.begin_recovery(Duration::from_millis(1)).unwrap();
+    let primary_state = root.recovery.state();
+    let primary_effects = root.pending_recovery.clone();
+
+    // Swift compares the complete target pin, disconnects an opened stale
+    // handle directly, and does not send this completion into Rust.
+    assert_ne!(root.pane_recovery.active(), Some(target));
+    assert_eq!(root.recovery.state(), primary_state);
+    assert_eq!(root.pending_recovery, primary_effects);
+    assert!(root.pane_recovery.pending_effects.is_empty());
+}
+
+#[test]
+fn pane_effect_and_ack_reject_a_stale_numeric_generation() {
+    use crate::recovery::RecoveryEffect;
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x96; 16]));
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+    let generation = root.pane_recovery_state().generation;
+    assert!(matches!(
+        root.pane_recovery_effect(target, generation),
+        Some(RecoveryEffect::PerformAttempt { .. })
+    ));
+    assert_eq!(
+        root.pane_recovery_effect(target, generation.wrapping_sub(1)),
+        None
+    );
+    root.ack_pane_recovery_effect(target, generation.wrapping_sub(1));
+    assert!(
+        root.pane_recovery_effect(target, generation).is_some(),
+        "stale ack must leave the active effect queued"
+    );
+}
+
+#[test]
+fn duplicate_pane_completion_keeps_the_retry_schedule_queued() {
+    use crate::recovery::{AttemptOutcome, RecoveryEffect};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x97; 16]));
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+    let generation = root.pane_recovery_state().generation;
+    root.complete_pane_recovery(
+        target,
+        generation,
+        AttemptOutcome::Retryable,
+        Duration::from_millis(1),
+        None,
+    )
+    .unwrap();
+    let queued = root.pane_recovery.pending_effects.clone();
+    assert!(matches!(
+        queued.first(),
+        Some(RecoveryEffect::Schedule { .. })
+    ));
+
+    root.complete_pane_recovery(
+        target,
+        generation,
+        AttemptOutcome::Retryable,
+        Duration::from_millis(2),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(root.pane_recovery.pending_effects, queued);
+    assert!(matches!(
+        root.pane_recovery_effect(target, generation),
+        Some(RecoveryEffect::Schedule { .. })
+    ));
+}
+
+#[test]
+fn opened_rejection_terminalizes_without_stranding_disposal_when_no_sibling_is_active() {
+    use crate::recovery::{AttemptOutcome, RecoveryEffect, RecoveryStage};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x98; 16]));
+    root.pane_recovery.expectations.insert(
+        pane,
+        PaneRecoveryExpectation {
+            runtime_id: 1,
+            attachment_id: AttachmentId::from_bytes([0x99; 16]),
+        },
+    );
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+    let generation = root.pane_recovery_state().generation;
+
+    root.complete_pane_recovery(
+        target,
+        generation,
+        AttemptOutcome::Opened {
+            handle: 0x99,
+            adopted: false,
+        },
+        Duration::from_millis(1),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(root.pane_recovery.active(), None);
+    assert_eq!(root.pane_recovery_state().stage, RecoveryStage::Blocked);
+    assert!(root
+        .pane_recovery
+        .pending_effects
+        .iter()
+        .all(|effect| !matches!(effect, RecoveryEffect::DisposeHandle(_))));
+    assert_eq!(
+        root.pane_recovery_target_for_pane(pane),
+        Some((target, generation, true))
+    );
+}
+
+#[test]
+fn scheduled_fire_at_the_episode_deadline_releases_the_active_pane() {
+    use crate::recovery::{AttemptOutcome, RecoveryEffect, RecoveryStage, EPISODE_DEADLINE};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x9a; 16]));
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+    let generation = root.pane_recovery_state().generation;
+    root.complete_pane_recovery(
+        target,
+        generation,
+        AttemptOutcome::Retryable,
+        Duration::from_millis(1),
+        None,
+    )
+    .unwrap();
+    assert!(matches!(
+        root.pane_recovery.pending_effects.first(),
+        Some(RecoveryEffect::Schedule { .. })
+    ));
+
+    assert!(root.fire_pane_recovery(target, generation, EPISODE_DEADLINE));
+
+    assert_eq!(root.pane_recovery_state().stage, RecoveryStage::Exhausted);
+    assert_eq!(root.pane_recovery.active(), None);
+    assert_eq!(root.pane_recovery.pending_len(), 0);
+}
+
+#[test]
+fn secondary_episode_does_not_replace_a_usable_primary_coordinator() {
+    use crate::recovery::RecoveryStage;
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    make_primary_usable(&mut root);
+    let primary = root.recovery.state();
+    let secondary = PaneId::from_bytes([0x61; 16]);
+    let target = queue_secondary_loss(&mut root, secondary);
+
+    assert_eq!(
+        root.begin_next_pane_recovery(Duration::from_millis(2)),
+        Some(target)
+    );
+
+    assert_eq!(
+        root.recovery.state(),
+        primary,
+        "secondary recovery changed the primary coordinator"
+    );
+    assert_eq!(root.recovery.state().stage, RecoveryStage::Usable);
+    assert!(
+        root.snapshot().composer_eligible,
+        "focused healthy primary composer became ineligible"
+    );
+}
+
+#[test]
+fn secondary_execution_ended_does_not_end_focused_healthy_primary() {
+    use crate::recovery::{AttemptOutcome, RecoveryStage};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    make_primary_usable(&mut root);
+    let primary = root.recovery.state();
+    let primary_effects = root.pending_recovery.clone();
+    let focused = root.snapshot().shell.focused_pane;
+    let secondary = PaneId::from_bytes([0x62; 16]);
+    let target = queue_secondary_loss(&mut root, secondary);
+    assert_eq!(
+        root.begin_next_pane_recovery(Duration::from_millis(2)),
+        Some(target)
+    );
+    let pane_generation = root.pane_recovery_state().generation;
+
+    root.complete_pane_recovery(
+        target,
+        pane_generation,
+        AttemptOutcome::ExecutionEnded,
+        Duration::from_millis(3),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(root.snapshot().shell.focused_pane, focused);
+    assert_eq!(
+        root.recovery.state(),
+        primary,
+        "secondary ExecutionEnded mutated primary recovery state"
+    );
+    assert_eq!(
+        root.pending_recovery, primary_effects,
+        "secondary completion replaced primary effects"
+    );
+    assert_eq!(root.snapshot().recovery_stage, RecoveryStage::Usable);
+    assert!(
+        root.snapshot().composer_eligible,
+        "focused healthy primary composer was disabled by secondary failure"
+    );
+}
+
+#[test]
+fn secondary_success_preserves_primary_disconnected_or_execution_ended_state() {
+    use crate::recovery::{AttemptOutcome, RecoveryStage};
+    use std::time::Duration;
+
+    let mut failures = Vec::new();
+    for primary_stage in [RecoveryStage::Disconnected, RecoveryStage::ExecutionEnded] {
+        let mut root = ApplicationRoot::new();
+        if primary_stage == RecoveryStage::ExecutionEnded {
+            let primary = PaneId::from_bytes([0x63; 16]);
+            root.bind_pane_recovery(primary, ExecutionId::from_bytes([0x64; 16]));
+            root.begin_recovery(Duration::ZERO).unwrap();
+            let generation = root.recovery.state().generation;
+            root.complete_recovery(
+                generation,
+                AttemptOutcome::ExecutionEnded,
+                Duration::from_millis(1),
+                None,
+            )
+            .unwrap();
+        }
+        assert_eq!(root.recovery.state().stage, primary_stage);
+        let primary = root.recovery.state();
+        let primary_effects = root.pending_recovery.clone();
+        let secondary = PaneId::from_bytes([0x65; 16]);
+        let target = queue_secondary_loss(&mut root, secondary);
+
+        assert_eq!(
+            root.begin_next_pane_recovery(Duration::from_millis(2)),
+            Some(target)
+        );
+        let pane_generation = root.pane_recovery_state().generation;
+        root.complete_pane_recovery(
+            target,
+            pane_generation,
+            AttemptOutcome::Opened {
+                handle: 0x66,
+                adopted: true,
+            },
+            Duration::from_millis(3),
+            None,
+        )
+        .unwrap();
+        assert!(root.advance_pane_recovery_stage(target, RecoveryStage::RestoringInteraction));
+        assert!(root.advance_pane_recovery_stage(target, RecoveryStage::Usable));
+
+        if root.recovery.state() != primary || root.pending_recovery != primary_effects {
+            failures.push(format!(
+                "primary {primary_stage:?}: state {:?} (expected {:?}), effects {:?} (expected {:?})",
+                root.recovery.state(),
+                primary,
+                root.pending_recovery,
+                primary_effects
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "secondary success changed primary state: {failures:?}"
+    );
 }
 
 #[test]
@@ -264,30 +633,31 @@ fn retryable_attempts_keep_target_and_exhaustion_releases_only_its_slot() {
     );
     root.pane_recovery.record_loss(target);
     assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
-    let generation = root.recovery.state().generation;
+    let generation = root.pane_recovery_state().generation;
     let mut now = Duration::ZERO;
 
     loop {
         assert_eq!(root.pane_recovery.active(), Some(target));
-        root.complete_recovery(generation, AttemptOutcome::Retryable, now, None)
+        root.complete_pane_recovery(target, generation, AttemptOutcome::Retryable, now, None)
             .unwrap();
-        if root.recovery.state().stage == crate::recovery::RecoveryStage::Exhausted {
+        if root.pane_recovery_state().stage == crate::recovery::RecoveryStage::Exhausted {
             break;
         }
         let delay = root
-            .pending_recovery
+            .pane_recovery
+            .pending_effects
             .iter()
             .find_map(|effect| match effect {
                 RecoveryEffect::Schedule { delay, .. } => Some(*delay),
                 _ => None,
             });
         now += delay.expect("retry schedule");
-        root.fire_scheduled_recovery(generation, now).unwrap();
+        assert!(root.fire_pane_recovery(target, generation, now));
     }
 
     assert_eq!(root.pane_recovery.active(), None);
     assert!(root.pane_recovery.expectations.contains_key(&pane));
-    let exhausted_generation = root.recovery.state().generation;
+    let exhausted_generation = root.pane_recovery.terminal_stages[&pane].0;
     assert!(root.retry_pane_recovery(target, exhausted_generation));
     assert!(!root.retry_pane_recovery(target, exhausted_generation.wrapping_sub(1)));
     assert_eq!(root.begin_next_pane_recovery(now), Some(target));
@@ -315,17 +685,18 @@ fn exhausted_pane_recovery_does_not_drop_a_live_sibling_from_the_queue() {
     assert!(root.pane_recovery.record_loss(failed));
     assert!(root.pane_recovery.record_loss(sibling_target));
     assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(failed));
-    let generation = root.recovery.state().generation;
+    let generation = root.pane_recovery_state().generation;
     let mut now = Duration::ZERO;
 
     loop {
-        root.complete_recovery(generation, AttemptOutcome::Retryable, now, None)
+        root.complete_pane_recovery(failed, generation, AttemptOutcome::Retryable, now, None)
             .unwrap();
-        if root.recovery.state().stage == RecoveryStage::Exhausted {
+        if root.pane_recovery_state().stage == RecoveryStage::Exhausted {
             break;
         }
         let delay = root
-            .pending_recovery
+            .pane_recovery
+            .pending_effects
             .iter()
             .find_map(|effect| match effect {
                 RecoveryEffect::Schedule { delay, .. } => Some(*delay),
@@ -333,16 +704,22 @@ fn exhausted_pane_recovery_does_not_drop_a_live_sibling_from_the_queue() {
             })
             .expect("bounded retry schedule");
         now += delay;
-        root.fire_scheduled_recovery(generation, now).unwrap();
+        assert!(root.fire_pane_recovery(failed, generation, now));
     }
 
     root.finish_pane_recovery_if_terminal();
     assert_eq!(root.pane_recovery.active(), None);
     assert_eq!(root.pane_recovery.pending_len(), 1);
+    let exhausted_generation = root.pane_recovery.terminal_stages[&pane].0;
     assert!(root.pane_recovery.expectations.contains_key(&pane));
     assert!(root.pane_recovery.expectations.contains_key(&sibling));
     assert_eq!(root.begin_next_pane_recovery(now), Some(sibling_target));
     assert_eq!(root.pane_recovery.active(), Some(sibling_target));
+    assert_eq!(
+        root.pane_recovery_target_for_pane(pane),
+        Some((failed, exhausted_generation, true)),
+        "a later Pane episode must not erase the failed Pane's retry disposition"
+    );
 }
 
 #[test]
@@ -371,7 +748,7 @@ fn rejected_commit_releases_only_the_exact_active_episode_for_retry() {
     root.pane_recovery.record_loss(target);
     root.pane_recovery.record_loss(sibling_target);
     assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
-    let generation = root.recovery.state().generation;
+    let generation = root.pane_recovery_state().generation;
 
     assert!(!root.abort_pane_recovery_commit(target, generation.wrapping_sub(1)));
     assert_eq!(root.pane_recovery.active(), Some(target));
@@ -380,9 +757,109 @@ fn rejected_commit_releases_only_the_exact_active_episode_for_retry() {
     assert_eq!(root.pane_recovery.pending_len(), 1);
     assert!(root.pane_recovery.expectations.contains_key(&pane));
     assert!(root.pane_recovery.expectations.contains_key(&sibling));
-    assert_ne!(root.recovery.state().generation, generation);
+    assert_ne!(root.pane_recovery_state().generation, generation);
     assert!(root.retry_pane_recovery(target, generation));
     assert_eq!(root.pane_recovery.pending_len(), 2);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn rejected_focused_pane_commit_publishes_no_candidate_state_and_remains_retryable() {
+    use crate::presentation::{PresentationIdentity, PresentationMode, PresentationSession};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let client = crate::app::provisioning_apply::negotiated_provisioning_client();
+    let execution = client.execution_id();
+    let candidate_attachment = client.attachment_id();
+    root.attach_client(root.fence(), client)
+        .expect("install initial focused Pane client");
+    let target = root.bind_pane_recovery(pane, execution);
+    let candidate_runtime = crate::ffi::with_client(
+        root.live_client_handle_for_test().expect("initial handle"),
+        |client| client.runtime_id(),
+    )
+    .expect("initial client is registered");
+    root.pane_recovery.expectations.insert(
+        pane,
+        PaneRecoveryExpectation {
+            runtime_id: candidate_runtime,
+            attachment_id: AttachmentId::from_bytes([0x33; 16]),
+        },
+    );
+    assert_ne!(
+        candidate_attachment,
+        root.pane_recovery.expectations[&pane].attachment_id
+    );
+    assert!(root.pane_recovery.record_loss(target));
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+    let generation = root.pane_recovery_state().generation;
+    root.complete_pane_recovery(
+        target,
+        generation,
+        crate::recovery::AttemptOutcome::Opened {
+            handle: 0,
+            adopted: true,
+        },
+        Duration::from_millis(1),
+        None,
+    )
+    .expect("accepted open enters reconstructing stage");
+
+    // Model the prior handle having been disconnected before the replacement
+    // arrives, while retaining the old focused authority until commit succeeds.
+    let old_handle = root.live_client_handle_for_test().expect("initial handle");
+    crate::ffi::unregister_client(old_handle);
+    root.client_handle = None;
+    root.pane_client_raws.remove(&pane);
+    root.pane_recovery.runtime_ids.remove(&pane);
+    let old_authority = super::super::PaneAuthority {
+        pane,
+        execution,
+        attachment: AttachmentId::from_bytes([0x33; 16]),
+        controller: true,
+        pty_generation: 1,
+    };
+    root.authority = Some(old_authority);
+    root.pane_authorities.insert(pane, old_authority);
+
+    let mut candidate = crate::app::provisioning_apply::negotiated_provisioning_client();
+    candidate.cache.generation = 1;
+    candidate.cache.rows = 24;
+    candidate.cache.columns = 80;
+    candidate.cache.cells = vec![
+        seyal_protocol::display::DisplayCell::blank();
+        usize::from(candidate.cache.rows)
+            * usize::from(candidate.cache.columns)
+    ];
+    let candidate_handle = crate::ffi::register_app_client(candidate)
+        .expect("register replacement client")
+        .raw();
+    // A stale focused presentation identity is a fallible BindIdentity case.
+    root.presentation = PresentationSession::new(
+        Some(PresentationIdentity::new(ExecutionId::from_bytes([0x99; 16]), 1).unwrap()),
+        PresentationMode::Flow,
+    );
+
+    assert_eq!(
+        root.commit_pane_recovery(target, generation, candidate_handle),
+        Err(crate::app::AppError::AlreadyBound)
+    );
+    assert_eq!(root.pane_client_raws.get(&pane), None);
+    assert!(root.client_handle.is_none());
+    assert!(!root.extra_pane_clients.contains_key(&pane));
+    assert_eq!(root.pane_recovery.runtime_ids.get(&pane), None);
+    assert_eq!(root.pane_authorities.get(&pane), Some(&old_authority));
+    assert_eq!(root.authority, Some(old_authority));
+    assert_eq!(root.pane_recovery.active(), Some(target));
+
+    // Match the FFI rejection path: disconnect the rejected candidate, retire
+    // the exact attempt, and prove the same binding can be explicitly retried.
+    crate::ffi::unregister_client(candidate_handle);
+    assert!(root.abort_pane_recovery_commit(target, generation));
+    assert_eq!(root.pane_recovery.active(), None);
+    assert!(root.retry_pane_recovery(target, generation));
 }
 
 #[test]
@@ -407,20 +884,21 @@ fn per_pane_target_is_active_then_retryable_and_rebind_invalidates_it() {
 
     let mut now = Duration::ZERO;
     assert_eq!(root.begin_next_pane_recovery(now), Some(target));
-    let generation = root.recovery.state().generation;
+    let generation = root.pane_recovery_state().generation;
     assert_eq!(
         root.pane_recovery_target_for_pane(pane),
         Some((target, generation, false))
     );
 
     loop {
-        root.complete_recovery(generation, AttemptOutcome::Retryable, now, None)
+        root.complete_pane_recovery(target, generation, AttemptOutcome::Retryable, now, None)
             .unwrap();
-        if root.recovery.state().stage == RecoveryStage::Exhausted {
+        if root.pane_recovery_state().stage == RecoveryStage::Exhausted {
             break;
         }
         let delay = root
-            .pending_recovery
+            .pane_recovery
+            .pending_effects
             .iter()
             .find_map(|effect| match effect {
                 RecoveryEffect::Schedule { delay, .. } => Some(*delay),
@@ -428,7 +906,7 @@ fn per_pane_target_is_active_then_retryable_and_rebind_invalidates_it() {
             })
             .expect("retry schedule");
         now += delay;
-        root.fire_scheduled_recovery(generation, now).unwrap();
+        assert!(root.fire_pane_recovery(target, generation, now));
     }
 
     root.finish_pane_recovery_if_terminal();

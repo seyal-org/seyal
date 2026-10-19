@@ -3,12 +3,14 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
+use crate::recovery::{
+    AttemptOutcome, LaunchResult, RecoveryCoordinator, RecoveryEffect, RecoveryStage,
+};
 use crate::shell::ShellSnapshot;
 use seyal_core::{AttachmentId, ExecutionId, PaneId};
 
+use super::AppError;
 use super::ApplicationRoot;
-#[cfg(target_os = "macos")]
-use super::{AppError, BindingEvidence};
 
 /// Identifies one Pane binding that may be recovered after attachment loss.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -35,11 +37,12 @@ impl PaneRecoveryTarget {
         self.pane_id
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) const fn execution_id(self) -> ExecutionId {
         self.execution_id
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) const fn binding_generation(self) -> u64 {
         self.binding_generation
     }
@@ -56,9 +59,13 @@ pub(super) struct PaneRecoveryQueue {
     latest_generation: HashMap<PaneId, u64>,
     pending: VecDeque<PaneRecoveryTarget>,
     active: Option<PaneRecoveryTarget>,
+    coordinator: RecoveryCoordinator,
+    pending_effects: Vec<RecoveryEffect>,
     pub(super) episode_generation: Option<u64>,
     pub(super) expectations: HashMap<PaneId, PaneRecoveryExpectation>,
     pub(super) retry_generations: HashMap<PaneId, u64>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    terminal_stages: HashMap<PaneId, (u64, RecoveryStage)>,
     pub(super) runtime_ids: HashMap<PaneId, u128>,
     pub(super) primary_pane: Option<PaneId>,
 }
@@ -69,6 +76,7 @@ pub(super) struct PaneRecoveryExpectation {
     pub attachment_id: AttachmentId,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 impl PaneRecoveryQueue {
     pub(super) fn from_shell_snapshot(snapshot: &ShellSnapshot) -> Self {
         Self::from_bindings(
@@ -133,7 +141,6 @@ impl PaneRecoveryQueue {
         self.bindings.get(&pane_id).copied()
     }
 
-    #[cfg(any(target_os = "macos", test))]
     pub(super) fn is_current(&self, target: PaneRecoveryTarget) -> bool {
         self.bindings.get(&target.pane_id) == Some(&target)
     }
@@ -147,7 +154,6 @@ impl PaneRecoveryQueue {
 
     /// Enqueues one loss if it belongs to the exact current binding and is not
     /// already pending or active. Returns whether new work was added.
-    #[cfg(any(target_os = "macos", test))]
     pub(super) fn record_loss(&mut self, target: PaneRecoveryTarget) -> bool {
         if self.bindings.get(&target.pane_id) != Some(&target)
             || self.active == Some(target)
@@ -160,7 +166,6 @@ impl PaneRecoveryQueue {
     }
 
     /// Claims the next pending target only when no attempt is currently active.
-    #[cfg(any(target_os = "macos", test))]
     pub(super) fn start_next(&mut self) -> Option<PaneRecoveryTarget> {
         if self.active.is_some() {
             return None;
@@ -194,7 +199,6 @@ impl PaneRecoveryQueue {
         self.pending.len()
     }
 
-    #[cfg(any(target_os = "macos", test))]
     pub(super) fn is_pending(&self, target: PaneRecoveryTarget) -> bool {
         self.pending.contains(&target)
     }
@@ -214,6 +218,7 @@ impl PaneRecoveryQueue {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 impl ApplicationRoot {
     #[cfg(any(target_os = "macos", test))]
     pub(super) fn remember_pane_runtime(&mut self, pane: PaneId, runtime_id: u128) {
@@ -233,15 +238,21 @@ impl ApplicationRoot {
         execution: ExecutionId,
     ) -> PaneRecoveryTarget {
         let previous = self.pane_recovery.current_target(pane);
+        #[cfg(any(target_os = "macos", test))]
         let active_was_replaced = self
             .pane_recovery
             .active()
             .is_some_and(|active| active.pane_id() == pane && active.execution_id() != execution);
         let current = self.pane_recovery.bind(pane, execution);
         if previous != Some(current) {
-            self.pane_recovery.expectations.remove(&pane);
-            self.pane_recovery.retry_generations.remove(&pane);
+            #[cfg(any(target_os = "macos", test))]
+            {
+                self.pane_recovery.expectations.remove(&pane);
+                self.pane_recovery.retry_generations.remove(&pane);
+                self.pane_recovery.terminal_stages.remove(&pane);
+            }
             self.pane_recovery.runtime_ids.remove(&pane);
+            #[cfg(any(target_os = "macos", test))]
             if active_was_replaced {
                 self.cancel_pane_recovery_episode();
             }
@@ -249,14 +260,13 @@ impl ApplicationRoot {
         current
     }
 
-    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn pane_recovery_target(&self) -> Option<PaneRecoveryTarget> {
-        (self.pane_recovery.episode_generation == Some(self.recovery.state().generation))
-            .then(|| self.pane_recovery.active())
-            .flatten()
+        (self.pane_recovery.episode_generation
+            == Some(self.pane_recovery.coordinator.state().generation))
+        .then(|| self.pane_recovery.active())
+        .flatten()
     }
 
-    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn pane_recovery_target_for_pane(
         &self,
         pane: PaneId,
@@ -266,8 +276,12 @@ impl ApplicationRoot {
 
         if self.pane_recovery.active() == Some(target) {
             return (self.pane_recovery.episode_generation
-                == Some(self.recovery.state().generation))
-            .then_some((target, self.recovery.state().generation, false));
+                == Some(self.pane_recovery.coordinator.state().generation))
+            .then_some((
+                target,
+                self.pane_recovery.coordinator.state().generation,
+                false,
+            ));
         }
         if self.pane_recovery.is_pending(target) {
             return None;
@@ -277,13 +291,13 @@ impl ApplicationRoot {
             return (*generation != 0).then_some((target, *generation, true));
         }
 
-        if matches!(
-            self.recovery.state().stage,
-            crate::recovery::RecoveryStage::Exhausted
-                | crate::recovery::RecoveryStage::Blocked
-                | crate::recovery::RecoveryStage::ExecutionEnded
-        ) {
-            return Some((target, self.recovery.state().generation, true));
+        if let Some((generation, stage)) = self.pane_recovery.terminal_stages.get(&pane)
+            && matches!(
+                stage,
+                RecoveryStage::Exhausted | RecoveryStage::Blocked | RecoveryStage::ExecutionEnded
+            )
+        {
+            return Some((target, *generation, true));
         }
         None
     }
@@ -326,16 +340,16 @@ impl ApplicationRoot {
         self.pane_recovery.record_loss(target);
     }
 
-    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn begin_next_pane_recovery(&mut self, now: Duration) -> Option<PaneRecoveryTarget> {
         if let Some(active) = self.pane_recovery.active() {
-            if self.pane_recovery.episode_generation == Some(self.recovery.state().generation) {
+            if self.pane_recovery.episode_generation
+                == Some(self.pane_recovery.coordinator.state().generation)
+            {
                 return Some(active);
             }
-            // The shared coordinator generation changed while this Pane's
-            // async open was outstanding. If primary recovery owns it, let
-            // the primary effect proceed and keep this target queued for a
-            // fresh bounded Pane episode after primary recovery settles.
+            // A primary recovery may have superseded this Pane episode. Keep
+            // the exact binding queued for a fresh bounded Pane attempt after
+            // the primary recovery settles.
             if self.primary_recovery_in_progress() {
                 return None;
             }
@@ -347,12 +361,120 @@ impl ApplicationRoot {
             return None;
         }
         let target = self.pane_recovery.start_next()?;
-        self.pending_recovery = self.recovery.begin_episode(now);
-        self.pane_recovery.episode_generation = Some(self.recovery.state().generation);
+        let effects = self.pane_recovery.coordinator.begin_episode(now);
+        self.replace_pane_recovery_effects(effects);
+        let generation = self.pane_recovery.coordinator.state().generation;
+        self.pane_recovery.episode_generation = Some(generation);
+        self.pane_recovery.terminal_stages.remove(&target.pane_id());
         Some(target)
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn pane_recovery_state(&self) -> crate::recovery::RecoveryState {
+        self.pane_recovery.coordinator.state()
+    }
+
+    pub(crate) fn pane_recovery_effect(
+        &self,
+        target: PaneRecoveryTarget,
+        generation: u64,
+    ) -> Option<RecoveryEffect> {
+        (self.pane_recovery.active() == Some(target)
+            && self.pane_recovery.coordinator.state().generation == generation
+            && self.pane_recovery.episode_generation == Some(generation))
+        .then(|| self.pane_recovery.pending_effects.first().copied())
+        .flatten()
+    }
+
+    pub(crate) fn ack_pane_recovery_effect(&mut self, target: PaneRecoveryTarget, generation: u64) {
+        if self.pane_recovery.active() == Some(target)
+            && self.pane_recovery.coordinator.state().generation == generation
+            && !self.pane_recovery.pending_effects.is_empty()
+        {
+            self.pane_recovery.pending_effects.remove(0);
+        }
+    }
+
+    pub(crate) fn complete_pane_recovery(
+        &mut self,
+        target: PaneRecoveryTarget,
+        generation: u64,
+        outcome: AttemptOutcome,
+        now: Duration,
+        launch: Option<LaunchResult>,
+    ) -> Result<(), AppError> {
+        if self.pane_recovery.active() != Some(target)
+            || !self.pane_recovery.is_current(target)
+            || generation != self.pane_recovery.coordinator.state().generation
+        {
+            return Err(AppError::StaleRecoveryGeneration);
+        }
+        let had_outstanding = self.pane_recovery.coordinator.has_outstanding_attempt();
+        let effects = self
+            .pane_recovery
+            .coordinator
+            .complete_attempt(generation, outcome, now, launch);
+        if !had_outstanding
+            && !(outcome == AttemptOutcome::EndpointMissing
+                && launch == Some(LaunchResult::HelperMissing)
+                && self.pane_recovery.coordinator.state().stage == RecoveryStage::Blocked)
+        {
+            // A duplicate completion can return a disposal for an opened
+            // handle, but Swift owns that handle and disconnects it directly.
+            // Keep any already-queued Schedule/PerformAttempt untouched.
+            return Ok(());
+        }
+        let effects = effects
+            .into_iter()
+            .filter(|effect| !matches!(effect, RecoveryEffect::DisposeHandle(_)))
+            .collect();
+        self.replace_pane_recovery_effects(effects);
+        self.finish_pane_recovery_if_terminal();
+        Ok(())
+    }
+
+    pub(crate) fn fire_pane_recovery(
+        &mut self,
+        target: PaneRecoveryTarget,
+        generation: u64,
+        now: Duration,
+    ) -> bool {
+        if self.pane_recovery.active() != Some(target)
+            || generation != self.pane_recovery.coordinator.state().generation
+        {
+            return false;
+        }
+        let effects = self
+            .pane_recovery
+            .coordinator
+            .scheduled_fire(generation, now);
+        self.replace_pane_recovery_effects(effects);
+        self.finish_pane_recovery_if_terminal();
+        true
+    }
+
+    fn replace_pane_recovery_effects(&mut self, effects: Vec<RecoveryEffect>) {
+        let pending = &mut self.pane_recovery.pending_effects;
+        let mut disposals: Vec<_> = pending
+            .drain(..)
+            .filter(|effect| matches!(effect, RecoveryEffect::DisposeHandle(_)))
+            .collect();
+        disposals.extend(effects);
+        *pending = disposals;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance_pane_recovery_stage(
+        &mut self,
+        target: PaneRecoveryTarget,
+        stage: RecoveryStage,
+    ) -> bool {
+        self.pane_recovery.active() == Some(target)
+            && self
+                .pane_recovery
+                .coordinator
+                .advance_presentation_stage(stage)
+    }
+
     pub(crate) fn retry_pane_recovery(
         &mut self,
         target: PaneRecoveryTarget,
@@ -360,14 +482,22 @@ impl ApplicationRoot {
     ) -> bool {
         use crate::recovery::RecoveryStage;
 
-        let state = self.recovery.state();
-        let naturally_retryable = state.generation == recovery_generation
-            && matches!(
-                state.stage,
-                RecoveryStage::Exhausted | RecoveryStage::Blocked | RecoveryStage::ExecutionEnded
-            );
+        let terminal = self
+            .pane_recovery
+            .terminal_stages
+            .get(&target.pane_id())
+            .copied();
         let explicitly_aborted = self.pane_recovery.retry_generations.get(&target.pane_id())
             == Some(&recovery_generation);
+        let naturally_retryable = terminal.is_some_and(|(generation, stage)| {
+            generation == recovery_generation
+                && matches!(
+                    stage,
+                    RecoveryStage::Exhausted
+                        | RecoveryStage::Blocked
+                        | RecoveryStage::ExecutionEnded
+                )
+        });
         if !naturally_retryable && !explicitly_aborted {
             return false;
         }
@@ -388,7 +518,6 @@ impl ApplicationRoot {
         enqueued
     }
 
-    #[cfg(any(target_os = "macos", test))]
     fn primary_recovery_in_progress(&self) -> bool {
         use crate::recovery::RecoveryStage;
         match self.recovery.state().stage {
@@ -415,7 +544,7 @@ impl ApplicationRoot {
         use seyal_runtime::local_ipc::framing::Role;
 
         if self.pane_recovery.active() != Some(target)
-            || self.recovery.state().generation != recovery_generation
+            || self.pane_recovery.coordinator.state().generation != recovery_generation
             || !self.pane_recovery.is_current(target)
             || self.shell.pane_execution(target.pane_id()).ok().flatten()
                 != Some(target.execution_id())
@@ -463,7 +592,7 @@ impl ApplicationRoot {
             return Err(AppError::InvalidPayload);
         }
         if !matches!(
-            self.recovery.state().stage,
+            self.pane_recovery.coordinator.state().stage,
             crate::recovery::RecoveryStage::Reconstructing
                 | crate::recovery::RecoveryStage::RestoringInteraction
         ) {
@@ -478,12 +607,64 @@ impl ApplicationRoot {
         {
             return Err(AppError::AlreadyBound);
         }
-        let evidence = BindingEvidence {
+        let evidence = super::BindingEvidence {
             execution: target.execution_id(),
             attachment: candidate.2,
             controller: true,
             pty_generation: candidate.6.max(1),
             alternate_screen: candidate.5,
+        };
+
+        // Stage every fallible part of the focused presentation commit and
+        // Pane coordinator transition before publishing the replacement
+        // handle, runtime id, or authority. The FFI caller disconnects a
+        // rejected candidate, so a failure here must leave no root mapping to
+        // that candidate behind.
+        let focused = self.shell.snapshot().focused_pane == pane;
+        let (next_presentation, next_presentation_mode) = if focused {
+            let identity = crate::presentation::PresentationIdentity::new(
+                evidence.execution,
+                evidence.pty_generation,
+            )
+            .ok_or(AppError::ZeroPtyGeneration)?;
+            let mut presentation = self.presentation.clone();
+            presentation
+                .apply(crate::presentation::PresentationAction::BindIdentity(
+                    identity,
+                ))
+                .map_err(|_| AppError::AlreadyBound)?;
+            let desired_mode = if evidence.alternate_screen {
+                crate::presentation::PresentationMode::Tui
+            } else {
+                self.resting
+            };
+            let current = presentation.snapshot();
+            if current.mode != desired_mode {
+                presentation
+                    .apply(crate::presentation::PresentationAction::Transition {
+                        mode: desired_mode,
+                        identity,
+                        explicit: self.explicit_raw
+                            && desired_mode == crate::presentation::PresentationMode::Raw,
+                        epoch: current.epoch,
+                    })
+                    .map_err(|_| AppError::StalePresentationEpoch)?;
+            }
+            (Some(presentation), Some(desired_mode))
+        } else {
+            (None, None)
+        };
+        let mut next_coordinator = self.pane_recovery.coordinator.clone();
+        if !next_coordinator.advance_presentation_stage(RecoveryStage::Usable) {
+            return Err(AppError::InvalidPayload);
+        }
+
+        let authority = super::PaneAuthority {
+            pane,
+            execution: evidence.execution,
+            attachment: evidence.attachment,
+            controller: evidence.controller,
+            pty_generation: evidence.pty_generation,
         };
         self.pane_client_raws.insert(pane, handle);
         if self.pane_recovery.primary_pane == Some(pane) && self.client_handle.is_none() {
@@ -493,39 +674,23 @@ impl ApplicationRoot {
                 .insert(pane, crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_recovery.runtime_ids.insert(pane, candidate.0);
-        self.pane_authorities.insert(
-            pane,
-            super::PaneAuthority {
-                pane,
-                execution: evidence.execution,
-                attachment: evidence.attachment,
-                controller: evidence.controller,
-                pty_generation: evidence.pty_generation,
-            },
-        );
-        if self.shell.snapshot().focused_pane == pane {
-            let identity = crate::presentation::PresentationIdentity::new(
-                evidence.execution,
-                evidence.pty_generation,
-            )
-            .ok_or(AppError::ZeroPtyGeneration)?;
-            self.presentation
-                .apply(crate::presentation::PresentationAction::BindIdentity(
-                    identity,
-                ))
-                .map_err(|_| AppError::AlreadyBound)?;
-            self.authority = self.pane_authorities.get(&pane).copied();
-            self.derive_presentation(evidence.alternate_screen)?;
+        self.pane_authorities.insert(pane, authority);
+        if let (Some(presentation), Some(desired_mode)) =
+            (next_presentation, next_presentation_mode)
+        {
+            let mode_changed = self.presentation.snapshot().mode != desired_mode;
+            self.presentation = presentation;
+            self.alternate_screen = evidence.alternate_screen;
+            self.authority = Some(authority);
+            self.sync_focused_presentation_mode();
+            if mode_changed {
+                self.clear_chord_prefix();
+            }
             self.sync_composer_presentation();
             self.output_utf8 = candidate.7;
             crate::ffi::set_focused_display_handle(handle);
         }
-        if !self
-            .recovery
-            .advance_presentation_stage(crate::recovery::RecoveryStage::Usable)
-        {
-            return Err(AppError::InvalidPayload);
-        }
+        self.pane_recovery.coordinator = next_coordinator;
         self.pane_recovery.complete(target);
         self.pane_recovery.episode_generation = None;
         self.pane_recovery.expectations.remove(&pane);
@@ -533,22 +698,26 @@ impl ApplicationRoot {
     }
 
     pub(crate) fn finish_pane_recovery_if_terminal(&mut self) {
-        use crate::recovery::RecoveryStage;
+        let stage = self.pane_recovery.coordinator.state().stage;
         if matches!(
-            self.recovery.state().stage,
+            stage,
             RecoveryStage::Exhausted | RecoveryStage::Blocked | RecoveryStage::ExecutionEnded
         ) && let Some(target) = self.pane_recovery.active()
-            && self.pane_recovery.episode_generation == Some(self.recovery.state().generation)
+            && self.pane_recovery.episode_generation
+                == Some(self.pane_recovery.coordinator.state().generation)
         {
+            self.pane_recovery.terminal_stages.insert(
+                target.pane_id(),
+                (self.pane_recovery.coordinator.state().generation, stage),
+            );
             self.pane_recovery.complete(target);
             self.pane_recovery.episode_generation = None;
         }
     }
 
     /// Retires a rejected attempt only if the callback still names the exact
-    /// active binding and primary-coordinator generation. Retain the recorded
+    /// active binding and Pane-coordinator generation. Retain the recorded
     /// loss expectation so the host can offer an explicit retry.
-    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn abort_pane_recovery_commit(
         &mut self,
         target: PaneRecoveryTarget,
@@ -556,7 +725,7 @@ impl ApplicationRoot {
     ) -> bool {
         if self.pane_recovery.active() != Some(target)
             || !self.pane_recovery.is_current(target)
-            || self.recovery.state().generation != recovery_generation
+            || self.pane_recovery.coordinator.state().generation != recovery_generation
         {
             return false;
         }
@@ -583,15 +752,21 @@ impl ApplicationRoot {
     }
 
     fn cancel_pane_recovery_episode(&mut self) {
-        let owns_coordinator =
-            self.pane_recovery.episode_generation == Some(self.recovery.state().generation);
         self.pane_recovery.episode_generation = None;
-        if !owns_coordinator {
-            return;
-        }
-        self.recovery.cancel();
-        self.pending_recovery
+        self.pane_recovery.coordinator.cancel();
+        self.pane_recovery
+            .pending_effects
             .retain(|effect| matches!(effect, crate::recovery::RecoveryEffect::DisposeHandle(_)));
+    }
+
+    pub(super) fn supersede_pane_recovery_for_primary(&mut self) {
+        if let Some(target) = self.pane_recovery.active() {
+            self.pane_recovery.complete(target);
+            if self.pane_recovery.is_current(target) {
+                self.pane_recovery.record_loss(target);
+            }
+        }
+        self.cancel_pane_recovery_episode();
     }
 }
 

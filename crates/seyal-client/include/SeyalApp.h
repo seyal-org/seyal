@@ -675,6 +675,18 @@ typedef struct SeyalAppPaneRecoveryTarget {
     uint64_t recovery_generation;
 } SeyalAppPaneRecoveryTarget;
 
+/* Pane-scoped effect stream. kind: 0 none, 1 attempt, 2 schedule,
+ * 3 launch helper, 4 dispose handle. This stream is independent of the
+ * application-primary recovery effects in SeyalAppSnapshot. */
+typedef struct SeyalAppPaneRecoveryEffect {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t reserved;
+    uint64_t generation;
+    uint64_t parameter;
+} SeyalAppPaneRecoveryEffect;
+
 /*
  * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
  * (outer Split first). x/y/width/height is the unit rect of the whole area
@@ -863,6 +875,21 @@ SeyalAppPaneRecoveryTarget seyal_app_pane_recovery_target_for_pane(
     uint64_t pane_lo,
     uint64_t pane_hi);
 SeyalAppPaneRecoveryTarget seyal_app_begin_next_pane_recovery(uint64_t handle, uint64_t now_ms);
+SeyalAppPaneRecoveryEffect seyal_app_pane_recovery_effect(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_ack_pane_recovery_effect(uint64_t handle, SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_fire_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint64_t now_ms);
+int32_t seyal_app_complete_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint32_t outcome,
+    uint32_t launch,
+    uint64_t registry_handle,
+    uint64_t now_ms);
 int32_t seyal_app_retry_pane_recovery(uint64_t handle, SeyalAppPaneRecoveryTarget target);
 int32_t seyal_app_commit_pane_recovery(
     uint64_t handle,

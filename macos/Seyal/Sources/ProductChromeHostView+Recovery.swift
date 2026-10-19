@@ -1,6 +1,6 @@
 import AppKit
 
-private struct PaneRecoveryPin: Sendable {
+struct PaneRecoveryPin: Sendable, Equatable {
     let version: UInt16
     let size: UInt16
     let flags: UInt16
@@ -41,6 +41,11 @@ private struct PaneRecoveryPin: Sendable {
     var executionIdentity: String {
         String(format: "%016llx%016llx", executionHigh, executionLow)
     }
+}
+
+enum RecoveryAttemptIdentity: Equatable {
+    case primary(UInt64)
+    case pane(PaneRecoveryPin)
 }
 
 /// Host effect executor for the Rust `RecoveryCoordinator`. Rust owns retry
@@ -115,29 +120,34 @@ extension ProductChromeHostView {
             pane.appHandle,
             runtimeRecoveryNowMillis()
         )
-        let snapshot = seyal_app_snapshot(pane.appHandle)
-        if recoveryTimer != nil, recoveryTimerGeneration != snapshot.recovery_generation {
+        if paneTarget.size != 0 {
+            drivePaneRecovery(paneTarget)
+        } else if recoveryTimerPanePin != nil {
             recoveryTimer?.invalidate()
             recoveryTimer = nil
             recoveryTimerGeneration = 0
+            recoveryTimerPanePin = nil
+        }
+        let snapshot = seyal_app_snapshot(pane.appHandle)
+        if recoveryTimer != nil, recoveryTimerPanePin == nil,
+            recoveryTimerGeneration != snapshot.recovery_generation {
+            recoveryTimer?.invalidate()
+            recoveryTimer = nil
+            recoveryTimerGeneration = 0
+            recoveryTimerPanePin = nil
         }
         switch snapshot.recovery_effect {
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue):
             // CompleteRecovery replaces this effect; acking it would drop the
             // attempt. The in-flight fence keeps reconcile pulses from
             // starting a second open for the same generation.
-            if paneTarget.size != 0,
-                paneTarget.recovery_generation == snapshot.recovery_generation
-            {
-                performPaneRecoveryAttempt(generation: snapshot.recovery_generation, target: paneTarget)
-            } else {
-                performRecoveryAttempt(generation: snapshot.recovery_generation)
-            }
+            performRecoveryAttempt(generation: snapshot.recovery_generation)
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_SCHEDULE.rawValue):
             let delayMs = seyal_app_recovery_param(pane.appHandle)
             let generation = snapshot.recovery_generation
             recoveryTimer?.invalidate()
             recoveryTimerGeneration = generation
+            recoveryTimerPanePin = nil
             recoveryTimer = Timer.scheduledTimer(
                 withTimeInterval: TimeInterval(delayMs) / 1000,
                 repeats: false
@@ -176,9 +186,47 @@ extension ProductChromeHostView {
         }
     }
 
+    private func drivePaneRecovery(_ target: SeyalAppPaneRecoveryTarget) {
+        let effect = seyal_app_pane_recovery_effect(pane.appHandle, target)
+        switch effect.kind {
+        case 1:
+            performPaneRecoveryAttempt(target: target, remainingMs: effect.parameter)
+        case 2:
+            let pin = PaneRecoveryPin(target)
+            recoveryTimer?.invalidate()
+            recoveryTimerGeneration = effect.generation
+            recoveryTimerPanePin = pin
+            recoveryTimer = Timer.scheduledTimer(
+                withTimeInterval: TimeInterval(effect.parameter) / 1000,
+                repeats: false
+            ) { [weak self] _ in
+                DispatchQueue.main.async { self?.firePaneRecovery(pin: pin) }
+            }
+            _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
+        case 3:
+            let launched = pane.inputSurface.bridge?.launchBundledRuntime() ?? false
+            _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
+            if !launched {
+                _ = completePaneRecovery(
+                    target: target,
+                    outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING,
+                    launch: SEYAL_APP_RECOVERY_LAUNCH_HELPER_MISSING
+                )
+            }
+            driveRecovery()
+        case 4:
+            disposeRecoveryHandle(effect.parameter)
+            _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
+            driveRecovery()
+        default:
+            break
+        }
+    }
+
     func performRecoveryAttempt(generation: UInt64) {
-        guard recoveryAttemptInFlight != generation else { return }
-        recoveryAttemptInFlight = generation
+        let identity = RecoveryAttemptIdentity.primary(generation)
+        guard recoveryAttemptInFlight != identity else { return }
+        recoveryAttemptInFlight = identity
         // Capture the Rust-issued remaining budget BEFORE Ack. Acking pops
         // PerformAttempt from the pending queue; reading after Ack used to
         // return 0 and short-circuit every open to `.retryable` (no attach).
@@ -213,16 +261,12 @@ extension ProductChromeHostView {
         }
     }
 
-    func performPaneRecoveryAttempt(generation: UInt64, target: SeyalAppPaneRecoveryTarget) {
-        guard target.size != 0,
-            target.recovery_generation == generation,
-            recoveryAttemptInFlight != generation
-        else { return }
-        recoveryAttemptInFlight = generation
-        let remainingMs = seyal_app_recovery_param(pane.appHandle)
-        ackRecovery()
-        let issuedAt = ProcessInfo.processInfo.systemUptime
+    private func performPaneRecoveryAttempt(target: SeyalAppPaneRecoveryTarget, remainingMs: UInt64) {
         let pin = PaneRecoveryPin(target)
+        guard target.size != 0, recoveryAttemptInFlight != .pane(pin) else { return }
+        recoveryAttemptInFlight = .pane(pin)
+        _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
+        let issuedAt = ProcessInfo.processInfo.systemUptime
         recoveryLifecycleQueue.async { [weak self] in
             let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt
             let outcome = openRuntimeRecoveryHandle(
@@ -238,7 +282,7 @@ extension ProductChromeHostView {
                         }
                         return
                     }
-                    self.finishPaneRecoveryAttempt(outcome, pin: pin, generation: generation)
+                    self.finishPaneRecoveryAttempt(outcome, pin: pin)
                 }
             }
         }
@@ -246,43 +290,45 @@ extension ProductChromeHostView {
 
     private func finishPaneRecoveryAttempt(
         _ outcome: RuntimeRecoveryAttemptOutcome,
-        pin: PaneRecoveryPin,
-        generation: UInt64
+        pin: PaneRecoveryPin
     ) {
-        let ownedInFlight = recoveryAttemptInFlight == generation
+        let identity = RecoveryAttemptIdentity.pane(pin)
+        let ownedInFlight = recoveryAttemptInFlight == identity
         defer {
-            if ownedInFlight, recoveryAttemptInFlight == generation {
+            if ownedInFlight, recoveryAttemptInFlight == identity {
                 recoveryAttemptInFlight = nil
             }
         }
         let active = seyal_app_active_pane_recovery_target(pane.appHandle)
-        let current = seyal_app_snapshot(pane.appHandle).recovery_generation == generation
-            && active.size == pin.size
+        let current = active.size == pin.size
             && active.pane_lo == pin.paneLow
             && active.pane_hi == pin.paneHigh
             && active.execution_lo == pin.executionLow
             && active.execution_hi == pin.executionHigh
             && active.binding_generation == pin.bindingGeneration
             && active.recovery_generation == pin.recoveryGeneration
+        guard current else {
+            if case let .opened(opened) = outcome {
+                seyal_bridge_disconnect_handle(opened.handle)
+            }
+            reconcileChrome()
+            return
+        }
         var result: Int32
         var publishedHandle: UInt64?
         switch outcome {
         case let .opened(opened):
-            guard current, seyal_bridge_adopt_handle(opened.handle) == 0 else {
+            guard seyal_bridge_adopt_handle(opened.handle) == 0 else {
                 seyal_bridge_disconnect_handle(opened.handle)
-                result = completeRecovery(
-                    generation: generation,
-                    outcome: SEYAL_APP_RECOVERY_OPENED_REJECTED,
-                    handle: opened.handle
+                result = completePaneRecovery(
+                    target: pin.ffiValue,
+                    outcome: SEYAL_APP_RECOVERY_BLOCKED_OUTCOME
                 )
-                if current, result != 0 {
-                    applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
-                }
                 reconcileChrome()
                 return
             }
-            result = completeRecovery(
-                generation: generation,
+            result = completePaneRecovery(
+                target: pin.ffiValue,
                 outcome: SEYAL_APP_RECOVERY_OPENED_ADOPTED,
                 handle: opened.handle
             )
@@ -300,26 +346,20 @@ extension ProductChromeHostView {
                 // A candidate rejected at the Rust ownership boundary must not
                 // remain registered or paint after the Pane binding changed.
                 seyal_bridge_disconnect_handle(opened.handle)
-                if current {
-                    applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
-                }
             }
         case .endpointMissing:
-            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING)
+            result = completePaneRecovery(target: pin.ffiValue, outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING)
         case .retryable:
-            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_RETRYABLE)
+            result = completePaneRecovery(target: pin.ffiValue, outcome: SEYAL_APP_RECOVERY_RETRYABLE)
         case .controllerBusy:
-            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_CONTROLLER_BUSY)
+            result = completePaneRecovery(target: pin.ffiValue, outcome: SEYAL_APP_RECOVERY_CONTROLLER_BUSY)
         case .executionEnded:
-            result = completeRecovery(
-                generation: generation,
+            result = completePaneRecovery(
+                target: pin.ffiValue,
                 outcome: SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME
             )
         case .blocked:
-            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_BLOCKED_OUTCOME)
-        }
-        if current, result != 0 {
-            applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
+            result = completePaneRecovery(target: pin.ffiValue, outcome: SEYAL_APP_RECOVERY_BLOCKED_OUTCOME)
         }
         reconcileChrome()
         if let publishedHandle {
@@ -332,9 +372,10 @@ extension ProductChromeHostView {
         // Clearing it before adopt let publishCurrentFrame → chrome reconcile →
         // driveRecovery start a second open for the same effect (main-thread
         // spin, empty Blocks, inactive composer).
-        let ownedInFlight = recoveryAttemptInFlight == generation
+        let identity = RecoveryAttemptIdentity.primary(generation)
+        let ownedInFlight = recoveryAttemptInFlight == identity
         defer {
-            if ownedInFlight, recoveryAttemptInFlight == generation {
+            if ownedInFlight, recoveryAttemptInFlight == identity {
                 recoveryAttemptInFlight = nil
             }
         }
@@ -406,9 +447,10 @@ extension ProductChromeHostView {
     }
 
     func fireRecovery(generation: UInt64) {
-        guard recoveryTimerGeneration == generation else { return }
+        guard recoveryTimerGeneration == generation, recoveryTimerPanePin == nil else { return }
         recoveryTimer = nil
         recoveryTimerGeneration = 0
+        recoveryTimerPanePin = nil
         guard seyal_app_snapshot(pane.appHandle).recovery_generation == generation else { return }
         let now = runtimeRecoveryNowMillis()
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_FIRE_RECOVERY) {
@@ -420,5 +462,31 @@ extension ProductChromeHostView {
 
     func ackRecovery() {
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_ACK_RECOVERY)
+    }
+
+    private func firePaneRecovery(pin: PaneRecoveryPin) {
+        guard recoveryTimerPanePin == pin else { return }
+        recoveryTimer = nil
+        recoveryTimerGeneration = 0
+        recoveryTimerPanePin = nil
+        _ = seyal_app_fire_pane_recovery(pane.appHandle, pin.ffiValue, runtimeRecoveryNowMillis())
+        driveRecovery()
+    }
+
+    @discardableResult
+    private func completePaneRecovery(
+        target: SeyalAppPaneRecoveryTarget,
+        outcome: SeyalAppRecoveryOutcome,
+        launch: SeyalAppRecoveryLaunch = SEYAL_APP_RECOVERY_LAUNCH_NONE,
+        handle: UInt64 = 0
+    ) -> Int32 {
+        seyal_app_complete_pane_recovery(
+            pane.appHandle,
+            target,
+            UInt32(outcome.rawValue),
+            UInt32(launch.rawValue),
+            handle,
+            runtimeRecoveryNowMillis()
+        )
     }
 }

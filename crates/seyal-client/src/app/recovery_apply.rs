@@ -7,6 +7,7 @@ use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult};
 
 impl ApplicationRoot {
     pub(super) fn begin_recovery(&mut self, now: Duration) -> Result<(), AppError> {
+        self.supersede_pane_recovery_for_primary();
         self.pending_recovery = self.recovery.begin_episode(now);
         Ok(())
     }
@@ -39,7 +40,6 @@ impl ApplicationRoot {
             self.sync_composer_presentation();
         }
         self.pending_recovery = effects;
-        self.finish_pane_recovery_if_terminal();
         Ok(())
     }
 

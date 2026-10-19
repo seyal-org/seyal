@@ -9,6 +9,7 @@ use seyal_core::{ExecutionId, PaneId};
 
 use crate::app::PaneRecoveryTarget;
 use crate::app::APP_ABI_VERSION;
+use crate::recovery::{AttemptOutcome, LaunchResult, RecoveryEffect};
 use crate::shell::SplitAxis;
 
 use super::encode::split_id;
@@ -20,6 +21,55 @@ const PANE_BINDING_HAS_EXECUTION: u16 = 1;
 const PANE_BINDING_HAS_DISPLAY: u16 = 2;
 const PANE_RECOVERY_TARGET_ACTIVE: u16 = 1;
 const PANE_RECOVERY_TARGET_RETRYABLE: u16 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppPaneRecoveryEffect {
+    pub version: u16,
+    pub size: u16,
+    pub kind: u16,
+    pub reserved: u16,
+    pub generation: u64,
+    pub parameter: u64,
+}
+
+impl SeyalAppPaneRecoveryEffect {
+    const fn empty() -> Self {
+        Self {
+            version: APP_ABI_VERSION,
+            size: 0,
+            kind: 0,
+            reserved: 0,
+            generation: 0,
+            parameter: 0,
+        }
+    }
+
+    fn from_effect(effect: Option<RecoveryEffect>) -> Self {
+        let Some(effect) = effect else {
+            return Self::empty();
+        };
+        let (kind, generation, parameter) = match effect {
+            RecoveryEffect::PerformAttempt {
+                generation,
+                remaining,
+            } => (1, generation, remaining.as_millis() as u64),
+            RecoveryEffect::Schedule { generation, delay } => {
+                (2, generation, delay.as_millis() as u64)
+            }
+            RecoveryEffect::LaunchHelper { generation } => (3, generation, generation),
+            RecoveryEffect::DisposeHandle(handle) => (4, 0, handle),
+        };
+        Self {
+            version: APP_ABI_VERSION,
+            size: size_of::<Self>() as u16,
+            kind,
+            reserved: 0,
+            generation,
+            parameter,
+        }
+    }
+}
 
 /// Exact active or retryable Pane recovery target. `size == 0` means none is
 /// currently available to this Pane.
@@ -120,7 +170,7 @@ pub extern "C" fn seyal_app_active_pane_recovery_target(handle: u64) -> SeyalApp
             .map(|target| {
                 SeyalAppPaneRecoveryTarget::from_target(
                     target,
-                    state.root.snapshot().recovery_generation,
+                    state.root.pane_recovery_state().generation,
                     false,
                 )
             })
@@ -169,11 +219,122 @@ pub extern "C" fn seyal_app_begin_next_pane_recovery(
             .map(|target| {
                 SeyalAppPaneRecoveryTarget::from_target(
                     target,
-                    state.root.snapshot().recovery_generation,
+                    state.root.pane_recovery_state().generation,
                     false,
                 )
             })
             .unwrap_or_else(SeyalAppPaneRecoveryTarget::empty)
+    })
+}
+
+/// Read the next effect belonging only to the exact active Pane episode.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_pane_recovery_effect(
+    handle: u64,
+    target: SeyalAppPaneRecoveryTarget,
+) -> SeyalAppPaneRecoveryEffect {
+    let Some((target, generation)) = target.target() else {
+        return SeyalAppPaneRecoveryEffect::empty();
+    };
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return SeyalAppPaneRecoveryEffect::empty();
+        };
+        SeyalAppPaneRecoveryEffect::from_effect(state.root.pane_recovery_effect(target, generation))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_ack_pane_recovery_effect(
+    handle: u64,
+    target: SeyalAppPaneRecoveryTarget,
+) -> i32 {
+    let Some((target, generation)) = target.target() else {
+        return -2;
+    };
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        state.root.ack_pane_recovery_effect(target, generation);
+        0
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_fire_pane_recovery(
+    handle: u64,
+    target: SeyalAppPaneRecoveryTarget,
+    now_ms: u64,
+) -> i32 {
+    let Some((target, generation)) = target.target() else {
+        return -2;
+    };
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        i32::from(!state.root.fire_pane_recovery(
+            target,
+            generation,
+            std::time::Duration::from_millis(now_ms),
+        ))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_complete_pane_recovery(
+    handle: u64,
+    target: SeyalAppPaneRecoveryTarget,
+    outcome: u32,
+    launch: u32,
+    registry_handle: u64,
+    now_ms: u64,
+) -> i32 {
+    let Some((target, generation)) = target.target() else {
+        return -2;
+    };
+    let outcome = match outcome {
+        0 => AttemptOutcome::Connected,
+        1 => AttemptOutcome::Opened {
+            handle: registry_handle,
+            adopted: true,
+        },
+        2 => AttemptOutcome::Opened {
+            handle: registry_handle,
+            adopted: false,
+        },
+        3 => AttemptOutcome::EndpointMissing,
+        4 => AttemptOutcome::Retryable,
+        5 => AttemptOutcome::ControllerBusy,
+        6 => AttemptOutcome::Blocked,
+        7 => AttemptOutcome::ExecutionEnded,
+        _ => return -2,
+    };
+    let launch = match launch {
+        0 => None,
+        1 => Some(LaunchResult::Started),
+        2 => Some(LaunchResult::HelperMissing),
+        _ => return -2,
+    };
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return -1;
+        };
+        state
+            .root
+            .complete_pane_recovery(
+                target,
+                generation,
+                outcome,
+                std::time::Duration::from_millis(now_ms),
+                launch,
+            )
+            .map_or(-3, |_| 0)
     })
 }
 
@@ -521,6 +682,9 @@ mod tests {
         assert_eq!(size_of::<SeyalAppPaneBinding>(), 48);
         assert_eq!(offset_of!(SeyalAppPaneBinding, execution_lo), 24);
         assert_eq!(offset_of!(SeyalAppPaneBinding, display_handle), 40);
+        assert_eq!(size_of::<SeyalAppPaneRecoveryEffect>(), 24);
+        assert_eq!(offset_of!(SeyalAppPaneRecoveryEffect, generation), 8);
+        assert_eq!(offset_of!(SeyalAppPaneRecoveryEffect, parameter), 16);
     }
 
     #[test]
