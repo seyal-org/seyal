@@ -547,6 +547,52 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testSecondaryPaneRecoveryPlaceholderOffersExactRetryableTarget() throws {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = UInt16(SEYAL_APP_ABI_VERSION)
+        target.size = UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+        target.flags = UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE)
+        target.pane_lo = 0x11
+        target.pane_hi = 0x12
+        target.execution_lo = 0x21
+        target.execution_hi = 0x22
+        target.binding_generation = 31
+        target.recovery_generation = 41
+
+        let host = SecondaryLivePaneHost(
+            appHandle: 0,
+            paneLo: target.pane_lo,
+            paneHi: target.pane_hi,
+            displayHandle: 0,
+            recoveryTarget: target
+        )
+        var retried: SeyalAppPaneRecoveryTarget?
+        host.onRetryRecovery = { retried = $0 }
+
+        let status = try XCTUnwrap(
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-status")
+        )
+        XCTAssertEqual(status.stringValue, "Terminal disconnected")
+        let retry = try XCTUnwrap(
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-retry") as? NSButton
+        )
+        XCTAssertFalse(retry.isHidden)
+        retry.performClick(nil)
+        let retryTarget = try XCTUnwrap(retried)
+        XCTAssertEqual(retryTarget.pane_lo, target.pane_lo)
+        XCTAssertEqual(retryTarget.pane_hi, target.pane_hi)
+        XCTAssertEqual(retryTarget.execution_lo, target.execution_lo)
+        XCTAssertEqual(retryTarget.execution_hi, target.execution_hi)
+        XCTAssertEqual(retryTarget.binding_generation, target.binding_generation)
+        XCTAssertEqual(retryTarget.recovery_generation, target.recovery_generation)
+
+        target.flags = UInt16(SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE)
+        host.updateRecoveryTarget(target)
+        XCTAssertEqual(status.stringValue, "Reconnecting terminal…")
+        XCTAssertTrue(retry.isHidden, "automatic recovery must not show an explicit retry button")
+    }
+
+    @MainActor
     func testSinglePaneProjectsNoSplitDividerAndDividerDragFailsClosed() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 56)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
@@ -822,7 +868,7 @@ final class SeyalHostComponentTests: XCTestCase {
 
     @MainActor
     func testSuppressedBridgeRecoveryKeepsSecondaryMetalPresentationEnabled() {
-        let view = MetalSurfaceView(
+        let view = VisibleMetalSurfaceForPresentationTest(
             frame: NSRect(x: 0, y: 0, width: 320, height: 200),
             paneID: "secondary-live-test",
             allowsImplicitExecutionBootstrap: false
@@ -3095,6 +3141,15 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
     }
 
+}
+
+/// NSWindow occlusion depends on the host's WindowServer state, which is not a
+/// stable input in hosted XCTest. Keep the component test focused on the
+/// visibility branch by providing an attached view whose effective visibility
+/// is deterministic; the real NSWindow and CAMetalLayer are still exercised.
+@MainActor
+private final class VisibleMetalSurfaceForPresentationTest: MetalSurfaceView {
+    override var shouldRender: Bool { true }
 }
 
 @discardableResult

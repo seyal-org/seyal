@@ -344,8 +344,17 @@ final class SeyalHostUITests: XCTestCase {
                     return nil
                 }
             }
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let composerAvailable = expectation(
+                for: NSPredicate(format: "value == %@", "available"),
+                evaluatedWith: composer,
+                handler: nil
+            )
+            guard XCTWaiter.wait(for: [composerAvailable], timeout: 10) == .completed else {
+                return nil
+            }
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
-            guard editor.waitForExistence(timeout: 5) else { return nil }
+            guard editor.waitForExistence(timeout: 5), editor.isEnabled else { return nil }
             editor.click()
             let command = "printf '%s\\n' \"$$\" > \(shellPIDFile.path); "
                 + "while true; do stty size </dev/tty > \(file.path); sleep 0.1; done "
@@ -355,13 +364,15 @@ final class SeyalHostUITests: XCTestCase {
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if let output = try? String(contentsOf: file, encoding: .utf8),
-                   let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8)
+                   let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8),
+                   let watcherPIDValue = try? String(contentsOf: watcherPIDFile, encoding: .utf8)
                 {
                     let fields = output.split(whereSeparator: \.isWhitespace)
                     if fields.count == 2,
                        let rows = Int(fields[0]),
                        let columns = Int(fields[1]),
-                       let shellPID = Int(shellPIDValue.trimmingCharacters(in: .whitespacesAndNewlines))
+                       let shellPID = Int(shellPIDValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+                       Int(watcherPIDValue.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
                     {
                         return (rows, columns, shellPID)
                     }
@@ -402,7 +413,11 @@ final class SeyalHostUITests: XCTestCase {
             shellPIDFile: firstShellPIDFile,
             watcherPIDFile: firstWatcherPIDFile
         ) else {
-            XCTFail("first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil")")
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            XCTFail(
+                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: firstFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: firstWatcherPIDFile.path))"
+            )
             return
         }
         guard let secondBefore = runSize(
@@ -412,8 +427,10 @@ final class SeyalHostUITests: XCTestCase {
             shellPIDFile: secondShellPIDFile,
             watcherPIDFile: secondWatcherPIDFile
         ) else {
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             XCTFail(
-                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
+                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: secondFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: secondWatcherPIDFile.path)), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
             )
             return
         }

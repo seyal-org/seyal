@@ -265,7 +265,19 @@ impl ApplicationRoot {
     /// `TerminateExecutionResult`.
     pub(super) fn terminate_execution(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)?;
-        let bound = self.authority.ok_or(AppError::UnboundUnauthorized)?;
+        // After registry loss, focused input authority is cleared before the
+        // reconnect attempt. The retained Pane authority still identifies the
+        // Controller attachment for a retryable terminate; dispatch below
+        // fails closed with NoLiveClient until a live client is restored.
+        let bound = self
+            .authority
+            .or_else(|| {
+                (self.shell.snapshot().focused_pane == fence.pane
+                    && !self.pane_client_raws.contains_key(&fence.pane))
+                .then(|| self.pane_authorities.get(&fence.pane).copied())
+                .flatten()
+            })
+            .ok_or(AppError::UnboundUnauthorized)?;
         if !bound.controller {
             return Err(AppError::NotController);
         }
@@ -377,6 +389,7 @@ impl ApplicationRoot {
                     self.shell
                         .apply(ShellAction::BindExecution { pane, execution })
                         .map_err(|_| AppError::AlreadyBound)?;
+                    self.bind_pane_recovery(pane, execution);
                     let _ = self.provisioning.apply_bind_success(pane, execution);
                     bound = Some(execution);
                 }
@@ -531,6 +544,8 @@ impl ApplicationRoot {
 
     pub(super) fn clear_authority_for_pane(&mut self, pane: PaneId) {
         self.pane_authorities.remove(&pane);
+        self.invalidate_pane_recovery(pane);
+        self.pane_runtime_ids.remove(&pane);
         #[cfg(target_os = "macos")]
         self.unregister_extra_pane_client(pane);
         if self
@@ -594,6 +609,7 @@ impl ApplicationRoot {
                     self.shell
                         .apply(ShellAction::BindExecution { pane, execution })
                         .map_err(|_| AppError::AlreadyBound)?;
+                    self.bind_pane_recovery(pane, execution);
                     let _ = self.provisioning.apply_bind_success(pane, execution);
                 }
                 ProvisioningEffect::AttachController { owner, execution } => {

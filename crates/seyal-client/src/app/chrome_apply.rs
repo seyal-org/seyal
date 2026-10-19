@@ -180,6 +180,15 @@ impl ApplicationRoot {
     /// target clears the active input route without deleting sibling bindings.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
+        if self.pane_recovery_expectations.contains_key(&focused) {
+            self.authority = None;
+            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+            self.sync_composer_presentation();
+            self.output_utf8.clear();
+            #[cfg(target_os = "macos")]
+            self.clear_focused_display_handle_if_owned();
+            return;
+        }
         let Some(authority) = self.pane_authorities.get(&focused).copied() else {
             self.authority = None;
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);

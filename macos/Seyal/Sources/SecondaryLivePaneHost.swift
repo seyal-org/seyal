@@ -53,16 +53,27 @@ final class SecondaryLivePaneHost: NSView {
     let paneLo: UInt64
     let paneHi: UInt64
     var onFocus: (() -> Void)?
+    var onRetryRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     private(set) var displayHandle: UInt64
+    private var recoveryTarget: SeyalAppPaneRecoveryTarget
     private let surface: MetalSurfaceView
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private var lastObservedLayoutSample: PaneLayoutGeometrySample?
     var beginsLayoutEpoch: ((PaneLayoutGeometrySample, UInt64) -> Bool)?
 
-    init(appHandle: UInt64, paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64) {
+    init(
+        appHandle: UInt64,
+        paneLo: UInt64,
+        paneHi: UInt64,
+        displayHandle: UInt64,
+        recoveryTarget: SeyalAppPaneRecoveryTarget
+    ) {
         self.appHandle = appHandle
         self.paneLo = paneLo
         self.paneHi = paneHi
         self.displayHandle = displayHandle
+        self.recoveryTarget = recoveryTarget
         surface = MetalSurfaceView(
             frame: .zero,
             paneID: String(format: "live-%016llx%016llx", paneHi, paneLo),
@@ -80,18 +91,37 @@ final class SecondaryLivePaneHost: NSView {
         // or reconnect them when the host is removed.
         surface.bridge?.stop()
         surface.bridge = nil
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.alignment = .center
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.maximumNumberOfLines = 2
+        statusLabel.setAccessibilityIdentifier("seyal-secondary-pane-recovery-status")
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+        retryButton.target = self
+        retryButton.action = #selector(retryRecovery)
+        retryButton.setAccessibilityIdentifier("seyal-secondary-pane-recovery-retry")
+        retryButton.setAccessibilityLabel("Retry reconnecting terminal pane")
+        retryButton.setAccessibilityHelp("Starts a bounded reconnect attempt for this pane.")
         surface.renderer.onNeedsCurrentFrame = { [weak self] in
             seyalRunAsMainActorFromMainQueue {
                 self?.publishFrame()
             }
         }
         addSubview(surface)
+        addSubview(statusLabel)
+        addSubview(retryButton)
         NSLayoutConstraint.activate([
             surface.leadingAnchor.constraint(equalTo: leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: trailingAnchor),
             surface.topAnchor.constraint(equalTo: topAnchor),
             surface.bottomAnchor.constraint(equalTo: bottomAnchor),
+            statusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -12),
+            retryButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+            retryButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
         ])
+        updateRecoveryTarget(recoveryTarget)
+        updateAvailabilityPresentation()
         publishFrame()
     }
 
@@ -105,14 +135,18 @@ final class SecondaryLivePaneHost: NSView {
     /// hit target for moving Rust-owned focus to that pane.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let localPoint = convert(point, from: superview)
+        if displayHandle == 0 {
+            return super.hitTest(localPoint)
+        }
         return bounds.contains(localPoint) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
-        onFocus?()
+        if displayHandle != 0 { onFocus?() }
     }
 
     override func accessibilityPerformPress() -> Bool {
+        guard displayHandle != 0 else { return false }
         onFocus?()
         return true
     }
@@ -124,8 +158,17 @@ final class SecondaryLivePaneHost: NSView {
         true
     }
 
+    @objc private func retryRecovery() {
+        guard displayHandle == 0,
+            recoveryTarget.size != 0,
+            recoveryTarget.flags == UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE)
+        else { return }
+        onRetryRecovery?(recoveryTarget)
+    }
+
     override func layout() {
         super.layout()
+        updateAvailabilityPresentation()
         guard displayHandle != 0, window != nil, !isHidden,
               bounds.width > 8, bounds.height > 8 else { return }
         let rounded = bounds.integral
@@ -161,11 +204,17 @@ final class SecondaryLivePaneHost: NSView {
     }
 
     func updateDisplayHandle(_ handle: UInt64) {
-        guard handle != 0, handle != displayHandle else { return }
+        guard handle != displayHandle else { return }
         displayHandle = handle
         lastObservedLayoutSample = nil
+        updateAvailabilityPresentation()
         needsLayout = true
         publishFrame()
+    }
+
+    func updateRecoveryTarget(_ target: SeyalAppPaneRecoveryTarget) {
+        recoveryTarget = target
+        updateAvailabilityPresentation()
     }
 
     /// Called when the shared primary bridge polls this registry handle.
@@ -180,5 +229,32 @@ final class SecondaryLivePaneHost: NSView {
         guard frame.cells != nil, frame.cell_count > 0 else { return }
         surface.consumeBridgeFrame(frame)
         setAccessibilityValue("rows=\(frame.rows) columns=\(frame.columns)")
+    }
+
+    private func updateAvailabilityPresentation() {
+        let available = displayHandle != 0
+        surface.isHidden = !available
+        statusLabel.isHidden = available
+        retryButton.isHidden = available
+            || recoveryTarget.flags != UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE)
+            || recoveryTarget.size == 0
+        guard !available else {
+            setAccessibilityRole(.button)
+            setAccessibilityLabel("Focus secondary terminal pane")
+            return
+        }
+        let state: String
+        switch recoveryTarget.flags {
+        case UInt16(SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE):
+            state = "Reconnecting terminal…"
+        case UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE):
+            state = "Terminal disconnected"
+        default:
+            state = "Waiting to reconnect"
+        }
+        statusLabel.stringValue = state
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Secondary terminal pane unavailable")
+        setAccessibilityValue(state)
     }
 }

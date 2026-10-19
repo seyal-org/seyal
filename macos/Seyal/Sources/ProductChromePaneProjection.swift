@@ -10,20 +10,27 @@ extension ProductChromeHostView {
     /// Project secondary Metal hosts for non-focused LIVE leaves (#936).
     func reconcileSecondaryLiveSurfaces(paneCount: Int) {
         let handle = pane.appHandle
-        var bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool)] = []
-        for index in 0..<paneCount {
-            let region = seyal_app_pane_region(handle, UInt32(index))
-            guard region.size != 0 else { break }
-            let binding = seyal_app_pane_binding(handle, UInt32(index))
+        var bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)] = []
+        for region in centerColumn.regions {
+            let binding = seyal_app_pane_binding(handle, UInt32(bindings.count))
             bindings.append(
                 (
-                    paneLo: region.pane_lo,
-                    paneHi: region.pane_hi,
+                    paneLo: region.paneLo,
+                    paneHi: region.paneHi,
                     displayHandle: binding.display_handle,
-                    focused: region.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED) != 0,
-                    live: region.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE) != 0
+                    focused: region.focused,
+                    live: region.live,
+                    recoveryTarget: region.recoveryTarget
                 )
             )
+        }
+        centerColumn.onRetryPaneRecovery = { [weak self] target in
+            guard let self,
+                target.flags == UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE),
+                seyal_app_retry_pane_recovery(self.pane.appHandle, target) == 0
+            else { return }
+            self.driveRecovery()
+            self.reconcilePaneHosts(paneCount: Int(seyal_app_shell(self.pane.appHandle).pane_count))
         }
         centerColumn.reconcileSecondaryLiveHosts(bindings: bindings)
         wireRegistryFrameRouting()

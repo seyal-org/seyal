@@ -1,5 +1,48 @@
 import AppKit
 
+private struct PaneRecoveryPin: Sendable {
+    let version: UInt16
+    let size: UInt16
+    let flags: UInt16
+    let paneLow: UInt64
+    let paneHigh: UInt64
+    let executionLow: UInt64
+    let executionHigh: UInt64
+    let bindingGeneration: UInt64
+    let recoveryGeneration: UInt64
+
+    init(_ target: SeyalAppPaneRecoveryTarget) {
+        version = target.version
+        size = target.size
+        flags = target.flags
+        paneLow = target.pane_lo
+        paneHigh = target.pane_hi
+        executionLow = target.execution_lo
+        executionHigh = target.execution_hi
+        bindingGeneration = target.binding_generation
+        recoveryGeneration = target.recovery_generation
+    }
+
+    var ffiValue: SeyalAppPaneRecoveryTarget {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = version
+        target.size = size
+        target.flags = flags
+        target.reserved = 0
+        target.pane_lo = paneLow
+        target.pane_hi = paneHigh
+        target.execution_lo = executionLow
+        target.execution_hi = executionHigh
+        target.binding_generation = bindingGeneration
+        target.recovery_generation = recoveryGeneration
+        return target
+    }
+
+    var executionIdentity: String {
+        String(format: "%016llx%016llx", executionHigh, executionLow)
+    }
+}
+
 /// Host effect executor for the Rust `RecoveryCoordinator`. Rust owns retry
 /// delays, the episode deadline, launch-once and generation fencing; this
 /// extension only opens/adopts handles, arms timers, launches the bundled
@@ -68,6 +111,10 @@ extension ProductChromeHostView {
     }
 
     func driveRecovery() {
+        let paneTarget = seyal_app_begin_next_pane_recovery(
+            pane.appHandle,
+            runtimeRecoveryNowMillis()
+        )
         let snapshot = seyal_app_snapshot(pane.appHandle)
         if recoveryTimer != nil, recoveryTimerGeneration != snapshot.recovery_generation {
             recoveryTimer?.invalidate()
@@ -79,7 +126,13 @@ extension ProductChromeHostView {
             // CompleteRecovery replaces this effect; acking it would drop the
             // attempt. The in-flight fence keeps reconcile pulses from
             // starting a second open for the same generation.
-            performRecoveryAttempt(generation: snapshot.recovery_generation)
+            if paneTarget.size != 0,
+                paneTarget.recovery_generation == snapshot.recovery_generation
+            {
+                performPaneRecoveryAttempt(generation: snapshot.recovery_generation, target: paneTarget)
+            } else {
+                performRecoveryAttempt(generation: snapshot.recovery_generation)
+            }
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_SCHEDULE.rawValue):
             let delayMs = seyal_app_recovery_param(pane.appHandle)
             let generation = snapshot.recovery_generation
@@ -157,6 +210,120 @@ extension ProductChromeHostView {
                     self.finishRecoveryAttempt(outcome, generation: generation)
                 }
             }
+        }
+    }
+
+    func performPaneRecoveryAttempt(generation: UInt64, target: SeyalAppPaneRecoveryTarget) {
+        guard target.size != 0,
+            target.recovery_generation == generation,
+            recoveryAttemptInFlight != generation
+        else { return }
+        recoveryAttemptInFlight = generation
+        let remainingMs = seyal_app_recovery_param(pane.appHandle)
+        ackRecovery()
+        let issuedAt = ProcessInfo.processInfo.systemUptime
+        let pin = PaneRecoveryPin(target)
+        recoveryLifecycleQueue.async { [weak self] in
+            let elapsed = ProcessInfo.processInfo.systemUptime - issuedAt
+            let outcome = openRuntimeRecoveryHandle(
+                executionIdentity: pin.executionIdentity,
+                allowsImplicitExecutionBootstrap: false,
+                remainingBudget: TimeInterval(remainingMs) / 1000 - elapsed
+            )
+            DispatchQueue.main.async { [weak self] in
+                seyalRunAsMainActorFromMainQueue {
+                    guard let self else {
+                        if case let .opened(opened) = outcome {
+                            seyal_bridge_disconnect_handle(opened.handle)
+                        }
+                        return
+                    }
+                    self.finishPaneRecoveryAttempt(outcome, pin: pin, generation: generation)
+                }
+            }
+        }
+    }
+
+    private func finishPaneRecoveryAttempt(
+        _ outcome: RuntimeRecoveryAttemptOutcome,
+        pin: PaneRecoveryPin,
+        generation: UInt64
+    ) {
+        let ownedInFlight = recoveryAttemptInFlight == generation
+        defer {
+            if ownedInFlight, recoveryAttemptInFlight == generation {
+                recoveryAttemptInFlight = nil
+            }
+        }
+        let active = seyal_app_active_pane_recovery_target(pane.appHandle)
+        let current = seyal_app_snapshot(pane.appHandle).recovery_generation == generation
+            && active.size == pin.size
+            && active.pane_lo == pin.paneLow
+            && active.pane_hi == pin.paneHigh
+            && active.execution_lo == pin.executionLow
+            && active.execution_hi == pin.executionHigh
+            && active.binding_generation == pin.bindingGeneration
+            && active.recovery_generation == pin.recoveryGeneration
+        var result: Int32
+        var publishedHandle: UInt64?
+        switch outcome {
+        case let .opened(opened):
+            guard current, seyal_bridge_adopt_handle(opened.handle) == 0 else {
+                seyal_bridge_disconnect_handle(opened.handle)
+                result = completeRecovery(
+                    generation: generation,
+                    outcome: SEYAL_APP_RECOVERY_OPENED_REJECTED,
+                    handle: opened.handle
+                )
+                if current, result != 0 {
+                    applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
+                }
+                reconcileChrome()
+                return
+            }
+            result = completeRecovery(
+                generation: generation,
+                outcome: SEYAL_APP_RECOVERY_OPENED_ADOPTED,
+                handle: opened.handle
+            )
+            if result == 0 {
+                result = seyal_app_commit_pane_recovery(
+                    pane.appHandle,
+                    pin.ffiValue,
+                    opened.handle
+                )
+            }
+            if result == 0 {
+                pane.inputSurface.bridge?.armAuxiliaryReadSources()
+                publishedHandle = opened.handle
+            } else {
+                // A candidate rejected at the Rust ownership boundary must not
+                // remain registered or paint after the Pane binding changed.
+                seyal_bridge_disconnect_handle(opened.handle)
+                if current {
+                    applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
+                }
+            }
+        case .endpointMissing:
+            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_ENDPOINT_MISSING)
+        case .retryable:
+            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_RETRYABLE)
+        case .controllerBusy:
+            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_CONTROLLER_BUSY)
+        case .executionEnded:
+            result = completeRecovery(
+                generation: generation,
+                outcome: SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME
+            )
+        case .blocked:
+            result = completeRecovery(generation: generation, outcome: SEYAL_APP_RECOVERY_BLOCKED_OUTCOME)
+        }
+        if current, result != 0 {
+            applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
+        }
+        reconcileChrome()
+        if let publishedHandle {
+            pane.inputSurface.bridge?.onRegistryHandlePolled?(publishedHandle)
         }
     }
 

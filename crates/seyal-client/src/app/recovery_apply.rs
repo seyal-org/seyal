@@ -35,10 +35,11 @@ impl ApplicationRoot {
             }
             return Ok(());
         }
-        if outcome == AttemptOutcome::ExecutionEnded {
+        if outcome == AttemptOutcome::ExecutionEnded && self.pane_recovery.active().is_none() {
             self.sync_composer_presentation();
         }
         self.pending_recovery = effects;
+        self.finish_pane_recovery_if_terminal();
         Ok(())
     }
 

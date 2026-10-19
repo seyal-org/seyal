@@ -23,10 +23,69 @@ final class PaneLayoutView: NSView {
         let focused: Bool
         let live: Bool
         let title: String
+        let recoveryFlags: UInt16
+        let recoveryExecutionLo: UInt64
+        let recoveryExecutionHi: UInt64
+        let recoveryBindingGeneration: UInt64
+        let recoveryGeneration: UInt64
+
+        init(
+            paneLo: UInt64,
+            paneHi: UInt64,
+            rect: CGRect,
+            focused: Bool,
+            live: Bool,
+            title: String,
+            recoveryFlags: UInt16 = 0,
+            recoveryExecutionLo: UInt64 = 0,
+            recoveryExecutionHi: UInt64 = 0,
+            recoveryBindingGeneration: UInt64 = 0,
+            recoveryGeneration: UInt64 = 0
+        ) {
+            self.paneLo = paneLo
+            self.paneHi = paneHi
+            self.rect = rect
+            self.focused = focused
+            self.live = live
+            self.title = title
+            self.recoveryFlags = recoveryFlags
+            self.recoveryExecutionLo = recoveryExecutionLo
+            self.recoveryExecutionHi = recoveryExecutionHi
+            self.recoveryBindingGeneration = recoveryBindingGeneration
+            self.recoveryGeneration = recoveryGeneration
+        }
 
         /// Everything but geometry: a change here rebuilds region views.
         var identity: Region {
-            Region(paneLo: paneLo, paneHi: paneHi, rect: .zero, focused: focused, live: live, title: title)
+            Region(
+                paneLo: paneLo,
+                paneHi: paneHi,
+                rect: .zero,
+                focused: focused,
+                live: live,
+                title: title,
+                recoveryFlags: recoveryFlags,
+                recoveryExecutionLo: recoveryExecutionLo,
+                recoveryExecutionHi: recoveryExecutionHi,
+                recoveryBindingGeneration: recoveryBindingGeneration,
+                recoveryGeneration: recoveryGeneration
+            )
+        }
+
+        var recoveryTarget: SeyalAppPaneRecoveryTarget {
+            var target = SeyalAppPaneRecoveryTarget()
+            target.version = UInt16(SEYAL_APP_ABI_VERSION)
+            target.size = recoveryFlags == 0
+                ? 0
+                : UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+            target.flags = recoveryFlags
+            target.pane_lo = paneLo
+            target.pane_hi = paneHi
+            target.execution_lo = recoveryExecutionLo
+            target.execution_hi = recoveryExecutionHi
+            target.binding_generation = recoveryBindingGeneration
+            target.recovery_generation = recoveryGeneration
+            return target
         }
     }
 
@@ -52,6 +111,7 @@ final class PaneLayoutView: NSView {
     /// Container for the focused Pane's chrome (transcript/composer/primary Metal).
     let liveContent = NSView()
     var onFocusPane: ((UInt64, UInt64) -> Void)?
+    var onRetryPaneRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     /// Rust application root the projection is read from; 0 until wired.
     var appHandle: UInt64 = 0
     private(set) var regions: [Region] = []
@@ -85,20 +145,19 @@ final class PaneLayoutView: NSView {
 
     /// Ensure non-focused LIVE leaves with a display handle have Metal hosts.
     func reconcileSecondaryLiveHosts(
-        bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool)]
+        bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)]
     ) {
         var keep = Set<PaneKey>()
         var currentLayoutEpochPanes = Set<PaneKey>()
         for binding in bindings {
             let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
-            guard binding.live, binding.displayHandle != 0 else {
+            guard binding.live else {
                 if let host = secondaryLiveHosts.removeValue(forKey: key) {
                     host.removeFromSuperview()
                 }
                 layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
                 continue
             }
-            currentLayoutEpochPanes.insert(key)
             guard !binding.focused else {
                 if let host = secondaryLiveHosts.removeValue(forKey: key) {
                     host.removeFromSuperview()
@@ -106,16 +165,23 @@ final class PaneLayoutView: NSView {
                 continue
             }
             keep.insert(key)
+            if binding.displayHandle != 0 {
+                currentLayoutEpochPanes.insert(key)
+            } else {
+                layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
+            }
             let host: SecondaryLivePaneHost
             if let existing = secondaryLiveHosts[key] {
                 host = existing
                 host.updateDisplayHandle(binding.displayHandle)
+                host.updateRecoveryTarget(binding.recoveryTarget)
             } else {
                 host = SecondaryLivePaneHost(
                     appHandle: appHandle,
                     paneLo: binding.paneLo,
                     paneHi: binding.paneHi,
-                    displayHandle: binding.displayHandle
+                    displayHandle: binding.displayHandle,
+                    recoveryTarget: binding.recoveryTarget
                 )
                 host.onFocus = { [weak self] in
                     self?.onFocusPane?(key.lo, key.hi)
@@ -129,9 +195,14 @@ final class PaneLayoutView: NSView {
                         displayHandle: displayHandle
                     )
                 }
+                host.onRetryRecovery = { [weak self] target in
+                    self?.onRetryPaneRecovery?(target)
+                }
                 secondaryLiveHosts[key] = host
                 addSubview(host, positioned: .above, relativeTo: liveContent)
-                host.noteRegistryPolled()
+                if binding.displayHandle != 0 {
+                    host.noteRegistryPolled()
+                }
             }
             // Publish the target frame in the same reconciliation turn that
             // installs the host. Waiting for a later parent layout pass leaves
@@ -149,6 +220,25 @@ final class PaneLayoutView: NSView {
         }
         trackedLayoutEpochPanes = currentLayoutEpochPanes
         needsLayout = true
+    }
+
+    /// Compatibility projection for component callers that only exercise the
+    /// live-host path. Production projections always pass Rust recovery state.
+    func reconcileSecondaryLiveHosts(
+        bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool)]
+    ) {
+        reconcileSecondaryLiveHosts(
+            bindings: bindings.map { binding in
+                (
+                    paneLo: binding.paneLo,
+                    paneHi: binding.paneHi,
+                    displayHandle: binding.displayHandle,
+                    focused: binding.focused,
+                    live: binding.live,
+                    recoveryTarget: SeyalAppPaneRecoveryTarget()
+                )
+            }
+        )
     }
 
     @available(*, unavailable)
@@ -218,6 +308,11 @@ final class PaneLayoutView: NSView {
                     as: UTF8.self
                 )
             } ?? "Pane"
+            let recovery = seyal_app_pane_recovery_target_for_pane(
+                appHandle,
+                raw.pane_lo,
+                raw.pane_hi
+            )
             regions.append(
                 Region(
                     paneLo: raw.pane_lo,
@@ -230,7 +325,12 @@ final class PaneLayoutView: NSView {
                     ),
                     focused: raw.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED) != 0,
                     live: raw.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE) != 0,
-                    title: title
+                    title: title,
+                    recoveryFlags: recovery.flags,
+                    recoveryExecutionLo: recovery.execution_lo,
+                    recoveryExecutionHi: recovery.execution_hi,
+                    recoveryBindingGeneration: recovery.binding_generation,
+                    recoveryGeneration: recovery.recovery_generation
                 )
             )
         }
