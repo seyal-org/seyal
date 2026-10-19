@@ -353,7 +353,7 @@ final class SeyalHostUITests: XCTestCase {
             guard XCTWaiter.wait(for: [composerAvailable], timeout: 10) == .completed else {
                 return nil
             }
-            let editorQuery = app.descendants(matching: .any)["seyal-composer-editor"]
+            let editorQuery = app.descendants(matching: .any).matching(identifier: "seyal-composer-editor")
             guard editorQuery.firstMatch.waitForExistence(timeout: 5) else { return nil }
             // The editor is projected inside the focused Pane's live chrome,
             // while Pane regions and liveContent are AX siblings. Resolve the
