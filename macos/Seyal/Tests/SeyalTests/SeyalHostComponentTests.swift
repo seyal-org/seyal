@@ -547,6 +547,37 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testFocusedRoundTripRetainsSecondaryPaneGeometryEpoch() {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+        let sample = PaneLayoutGeometrySample(
+            viewportSize: CGSize(width: 250, height: 300),
+            cellSize: CGSize(width: 10, height: 20)
+        )
+        XCTAssertTrue(
+            layout.observesMeaningfulLayoutEpoch(sample, paneLo: 2, paneHi: 2, displayHandle: 42)
+        )
+        let target = SeyalAppPaneRecoveryTarget()
+
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 1, displayHandle: 41, focused: true, live: true, recoveryTarget: target),
+            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true, recoveryTarget: target),
+        ])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 1, displayHandle: 41, focused: false, live: true, recoveryTarget: target),
+            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: true, live: true, recoveryTarget: target),
+        ])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 1, displayHandle: 41, focused: true, live: true, recoveryTarget: target),
+            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true, recoveryTarget: target),
+        ])
+
+        XCTAssertFalse(
+            layout.observesMeaningfulLayoutEpoch(sample, paneLo: 2, paneHi: 2, displayHandle: 42),
+            "an unchanged Pane geometry must not start a new epoch after secondary → focused → secondary"
+        )
+    }
+
+    @MainActor
     func testSecondaryPaneRecoveryPlaceholderOffersExactRetryableTarget() throws {
         var target = SeyalAppPaneRecoveryTarget()
         target.version = UInt16(SEYAL_APP_ABI_VERSION)

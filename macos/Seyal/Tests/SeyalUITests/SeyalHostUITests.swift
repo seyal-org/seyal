@@ -353,8 +353,45 @@ final class SeyalHostUITests: XCTestCase {
             guard XCTWaiter.wait(for: [composerAvailable], timeout: 10) == .completed else {
                 return nil
             }
-            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
-            guard editor.waitForExistence(timeout: 5), editor.isEnabled else { return nil }
+            let editorQuery = app.descendants(matching: .any)["seyal-composer-editor"]
+            guard editorQuery.firstMatch.waitForExistence(timeout: 5) else { return nil }
+            // The editor is projected inside the focused Pane's live chrome,
+            // while Pane regions and liveContent are AX siblings. Resolve the
+            // editor by its current frame instead of relying on firstMatch,
+            // then wait for AppKit's enabled state to catch up with the
+            // composer availability value observed above.
+            let editor = editorQuery.allElementsBoundByIndex.first {
+                $0.frame != .zero && region.frame.insetBy(dx: -2, dy: -2).contains($0.frame)
+            }
+            guard let editor else {
+                let candidates = editorQuery.allElementsBoundByIndex.map {
+                    "id=\($0.identifier) enabled=\($0.isEnabled) frame=\($0.frame)"
+                }.joined(separator: "; ")
+                XCTFail(
+                    "no composer editor is inside the focused Pane region; "
+                        + "region=\(region.identifier) regionFrame=\(region.frame) "
+                        + "composer=\(composer.value ?? "nil") editorCount=\(editorQuery.count) "
+                        + "candidates=[\(candidates)]"
+                )
+                return nil
+            }
+            let editorEnabled = expectation(
+                for: NSPredicate(format: "isEnabled == true"),
+                evaluatedWith: editor,
+                handler: nil
+            )
+            guard XCTWaiter.wait(for: [editorEnabled], timeout: 5) == .completed else {
+                let candidates = editorQuery.allElementsBoundByIndex.map {
+                    "id=\($0.identifier) enabled=\($0.isEnabled) frame=\($0.frame)"
+                }.joined(separator: "; ")
+                XCTFail(
+                    "focused Pane editor did not become enabled; region=\(region.identifier) "
+                        + "regionFrame=\(region.frame) composer=\(composer.value ?? "nil") "
+                        + "editorCount=\(editorQuery.count) selectedFrame=\(editor.frame) "
+                        + "candidates=[\(candidates)]"
+                )
+                return nil
+            }
             editor.click()
             let command = "printf '%s\\n' \"$$\" > \(shellPIDFile.path); "
                 + "while true; do stty size </dev/tty > \(file.path); sleep 0.1; done "
