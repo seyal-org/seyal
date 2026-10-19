@@ -570,7 +570,7 @@ final class SeyalHostComponentTests: XCTestCase {
         host.onRetryRecovery = { retried = $0 }
 
         let status = try XCTUnwrap(
-            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-status")
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-status") as? NSTextField
         )
         XCTAssertEqual(status.stringValue, "Terminal disconnected")
         let retry = try XCTUnwrap(
