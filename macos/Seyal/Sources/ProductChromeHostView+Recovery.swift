@@ -122,19 +122,16 @@ extension ProductChromeHostView {
         )
         if paneTarget.size != 0 {
             drivePaneRecovery(paneTarget)
-        } else if recoveryTimerPanePin != nil {
-            recoveryTimer?.invalidate()
-            recoveryTimer = nil
-            recoveryTimerGeneration = 0
-            recoveryTimerPanePin = nil
+        } else if paneRecoveryTimerPin != nil {
+            paneRecoveryTimer?.invalidate()
+            paneRecoveryTimer = nil
+            paneRecoveryTimerPin = nil
         }
         let snapshot = seyal_app_snapshot(pane.appHandle)
-        if recoveryTimer != nil, recoveryTimerPanePin == nil,
-            recoveryTimerGeneration != snapshot.recovery_generation {
+        if recoveryTimer != nil, recoveryTimerGeneration != snapshot.recovery_generation {
             recoveryTimer?.invalidate()
             recoveryTimer = nil
             recoveryTimerGeneration = 0
-            recoveryTimerPanePin = nil
         }
         switch snapshot.recovery_effect {
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue):
@@ -145,17 +142,7 @@ extension ProductChromeHostView {
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_SCHEDULE.rawValue):
             let delayMs = seyal_app_recovery_param(pane.appHandle)
             let generation = snapshot.recovery_generation
-            recoveryTimer?.invalidate()
-            recoveryTimerGeneration = generation
-            recoveryTimerPanePin = nil
-            recoveryTimer = Timer.scheduledTimer(
-                withTimeInterval: TimeInterval(delayMs) / 1000,
-                repeats: false
-            ) { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.fireRecovery(generation: generation)
-                }
-            }
+            scheduleRecoveryTimer(generation: generation, delayMs: delayMs)
             ackRecovery()
             driveRecovery()
         case UInt32(SEYAL_APP_RECOVERY_EFFECT_LAUNCH_HELPER.rawValue):
@@ -193,15 +180,7 @@ extension ProductChromeHostView {
             performPaneRecoveryAttempt(target: target, remainingMs: effect.parameter)
         case 2:
             let pin = PaneRecoveryPin(target)
-            recoveryTimer?.invalidate()
-            recoveryTimerGeneration = effect.generation
-            recoveryTimerPanePin = pin
-            recoveryTimer = Timer.scheduledTimer(
-                withTimeInterval: TimeInterval(effect.parameter) / 1000,
-                repeats: false
-            ) { [weak self] _ in
-                DispatchQueue.main.async { self?.firePaneRecovery(pin: pin) }
-            }
+            schedulePaneRecoveryTimer(pin: pin, delayMs: effect.parameter)
             _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
         case 3:
             let launched = pane.inputSurface.bridge?.launchBundledRuntime() ?? false
@@ -447,10 +426,9 @@ extension ProductChromeHostView {
     }
 
     func fireRecovery(generation: UInt64) {
-        guard recoveryTimerGeneration == generation, recoveryTimerPanePin == nil else { return }
+        guard recoveryTimerGeneration == generation else { return }
         recoveryTimer = nil
         recoveryTimerGeneration = 0
-        recoveryTimerPanePin = nil
         guard seyal_app_snapshot(pane.appHandle).recovery_generation == generation else { return }
         let now = runtimeRecoveryNowMillis()
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_FIRE_RECOVERY) {
@@ -465,12 +443,33 @@ extension ProductChromeHostView {
     }
 
     private func firePaneRecovery(pin: PaneRecoveryPin) {
-        guard recoveryTimerPanePin == pin else { return }
-        recoveryTimer = nil
-        recoveryTimerGeneration = 0
-        recoveryTimerPanePin = nil
+        guard paneRecoveryTimerPin == pin else { return }
+        paneRecoveryTimer = nil
+        paneRecoveryTimerPin = nil
         _ = seyal_app_fire_pane_recovery(pane.appHandle, pin.ffiValue, runtimeRecoveryNowMillis())
         driveRecovery()
+    }
+
+    func scheduleRecoveryTimer(generation: UInt64, delayMs: UInt64) {
+        recoveryTimer?.invalidate()
+        recoveryTimerGeneration = generation
+        recoveryTimer = Timer.scheduledTimer(
+            withTimeInterval: TimeInterval(delayMs) / 1000,
+            repeats: false
+        ) { [weak self] _ in
+            DispatchQueue.main.async { self?.fireRecovery(generation: generation) }
+        }
+    }
+
+    func schedulePaneRecoveryTimer(pin: PaneRecoveryPin, delayMs: UInt64) {
+        paneRecoveryTimer?.invalidate()
+        paneRecoveryTimerPin = pin
+        paneRecoveryTimer = Timer.scheduledTimer(
+            withTimeInterval: TimeInterval(delayMs) / 1000,
+            repeats: false
+        ) { [weak self] _ in
+            DispatchQueue.main.async { self?.firePaneRecovery(pin: pin) }
+        }
     }
 
     @discardableResult

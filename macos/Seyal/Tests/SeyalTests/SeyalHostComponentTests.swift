@@ -1392,6 +1392,54 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testPrimaryAndPaneRecoveryTimersRemainIndependentWhenRescheduled() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        defer {
+            view.recoveryTimer?.invalidate()
+            view.paneRecoveryTimer?.invalidate()
+        }
+
+        let panePin = PaneRecoveryPin(makePaneRecoveryTarget(recoveryGeneration: 41))
+        let replacementPanePin = PaneRecoveryPin(makePaneRecoveryTarget(recoveryGeneration: 42))
+
+        view.schedulePaneRecoveryTimer(pin: panePin, delayMs: 60_000)
+        let originalPaneTimer = try XCTUnwrap(view.paneRecoveryTimer)
+        view.scheduleRecoveryTimer(generation: 7, delayMs: 60_000)
+        let originalPrimaryTimer = try XCTUnwrap(view.recoveryTimer)
+
+        // Replacing the primary retry must leave the pane callback armed.
+        view.scheduleRecoveryTimer(generation: 8, delayMs: 60_000)
+        let replacementPrimaryTimer = try XCTUnwrap(view.recoveryTimer)
+        XCTAssertFalse(originalPrimaryTimer.isValid)
+        XCTAssertTrue(originalPaneTimer.isValid)
+        XCTAssertTrue(view.paneRecoveryTimer === originalPaneTimer)
+        XCTAssertEqual(view.paneRecoveryTimerPin, panePin)
+
+        // Replacing the pane retry must leave the latest primary callback armed.
+        view.schedulePaneRecoveryTimer(pin: replacementPanePin, delayMs: 60_000)
+        let replacementPaneTimer = try XCTUnwrap(view.paneRecoveryTimer)
+        XCTAssertFalse(originalPaneTimer.isValid)
+        XCTAssertTrue(replacementPaneTimer.isValid)
+        XCTAssertTrue(replacementPrimaryTimer.isValid)
+        XCTAssertTrue(view.recoveryTimer === replacementPrimaryTimer)
+        XCTAssertEqual(view.recoveryTimerGeneration, 8)
+        XCTAssertEqual(view.paneRecoveryTimerPin, replacementPanePin)
+    }
+
+    private func makePaneRecoveryTarget(recoveryGeneration: UInt64) -> SeyalAppPaneRecoveryTarget {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = UInt16(SEYAL_APP_ABI_VERSION)
+        target.size = UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+        target.pane_lo = 0x11
+        target.pane_hi = 0x12
+        target.execution_lo = 0x21
+        target.execution_hi = 0x22
+        target.binding_generation = 31
+        target.recovery_generation = recoveryGeneration
+        return target
+    }
+
+    @MainActor
     func testRecoveryFocusRestartsOnlyAfterEligibilityChanges() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }

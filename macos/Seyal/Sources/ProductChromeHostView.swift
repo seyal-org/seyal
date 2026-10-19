@@ -38,7 +38,8 @@ final class ProductChromeHostView: NSView {
     var liveContent: NSView { centerColumn.liveContent }
     var recoveryTimer: Timer?
     var recoveryTimerGeneration: UInt64 = 0
-    var recoveryTimerPanePin: PaneRecoveryPin?
+    var paneRecoveryTimer: Timer?
+    var paneRecoveryTimerPin: PaneRecoveryPin?
     /// Rust recovery generation whose PerformAttempt is open on the lifecycle
     /// queue or still completing on MainActor (adopt + CompleteRecovery).
     /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
