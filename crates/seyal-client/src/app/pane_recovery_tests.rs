@@ -193,6 +193,60 @@ fn primary_recovery_supersedes_an_active_pane_episode_and_pane_restarts_afterwar
 }
 
 #[test]
+fn removing_superseded_pane_does_not_cancel_primary_recovery_or_its_effects() {
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x91; 16]));
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+
+    root.begin_recovery(Duration::from_millis(1)).unwrap();
+    let primary_state = root.recovery.state();
+    let primary_effects = root.pending_recovery.clone();
+    assert!(!primary_effects.is_empty());
+
+    root.invalidate_pane_recovery(pane);
+
+    assert!(
+        root.recovery.state() == primary_state && root.pending_recovery == primary_effects,
+        "Pane removal cancelled primary recovery: state {:?} (expected {:?}), effects {:?} (expected {:?})",
+        root.recovery.state(),
+        primary_state,
+        root.pending_recovery,
+        primary_effects
+    );
+}
+
+#[test]
+fn rebinding_superseded_pane_does_not_cancel_primary_recovery_or_its_effects() {
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let target = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x92; 16]));
+    root.pane_recovery.record_loss(target);
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(target));
+
+    root.begin_recovery(Duration::from_millis(1)).unwrap();
+    let primary_state = root.recovery.state();
+    let primary_effects = root.pending_recovery.clone();
+    assert!(!primary_effects.is_empty());
+
+    root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x93; 16]));
+
+    assert!(
+        root.recovery.state() == primary_state && root.pending_recovery == primary_effects,
+        "Pane rebind cancelled primary recovery: state {:?} (expected {:?}), effects {:?} (expected {:?})",
+        root.recovery.state(),
+        primary_state,
+        root.pending_recovery,
+        primary_effects
+    );
+}
+
+#[test]
 fn retryable_attempts_keep_target_and_exhaustion_releases_only_its_slot() {
     use crate::recovery::{AttemptOutcome, RecoveryEffect};
     use std::time::Duration;
@@ -237,6 +291,58 @@ fn retryable_attempts_keep_target_and_exhaustion_releases_only_its_slot() {
     assert!(root.retry_pane_recovery(target, exhausted_generation));
     assert!(!root.retry_pane_recovery(target, exhausted_generation.wrapping_sub(1)));
     assert_eq!(root.begin_next_pane_recovery(now), Some(target));
+}
+
+#[test]
+fn exhausted_pane_recovery_does_not_drop_a_live_sibling_from_the_queue() {
+    use crate::recovery::{AttemptOutcome, RecoveryEffect, RecoveryStage};
+    use std::time::Duration;
+
+    let mut root = ApplicationRoot::new();
+    let pane = root.snapshot().shell.focused_pane;
+    let sibling = PaneId::from_bytes([0x34; 16]);
+    let failed = root.bind_pane_recovery(pane, ExecutionId::from_bytes([0x81; 16]));
+    let sibling_target = root.bind_pane_recovery(sibling, ExecutionId::from_bytes([0x82; 16]));
+    for (pane_id, runtime_id, attachment) in [(pane, 8, 0x28), (sibling, 9, 0x29)] {
+        root.pane_recovery.expectations.insert(
+            pane_id,
+            PaneRecoveryExpectation {
+                runtime_id,
+                attachment_id: AttachmentId::from_bytes([attachment; 16]),
+            },
+        );
+    }
+    assert!(root.pane_recovery.record_loss(failed));
+    assert!(root.pane_recovery.record_loss(sibling_target));
+    assert_eq!(root.begin_next_pane_recovery(Duration::ZERO), Some(failed));
+    let generation = root.recovery.state().generation;
+    let mut now = Duration::ZERO;
+
+    loop {
+        root.complete_recovery(generation, AttemptOutcome::Retryable, now, None)
+            .unwrap();
+        if root.recovery.state().stage == RecoveryStage::Exhausted {
+            break;
+        }
+        let delay = root
+            .pending_recovery
+            .iter()
+            .find_map(|effect| match effect {
+                RecoveryEffect::Schedule { delay, .. } => Some(*delay),
+                _ => None,
+            })
+            .expect("bounded retry schedule");
+        now += delay;
+        root.fire_scheduled_recovery(generation, now).unwrap();
+    }
+
+    root.finish_pane_recovery_if_terminal();
+    assert_eq!(root.pane_recovery.active(), None);
+    assert_eq!(root.pane_recovery.pending_len(), 1);
+    assert!(root.pane_recovery.expectations.contains_key(&pane));
+    assert!(root.pane_recovery.expectations.contains_key(&sibling));
+    assert_eq!(root.begin_next_pane_recovery(now), Some(sibling_target));
+    assert_eq!(root.pane_recovery.active(), Some(sibling_target));
 }
 
 #[test]
