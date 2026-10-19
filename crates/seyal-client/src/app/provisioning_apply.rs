@@ -273,7 +273,7 @@ impl ApplicationRoot {
             .authority
             .or_else(|| {
                 (self.shell.snapshot().focused_pane == fence.pane
-                    && !self.pane_client_raws.contains_key(&fence.pane))
+                    && !self.has_live_pane_client(fence.pane))
                 .then(|| self.pane_authorities.get(&fence.pane).copied())
                 .flatten()
             })
@@ -318,6 +318,16 @@ impl ApplicationRoot {
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn has_live_pane_client(&self, pane: PaneId) -> bool {
+        self.pane_client_raws.contains_key(&pane)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn has_live_pane_client(&self, _pane: PaneId) -> bool {
+        false
     }
 
     /// Absorb a create result from the wire client and advance the session.
@@ -545,7 +555,7 @@ impl ApplicationRoot {
     pub(super) fn clear_authority_for_pane(&mut self, pane: PaneId) {
         self.pane_authorities.remove(&pane);
         self.invalidate_pane_recovery(pane);
-        self.pane_runtime_ids.remove(&pane);
+        self.pane_recovery.runtime_ids.remove(&pane);
         #[cfg(target_os = "macos")]
         self.unregister_extra_pane_client(pane);
         if self

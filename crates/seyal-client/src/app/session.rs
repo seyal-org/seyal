@@ -61,13 +61,15 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(previous.raw());
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
-        if self.primary_pane.is_none() {
-            self.primary_pane = Some(fence.pane);
+        if self.pane_recovery.primary_pane.is_none() {
+            self.pane_recovery.primary_pane = Some(fence.pane);
         }
         self.pane_client_raws.insert(fence.pane, handle);
-        self.pane_runtime_ids.insert(fence.pane, runtime_id);
-        if self.primary_pane.is_none() {
-            self.primary_pane = Some(fence.pane);
+        self.pane_recovery
+            .runtime_ids
+            .insert(fence.pane, runtime_id);
+        if self.pane_recovery.primary_pane.is_none() {
+            self.pane_recovery.primary_pane = Some(fence.pane);
         }
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
@@ -97,7 +99,9 @@ impl ApplicationRoot {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
-        self.pane_runtime_ids.insert(fence.pane, runtime_id);
+        self.pane_recovery
+            .runtime_ids
+            .insert(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -142,9 +146,11 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
-        self.pane_runtime_ids.insert(fence.pane, runtime_id);
-        if self.primary_pane.is_none() {
-            self.primary_pane = Some(fence.pane);
+        self.pane_recovery
+            .runtime_ids
+            .insert(fence.pane, runtime_id);
+        if self.pane_recovery.primary_pane.is_none() {
+            self.pane_recovery.primary_pane = Some(fence.pane);
         }
         crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
@@ -534,8 +540,8 @@ impl ApplicationRoot {
         };
         self.pane_authorities.insert(fence.pane, authority);
         self.bind_pane_recovery(fence.pane, evidence.execution);
-        if self.primary_pane.is_none() {
-            self.primary_pane = Some(fence.pane);
+        if self.pane_recovery.primary_pane.is_none() {
+            self.pane_recovery.primary_pane = Some(fence.pane);
         }
         self.authority = Some(authority);
         self.derive_presentation(evidence.alternate_screen)?;

@@ -16,12 +16,14 @@ mod keybinding_apply;
 mod live_attach_apply;
 mod native_effect;
 mod palette_apply;
+mod pane_projection;
 mod pane_recovery;
 mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
 
+#[cfg(target_os = "macos")]
 pub(crate) use pane_recovery::PaneRecoveryTarget;
 
 use accessibility::accessibility_nodes;
@@ -50,7 +52,7 @@ use std::time::Duration;
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
-use crate::app::pane_recovery::{PaneRecoveryExpectation, PaneRecoveryQueue};
+use crate::app::pane_recovery::PaneRecoveryQueue;
 use crate::chrome::{
     AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
@@ -61,7 +63,7 @@ use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
 use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion, SplitPosition};
+use crate::pane_layout::SplitPosition;
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
@@ -513,13 +515,6 @@ pub struct ApplicationRoot {
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
     pane_recovery: PaneRecoveryQueue,
-    /// RecoveryCoordinator generation currently owned by the active Pane
-    /// attempt; primary recovery may replace it while its open is in flight.
-    pane_recovery_episode_generation: Option<u64>,
-    pane_recovery_expectations: HashMap<PaneId, PaneRecoveryExpectation>,
-    pane_recovery_retry_generations: HashMap<PaneId, u64>,
-    pane_runtime_ids: HashMap<PaneId, u128>,
-    primary_pane: Option<PaneId>,
     reconstruction: ReconstructionState,
     composer: ComposerState,
     chrome: ChromeState,
@@ -608,12 +603,7 @@ impl ApplicationRoot {
                 window: snap.active_window,
             });
         }
-        let mut pane_recovery = PaneRecoveryQueue::default();
-        for pane in &snap.panes {
-            if let Some(execution) = pane.execution {
-                pane_recovery.bind(pane.id, execution);
-            }
-        }
+        let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
@@ -631,11 +621,6 @@ impl ApplicationRoot {
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
             pane_recovery,
-            pane_recovery_episode_generation: None,
-            pane_recovery_expectations: HashMap::new(),
-            pane_recovery_retry_generations: HashMap::new(),
-            pane_runtime_ids: HashMap::new(),
-            primary_pane: None,
             reconstruction: ReconstructionState::default(),
             composer,
             chrome: ChromeState::new(),
@@ -740,18 +725,6 @@ impl ApplicationRoot {
 
     pub fn provisioning_mut(&mut self) -> &mut ProvisioningSession {
         &mut self.provisioning
-    }
-
-    /// Active Tab's Pane regions (#923 / #936). Every execution-bound leaf is
-    /// live simultaneously; the focused leaf is also live as the ADR-017 bind
-    /// landing region before its Controller attach completes.
-    pub fn pane_regions(&self) -> Vec<PaneRegion> {
-        let shell = self.shell.snapshot();
-        let bound = shell
-            .panes
-            .iter()
-            .filter_map(|pane| pane.execution.map(|_| pane.id));
-        pane_layout::project(&shell.tree, shell.focused_pane, bound)
     }
 
     pub fn fence(&self) -> AppFence {
