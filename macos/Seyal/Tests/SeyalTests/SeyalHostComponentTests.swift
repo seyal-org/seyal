@@ -590,6 +590,17 @@ final class SeyalHostComponentTests: XCTestCase {
         target.binding_generation = 31
         target.recovery_generation = 41
 
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
+        let parent = NSView(frame: NSRect(x: 24, y: 32, width: 640, height: 420))
+        container.addSubview(parent)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = container
         let host = SecondaryLivePaneHost(
             appHandle: 0,
             paneLo: target.pane_lo,
@@ -597,6 +608,15 @@ final class SeyalHostComponentTests: XCTestCase {
             displayHandle: 0,
             recoveryTarget: target
         )
+        host.frame = NSRect(x: 100, y: 80, width: 320, height: 220)
+        parent.addSubview(host)
+        window.makeKeyAndOrderFront(nil)
+        parent.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        defer {
+            host.removeFromSuperview()
+            window.close()
+        }
         var retried: SeyalAppPaneRecoveryTarget?
         host.onRetryRecovery = { retried = $0 }
 
@@ -608,6 +628,14 @@ final class SeyalHostComponentTests: XCTestCase {
             accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-retry") as? NSButton
         )
         XCTAssertFalse(retry.isHidden)
+        let retryCenterInContainer = retry.convert(
+            NSPoint(x: retry.bounds.midX, y: retry.bounds.midY),
+            to: container
+        )
+        XCTAssertTrue(
+            parent.hitTest(retryCenterInContainer) === retry,
+            "superview-coordinate hit testing must reach Retry when the recovery host has a nonzero origin"
+        )
         retry.performClick(nil)
         let retryTarget = try XCTUnwrap(retried)
         XCTAssertEqual(retryTarget.pane_lo, target.pane_lo)
