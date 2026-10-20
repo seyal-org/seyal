@@ -2159,6 +2159,7 @@ final class SeyalHostComponentTests: XCTestCase {
         let editor = try XCTUnwrap(
             accessibilityChild(view, identifier: "seyal-composer-editor") as? NSTextView)
         XCTAssertEqual(composer.accessibilityValue() as? String, "available")
+        XCTAssertTrue(editor.isEditable, "Available composer must accept native text input")
 
         // Native typing is the source of the draft: the editor already holds
         // the text and the host commits it to Rust (SetDraft) as it changes.
@@ -2190,6 +2191,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
         view.reconcileChrome()
         XCTAssertEqual(composer.accessibilityValue() as? String, "busy")
+        XCTAssertFalse(editor.isEditable, "Busy composer must reject further native text input")
         XCTAssertEqual(editor.string, "sleep 2", "draft is kept while the request is in flight")
 
         var result = SeyalAppAction()
@@ -2210,6 +2212,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 3), 0)
         view.reconcileChrome()
         XCTAssertEqual(composer.accessibilityValue() as? String, "available")
+        XCTAssertTrue(editor.isEditable, "composer becomes editable again when Runtime reports Available")
         XCTAssertEqual(editor.string, "")
     }
 

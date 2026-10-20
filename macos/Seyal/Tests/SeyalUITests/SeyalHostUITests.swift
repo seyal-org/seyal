@@ -358,8 +358,7 @@ final class SeyalHostUITests: XCTestCase {
             // The editor is projected inside the focused Pane's live chrome,
             // while Pane regions and liveContent are AX siblings. Resolve the
             // editor by its current frame instead of relying on firstMatch,
-            // then wait for AppKit's enabled state to catch up with the
-            // composer availability value observed above.
+            // so typing is attempted in the editor owned by this region.
             let editor = editorQuery.allElementsBoundByIndex.first {
                 $0.frame != .zero && region.frame.insetBy(dx: -2, dy: -2).contains($0.frame)
             }
@@ -375,23 +374,10 @@ final class SeyalHostUITests: XCTestCase {
                 )
                 return nil
             }
-            let editorEnabled = expectation(
-                for: NSPredicate(format: "isEnabled == true"),
-                evaluatedWith: editor,
-                handler: nil
-            )
-            guard XCTWaiter.wait(for: [editorEnabled], timeout: 5) == .completed else {
-                let candidates = editorQuery.allElementsBoundByIndex.map {
-                    "id=\($0.identifier) enabled=\($0.isEnabled) frame=\($0.frame)"
-                }.joined(separator: "; ")
-                XCTFail(
-                    "focused Pane editor did not become enabled; region=\(region.identifier) "
-                        + "regionFrame=\(region.frame) composer=\(composer.value ?? "nil") "
-                        + "editorCount=\(editorQuery.count) selectedFrame=\(editor.frame) "
-                        + "candidates=[\(candidates)]"
-                )
-                return nil
-            }
+            // AX enabled state and NSTextView editability are distinct. Prove
+            // the actual input path by typing and waiting for the command's
+            // live PTY probe below instead of treating AXEnabled as the
+            // product editability contract.
             editor.click()
             let command = "printf '%s\\n' \"$$\" > \(shellPIDFile.path); "
                 + "while true; do stty size </dev/tty > \(file.path); sleep 0.1; done "
@@ -498,7 +484,7 @@ final class SeyalHostUITests: XCTestCase {
             let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             XCTFail(
-                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: firstFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: firstWatcherPIDFile.path))"
+                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: firstFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: firstWatcherPIDFile.path))"
             )
             return
         }
@@ -512,7 +498,7 @@ final class SeyalHostUITests: XCTestCase {
             let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             XCTFail(
-                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: secondFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: secondWatcherPIDFile.path)), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
+                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: secondFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: secondWatcherPIDFile.path)), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
             )
             return
         }
