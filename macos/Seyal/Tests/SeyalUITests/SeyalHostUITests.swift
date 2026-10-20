@@ -298,6 +298,10 @@ final class SeyalHostUITests: XCTestCase {
         let secondShellPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-shell-\(UUID().uuidString)-b")
         let firstWatcherPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-watcher-\(UUID().uuidString)-a")
         let secondWatcherPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-watcher-\(UUID().uuidString)-b")
+        let firstStartedFile = URL(fileURLWithPath: "/tmp/seyal-936-started-\(UUID().uuidString)-a")
+        let secondStartedFile = URL(fileURLWithPath: "/tmp/seyal-936-started-\(UUID().uuidString)-b")
+        let firstProbeScript = URL(fileURLWithPath: "/tmp/seyal-936-probe-\(UUID().uuidString)-a.sh")
+        let secondProbeScript = URL(fileURLWithPath: "/tmp/seyal-936-probe-\(UUID().uuidString)-b.sh")
         defer {
             for pidFile in [firstWatcherPIDFile, secondWatcherPIDFile] {
                 guard let value = try? String(contentsOf: pidFile, encoding: .utf8),
@@ -311,18 +315,63 @@ final class SeyalHostUITests: XCTestCase {
             }
             for file in [
                 firstFile, secondFile, firstShellPIDFile, secondShellPIDFile,
-                firstWatcherPIDFile, secondWatcherPIDFile,
+                firstWatcherPIDFile, secondWatcherPIDFile, firstStartedFile,
+                secondStartedFile, firstProbeScript, secondProbeScript,
             ] {
                 try? FileManager.default.removeItem(at: file)
             }
         }
+
+        func writeProbeScript(
+            to script: URL,
+            ptyFile: URL,
+            shellPIDFile: URL,
+            watcherPIDFile: URL,
+            startedFile: URL
+        ) throws {
+            // Keep XCTest's typed command short and shell-neutral; Bash-specific
+            // watcher syntax stays in the fixture. Its sentinel distinguishes
+            // failed shell entry from a PTY-probe failure.
+            try """
+            #!/bin/bash
+            set -eu
+            printf '%s\\n' "$PPID" > '\(shellPIDFile.path)'
+            : > '\(startedFile.path)'
+            (
+                while true; do
+                    stty size </dev/tty > '\(ptyFile.path)' 2>/dev/null || true
+                    sleep 0.1
+                done
+            ) </dev/null >/dev/null 2>&1 &
+            printf '%s\\n' "$!" > '\(watcherPIDFile.path)'
+            """.write(to: script, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: script.path)
+        }
+
+        try writeProbeScript(
+            to: firstProbeScript,
+            ptyFile: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            watcherPIDFile: firstWatcherPIDFile,
+            startedFile: firstStartedFile
+        )
+        try writeProbeScript(
+            to: secondProbeScript,
+            ptyFile: secondFile,
+            shellPIDFile: secondShellPIDFile,
+            watcherPIDFile: secondWatcherPIDFile,
+            startedFile: secondStartedFile
+        )
 
         func runSize(
             in region: XCUIElement,
             activating focusTarget: XCUIElement,
             file: URL,
             shellPIDFile: URL,
-            watcherPIDFile: URL
+            watcherPIDFile: URL,
+            startedFile: URL,
+            probeScript: URL
         ) -> (rows: Int, columns: Int, shellPID: Int)? {
             let focused = NSPredicate(format: "value == 'focused'")
             if (region.value as? String) != "focused" {
@@ -379,14 +428,27 @@ final class SeyalHostUITests: XCTestCase {
             // live PTY probe below instead of treating AXEnabled as the
             // product editability contract.
             editor.click()
-            let command = "printf '%s\\n' \"$$\" > \(shellPIDFile.path); "
-                + "while true; do stty size </dev/tty > \(file.path); sleep 0.1; done "
-                + "</dev/null >/dev/null 2>&1 & printf '%s\\n' \"$!\" > \(watcherPIDFile.path)"
+            let command = "/bin/bash \(probeScript.path)"
             editor.typeText(command)
+            let draftMatchesCommand = expectation(
+                for: NSPredicate(format: "value == %@", command),
+                evaluatedWith: editor,
+                handler: nil
+            )
+            guard XCTWaiter.wait(for: [draftMatchesCommand], timeout: 5) == .completed else {
+                XCTFail(
+                    "composer editor did not expose the submitted fixture command before Return; "
+                        + "region=\(region.identifier) regionFrame=\(region.frame) "
+                        + "editorFrame=\(editor.frame) expectedDraft=\(command) "
+                        + "observedDraft=\(editor.value ?? "nil") composer=\(composer.value ?? "nil")"
+                )
+                return nil
+            }
             editor.typeKey("\r", modifierFlags: [])
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
-                if let output = try? String(contentsOf: file, encoding: .utf8),
+                if FileManager.default.fileExists(atPath: startedFile.path),
+                   let output = try? String(contentsOf: file, encoding: .utf8),
                    let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8),
                    let watcherPIDValue = try? String(contentsOf: watcherPIDFile, encoding: .utf8)
                 {
@@ -479,12 +541,17 @@ final class SeyalHostUITests: XCTestCase {
             activating: firstRegion,
             file: firstFile,
             shellPIDFile: firstShellPIDFile,
-            watcherPIDFile: firstWatcherPIDFile
+            watcherPIDFile: firstWatcherPIDFile,
+            startedFile: firstStartedFile,
+            probeScript: firstProbeScript
         ) else {
             let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            let shellPID = (try? String(contentsOf: firstShellPIDFile, encoding: .utf8)) ?? "missing"
+            let watcherPID = (try? String(contentsOf: firstWatcherPIDFile, encoding: .utf8)) ?? "missing"
+            let probe = (try? String(contentsOf: firstFile, encoding: .utf8)) ?? "missing"
             XCTFail(
-                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: firstFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: firstWatcherPIDFile.path))"
+                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: firstStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID)"
             )
             return
         }
@@ -493,12 +560,17 @@ final class SeyalHostUITests: XCTestCase {
             activating: secondaryHost,
             file: secondFile,
             shellPIDFile: secondShellPIDFile,
-            watcherPIDFile: secondWatcherPIDFile
+            watcherPIDFile: secondWatcherPIDFile,
+            startedFile: secondStartedFile,
+            probeScript: secondProbeScript
         ) else {
             let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
             let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            let shellPID = (try? String(contentsOf: secondShellPIDFile, encoding: .utf8)) ?? "missing"
+            let watcherPID = (try? String(contentsOf: secondWatcherPIDFile, encoding: .utf8)) ?? "missing"
+            let probe = (try? String(contentsOf: secondFile, encoding: .utf8)) ?? "missing"
             XCTFail(
-                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), probeExists=\(FileManager.default.fileExists(atPath: secondFile.path)), watcherExists=\(FileManager.default.fileExists(atPath: secondWatcherPIDFile.path)), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
+                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: secondStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
             )
             return
         }
