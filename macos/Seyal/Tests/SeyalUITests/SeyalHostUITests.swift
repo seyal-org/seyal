@@ -376,20 +376,37 @@ final class SeyalHostUITests: XCTestCase {
             let focused = NSPredicate(format: "value == 'focused'")
             if (region.value as? String) != "focused" {
                 guard focusTarget.waitForExistence(timeout: 5) else {
+                    XCTFail(
+                        "Pane focus target did not exist; region=\(region.identifier) "
+                            + "regionFrame=\(region.frame) target=\(focusTarget.identifier) "
+                            + "targetFrame=\(focusTarget.frame)"
+                    )
                     return nil
                 }
-                guard focusTarget.isEnabled else { return nil }
                 let hittable = expectation(
                     for: NSPredicate(format: "isHittable == true"),
                     evaluatedWith: focusTarget,
                     handler: nil
                 )
                 guard XCTWaiter.wait(for: [hittable], timeout: 5) == .completed else {
+                    XCTFail(
+                        "Pane focus target was not hittable; region=\(region.identifier) "
+                            + "regionState=\(region.value ?? "nil") regionFrame=\(region.frame) "
+                            + "target=\(focusTarget.identifier) targetState=\(focusTarget.value ?? "nil") "
+                            + "targetFrame=\(focusTarget.frame) enabled=\(focusTarget.isEnabled) "
+                            + "hittable=\(focusTarget.isHittable)"
+                    )
                     return nil
                 }
                 focusTarget.click()
                 let focusExpectation = expectation(for: focused, evaluatedWith: region, handler: nil)
                 guard XCTWaiter.wait(for: [focusExpectation], timeout: 5) == .completed else {
+                    XCTFail(
+                        "Pane region did not focus after its target was clicked; "
+                            + "region=\(region.identifier) regionState=\(region.value ?? "nil") "
+                            + "regionFrame=\(region.frame) target=\(focusTarget.identifier) "
+                            + "targetFrame=\(focusTarget.frame) targetHittable=\(focusTarget.isHittable)"
+                    )
                     return nil
                 }
             }
@@ -557,7 +574,7 @@ final class SeyalHostUITests: XCTestCase {
         }
         guard let secondBefore = runSize(
             in: secondRegion,
-            activating: secondaryHost,
+            activating: secondRegion,
             file: secondFile,
             shellPIDFile: secondShellPIDFile,
             watcherPIDFile: secondWatcherPIDFile,
