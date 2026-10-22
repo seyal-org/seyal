@@ -1637,12 +1637,22 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(attempts, 2, "immediate and one deferred attempt both reject")
         XCTAssertFalse(deferredAccepted, "rejected native focus cannot report acceptance")
         XCTAssertTrue(view.recoveryPresentationPending, "never report Connected on denied focus")
-        // Direct acceptance returns true to the caller. The onAccepted callback
-        // is reserved for an asynchronously accepted *deferred* attempt.
-        XCTAssertTrue(view.requestComposerFocusForRecovery(
+        // A later real focus-readiness event invalidates the pending backoff
+        // generation before re-offering focus. Calling directly before that
+        // event must fail closed while the previous retry is still scheduled.
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
             focus: focus,
             onAccepted: { deferredAccepted = true }
         ))
+        XCTAssertEqual(attempts, 2, "scheduled retry prevents concurrent offers")
+        var acceptedOnReadinessEvent = false
+        view.recoveryFocusReadinessDidChange {
+            acceptedOnReadinessEvent = view.requestComposerFocusForRecovery(
+                focus: focus,
+                onAccepted: { deferredAccepted = true }
+            )
+        }
+        XCTAssertTrue(acceptedOnReadinessEvent, "later focus-ready event reoffers focus")
         XCTAssertFalse(deferredAccepted, "immediate success must not be double-reported")
         XCTAssertEqual(attempts, 3, "later focus-ready event reoffers once")
     }
