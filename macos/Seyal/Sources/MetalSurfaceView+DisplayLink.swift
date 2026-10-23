@@ -147,7 +147,6 @@ extension MetalSurfaceView {
     guard !proposingGeometry else { return }
     guard terminalBridgeIsConnected, bounds.width > 8, bounds.height > 8 else { return }
     let rounded = bounds.integral
-    guard rounded != lastProposedGeometry else { return }
     let cell = terminalPresentationCellSize()
     guard cell.width > 0, cell.height > 0 else { return }
     proposingGeometry = true
@@ -158,8 +157,7 @@ extension MetalSurfaceView {
       horizontalInsets: 0,
       verticalInsets: 0,
       cellWidth: Double(cell.width),
-      cellHeight: Double(cell.height),
-      meaningfulLayoutEpoch: true
+      cellHeight: Double(cell.height)
     )
     if result == 0 {
       lastProposedGeometry = rounded

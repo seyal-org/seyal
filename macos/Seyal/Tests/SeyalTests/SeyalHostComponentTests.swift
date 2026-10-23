@@ -552,37 +552,6 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testFocusedRoundTripRetainsSecondaryPaneGeometryEpoch() {
-        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
-        let sample = PaneLayoutGeometrySample(
-            viewportSize: CGSize(width: 250, height: 300),
-            cellSize: CGSize(width: 10, height: 20)
-        )
-        XCTAssertTrue(
-            layout.observesMeaningfulLayoutEpoch(sample, paneLo: 2, paneHi: 2, displayHandle: 42)
-        )
-        let target = SeyalAppPaneRecoveryTarget()
-
-        layout.reconcileSecondaryLiveHosts(bindings: [
-            (paneLo: 1, paneHi: 1, displayHandle: 41, focused: true, live: true, recoveryTarget: target),
-            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true, recoveryTarget: target),
-        ])
-        layout.reconcileSecondaryLiveHosts(bindings: [
-            (paneLo: 1, paneHi: 1, displayHandle: 41, focused: false, live: true, recoveryTarget: target),
-            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: true, live: true, recoveryTarget: target),
-        ])
-        layout.reconcileSecondaryLiveHosts(bindings: [
-            (paneLo: 1, paneHi: 1, displayHandle: 41, focused: true, live: true, recoveryTarget: target),
-            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true, recoveryTarget: target),
-        ])
-
-        XCTAssertFalse(
-            layout.observesMeaningfulLayoutEpoch(sample, paneLo: 2, paneHi: 2, displayHandle: 42),
-            "an unchanged Pane geometry must not start a new epoch after secondary → focused → secondary"
-        )
-    }
-
-    @MainActor
     func testSecondaryPaneRecoveryPlaceholderOffersExactRetryableTarget() throws {
         var target = SeyalAppPaneRecoveryTarget()
         target.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -960,42 +929,6 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(view.renderer.visible, "recovery suppression must not hide an attached live surface")
         XCTAssertNotNil(view.metalDisplayLinkLease, "secondary live surface must keep its Metal presenter")
         XCTAssertNil(view.bridge, "secondary host presentation must not create a Runtime bridge")
-    }
-
-    func testPaneGeometryOnlyStartsANewEpochForChangedLayoutSamples() {
-        let initial = PaneLayoutGeometrySample(
-            viewportSize: CGSize(width: 500, height: 300),
-            cellSize: CGSize(width: 10, height: 20)
-        )
-        var tracker = PaneLayoutGeometryEpochTracker()
-        XCTAssertTrue(tracker.observe(initial, paneLo: 1, paneHi: 2, displayHandle: 7))
-        // Removing/recreating a secondary host after a focus round trip must
-        // preserve the Pane's retry epoch for an identical layout sample.
-        XCTAssertFalse(tracker.observe(initial, paneLo: 1, paneHi: 2, displayHandle: 7))
-        XCTAssertFalse(initial.beginsMeaningfulEpoch(after: initial))
-        let movedWithoutResize = PaneLayoutGeometrySample(
-            viewportSize: initial.viewportSize,
-            cellSize: initial.cellSize
-        )
-        XCTAssertFalse(movedWithoutResize.beginsMeaningfulEpoch(after: initial))
-
-        let resizedViewport = PaneLayoutGeometrySample(
-            viewportSize: CGSize(width: 600, height: 300),
-            cellSize: initial.cellSize
-        )
-        XCTAssertTrue(resizedViewport.beginsMeaningfulEpoch(after: initial))
-        XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 7))
-        XCTAssertFalse(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 7))
-
-        XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 8))
-        tracker.removePane(paneLo: 1, paneHi: 2)
-        XCTAssertTrue(tracker.observe(resizedViewport, paneLo: 1, paneHi: 2, displayHandle: 8))
-
-        let changedCellMetrics = PaneLayoutGeometrySample(
-            viewportSize: initial.viewportSize,
-            cellSize: CGSize(width: 11, height: 20)
-        )
-        XCTAssertTrue(changedCellMetrics.beginsMeaningfulEpoch(after: initial))
     }
 
     @MainActor

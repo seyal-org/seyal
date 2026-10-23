@@ -274,8 +274,7 @@ int32_t seyal_bridge_propose_geometry(
     double horizontal_insets,
     double vertical_insets,
     double cell_width,
-    double cell_height,
-    uint8_t meaningful_layout_epoch
+    double cell_height
 );
 int32_t seyal_bridge_retry_resize(void);
 int32_t seyal_bridge_input_failure(void);

@@ -215,7 +215,6 @@ pub extern "C" fn seyal_app_propose_pane_geometry(
     vertical_insets: f64,
     cell_width: f64,
     cell_height: f64,
-    meaningful_layout_epoch: u8,
 ) -> i32 {
     let mut bytes = [0u8; 16];
     bytes[..8].copy_from_slice(&pane_lo.to_le_bytes());
@@ -236,7 +235,6 @@ pub extern "C" fn seyal_app_propose_pane_geometry(
                 vertical_insets,
                 cell_width,
                 cell_height,
-                meaningful_layout_epoch != 0,
             )
             .map_or_else(super::error_code::error_number, |_| 0)
     })
@@ -378,13 +376,12 @@ mod tests {
                 0.0,
                 10.0,
                 20.0,
-                1,
             ),
             14,
             "invalid metrics are rejected before a client lookup"
         );
         assert_eq!(
-            seyal_app_propose_pane_geometry(handle, 1, 2, 800.0, 600.0, 0.0, 0.0, 10.0, 20.0, 1,),
+            seyal_app_propose_pane_geometry(handle, 1, 2, 800.0, 600.0, 0.0, 0.0, 10.0, 20.0,),
             1,
             "a stale PaneId cannot resolve to the current focused client"
         );

@@ -18,7 +18,8 @@ mod planner;
 mod tests;
 
 pub use geometry::{
-    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
+    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, LayoutMetrics,
+    ResizeFailure,
 };
 pub(crate) use planner::{
     classify_server_error, newest_pending_geometry, resize_needs_mutation,
@@ -320,10 +321,20 @@ impl LocalDisplayClient {
     }
 
     pub fn set_desired_geometry(&mut self, geometry: GridGeometry) -> Result<(), ClientError> {
-        self.set_desired_geometry_for_layout(geometry, false)
+        self.set_desired_geometry_with_epoch(geometry, false)
     }
 
     pub fn set_desired_geometry_for_layout(
+        &mut self,
+        geometry: GridGeometry,
+        metrics: LayoutMetrics,
+    ) -> Result<(), ClientError> {
+        let meaningful_layout_epoch = self.last_layout_metrics != Some(metrics);
+        self.last_layout_metrics = Some(metrics);
+        self.set_desired_geometry_with_epoch(geometry, meaningful_layout_epoch)
+    }
+
+    fn set_desired_geometry_with_epoch(
         &mut self,
         geometry: GridGeometry,
         meaningful_layout_epoch: bool,

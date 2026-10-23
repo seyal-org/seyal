@@ -119,8 +119,6 @@ final class PaneLayoutView: NSView {
     private var regionViews: [PaneRegionView] = []
     private var dividerViews: [PaneDividerView] = []
     private var secondaryLiveHosts: [PaneKey: SecondaryLivePaneHost] = [:]
-    private var layoutEpochTracker = PaneLayoutGeometryEpochTracker()
-    private var trackedLayoutEpochPanes: Set<PaneKey> = []
     private var theme: NativeTheme?
 
     private struct PaneKey: Hashable {
@@ -143,47 +141,18 @@ final class PaneLayoutView: NSView {
         secondaryLiveHosts.values.first { $0.displayHandle == displayHandle }
     }
 
-    /// Record the geometry sample for a live Pane and report whether it starts
-    /// a meaningful layout epoch. Secondary hosts use this to preserve the
-    /// Pane's observation across focus and reparenting transitions.
-    func observesMeaningfulLayoutEpoch(
-        _ sample: PaneLayoutGeometrySample,
-        paneLo: UInt64,
-        paneHi: UInt64,
-        displayHandle: UInt64
-    ) -> Bool {
-        layoutEpochTracker.observe(
-            sample,
-            paneLo: paneLo,
-            paneHi: paneHi,
-            displayHandle: displayHandle
-        )
-    }
-
     /// Ensure non-focused LIVE leaves with a display handle have Metal hosts.
     func reconcileSecondaryLiveHosts(
         bindings: [(paneLo: UInt64, paneHi: UInt64, displayHandle: UInt64, focused: Bool, live: Bool, recoveryTarget: SeyalAppPaneRecoveryTarget)]
     ) {
         var keep = Set<PaneKey>()
-        var currentLayoutEpochPanes = Set<PaneKey>()
         for binding in bindings {
             let key = PaneKey(lo: binding.paneLo, hi: binding.paneHi)
             guard binding.live else {
                 if let host = secondaryLiveHosts.removeValue(forKey: key) {
                     host.removeFromSuperview()
                 }
-                layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
                 continue
-            }
-            // Keep the last accepted geometry observation for every live,
-            // bound Pane even while its primary surface is focused. The
-            // secondary Metal host is removed during focus, but that must not
-            // make an unchanged layout look like a new geometry epoch when
-            // the Pane becomes secondary again.
-            if binding.displayHandle != 0 {
-                currentLayoutEpochPanes.insert(key)
-            } else {
-                layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
             }
             guard !binding.focused else {
                 if let host = secondaryLiveHosts.removeValue(forKey: key) {
@@ -208,15 +177,6 @@ final class PaneLayoutView: NSView {
                 host.onFocus = { [weak self] in
                     self?.onFocusPane?(key.lo, key.hi)
                 }
-                host.beginsLayoutEpoch = { [weak self] sample, displayHandle in
-                    guard let self else { return false }
-                    return self.observesMeaningfulLayoutEpoch(
-                        sample,
-                        paneLo: key.lo,
-                        paneHi: key.hi,
-                        displayHandle: displayHandle
-                    )
-                }
                 host.onRetryRecovery = { [weak self] target in
                     self?.onRetryPaneRecovery?(target)
                 }
@@ -237,10 +197,6 @@ final class PaneLayoutView: NSView {
         for key in secondaryLiveHosts.keys where !keep.contains(key) {
             secondaryLiveHosts.removeValue(forKey: key)?.removeFromSuperview()
         }
-        for key in trackedLayoutEpochPanes where !currentLayoutEpochPanes.contains(key) {
-            layoutEpochTracker.removePane(paneLo: key.lo, paneHi: key.hi)
-        }
-        trackedLayoutEpochPanes = currentLayoutEpochPanes
         needsLayout = true
     }
 

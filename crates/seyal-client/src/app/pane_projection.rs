@@ -31,7 +31,6 @@ impl ApplicationRoot {
         vertical_insets: f64,
         cell_width: f64,
         cell_height: f64,
-        meaningful_layout_epoch: bool,
     ) -> Result<(), AppError> {
         let geometry = crate::derive_grid_geometry(
             viewport_width,
@@ -42,6 +41,14 @@ impl ApplicationRoot {
             cell_height,
         )
         .ok_or(AppError::InvalidPayload)?;
+        let metrics = crate::local::LayoutMetrics::new(
+            viewport_width,
+            viewport_height,
+            horizontal_insets,
+            vertical_insets,
+            cell_width,
+            cell_height,
+        );
         let shell = self.shell.snapshot();
         let execution = shell
             .panes
@@ -60,7 +67,7 @@ impl ApplicationRoot {
                 return Err(AppError::StaleExecution);
             }
             client
-                .set_desired_geometry_for_layout(geometry, meaningful_layout_epoch)
+                .set_desired_geometry_for_layout(geometry, metrics)
                 .map_err(|error| match error {
                     crate::ClientError::LostController => AppError::NotController,
                     crate::ClientError::InvalidGeometry => AppError::InvalidPayload,

@@ -748,8 +748,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     horizontalInsets: Double,
     verticalInsets: Double,
     cellWidth: Double,
-    cellHeight: Double,
-    meaningfulLayoutEpoch: Bool
+    cellHeight: Double
   ) -> Int32 {
     bridge?.proposeGeometry(
       viewportWidth: viewportWidth,
@@ -757,8 +756,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       horizontalInsets: horizontalInsets,
       verticalInsets: verticalInsets,
       cellWidth: cellWidth,
-      cellHeight: cellHeight,
-      meaningfulLayoutEpoch: meaningfulLayoutEpoch
+      cellHeight: cellHeight
     ) ?? -10
   }
 

@@ -226,9 +226,9 @@ fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
     let second_geometry = seyal_client::derive_grid_geometry(509.0, 799.0, 0.0, 0.0, 10.0, 20.0)
         .expect("second geometry");
     assert_ne!(first_geometry, second_geometry);
-    root.propose_pane_geometry(first_pane, 801.0, 641.0, 0.0, 0.0, 10.0, 20.0, true)
+    root.propose_pane_geometry(first_pane, 801.0, 641.0, 0.0, 0.0, 10.0, 20.0)
         .expect("resize first execution");
-    root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0, true)
+    root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0)
         .expect("resize second execution");
 
     fn wait_for_geometry(handle: u64, expected: seyal_client::GridGeometry, deadline: Instant) {
@@ -256,9 +256,9 @@ fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
         seyal_client::derive_grid_geometry(1001.0, 1001.0, 0.0, 0.0, 10.0, 20.0)
             .expect("intermediate geometry");
     assert_ne!(intermediate_geometry, first_geometry);
-    root.propose_pane_geometry(first_pane, 1001.0, 1001.0, 0.0, 0.0, 10.0, 20.0, true)
+    root.propose_pane_geometry(first_pane, 1001.0, 1001.0, 0.0, 0.0, 10.0, 20.0)
         .expect("resize first execution away");
-    root.propose_pane_geometry(first_pane, 801.0, 641.0, 0.0, 0.0, 10.0, 20.0, true)
+    root.propose_pane_geometry(first_pane, 801.0, 641.0, 0.0, 0.0, 10.0, 20.0)
         .expect("restore first execution geometry");
     wait_for_geometry(
         first_handle,
@@ -274,13 +274,13 @@ fn split_live_resize_targets_each_execution_and_rejects_stale_pane() {
     // Invalid metrics and a closed Pane fail before submitting another
     // resize; neither may redirect geometry to the currently focused sibling.
     assert_eq!(
-        root.propose_pane_geometry(second_pane, f64::NAN, 799.0, 0.0, 0.0, 10.0, 20.0, true),
+        root.propose_pane_geometry(second_pane, f64::NAN, 799.0, 0.0, 0.0, 10.0, 20.0),
         Err(AppError::InvalidPayload)
     );
     root.apply(AppAction::ClosePane { id: second_pane })
         .expect("close second Pane");
     assert_eq!(
-        root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0, true),
+        root.propose_pane_geometry(second_pane, 509.0, 799.0, 0.0, 0.0, 10.0, 20.0),
         Err(AppError::UnknownPane)
     );
     wait_for_geometry(

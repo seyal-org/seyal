@@ -1,46 +1,5 @@
 import AppKit
 
-struct PaneLayoutGeometrySample: Equatable {
-    let viewportSize: CGSize
-    let cellSize: CGSize
-
-    func beginsMeaningfulEpoch(after previous: PaneLayoutGeometrySample?) -> Bool {
-        guard let previous else { return true }
-        return viewportSize != previous.viewportSize || cellSize != previous.cellSize
-    }
-}
-
-struct PaneLayoutGeometryEpochTracker {
-    private struct PaneKey: Hashable {
-        let lo: UInt64
-        let hi: UInt64
-    }
-
-    private struct Observation {
-        let displayHandle: UInt64
-        let sample: PaneLayoutGeometrySample
-    }
-
-    private var observations: [PaneKey: Observation] = [:]
-
-    mutating func observe(
-        _ sample: PaneLayoutGeometrySample,
-        paneLo: UInt64,
-        paneHi: UInt64,
-        displayHandle: UInt64
-    ) -> Bool {
-        let key = PaneKey(lo: paneLo, hi: paneHi)
-        let previous = observations[key]
-        observations[key] = Observation(displayHandle: displayHandle, sample: sample)
-        guard previous?.displayHandle == displayHandle else { return true }
-        return sample.beginsMeaningfulEpoch(after: previous?.sample)
-    }
-
-    mutating func removePane(paneLo: UInt64, paneHi: UInt64) {
-        observations.removeValue(forKey: PaneKey(lo: paneLo, hi: paneHi))
-    }
-}
-
 /// Thin Metal host for a non-focused live Pane leaf (#936).
 ///
 /// The ApplicationRoot already owns the Controller in the bridge registry
@@ -59,8 +18,6 @@ final class SecondaryLivePaneHost: NSView {
     private let surface: MetalSurfaceView
     private let statusLabel = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
-    private var lastObservedLayoutSample: PaneLayoutGeometrySample?
-    var beginsLayoutEpoch: ((PaneLayoutGeometrySample, UInt64) -> Bool)?
 
     init(
         appHandle: UInt64,
@@ -174,16 +131,8 @@ final class SecondaryLivePaneHost: NSView {
         let rounded = bounds.integral
         let cell = surface.terminalPresentationCellSize()
         guard cell.width > 0, cell.height > 0 else { return }
-        let sample = PaneLayoutGeometrySample(
-            viewportSize: CGSize(width: rounded.width, height: rounded.height),
-            cellSize: cell
-        )
-        let beginsMeaningfulEpoch = beginsLayoutEpoch?(sample, displayHandle)
-            ?? sample.beginsMeaningfulEpoch(after: lastObservedLayoutSample)
-        lastObservedLayoutSample = sample
-        // Only point-space viewport and permanent renderer metrics cross the
-        // ABI. Rust derives the grid and verifies the Pane → ExecutionId before
-        // its own client submits the correlated SPEC-004 resize.
+        // Forward native viewport and renderer measurements. Rust derives the
+        // grid, detects layout changes, and owns retry authorization.
         _ = seyal_app_propose_pane_geometry(
             appHandle,
             paneLo,
@@ -193,8 +142,7 @@ final class SecondaryLivePaneHost: NSView {
             0,
             0,
             Double(cell.width),
-            Double(cell.height),
-            beginsMeaningfulEpoch ? 1 : 0
+            Double(cell.height)
         )
     }
 
@@ -206,7 +154,6 @@ final class SecondaryLivePaneHost: NSView {
     func updateDisplayHandle(_ handle: UInt64) {
         guard handle != displayHandle else { return }
         displayHandle = handle
-        lastObservedLayoutSample = nil
         updateAvailabilityPresentation()
         needsLayout = true
         publishFrame()

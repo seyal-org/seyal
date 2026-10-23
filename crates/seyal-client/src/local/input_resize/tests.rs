@@ -40,6 +40,7 @@ fn resize_client() -> (LocalDisplayClient, UnixStream) {
             needs_initial_prepare: false,
             next_resize_request_id: 1,
             desired_geometry: None,
+            last_layout_metrics: None,
             committed_geometry: geometry(24, 80),
             unresolved_resizes: VecDeque::new(),
             applied_awaiting_projection: None,
@@ -309,6 +310,14 @@ fn older_rejected_resize_cannot_replace_newer_applied_projection_fence() {
 fn rejected_current_resize_waits_for_meaningful_layout_recovery() {
     let (mut client, _peer) = resize_client();
     let target = geometry(30, 100);
+    let initial_layout = LayoutMetrics::new(500.0, 300.0, 0.0, 0.0, 5.0, 10.0);
+    client
+        .set_desired_geometry_for_layout(target, initial_layout)
+        .expect("initial layout is accepted");
+    // Seed the native layout sample without keeping the initial request; the
+    // remainder of this test injects the rejected Runtime result directly.
+    client.unresolved_resizes.clear();
+    client.outbound.clear();
     client.desired_geometry = Some(target);
     client.unresolved_resizes.push_back(ResizeRecord {
         request_id: 1,
@@ -338,20 +347,22 @@ fn rejected_current_resize_waits_for_meaningful_layout_recovery() {
     assert!(client.unresolved_resizes.is_empty());
     assert!(client.outbound.is_empty());
 
-    // Re-observing the same layout and reconciling does not resend a rejected
-    // Runtime request. A meaningful new layout epoch permits one retry.
+    // Re-observing identical native metrics does not resend a rejected Runtime
+    // request. Rust recognizes changed viewport metrics as a new layout epoch,
+    // even when the derived rows/columns remain identical.
     client
-        .set_desired_geometry_for_layout(target, false)
+        .set_desired_geometry_for_layout(target, initial_layout)
         .expect("same layout remains suppressed");
     assert!(client.unresolved_resizes.is_empty());
+    let changed_viewport_same_grid = LayoutMetrics::new(501.0, 300.0, 0.0, 0.0, 5.0, 10.0);
     client
-        .set_desired_geometry_for_layout(target, true)
-        .expect("meaningful layout recovery retries once");
+        .set_desired_geometry_for_layout(target, changed_viewport_same_grid)
+        .expect("changed native metrics authorize layout recovery");
     assert_eq!(client.unresolved_resizes.len(), 1);
     assert_eq!(client.unresolved_resizes[0].request_id, 2);
     assert_eq!(client.unresolved_resizes[0].geometry, target);
     client
-        .set_desired_geometry_for_layout(target, true)
+        .set_desired_geometry_for_layout(target, changed_viewport_same_grid)
         .expect("same recovery epoch does not duplicate request");
     assert_eq!(client.unresolved_resizes.len(), 1);
 }

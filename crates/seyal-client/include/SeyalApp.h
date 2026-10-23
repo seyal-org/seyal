@@ -906,8 +906,7 @@ int32_t seyal_app_propose_pane_geometry(
     double horizontal_insets,
     double vertical_insets,
     double cell_width,
-    double cell_height,
-    uint8_t meaningful_layout_epoch);
+    double cell_height);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);
