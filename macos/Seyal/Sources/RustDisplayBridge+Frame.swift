@@ -1,5 +1,32 @@
 import Foundation
 
+struct ComposerStatusRelayTracker {
+  private var lastKey: (revision: UInt64, attachmentLow: UInt64, attachmentHigh: UInt64)?
+
+  mutating func shouldRelay(
+    revision: UInt64,
+    attachmentIDLow: UInt64,
+    attachmentIDHigh: UInt64
+  ) -> Bool {
+    guard revision != 0 else { return false }
+    if let previous = lastKey,
+      previous.revision == revision,
+      previous.attachmentLow == attachmentIDLow,
+      previous.attachmentHigh == attachmentIDHigh
+    {
+      return false
+    }
+    lastKey = (revision, attachmentIDLow, attachmentIDHigh)
+    return true
+  }
+
+  mutating func clear() -> Bool {
+    guard lastKey != nil else { return false }
+    lastKey = nil
+    return true
+  }
+}
+
 @MainActor
 extension RustDisplayBridge {
   func currentFrame() -> SeyalPreparedFrame? {
@@ -69,20 +96,26 @@ extension RustDisplayBridge {
     return seyal_bridge_next_composer_request_id()
   }
 
-  /// Relay a newer Runtime composer eligibility. Only the revision decides
-  /// novelty; the host never interprets the eligibility code.
+  /// Relay a newer Runtime composer eligibility for the focused display
+  /// attachment. Rust owns the status meaning and revision; the host only
+  /// scopes deduplication to the attachment that produced it.
   func publishComposerStatus() {
     guard isConnected, selectClient() else { return }
     let status = seyal_bridge_composer_status()
-    guard status.revision != 0, status.revision != lastComposerStatusRevision else { return }
-    lastComposerStatusRevision = status.revision
-    onComposerStatus(NativeComposerStatus(eligibility: status.eligibility, revision: status.revision))
+    let shouldRelay = composerStatusRelayTracker.shouldRelay(
+      revision: status.revision,
+      attachmentIDLow: status.attachment_id_low,
+      attachmentIDHigh: status.attachment_id_high
+    )
+    guard shouldRelay else { return }
+    onComposerStatus(
+      NativeComposerStatus(eligibility: status.eligibility, revision: status.revision)
+    )
   }
 
   /// Transport lost: the relayed fact no longer describes a live attachment.
   func clearComposerStatus() {
-    guard lastComposerStatusRevision != 0 else { return }
-    lastComposerStatusRevision = 0
+    guard composerStatusRelayTracker.clear() else { return }
     onComposerStatus(.cleared)
   }
 

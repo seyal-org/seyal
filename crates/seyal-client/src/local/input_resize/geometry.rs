@@ -24,6 +24,39 @@ pub struct GridGeometry {
     pub columns: u16,
 }
 
+/// Native viewport and renderer measurements used by Rust to decide whether
+/// a new layout observation may retry a rejected resize. Swift may report
+/// these inputs but never authorizes retry behavior.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LayoutMetrics {
+    pub(crate) viewport_width: f64,
+    pub(crate) viewport_height: f64,
+    pub(crate) horizontal_insets: f64,
+    pub(crate) vertical_insets: f64,
+    pub(crate) cell_width: f64,
+    pub(crate) cell_height: f64,
+}
+
+impl LayoutMetrics {
+    pub fn new(
+        viewport_width: f64,
+        viewport_height: f64,
+        horizontal_insets: f64,
+        vertical_insets: f64,
+        cell_width: f64,
+        cell_height: f64,
+    ) -> Self {
+        Self {
+            viewport_width,
+            viewport_height,
+            horizontal_insets,
+            vertical_insets,
+            cell_width,
+            cell_height,
+        }
+    }
+}
+
 pub fn derive_grid_geometry(
     viewport_width: f64,
     viewport_height: f64,

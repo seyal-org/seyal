@@ -370,6 +370,50 @@ rather than exceptional. Resolution therefore becomes:
   explicitly requested, Controller-fenced operation in SPEC-004 §18 and is never
   a consequence of closing presentation.
 
+#### 8.2.2 Same-session Pane attachment loss in a multi-live layout
+
+When one Pane loses its client attachment while its Seyal session and other
+Panes remain live, Rust-owned portable Pane state is the recovery authority.
+Recovery MUST be scoped to that Pane's exact `ExecutionId` and its current
+Pane-to-execution binding generation. It MUST NOT resolve by choosing another
+eligible execution, provision a replacement execution, or change a sibling
+Pane's attachment, Controller, focus, input route or presentation state.
+
+Each automatic recovery episode is bounded and follows the existing bounded
+Runtime discovery and Controller-reacquisition rules in §§8.1 and 8.3 as
+applicable. Before the recovered Pane becomes `Usable`, Runtime/client state
+MUST validate the same `ExecutionId`, a fresh `AttachmentId` with Controller
+authority for that execution, and a complete current snapshot committed for
+that attachment. Failure, mismatch, or exhaustion leaves only the affected
+Pane non-usable and exposes a recoverable non-secret state; it does not revoke
+or suspend healthy siblings.
+
+A valid current snapshot MAY be committed and its frame published while its
+Pane is unfocused. Snapshot/frame publication MUST NOT focus or activate that
+Pane, change the focused Pane, or grant it input authority. Focus and input
+remain owned by the currently selected Pane/presentation until an explicit
+current user/layout transition grants them to another Pane.
+
+Every asynchronous recovery completion MUST be fenced by the captured
+`ExecutionId`, fresh `AttachmentId`, Pane binding generation and current
+snapshot generation. A completion whose Pane was removed, rebound, or whose
+captured generation is stale MUST be discarded; it MUST NOT restore stale
+display state, focus, accessibility focus, IME, mouse or input ownership. A
+Pane that is still present may start a new bounded episode for its current
+binding.
+
+Required deterministic tests:
+
+- loss and recovery of one Pane attaches to its exact `ExecutionId` with a
+  fresh Controller attachment and current snapshot, while a live sibling keeps
+  its execution, attachment, focus and input authority;
+- a recovered but unfocused Pane publishes its current frame without taking
+  focus or accepting input;
+- stale completions after Pane removal, rebinding, or a newer snapshot cannot
+  restore display or interaction state;
+- persistent attach/snapshot failure exhausts the bounded episode, leaves no
+  retry active, and does not interrupt sibling output, input or resize work.
+
 ### 8.3 Controller reacquisition race
 
 A replacement GUI may arrive before Runtime processes EOF/reset for the dead Controller. In this narrow race `ControllerBusy` is valid.

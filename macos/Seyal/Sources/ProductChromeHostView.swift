@@ -38,11 +38,13 @@ final class ProductChromeHostView: NSView {
     var liveContent: NSView { centerColumn.liveContent }
     var recoveryTimer: Timer?
     var recoveryTimerGeneration: UInt64 = 0
+    var paneRecoveryTimer: Timer?
+    var paneRecoveryTimerPin: PaneRecoveryPin?
     /// Rust recovery generation whose PerformAttempt is open on the lifecycle
     /// queue or still completing on MainActor (adopt + CompleteRecovery).
     /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
     /// second open while PerformAttempt remains the pending Rust effect.
-    var recoveryAttemptInFlight: UInt64?
+    var recoveryAttemptInFlight: RecoveryAttemptIdentity?
     /// Blocking hello/attach runs here so the AppKit actor never becomes the
     /// lifecycle I/O executor.
     let recoveryLifecycleQueue = DispatchQueue(
@@ -455,7 +457,7 @@ final class ProductChromeHostView: NSView {
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildTabStrip(shell: shell)
-        centerColumn.reconcile(paneCount: Int(shell.pane_count))
+        reconcilePaneHosts(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
@@ -761,20 +763,6 @@ final class ProductChromeHostView: NSView {
         )
         coldVisualProbe.setAccessibilityLabel(
             "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
-        )
-    }
-}
-
-extension ProductChromeHostView: NSMenuItemValidation {
-    /// R6.4.2: enabled state comes only from the Rust shortcut projection.
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        guard let commandId = menuItem.representedObject as? UInt16 else {
-            return true
-        }
-        return KeybindingShortcutRealization.isEnabled(
-            appHandle: pane.appHandle,
-            commandId: commandId,
-            composerFocused: false
         )
     }
 }

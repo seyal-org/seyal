@@ -16,10 +16,15 @@ mod keybinding_apply;
 mod live_attach_apply;
 mod native_effect;
 mod palette_apply;
+mod pane_projection;
+mod pane_recovery;
 mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
+
+#[cfg(target_os = "macos")]
+pub(crate) use pane_recovery::PaneRecoveryTarget;
 
 use accessibility::accessibility_nodes;
 
@@ -47,6 +52,7 @@ use std::time::Duration;
 
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
+use crate::app::pane_recovery::PaneRecoveryQueue;
 use crate::chrome::{
     AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
@@ -57,7 +63,7 @@ use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
 use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
 use crate::palette::{PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion, SplitPosition};
+use crate::pane_layout::SplitPosition;
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
@@ -508,6 +514,7 @@ pub struct ApplicationRoot {
     frozen: bool,
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
+    pane_recovery: PaneRecoveryQueue,
     reconstruction: ReconstructionState,
     composer: ComposerState,
     chrome: ChromeState,
@@ -596,6 +603,7 @@ impl ApplicationRoot {
                 window: snap.active_window,
             });
         }
+        let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
@@ -612,6 +620,7 @@ impl ApplicationRoot {
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
+            pane_recovery,
             reconstruction: ReconstructionState::default(),
             composer,
             chrome: ChromeState::new(),
@@ -716,26 +725,6 @@ impl ApplicationRoot {
 
     pub fn provisioning_mut(&mut self) -> &mut ProvisioningSession {
         &mut self.provisioning
-    }
-
-    /// Active Tab's Pane regions (#923). The one live surface belongs to the
-    /// execution-bound Pane, or before any bind to the focused Pane (where
-    /// `Bind` will land); it is shown only while that Pane is focused.
-    pub fn pane_regions(&self) -> Vec<PaneRegion> {
-        let shell = self.shell.snapshot();
-        let focused = shell.focused_pane;
-        let live_pane =
-            if self.pane_authorities.contains_key(&focused) || self.pane_authorities.is_empty() {
-                focused
-            } else {
-                // Unbound focus while another leaf remains bound: no live surface.
-                self.pane_authorities
-                    .keys()
-                    .copied()
-                    .next()
-                    .expect("non-empty pane_authorities")
-            };
-        pane_layout::project(&shell.tree, focused, live_pane)
     }
 
     pub fn fence(&self) -> AppFence {

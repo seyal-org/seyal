@@ -71,9 +71,12 @@ final class SeyalHostUITests: XCTestCase {
 
     /// Kill a leftover Seyal.app from the previous case before launch.
     /// Must run on the test's MainActor isolation, not XCTest's sync tearDown.
-    private func hostedApp() -> XCUIApplication {
+    private func hostedApp(compactWindowForResize: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchIsolatedHost()
+        let environment = compactWindowForResize
+            ? ["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW": "1"]
+            : [:]
+        app.launchIsolatedHost(environment: environment)
         return app
     }
 
@@ -201,9 +204,8 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["seyal-composer-execute"].waitForExistence(timeout: 5))
     }
 
-    /// #923: the Tab's Rust PaneTree is projected into Pane regions. M001
-    /// policy keeps one Pane, so exactly one focused region hosts the live
-    /// composer/transcript surface, and no second region is invented.
+    /// #923: the Tab's Rust PaneTree is projected into Pane regions. Before a
+    /// Split, exactly one focused region hosts the live composer/transcript.
     func testSinglePaneTreeProjectsOneFocusedRegionHostingTheLiveSurface() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)
@@ -225,6 +227,593 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(composer.isHittable, "live composer stays interactive inside the region")
         XCTAssertTrue(region.frame.contains(composer.frame), "composer sits in the live region")
         XCTAssertTrue(region.frame.contains(transcript.frame), "transcript sits in the live region")
+    }
+
+    /// #936: C3 SplitFocused provisions a second leaf; both bound leaves stay
+    /// LIVE and the unfocused sibling presents through SecondaryLivePaneHost.
+    func testSplitProjectsSecondLiveRegionAndSecondaryMetalHost() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8), "C3 production composition shows Split Right")
+        XCTAssertTrue(split.isHittable, "Split Right must be interactive once splitting is enabled")
+        split.click()
+        let second = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 12), "SplitFocused must project a second Pane region")
+        XCTAssertEqual(app.state, .runningForeground, "split must not crash Seyal.app")
+        XCTAssertTrue(app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch.exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["seyal-pane-divider-0"].firstMatch.waitForExistence(timeout: 5),
+            "a two-leaf tree projects the Rust divider"
+        )
+        let secondary = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+        XCTAssertTrue(
+            secondary.waitForExistence(timeout: 12),
+            "unfocused bound sibling must keep a live Metal host"
+        )
+    }
+
+    /// #936: a real outer-window resize reaches both independent PTYs. The
+    /// Pane 0 stays unfocused while its secondary host receives new geometry.
+    func testWindowResizeUpdatesBothLivePanePtyGeometries() throws {
+        let app = hostedApp(compactWindowForResize: true)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 8))
+        let compactWindow = expectation(
+            for: NSPredicate { _, _ in window.frame.width <= 1200 },
+            evaluatedWith: window,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [compactWindow], timeout: 5),
+            .completed,
+            "test launch must apply its compact frame after AppKit restores the window"
+        )
+        waitForUsablePty(in: app)
+        XCTAssertLessThanOrEqual(
+            window.frame.width,
+            1200,
+            "Runtime attach must not restore a window larger than the test display: \(window.frame)"
+        )
+        let split = app.descendants(matching: .any)["seyal-split-right"].firstMatch
+        XCTAssertTrue(split.waitForExistence(timeout: 8))
+        split.click()
+        XCTAssertLessThanOrEqual(
+            window.frame.width,
+            1200,
+            "split must preserve the compact test window: \(window.frame)"
+        )
+        let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
+        let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(firstRegion.waitForExistence(timeout: 12))
+        XCTAssertTrue(secondRegion.waitForExistence(timeout: 12))
+        // Split Right should leave the new right Pane focused. Keep the test
+        // deterministic if focus restoration differs on a host by using the
+        // app's pane-focus shortcut, then verify the actual projected state.
+        if (secondRegion.value as? String) != "focused" {
+            app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        }
+        let initialRightPaneFocused = expectation(
+            for: NSPredicate(format: "value == 'focused'"),
+            evaluatedWith: secondRegion,
+            handler: nil
+        )
+        guard XCTWaiter.wait(for: [initialRightPaneFocused], timeout: 5) == .completed else {
+            XCTFail(
+                "Pane 1 must be focused after Split Right before probing; "
+                    + "region0=\(firstRegion.value ?? "nil") frame=\(firstRegion.frame) "
+                    + "region1=\(secondRegion.value ?? "nil") frame=\(secondRegion.frame)"
+            )
+            return
+        }
+        XCTAssertNotEqual(firstRegion.value as? String, "focused")
+        let primarySurface = app.descendants(matching: .any)["terminal-input"].firstMatch
+        XCTAssertTrue(primarySurface.waitForExistence(timeout: 8))
+        let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+        XCTAssertTrue(secondaryHost.waitForExistence(timeout: 12))
+        XCTAssertTrue(secondaryHost.isEnabled, "secondary Pane focus target must be an enabled AX button")
+
+        let firstFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-a")
+        let secondFile = URL(fileURLWithPath: "/tmp/seyal-936-size-\(UUID().uuidString)-b")
+        let firstShellPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-shell-\(UUID().uuidString)-a")
+        let secondShellPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-shell-\(UUID().uuidString)-b")
+        let firstWatcherPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-watcher-\(UUID().uuidString)-a")
+        let secondWatcherPIDFile = URL(fileURLWithPath: "/tmp/seyal-936-watcher-\(UUID().uuidString)-b")
+        let firstStartedFile = URL(fileURLWithPath: "/tmp/seyal-936-started-\(UUID().uuidString)-a")
+        let secondStartedFile = URL(fileURLWithPath: "/tmp/seyal-936-started-\(UUID().uuidString)-b")
+        let firstProbeScript = URL(fileURLWithPath: "/tmp/seyal-936-probe-\(UUID().uuidString)-a.sh")
+        let secondProbeScript = URL(fileURLWithPath: "/tmp/seyal-936-probe-\(UUID().uuidString)-b.sh")
+        defer {
+            for pidFile in [firstWatcherPIDFile, secondWatcherPIDFile] {
+                guard let value = try? String(contentsOf: pidFile, encoding: .utf8),
+                      let pid = Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+                else { continue }
+                let killer = Process()
+                killer.executableURL = URL(fileURLWithPath: "/bin/kill")
+                killer.arguments = ["\(pid)"]
+                try? killer.run()
+                killer.waitUntilExit()
+            }
+            for file in [
+                firstFile, secondFile, firstShellPIDFile, secondShellPIDFile,
+                firstWatcherPIDFile, secondWatcherPIDFile, firstStartedFile,
+                secondStartedFile, firstProbeScript, secondProbeScript,
+            ] {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+
+        func writeProbeScript(
+            to script: URL,
+            ptyFile: URL,
+            shellPIDFile: URL,
+            watcherPIDFile: URL,
+            startedFile: URL
+        ) throws {
+            // Keep XCTest's typed command short and shell-neutral; Bash-specific
+            // watcher syntax stays in the fixture. Its sentinel distinguishes
+            // failed shell entry from a PTY-probe failure.
+            try """
+            #!/bin/bash
+            set -eu
+            printf '%s\\n' "$PPID" > '\(shellPIDFile.path)'
+            : > '\(startedFile.path)'
+            (
+                while true; do
+                    stty size </dev/tty > '\(ptyFile.path)' 2>/dev/null || true
+                    sleep 0.1
+                done
+            ) </dev/null >/dev/null 2>&1 &
+            printf '%s\\n' "$!" > '\(watcherPIDFile.path)'
+            """.write(to: script, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: script.path)
+        }
+
+        try writeProbeScript(
+            to: firstProbeScript,
+            ptyFile: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            watcherPIDFile: firstWatcherPIDFile,
+            startedFile: firstStartedFile
+        )
+        try writeProbeScript(
+            to: secondProbeScript,
+            ptyFile: secondFile,
+            shellPIDFile: secondShellPIDFile,
+            watcherPIDFile: secondWatcherPIDFile,
+            startedFile: secondStartedFile
+        )
+
+        func runSize(
+            in region: XCUIElement,
+            activating focusTarget: XCUIElement,
+            file: URL,
+            shellPIDFile: URL,
+            watcherPIDFile: URL,
+            startedFile: URL,
+            probeScript: URL
+        ) -> (rows: Int, columns: Int, shellPID: Int)? {
+            let focused = NSPredicate(format: "value == 'focused'")
+            if (region.value as? String) != "focused" {
+                guard focusTarget.waitForExistence(timeout: 5) else {
+                    XCTFail(
+                        "Pane focus target did not exist; region=\(region.identifier) "
+                            + "regionFrame=\(region.frame) target=\(focusTarget.identifier) "
+                            + "targetFrame=\(focusTarget.frame)"
+                    )
+                    return nil
+                }
+                let hittable = expectation(
+                    for: NSPredicate(format: "isHittable == true"),
+                    evaluatedWith: focusTarget,
+                    handler: nil
+                )
+                guard XCTWaiter.wait(for: [hittable], timeout: 5) == .completed else {
+                    XCTFail(
+                        "Pane focus target was not hittable; region=\(region.identifier) "
+                            + "regionState=\(region.value ?? "nil") regionFrame=\(region.frame) "
+                            + "target=\(focusTarget.identifier) targetState=\(focusTarget.value ?? "nil") "
+                            + "targetFrame=\(focusTarget.frame) enabled=\(focusTarget.isEnabled) "
+                            + "hittable=\(focusTarget.isHittable)"
+                    )
+                    return nil
+                }
+                focusTarget.click()
+                let focusExpectation = expectation(for: focused, evaluatedWith: region, handler: nil)
+                guard XCTWaiter.wait(for: [focusExpectation], timeout: 5) == .completed else {
+                    XCTFail(
+                        "Pane region did not focus after its target was clicked; "
+                            + "region=\(region.identifier) regionState=\(region.value ?? "nil") "
+                            + "regionFrame=\(region.frame) target=\(focusTarget.identifier) "
+                            + "targetFrame=\(focusTarget.frame) targetHittable=\(focusTarget.isHittable)"
+                    )
+                    return nil
+                }
+            }
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let composerAvailable = expectation(
+                for: NSPredicate(format: "value == %@", "available"),
+                evaluatedWith: composer,
+                handler: nil
+            )
+            guard XCTWaiter.wait(for: [composerAvailable], timeout: 10) == .completed else {
+                return nil
+            }
+            let editorQuery = app.descendants(matching: .any).matching(identifier: "seyal-composer-editor")
+            guard editorQuery.firstMatch.waitForExistence(timeout: 5) else { return nil }
+            // The editor is projected inside the focused Pane's live chrome,
+            // while Pane regions and liveContent are AX siblings. Resolve the
+            // editor by its current frame instead of relying on firstMatch,
+            // so typing is attempted in the editor owned by this region.
+            let editor = editorQuery.allElementsBoundByIndex.first {
+                $0.frame != .zero && region.frame.insetBy(dx: -2, dy: -2).contains($0.frame)
+            }
+            guard let editor else {
+                let candidates = editorQuery.allElementsBoundByIndex.map {
+                    "id=\($0.identifier) enabled=\($0.isEnabled) frame=\($0.frame)"
+                }.joined(separator: "; ")
+                XCTFail(
+                    "no composer editor is inside the focused Pane region; "
+                        + "region=\(region.identifier) regionFrame=\(region.frame) "
+                        + "composer=\(composer.value ?? "nil") editorCount=\(editorQuery.count) "
+                        + "candidates=[\(candidates)]"
+                )
+                return nil
+            }
+            // AX enabled state and NSTextView editability are distinct. Prove
+            // the actual input path by typing and waiting for the command's
+            // live PTY probe below instead of treating AXEnabled as the
+            // product editability contract.
+            editor.click()
+            let command = "/bin/bash \(probeScript.path)"
+            editor.typeText(command)
+            let draftMatchesCommand = expectation(
+                for: NSPredicate(format: "value == %@", command),
+                evaluatedWith: editor,
+                handler: nil
+            )
+            guard XCTWaiter.wait(for: [draftMatchesCommand], timeout: 5) == .completed else {
+                XCTFail(
+                    "composer editor did not expose the submitted fixture command before Return; "
+                        + "region=\(region.identifier) regionFrame=\(region.frame) "
+                        + "editorFrame=\(editor.frame) expectedDraft=\(command) "
+                        + "observedDraft=\(editor.value ?? "nil") composer=\(composer.value ?? "nil")"
+                )
+                return nil
+            }
+            editor.typeKey("\r", modifierFlags: [])
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if FileManager.default.fileExists(atPath: startedFile.path),
+                   let output = try? String(contentsOf: file, encoding: .utf8),
+                   let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8),
+                   let watcherPIDValue = try? String(contentsOf: watcherPIDFile, encoding: .utf8)
+                {
+                    let fields = output.split(whereSeparator: \.isWhitespace)
+                    if fields.count == 2,
+                       let rows = Int(fields[0]),
+                       let columns = Int(fields[1]),
+                       let shellPID = Int(shellPIDValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+                       Int(watcherPIDValue.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+                    {
+                        return (rows, columns, shellPID)
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            return nil
+        }
+
+        func projectedSize(from element: XCUIElement) -> (rows: Int, columns: Int)? {
+            guard let value = element.value as? String else { return nil }
+            let fields = value.split(whereSeparator: \.isWhitespace)
+            guard let rowField = fields.first(where: { $0.hasPrefix("rows=") }),
+                  let columnField = fields.first(where: { $0.hasPrefix("columns=") }),
+                  let rows = Int(rowField.dropFirst("rows=".count)),
+                  let columns = Int(columnField.dropFirst("columns=".count))
+            else { return nil }
+            return (rows, columns)
+        }
+
+        func processIsAlive(_ pid: Int) -> Bool {
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: "/bin/kill")
+            probe.arguments = ["-0", "\(pid)"]
+            do {
+                try probe.run()
+                probe.waitUntilExit()
+                return probe.terminationStatus == 0
+            } catch {
+                return false
+            }
+        }
+
+        func waitForMatchingSize(
+            from file: URL,
+            shellPIDFile: URL,
+            displayedBy element: XCUIElement,
+            original: (rows: Int, columns: Int, shellPID: Int)
+        ) -> (rows: Int, columns: Int, shellPID: Int)? {
+            let deadline = Date().addingTimeInterval(10)
+            var lastProbe = "missing"
+            var lastPID = "missing"
+            var lastProjection = "unavailable"
+            while Date() < deadline {
+                if let value = try? String(contentsOf: file, encoding: .utf8) {
+                    lastProbe = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let fields = value.split(whereSeparator: \.isWhitespace)
+                    if fields.count == 2,
+                       let rows = Int(fields[0]),
+                       let columns = Int(fields[1]),
+                       let pidValue = try? String(contentsOf: shellPIDFile, encoding: .utf8)
+                    {
+                        lastPID = pidValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        lastProjection = String(describing: projectedSize(from: element))
+                        if let shellPID = Int(lastPID),
+                           shellPID == original.shellPID,
+                           processIsAlive(shellPID),
+                           rows > 0,
+                           columns > 0,
+                           let projection = projectedSize(from: element),
+                           projection.rows == rows,
+                           projection.columns == columns
+                        {
+                            return (rows, columns, shellPID)
+                        }
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            XCTFail(
+                "Pane PTY did not converge with its current surface after focus restoration; "
+                    + "surface=\(element.identifier) originalPID=\(original.shellPID) "
+                    + "lastPID=\(lastPID) live=\(processIsAlive(original.shellPID)) "
+                    + "lastPTY=\(lastProbe) lastProjection=\(lastProjection)"
+            )
+            return nil
+        }
+
+        guard let secondBefore = runSize(
+            in: secondRegion,
+            activating: secondRegion,
+            file: secondFile,
+            shellPIDFile: secondShellPIDFile,
+            watcherPIDFile: secondWatcherPIDFile,
+            startedFile: secondStartedFile,
+            probeScript: secondProbeScript
+        ) else {
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            let shellPID = (try? String(contentsOf: secondShellPIDFile, encoding: .utf8)) ?? "missing"
+            let watcherPID = (try? String(contentsOf: secondWatcherPIDFile, encoding: .utf8)) ?? "missing"
+            let probe = (try? String(contentsOf: secondFile, encoding: .utf8)) ?? "missing"
+            XCTFail(
+                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: secondStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
+            )
+            return
+        }
+        // Probe the right Pane while it is already focused, then click the
+        // left region to focus the unfocused sibling. The left region is the
+        // stable focus target exercised by the split-focus UI test.
+        guard let firstBefore = runSize(
+            in: firstRegion,
+            activating: firstRegion,
+            file: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            watcherPIDFile: firstWatcherPIDFile,
+            startedFile: firstStartedFile,
+            probeScript: firstProbeScript
+        ) else {
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            let shellPID = (try? String(contentsOf: firstShellPIDFile, encoding: .utf8)) ?? "missing"
+            let watcherPID = (try? String(contentsOf: firstWatcherPIDFile, encoding: .utf8)) ?? "missing"
+            let probe = (try? String(contentsOf: firstFile, encoding: .utf8)) ?? "missing"
+            XCTFail(
+                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: firstStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), regionFrame=\(firstRegion.frame)"
+            )
+            return
+        }
+        XCTAssertGreaterThan(firstBefore.0, 0)
+        XCTAssertGreaterThan(firstBefore.1, 0)
+        XCTAssertGreaterThan(secondBefore.0, 0)
+        XCTAssertGreaterThan(secondBefore.1, 0)
+        XCTAssertNotEqual(
+            firstBefore.shellPID,
+            secondBefore.shellPID,
+            "each Pane must run its command in a distinct live shell execution"
+        )
+        // runSize(firstRegion) focused Pane 0 so its command could be
+        // submitted. Restore Pane 1 before associating live-surface
+        // projections with the two PTY samples: the primary surface follows
+        // focus, and the secondary host represents the other Pane.
+        app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        let secondPaneFocused = expectation(
+            for: NSPredicate(format: "value == 'focused'"),
+            evaluatedWith: secondRegion,
+            handler: nil
+        )
+        guard XCTWaiter.wait(for: [secondPaneFocused], timeout: 5) == .completed else {
+            XCTFail("Pane 1 must regain focus before associating live projections with PTY samples")
+            return
+        }
+        let firstPaneUnfocused = expectation(
+            for: NSPredicate(format: "value != 'focused'"),
+            evaluatedWith: firstRegion,
+            handler: nil
+        )
+        guard XCTWaiter.wait(for: [firstPaneUnfocused], timeout: 5) == .completed else {
+            XCTFail("Pane 0 must be unfocused before associating live projections with PTY samples")
+            return
+        }
+
+        let primarySurfaceAfterFocus = app.descendants(matching: .any)["terminal-input"].firstMatch
+        let secondaryHostAfterFocus = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+        XCTAssertTrue(primarySurfaceAfterFocus.waitForExistence(timeout: 5))
+        XCTAssertTrue(secondaryHostAfterFocus.waitForExistence(timeout: 5))
+        guard let secondAtPane1Focus = waitForMatchingSize(
+            from: secondFile,
+            shellPIDFile: secondShellPIDFile,
+            displayedBy: primarySurfaceAfterFocus,
+            original: secondBefore
+        ),
+              let firstAtPane1Focus = waitForMatchingSize(
+                  from: firstFile,
+                  shellPIDFile: firstShellPIDFile,
+                  displayedBy: secondaryHostAfterFocus,
+                  original: firstBefore
+              )
+        else {
+            return
+        }
+
+        let oldWidth = window.frame.width
+        // The compact test frame leaves enough display space for both panes
+        // and a real native resize gesture.
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+            .withOffset(CGVector(dx: -3, dy: -3))
+        corner.click(forDuration: 0.15, thenDragTo: corner.withOffset(CGVector(dx: 120, dy: 0)))
+        let resizeDeadline = Date().addingTimeInterval(5)
+        while Date() < resizeDeadline, window.frame.width <= oldWidth + 20 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertGreaterThan(window.frame.width, oldWidth + 20, "window must resize")
+
+        func waitForResizedSize(
+            in region: XCUIElement,
+            displayedBy displayElement: XCUIElement,
+            file: URL,
+            shellPIDFile: URL,
+            previous: (rows: Int, columns: Int, shellPID: Int),
+            requireUnfocused: Bool
+        ) -> (rows: Int, columns: Int, shellPID: Int)? {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if let output = try? String(contentsOf: file, encoding: .utf8) {
+                    let fields = output.split(whereSeparator: \.isWhitespace)
+                    let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8)
+                    let shellPID = shellPIDValue.flatMap {
+                        Int($0.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                    if fields.count == 2,
+                       let rows = Int(fields[0]),
+                       let columns = Int(fields[1]),
+                       let projection = projectedSize(from: displayElement),
+                       let shellPID,
+                       shellPID == previous.shellPID,
+                       processIsAlive(shellPID),
+                       (rows != previous.rows || columns != previous.columns),
+                       projection.rows == rows,
+                       projection.columns == columns
+                    {
+                        if requireUnfocused {
+                            XCTAssertNotEqual(
+                                region.value as? String,
+                                "focused",
+                                "the secondary Pane must remain unfocused while its PTY resizes"
+                            )
+                        }
+                        return (rows, columns, previous.shellPID)
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            return nil
+        }
+
+        guard let firstAfter = waitForResizedSize(
+            in: firstRegion,
+            displayedBy: secondaryHostAfterFocus,
+            file: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            previous: firstAtPane1Focus,
+            requireUnfocused: true
+        ),
+              let secondAfter = waitForResizedSize(
+                  in: secondRegion,
+                  displayedBy: primarySurfaceAfterFocus,
+                  file: secondFile,
+                  shellPIDFile: secondShellPIDFile,
+                  previous: secondAtPane1Focus,
+                  requireUnfocused: false
+              )
+        else {
+            XCTFail("both PTYs must resize while the secondary Pane remains unfocused")
+            return
+        }
+        XCTAssertTrue(processIsAlive(firstAfter.shellPID), "first shell must remain live after both PTY samples")
+        XCTAssertTrue(processIsAlive(secondAfter.shellPID), "second shell must remain live after both PTY samples")
+        XCTAssertNotEqual(
+            secondAfter.1,
+            secondAtPane1Focus.1,
+            "focused Pane 1 PTY columns must follow layout"
+        )
+        XCTAssertNotEqual(
+            firstAfter.1,
+            firstAtPane1Focus.1,
+            "unfocused Pane 0 PTY columns must follow layout independently"
+        )
+        XCTAssertEqual(firstAfter.shellPID, firstBefore.shellPID)
+        XCTAssertEqual(secondAfter.shellPID, secondBefore.shellPID)
+        XCTAssertNotEqual(
+            firstAfter.shellPID,
+            secondAfter.shellPID,
+            "window resize must keep both commands attached to their distinct shell executions"
+        )
+
+        let divider = app.descendants(matching: .any)["seyal-pane-divider-0"].firstMatch
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        XCTAssertTrue(divider.isHittable, "the Rust-projected split divider must be draggable")
+        guard let dividerRatioBefore = divider.value as? String else {
+            XCTFail("split divider must expose its Rust-projected ratio")
+            return
+        }
+        let dividerCenter = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        dividerCenter.click(
+            forDuration: 0.15,
+            thenDragTo: dividerCenter.withOffset(CGVector(dx: 100, dy: 0))
+        )
+        let dividerDeadline = Date().addingTimeInterval(5)
+        while Date() < dividerDeadline, (divider.value as? String) == dividerRatioBefore {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertNotEqual(divider.value as? String, dividerRatioBefore, "divider drag must update Rust's ratio")
+        XCTAssertEqual(secondRegion.value as? String, "focused", "Pane 1 must remain focused during divider resize")
+        XCTAssertNotEqual(firstRegion.value as? String, "focused", "Pane 0 must remain the unfocused secondary")
+
+        guard let firstAfterDivider = waitForResizedSize(
+            in: firstRegion,
+            displayedBy: secondaryHostAfterFocus,
+            file: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            previous: firstAfter,
+            requireUnfocused: true
+        ),
+              let secondAfterDivider = waitForResizedSize(
+                  in: secondRegion,
+                  displayedBy: primarySurfaceAfterFocus,
+                  file: secondFile,
+                  shellPIDFile: secondShellPIDFile,
+                  previous: secondAfter,
+                  requireUnfocused: false
+              )
+        else {
+            XCTFail("both PTYs must follow the divider change while Pane 0 stays unfocused")
+            return
+        }
+        XCTAssertTrue(
+            processIsAlive(firstAfterDivider.shellPID),
+            "first shell must remain live after both divider-resize samples"
+        )
+        XCTAssertTrue(
+            processIsAlive(secondAfterDivider.shellPID),
+            "second shell must remain live after both divider-resize samples"
+        )
+        XCTAssertNotEqual(firstAfterDivider.columns, secondAfterDivider.columns)
+        XCTAssertEqual(firstAfterDivider.shellPID, firstBefore.shellPID)
+        XCTAssertEqual(secondAfterDivider.shellPID, secondBefore.shellPID)
+        XCTAssertEqual(app.state, .runningForeground, "resizing live panes must not crash Seyal.app")
     }
 
     func testComposerSubmitAndTerminalFocusStayOnRustEligibility() throws {

@@ -180,8 +180,7 @@ extension RustDisplayBridge {
     horizontalInsets: Double,
     verticalInsets: Double,
     cellWidth: Double,
-    cellHeight: Double,
-    meaningfulLayoutEpoch: Bool
+    cellHeight: Double
   ) -> Int32 {
     guard isConnected, selectClient() else {
       onStatusChanged()
@@ -194,8 +193,7 @@ extension RustDisplayBridge {
         horizontalInsets,
         verticalInsets,
         cellWidth,
-        cellHeight,
-        meaningfulLayoutEpoch ? 1 : 0
+        cellHeight
       )
     )
   }

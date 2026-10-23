@@ -71,6 +71,9 @@ final class RustDisplayBridge {
   let onError: ErrorHandler
   var onStatusChanged: StatusHandler
   var onCopiedText: ((String) -> Void)?
+  /// Notifies the multi-live host after a non-primary registry handle is polled
+  /// (#936) so a secondary Metal surface can present without changing focus.
+  var onRegistryHandlePolled: ((UInt64) -> Void)?
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
   var auxiliaryWriteSources: [UInt64: DispatchSourceWrite] = [:]
@@ -101,7 +104,7 @@ final class RustDisplayBridge {
   var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
   var lastComposerResultRequestID: UInt64 = 0
-  var lastComposerStatusRevision: UInt64 = 0
+  var composerStatusRelayTracker = ComposerStatusRelayTracker()
 
   init(
     onFrame: @escaping FrameHandler,
@@ -435,8 +438,10 @@ final class RustDisplayBridge {
             self.onStatusChanged()
             return
           }
+          self.onRegistryHandlePolled?(handle)
           _ = self.selectClient()
           self.publishCurrentFrame()
+          self.publishComposerStatus()
           self.synchronizeWriteReadinessSource()
         }
       }
@@ -465,6 +470,7 @@ final class RustDisplayBridge {
         _ = seyal_bridge_poll()
         self.armAuxiliaryReadSources()
         self.publishCurrentFrame()
+        self.publishComposerStatus()
         self.synchronizeWriteReadinessSource()
       }
     }

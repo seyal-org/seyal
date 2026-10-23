@@ -23,9 +23,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     override init() {
         liveHost = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         super.init()
-        // Chain after ProductChromeHostView's own pane hook so window effects
-        // apply whenever Rust commits a product transition.
+        // Preserve ProductChromeHostView's frame/block refresh hook, then add
+        // the multi-window realization work for the same Rust commit.
+        let refreshProductHost = liveHost.pane.onProductChanged
         liveHost.pane.onProductChanged = { [weak self] in
+            refreshProductHost?()
             guard let self else { return }
             self.liveHost.reconcileChrome()
             self.applyPendingEffects()
@@ -38,6 +40,19 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
         liveHost.activateAfterWindowPresentation()
         NSApp.activate(ignoringOtherApps: true)
+        #if DEBUG
+        // Hosted resize acceptance needs enough room for both real Pane targets
+        // on smaller CI displays, even when AppKit restores a previous frame.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let window = self.realizations.values.first(where: { $0.contentView === self.liveHost })
+                else { return }
+                window.setContentSize(NSSize(width: 1100, height: 760))
+                window.center()
+            }
+        }
+        #endif
     }
 
     func applyPendingEffectsAndReconcile() {
@@ -121,7 +136,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         if !orderedKeys.contains(key) {
             orderedKeys.append(key)
         }
-        // One live Metal leaf: install live host only for the product-active window.
+        // Install the live Pane surfaces only in Rust's product-active window.
         if isProductActive(key) {
             installLiveHost(in: window, key: key)
         } else {
@@ -337,9 +352,18 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         return shell.active_window_lo == key.lo && shell.active_window_hi == key.hi
     }
 
+    private var initialWindowSize: NSSize {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            return NSSize(width: 1100, height: 760)
+        }
+        #endif
+        return NSSize(width: 1280, height: 800)
+    }
+
     private func makeSeyalWindow(for key: WindowKey) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+            contentRect: NSRect(origin: .zero, size: initialWindowSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
