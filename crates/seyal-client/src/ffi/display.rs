@@ -184,21 +184,26 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
         .unwrap_or_else(SeyalComposerResult::empty)
 }
 
-/// Copies the latest Runtime composer eligibility for the active client into
-/// a typed C value. Revision 0 / eligibility 0 means nothing published yet.
-/// The host relays it verbatim; Rust remains the only reader of its meaning.
+/// Copies the latest Runtime composer eligibility and its attachment identity
+/// for the focused display client into a typed C value. Revision 0 / eligibility
+/// 0 means nothing published yet. Rust remains the only reader of its meaning.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
     with_display_client(|client| client.composer_status())
         .flatten()
-        .map(|status| SeyalComposerStatus {
-            revision: status.revision,
-            eligibility: match status.eligibility {
-                ComposerEligibility::Available => 1,
-                ComposerEligibility::Busy => 2,
-                ComposerEligibility::Unsupported => 3,
-            },
-            reserved: [0; 7],
+        .map(|status| {
+            let attachment = status.attachment_id.to_bytes();
+            SeyalComposerStatus {
+                revision: status.revision,
+                attachment_id_low: u64::from_le_bytes(attachment[..8].try_into().unwrap()),
+                attachment_id_high: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
+                eligibility: match status.eligibility {
+                    ComposerEligibility::Available => 1,
+                    ComposerEligibility::Busy => 2,
+                    ComposerEligibility::Unsupported => 3,
+                },
+                reserved: [0; 7],
+            }
         })
         .unwrap_or_else(SeyalComposerStatus::empty)
 }

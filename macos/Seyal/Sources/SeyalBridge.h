@@ -113,9 +113,13 @@ typedef struct SeyalComposerResult {
 } SeyalComposerResult;
 
 /* Runtime-published composer eligibility (#978): eligibility uses
- * SeyalAppComposerEligibility; revision 0 means nothing published yet. */
+ * SeyalAppComposerEligibility; revision 0 means no status was published.
+ * Revisions are execution-scoped, and attachment identity identifies the
+ * focused display client whose status is reported. */
 typedef struct SeyalComposerStatus {
     uint64_t revision;
+    uint64_t attachment_id_low;
+    uint64_t attachment_id_high;
     uint8_t eligibility;
     uint8_t reserved[7];
 } SeyalComposerStatus;

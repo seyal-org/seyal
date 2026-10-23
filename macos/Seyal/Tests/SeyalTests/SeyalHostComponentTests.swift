@@ -40,7 +40,12 @@ final class SeyalHostComponentTests: XCTestCase {
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
         XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 40)
-        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 32)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.revision), 0)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_low), 8)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_high), 16)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.eligibility), 24)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.reserved), 25)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 120)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
@@ -1334,6 +1339,23 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(text.isEmpty, "RustDisplayBridge.swift must be readable from the test bundle")
         XCTAssertFalse(text.contains("struct ComposerRequestCorrelation"))
         XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
+    }
+
+    /// #1250: Runtime revisions are execution-scoped; equal revisions from
+    /// distinct focused attachments each need to reach the native composer.
+    func testComposerStatusRelayDeduplicatesByFocusedAttachmentAndRevision() {
+        var tracker = ComposerStatusRelayTracker()
+        XCTAssertTrue(tracker.shouldRelay(revision: 7, attachmentIDLow: 11, attachmentIDHigh: 1))
+        XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 11, attachmentIDHigh: 1))
+        XCTAssertTrue(
+            tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2),
+            "the same Runtime revision on another focused attachment must be relayed"
+        )
+        XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2))
+        XCTAssertTrue(tracker.shouldRelay(revision: 8, attachmentIDLow: 22, attachmentIDHigh: 2))
+        XCTAssertFalse(tracker.shouldRelay(revision: 0, attachmentIDLow: 33, attachmentIDHigh: 3))
+        XCTAssertTrue(tracker.clear())
+        XCTAssertFalse(tracker.clear())
     }
 
     @MainActor
