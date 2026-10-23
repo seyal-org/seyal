@@ -254,7 +254,7 @@ final class SeyalHostUITests: XCTestCase {
     }
 
     /// #936: a real outer-window resize reaches both independent PTYs. The
-    /// second execution is unfocused while its secondary host proposes layout.
+    /// Pane 0 stays unfocused while its secondary host receives new geometry.
     func testWindowResizeUpdatesBothLivePanePtyGeometries() throws {
         let app = hostedApp(compactWindowForResize: true)
         let window = app.windows.firstMatch
@@ -285,7 +285,28 @@ final class SeyalHostUITests: XCTestCase {
         )
         let firstRegion = app.descendants(matching: .any)["seyal-pane-region-0"].firstMatch
         let secondRegion = app.descendants(matching: .any)["seyal-pane-region-1"].firstMatch
+        XCTAssertTrue(firstRegion.waitForExistence(timeout: 12))
         XCTAssertTrue(secondRegion.waitForExistence(timeout: 12))
+        // Split Right should leave the new right Pane focused. Keep the test
+        // deterministic if focus restoration differs on a host by using the
+        // app's pane-focus shortcut, then verify the actual projected state.
+        if (secondRegion.value as? String) != "focused" {
+            app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        }
+        let initialRightPaneFocused = expectation(
+            for: NSPredicate(format: "value == 'focused'"),
+            evaluatedWith: secondRegion,
+            handler: nil
+        )
+        guard XCTWaiter.wait(for: [initialRightPaneFocused], timeout: 5) == .completed else {
+            XCTFail(
+                "Pane 1 must be focused after Split Right before probing; "
+                    + "region0=\(firstRegion.value ?? "nil") frame=\(firstRegion.frame) "
+                    + "region1=\(secondRegion.value ?? "nil") frame=\(secondRegion.frame)"
+            )
+            return
+        }
+        XCTAssertNotEqual(firstRegion.value as? String, "focused")
         let primarySurface = app.descendants(matching: .any)["terminal-input"].firstMatch
         XCTAssertTrue(primarySurface.waitForExistence(timeout: 8))
         let secondaryHost = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
@@ -553,25 +574,6 @@ final class SeyalHostUITests: XCTestCase {
             return nil
         }
 
-        guard let firstBefore = runSize(
-            in: firstRegion,
-            activating: firstRegion,
-            file: firstFile,
-            shellPIDFile: firstShellPIDFile,
-            watcherPIDFile: firstWatcherPIDFile,
-            startedFile: firstStartedFile,
-            probeScript: firstProbeScript
-        ) else {
-            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
-            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
-            let shellPID = (try? String(contentsOf: firstShellPIDFile, encoding: .utf8)) ?? "missing"
-            let watcherPID = (try? String(contentsOf: firstWatcherPIDFile, encoding: .utf8)) ?? "missing"
-            let probe = (try? String(contentsOf: firstFile, encoding: .utf8)) ?? "missing"
-            XCTFail(
-                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: firstStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID)"
-            )
-            return
-        }
         guard let secondBefore = runSize(
             in: secondRegion,
             activating: secondRegion,
@@ -591,6 +593,28 @@ final class SeyalHostUITests: XCTestCase {
             )
             return
         }
+        // Probe the right Pane while it is already focused, then click the
+        // left region to focus the unfocused sibling. The left region is the
+        // stable focus target exercised by the split-focus UI test.
+        guard let firstBefore = runSize(
+            in: firstRegion,
+            activating: firstRegion,
+            file: firstFile,
+            shellPIDFile: firstShellPIDFile,
+            watcherPIDFile: firstWatcherPIDFile,
+            startedFile: firstStartedFile,
+            probeScript: firstProbeScript
+        ) else {
+            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
+            let shellPID = (try? String(contentsOf: firstShellPIDFile, encoding: .utf8)) ?? "missing"
+            let watcherPID = (try? String(contentsOf: firstWatcherPIDFile, encoding: .utf8)) ?? "missing"
+            let probe = (try? String(contentsOf: firstFile, encoding: .utf8)) ?? "missing"
+            XCTFail(
+                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: firstStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), regionFrame=\(firstRegion.frame)"
+            )
+            return
+        }
         XCTAssertGreaterThan(firstBefore.0, 0)
         XCTAssertGreaterThan(firstBefore.1, 0)
         XCTAssertGreaterThan(secondBefore.0, 0)
@@ -600,27 +624,27 @@ final class SeyalHostUITests: XCTestCase {
             secondBefore.shellPID,
             "each Pane must run its command in a distinct live shell execution"
         )
-        // runSize(secondRegion) focused Pane 2 so its command could be
+        // runSize(firstRegion) focused Pane 0 so its command could be
         // submitted. Restore Pane 1 before associating live-surface
         // projections with the two PTY samples: the primary surface follows
         // focus, and the secondary host represents the other Pane.
-        app.typeKey(.leftArrow, modifierFlags: [.command, .option])
-        let firstPaneFocused = expectation(
+        app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        let secondPaneFocused = expectation(
             for: NSPredicate(format: "value == 'focused'"),
-            evaluatedWith: firstRegion,
-            handler: nil
-        )
-        guard XCTWaiter.wait(for: [firstPaneFocused], timeout: 5) == .completed else {
-            XCTFail("Pane 1 must regain focus before associating live projections with PTY samples")
-            return
-        }
-        let secondPaneUnfocused = expectation(
-            for: NSPredicate(format: "value != 'focused'"),
             evaluatedWith: secondRegion,
             handler: nil
         )
-        guard XCTWaiter.wait(for: [secondPaneUnfocused], timeout: 5) == .completed else {
-            XCTFail("Pane 2 must be unfocused before associating live projections with PTY samples")
+        guard XCTWaiter.wait(for: [secondPaneFocused], timeout: 5) == .completed else {
+            XCTFail("Pane 1 must regain focus before associating live projections with PTY samples")
+            return
+        }
+        let firstPaneUnfocused = expectation(
+            for: NSPredicate(format: "value != 'focused'"),
+            evaluatedWith: firstRegion,
+            handler: nil
+        )
+        guard XCTWaiter.wait(for: [firstPaneUnfocused], timeout: 5) == .completed else {
+            XCTFail("Pane 0 must be unfocused before associating live projections with PTY samples")
             return
         }
 
@@ -628,17 +652,17 @@ final class SeyalHostUITests: XCTestCase {
         let secondaryHostAfterFocus = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
         XCTAssertTrue(primarySurfaceAfterFocus.waitForExistence(timeout: 5))
         XCTAssertTrue(secondaryHostAfterFocus.waitForExistence(timeout: 5))
-        guard let firstAtPane1Focus = waitForMatchingSize(
-            from: firstFile,
-            shellPIDFile: firstShellPIDFile,
+        guard let secondAtPane1Focus = waitForMatchingSize(
+            from: secondFile,
+            shellPIDFile: secondShellPIDFile,
             displayedBy: primarySurfaceAfterFocus,
-            original: firstBefore
+            original: secondBefore
         ),
-              let secondAtPane1Focus = waitForMatchingSize(
-                  from: secondFile,
-                  shellPIDFile: secondShellPIDFile,
+              let firstAtPane1Focus = waitForMatchingSize(
+                  from: firstFile,
+                  shellPIDFile: firstShellPIDFile,
                   displayedBy: secondaryHostAfterFocus,
-                  original: secondBefore
+                  original: firstBefore
               )
         else {
             return
@@ -700,19 +724,19 @@ final class SeyalHostUITests: XCTestCase {
 
         guard let firstAfter = waitForResizedSize(
             in: firstRegion,
-            displayedBy: primarySurfaceAfterFocus,
+            displayedBy: secondaryHostAfterFocus,
             file: firstFile,
             shellPIDFile: firstShellPIDFile,
             previous: firstAtPane1Focus,
-            requireUnfocused: false
+            requireUnfocused: true
         ),
               let secondAfter = waitForResizedSize(
                   in: secondRegion,
-                  displayedBy: secondaryHostAfterFocus,
+                  displayedBy: primarySurfaceAfterFocus,
                   file: secondFile,
                   shellPIDFile: secondShellPIDFile,
                   previous: secondAtPane1Focus,
-                  requireUnfocused: true
+                  requireUnfocused: false
               )
         else {
             XCTFail("both PTYs must resize while the secondary Pane remains unfocused")
@@ -721,14 +745,14 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(processIsAlive(firstAfter.shellPID), "first shell must remain live after both PTY samples")
         XCTAssertTrue(processIsAlive(secondAfter.shellPID), "second shell must remain live after both PTY samples")
         XCTAssertNotEqual(
-            firstAfter.1,
-            firstAtPane1Focus.1,
-            "focused Pane PTY columns must follow layout"
-        )
-        XCTAssertNotEqual(
             secondAfter.1,
             secondAtPane1Focus.1,
-            "unfocused secondary Pane PTY columns must follow layout independently"
+            "focused Pane 1 PTY columns must follow layout"
+        )
+        XCTAssertNotEqual(
+            firstAfter.1,
+            firstAtPane1Focus.1,
+            "unfocused Pane 0 PTY columns must follow layout independently"
         )
         XCTAssertEqual(firstAfter.shellPID, firstBefore.shellPID)
         XCTAssertEqual(secondAfter.shellPID, secondBefore.shellPID)
@@ -755,26 +779,27 @@ final class SeyalHostUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
         XCTAssertNotEqual(divider.value as? String, dividerRatioBefore, "divider drag must update Rust's ratio")
-        XCTAssertNotEqual(secondRegion.value as? String, "focused")
+        XCTAssertEqual(secondRegion.value as? String, "focused", "Pane 1 must remain focused during divider resize")
+        XCTAssertNotEqual(firstRegion.value as? String, "focused", "Pane 0 must remain the unfocused secondary")
 
         guard let firstAfterDivider = waitForResizedSize(
             in: firstRegion,
-            displayedBy: primarySurfaceAfterFocus,
+            displayedBy: secondaryHostAfterFocus,
             file: firstFile,
             shellPIDFile: firstShellPIDFile,
             previous: firstAfter,
-            requireUnfocused: false
+            requireUnfocused: true
         ),
               let secondAfterDivider = waitForResizedSize(
                   in: secondRegion,
-                  displayedBy: secondaryHostAfterFocus,
+                  displayedBy: primarySurfaceAfterFocus,
                   file: secondFile,
                   shellPIDFile: secondShellPIDFile,
                   previous: secondAfter,
-                  requireUnfocused: true
+                  requireUnfocused: false
               )
         else {
-            XCTFail("both PTYs must follow the divider change while the secondary Pane stays unfocused")
+            XCTFail("both PTYs must follow the divider change while Pane 0 stays unfocused")
             return
         }
         XCTAssertTrue(
