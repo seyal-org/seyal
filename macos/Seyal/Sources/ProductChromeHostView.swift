@@ -476,30 +476,6 @@ final class ProductChromeHostView: NSView {
     }
 
 
-    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
-    /// WorkspaceCommand. Rust re-validates against the current route context.
-    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
-        guard let commandId = sender.representedObject as? UInt16 else { return }
-        let ordinal = commandId == KeybindingShortcutRealization.windowSelectOrdinal
-            ? UInt8(sender.tag)
-            : 0
-        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, ordinal, 0)
-        if code == 0 {
-            reconcileChrome()
-            routeFocus()
-        } else {
-            NSApp.presentError(
-                NSError(
-                    domain: "Seyal.WorkspaceCommand",
-                    code: Int(code),
-                    userInfo: [
-                        NSLocalizedDescriptionKey: "Seyal could not perform “\(sender.title)”. Try again."
-                    ]
-                )
-            )
-        }
-    }
-
     /// R6.2.1: route Command through Rust before AppKit menu key-equivalents.
     /// Matched / cross-context projected steals consume; §6.2 step 2c miss and
     /// reserved §4.2 stay native (composer/palette ⌘←/⌘⌫ editing).
