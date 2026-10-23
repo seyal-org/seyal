@@ -127,19 +127,6 @@ final class MultiWindowHostTests: XCTestCase {
         let snapshotOrder = host.snapshotOrderedWindowKeys()
         XCTAssertEqual(snapshotOrder.count, 3)
         XCTAssertEqual(host.orderedKeys, snapshotOrder)
-        let source = try! String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/MultiWindowHostController.swift"),
-            encoding: .utf8
-        )
-        XCTAssertFalse(
-            source.contains("NSApp.windows as"),
-            "host must not consult AppKit window list as order authority"
-        )
-        XCTAssertTrue(source.contains("snapshotOrderedWindowKeys"))
     }
 
     func testDestroyRealizationRemovesWindow() {
@@ -208,21 +195,53 @@ final class MultiWindowHostTests: XCTestCase {
     }
 
     func testMenuKeyEquivalentsNotKeyDown() {
-        let source = try! String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/AppDelegate.swift"),
-            encoding: .utf8
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+
+        let menu = AppDelegate.makeMainMenu(targeting: host)
+        let fileMenu = menu.items.first { $0.submenu?.title == "File" }?.submenu
+        let viewMenu = menu.items.first { $0.submenu?.title == "View" }?.submenu
+        let windowMenu = menu.items.first { $0.submenu?.title == "Window" }?.submenu
+        let projectedItems = [fileMenu, viewMenu, windowMenu]
+            .compactMap { $0 }
+            .flatMap(\.items)
+            .filter {
+                $0.representedObject is UInt16
+                    && ($0.representedObject as? UInt16) != KeybindingShortcutRealization.windowSelectOrdinal
+            }
+
+        XCTAssertEqual(projectedItems.count, 15)
+        XCTAssertEqual(
+            Set(projectedItems.compactMap { $0.representedObject as? UInt16 }),
+            Set((0..<seyal_app_shortcut_count()).compactMap { index in
+                let row = seyal_app_shortcut_item(index)
+                return row.size == 0 ? nil : row.command_id
+            })
         )
-        XCTAssertTrue(source.contains("keyEquivalent: \"n\""))
-        XCTAssertTrue(source.contains("[.command, .shift]"))
-        XCTAssertTrue(source.contains("keyEquivalent: \"t\""))
-        XCTAssertTrue(source.contains("keyEquivalent: \"w\""))
-        XCTAssertTrue(source.contains("hierarchicalClose"))
-        XCTAssertTrue(source.contains("applicationShouldHandleReopen"))
-        XCTAssertFalse(source.contains("keyDown"))
+        XCTAssertEqual(projectedItems.filter { $0.title == "New Tab" }.count, 1)
+        XCTAssertEqual(
+            windowMenu?.items.filter {
+                $0.representedObject as? UInt16 == KeybindingShortcutRealization.windowSelectOrdinal
+            }.count,
+            9
+        )
+        XCTAssertTrue(projectedItems.contains { $0.title == "Split Right" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Split Down" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle Raw" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Toggle TUI" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Go to…" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Previous Tab" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Next Tab" })
+        XCTAssertTrue(projectedItems.contains { $0.title == "Close Tab" })
+        XCTAssertTrue(projectedItems.allSatisfy { $0.target === host.liveHost })
+        XCTAssertTrue(projectedItems.allSatisfy {
+            $0.action == #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:))
+        })
+
+        let close = projectedItems.first { $0.representedObject as? UInt16 == 22 }
+        XCTAssertEqual(close?.keyEquivalent, "w")
+        XCTAssertTrue(close?.keyEquivalentModifierMask.contains(.command) == true)
     }
 
     func testQuitReplyRuleAfterExtraWindows() {
@@ -274,16 +293,20 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertFalse(host.windowShouldClose(window))
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
-        let hostSource = try! String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/MultiWindowHostController.swift"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(hostSource.contains("SEYAL_APP_ACTION_CLOSE_WINDOW"))
-        XCTAssertFalse(hostSource.contains("func keyDown"), "⌘W must not use keyDown")
+    }
+
+    func testComponentHostDestroysWindowThroughAppKitClosePath() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first, let window = host.realizedWindow(for: key) else {
+            return XCTFail("expected bootstrap window")
+        }
+
+        host.forwardCloseWindow(key)
+
+        XCTAssertFalse(NSApp.windows.contains { $0 === window })
+        XCTAssertEqual(window.windowNumber, -1)
     }
 
     func testLastWindowCloseLeavesZeroWindowsWithoutQuit() {
@@ -317,19 +340,10 @@ final class MultiWindowHostTests: XCTestCase {
         }
         host.forwardCloseWindow(again)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
-        host.handleDockReopen()
+        let delegate = AppDelegate(host: host)
+        XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
         XCTAssertEqual(host.orderedKeys.count, 1)
-        let delegateSource = try! String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/AppDelegate.swift"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(delegateSource.contains("applicationShouldHandleReopen"))
-        XCTAssertTrue(delegateSource.contains("handleDockReopen"))
     }
 
     func testHierarchicalCloseMenuForwardsClosePane() {

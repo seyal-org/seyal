@@ -1226,4 +1226,20 @@ final class SeyalHostUITests: XCTestCase {
         newWindow.click()
         waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
     }
+
+    func testTitleBarCloseForwardsThroughWindowCloseDelegate() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5))
+        newWindow.click()
+        waitForWindowCount(app, 2, message: "New Window creates a second headed window")
+
+        let window = app.windows.element(boundBy: 1)
+        let closeButton = window.buttons["Close"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5), "window has its native close control")
+        closeButton.click()
+        waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")
+        XCTAssertEqual(app.state, .runningForeground, "closing a non-final window must not quit")
+    }
 }

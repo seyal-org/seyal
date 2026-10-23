@@ -10,10 +10,6 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
-    /// Closed windows remain strongly held while AppKit finishes close-time
-    /// callbacks. Window ownership stays with Swift ARC; AppKit's default
-    /// release-on-close must be disabled in `makeSeyalWindow`.
-    private var closingWindows: [NSWindow] = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
 
@@ -129,21 +125,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         }
         window.delegate = nil
         window.contentView = nil
-        if NSApp.delegate is AppDelegate {
-            // In production AppDelegate keeps Seyal running after the last
-            // window closes. Remove the NSWindow from AppKit's window list so
-            // last-window-close and Dock reopen observe the true zero-window state.
-            closingWindows.append(window)
-            window.close()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak window] in
-                guard let self, let window else { return }
-                self.closingWindows.removeAll { $0 === window }
-            }
-        } else {
-            // Some component-test hosts lack AppDelegate; ordering out avoids
-            // XCTest termination while still removing the realization.
-            window.orderOut(nil)
-        }
+        // Use AppKit's production close path in every host. The application
+        // delegate owns stay-alive policy; component tests install the same
+        // `applicationShouldTerminateAfterLastWindowClosed` safeguard.
+        // `isReleasedWhenClosed = false` keeps ownership with Swift ARC.
+        window.close()
     }
 
     private func orderFrontMakeKey(_ key: WindowKey) {
@@ -200,9 +186,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        // NSWindow defaults to releasing itself when closed. Apple documents
-        // that ARC clients must disable this to avoid over-release; this host
-        // owns each window through `realizations` / `closingWindows` instead.
+        // NSWindow defaults to releasing itself when closed. ARC owns the
+        // realization after close, so AppKit must not release it as well.
         window.isReleasedWhenClosed = false
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)

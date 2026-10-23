@@ -480,10 +480,23 @@ final class ProductChromeHostView: NSView {
     /// WorkspaceCommand. Rust re-validates against the current route context.
     @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
         guard let commandId = sender.representedObject as? UInt16 else { return }
-        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, 0, 0)
+        let ordinal = commandId == KeybindingShortcutRealization.windowSelectOrdinal
+            ? UInt8(sender.tag)
+            : 0
+        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, ordinal, 0)
         if code == 0 {
             reconcileChrome()
             routeFocus()
+        } else {
+            NSApp.presentError(
+                NSError(
+                    domain: "Seyal.WorkspaceCommand",
+                    code: Int(code),
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Seyal could not perform “\(sender.title)”. Try again."
+                    ]
+                )
+            )
         }
     }
 
@@ -767,6 +780,9 @@ extension ProductChromeHostView: NSMenuItemValidation {
         return KeybindingShortcutRealization.isEnabled(
             appHandle: pane.appHandle,
             commandId: commandId,
+            ordinal: commandId == KeybindingShortcutRealization.windowSelectOrdinal
+                ? UInt8(menuItem.tag)
+                : 0,
             composerFocused: false
         )
     }
