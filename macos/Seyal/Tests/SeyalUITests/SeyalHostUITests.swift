@@ -1242,7 +1242,9 @@ final class SeyalHostUITests: XCTestCase {
 
         // XCUI does not promise that app.windows order follows Seyal's snapshot
         // order. Match the native window control across the app instead.
-        let closeButton = app.windows.buttons.matching(identifier: "Close").firstMatch
+        let closeButton = app.windows.descendants(matching: .button)
+            .matching(NSPredicate(format: "label == %@", "Close"))
+            .firstMatch
         XCTAssertTrue(closeButton.waitForExistence(timeout: 5), "window has its native close control")
         closeButton.click()
         waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")

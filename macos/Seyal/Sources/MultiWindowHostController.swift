@@ -25,7 +25,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         super.init()
         // Chain after ProductChromeHostView's own pane hook so window effects
         // apply whenever Rust commits a product transition.
+        let forwardProductChange = liveHost.pane.onProductChanged
         liveHost.pane.onProductChanged = { [weak self] in
+            forwardProductChange?()
             guard let self else { return }
             self.liveHost.reconcileChrome()
             self.applyPendingEffects()
@@ -396,6 +398,12 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         // ADR-018 §2.5: refuse local destroy; Rust emits DestroyWindowRealization.
         if let key = key(for: sender) {
             forwardCloseWindow(key)
+            // Rust has now removed the realization and emitted its destroy
+            // effect. AppKit invokes this delegate while its own close path is
+            // active, so the nested window.close() used to apply that effect
+            // cannot complete the outer request. Allow AppKit to finish only
+            // after the Rust-owned realization has been removed.
+            return realizations[key] == nil
         }
         return false
     }

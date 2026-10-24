@@ -311,6 +311,25 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(window.windowNumber, -1)
     }
 
+    func testProjectedCloseCommandDrainsRustWindowDestroyEffect() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let key = host.orderedKeys.first,
+              let window = host.realizedWindow(for: key)
+        else {
+            return XCTFail("expected bootstrap window")
+        }
+
+        let item = NSMenuItem()
+        item.representedObject = KeybindingShortcutRealization.appCloseFocused
+        host.liveHost.invokeProjectedWorkspaceCommand(item)
+
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        XCTAssertNil(host.realizedWindow(for: key))
+        XCTAssertEqual(window.windowNumber, -1)
+    }
+
     func testLastWindowCloseLeavesZeroWindowsWithoutQuit() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }

@@ -48,7 +48,11 @@ extension ProductChromeHostView {
             : 0
         let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, ordinal, 0)
         if code == 0 {
-            reconcileChrome()
+            // This callback also lets the owning window host realize native
+            // effects (including a Rust-owned window close) produced by the
+            // command. Calling only reconcileChrome leaves the AppKit window
+            // map stale until some later frame happens to arrive.
+            pane.onProductChanged?()
             routeFocus()
         } else {
             NSApp.presentError(
