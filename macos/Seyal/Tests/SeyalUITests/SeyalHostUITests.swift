@@ -1208,6 +1208,9 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
+        let fileMenu = app.menuBars.menuBarItems["File"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
+        fileMenu.click()
         let close = app.menuItems["Close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.click()
@@ -1235,8 +1238,9 @@ final class SeyalHostUITests: XCTestCase {
         newWindow.click()
         waitForWindowCount(app, 2, message: "New Window creates a second headed window")
 
-        let window = app.windows.element(boundBy: 1)
-        let closeButton = window.buttons["Close"]
+        // XCUI does not promise that app.windows order follows Seyal's snapshot
+        // order. Match the native window control across the app instead.
+        let closeButton = app.windows.buttons.matching(identifier: "Close").firstMatch
         XCTAssertTrue(closeButton.waitForExistence(timeout: 5), "window has its native close control")
         closeButton.click()
         waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")

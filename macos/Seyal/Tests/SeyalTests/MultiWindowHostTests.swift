@@ -303,7 +303,9 @@ final class MultiWindowHostTests: XCTestCase {
             return XCTFail("expected bootstrap window")
         }
 
-        host.forwardCloseWindow(key)
+        // Start from AppKit's real close request. The delegate must veto the
+        // local close, forward CloseWindow, and let Rust's effect close it.
+        window.performClose(nil)
 
         XCTAssertFalse(NSApp.windows.contains { $0 === window })
         XCTAssertEqual(window.windowNumber, -1)
