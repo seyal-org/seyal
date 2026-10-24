@@ -23,26 +23,28 @@ fn forged_attachment(seed: u8) -> AttachmentId {
 }
 
 fn schedule_recovery_twice(
-    queue: &mut VecDeque<u64>,
-    pending: &mut HashSet<u64>,
+    queue: &mut VecDeque<(u64, AttachmentId)>,
+    pending: &mut HashSet<(u64, AttachmentId)>,
     token: u64,
+    attachment_id: AttachmentId,
 ) {
-    let first = recovery::schedule_snapshot_recovery(queue, pending, token);
-    let second = recovery::schedule_snapshot_recovery(queue, pending, token);
+    let target = (token, attachment_id);
+    let first = recovery::schedule_snapshot_recovery(queue, pending, token, attachment_id);
+    let second = recovery::schedule_snapshot_recovery(queue, pending, token, attachment_id);
     assert!(!second, "repeated recovery request must coalesce");
-    assert!(pending.contains(&token));
+    assert!(pending.contains(&target));
     if first {
         assert_eq!(
             queue.back().copied(),
-            Some(token),
-            "a newly pending recovery must enqueue the requesting token"
+            Some(target),
+            "a newly pending recovery must enqueue the requesting attachment"
         );
     }
 }
 
 /// Cross-platform structural campaign over production AttachmentRegistry and
-/// recovery coalescing. Removes the previous Linux silent no-op while keeping
-/// ConnectionState transitions macOS-gated with the IPC module.
+/// attachment-scoped recovery coalescing. Removes the previous Linux silent
+/// no-op while keeping ConnectionState transitions macOS-gated with the IPC module.
 fn fuzz_attachment_recovery(data: &[u8]) {
     let execution = ExecutionId::from_bytes(1u128.to_le_bytes());
     let mut registry = AttachmentRegistry::new();
@@ -79,7 +81,7 @@ fn fuzz_attachment_recovery(data: &[u8]) {
                 if registry.detach_for_connection(tokens[index], id).is_ok()
                     && attachments[index] == Some(id)
                 {
-                    recovery_pending.remove(&tokens[index]);
+                    recovery_pending.remove(&(tokens[index], id));
                     attachments[index] = None;
                 }
             }
@@ -94,6 +96,7 @@ fn fuzz_attachment_recovery(data: &[u8]) {
                         &mut recovery_queue,
                         &mut recovery_pending,
                         tokens[index],
+                        id,
                     );
                 }
             }
@@ -108,15 +111,15 @@ fn fuzz_attachment_recovery(data: &[u8]) {
             4 => {
                 if let Some(id) = attachments[index].take() {
                     let _ = registry.detach_for_connection(tokens[index], id);
+                    recovery_pending.remove(&(tokens[index], id));
                 }
-                recovery_pending.remove(&tokens[index]);
                 tokens[index] = next_token;
                 next_token = next_token.wrapping_add(1).max(3);
             }
             5 => {
                 registry.remove_all_for_execution(execution);
                 for token in &tokens {
-                    recovery_pending.remove(token);
+                    recovery_pending.retain(|(pending_token, _)| pending_token != token);
                 }
                 attachments = [None, None];
             }
@@ -127,10 +130,11 @@ fn fuzz_attachment_recovery(data: &[u8]) {
                             &mut recovery_queue,
                             &mut recovery_pending,
                             tokens[index],
+                            attachments[index].expect("attached slot has identity"),
                         );
                     } else {
-                        if let Some(token) = recovery_queue.pop_front() {
-                            recovery_pending.remove(&token);
+                        if let Some(target) = recovery_queue.pop_front() {
+                            recovery_pending.remove(&target);
                         }
                     }
                 }
@@ -144,7 +148,9 @@ fn fuzz_attachment_recovery(data: &[u8]) {
                     Ok(execution)
                 );
             } else {
-                assert!(!recovery_pending.contains(token));
+                assert!(!recovery_pending
+                    .iter()
+                    .any(|(pending_token, _)| pending_token == token));
             }
         }
         assert!(recovery_pending.len() <= tokens.len());
@@ -152,11 +158,11 @@ fn fuzz_attachment_recovery(data: &[u8]) {
 }
 
 #[cfg(target_os = "macos")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ClientState {
     token: u64,
     state: ConnectionState,
-    attachment: Option<AttachmentId>,
+    attachments: Vec<AttachmentId>,
 }
 
 #[cfg(target_os = "macos")]
@@ -165,7 +171,7 @@ impl ClientState {
         Self {
             token,
             state: ConnectionState::AwaitHello,
-            attachment: None,
+            attachments: Vec::new(),
         }
     }
 }
@@ -179,7 +185,7 @@ fn fuzz_state_machine(data: &[u8]) {
     let mut recovery_queue = VecDeque::new();
     let mut recovery_pending = HashSet::new();
 
-    for operation in data.chunks(4).take(128) {
+    for (step, operation) in data.chunks(4).take(128).enumerate() {
         if operation.len() < 4 {
             break;
         }
@@ -207,20 +213,18 @@ fn fuzz_state_machine(data: &[u8]) {
                         Role::Controller
                     };
                     if let Ok(id) = registry.create_attachment(execution, role, client.token) {
-                        client.attachment = Some(id);
+                        client.attachments.push(id);
                         client.state = ConnectionState::Attached;
                     }
                 }
             }
             // Explicit Resync identity validation plus the exact production
             // recovery-request coalescing seam. Repeated requests for one live
-            // connection must create one logical pending snapshot requirement.
+            // attachment must create one logical pending snapshot requirement.
             2 => {
                 if client.state.validate_incoming(MessageType::Resync).is_ok() {
                     let id = if operation[2] & 1 == 0 {
-                        client
-                            .attachment
-                            .unwrap_or_else(|| forged_attachment(operation[3]))
+                        client.attachments.last().copied().unwrap_or_else(|| forged_attachment(operation[3]))
                     } else {
                         forged_attachment(operation[3])
                     };
@@ -232,6 +236,7 @@ fn fuzz_state_machine(data: &[u8]) {
                             &mut recovery_queue,
                             &mut recovery_pending,
                             client.token,
+                            id,
                         );
                     }
                 }
@@ -242,16 +247,16 @@ fn fuzz_state_machine(data: &[u8]) {
             3 => {
                 if client.state.validate_incoming(MessageType::Detach).is_ok() {
                     let id = if operation[2] & 1 == 0 {
-                        client
-                            .attachment
-                            .unwrap_or_else(|| forged_attachment(operation[3]))
+                        client.attachments.last().copied().unwrap_or_else(|| forged_attachment(operation[3]))
                     } else {
                         forged_attachment(operation[3])
                     };
                     if registry.detach_for_connection(client.token, id).is_ok() {
-                        if client.attachment == Some(id) {
-                            recovery_pending.remove(&client.token);
-                            client.attachment = None;
+                        if client.attachments.contains(&id) {
+                            recovery_pending.remove(&(client.token, id));
+                            client.attachments.retain(|attachment| *attachment != id);
+                        }
+                        if client.attachments.is_empty() {
                             client.state = ConnectionState::Ready;
                         }
                     }
@@ -262,9 +267,7 @@ fn fuzz_state_machine(data: &[u8]) {
             4 => {
                 if client.state.validate_incoming(MessageType::Input).is_ok() {
                     let id = if operation[2] & 1 == 0 {
-                        client
-                            .attachment
-                            .unwrap_or_else(|| forged_attachment(operation[3]))
+                        client.attachments.last().copied().unwrap_or_else(|| forged_attachment(operation[3]))
                     } else {
                         forged_attachment(operation[3])
                     };
@@ -275,10 +278,10 @@ fn fuzz_state_machine(data: &[u8]) {
             // recovery requirement, then assign a new connection token so old
             // identities cannot acquire authority.
             5 => {
-                if let Some(id) = client.attachment.take() {
+                for id in client.attachments.drain(..) {
                     let _ = registry.detach_for_connection(client.token, id);
+                    recovery_pending.remove(&(client.token, id));
                 }
-                recovery_pending.remove(&client.token);
                 client.token = next_token;
                 next_token = next_token.wrapping_add(1).max(3);
                 client.state = ConnectionState::AwaitHello;
@@ -288,8 +291,10 @@ fn fuzz_state_machine(data: &[u8]) {
             6 => {
                 registry.remove_all_for_execution(execution);
                 for state in &mut clients {
-                    recovery_pending.remove(&state.token);
-                    state.attachment = None;
+                    for id in state.attachments.drain(..) {
+                        let _ = registry.detach_for_connection(state.token, id);
+                        recovery_pending.remove(&(state.token, id));
+                    }
                     if state.state == ConnectionState::Attached {
                         state.state = ConnectionState::Ready;
                     }
@@ -299,20 +304,24 @@ fn fuzz_state_machine(data: &[u8]) {
             // seam as explicit Resync after Runtime decides NeedSnapshot.
             // `display_state_machine` independently fuzzes client-side generation
             // mismatch rejection/atomicity; this operation fuzzes the server's
-            // shared logical recovery requirement and repeated-gap coalescing.
+            // per-attachment recovery requirement and repeated-gap coalescing.
             7 => {
-                if client.state == ConnectionState::Attached && client.attachment.is_some() {
+                if client.state == ConnectionState::Attached && !client.attachments.is_empty() {
                     if operation[2] & 1 == 0 {
                         schedule_recovery_twice(
                             &mut recovery_queue,
                             &mut recovery_pending,
                             client.token,
+                            *client.attachments.last().expect("attached client has identity"),
                         );
                     } else {
                         // Model completion/materialization of the current
                         // snapshot requirement. Runtime removes the set entry;
                         // any queued stale token is intentionally tolerated.
-                        recovery_pending.remove(&client.token);
+                        recovery_pending.remove(&(
+                            client.token,
+                            *client.attachments.last().expect("attached client has identity"),
+                        ));
                     }
                 }
             }
@@ -334,16 +343,24 @@ fn fuzz_state_machine(data: &[u8]) {
         // in the fuzz harness. A logical recovery requirement can only remain
         // for a currently attached connection.
         for state in &clients {
-            if let Some(id) = state.attachment {
+            if !state.attachments.is_empty() {
+                for id in &state.attachments {
                 assert_eq!(
-                    registry.execution_for_connection(state.token, id),
+                    registry.execution_for_connection(state.token, *id),
                     Ok(execution)
                 );
+                }
             } else {
-                assert!(!recovery_pending.contains(&state.token));
+                assert!(
+                    !recovery_pending
+                        .iter()
+                        .any(|(pending_token, _)| pending_token == &state.token),
+                    "client without an attachment retained recovery for token {} at step {step} ({operation:?}): {recovery_pending:?}",
+                    state.token,
+                );
             }
         }
-        assert!(recovery_pending.len() <= clients.len());
+        assert!(recovery_pending.len() <= clients.iter().map(|client| client.attachments.len()).sum());
     }
 }
 

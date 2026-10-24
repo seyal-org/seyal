@@ -1,5 +1,7 @@
+use super::presentation::{classify_resync_scan_frame, ResyncScanFrame};
 use super::*;
 use seyal_runtime::{
+    display::decode_chunk,
     local_ipc::framing::{
         encode_frame, Attached, ErrorCode, Lifecycle, Resync, TerminateExecutionRequest,
         TerminateExecutionResult, TerminateExecutionResultCode,
@@ -335,7 +337,10 @@ fn malformed_multichunk_attach_quarantines_stale_remainder_before_resync_snapsho
         let mut malformed_first = snapshot_chunk(4, 2, 0, 0, 2, 'X');
         let meta_offset = HEADER_LEN + 48 + 12;
         malformed_first[meta_offset..meta_offset + 4].copy_from_slice(&(104u32).to_le_bytes());
-        assert_eq!(display_chunk_remainder_hint(&malformed_first), Some(1));
+        assert_eq!(
+            display_chunk_remainder_hint(&malformed_first, false),
+            Some(1)
+        );
         server
             .write_all(&malformed_first)
             .expect("malformed first chunk");
@@ -350,9 +355,9 @@ fn malformed_multichunk_attach_quarantines_stale_remainder_before_resync_snapsho
             attachment_id
         );
         let valid = snapshot(4, 'V');
-        assert_eq!(display_chunk_remainder_hint(&valid), Some(0));
+        assert_eq!(display_chunk_remainder_hint(&valid, false), Some(0));
         assert!(matches!(
-            classify_resync_scan_frame(&valid).unwrap(),
+            classify_resync_scan_frame(&valid, attachment_id, false).unwrap(),
             ResyncScanFrame::SnapshotStart
         ));
         assert!(decode_chunk(&valid).is_ok());

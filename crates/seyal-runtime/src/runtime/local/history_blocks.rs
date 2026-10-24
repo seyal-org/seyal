@@ -1,12 +1,9 @@
 use seyal_exec::{Color, HistoryRangeError, LineId};
 
 use crate::{
-    local_ipc::{
-        attachment::AttachmentError,
-        framing::{
-            self, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode, MessageType,
-            CAP_COMMAND_BLOCKS,
-        },
+    local_ipc::framing::{
+        self, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode, MessageType,
+        CAP_COMMAND_BLOCKS,
     },
     ExecutionId,
 };
@@ -36,17 +33,7 @@ impl Runtime {
         let execution_id = match self.local_ipc.as_ref().map(|state| {
             state
                 .attachments
-                .execution_of(request.attachment_id)
-                .and_then(|id| {
-                    let attached = state
-                        .connections
-                        .get(&token)
-                        .and_then(|meta| meta.attachment)
-                        == Some(request.attachment_id);
-                    attached
-                        .then_some(id)
-                        .ok_or(AttachmentError::PermissionDenied)
-                })
+                .execution_for_connection(token, request.attachment_id)
         }) {
             Some(Ok(id)) => id,
             _ => {
@@ -231,9 +218,14 @@ impl Runtime {
                             .filter_map(|(&token, meta)| {
                                 let supports_blocks =
                                     meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
-                                let attached_here = meta.attachment.and_then(|attachment| {
-                                    state.attachments.execution_of(attachment).ok()
-                                }) == Some(execution_id);
+                                let attached_here = state
+                                    .attachments
+                                    .attachments_on_connection(token)
+                                    .into_iter()
+                                    .any(|attachment| {
+                                        state.attachments.execution_of(attachment).ok()
+                                            == Some(execution_id)
+                                    });
                                 (supports_blocks && attached_here).then_some(token)
                             })
                             .collect::<Vec<_>>()
@@ -250,26 +242,38 @@ impl Runtime {
             }
         };
         let frame = framing::encode_frame(MessageType::BlockTimeline, &payload);
-        let tokens = self
+        let targets = self
             .local_ipc
             .as_ref()
             .map(|state| {
                 state
                     .connections
                     .iter()
-                    .filter_map(|(&token, meta)| {
+                    .flat_map(|(&token, meta)| {
                         let supports_blocks = meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
-                        let attached_here = meta
-                            .attachment
-                            .and_then(|attachment| state.attachments.execution_of(attachment).ok())
-                            == Some(execution_id);
-                        (supports_blocks && attached_here).then_some(token)
+                        if !supports_blocks {
+                            return Vec::new();
+                        }
+                        state
+                            .attachments
+                            .attachments_on_connection(token)
+                            .into_iter()
+                            .filter(|attachment| {
+                                state.attachments.execution_of(*attachment).ok()
+                                    == Some(execution_id)
+                                    && state.attachments.delivery_of(*attachment).ok()
+                                        == Some(
+                                            crate::local_ipc::attachment::DeliveryState::Delivering,
+                                        )
+                            })
+                            .map(|attachment| (token, attachment))
+                            .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        for token in tokens {
-            let _ = self.send_after_display_frame(token, frame.clone());
+        for (token, attachment_id) in targets {
+            let _ = self.send_attachment_after_display_frame(token, attachment_id, frame.clone());
         }
     }
 }

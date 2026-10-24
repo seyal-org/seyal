@@ -121,6 +121,8 @@ pub enum AppAction {
     ReportWindowEvent {
         window: WindowId,
         event: WindowNativeEvent,
+        /// Packed from FFI reserved bit 8 for OcclusionChanged.
+        occluded: bool,
     },
     CloseWindow {
         id: WindowId,

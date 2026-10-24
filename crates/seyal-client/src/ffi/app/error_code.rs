@@ -62,5 +62,6 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::ExecutionNotUnpresented => 54,
         AppError::UnknownWindow => 55,
         AppError::WindowCreationUnavailable => 56,
+        AppError::DeliveryControlFailed => 57,
     }
 }
