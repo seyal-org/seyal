@@ -291,8 +291,14 @@ final class MultiWindowHostTests: XCTestCase {
             "Swift ARC owns realized windows; AppKit must not release them on close"
         )
         XCTAssertFalse(host.windowShouldClose(window))
+        XCTAssertTrue(
+            NSApp.windows.contains { $0 === window },
+            "delegate veto keeps AppKit's current close request open"
+        )
+        XCTAssertNotEqual(window.windowNumber, -1)
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        assertWindowEventuallyCloses(window)
     }
 
     func testComponentHostDestroysWindowThroughAppKitClosePath() {
@@ -306,6 +312,18 @@ final class MultiWindowHostTests: XCTestCase {
         // Start from AppKit's real close request. The delegate must veto the
         // local close, forward CloseWindow, and let Rust's effect close it.
         window.performClose(nil)
+
+        XCTAssertTrue(
+            NSApp.windows.contains { $0 === window },
+            "AppKit request is vetoed synchronously"
+        )
+        XCTAssertNotEqual(window.windowNumber, -1)
+        XCTAssertTrue(
+            host.orderedKeys.isEmpty,
+            "Rust's DestroyWindowRealization removes the host entry"
+        )
+        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
+        assertWindowEventuallyCloses(window)
 
         XCTAssertFalse(NSApp.windows.contains { $0 === window })
         XCTAssertEqual(window.windowNumber, -1)
@@ -330,6 +348,54 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(window.windowNumber, -1)
     }
 
+    func testNativeKeyActivationUpdatesRustTargetBeforeHierarchicalClose() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        guard let first = host.orderedKeys.first,
+              let firstWindow = host.realizedWindow(for: first)
+        else {
+            return XCTFail("expected bootstrap window")
+        }
+        let firstPane = seyal_app_shell(host.appHandle)
+
+        host.createWindow(nil)
+        guard let second = host.orderedKeys.last,
+              let secondWindow = host.realizedWindow(for: second)
+        else {
+            return XCTFail("expected second window")
+        }
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(seyal_app_shell(host.appHandle).active_window_lo, second.lo)
+
+        firstWindow.makeKeyAndOrderFront(nil)
+        let firstActivated = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated {
+                    let shell = seyal_app_shell(host.appHandle)
+                    return shell.active_window_lo == first.lo
+                        && shell.active_window_hi == first.hi
+                        && shell.focused_pane_lo == firstPane.focused_pane_lo
+                        && shell.focused_pane_hi == firstPane.focused_pane_hi
+                }
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [firstActivated], timeout: 2), .completed)
+
+        let closeItem = NSMenuItem()
+        closeItem.representedObject = KeybindingShortcutRealization.appCloseFocused
+        host.liveHost.invokeProjectedWorkspaceCommand(closeItem)
+
+        XCTAssertNil(host.realizedWindow(for: first), "⌘W closes the Rust-focused first Window")
+        XCTAssertNotNil(host.realizedWindow(for: second), "the formerly active second Window survives")
+        let afterClose = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(afterClose.window_count, 1)
+        XCTAssertEqual(afterClose.active_window_lo, second.lo)
+        XCTAssertEqual(afterClose.active_window_hi, second.hi)
+        XCTAssertNotEqual(secondWindow.windowNumber, -1)
+    }
+
     func testLastWindowCloseLeavesZeroWindowsWithoutQuit() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
@@ -342,6 +408,27 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
         let delegate = AppDelegate()
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+    }
+
+    private func assertWindowEventuallyCloses(
+        _ window: NSWindow,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let closed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated {
+                    !NSApp.windows.contains { $0 === window } && window.windowNumber == -1
+                }
+            },
+            object: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [closed], timeout: 2),
+            .completed,
+            file: file,
+            line: line
+        )
     }
 
     func testZeroWindowReentryViaNewWindowAndDockReopen() {

@@ -12,6 +12,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     private var realizations: [WindowKey: NSWindow] = [:]
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
+    /// Guards AppKit's synchronous close callback so its Destroy effect can
+    /// finish the native close after the delegate has returned.
+    private var appKitCloseRequestsInFlight: Set<WindowKey> = []
 
     let liveHost: ProductChromeHostView
     private let quitCoordinator = ApplicationQuitCoordinator()
@@ -131,7 +134,17 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         // delegate owns stay-alive policy; component tests install the same
         // `applicationShouldTerminateAfterLastWindowClosed` safeguard.
         // `isReleasedWhenClosed = false` keeps ownership with Swift ARC.
-        window.close()
+        if appKitCloseRequestsInFlight.contains(key) {
+            // `windowShouldClose` must veto AppKit's synchronous request per
+            // ADR-018 §2.5. The effect still owns this destruction; defer its
+            // AppKit close until the delegate has unwound; the captured
+            // NSWindow stays retained until close completes.
+            DispatchQueue.main.async { [window] in
+                window.close()
+            }
+        } else {
+            window.close()
+        }
     }
 
     private func orderFrontMakeKey(_ key: WindowKey) {
@@ -381,7 +394,15 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.target_execution_lo = key.lo
         action.target_execution_hi = key.hi
         action.reserved = event
-        _ = seyal_app_apply(appHandle, &action)
+        let result = seyal_app_apply(appHandle, &action)
+        if result == 0, event == SEYAL_APP_WINDOW_EVENT_BECAME_KEY {
+            // AppKit is already key. Rust commits product selection and focus
+            // history from this typed event; move the one live host into that
+            // Rust-selected realization without asking AppKit to key it again.
+            installLiveHost(in: window, key: key)
+            liveHost.reconcileChrome()
+            liveHost.routeFocus()
+        }
     }
 
     private func key(for window: NSWindow) -> WindowKey? {
@@ -397,13 +418,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         // ADR-018 §2.5: refuse local destroy; Rust emits DestroyWindowRealization.
         if let key = key(for: sender) {
+            appKitCloseRequestsInFlight.insert(key)
+            defer { appKitCloseRequestsInFlight.remove(key) }
             forwardCloseWindow(key)
-            // Rust has now removed the realization and emitted its destroy
-            // effect. AppKit invokes this delegate while its own close path is
-            // active, so the nested window.close() used to apply that effect
-            // cannot complete the outer request. Allow AppKit to finish only
-            // after the Rust-owned realization has been removed.
-            return realizations[key] == nil
         }
         return false
     }
