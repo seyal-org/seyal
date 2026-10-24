@@ -139,6 +139,7 @@ fn seed_shell() -> (
         w1,
         true,
         true,
+        false,
     )
     .expect("fixture");
     (shell, w1, w2, t1, t2, p1, p2)
@@ -1139,8 +1140,7 @@ fn address_run_fails_closed_when_target_gone_instead_of_other_ordinal_action() {
         })
         .expect("destroy stored target");
     let before = shell.focus_checkpoint();
-    // A fresh ordinal rebuild would now offer other rows at the old index.
-    // Address path must fail closed, not silently run a neighbour action.
+    // Address path must fail closed instead of running a neighbour ordinal.
     assert_eq!(
         navigate_apply_only(
             stored,

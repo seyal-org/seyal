@@ -44,15 +44,21 @@ reason = "SPEC-022 §6 focus history store and its state-transition proofs stay 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 790
-issue = 1153
-reason = "ApplicationRoot keeps product-state ownership and cross-domain action dispatch together; #1153 extracts the public AppAction vocabulary and hierarchical close lifecycle into focused siblings."
+acknowledged_loc = 825
+issue = 1158
+reason = "ApplicationRoot keeps product-state ownership and cross-domain action dispatch together; #1153 extracts the public AppAction vocabulary and hierarchical close lifecycle into focused siblings, while #1158 adds W4a window-action dispatch, typed event recording, and Rust-owned realization effects."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
-acknowledged_loc = 986
-issue = 1153
-reason = "The app-level action regression suite stays together around product-state transitions; #1153 moves close-disposition and bound-execution close proofs into dedicated sibling test modules."
+acknowledged_loc = 999
+issue = 1158
+reason = "The app-level action regression suite stays together around product-state transitions; #1153 moves close-disposition and bound-execution close proofs into dedicated sibling test modules, and #1158 adds the W4b quit-effect acknowledgement assertion."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/ffi/app/decode.rs"
+acknowledged_loc = 746
+issue = 1158
+reason = "The versioned ABI action decoder remains one fail-closed boundary; W4a appends window select/cycle/create/event action kinds after the current focus-history action range and decodes native presentation events there."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
 acknowledged_loc = 884
@@ -71,17 +77,11 @@ acknowledged_loc = 860
 issue = 1143
 reason = "ADR-017 §7 and Issue #1136 acceptance matrix plus #1143 unpresented adopt/dispose attach-then-terminate proofs; production reducer stays in provisioning/mod.rs plus intent/disposition/resolution siblings."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-acknowledged_loc = 992
+ceiling_loc = 1091
 issue = 1117
-reason = "Published C ABI entry points stay one thin façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/; #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; #1117 adds the scalar focus-history sequence accessor without changing the v1 snapshot layout."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 708
-issue = 1153
-reason = "The versioned ABI action decoder remains the single boundary that validates action kinds and constructs portable AppAction values; #1153 adds snapshot containment generations to close actions without expanding this responsibility."
+responsibility = "Published C ABI entry points stay one thin façade after decode/encode/visual/window extraction. #1108 moves multi-window shell header fill and seyal_app_shell into ffi/app/window/; #1175 wires Bind to the matching create Controller and drives ApplicationRoot from seyal_bridge_poll only while provisioning work is outstanding; #1117 adds the scalar focus-history sequence accessor without changing the v1 snapshot layout."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -229,14 +229,14 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
 ceiling_loc = 1154
-issue = 1122
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside its address; #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites, W2a adds Window-aware navigation fixtures, and #1117 makes history policy explicit at legacy ApplyOnly call sites with new integration tests in history_integration_tests.rs."
+issue = 1158
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside its address; #1122 threads ADR-018 containment_generation on Split/Close ShellAction call sites, W2a adds Window-aware navigation fixtures, #1117 makes history policy explicit at legacy ApplyOnly call sites, and #1158 updates the complete Workspace fixture shape."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 904
-issue = 1143
-reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract, #1143 adds deterministic explicit adopt/terminate rows for live-unpresented executions, and #1175 adds focused Controller termination."
+acknowledged_loc = 905
+issue = 1158
+reason = "Command palette query, frozen rows, and run dispatch remain one reducer; #1092 carries the ADR-018 containment generation through the window-aware action contract, #1143 adds deterministic explicit adopt/terminate rows for live-unpresented executions, #1175 adds focused Controller termination, and #1158 updates the complete Workspace fixture shape."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
@@ -253,6 +253,12 @@ reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligi
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/keybinding/tests.rs"
-acknowledged_loc = 701
-issue = 1106
-reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
+acknowledged_loc = 702
+issue = 1158
+reason = "SPEC-024 §14 K2 matrix stays one keybinding table-load test module; #1158 admits §5.0 window/hierarchical-close builtins beside existing defaults."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/local/mod.rs"
+acknowledged_loc = 747
+issue = 1123
+reason = "LocalDisplayClient stays one attach/poll client; #1123 adds request_bounded_detach and fallible try_reconstruction_probe_client for ADR-018 §4 quit fixtures without waiting on Detached."

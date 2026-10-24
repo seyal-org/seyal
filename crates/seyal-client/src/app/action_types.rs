@@ -111,6 +111,17 @@ pub enum AppAction {
         id: TabId,
     },
     CreateTab,
+    SelectWindow {
+        id: WindowId,
+    },
+    CycleWindow {
+        direction: crate::shell::CycleDirection,
+    },
+    CreateWindow,
+    ReportWindowEvent {
+        window: WindowId,
+        event: WindowNativeEvent,
+    },
     CloseWindow {
         id: WindowId,
         containment_generation: u64,
@@ -255,4 +266,21 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+}
+
+/// Typed native window inputs (ADR-018 §2.3). Recorded without changing
+/// product state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum WindowNativeEvent {
+    BecameKey = 0,
+    ResignedKey = 1,
+    BecameMain = 2,
+    ResignedMain = 3,
+    OcclusionChanged = 4,
+    Miniaturized = 5,
+    Deminiaturized = 6,
+    EnteredFullscreen = 7,
+    ExitedFullscreen = 8,
+    ScreenOrScaleChanged = 9,
 }

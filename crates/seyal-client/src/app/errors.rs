@@ -22,6 +22,13 @@ pub(super) fn close_tab_error(error: ShellError) -> AppError {
     }
 }
 
+pub(super) fn close_window_error(error: ShellError) -> AppError {
+    match error {
+        ShellError::StaleContainment => AppError::StalePane,
+        _ => AppError::UnknownWindow,
+    }
+}
+
 pub(super) fn close_pane_error(error: ShellError) -> AppError {
     match error {
         ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,

@@ -6,6 +6,14 @@ use super::{AppAction, AppError, ApplicationRoot, BindingEvidence};
 use crate::palette::PaletteCommand;
 use crate::provisioning::ProvisioningEffect;
 
+fn root_with_bootstrap_effects_drained() -> ApplicationRoot {
+    let mut root = ApplicationRoot::new();
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    root
+}
+
 fn evidence(execution: ExecutionId, attachment: AttachmentId) -> BindingEvidence {
     BindingEvidence {
         execution,
@@ -59,7 +67,7 @@ fn adopt_keeps_execution_id_and_uses_fresh_attachment() {
 
 #[test]
 fn terminate_queues_adr005_effect_not_from_close() {
-    let mut root = ApplicationRoot::new();
+    let mut root = root_with_bootstrap_effects_drained();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::new();
     root.apply(AppAction::RecordUnpresented {
@@ -121,7 +129,7 @@ fn palette_lists_unpresented_without_auto_select() {
 
 #[test]
 fn palette_terminate_dispatches_typed_action() {
-    let mut root = ApplicationRoot::new();
+    let mut root = root_with_bootstrap_effects_drained();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::from_bytes([0x33; 16]);
     root.apply(AppAction::RecordUnpresented {
@@ -245,7 +253,10 @@ fn close_actions_do_not_emit_terminate_execution() {
         .snapshot()
         .pending_effects
         .iter()
-        .all(|effect| !matches!(effect, super::NativeEffect::BoundedDetachThenTerminate)));
+        .all(|effect| !matches!(
+            effect,
+            super::NativeEffect::BoundedDetachThenTerminate { .. }
+        )));
     assert_eq!(root.live_unpresented(), vec![execution]);
     let _ = PaletteCommand::TerminateUnpresented(execution);
 }
@@ -279,12 +290,15 @@ fn close_window_releases_bound_execution_into_live_unpresented_catalog() {
         .snapshot()
         .pending_effects
         .iter()
-        .all(|effect| !matches!(effect, super::NativeEffect::BoundedDetachThenTerminate)));
+        .all(|effect| !matches!(
+            effect,
+            super::NativeEffect::BoundedDetachThenTerminate { .. }
+        )));
 }
 
 #[test]
 fn palette_adopt_emits_attach_intent_without_binding() {
-    let mut root = ApplicationRoot::new();
+    let mut root = root_with_bootstrap_effects_drained();
     let workspace = WorkspaceId::m001_default();
     let execution = ExecutionId::from_bytes([0xcd; 16]);
     root.apply(AppAction::RecordUnpresented {

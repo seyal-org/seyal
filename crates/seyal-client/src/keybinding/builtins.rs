@@ -1,8 +1,7 @@
-//! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open`.
+//! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open` / K9 window close.
 //!
-//! Excludes ADR-021 pane rows (K7) and ADR-018 `window.new` (R5.0.1).
-//! Includes §5.4 `ctrl+r` and §5.5 `goto.open` (K8/N4).
-//! Focus-history Back/Forward builtins wait for N3 / tip B (no dead catalog rows).
+//! Excludes remaining ADR-021 pane rows that still lack typed actions (K7 leftovers).
+//! Includes §5.0 window / hierarchical-close builtins (W4b / #1158).
 
 use super::keys::parse_keys;
 use super::types::{
@@ -33,13 +32,41 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
             context: APP,
         },
         BuiltinRow {
+            keys_notation: "cmd+n",
+            id: WorkspaceCommandId::TabCreate,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
             keys_notation: "cmd+t",
             id: WorkspaceCommandId::TabCreate,
             ordinal: None,
             context: APP,
         },
-        // cmd+w stays unbound until K9 (`app.close_focused`); SPEC-024 §4.1 /
-        // §5.0 give `tab.close_focused` no cmd+w builtin (R5.0.1).
+        BuiltinRow {
+            keys_notation: "cmd+w",
+            id: WorkspaceCommandId::AppCloseFocused,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+shift+n",
+            id: WorkspaceCommandId::WindowNew,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+`",
+            id: WorkspaceCommandId::WindowCycleNext,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+shift+`",
+            id: WorkspaceCommandId::WindowCyclePrevious,
+            ordinal: None,
+            context: APP,
+        },
         BuiltinRow {
             keys_notation: "cmd+shift+[",
             id: WorkspaceCommandId::TabSelectPrevious,
@@ -115,6 +142,60 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         BuiltinRow {
             keys_notation: "cmd+9",
             id: WorkspaceCommandId::TabSelectOrdinal,
+            ordinal: Some(9),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+1",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(1),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+2",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(2),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+3",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(3),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+4",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(4),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+5",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(5),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+6",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(6),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+7",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(7),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+8",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
+            ordinal: Some(8),
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+9",
+            id: WorkspaceCommandId::WindowSelectOrdinal,
             ordinal: Some(9),
             context: APP,
         },

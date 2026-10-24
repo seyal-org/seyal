@@ -213,7 +213,7 @@ extension ProductChromeHostView {
         let now = runtimeRecoveryNowMillis()
         return applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_COMPLETE_RECOVERY) {
             $0.target_execution_lo = generation
-            $0.target_pty_generation = now
+            $0.target_generation = now
             $0.target_attachment_lo = handle
             $0.reserved = UInt32(outcome.rawValue) | (UInt32(launch.rawValue) << 8)
         }
@@ -225,7 +225,7 @@ extension ProductChromeHostView {
         let now = runtimeRecoveryNowMillis()
         applyRuntimeRecoveryAction(pane.appHandle, kind: SEYAL_APP_ACTION_FIRE_RECOVERY) {
             $0.target_execution_lo = generation
-            $0.target_pty_generation = now
+            $0.target_generation = now
         }
         reconcileChrome()
     }

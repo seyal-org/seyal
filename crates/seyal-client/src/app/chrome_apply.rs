@@ -1,6 +1,6 @@
 //! Shell tab/pane and chrome inspector apply paths.
 
-use seyal_core::{PaneId, TabId, WorkspaceId};
+use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
 use crate::chrome::{
@@ -100,6 +100,7 @@ impl ApplicationRoot {
             self.shell
                 .apply_activate_workspace(workspace)
                 .map_err(|_| AppError::UnknownChromeWorkspace)?;
+            self.drain_shell_effects();
         }
         if let Some(tab) = effect.select_tab {
             self.shell
@@ -148,8 +149,7 @@ impl ApplicationRoot {
     }
 
     pub(super) fn focus_pane(&mut self, id: PaneId) -> Result<(), AppError> {
-        self.shell
-            .apply(ShellAction::FocusPane { id })
+        self.apply_shell(ShellAction::FocusPane { id })
             .map_err(|_| AppError::UnknownPane)?;
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
@@ -281,8 +281,7 @@ impl ApplicationRoot {
             });
         };
         let ratio = divider.ratio_at(position).ok_or(AppError::NoSplitDivider)?;
-        self.shell
-            .apply(ShellAction::SetSplitRatio { pane, ratio })
+        self.apply_shell(ShellAction::SetSplitRatio { pane, ratio })
             .map_err(|error| match error {
                 ShellError::NoSplitDivider => AppError::NoSplitDivider,
                 _ => AppError::UnknownPane,
@@ -310,6 +309,81 @@ impl ApplicationRoot {
             .apply(ChromeAction::ReplaceAttention { items: attention }, &shell)
             .map(|_| ())
             .map_err(chrome_error)
+    }
+    pub(super) fn select_window(&mut self, id: WindowId) -> Result<(), AppError> {
+        self.apply_shell(ShellAction::SelectWindow {
+            id,
+            containment_generation: self.shell.containment_generation(),
+        })
+        .map_err(|_| AppError::UnknownWindow)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn cycle_window(
+        &mut self,
+        direction: crate::shell::CycleDirection,
+    ) -> Result<(), AppError> {
+        self.apply_shell(ShellAction::CycleWindow {
+            direction,
+            containment_generation: self.shell.containment_generation(),
+        })
+        .map_err(|_| AppError::UnknownWindow)?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn create_window(&mut self) -> Result<(), AppError> {
+        // ADR-018 §2.2 / §3.3a: host sends target-free New Window; Rust picks
+        // the product-active Window's Workspace when any Window exists,
+        // otherwise `last_active_workspace` (zero-window re-entry / W4b).
+        let snap = self.shell.snapshot();
+        let workspace = if snap.windows.is_empty() {
+            snap.last_active_workspace
+        } else {
+            snap.active_workspace
+        };
+        let generation = snap.containment_generation;
+        self.apply_shell(ShellAction::CreateWindow {
+            workspace,
+            containment_generation: generation,
+        })
+        .map_err(|error| match error {
+            ShellError::WindowCreationUnavailable => AppError::WindowCreationUnavailable,
+            _ => AppError::UnknownChromeWorkspace,
+        })?;
+        let _ = self
+            .chrome
+            .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        Ok(())
+    }
+
+    pub(super) fn report_window_event(
+        &mut self,
+        window: WindowId,
+        event: WindowNativeEvent,
+    ) -> Result<(), AppError> {
+        if !self
+            .shell
+            .snapshot()
+            .windows
+            .iter()
+            .any(|entry| entry.id == window)
+        {
+            return Err(AppError::UnknownWindow);
+        }
+        // Disposable presentation input only — never mutates window/tab/pane product state.
+        self.last_window_event = Some((window, event));
+        Ok(())
+    }
+
+    /// Last forwarded window event (W4a tests / host observability).
+    pub fn last_window_event(&self) -> Option<(WindowId, WindowNativeEvent)> {
+        self.last_window_event
     }
 }
 

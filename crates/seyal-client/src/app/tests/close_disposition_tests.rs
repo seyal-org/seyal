@@ -49,6 +49,21 @@ fn evidence(tag: u8, controller: bool, alternate: bool) -> BindingEvidence {
 }
 
 #[test]
+fn closing_unknown_window_returns_window_error_without_mutation() {
+    let mut root = ApplicationRoot::new();
+    let before = root.snapshot().shell;
+
+    assert_eq!(
+        root.apply(AppAction::CloseWindow {
+            id: WindowId::new(),
+            containment_generation: before.containment_generation,
+        }),
+        Err(AppError::UnknownWindow)
+    );
+    assert_eq!(root.snapshot().shell.windows, before.windows);
+}
+
+#[test]
 fn closing_bound_authority_pane_clears_presentation_for_rebind() {
     let tab = TabId::new();
     let pane = PaneId::new();
@@ -78,6 +93,7 @@ fn closing_bound_authority_pane_clears_presentation_for_rebind() {
         }],
         workspace,
         true,
+        false,
         false,
     )
     .expect("fixture");
@@ -124,4 +140,154 @@ fn closing_bound_authority_pane_clears_presentation_for_rebind() {
     })
     .expect("rebind after authority pane close must succeed");
     assert_eq!(root.snapshot().execution, Some(second.execution));
+}
+
+#[test]
+fn stale_host_close_actions_reject_the_observed_generation() {
+    let mut root = ApplicationRoot::new();
+
+    let window_snapshot = root.snapshot().shell;
+    let first_window = window_snapshot.active_window.unwrap();
+    root.apply_shell(crate::shell::ShellAction::CreateWindow {
+        workspace: window_snapshot.active_workspace,
+        containment_generation: window_snapshot.containment_generation,
+    })
+    .unwrap();
+    let before_stale_window_close = root.snapshot().shell;
+    assert_eq!(
+        root.apply(AppAction::CloseWindow {
+            id: first_window,
+            containment_generation: window_snapshot.containment_generation,
+        }),
+        Err(AppError::StalePane)
+    );
+    let after_stale_window_close = root.snapshot().shell;
+    assert_eq!(
+        after_stale_window_close.windows,
+        before_stale_window_close.windows
+    );
+    assert_eq!(
+        after_stale_window_close.containment_generation,
+        before_stale_window_close.containment_generation
+    );
+
+    let tab_snapshot = root.snapshot().shell;
+    let tab = tab_snapshot.active_tab;
+    root.apply(AppAction::CreateTab).unwrap();
+    let before_stale_tab_close = root.snapshot().shell;
+    assert_eq!(
+        root.apply(AppAction::CloseTab {
+            id: tab,
+            containment_generation: tab_snapshot.containment_generation,
+        }),
+        Err(AppError::StalePane)
+    );
+    let after_stale_tab_close = root.snapshot().shell;
+    assert_eq!(
+        after_stale_tab_close.windows,
+        before_stale_tab_close.windows
+    );
+    assert_eq!(
+        after_stale_tab_close.containment_generation,
+        before_stale_tab_close.containment_generation
+    );
+
+    let pane_snapshot = root.snapshot().shell;
+    let pane = pane_snapshot.focused_pane;
+    root.apply(AppAction::CreateTab).unwrap();
+    let before_stale_pane_close = root.snapshot().shell;
+    assert_eq!(
+        root.apply(AppAction::ClosePane {
+            id: pane,
+            containment_generation: pane_snapshot.containment_generation,
+        }),
+        Err(AppError::StalePane)
+    );
+    let after_stale_pane_close = root.snapshot().shell;
+    assert_eq!(
+        after_stale_pane_close.windows,
+        before_stale_pane_close.windows
+    );
+    assert_eq!(
+        after_stale_pane_close.containment_generation,
+        before_stale_pane_close.containment_generation
+    );
+}
+
+#[test]
+fn hierarchical_close_drains_window_destruction_effects() {
+    for close in ["window", "tab", "pane"] {
+        let mut root = ApplicationRoot::new();
+        while !root.snapshot().pending_effects.is_empty() {
+            root.apply(AppAction::AckEffect)
+                .expect("ack initial window realization effects");
+        }
+        let before = root.snapshot().shell;
+        let window = before.active_window.unwrap();
+        let tab = before.active_tab;
+        let pane = before.focused_pane;
+
+        match close {
+            "window" => root
+                .apply(AppAction::CloseWindow {
+                    id: window,
+                    containment_generation: before.containment_generation,
+                })
+                .expect("close window"),
+            "tab" => root
+                .apply(AppAction::CloseTab {
+                    id: tab,
+                    containment_generation: before.containment_generation,
+                })
+                .expect("sole tab closes its window"),
+            "pane" => root
+                .apply(AppAction::ClosePane {
+                    id: pane,
+                    containment_generation: before.containment_generation,
+                })
+                .expect("sole pane cascades through tab and window"),
+            _ => unreachable!(),
+        }
+
+        assert_eq!(root.snapshot().shell.windows.len(), 0, "{close}");
+        assert_eq!(
+            root.snapshot().pending_effects,
+            [NativeEffect::DestroyWindowRealization { window }],
+            "{close} must expose its native window destruction effect"
+        );
+    }
+}
+
+#[test]
+fn active_window_close_drains_destroy_before_successor_activation() {
+    let mut root = ApplicationRoot::new();
+    let initial = root.snapshot().shell;
+    let successor = initial.active_window.unwrap();
+    root.apply_shell(crate::shell::ShellAction::CreateWindow {
+        workspace: initial.active_workspace,
+        containment_generation: initial.containment_generation,
+    })
+    .expect("create second window");
+    let expanded = root.snapshot().shell;
+    let closed = expanded.active_window.unwrap();
+    assert_ne!(closed, successor);
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect)
+            .expect("ack create effects");
+    }
+
+    root.apply(AppAction::CloseWindow {
+        id: closed,
+        containment_generation: expanded.containment_generation,
+    })
+    .expect("close active window");
+
+    assert_eq!(
+        root.snapshot().pending_effects,
+        [
+            NativeEffect::DestroyWindowRealization { window: closed },
+            NativeEffect::OrderFrontMakeKey { window: successor },
+        ],
+        "close effects must reach the host in Rust commit order"
+    );
 }

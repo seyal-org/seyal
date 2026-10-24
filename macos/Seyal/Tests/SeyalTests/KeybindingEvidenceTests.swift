@@ -149,7 +149,7 @@ final class KeybindingEvidenceTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var refresh = SeyalAppAction()

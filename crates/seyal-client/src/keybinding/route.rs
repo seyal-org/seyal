@@ -366,7 +366,13 @@ pub fn menu_command_contexts(command: WorkspaceCommand) -> BindingContext {
         | WorkspaceCommandId::AppQuit
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
-        | WorkspaceCommandId::GotoOpen => BindingContext::APP,
+        | WorkspaceCommandId::GotoOpen
+        | WorkspaceCommandId::AppCloseFocused
+        | WorkspaceCommandId::WindowNew
+        | WorkspaceCommandId::WindowClose
+        | WorkspaceCommandId::WindowCycleNext
+        | WorkspaceCommandId::WindowCyclePrevious
+        | WorkspaceCommandId::WindowSelectOrdinal => BindingContext::APP,
     }
 }
 
