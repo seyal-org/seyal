@@ -13,6 +13,12 @@ enum KeybindingShortcutRealization {
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
     static let gotoOpen: UInt16 = 21
+    static let appCloseFocused: UInt16 = 22
+    static let windowNew: UInt16 = 23
+    static let windowClose: UInt16 = 24
+    static let windowCycleNext: UInt16 = 25
+    static let windowCyclePrevious: UInt16 = 26
+    static let windowSelectOrdinal: UInt16 = 27
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
@@ -69,8 +75,13 @@ enum KeybindingShortcutRealization {
         }
     }
 
-    static func isEnabled(appHandle: UInt64, commandId: UInt16, composerFocused: Bool) -> Bool {
-        seyal_app_shortcut_enabled(appHandle, commandId, 0, composerFocused ? 1 : 0) != 0
+    static func isEnabled(
+        appHandle: UInt64,
+        commandId: UInt16,
+        ordinal: UInt8 = 0,
+        composerFocused: Bool
+    ) -> Bool {
+        seyal_app_shortcut_enabled(appHandle, commandId, ordinal, composerFocused ? 1 : 0) != 0
     }
 
     private static func modifierMask(_ bits: UInt8) -> NSEvent.ModifierFlags {

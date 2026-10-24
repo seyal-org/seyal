@@ -61,6 +61,7 @@ fn seed_n_windows(n: usize) -> ShellState {
         workspace,
         true,
         true,
+        true,
     )
     .expect("seeded shell")
 }
@@ -70,6 +71,9 @@ fn install_shell(handle: u64, shell: ShellState) {
         let mut apps = apps.borrow_mut();
         let state = apps.get_mut(&handle).expect("handle");
         state.root = ApplicationRoot::with_shell(shell);
+        while !state.root.snapshot().pending_effects.is_empty() {
+            state.root.apply(crate::app::AppAction::AckEffect).unwrap();
+        }
         state.window_scratch.clear();
     });
 }
@@ -207,6 +211,7 @@ fn pane_tree_split_ratio_round_trips_through_ffi() {
             }],
         }],
         workspace,
+        true,
         true,
         true,
     )

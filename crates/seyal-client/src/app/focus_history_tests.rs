@@ -47,6 +47,7 @@ fn two_pane_root() -> (ApplicationRoot, WorkspaceId, TabId, PaneId, PaneId) {
         w1,
         true,
         true,
+        true,
     )
     .expect("fixture");
     let mut root = ApplicationRoot::with_shell(shell);
@@ -352,6 +353,7 @@ fn open_attention_cross_window_drains_the_window_raise_effect() {
         workspace,
         true,
         true,
+        true,
     )
     .unwrap();
     let mut root = ApplicationRoot::with_shell(shell);
@@ -456,6 +458,7 @@ fn two_tab_bound_root() -> (
             }],
         }],
         w1,
+        true,
         true,
         true,
     )
@@ -621,6 +624,7 @@ fn history_traverses_unbound_pane_without_mutating_sibling_binding() {
             }],
         }],
         w1,
+        true,
         true,
         true,
     )

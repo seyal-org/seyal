@@ -32,6 +32,8 @@ mod tests;
 mod unpresented_tests;
 #[cfg(test)]
 mod w2a_tests;
+#[cfg(test)]
+mod window_admission_tests;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -71,6 +73,7 @@ pub enum ShellError {
     UnknownTab,
     UnknownPane,
     TabCreationUnavailable,
+    WindowCreationUnavailable,
     PaneSplitUnavailable,
     CannotCloseLastTab,
     CannotCloseLastPane,
@@ -106,6 +109,9 @@ impl ShellError {
             Self::UnknownPane => "Unknown Pane.",
             Self::TabCreationUnavailable => {
                 "Creating tabs is unavailable until a distinct execution route is available."
+            }
+            Self::WindowCreationUnavailable => {
+                "Creating windows is unavailable until window admission is enabled."
             }
             Self::PaneSplitUnavailable => {
                 "Splitting panes is unavailable until a distinct execution route is available."
@@ -163,7 +169,9 @@ pub struct ShellSnapshot {
     pub containment_generation: u64,
     /// Active-Window Tab projection (compatible with pre-W3 hosts).
     pub tabs: Vec<TabSnapshot>,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub active_tab: TabId,
+    /// Placeholder identity when [`Self::active_window`] is `None`.
     pub focused_pane: PaneId,
     /// Active-Tab zoom overlay (`None` when not zoomed). Topology unchanged.
     pub zoomed: Option<PaneId>,
@@ -175,12 +183,12 @@ pub struct ShellSnapshot {
     /// Hosts use this to omit the control rather than show one that always
     /// fails closed (mirrors the palette's own omission of "New Tab").
     pub allows_tab_creation: bool,
+    pub allows_window_creation: bool,
     pub allows_pane_splitting: bool,
-    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused
-    /// Pane would currently be accepted (the last Tab/Pane cannot close).
-    /// Closing a bound Pane releases the binding; disposition is portable
-    /// provisioning authority (ADR-017 §6.1 detach-only).
-    /// Hosts read these instead of re-deriving the rule from counts.
+    /// Whether `CloseTab` of the active Tab / `ClosePane` of the focused Pane
+    /// would currently be accepted. Hierarchical close always admits the active
+    /// Tab / focused Pane while a Window exists (last Tab → Window, last Pane →
+    /// Tab). Hosts read these instead of re-deriving the rule from counts.
     pub allows_tab_close: bool,
     pub allows_pane_close: bool,
 }
@@ -218,6 +226,7 @@ pub struct ShellState {
     focus_history: FocusHistory,
     allows_pane_splitting: bool,
     allows_tab_creation: bool,
+    allows_window_creation: bool,
     last_error: Option<ShellError>,
     next_tab_ordinal: u32,
     /// Monotonic ADR-018 fence; bumps only on containment mutations.
@@ -266,6 +275,7 @@ impl ShellState {
             // path as CreateTab (one ExecutionId per new terminal leaf).
             allows_pane_splitting: true,
             allows_tab_creation: true,
+            allows_window_creation: true,
             last_error: None,
             next_tab_ordinal: 2,
             containment_generation: 0,
@@ -284,6 +294,7 @@ impl ShellState {
         active_workspace: WorkspaceId,
         allows_pane_splitting: bool,
         allows_tab_creation: bool,
+        allows_window_creation: bool,
     ) -> Result<Self, ShellError> {
         if workspaces.is_empty() {
             return Err(ShellError::EmptyShell);
@@ -308,6 +319,7 @@ impl ShellState {
             focus_history: FocusHistory::default(),
             allows_pane_splitting,
             allows_tab_creation,
+            allows_window_creation,
             last_error: None,
             next_tab_ordinal: 2,
             containment_generation: 0,
@@ -425,10 +437,19 @@ impl ShellState {
         self.allows_tab_creation
     }
 
-    /// Test/C2 harness: flip the production gate without rebuilding the shell.
+    pub fn allows_window_creation(&self) -> bool {
+        self.allows_window_creation
+    }
+
+    /// Test harness: flip CreateWindow admission without rebuilding the shell.
     #[cfg(test)]
+    pub(crate) fn set_allows_window_creation_for_test(&mut self, allowed: bool) {
+        self.allows_window_creation = allowed;
+    }
+
     /// Test-only policy flip. Called from macOS C2 harness suites via
     /// `ApplicationRoot::enable_tab_creation_for_test`.
+    #[cfg(test)]
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn set_allows_tab_creation_for_test(&mut self, allowed: bool) {
         self.allows_tab_creation = allowed;
@@ -656,6 +677,7 @@ impl ShellState {
             ShellAction::CreateWindow { .. }
             | ShellAction::ActivateWorkspace { .. }
             | ShellAction::SelectWindow { .. }
+            | ShellAction::NativeWindowBecameKey { .. }
             | ShellAction::SelectTab { .. }
             | ShellAction::CreateTab { .. }
             | ShellAction::CycleWindow { .. }

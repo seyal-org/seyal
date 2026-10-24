@@ -1,7 +1,9 @@
 //! ApplicationRoot close coordination, preserving presentation and execution lifecycles.
 
 use super::provisioning_apply::WireDispatchContext;
-use super::{close_pane_error, close_tab_error, AppAction, AppError, ApplicationRoot};
+use super::{
+    close_pane_error, close_tab_error, close_window_error, AppAction, AppError, ApplicationRoot,
+};
 use crate::chrome::ChromeAction;
 use crate::provisioning::ProvisioningEffect;
 use crate::shell::ShellAction;
@@ -38,7 +40,7 @@ impl ApplicationRoot {
             .windows
             .iter()
             .find(|window| window.id == id)
-            .ok_or(AppError::UnknownChromeTab)?;
+            .ok_or(AppError::UnknownWindow)?;
         let removed_tabs: Vec<TabId> = removed_window.tabs.iter().map(|tab| tab.id).collect();
         let removed_workspace = removed_window.workspace;
         let removed_active_tab = removed_window.active_tab;
@@ -48,7 +50,7 @@ impl ApplicationRoot {
                 id,
                 containment_generation,
             })
-            .map_err(close_tab_error)?;
+            .map_err(close_window_error)?;
         self.drain_shell_effects();
         let removed = self.shell.take_removed_tab_panes();
         self.dispose_removed_panes(removed, removed_workspace)?;

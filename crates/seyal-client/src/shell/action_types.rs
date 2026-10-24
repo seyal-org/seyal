@@ -30,6 +30,12 @@ pub enum ShellAction {
         id: WindowId,
         containment_generation: u64,
     },
+    /// Native realization already became key; commit Rust selection and
+    /// focus history without ordering the same NSWindow again.
+    NativeWindowBecameKey {
+        id: WindowId,
+        containment_generation: u64,
+    },
     SelectTab {
         id: TabId,
         containment_generation: u64,

@@ -60,5 +60,7 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::NavigationHistoryUnavailable => 52,
         AppError::CrossWorkspaceAdopt => 53,
         AppError::ExecutionNotUnpresented => 54,
+        AppError::UnknownWindow => 55,
+        AppError::WindowCreationUnavailable => 56,
     }
 }

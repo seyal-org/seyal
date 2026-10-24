@@ -129,7 +129,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
@@ -189,7 +189,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
@@ -224,7 +224,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -260,7 +260,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             relayComposerStatus(
@@ -277,7 +277,7 @@ final class SeyalHostComponentTests: XCTestCase {
         setDraft.size = bind.size
         setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         setDraft.applySnapshotFence(seyal_app_snapshot(handle))
-        setDraft.target_pty_generation = seyal_app_composer(handle).epoch
+        setDraft.target_generation = seyal_app_composer(handle).epoch
         draft.withUnsafeBufferPointer { buffer in
             setDraft.payload = buffer.baseAddress
             setDraft.payload_len = UInt32(buffer.count)
@@ -288,7 +288,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(seyal_app_snapshot(handle))
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         let requestID = seyal_app_composer(handle).request_id
         XCTAssertNotEqual(requestID, 0)
@@ -535,7 +535,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -577,7 +577,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -588,7 +588,7 @@ final class SeyalHostComponentTests: XCTestCase {
         begin.version = bind.version
         begin.size = bind.size
         begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
-        begin.target_pty_generation = 0
+        begin.target_generation = 0
         XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
         let generation = seyal_app_snapshot(handle).recovery_generation
 
@@ -597,7 +597,7 @@ final class SeyalHostComponentTests: XCTestCase {
         ended.size = bind.size
         ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
         ended.target_execution_lo = generation
-        ended.target_pty_generation = 1
+        ended.target_generation = 1
         ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
@@ -1348,7 +1348,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
@@ -1359,7 +1359,7 @@ final class SeyalHostComponentTests: XCTestCase {
             draft.size = bind.size
             draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
             draft.applySnapshotFence(bound)
-            draft.target_pty_generation = composer.epoch
+            draft.target_generation = composer.epoch
             let utf8 = Array(command.utf8)
             utf8.withUnsafeBufferPointer { buffer in
                 draft.payload = buffer.baseAddress
@@ -1371,7 +1371,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_pty_generation = composer.epoch
+            submit.target_generation = composer.epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -1419,7 +1419,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var composer = seyal_app_composer(handle)
@@ -1488,7 +1488,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -1506,7 +1506,7 @@ final class SeyalHostComponentTests: XCTestCase {
         draft.size = bind.size
         draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         draft.applySnapshotFence(bound)
-        draft.target_pty_generation = seyal_app_composer(handle).epoch
+        draft.target_generation = seyal_app_composer(handle).epoch
         let draftBytes = Array("sleep 2".utf8)
         draftBytes.withUnsafeBufferPointer { buffer in
             draft.payload = buffer.baseAddress
@@ -1521,7 +1521,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(bound)
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         // Runtime's Busy flip arrives before the correlated result.
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
@@ -1558,7 +1558,7 @@ final class SeyalHostComponentTests: XCTestCase {
         action.kind = kind
         action.applySnapshotFence(snap)
         action.reserved = reserved
-        action.target_pty_generation = seyal_app_composer(handle).epoch
+        action.target_generation = seyal_app_composer(handle).epoch
         let utf8 = Array((payload ?? "").utf8)
         return utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress
@@ -1712,7 +1712,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(seyal_app_composer(handle).block_count, 0, "no Runtime timeline in a unit test")
@@ -2364,7 +2364,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
