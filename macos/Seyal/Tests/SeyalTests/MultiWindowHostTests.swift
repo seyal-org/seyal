@@ -47,6 +47,11 @@ final class MultiWindowHostTests: XCTestCase {
         let activeWindowHi = before.active_window_hi
         let focusedPaneLo = before.focused_pane_lo
         let focusedPaneHi = before.focused_pane_hi
+        guard let expectedSuccessor = host.snapshotOrderedWindowKeys().first(where: {
+            $0.lo != activeWindowLo || $0.hi != activeWindowHi
+        }) else {
+            return XCTFail("expected a successor Window")
+        }
 
         host.applyPendingEffectsAndReconcile()
 
@@ -61,11 +66,6 @@ final class MultiWindowHostTests: XCTestCase {
         // entries. Once Rust closes the active first Window, snapshot-order
         // successor selection should choose the second Window. Making every
         // realization key would leave the third Window at the MRU head here.
-        guard let expectedSuccessor = host.snapshotOrderedWindowKeys().first(where: {
-            $0.lo != activeWindowLo || $0.hi != activeWindowHi
-        }) else {
-            return XCTFail("expected a successor Window")
-        }
         host.forwardCloseWindow(.init(lo: activeWindowLo, hi: activeWindowHi))
 
         let afterClose = seyal_app_shell(host.appHandle)
