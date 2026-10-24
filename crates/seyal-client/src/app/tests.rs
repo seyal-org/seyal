@@ -901,6 +901,7 @@ fn block_selection_is_fenced_and_sourced_from_runtime_blocks() {
             end_line: Some(3),
             running: false,
             exit_status: Some(0),
+            duration_ns: None,
         }],
     })
     .unwrap();
@@ -1012,6 +1013,7 @@ fn composer_submit_busy_and_stale_request_are_rust_owned() {
             end_line: Some(1),
             running: false,
             exit_status: Some(0),
+            duration_ns: None,
         }],
     })
     .unwrap();

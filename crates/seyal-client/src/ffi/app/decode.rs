@@ -44,6 +44,7 @@ pub(super) fn runtime_block_from_command(record: &CommandBlock) -> RuntimeBlockR
             CommandBlockState::Running => None,
             CommandBlockState::Completed { exit_status } => exit_status,
         },
+        duration_ns: record.duration_ns,
     }
 }
 
