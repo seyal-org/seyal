@@ -37,7 +37,7 @@ impl LocalDisplayClient {
 
     pub fn submit_composer_command(&mut self, command: &str) -> Result<(), ClientError> {
         self.require_controller()?;
-        if !self.command_blocks_supported {
+        if self.block_timeline_schema.is_none() {
             return Err(ClientError::UnsupportedInteractiveCapability);
         }
         let request_id = self.next_composer_request_id;

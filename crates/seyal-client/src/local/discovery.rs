@@ -11,10 +11,10 @@ use seyal_runtime::{
             control_socket_path, ensure_verified_runtime_dir, resolved_runtime_dir, DiscoveryError,
         },
         framing::{
-            encode_frame, ClientHello, ErrorCode, ErrorMessage, MessageType, ServerHello,
-            CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS, CAP_CORRELATED_RESIZE,
-            CAP_EXECUTION_PROVISIONING, CAP_EXTENDED_TERMINAL_KEY, CAP_GRAPHEME_DISPLAY,
-            CAP_SEMANTIC_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS,
+            encode_frame, BlockTimelineSchema, ClientHello, ErrorCode, ErrorMessage, MessageType,
+            ServerHello, CAP_BINARY_DISPLAY, CAP_COMMAND_BLOCKS, CAP_COMMAND_BLOCK_DURATION,
+            CAP_CORRELATED_RESIZE, CAP_EXECUTION_PROVISIONING, CAP_EXTENDED_TERMINAL_KEY,
+            CAP_GRAPHEME_DISPLAY, CAP_SEMANTIC_TERMINAL_KEY, CAP_VIEWPORT_LINE_IDS,
         },
     },
     pass8::CAP_BLOCK_METADATA,
@@ -253,21 +253,12 @@ pub(crate) fn extended_terminal_key_supported(server_capabilities: u32) -> bool 
     server_capabilities & CAP_EXTENDED_TERMINAL_KEY != 0
 }
 
-pub(crate) fn hello_until(
+pub(crate) fn hello_with_capabilities_until(
     stream: &mut UnixStream,
     interactive: bool,
-    request_block_metadata: bool,
-    request_extended_terminal_key: bool,
-    request_viewport_line_ids: bool,
-    request_execution_provisioning: bool,
+    client_capabilities: u32,
     deadline: Instant,
 ) -> Result<ServerHello, ClientError> {
-    let client_capabilities = requested_capabilities(
-        request_block_metadata,
-        request_extended_terminal_key,
-        request_viewport_line_ids,
-        request_execution_provisioning,
-    );
     send_control_until(
         stream,
         MessageType::ClientHello,
@@ -305,58 +296,85 @@ pub(crate) fn hello_until(
     Ok(hello)
 }
 
+/// A successful hello plus the capabilities this client actually requested.
+/// Runtime advertises every bit it supports, so a negotiated feature is the
+/// intersection of both sides, never the server bits alone.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NegotiatedHello {
+    pub(crate) server: ServerHello,
+    pub(crate) client_capabilities: u32,
+}
+
+impl NegotiatedHello {
+    pub(crate) fn block_timeline_schema(&self) -> Option<BlockTimelineSchema> {
+        BlockTimelineSchema::negotiated(self.client_capabilities & self.server.server_capabilities)
+    }
+}
+
+/// Removals of the composed ClientHello fallback (ADR-009 2026-10-18
+/// amendment, #1355), in order. Each one is cumulative; the last is the
+/// existing extended-key compatibility step, unchanged in content.
+const HELLO_FALLBACK_REMOVALS: [u32; 3] = [
+    CAP_COMMAND_BLOCK_DURATION,
+    CAP_VIEWPORT_LINE_IDS,
+    CAP_EXTENDED_TERMINAL_KEY | CAP_EXECUTION_PROVISIONING,
+];
+
 /// New clients advertise newer optional bits; older Runtimes reject unknown
 /// ClientHello bits as `MalformedPayload` instead of ignoring them.
 ///
-/// Ordered reconnect fallback (bounded; each step at most once):
-/// 1. Full advertise (viewport LineIds + extended key + execution provisioning).
-/// 2. Drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime; still advertises provisioning).
-/// 3. Drop extended key + provisioning (SPEC-006 §21.5 / pre-V2 M001 allowlist).
+/// Composed reconnect fallback (ADR-009 #1355; at most four ClientHellos):
+/// 1. Full advertise (duration + viewport LineIds + extended key + provisioning).
+/// 2. Drop only `CAP_COMMAND_BLOCK_DURATION` (pre-#1043 Runtime).
+/// 3. Also drop `CAP_VIEWPORT_LINE_IDS` (pre-#865 Runtime).
+/// 4. Also drop extended key + provisioning (SPEC-006 §21.5 / pre-V2 M001 allowlist).
 pub(crate) fn hello_until_with_legacy_key_fallback(
     stream: &mut UnixStream,
-    mut reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
+    reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
     interactive: bool,
     request_block_metadata: bool,
     deadline: Instant,
-) -> Result<ServerHello, ClientError> {
-    match hello_until(
+) -> Result<NegotiatedHello, ClientError> {
+    hello_chain_until(
         stream,
+        reconnect,
         interactive,
-        request_block_metadata,
-        true,
-        true,
-        true,
+        requested_capabilities(request_block_metadata, true, true, true)
+            | CAP_COMMAND_BLOCK_DURATION,
         deadline,
-    ) {
-        Ok(hello) => Ok(hello),
-        Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
-            *stream = reconnect()?;
-            match hello_until(
-                stream,
-                interactive,
-                request_block_metadata,
-                true,
-                false,
-                true,
-                deadline,
-            ) {
-                Ok(hello) => Ok(hello),
-                Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
-                    *stream = reconnect()?;
-                    hello_until(
-                        stream,
-                        interactive,
-                        request_block_metadata,
-                        false,
-                        false,
-                        false,
-                        deadline,
-                    )
-                }
-                Err(error) => Err(error),
+    )
+}
+
+/// Each removal runs at most once, only after `MalformedPayload` for this
+/// client's ClientHello, on a fresh connection. A removal whose bits were not
+/// requested is skipped and costs no attempt. Any other error, a reconnect
+/// failure, or exhaustion returns that error without further retry.
+pub(crate) fn hello_chain_until(
+    stream: &mut UnixStream,
+    mut reconnect: impl FnMut() -> Result<UnixStream, ClientError>,
+    interactive: bool,
+    initial_capabilities: u32,
+    deadline: Instant,
+) -> Result<NegotiatedHello, ClientError> {
+    let mut client_capabilities = initial_capabilities;
+    let mut removals = HELLO_FALLBACK_REMOVALS.into_iter();
+    loop {
+        match hello_with_capabilities_until(stream, interactive, client_capabilities, deadline) {
+            Ok(server) => {
+                return Ok(NegotiatedHello {
+                    server,
+                    client_capabilities,
+                })
             }
+            Err(ClientError::Server(ErrorCode::MalformedPayload)) => {
+                let Some(removal) = removals.find(|bits| client_capabilities & bits != 0) else {
+                    return Err(ClientError::Server(ErrorCode::MalformedPayload));
+                };
+                *stream = reconnect()?;
+                client_capabilities &= !removal;
+            }
+            Err(error) => return Err(error),
         }
-        Err(error) => Err(error),
     }
 }
 

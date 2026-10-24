@@ -48,7 +48,7 @@ fn test_client(stream: UnixStream) -> LocalDisplayClient {
             revision: 0,
             records: Vec::new(),
         },
-        command_blocks_supported: false,
+        block_timeline_schema: None,
         last_composer_result: None,
         composer_status: None,
         pending_composer_requests: std::collections::HashSet::new(),
@@ -624,4 +624,62 @@ fn same_generation_and_row_count_conflicting_ids_are_fatal() {
         client.apply_viewport_line_ids(&payload),
         Err(ClientError::Protocol)
     );
+}
+
+fn duration_timeline_frame() -> Vec<u8> {
+    use seyal_runtime::local_ipc::framing::{CommandBlock, CommandBlockState};
+    let timeline = BlockTimeline {
+        revision: 3,
+        records: vec![CommandBlock {
+            id: 1,
+            command: "true".to_owned(),
+            start_line: 1,
+            end_line: Some(2),
+            state: CommandBlockState::Completed {
+                exit_status: Some(0),
+            },
+            duration_ns: Some(1_250_000),
+        }],
+    };
+    encode_frame(
+        MessageType::BlockTimeline,
+        &timeline
+            .try_encode_schema(BlockTimelineSchema::Duration)
+            .expect("duration encode"),
+    )
+}
+
+#[test]
+fn block_timeline_decodes_with_the_negotiated_duration_schema() {
+    let (ours, mut theirs) = UnixStream::pair().expect("socketpair");
+    ours.set_nonblocking(true).expect("nonblocking");
+    let mut client = test_client(ours);
+    client.block_timeline_schema = Some(BlockTimelineSchema::Duration);
+    theirs.write_all(&duration_timeline_frame()).expect("write");
+    client.poll_prepare().expect("poll");
+    assert_eq!(client.block_timeline().revision, 3);
+    assert_eq!(
+        client.block_timeline().records[0].duration_ns,
+        Some(1_250_000)
+    );
+}
+
+#[test]
+fn legacy_schema_rejects_a_duration_shaped_timeline_instead_of_guessing() {
+    let (ours, mut theirs) = UnixStream::pair().expect("socketpair");
+    ours.set_nonblocking(true).expect("nonblocking");
+    let mut client = test_client(ours);
+    client.block_timeline_schema = Some(BlockTimelineSchema::Legacy);
+    theirs.write_all(&duration_timeline_frame()).expect("write");
+    assert!(matches!(client.poll_prepare(), Err(ClientError::Protocol)));
+    assert_eq!(client.block_timeline().revision, 0);
+}
+
+#[test]
+fn block_timeline_without_negotiated_command_blocks_is_a_protocol_error() {
+    let (ours, mut theirs) = UnixStream::pair().expect("socketpair");
+    ours.set_nonblocking(true).expect("nonblocking");
+    let mut client = test_client(ours);
+    theirs.write_all(&duration_timeline_frame()).expect("write");
+    assert!(matches!(client.poll_prepare(), Err(ClientError::Protocol)));
 }
