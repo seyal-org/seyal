@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 877
-issue = 1065
-reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator so the file only ratchets down."
+acknowledged_loc = 881
+issue = 1010
+reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator. #1010 adds only the onHistoryCopy forwarding of the Rust-built Block copy text."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -42,9 +42,9 @@ reason = "SPEC-022 §6 focus history store and its state-transition proofs stay 
 
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1051
-issue = 1123
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, and #1144 adds activation-failure routing beside the existing action table."
+ceiling_loc = 1018
+issue = 1010
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, and #1144 adds activation-failure routing beside the existing action table. #1010 adds only the RerunBlock action variant and dispatch arm, its three fail-closed errors and the snapshot_generation accessor the FFI row cache keys on; the Rerun reducer lives in composer_apply.rs and its tests in block_rerun_tests.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1091
-issue = 1123
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures and #1144 extends activation-failure event wiring while preserving the typed Rust authority."
+ceiling_loc = 1083
+issue = 1010
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures and #1144 extends activation-failure event wiring while preserving the typed Rust authority. #1010 adds only the block_actions module declaration/re-exports and one BlockActionRows field; seyal_app_block_row moves beside the action rows it shares an encode cache with in block_actions.rs, Rerun errors 56-58 live in error_code.rs and row encoding in encode.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -124,9 +124,9 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 940
-issue = 1175
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175 adds harness_probe=false on live finish_attach so CreateTab's second-Controller driver can distinguish Runtime clients from in-process unit-test probes without splitting the Ready-stream lifecycle."
+acknowledged_loc = 943
+issue = 1010
+reason = "Connect/attach/bootstrap create stay one cold-path attach module after ADR-017 §6.3 dispose (FinishAttachError.terminated_on_attachment including Resync/socket-mode failures, dispose_never_bound_orphan), #1149 queued create-result initializer, and master InvalidExecution attach_server_error mapping; further split would separate create, attach, and dispose that share one Ready-stream lifecycle. #1175 adds harness_probe=false on live finish_attach so CreateTab's second-Controller driver can distinguish Runtime clients from in-process unit-test probes. #1010 adds only the three Block-copy field initializers to the attached-client constructor. Ceiling matches post-master-merge LOC."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
@@ -233,9 +233,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 780
-issue = 1218
-reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift."
+acknowledged_loc = 784
+issue = 1010
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift. #1010 adds only the design-doc Block spacing/inset values and the Rust-built Block copy pasteboard callback wiring."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
@@ -247,12 +247,12 @@ reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one key
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 739
-issue = 1123
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, and #1144 adds the ActivationFailed event without splitting the ABI table."
+acknowledged_loc = 748
+issue = 1010
+reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, and #1144 adds the ActivationFailed event without splitting the ABI table. #1010 adds only the RerunBlock (69) decode arm."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 747
-issue = 1123
-reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach and a fallible probe client for ADR-018 §4 quit fixtures without waiting on Detached."
+acknowledged_loc = 743
+issue = 1010
+reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach and a fallible probe client for ADR-018 §4 quit fixtures without waiting on Detached. #1010 adds the Block-copy state fields, the history_range_text accessor and the post-read advance_block_copy call; copy accumulation lives in local/block_copy.rs and text building in history_text.rs."
