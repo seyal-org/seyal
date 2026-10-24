@@ -56,6 +56,22 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(after.active_window_hi, activeWindowHi)
         XCTAssertEqual(after.focused_pane_lo, focusedPaneLo)
         XCTAssertEqual(after.focused_pane_hi, focusedPaneHi)
+
+        // Realizing the other windows must not add synthetic native-key MRU
+        // entries. Once Rust closes the active first Window, snapshot-order
+        // successor selection should choose the second Window. Making every
+        // realization key would leave the third Window at the MRU head here.
+        guard let expectedSuccessor = host.snapshotOrderedWindowKeys().first(where: {
+            $0.lo != activeWindowLo || $0.hi != activeWindowHi
+        }) else {
+            return XCTFail("expected a successor Window")
+        }
+        host.forwardCloseWindow(.init(lo: activeWindowLo, hi: activeWindowHi))
+
+        let afterClose = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(afterClose.window_count, 2)
+        XCTAssertEqual(afterClose.active_window_lo, expectedSuccessor.lo)
+        XCTAssertEqual(afterClose.active_window_hi, expectedSuccessor.hi)
     }
 
     func testTerminateLaterRepliesOnceOnCleanupComplete() {
