@@ -311,7 +311,7 @@ pub struct ApplicationRoot {
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
-    /// Last forwarded window presentation event (not product state).
+    /// Last forwarded native window event; BecameKey also commits product selection.
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,

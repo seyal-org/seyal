@@ -112,7 +112,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         } else {
             window.contentView = InactiveWindowPlaceholderView(frame: window.contentLayoutRect)
         }
-        window.makeKeyAndOrderFront(nil)
+        if isProductActive(key) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            // Realizing the snapshot must not synthesize native focus changes:
+            // only Rust's explicit OrderFrontMakeKey effect activates a window.
+            window.orderFront(nil)
+        }
     }
 
     private func destroyRealization(_ key: WindowKey) {

@@ -38,6 +38,26 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
     }
 
+    func testRealizingInactiveWindowsPreservesRustActiveWindowAndFocus() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_windows_only(host.appHandle, 3), 0)
+        let before = seyal_app_shell(host.appHandle)
+        let activeWindowLo = before.active_window_lo
+        let activeWindowHi = before.active_window_hi
+        let focusedPaneLo = before.focused_pane_lo
+        let focusedPaneHi = before.focused_pane_hi
+
+        host.applyPendingEffectsAndReconcile()
+
+        let after = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(host.orderedKeys.count, 3)
+        XCTAssertEqual(after.active_window_lo, activeWindowLo)
+        XCTAssertEqual(after.active_window_hi, activeWindowHi)
+        XCTAssertEqual(after.focused_pane_lo, focusedPaneLo)
+        XCTAssertEqual(after.focused_pane_hi, focusedPaneHi)
+    }
+
     func testTerminateLaterRepliesOnceOnCleanupComplete() {
         let host = seededQuitHost(windows: 3)
         defer { host.performQuitCleanup() }
