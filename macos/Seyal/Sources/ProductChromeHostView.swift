@@ -436,7 +436,7 @@ final class ProductChromeHostView: NSView {
             composer.reconcile()
             historyOverlay.reconcile()
             commandPalette.reconcile()
-            driveRecovery()
+            driveRecoveryAndAdvancePendingPresentation()
             recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
             return
         }
@@ -465,7 +465,7 @@ final class ProductChromeHostView: NSView {
         composer.reconcile()
         historyOverlay.reconcile()
         commandPalette.reconcile()
-        driveRecovery()
+        driveRecoveryAndAdvancePendingPresentation()
         recoveryLabel.stringValue = recoveryText(seyal_app_snapshot(pane.appHandle))
         if eligibilityChanged {
             routeFocus()
