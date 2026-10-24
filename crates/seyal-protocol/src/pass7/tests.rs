@@ -31,6 +31,7 @@ fn timeline_round_trip_preserves_only_metadata_and_anchors() {
         revision: 9,
         records: vec![
             CommandBlock {
+                duration_ns: None,
                 id: 1,
                 command: "printf one".into(),
                 start_line: 31,
@@ -38,6 +39,7 @@ fn timeline_round_trip_preserves_only_metadata_and_anchors() {
                 state: CommandBlockState::Running,
             },
             CommandBlock {
+                duration_ns: None,
                 id: 2,
                 command: "false".into(),
                 start_line: 34,
@@ -56,6 +58,7 @@ fn timeline_state_tag_2_round_trips_completed_without_exit_status() {
     let timeline = BlockTimeline {
         revision: 11,
         records: vec![CommandBlock {
+            duration_ns: None,
             id: 3,
             command: "sleep 1".into(),
             start_line: 40,
@@ -83,6 +86,7 @@ fn timeline_state_tag_2_rejects_nonzero_exit_status_and_inverted_end_line() {
     let timeline = BlockTimeline {
         revision: 12,
         records: vec![CommandBlock {
+            duration_ns: None,
             id: 4,
             command: "echo".into(),
             start_line: 50,
@@ -114,6 +118,7 @@ fn timeline_state_tag_2_rejects_nonzero_exit_status_and_inverted_end_line() {
 #[test]
 fn timeline_try_encode_rejects_unbounded_record_count() {
     let record = CommandBlock {
+        duration_ns: None,
         id: 1,
         command: "echo".into(),
         start_line: 1,
@@ -134,6 +139,7 @@ fn timeline_try_encode_rejects_cumulative_command_bytes_over_frame() {
         revision: 1,
         records: (1..=16)
             .map(|id| CommandBlock {
+                duration_ns: None,
                 id,
                 command: large.clone(),
                 start_line: id,

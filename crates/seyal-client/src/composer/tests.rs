@@ -181,6 +181,7 @@ fn running(id: BlockId, command: &str, start: u64) -> RuntimeBlockRecord {
         end_line: None,
         running: true,
         exit_status: None,
+        duration_ns: None,
     }
 }
 
@@ -192,6 +193,7 @@ fn completed(id: BlockId, command: &str, start: u64, end: u64) -> RuntimeBlockRe
         end_line: Some(end),
         running: false,
         exit_status: Some(0),
+        duration_ns: None,
     }
 }
 
@@ -558,6 +560,7 @@ fn failed_runtime_exit_projects_failed_without_completing_siblings() {
                     end_line: Some(1),
                     running: false,
                     exit_status: Some(1),
+                    duration_ns: None,
                 },
                 running(running_id, "sleep 10", 2),
             ],
@@ -584,6 +587,7 @@ fn completed_without_exit_status_projects_unknown_never_zero_or_failed() {
                 end_line: Some(12),
                 running: false,
                 exit_status: None,
+                duration_ns: None,
             }],
         })
         .unwrap();

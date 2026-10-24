@@ -10,11 +10,13 @@ mod terminal_key;
 mod viewport_line_ids;
 
 #[cfg(test)]
+mod command_block_duration_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::{framing::FramingError, AttachmentId};
 
-pub use command_blocks::{BlockTimeline, CommandBlock, CommandBlockState};
+pub use command_blocks::{BlockTimeline, BlockTimelineSchema, CommandBlock, CommandBlockState};
 pub use composer::{
     ComposerCommandRef, ComposerEligibility, ComposerResult, ComposerResultCode, ComposerStatus,
 };

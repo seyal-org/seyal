@@ -1,6 +1,10 @@
 //! Pass 7 command-block timeline wire payloads.
+//!
+//! Two record shapes exist, selected only by the negotiated capability, never
+//! by payload length (ADR-009 2026-09-19 amendment, SPEC-008 §5.4): the legacy
+//! 36-byte fixed header and the duration-capable 52-byte fixed header.
 
-use crate::framing::FramingError;
+use crate::framing::{FramingError, CAP_COMMAND_BLOCKS, CAP_COMMAND_BLOCK_DURATION};
 
 use super::composer::MAX_COMPOSER_COMMAND_BYTES;
 
@@ -26,6 +30,59 @@ pub struct CommandBlock {
     pub start_line: u64,
     pub end_line: Option<u64>,
     pub state: CommandBlockState,
+    /// Runtime-measured `C`→`D` elapsed time. `Some` only for a Block that
+    /// completed through a matching trusted `D` (state tag 1); never a
+    /// sentinel for unknown.
+    pub duration_ns: Option<u64>,
+}
+
+impl CommandBlock {
+    /// A duration exists only after a matching trusted `D`, which also
+    /// supplies the exit status.
+    fn duration_is_consistent(&self) -> bool {
+        self.duration_ns.is_none()
+            || matches!(
+                self.state,
+                CommandBlockState::Completed {
+                    exit_status: Some(_)
+                }
+            )
+    }
+}
+
+/// `BlockTimeline` record shape for one connection: the intersection of the
+/// ClientHello request and the ServerHello capabilities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BlockTimelineSchema {
+    /// 36-byte fixed record header; carries no duration.
+    Legacy,
+    /// 52-byte fixed record header with explicit duration presence.
+    Duration,
+}
+
+impl BlockTimelineSchema {
+    /// `None` without command Blocks (duration alone negotiates nothing).
+    pub fn negotiated(capabilities: u32) -> Option<Self> {
+        if capabilities & CAP_COMMAND_BLOCKS == 0 {
+            None
+        } else if capabilities & CAP_COMMAND_BLOCK_DURATION != 0 {
+            Some(Self::Duration)
+        } else {
+            Some(Self::Legacy)
+        }
+    }
+
+    pub const fn record_header_len(self) -> usize {
+        match self {
+            Self::Legacy => 36,
+            Self::Duration => 52,
+        }
+    }
+
+    /// Offset of `command_len` within the fixed record header.
+    const fn command_len_offset(self) -> usize {
+        self.record_header_len() - 4
+    }
 }
 
 /// A bounded full replacement cache for one attached execution. A client must
@@ -38,9 +95,23 @@ pub struct BlockTimeline {
 
 impl BlockTimeline {
     const HEADER_LEN: usize = 16;
-    const RECORD_HEADER_LEN: usize = 36;
 
+    /// Legacy-schema encode (peers without `CAP_COMMAND_BLOCK_DURATION`).
     pub fn try_encode(&self) -> Result<Vec<u8>, FramingError> {
+        self.try_encode_schema(BlockTimelineSchema::Legacy)
+    }
+
+    /// Exact encoded length under `schema`, for admission/eviction planning.
+    pub fn encoded_len(&self, schema: BlockTimelineSchema) -> usize {
+        Self::HEADER_LEN
+            + self
+                .records
+                .iter()
+                .map(|record| schema.record_header_len() + record.command.len())
+                .sum::<usize>()
+    }
+
+    pub fn try_encode_schema(&self, schema: BlockTimelineSchema) -> Result<Vec<u8>, FramingError> {
         if self.records.len() > MAX_COMMAND_BLOCK_RECORDS {
             return Err(FramingError::OversizedPayload);
         }
@@ -51,7 +122,10 @@ impl BlockTimeline {
         out.extend_from_slice(&0u32.to_le_bytes());
         for record in &self.records {
             let command = record.command.as_bytes();
-            if command.is_empty() || command.len() > MAX_COMPOSER_COMMAND_BYTES {
+            if command.is_empty()
+                || command.len() > MAX_COMPOSER_COMMAND_BYTES
+                || !record.duration_is_consistent()
+            {
                 return Err(FramingError::MalformedPayload);
             }
             let (state, exit_status) = match record.state {
@@ -67,6 +141,11 @@ impl BlockTimeline {
             out.push(state);
             out.extend_from_slice(&[0; 3]);
             out.extend_from_slice(&exit_status.to_le_bytes());
+            if schema == BlockTimelineSchema::Duration {
+                out.push(u8::from(record.duration_ns.is_some()));
+                out.extend_from_slice(&[0; 7]);
+                out.extend_from_slice(&record.duration_ns.unwrap_or(0).to_le_bytes());
+            }
             out.extend_from_slice(&(command.len() as u16).to_le_bytes());
             out.extend_from_slice(&0u16.to_le_bytes());
             out.extend_from_slice(command);
@@ -82,7 +161,14 @@ impl BlockTimeline {
             .expect("BlockTimeline must satisfy bounded wire limits")
     }
 
+    /// Legacy-schema decode (peers without `CAP_COMMAND_BLOCK_DURATION`).
     pub fn decode(bytes: &[u8]) -> Result<Self, FramingError> {
+        Self::decode_schema(bytes, BlockTimelineSchema::Legacy)
+    }
+
+    /// Decode with the connection's negotiated schema. A shape that disagrees
+    /// with `schema` fails closed before any record is applied.
+    pub fn decode_schema(bytes: &[u8], schema: BlockTimelineSchema) -> Result<Self, FramingError> {
         if bytes.len() > crate::framing::MAX_FRAME_PAYLOAD as usize {
             return Err(FramingError::OversizedPayload);
         }
@@ -97,43 +183,57 @@ impl BlockTimeline {
         {
             return Err(FramingError::MalformedPayload);
         }
+        let header_len = schema.record_header_len();
         let mut offset = Self::HEADER_LEN;
         let mut records = Vec::with_capacity(count);
         for _ in 0..count {
             let header_end = offset
-                .checked_add(Self::RECORD_HEADER_LEN)
+                .checked_add(header_len)
                 .ok_or(FramingError::MalformedPayload)?;
             if header_end > bytes.len() {
                 return Err(FramingError::TruncatedPayload);
             }
-            let id = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-            let start_line = u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
-            let end_raw = u64::from_le_bytes(bytes[offset + 16..offset + 24].try_into().unwrap());
-            let state_tag = bytes[offset + 24];
-            if bytes[offset + 25..offset + 28] != [0; 3]
-                || u16::from_le_bytes(bytes[offset + 30..offset + 32].try_into().unwrap()) != 0
-            {
+            let record = &bytes[offset..header_end];
+            let id = u64::from_le_bytes(record[0..8].try_into().unwrap());
+            let start_line = u64::from_le_bytes(record[8..16].try_into().unwrap());
+            let end_raw = u64::from_le_bytes(record[16..24].try_into().unwrap());
+            let state_tag = record[24];
+            // Preserved from the legacy decoder: bytes 30..32 (the high half of
+            // `exit_status`) must be zero, so only 0..=65535 statuses decode.
+            if record[25..28] != [0; 3] || record[30..32] != [0; 2] {
                 return Err(FramingError::MalformedPayload);
             }
-            let exit_status =
-                i32::from_le_bytes(bytes[offset + 28..offset + 32].try_into().unwrap());
+            let exit_status = i32::from_le_bytes(record[28..32].try_into().unwrap());
+            let duration_ns = match schema {
+                BlockTimelineSchema::Legacy => None,
+                BlockTimelineSchema::Duration => {
+                    let value = u64::from_le_bytes(record[40..48].try_into().unwrap());
+                    if record[33..40] != [0; 7] {
+                        return Err(FramingError::MalformedPayload);
+                    }
+                    match record[32] {
+                        0 if value == 0 => None,
+                        1 => Some(value),
+                        _ => return Err(FramingError::MalformedPayload),
+                    }
+                }
+            };
+            let len_at = schema.command_len_offset();
             let command_len =
-                u16::from_le_bytes(bytes[offset + 32..offset + 34].try_into().unwrap()) as usize;
-            // The record fixed prefix includes the command length/reserved fields.
-            let command_start = offset + 36;
+                u16::from_le_bytes(record[len_at..len_at + 2].try_into().unwrap()) as usize;
             if command_len == 0
                 || command_len > MAX_COMPOSER_COMMAND_BYTES
-                || u16::from_le_bytes(bytes[offset + 34..offset + 36].try_into().unwrap()) != 0
+                || u16::from_le_bytes(record[len_at + 2..len_at + 4].try_into().unwrap()) != 0
             {
                 return Err(FramingError::MalformedPayload);
             }
-            let command_end = command_start
+            let command_end = header_end
                 .checked_add(command_len)
                 .ok_or(FramingError::MalformedPayload)?;
             if command_end > bytes.len() {
                 return Err(FramingError::TruncatedPayload);
             }
-            let command = std::str::from_utf8(&bytes[command_start..command_end])
+            let command = std::str::from_utf8(&bytes[header_end..command_end])
                 .map_err(|_| FramingError::MalformedPayload)?
                 .to_owned();
             let (end_line, state) = match state_tag {
@@ -153,13 +253,18 @@ impl BlockTimeline {
             if id == 0 || start_line == 0 {
                 return Err(FramingError::MalformedPayload);
             }
-            records.push(CommandBlock {
+            let block = CommandBlock {
                 id,
                 command,
                 start_line,
                 end_line,
                 state,
-            });
+                duration_ns,
+            };
+            if !block.duration_is_consistent() {
+                return Err(FramingError::MalformedPayload);
+            }
+            records.push(block);
             offset = command_end;
         }
         if offset != bytes.len() {

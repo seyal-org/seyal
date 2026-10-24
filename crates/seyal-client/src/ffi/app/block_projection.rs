@@ -245,6 +245,7 @@ mod tests {
                             end_line: Some(12),
                             running: false,
                             exit_status: Some(0),
+                            duration_ns: None,
                         },
                         RuntimeBlockRecord {
                             id: BlockId::from_bytes([0x22; 16]),
@@ -253,6 +254,7 @@ mod tests {
                             end_line: None,
                             running: true,
                             exit_status: None,
+                            duration_ns: None,
                         },
                     ],
                 })

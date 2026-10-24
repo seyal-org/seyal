@@ -499,6 +499,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         end_line: Some(3),
                         running: false,
                         exit_status: Some(0),
+                        duration_ns: None,
                     },
                     RuntimeBlockRecord {
                         id: BlockId::from_bytes([0x61; 16]),
@@ -507,6 +508,7 @@ fn block_selection_ffi_marks_row_and_switches_inspector() {
                         end_line: None,
                         running: true,
                         exit_status: None,
+                        duration_ns: None,
                     },
                 ],
             })
@@ -650,6 +652,7 @@ fn identity_fence(kind: u16, snap: &SeyalAppSnapshot) -> SeyalAppAction {
 #[test]
 fn runtime_block_from_command_preserves_protocol_lifecycle() {
     let running = CommandBlock {
+        duration_ns: None,
         id: 7,
         command: "echo hi".into(),
         start_line: 3,
@@ -666,6 +669,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
     assert_eq!(projected.id, BlockId::from_bytes(expected));
 
     let failed = CommandBlock {
+        duration_ns: Some(1_240_000_000),
         id: 8,
         command: "false".into(),
         start_line: 4,
@@ -678,6 +682,7 @@ fn runtime_block_from_command_preserves_protocol_lifecycle() {
     assert!(!projected.running);
     assert_eq!(projected.exit_status, Some(1));
     assert_eq!(projected.end_line, Some(4));
+    assert_eq!(projected.duration_ns, Some(1_240_000_000));
 }
 
 #[test]

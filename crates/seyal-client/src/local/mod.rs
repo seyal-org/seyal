@@ -18,10 +18,10 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{decode_chunk, DisplayCache},
     local_ipc::framing::{
-        encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
-        CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader, HistoryRangeRequest,
-        HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult, Role,
-        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        encode_frame, BlockTimeline, BlockTimelineSchema, ComposerResult, ComposerResultCode,
+        ComposerStatus, CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader,
+        HistoryRangeRequest, HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult,
+        Role, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
     pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
@@ -127,7 +127,10 @@ pub struct LocalDisplayClient {
     pub(crate) input_failure: Option<InputAdmissionFailure>,
     pub(crate) resize_failure: Option<ResizeFailure>,
     pub(crate) block_timeline: BlockTimeline,
-    pub(crate) command_blocks_supported: bool,
+    /// `None` without command Blocks; otherwise the record shape both sides
+    /// negotiated (`NegotiatedHello::block_timeline_schema`). `BlockTimeline`
+    /// frames decode only with it, never by inferring from payload length.
+    pub(crate) block_timeline_schema: Option<BlockTimelineSchema>,
     pub(crate) last_composer_result: Option<ComposerResult>,
     /// Latest Runtime-published composer eligibility for this attachment
     /// (ADR-009 invariant 7). `None` until Runtime publishes; the composer
@@ -402,7 +405,8 @@ impl LocalDisplayClient {
                         self.accept_resize_result(result)?;
                     }
                     MessageType::BlockTimeline => {
-                        let timeline = BlockTimeline::decode(&frame[HEADER_LEN..])
+                        let schema = self.block_timeline_schema.ok_or(ClientError::Protocol)?;
+                        let timeline = BlockTimeline::decode_schema(&frame[HEADER_LEN..], schema)
                             .map_err(|_| ClientError::Protocol)?;
                         if timeline.revision >= self.block_timeline.revision {
                             metadata_changed = timeline.revision > self.block_timeline.revision;
@@ -687,7 +691,7 @@ fn reconstruction_probe_client_with_stream(
             revision: 0,
             records: Vec::new(),
         },
-        command_blocks_supported: false,
+        block_timeline_schema: None,
         last_composer_result: None,
         composer_status: None,
         pending_composer_requests: std::collections::HashSet::new(),

@@ -9,9 +9,9 @@ use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
     display::{decode_chunk, empty_cache, DisplayKind},
     local_ipc::framing::{
-        Attach, Attached, BlockTimeline, CreateExecutionRequest, CreateExecutionResult,
-        CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader, MessageType, Resync,
-        Role, TerminateExecutionRequest, TerminateExecutionResult, CAP_COMMAND_BLOCKS, HEADER_LEN,
+        Attach, Attached, BlockTimeline, BlockTimelineSchema, CreateExecutionRequest,
+        CreateExecutionResult, CreateExecutionResultCode, ErrorMessage, ExecutionList, FrameHeader,
+        MessageType, Resync, Role, TerminateExecutionRequest, TerminateExecutionResult, HEADER_LEN,
     },
     pass8::BLOCK_STATE_MESSAGE_TYPE,
     AttachmentId, ExecutionId,
@@ -402,7 +402,7 @@ impl LocalDisplayClient {
         let socket_path = canonical_control_socket_path()?;
 
         let mut stream = connect_stream_until(&socket_path, deadline)?;
-        let mut server_hello = hello_until_with_legacy_key_fallback(
+        let mut negotiated = hello_until_with_legacy_key_fallback(
             &mut stream,
             || connect_stream_until(&socket_path, deadline),
             role == Role::Controller,
@@ -425,7 +425,7 @@ impl LocalDisplayClient {
             Ok(execution_id) => execution_id,
             Err(ClientError::NoRunningExecution | ClientError::AmbiguousExecutions)
                 if role == Role::Controller
-                    && provisioning_negotiated(server_hello.server_capabilities) =>
+                    && provisioning_negotiated(negotiated.server.server_capabilities) =>
             {
                 created_bootstrap = true;
                 create_profile_zero_execution(&mut stream, deadline)?
@@ -440,10 +440,10 @@ impl LocalDisplayClient {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
 
-        if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
+        if is_epoch_quarantined(negotiated.server.runtime_id, execution_id) {
             drop(stream);
             stream = connect_stream_until(&socket_path, deadline)?;
-            server_hello = hello_until_with_legacy_key_fallback(
+            negotiated = hello_until_with_legacy_key_fallback(
                 &mut stream,
                 || connect_stream_until(&socket_path, deadline),
                 role == Role::Controller,
@@ -452,18 +452,18 @@ impl LocalDisplayClient {
             )?;
         }
         let block_metadata_negotiated =
-            server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
-                && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
+            negotiated.server.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
+                && !is_epoch_quarantined(negotiated.server.runtime_id, execution_id);
         let dispose_request_id = if created_bootstrap { 2 } else { 1 };
         let mut client = match Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
-            server_hello.server_capabilities & CAP_COMMAND_BLOCKS != 0,
-            extended_terminal_key_supported(server_hello.server_capabilities),
-            server_hello.runtime_id,
+            negotiated.block_timeline_schema(),
+            extended_terminal_key_supported(negotiated.server.server_capabilities),
+            negotiated.server.runtime_id,
             block_metadata_negotiated,
-            provisioning_negotiated(server_hello.server_capabilities),
+            provisioning_negotiated(negotiated.server.server_capabilities),
             // §6.3 dispose only for Created never-bound bootstrap orphans — not
             // adopt/reconnect of a live survivor (connect_first with existing id).
             created_bootstrap,
@@ -509,7 +509,7 @@ impl LocalDisplayClient {
         deadline: Instant,
     ) -> Result<Self, ClientError> {
         let mut stream = connect_stream_until(socket_path, deadline)?;
-        let mut server_hello = hello_until_with_legacy_key_fallback(
+        let mut negotiated = hello_until_with_legacy_key_fallback(
             &mut stream,
             || connect_stream_until(socket_path, deadline),
             role == Role::Controller,
@@ -525,10 +525,10 @@ impl LocalDisplayClient {
         if !execution_is_running(&executions, execution_id) {
             return Err(ClientError::NoRunningExecution);
         }
-        if is_epoch_quarantined(server_hello.runtime_id, execution_id) {
+        if is_epoch_quarantined(negotiated.server.runtime_id, execution_id) {
             drop(stream);
             stream = connect_stream_until(socket_path, deadline)?;
-            server_hello = hello_until_with_legacy_key_fallback(
+            negotiated = hello_until_with_legacy_key_fallback(
                 &mut stream,
                 || connect_stream_until(socket_path, deadline),
                 role == Role::Controller,
@@ -537,17 +537,17 @@ impl LocalDisplayClient {
             )?;
         }
         let block_metadata_negotiated =
-            server_hello.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
-                && !is_epoch_quarantined(server_hello.runtime_id, execution_id);
+            negotiated.server.server_capabilities & seyal_runtime::pass8::CAP_BLOCK_METADATA != 0
+                && !is_epoch_quarantined(negotiated.server.runtime_id, execution_id);
         Self::finish_attach_with_deadline(
             stream,
             execution_id,
             role,
-            server_hello.server_capabilities & CAP_COMMAND_BLOCKS != 0,
-            extended_terminal_key_supported(server_hello.server_capabilities),
-            server_hello.runtime_id,
+            negotiated.block_timeline_schema(),
+            extended_terminal_key_supported(negotiated.server.server_capabilities),
+            negotiated.server.runtime_id,
             block_metadata_negotiated,
-            provisioning_negotiated(server_hello.server_capabilities),
+            provisioning_negotiated(negotiated.server.server_capabilities),
             false,
             1,
             deadline,
@@ -567,7 +567,7 @@ impl LocalDisplayClient {
     ) -> Result<Self, ClientError> {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         let mut stream = connect_stream_until(socket_path, deadline)?;
-        let server_hello = hello_until_with_legacy_key_fallback(
+        let negotiated = hello_until_with_legacy_key_fallback(
             &mut stream,
             || connect_stream_until(socket_path, deadline),
             role == Role::Controller,
@@ -578,11 +578,11 @@ impl LocalDisplayClient {
             stream,
             execution_id,
             role,
-            server_hello.server_capabilities & CAP_COMMAND_BLOCKS != 0,
-            extended_terminal_key_supported(server_hello.server_capabilities),
-            server_hello.runtime_id,
+            negotiated.block_timeline_schema(),
+            extended_terminal_key_supported(negotiated.server.server_capabilities),
+            negotiated.server.runtime_id,
             false,
-            provisioning_negotiated(server_hello.server_capabilities),
+            provisioning_negotiated(negotiated.server.server_capabilities),
             false,
             1,
             deadline,
@@ -604,7 +604,7 @@ impl LocalDisplayClient {
             stream,
             execution_id,
             role,
-            command_blocks_supported,
+            command_blocks_supported.then_some(BlockTimelineSchema::Legacy),
             extended_terminal_key_supported,
             runtime_id,
             block_metadata_negotiated,
@@ -621,7 +621,7 @@ impl LocalDisplayClient {
         mut stream: UnixStream,
         execution_id: ExecutionId,
         role: Role,
-        command_blocks_supported: bool,
+        block_timeline_schema: Option<BlockTimelineSchema>,
         extended_terminal_key_supported: bool,
         runtime_id: u128,
         block_metadata_negotiated: bool,
@@ -859,7 +859,7 @@ impl LocalDisplayClient {
                 revision: 0,
                 records: Vec::new(),
             },
-            command_blocks_supported,
+            block_timeline_schema,
             last_composer_result: None,
             composer_status: None,
             pending_composer_requests: std::collections::HashSet::new(),

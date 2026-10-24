@@ -273,6 +273,8 @@ impl Runtime {
             #[cfg(target_os = "macos")]
             untrusted_markers: 0,
             #[cfg(target_os = "macos")]
+            pty_read_seq: 0,
+            #[cfg(target_os = "macos")]
             block_timeline: CommandBlockTimeline::default(),
             #[cfg(target_os = "macos")]
             block_revision: 0,

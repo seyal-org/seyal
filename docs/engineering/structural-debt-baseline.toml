@@ -66,9 +66,9 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1095
+ceiling_loc = 1097
 issue = 1123
-responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture."
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture. #1043 adds only the required RuntimeBlockRecord.duration_ns field to two existing fixtures."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
@@ -84,9 +84,9 @@ reason = "Former ffi/app.rs #[cfg(test)] ABI contract suite; #1149 moves C2 shel
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/composer/tests.rs"
-acknowledged_loc = 856
-issue = 1020
-reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production composer reducer stays under review_loc. Ceiling matches rustfmt-normalized LOC after the split."
+acknowledged_loc = 860
+issue = 1043
+reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change (#1020); production composer reducer stays under review_loc. #1043 adds only the required RuntimeBlockRecord.duration_ns field to four existing fixtures; duration tests live in composer/duration.rs."
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
@@ -247,9 +247,9 @@ reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one key
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 739
-issue = 1123
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, and #1144 adds the ActivationFailed event without splitting the ABI table."
+acknowledged_loc = 740
+issue = 1043
+reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event without splitting the ABI table, and #1043 carries the Runtime duration_ns into RuntimeBlockRecord."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"

@@ -107,15 +107,20 @@ impl Runtime {
             );
             return;
         };
-        if hello.client_capabilities
+        let unsupported = hello.client_capabilities
             & !(CAP_COMMAND_BLOCKS
+                | framing::CAP_COMMAND_BLOCK_DURATION
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_EXECUTION_PROVISIONING
                 | framing::CAP_VIEWPORT_LINE_IDS)
-            != 0
-        {
+            != 0;
+        // ADR-009 duration amendment: duration depends on command Blocks.
+        let duration_without_blocks =
+            hello.client_capabilities & framing::CAP_COMMAND_BLOCK_DURATION != 0
+                && hello.client_capabilities & CAP_COMMAND_BLOCKS == 0;
+        if unsupported || duration_without_blocks {
             self.send_error(
                 token,
                 ErrorCode::MalformedPayload,
@@ -131,6 +136,7 @@ impl Runtime {
                 | framing::CAP_CORRELATED_RESIZE
                 | framing::CAP_EXTENDED_TERMINAL_KEY
                 | CAP_COMMAND_BLOCKS
+                | framing::CAP_COMMAND_BLOCK_DURATION
                 | CAP_BLOCK_METADATA
                 | framing::CAP_GRAPHEME_DISPLAY
                 | CAP_EXECUTION_PROVISIONING

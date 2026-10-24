@@ -164,6 +164,14 @@ impl Harness {
             .collect()
     }
 
+    fn durations(&self) -> Vec<Option<u64>> {
+        self.runtime.entries[&self.id]
+            .block_timeline
+            .records()
+            .map(|record| record.duration_ns)
+            .collect()
+    }
+
     fn wait_block_completed(&mut self, index: usize) -> CommandBlockLifecycle {
         self.pump_until(|runtime, id| {
             runtime.entries[&id]
@@ -765,4 +773,87 @@ fn nonce_is_absent_from_the_child_environment_and_argv() {
     );
     assert_ne!(nonce, "0".repeat(32));
     let _ = ShellIntegrationToken::from_bytes([0; 16]);
+}
+
+// ADR-009 2026-09-19 duration amendment / #1043: Runtime-measured C→D.
+
+#[test]
+fn delayed_command_records_runtime_measured_duration() {
+    let mut h = spawn("duration", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("sleep 1"),
+        ComposerAdmission::Accepted(_)
+    ));
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    let duration = h.durations()[0].expect("a delayed command's C and D arrive in separate reads");
+    assert!(
+        (900_000_000..5_000_000_000).contains(&duration),
+        "Runtime-measured C→D for `sleep 1` was {duration} ns"
+    );
+}
+
+/// Interactive zsh with the bundled hooks never coalesces `C` and `D`: it
+/// blocks after `preexec` prints `C` until Runtime drains it (observed on
+/// macOS), so `D` always arrives in a later readable turn. To prove the
+/// coalesced rule on a live PTY anyway, this zsh skips the hooks (`-f`), reads
+/// the real nonce from the inherited descriptor exactly as the bundled
+/// `.zshenv` does, and writes trusted `C`, `D` and the next `A` in one write.
+const COALESCED_MARKERS_SCRIPT: &str = r#"IFS= read -r n <&"$SEYAL_NONCE_FD"
+printf '\033]133;A;%s\007' "$n"
+IFS= read -r line
+printf '\033]133;C;%s\007\033]133;D;%s;0\007\033]133;A;%s\007' "$n" "$n" "$n"
+sleep 5
+"#;
+
+#[test]
+fn c_and_d_coalesced_in_one_read_leave_duration_unknown() {
+    let mut h = spawn(
+        "coalesced",
+        PLAIN_RC,
+        Some(("/bin/zsh", &["-f", "-c", COALESCED_MARKERS_SCRIPT])),
+    );
+    h.wait_at_prompt();
+    assert!(matches!(h.submit("true"), ComposerAdmission::Accepted(_)));
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+    assert_eq!(
+        h.durations()[0],
+        None,
+        "trusted C and D drained in one readable turn must be unknown, never near-zero"
+    );
+}
+
+#[test]
+fn completed_duration_is_immutable_while_runtime_retains_the_timeline() {
+    let mut h = spawn("immutable", PLAIN_RC, None);
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("sleep 0.3"),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.wait_block_completed(0);
+    let first = h.durations()[0];
+    assert!(first.is_some(), "sleep 0.3 is measured");
+    h.wait_at_prompt();
+    assert!(matches!(
+        h.submit("printf later"),
+        ComposerAdmission::Accepted(_)
+    ));
+    h.wait_block_completed(1);
+    h.pump_for(Duration::from_millis(200));
+    assert_eq!(
+        h.durations()[0],
+        first,
+        "later activity never rewrites a completed duration"
+    );
 }

@@ -349,6 +349,7 @@ fn block(tag: u8, command: &str, state: BlockPresentationState) -> BlockProjecti
         start_line: 10,
         end_line: None,
         exit_status: None,
+        duration_ns: None,
     }
 }
 

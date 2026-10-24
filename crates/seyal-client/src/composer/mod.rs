@@ -7,6 +7,7 @@
 //! [`ComposerSnapshot`]. Do not call this from the PTY→VT→damage path. Do not
 //! invent Block completions.
 
+mod duration;
 mod history;
 
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use seyal_core::{BlockId, PaneId};
 
 use crate::presentation::{InputRoute, PresentationMode};
 
+pub use duration::format_block_duration;
 use history::{HistoryOverlay, PaneHistory};
 pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS};
 
@@ -135,6 +137,8 @@ pub struct RuntimeBlockRecord {
     pub end_line: Option<u64>,
     pub running: bool,
     pub exit_status: Option<i32>,
+    /// Runtime-measured `C`→`D` time; `None` when unknown or not negotiated.
+    pub duration_ns: Option<u64>,
 }
 
 impl RuntimeBlockRecord {
@@ -159,6 +163,18 @@ pub struct BlockProjection {
     pub end_line: Option<u64>,
     /// Runtime-published exit status; `None` while running or unknown.
     pub exit_status: Option<i32>,
+    /// Runtime-measured duration of a completed Block; `None` when unknown.
+    pub duration_ns: Option<u64>,
+}
+
+impl BlockProjection {
+    /// Seam duration text (SPEC-008 §5.4); `None` renders no number.
+    pub fn duration_text(&self) -> Option<String> {
+        if self.state == BlockPresentationState::Running {
+            return None;
+        }
+        self.duration_ns.map(format_block_duration)
+    }
 }
 
 /// Typed host → Rust command. One action is one coarse transition.
@@ -388,6 +404,7 @@ impl PaneComposer {
                 start_line: record.start_line,
                 end_line: record.end_line,
                 exit_status: record.exit_status,
+                duration_ns: record.duration_ns,
             })
             .collect()
     }

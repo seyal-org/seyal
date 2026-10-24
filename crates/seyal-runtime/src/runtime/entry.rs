@@ -62,6 +62,10 @@ pub(in crate::runtime) struct Entry {
     /// Markers whose nonce was missing or wrong; never affect state.
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) untrusted_markers: u64,
+    /// PTY reads that delivered bytes, so a trusted `C`/`D` pair drained from
+    /// one read is recognised as coalesced (duration unknown).
+    #[cfg(target_os = "macos")]
+    pub(in crate::runtime) pty_read_seq: u64,
     #[cfg(target_os = "macos")]
     pub(in crate::runtime) block_timeline: CommandBlockTimeline,
     #[cfg(target_os = "macos")]

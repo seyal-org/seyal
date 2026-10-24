@@ -4,8 +4,8 @@ use crate::{
     local_ipc::{
         attachment::AttachmentError,
         framing::{
-            self, BlockTimeline, CommandBlock, CommandBlockState, ErrorCode, MessageType,
-            CAP_COMMAND_BLOCKS,
+            self, BlockTimeline, BlockTimelineSchema, CommandBlock, CommandBlockState, ErrorCode,
+            MessageType,
         },
     },
     ExecutionId,
@@ -187,58 +187,69 @@ impl Runtime {
     /// Broadcast a bounded replacement cache after the Runtime has observed a
     /// trusted OSC lifecycle transition. It is queued after display work so a
     /// slow client cannot delay PTY/VT or terminal projection progress.
+    ///
+    /// Attached Block clients are grouped by negotiated schema; each schema
+    /// present is encoded once and shared across its group, so at most two
+    /// encodings exist per publication (ADR-009 duration amendment).
     pub(in crate::runtime) fn publish_block_timeline(&mut self, execution_id: ExecutionId) {
         let Some(entry) = self.entries.get(&execution_id) else {
             return;
         };
-        let records = entry
-            .block_timeline
-            .records()
-            .map(|record| CommandBlock {
-                id: record.id.raw(),
-                command: record.command.clone(),
-                start_line: record.start_line,
-                end_line: record.end_line,
-                state: match record.lifecycle {
-                    crate::command_block_timeline::CommandBlockLifecycle::Running => {
-                        CommandBlockState::Running
-                    }
-                    crate::command_block_timeline::CommandBlockLifecycle::Completed {
-                        exit_status,
-                    } => CommandBlockState::Completed { exit_status },
-                },
-            })
-            .collect();
-        let payload = match (BlockTimeline {
+        let mut legacy = Vec::new();
+        let mut duration = Vec::new();
+        if let Some(state) = self.local_ipc.as_ref() {
+            for (&token, meta) in &state.connections {
+                let attached_here = meta
+                    .attachment
+                    .and_then(|attachment| state.attachments.execution_of(attachment).ok())
+                    == Some(execution_id);
+                if !attached_here {
+                    continue;
+                }
+                match BlockTimelineSchema::negotiated(meta.client_capabilities) {
+                    Some(BlockTimelineSchema::Legacy) => legacy.push(token),
+                    Some(BlockTimelineSchema::Duration) => duration.push(token),
+                    None => {}
+                }
+            }
+        }
+        if legacy.is_empty() && duration.is_empty() {
+            return;
+        }
+        let timeline = BlockTimeline {
             revision: entry.block_revision,
-            records,
-        })
-        .try_encode()
-        {
-            Ok(payload) => payload,
-            Err(_) => {
-                // Admission enforces the wire budget; encode failure here means
-                // an invariant break. Never leave clients on a silently stale
-                // replacement timeline — drop the frame and surface capacity
-                // on every attached block-capable connection.
-                let tokens = self
-                    .local_ipc
-                    .as_ref()
-                    .map(|state| {
-                        state
-                            .connections
-                            .iter()
-                            .filter_map(|(&token, meta)| {
-                                let supports_blocks =
-                                    meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
-                                let attached_here = meta.attachment.and_then(|attachment| {
-                                    state.attachments.execution_of(attachment).ok()
-                                }) == Some(execution_id);
-                                (supports_blocks && attached_here).then_some(token)
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+            records: entry
+                .block_timeline
+                .records()
+                .map(|record| CommandBlock {
+                    id: record.id.raw(),
+                    command: record.command.clone(),
+                    start_line: record.start_line,
+                    end_line: record.end_line,
+                    state: match record.lifecycle {
+                        crate::command_block_timeline::CommandBlockLifecycle::Running => {
+                            CommandBlockState::Running
+                        }
+                        crate::command_block_timeline::CommandBlockLifecycle::Completed {
+                            exit_status,
+                        } => CommandBlockState::Completed { exit_status },
+                    },
+                    duration_ns: record.duration_ns,
+                })
+                .collect(),
+        };
+        for (schema, tokens) in [
+            (BlockTimelineSchema::Legacy, legacy),
+            (BlockTimelineSchema::Duration, duration),
+        ] {
+            if tokens.is_empty() {
+                continue;
+            }
+            let Ok(payload) = timeline.try_encode_schema(schema) else {
+                // Admission keeps every retained timeline within one frame for
+                // both schemas; an encode failure is an invariant break. Never
+                // leave this group on a silently stale replacement timeline:
+                // surface capacity on each of its connections instead.
                 for token in tokens {
                     self.send_error(
                         token,
@@ -246,30 +257,12 @@ impl Runtime {
                         MessageType::BlockTimeline as u16,
                     );
                 }
-                return;
+                continue;
+            };
+            let frame = framing::encode_frame(MessageType::BlockTimeline, &payload);
+            for token in tokens {
+                let _ = self.send_after_display_frame(token, frame.clone());
             }
-        };
-        let frame = framing::encode_frame(MessageType::BlockTimeline, &payload);
-        let tokens = self
-            .local_ipc
-            .as_ref()
-            .map(|state| {
-                state
-                    .connections
-                    .iter()
-                    .filter_map(|(&token, meta)| {
-                        let supports_blocks = meta.client_capabilities & CAP_COMMAND_BLOCKS != 0;
-                        let attached_here = meta
-                            .attachment
-                            .and_then(|attachment| state.attachments.execution_of(attachment).ok())
-                            == Some(execution_id);
-                        (supports_blocks && attached_here).then_some(token)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        for token in tokens {
-            let _ = self.send_after_display_frame(token, frame.clone());
         }
     }
 }
