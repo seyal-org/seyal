@@ -272,13 +272,13 @@ final class ProductChromeHostView: NSView {
 
             centerColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
             transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
-            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
+            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20).yieldingToPaneRegion(),
             transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
             composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
+            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24).yieldingToPaneRegion(),
             composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
+            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16).yieldingToPaneRegion(),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -302,9 +302,9 @@ final class ProductChromeHostView: NSView {
         ]
         paneFillsCenter = [
             pane.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor),
-            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor),
+            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor).yieldingToPaneRegion(),
             pane.topAnchor.constraint(equalTo: liveContent.topAnchor),
-            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor),
+            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor).yieldingToPaneRegion(),
         ]
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
