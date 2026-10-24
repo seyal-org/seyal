@@ -1215,6 +1215,7 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.click()
         waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
+        fileMenu.click()
         close.click()
         waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
         // NSWindow close can enqueue AppKit Touch Bar work for the next display
@@ -1226,6 +1227,7 @@ final class SeyalHostUITests: XCTestCase {
             "File → New Window stays available after the last window closes"
         )
         XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
+        fileMenu.click()
         newWindow.click()
         waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
     }
