@@ -6,10 +6,11 @@
 
 ## Method
 
-- **Spike:** local, non-mergeable branch `crdileep82/spike/1041-prompt-anchor` @ `0048b620`, based on `master` `c7d953c1`. It is never pushed or merged; only these findings graduate (AGENTS.md production-vs-POC guardrail).
+- **Spike:** local, non-mergeable branch `crdileep82/spike/1041-prompt-anchor` @ `3550ead4` (edge cases at `0048b620`; the reattach experiment added in `3550ead4`), based on `master` `c7d953c1`. It is never pushed or merged; only these findings graduate (AGENTS.md production-vs-POC guardrail).
   - Parser: the trusted `A` stamps the cursor line at recognition (as `C`/`D` already do). At `D` the parser also reports the cursor line, the cursor column, and whether every cell of the cursor row is blank.
   - Runtime: `pending_prompt_line` follows decisions 1–2 (last trusted `A` wins; trusted `C`/`D` consume it; `prompt_line` only if `< start_line`). `output_empty` follows decision 8 (cursor column 0 on `start_line` and the row blank at trusted `D`).
 - **Harness:** the production Runtime with a real `/bin/zsh -i` under a real PTY, using the bundled `.zshenv` hooks (`shell_integration_live_tests.rs` harness). Each case prints one `EVIDENCE` line.
+- **Reattach (wire):** the same harness with production local IPC enabled. A spike-only ClientHello/ServerHello bit (`1 << 11`, a stand-in; #1042 assigns the real bit) makes Runtime append the 16-byte per-record extension measured below to `BlockTimeline`. Clients are real `UnixStream` peers speaking the production framing (`ClientHello`, `Attach`, `Detach`), and they decode the frame themselves.
 - **Environment:** macOS 27.0.1, Apple M2 Pro, zsh 5.9 (arm64-apple-darwin26.0).
 
 ## Edge-case results
@@ -27,7 +28,7 @@
 | `A`, `C` and `D` in one PTY read | Not reachable | **Impossible by construction:** Runtime admits a composer submission only in `AtPrompt`, i.e. after it has already observed the trusted `A`, so that `A` is always in an earlier read. A fresh trusted `A` while `Pending` drops the submission (`integration_state.rs`: `(Pending, PromptStarted) → DropPending`) |
 | Zero-output commands (incl. top screen row) | `true` → `output_empty=true`; `true` after `clear` (top row) → `true` | As specified |
 | Prompt row evicted from bounded history | with `history_aggregate_bytes = 64 KiB` and `seq 1 40000`, fetching the earlier Block's context returned `Err(Stale)` | As specified (decision 3): eviction is detectable through the existing bounded range check (`range_intersects_evicted`); no new tracking needed |
-| Reattach after completion | By construction | `prompt_line` / `output_empty` are Runtime timeline state, re-published on attach (as #1043's duration, proven over IPC there) |
+| Reattach after completion | Client 1 attached live: Blocks `(id 1, start 3, prompt_line=Some(2), output_empty=false)` and `(id 2, start 5, Some(4), true)`. After `Detach` and socket close, a third Block completed with no client attached. Client 2 reattached: same `ExecutionId`, new `AttachmentId`, records 1–2 byte-identical plus `(id 3, start 6, Some(5), false)`. After an abrupt disconnect (no `Detach`, no `Goodbye`), client 3 reattached and got the same three records. Each wire view equalled Runtime state, and the context rows were unchanged. Passed 6/6 runs | As specified: `prompt_line` and `output_empty` are Runtime timeline state and are re-published unchanged on every attach |
 | Interrupted multiline submission (no `C`) | next Block `context=["T% printf 'after\n'"]` | As specified: the next trusted `A` overwrites the pending stamp |
 | Nested shell / `exec` replacement | outer Block anchored; inner `zsh -f` prompts never stamp; next outer Block `context=["T% printf 'outer-again\n'"]` | As specified: no nonce in children |
 

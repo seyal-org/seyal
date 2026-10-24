@@ -1,7 +1,7 @@
 # ADR-009 — Command Blocks, Pane Composer, and Presentation Takeover
 
-- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment accepted on merge of its acceptance PR under #1041 (proposed by PR #1045)
-- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24, accepted 2026-10-18
+- **Status:** Accepted 2026-08-28; presentation amendment accepted 2026-09-11 by #858 / PR #859 (`8d08f2f`); trusted shell-integration injection mechanism accepted 2026-09-16 by #968; duration / shell-metadata boundary amendment accepted on merge of PR #1022 under #686 (superseded predecessor PR #991); prompt-anchor amendment proposed by PR #1045 under #1041 and accepted on merge of its acceptance PR #1359 by a non-author human reviewer; composed ClientHello fallback amendment accepted on merge of its PR under #1355
+- **Date:** 2026-08-28; presentation amendment 2026-09-11; shell-integration injection amendment 2026-09-16; duration / shell-metadata boundary amendment accepted 2026-09-24 (PR #1022); prompt-anchor amendment proposed 2026-09-24, accepted on the merge date of PR #1359; composed ClientHello fallback amendment 2026-10-18 (#1355)
 - **Scope:** Post-Pass-7 command/Block presentation and Flow/Raw/TUI mode ownership
 - **Supersedes for this behavior:** the Pass 8 minimal-only boundary in `SPEC-007`; historical M001 presentation wording in SPEC-006/SPEC-009 and M001 UI design documents only where it assumes a permanently visible/focusable terminal surface while Flow is active
 - **Depends on:** ADR-004, ADR-005, ADR-006, ADR-007, ADR-008, SPEC-001, SPEC-003, SPEC-004, SPEC-005, SPEC-006
@@ -820,6 +820,10 @@ timeline must encode within the frame limit for both schemas. A later encode
 failure is an invariant failure: fail the affected group closed and do not
 silently leave it with a stale timeline.
 
+*Fallback order amended 2026-10-18 (#1355): the bounded order in this paragraph
+is superseded by the composed chain in "2026-10-18 amendment — composed
+ClientHello fallback" below; everything else in this paragraph still holds.*
+
 When a Runtime rejects a ClientHello that requested duration, the client may
 make one duration-specific compatibility retry. Retry only after a decoded
 Error has `error_code=MalformedPayload` and
@@ -954,12 +958,12 @@ integration, or trusted remote-shell Blocks that would expand this boundary.
 
 ## 2026-09-24 amendment — Block prompt anchor and terminal-truth context line (#1041)
 
-**Status:** Accepted 2026-10-18 on merge of its acceptance PR under #1041
-(proposed by PR #1045). The acceptance gates below are met; the evidence,
+**Status:** Accepted on merge of acceptance PR #1359 under #1041 by a
+non-author human reviewer (proposed by PR #1045). This section is normative
+from that merge, not before. The evidence for the acceptance gates below,
 including corrected edge-case expectations and recorded limits, is in
 [`m003-1041-prompt-anchor-acceptance.md`](../evidence/m003-1041-prompt-anchor-acceptance.md).
-This section is normative. Product code, the wire capability and SPEC-008
-edits land under #1042.
+Product code, the wire capability and SPEC-008 edits land under #1042.
 
 ### Problem
 
@@ -1055,10 +1059,19 @@ encoding, and `output_empty: bool` for completed records (always `false` while
 running). It is negotiated exactly like the duration amendment: a
 ClientHello/ServerHello capability bit selects the extended record. Without the
 bit, Runtime sends the existing shape. A capability without command Blocks is a
-protocol error. Mixed-version fallback adds one step to the composed ClientHello
-chain (ADR-009 2026-10-18 amendment, #1355): the prompt-anchor bit is removed
-first, then the duration, viewport-LineIds and extended-key steps follow in
-their fixed order, adding at most one attempt.
+protocol error. Mixed-version fallback adds one step to the front of the
+composed ClientHello chain of the 2026-10-18 amendment (#1355), under that
+chain's retry, fresh-connection and skip rules:
+
+1. Request the prompt-anchor bit with every capability of that chain's step 1.
+2. Remove **only** the prompt-anchor bit.
+3. Then that chain's steps 2–4, in order: remove `CAP_COMMAND_BLOCK_DURATION`,
+   then `CAP_VIEWPORT_LINE_IDS`, then `CAP_EXTENDED_TERMINAL_KEY`.
+
+This adds at most one attempt. A client that requests the prompt-anchor bit
+therefore sends at most five ClientHellos per chain, or ten on SPEC-004's
+epoch-quarantined attach path. A client that does not request the bit keeps
+the 2026-10-18 chain unchanged.
 Per-record growth is bounded to one optional `LineId` and one flag byte.
 
 ### Invariants
@@ -1158,3 +1171,96 @@ Met on acceptance (evidence linked in the Status line):
 Update SPEC-008 §5 (context region), `M001-CORE-TERMINAL-REFERENCE-SCREEN.md` §7
 (Block model gains a terminal-truth context line), and mark #1042 Ready. #1010
 removes its staged command label only after #1042 lands.
+
+## 2026-10-18 amendment — composed ClientHello fallback (#1355)
+
+**Status:** Accepted on merge of its PR under #1355 by a non-author maintainer.
+This section is normative from acceptance. It amends only the duration
+fallback order of the 2026-09-19 amendment; the duration semantics, record
+schema, fan-out and admission rules there are unchanged.
+
+### Problem
+
+The 2026-09-19 amendment bounds the duration retry to "at most three
+ClientHello attempts including the initial request" (duration, then the
+extended-key fallback). SPEC-004 later added a viewport-LineIds step
+(`CAP_VIEWPORT_LINE_IDS`, bit 9, #865) to the same chain and, because the two
+orders did not compose, forbids a client from requesting bit 8 and bit 9 in the
+same ClientHello until this ADR's order is amended. The production client
+always requests bit 9 for Flow live-tail, so the accepted duration contract was
+unreachable in the product (#1043).
+
+### Decision
+
+A client that requests `CAP_COMMAND_BLOCK_DURATION` uses one composed chain.
+Each step happens at most once per connect attempt, only after a decoded
+`Error` with `error_code = MalformedPayload` and `offending_message_type =
+ClientHello` for a ClientHello the client itself encoded and validated, and
+each retry uses a fresh connection:
+
+1. Request `CAP_COMMAND_BLOCK_DURATION` (with `CAP_COMMAND_BLOCKS`),
+   `CAP_VIEWPORT_LINE_IDS` and `CAP_EXTENDED_TERMINAL_KEY`, plus the client's
+   other unchanged capabilities.
+2. Remove **only** `CAP_COMMAND_BLOCK_DURATION`.
+3. Additionally remove `CAP_VIEWPORT_LINE_IDS` (SPEC-004's viewport step).
+4. Additionally remove `CAP_EXTENDED_TERMINAL_KEY` (the existing extended-key
+   compatibility fallback, unchanged in content, including any capability that
+   step already removes together with the extended key).
+
+A step whose capability was not requested in the previous ClientHello is
+skipped and does not consume an attempt. The worst case is therefore four
+ClientHellos per chain; SPEC-004's epoch-quarantined attach starts a second
+chain on a new connection, so that path's worst case is eight. (A client that
+also requests the prompt-anchor bit adds one step to the front of this chain,
+for five and ten; see "Record and wire shape" in the 2026-09-24 prompt-anchor
+amendment.) Any other
+error, any transport failure, or exhaustion of the chain returns the final
+error without further retry.
+
+With this order, a Runtime that supports bit 9 and the extended key but not
+bit 8 (the `master` Runtime before #1043) succeeds at step 2 and keeps
+viewport LineIds and extended keys; a pre-#865 Runtime succeeds at step 3; a
+pre-V2 key allowlist succeeds at step 4.
+
+### Invariants
+
+- No probing with unknown message types (SPEC-004).
+- A ClientHello requesting bit 8 without `CAP_COMMAND_BLOCKS` is invalid, and
+  Runtime never advertises bit 8 without `CAP_COMMAND_BLOCKS` (2026-09-19
+  amendment).
+- The chain is bounded and strictly ordered; schemas are still bound to the
+  negotiated capability, never inferred from payload length.
+- No change to `CAP_BLOCK_METADATA`, `CAP_COMMAND_BLOCKS`,
+  `CAP_GRAPHEME_DISPLAY` or `CAP_EXECUTION_PROVISIONING` negotiation beyond
+  their existing behavior inside step 4.
+
+### Required tests (implementation Issue #1043)
+
+- Rejection of the step-1 ClientHello removes only bit 8 on a fresh
+  connection, and a Runtime without bit 8 keeps bit 9 and the extended key.
+- A Runtime rejecting bits 8 and 9 lands on step 3; one also rejecting the
+  extended key lands on step 4; at most four attempts per chain.
+- Skipped steps do not consume attempts when a bit was never requested.
+- Unrelated errors and transport failures never retry; exhaustion returns the
+  final error; existing viewport and extended-key fallback behavior is
+  preserved for clients that do not request duration.
+
+### Alternatives considered
+
+- **Strict three attempts, removing bits 8 and 9 together at step 2.**
+  Rejected: a client facing a Runtime that supports bit 9 but not bit 8 would
+  lose viewport LineIds and regress Flow live-tail.
+- **Never request bit 8 together with bit 9 (status quo).** Rejected: the
+  accepted completed-Block duration could never reach the product.
+- **A separate capability probe.** Rejected: SPEC-004 forbids probing an older
+  Runtime with an unknown message type.
+
+### Accepted-text changes on acceptance
+
+- The 2026-09-19 amendment's fallback paragraph carries a pointer to this
+  section (done in this PR).
+- SPEC-004's legacy-hello section and its hello-fallback test bullet are
+  aligned to this chain in a follow-up specification PR, removing the
+  "must not request bit 8 and bit 9 in the same ClientHello" restriction.
+- #1043 implements the client chain and its tests.
+
