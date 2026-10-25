@@ -54,6 +54,8 @@ struct Client {
     resume_sequence: u64,
     presentation_sequences: HashMap<AttachmentId, u64>,
     expected_presentation_attachment: Option<AttachmentId>,
+    /// Park presentation frames until the next non-presentation control frame.
+    park_presentation: bool,
     deferred_presentation_frames: HashMap<AttachmentId, VecDeque<(u16, Vec<u8>)>>,
 }
 
@@ -103,6 +105,7 @@ impl Harness {
                         resume_sequence: 0,
                         presentation_sequences: HashMap::new(),
                         expected_presentation_attachment: None,
+                        park_presentation: false,
                         deferred_presentation_frames: HashMap::new(),
                     };
                 }
@@ -156,14 +159,20 @@ impl Harness {
                     {
                         let envelope = decode_presentation_envelope(&frame)
                             .expect("negotiated presentation envelope");
-                        assert_eq!(
-                            client.presentation_sequences.get(&envelope.attachment_id),
-                            Some(&envelope.resume_sequence),
-                            "frame must carry the identity and epoch of its logical attachment"
-                        );
-                        if let Some(expected) = client.expected_presentation_attachment
-                            && envelope.attachment_id != expected
-                        {
+                        let accept =
+                            client.expected_presentation_attachment == Some(envelope.attachment_id);
+                        let park = !accept
+                            && (client.park_presentation
+                                || client.expected_presentation_attachment.is_some());
+                        if park {
+                            if let Some(sequence) =
+                                client.presentation_sequences.get(&envelope.attachment_id)
+                            {
+                                assert_eq!(
+                                    sequence, &envelope.resume_sequence,
+                                    "frame must carry the identity and epoch of its logical attachment"
+                                );
+                            }
                             client
                                 .deferred_presentation_frames
                                 .entry(envelope.attachment_id)
@@ -171,6 +180,11 @@ impl Harness {
                                 .push_back((header.message_type, envelope.payload.to_vec()));
                             continue;
                         }
+                        assert_eq!(
+                            client.presentation_sequences.get(&envelope.attachment_id),
+                            Some(&envelope.resume_sequence),
+                            "frame must carry the identity and epoch of its logical attachment"
+                        );
                         envelope.payload.to_vec()
                     } else {
                         frame[HEADER_LEN..].to_vec()
@@ -229,7 +243,11 @@ impl Harness {
             .encode(),
         );
         let deadline = Instant::now() + Duration::from_secs(3);
+        // A live attachment can emit display frames before this Attach's
+        // control frame. Park those until Attached arrives.
+        client.park_presentation = true;
         let (kind, payload) = self.expect_frame(client, deadline);
+        client.park_presentation = false;
         assert_eq!(kind, MessageType::Attached as u16);
         let attached = Attached::decode(&payload).expect("Attached");
         client.attachment_id = Some(attached.attachment_id);
@@ -258,6 +276,17 @@ impl Harness {
         deadline: Instant,
     ) -> Vec<DecodedDisplayChunk> {
         let (kind, payload) = self.expect_frame(client, deadline);
+        self.finish_display_batch(client, kind, payload, expected_kind, deadline)
+    }
+
+    fn finish_display_batch(
+        &mut self,
+        client: &mut Client,
+        kind: u16,
+        payload: Vec<u8>,
+        expected_kind: MessageType,
+        deadline: Instant,
+    ) -> Vec<DecodedDisplayChunk> {
         assert_eq!(kind, expected_kind as u16);
         let first_frame = encode_frame(expected_kind, &payload);
         let first = decode_chunk(&first_frame).expect("display chunk");
@@ -280,7 +309,44 @@ impl Harness {
         deadline: Instant,
     ) -> Vec<DecodedDisplayChunk> {
         client.expected_presentation_attachment = Some(attachment_id);
-        let result = self.expect_display_batch(client, expected_kind, deadline);
+        let result = if expected_kind == MessageType::DisplaySnapshot {
+            // The same attachment can emit a delta, or ViewportLineIds, before
+            // its snapshot reaches the socket. The snapshot is the initial
+            // state; hold earlier viewport frames for the next reader.
+            let mut parked_viewport = VecDeque::new();
+            let chunks = loop {
+                let (kind, payload) = self.expect_frame(client, deadline);
+                if kind == MessageType::DisplaySnapshot as u16 {
+                    break self.finish_display_batch(
+                        client,
+                        kind,
+                        payload,
+                        expected_kind,
+                        deadline,
+                    );
+                }
+                if kind == MessageType::ViewportLineIds as u16 {
+                    parked_viewport.push_back((kind, payload));
+                    continue;
+                }
+                if kind == MessageType::DisplayDelta as u16 {
+                    continue;
+                }
+                panic!("attachment {attachment_id:?} expected DisplaySnapshot, got message type {kind}");
+            };
+            if !parked_viewport.is_empty() {
+                let queue = client
+                    .deferred_presentation_frames
+                    .entry(attachment_id)
+                    .or_default();
+                for frame in parked_viewport.into_iter().rev() {
+                    queue.push_front(frame);
+                }
+            }
+            chunks
+        } else {
+            self.expect_display_batch(client, expected_kind, deadline)
+        };
         client.expected_presentation_attachment = None;
         result
     }
