@@ -3,8 +3,8 @@ import Foundation
 @MainActor
 extension RustDisplayBridge {
   func currentFrame() -> SeyalPreparedFrame? {
-    guard isConnected, selectClient() else { return nil }
-    let frame = seyal_bridge_frame()
+    guard isConnected, clientHandle != 0 else { return nil }
+    let frame = seyal_bridge_frame_for(clientHandle)
     guard frame.cells != nil, frame.cell_count > 0 else { return nil }
     return frame
   }
