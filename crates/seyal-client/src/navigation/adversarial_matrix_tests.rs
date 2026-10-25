@@ -319,9 +319,10 @@ fn exited_execution_fails_closed_no_retarget() {
     assert_eq!(shell.snapshot().focused_pane, pane_a);
 }
 
-/// Live unbound (detached) execution → TargetUnbound; no implicit attach.
+/// Live execution with no shell binding → TargetUnbound; no implicit attach.
+/// Attachment is ApplicationRoot authority, not this Navigate address axis.
 #[test]
-fn detached_live_execution_fails_closed_no_retarget() {
+fn live_unbound_execution_fails_closed_no_retarget() {
     let (mut shell, _win_a, _win_b, _tab_a, _tab_b, pane_a, _pane_b) = matrix_shell(None);
     let live = ExecutionId::from_bytes([0xe4; 16]);
     let focus_before = shell.snapshot().focused_pane;
@@ -418,7 +419,7 @@ fn repeated_activation_failure_stays_bounded_committed_focus_survives() {
 /// via the destroy path; remaining activation still names the original WindowId.
 #[test]
 fn concurrent_destroy_during_pending_activation_no_retarget() {
-    let (shell, win_a, win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(None);
+    let (shell, _win_a, win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
 
@@ -474,15 +475,11 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
     root.apply(AppAction::ClosePane { id: pane_b })
         .expect("destroy during pending activation");
     let after = root.snapshot();
-    assert_ne!(after.shell.focused_pane, pane_b);
-    assert_ne!(
-        after.shell.focused_pane, pane_a,
-        "destroy must not retarget into the inactive window's pane"
+    assert_eq!(after.shell.focused_pane, pane_b2);
+    assert_eq!(
+        after.pending_effects.last().copied(),
+        Some(NativeEffect::WindowActivation { window: win_b })
     );
-    if let Some(NativeEffect::WindowActivation { window }) = after.pending_effects.last() {
-        assert_eq!(*window, win_b);
-        assert_ne!(*window, win_a);
-    }
     assert_eq!(
         root.apply(AppAction::ReportWindowEvent {
             window: win_b,
@@ -490,13 +487,13 @@ fn concurrent_destroy_during_pending_activation_no_retarget() {
         }),
         Err(crate::app::AppError::WindowActivationFailed)
     );
-    assert_ne!(root.snapshot().shell.focused_pane, pane_b);
-    assert_ne!(root.snapshot().shell.focused_pane, pane_a);
+    assert_eq!(root.snapshot().shell.focused_pane, pane_b2);
 }
 
-/// History Back/Forward traverse the same Pane records Navigate recorded.
+/// History Back/Forward restore the Pane and the published cursor.
+/// This does not read a displayed history-entry projection.
 #[test]
-fn history_back_forward_traverse_recorded_surface_targets() {
+fn history_back_forward_restore_published_cursor_and_pane() {
     let (shell, _win_a, _win_b, tab_a, tab_b, pane_a, pane_b) = matrix_shell(None);
     let mut root = ApplicationRoot::with_shell(shell);
     drain_bootstrap(&mut root);
@@ -513,7 +510,7 @@ fn history_back_forward_traverse_recorded_surface_targets() {
     let seq_pane_a = root
         .snapshot()
         .focus_history_seq
-        .expect("surface cursor for A");
+        .expect("published cursor for A");
     assert_eq!(root.snapshot().shell.focused_pane, pane_a);
     root.apply(AppAction::Navigate {
         fence: root.fence(),
@@ -527,7 +524,7 @@ fn history_back_forward_traverse_recorded_surface_targets() {
     let seq_pane_b = root
         .snapshot()
         .focus_history_seq
-        .expect("surface cursor for B");
+        .expect("published cursor for B");
     assert_ne!(seq_pane_b, seq_pane_a);
     assert_eq!(root.snapshot().shell.focused_pane, pane_b);
     root.apply(AppAction::HistoryBack {
@@ -539,7 +536,7 @@ fn history_back_forward_traverse_recorded_surface_targets() {
     assert_eq!(
         root.snapshot().focus_history_seq,
         Some(seq_pane_a),
-        "Back must restore the cursor the surface published for pane A"
+        "Back must restore the cursor published for pane A"
     );
     root.apply(AppAction::HistoryForward {
         fence: root.fence(),
@@ -550,12 +547,12 @@ fn history_back_forward_traverse_recorded_surface_targets() {
     assert_eq!(
         root.snapshot().focus_history_seq,
         Some(seq_pane_b),
-        "Forward must restore the cursor the surface published for pane B"
+        "Forward must restore the cursor published for pane B"
     );
 }
 
 /// Orthogonal matrix sample: alive+bound+present+inactive-window succeeds;
-/// exited / destroyed / detached each refuse without mutating focus.
+/// exited / destroyed / live-unbound each refuse without mutating focus.
 #[test]
 fn orthogonal_matrix_sample_cells_fail_closed_independently() {
     let live = ExecutionId::from_bytes([0xf1; 16]);

@@ -2,12 +2,13 @@ import XCTest
 
 @testable import Seyal
 
-/// N6 headed host evidence (SPEC-022 §12 items 31–33) using the existing
-/// SeyalTests FFI harness. Headed CreateWindow admission is off, so a second
-/// Pane comes from `seyal_app_test_seed_windows_only`. Real PTY multi-pane
-/// executions remain harness-limited; see
-/// `docs/evidence/m003-n6-navigation-1156.md`.
-final class NavigationEvidenceHostTests: XCTestCase {
+/// N6 headless C-ABI evidence for SPEC-022 §12 items 31–33.
+///
+/// Every call is `seyal_app_*` on a bare handle. This class does not create an
+/// AppKit window or drive `MultiWindowHostController`, so it is not the headed
+/// XCTest/XCUI row. Headed host realization and real PTY executions remain
+/// harness-limited; see `docs/evidence/m003-n6-navigation-1156.md`.
+final class NavigationEvidenceAbiTests: XCTestCase {
     private func makeHandle() -> UInt64 {
         let handle = seyal_app_create()
         XCTAssertNotEqual(handle, 0)
@@ -119,7 +120,12 @@ final class NavigationEvidenceHostTests: XCTestCase {
         return (leaf.pane_lo, leaf.pane_hi)
     }
 
-    private func navigateGotoToPane(_ handle: UInt64, paneLo: UInt64, paneHi: UInt64) {
+    private func navigateGotoToPane(
+        _ handle: UInt64,
+        paneLo: UInt64,
+        paneHi: UInt64,
+        ackEffects: Bool = true
+    ) {
         XCTAssertEqual(
             apply(
                 handle,
@@ -153,13 +159,15 @@ final class NavigationEvidenceHostTests: XCTestCase {
                 ),
                 0
             )
-            ackPendingEffects(handle)
+            if ackEffects {
+                ackPendingEffects(handle)
+            }
             return
         }
         XCTFail("goto panes scope missing Pane \(paneLo)/\(paneHi)")
     }
 
-    /// Item 31 (host path): OpenGoto → run address-carrying row focuses that Pane.
+    /// Item 31, C-ABI only: OpenGoto → run address-carrying row focuses that Pane.
     func testGotoSelectionFocusesIntendedPane() {
         let handle = makeHandle()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -175,7 +183,7 @@ final class NavigationEvidenceHostTests: XCTestCase {
         XCTAssertTrue(paneB.lo != paneA.lo || paneB.hi != paneA.hi)
     }
 
-    /// Item 32 (host path): Navigate away and back keeps the same ExecutionId.
+    /// Item 32, C-ABI only: Navigate away and back keeps the same ExecutionId.
     func testNavigateAwayAndBackPreservesExecutionIdentity() {
         let handle = makeHandle()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -204,8 +212,8 @@ final class NavigationEvidenceHostTests: XCTestCase {
         )
     }
 
-    /// Item 33 (host path): HistoryBack/Forward use master's N3 actions 63/64.
-    /// The published cursor is `seyal_app_focus_history_seq`, not a snapshot field.
+    /// Item 33, C-ABI only: actions 63/64 restore the published cursor and Pane.
+    /// This does not send `cmd+[` / `cmd+]` and does not read a displayed history.
     func testHistoryBackForwardTraverseRecordedTargets() {
         let handle = makeHandle()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -264,17 +272,31 @@ final class NavigationEvidenceHostTests: XCTestCase {
         XCTAssertEqual(seyal_app_focus_history_seq(handle), seqPaneB)
     }
 
-    /// Cross-window Navigate still emits one WindowActivation.
+    /// Cross-window Navigate emits one WindowActivation before any acknowledgement.
     func testCrossWindowGotoEmitsWindowActivation() {
         let handle = makeHandle()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         _ = seedSecondWindow(handle)
         let paneB = otherWindowPane(handle)
-        navigateGotoToPane(handle, paneLo: paneB.lo, paneHi: paneB.hi)
+        navigateGotoToPane(handle, paneLo: paneB.lo, paneHi: paneB.hi, ackEffects: false)
         let shell = seyal_app_shell(handle)
+        let target = seyal_app_window(handle, 1)
+        XCTAssertNotEqual(seyal_app_snapshot(handle).pending_effect, 0)
+        var activations = 0
+        for index in 0..<Int(shell.effect_count) {
+            let effect = seyal_app_native_effect(handle, UInt32(index))
+            guard effect.kind == UInt16(SEYAL_APP_EFFECT_WINDOW_ACTIVATION) else { continue }
+            activations += 1
+            XCTAssertEqual(effect.window_lo, target.window_lo)
+            XCTAssertEqual(effect.window_hi, target.window_hi)
+        }
+        XCTAssertEqual(activations, 1, "one WindowActivation for the target window")
+        ackPendingEffects(handle)
         XCTAssertEqual(shell.window_count, 2)
         XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
-        let target = seyal_app_window(handle, 1)
-        XCTAssertNotEqual(target.flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE), 0)
+        XCTAssertNotEqual(
+            seyal_app_window(handle, 1).flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE),
+            0
+        )
     }
 }

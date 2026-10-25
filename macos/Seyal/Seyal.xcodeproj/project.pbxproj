@@ -82,7 +82,7 @@
 		A1000000000000000000008C /* ApplicationQuitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000008C /* ApplicationQuitCoordinator.swift */; };
 		A1000000000000000000008D /* MultiWindowHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000008D /* MultiWindowHostController.swift */; };
 		C1000000000000000000000A /* MultiWindowHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* MultiWindowHostTests.swift */; };
-		C10000000000000000000011 /* NavigationEvidenceHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000011 /* NavigationEvidenceHostTests.swift */; };
+		C10000000000000000000011 /* NavigationEvidenceAbiTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -184,7 +184,7 @@
 		A2000000000000000000008C /* ApplicationQuitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationQuitCoordinator.swift; sourceTree = "<group>"; };
 		A2000000000000000000008D /* MultiWindowHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowHostController.swift; sourceTree = "<group>"; };
 		C2000000000000000000000A /* MultiWindowHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowHostTests.swift; sourceTree = "<group>"; };
-		C20000000000000000000011 /* NavigationEvidenceHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationEvidenceHostTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationEvidenceAbiTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -330,7 +330,7 @@
 			children = (
 				C20000000000000000000003 /* SeyalHostComponentTests.swift */,
 				C2000000000000000000000A /* MultiWindowHostTests.swift */,
-				C20000000000000000000011 /* NavigationEvidenceHostTests.swift */,
+				C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */,
 				C20000000000000000000008 /* KeybindingEvidenceTests.swift */,
 				C2000000000000000000000E /* DividerDragProjectionTests.swift */,
 				C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */,
@@ -548,7 +548,7 @@
 			files = (
 				C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */,
 				C1000000000000000000000A /* MultiWindowHostTests.swift in Sources */,
-				C10000000000000000000011 /* NavigationEvidenceHostTests.swift in Sources */,
+				C10000000000000000000011 /* NavigationEvidenceAbiTests.swift in Sources */,
 				C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */,
 				C1000000000000000000000E /* DividerDragProjectionTests.swift in Sources */,
 				C1000000000000000000000A /* AttentionOsNotificationAdapterTests.swift in Sources */,
