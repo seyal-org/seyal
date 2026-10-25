@@ -771,16 +771,6 @@ extension ProductChromeHostView: NSMenuItemValidation {
         guard let commandId = menuItem.representedObject as? UInt16 else {
             return true
         }
-        if let title = KeybindingShortcutRealization.liveTitle(
-            appHandle: pane.appHandle,
-            commandId: commandId
-        ) {
-            menuItem.title = title
-        }
-        return KeybindingShortcutRealization.isEnabled(
-            appHandle: pane.appHandle,
-            commandId: commandId,
-            composerFocused: false
-        )
+        return KeybindingShortcutRealization.validate(menuItem, commandId: commandId, appHandle: pane.appHandle)
     }
 }

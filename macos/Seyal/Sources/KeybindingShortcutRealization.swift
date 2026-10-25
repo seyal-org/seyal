@@ -71,10 +71,14 @@ enum KeybindingShortcutRealization {
         }
     }
 
-    /// SPEC-024 R5.6.2: live title from Rust product state; nil keeps the cold title.
-    static func liveTitle(appHandle: UInt64, commandId: UInt16) -> String? {
-        let title = seyal_app_shortcut_title(appHandle, commandId, 0)
-        return copyUTF8(title.title, title.title_len)
+    /// Menu validation: R5.6.2 live title from Rust product state (an empty
+    /// result keeps the cold title) and the R6.4.2 enabled bit.
+    static func validate(_ menuItem: NSMenuItem, commandId: UInt16, appHandle: UInt64) -> Bool {
+        let live = seyal_app_shortcut_title(appHandle, commandId, 0)
+        if let title = copyUTF8(live.title, live.title_len) {
+            menuItem.title = title
+        }
+        return isEnabled(appHandle: appHandle, commandId: commandId, composerFocused: false)
     }
 
     static func isEnabled(appHandle: UInt64, commandId: UInt16, composerFocused: Bool) -> Bool {
