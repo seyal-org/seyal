@@ -273,9 +273,6 @@ final class ProductChromeHostView: NSView {
             recoveryLabel.heightAnchor.constraint(equalToConstant: 1),
 
             centerColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
-            // liveContent's size is the Rust region, so these required edges
-            // follow that region instead of letting content width win or
-            // growing the window.
             transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
             transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
             transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
