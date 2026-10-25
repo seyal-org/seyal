@@ -181,6 +181,7 @@ impl ApplicationRoot {
             pty_generation: client.cache().generation.max(1),
             alternate_screen: client.cache().alternate_screen,
         };
+        let runtime_id = client.runtime_id();
         let registered = match crate::ffi::register_app_client(client) {
             Ok(handle) => handle,
             Err(()) => return Err(AppError::AlreadyBound),
@@ -192,6 +193,7 @@ impl ApplicationRoot {
             self.extra_pane_clients.insert(pane, registered);
         }
         self.pane_client_raws.insert(pane, raw);
+        self.remember_pane_runtime(pane, runtime_id);
 
         let attach = self.complete_create_attach_and_bind(request_id, evidence.attachment);
         match attach {
@@ -285,6 +287,8 @@ impl ApplicationRoot {
         if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
             return Err(AppError::StaleExecution);
         }
+        self.bind_pane_recovery(pane, evidence.execution);
+        self.remember_primary_pane(pane);
         let authority = PaneAuthority {
             pane,
             execution: evidence.execution,
@@ -326,6 +330,7 @@ impl ApplicationRoot {
             .map(|(pane, _)| *pane)
             .collect();
         for pane in panes {
+            self.note_pane_attachment_loss(pane, handle);
             self.unregister_extra_pane_client(pane);
             if self
                 .client_handle
@@ -334,6 +339,14 @@ impl ApplicationRoot {
             {
                 self.client_handle = None;
                 self.pane_client_raws.remove(&pane);
+            }
+            if self.shell.snapshot().focused_pane == pane {
+                self.authority = None;
+                let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+                self.sync_composer_presentation();
+                if crate::ffi::focused_registry_handle() == 0 {
+                    crate::ffi::set_focused_display_handle(0);
+                }
             }
         }
     }

@@ -41,9 +41,7 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     override var recoveryAppHandle: UInt64 { appHandle }
 
     override func updateVisibility() {
-        if shouldRender, !renderable, recoveryPresentationPending {
-            resetComposerRecoveryFocusRetries()
-        }
+        if shouldRender, !renderable, recoveryPresentationPending { resetComposerRecoveryFocusRetries() }
         super.updateVisibility()
     }
 
@@ -68,16 +66,6 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         resetComposerRecoveryFocusRetries()
     }
 
-    override func windowActivationNotificationReceived() {
-        guard !activationRecoveryNotificationScheduled else { return }
-        activationRecoveryNotificationScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.activationRecoveryNotificationScheduled = false
-            self.windowActivationChanged()
-        }
-    }
-
     override func windowActivationChanged() {
         let wasRecoveryPending = recoveryPresentationPending
         super.windowActivationChanged()
@@ -85,6 +73,16 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             recoveryFocusReadinessDidChange { [weak self] in
                 _ = self?.advanceRecoveryPresentationIfReady()
             }
+        }
+    }
+
+    override func windowActivationNotificationReceived() {
+        guard !activationRecoveryNotificationScheduled else { return }
+        activationRecoveryNotificationScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.activationRecoveryNotificationScheduled = false
+            self.windowActivationChanged()
         }
     }
 
@@ -153,11 +151,6 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     override func terminalBridgeStatusDidChange() {
         super.terminalBridgeStatusDidChange()
         let connected = terminalBridgeIsConnected
-        if connected, recoveryPresentationPending {
-            // A usable bridge is when the composer can accept first responder.
-            resetComposerRecoveryFocusRetries()
-            _ = advanceRecoveryPresentationIfReady()
-        }
         if connected {
             guard !announcedBridgeUsable else { return }
             announcedBridgeUsable = true

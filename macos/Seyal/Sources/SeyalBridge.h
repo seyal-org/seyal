@@ -113,9 +113,13 @@ typedef struct SeyalComposerResult {
 } SeyalComposerResult;
 
 /* Runtime-published composer eligibility (#978): eligibility uses
- * SeyalAppComposerEligibility; revision 0 means nothing published yet. */
+ * SeyalAppComposerEligibility; revision 0 means no status was published.
+ * Revisions are execution-scoped, and attachment identity identifies the
+ * focused display client whose status is reported. */
 typedef struct SeyalComposerStatus {
     uint64_t revision;
+    uint64_t attachment_id_low;
+    uint64_t attachment_id_high;
     uint8_t eligibility;
     uint8_t reserved[7];
 } SeyalComposerStatus;
@@ -204,6 +208,7 @@ int32_t seyal_bridge_wants_write_for(uint64_t handle);
 int32_t seyal_bridge_flush_writable(void);
 int32_t seyal_bridge_flush_writable_for(uint64_t handle);
 int32_t seyal_bridge_submit_utf8(const uint8_t *bytes, uint32_t len);
+int32_t seyal_bridge_submit_utf8_for(uint64_t handle, const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_paste(const uint8_t *bytes, uint32_t len);
 int32_t seyal_bridge_submit_host_selection(
     uint8_t action,
@@ -270,15 +275,15 @@ int32_t seyal_bridge_propose_geometry(
     double horizontal_insets,
     double vertical_insets,
     double cell_width,
-    double cell_height,
-    uint8_t meaningful_layout_epoch
+    double cell_height
 );
 int32_t seyal_bridge_retry_resize(void);
 int32_t seyal_bridge_input_failure(void);
 int32_t seyal_bridge_resize_failure(void);
 SeyalPreparedFrame seyal_bridge_frame(void);
+/* Prepared frame for one registry handle without changing focus (#936). */
 SeyalPreparedFrame seyal_bridge_frame_for(uint64_t handle);
-int32_t seyal_bridge_submit_utf8_for(uint64_t handle, const uint8_t *bytes, uint32_t len);
+int32_t seyal_bridge_ensure_prepared_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);
 uint32_t seyal_bridge_block_count(void);

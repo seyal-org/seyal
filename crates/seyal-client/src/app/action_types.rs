@@ -286,4 +286,6 @@ pub enum WindowNativeEvent {
     EnteredFullscreen = 7,
     ExitedFullscreen = 8,
     ScreenOrScaleChanged = 9,
+    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
+    ActivationFailed = 10,
 }

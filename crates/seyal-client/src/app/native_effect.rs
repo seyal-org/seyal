@@ -1,4 +1,4 @@
-//! ADR-018 §2.4 native effects queued for the thin host (W3 / W6).
+//! ADR-018 §2.4 native effects queued for the thin host (W3/W4a).
 
 use seyal_core::WindowId;
 
@@ -15,10 +15,24 @@ pub const QUIT_CLEANUP_DEADLINE_MS: u64 = 500;
 /// Typed native effect returned to the host after a committed product transition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeEffect {
-    BoundedDetachThenTerminate { deadline_ms: u64 },
-    RealizeWindow { window: WindowId },
-    DestroyWindowRealization { window: WindowId },
-    OrderFrontMakeKey { window: WindowId },
+    /// Quit backstop deadline. `deadline_ms` is relative from emission.
+    BoundedDetachThenTerminate {
+        deadline_ms: u64,
+    },
+    RealizeWindow {
+        window: WindowId,
+    },
+    DestroyWindowRealization {
+        window: WindowId,
+    },
+    OrderFrontMakeKey {
+        window: WindowId,
+    },
+    /// SPEC-022 R5.2: host must activate this window, not another.
+    WindowActivation {
+        window: WindowId,
+    },
+    /// Rust finished quit bookkeeping after the host acked BoundedDetachThenTerminate.
     QuitCleanupComplete,
 }
 
@@ -30,6 +44,7 @@ impl From<ShellNativeEffect> for NativeEffect {
                 Self::DestroyWindowRealization { window }
             }
             ShellNativeEffect::OrderFrontMakeKey { window } => Self::OrderFrontMakeKey { window },
+            ShellNativeEffect::WindowActivation { window } => Self::WindowActivation { window },
         }
     }
 }
@@ -42,7 +57,8 @@ impl NativeEffect {
             Self::RealizeWindow { .. } => 2,
             Self::DestroyWindowRealization { .. } => 3,
             Self::OrderFrontMakeKey { .. } => 4,
-            Self::QuitCleanupComplete => 7,
+            Self::QuitCleanupComplete => 5,
+            Self::WindowActivation { .. } => 6,
         }
     }
 
@@ -51,10 +67,12 @@ impl NativeEffect {
             Self::BoundedDetachThenTerminate { .. } | Self::QuitCleanupComplete => None,
             Self::RealizeWindow { window }
             | Self::DestroyWindowRealization { window }
-            | Self::OrderFrontMakeKey { window } => Some(window),
+            | Self::OrderFrontMakeKey { window }
+            | Self::WindowActivation { window } => Some(window),
         }
     }
 
+    /// Relative deadline for kind 1; otherwise 0. Encoded in `window_lo` on the ABI row.
     pub fn deadline_ms(self) -> u64 {
         match self {
             Self::BoundedDetachThenTerminate { deadline_ms } => deadline_ms,

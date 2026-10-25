@@ -9,6 +9,7 @@ mod action_types;
 mod actions;
 mod close;
 mod effects;
+mod equalize;
 mod focus_direction;
 mod focus_history;
 mod inventory;
@@ -26,6 +27,8 @@ mod pt1_tests;
 mod pt2_tests;
 #[cfg(test)]
 mod pt3_tests;
+#[cfg(test)]
+mod pt4_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -357,8 +360,13 @@ impl ShellState {
         std::mem::take(&mut self.pending_effects)
     }
 
-    pub(super) fn push_effect(&mut self, effect: ShellNativeEffect) {
+    pub(crate) fn push_effect(&mut self, effect: ShellNativeEffect) {
         self.pending_effects.push(effect);
+    }
+
+    /// Hosting window of `tab` from the Tab → Window placement map (SPEC-022 R5.1).
+    pub fn window_of_tab(&self, tab: TabId) -> Option<WindowId> {
+        self.find_tab_location(tab).map(|(_, window, _)| window)
     }
 
     pub fn last_active_workspace(&self) -> WorkspaceId {
@@ -443,7 +451,7 @@ impl ShellState {
         self.allows_window_creation
     }
 
-    /// Test harness: flip CreateWindow admission without rebuilding the shell.
+    /// Test harness: admit CreateWindow on an occupied Workspace.
     #[cfg(test)]
     pub(crate) fn set_allows_window_creation_for_test(&mut self, allowed: bool) {
         self.allows_window_creation = allowed;
@@ -633,7 +641,6 @@ impl ShellState {
         {
             return Err(ShellError::UnknownPane);
         }
-        let previous_product = self.product_active_window().map(|window| window.id);
         let workspace_mut = self.workspace_mut(workspace)?;
         workspace_mut.select_tab(tab)?;
         let active_tab = workspace_mut.active_tab_mut()?;
@@ -644,11 +651,6 @@ impl ShellState {
         self.focus_history.record(pane);
         self.last_active_workspace = workspace;
         self.last_error = None;
-        if let Some((_, window, _)) = self.find_tab_location(tab)
-            && previous_product != Some(window)
-        {
-            self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
-        }
         Ok(())
     }
 
@@ -680,6 +682,7 @@ impl ShellState {
             | ShellAction::ActivateWorkspace { .. }
             | ShellAction::SelectWindow { .. }
             | ShellAction::NativeWindowBecameKey { .. }
+            | ShellAction::ObserveWindowBecameKey { .. }
             | ShellAction::SelectTab { .. }
             | ShellAction::CreateTab { .. }
             | ShellAction::CycleWindow { .. }
@@ -726,6 +729,16 @@ impl ShellState {
                 .and_then(|()| self.move_pane_beside(pane, neighbor, side)),
             ShellAction::FocusDirection { direction } => self.focus_direction(direction),
             ShellAction::SetSplitRatio { pane, ratio } => self.set_split_ratio(pane, ratio),
+            ShellAction::EqualizeTab {
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.equalize_tab()),
+            ShellAction::EqualizeFocused {
+                containment_generation,
+            } => self
+                .require_containment_generation(containment_generation)
+                .and_then(|()| self.equalize_focused()),
             ShellAction::BindExecution { pane, execution } => self.bind_execution(pane, execution),
             ShellAction::RecordUnpresented { .. }
             | ShellAction::ForgetUnpresented { .. }

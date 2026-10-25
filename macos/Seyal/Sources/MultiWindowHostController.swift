@@ -10,11 +10,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
+    /// Close requests whose `windowShouldClose` veto is still on the stack.
+    private var appKitCloseRequestsInFlight: Set<WindowKey> = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
-    /// Guards AppKit's synchronous close callback so its Destroy effect can
-    /// finish the native close after the delegate has returned.
-    private var appKitCloseRequestsInFlight: Set<WindowKey> = []
 
     let liveHost: ProductChromeHostView
     private let quitCoordinator = ApplicationQuitCoordinator()
@@ -26,11 +25,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     override init() {
         liveHost = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         super.init()
-        // Chain after ProductChromeHostView's own pane hook so window effects
-        // apply whenever Rust commits a product transition.
-        let forwardProductChange = liveHost.pane.onProductChanged
+        // Preserve ProductChromeHostView's frame/block refresh hook, then add
+        // the multi-window realization work for the same Rust commit.
+        let refreshProductHost = liveHost.pane.onProductChanged
         liveHost.pane.onProductChanged = { [weak self] in
-            forwardProductChange?()
+            refreshProductHost?()
             guard let self else { return }
             self.liveHost.reconcileChrome()
             self.applyPendingEffects()
@@ -43,6 +42,18 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
         liveHost.activateAfterWindowPresentation()
         NSApp.activate(ignoringOtherApps: true)
+        #if DEBUG
+        // Hosted resize acceptance needs enough room for both real Pane targets
+        // on smaller CI displays, even when AppKit restores a previous frame.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let window = self.realizations.values.first(where: { $0.contentView === self.liveHost })
+                else { return }
+                self.placeCompactResizeWindow(window)
+            }
+        }
+        #endif
     }
 
     func applyPendingEffectsAndReconcile() {
@@ -51,6 +62,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         refreshTitlesFromSnapshot()
         liveHost.reconcileChrome()
     }
+
+    #if DEBUG
+    /// Once the hosted test drags the window, leave that size alone.
+    private var compactClampArmed = true
+    /// Re-entrancy fence for the hosted resize fixture's on-screen clamp.
+    private var applyingCompactFrame = false
+    #endif
 
     /// UI order equals snapshot order (ADR-018 §1.3 / W4a).
     func snapshotOrderedWindowKeys() -> [WindowKey] {
@@ -69,6 +87,10 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         orderedKeys.compactMap { realizations[$0]?.tabbingMode }
     }
 
+    func realizedWindowForTests(_ key: WindowKey) -> NSWindow? {
+        realizations[key]
+    }
+
     func applyPendingEffects() {
         // Drain window effects only. Quit effects stay queued for §4.
         while true {
@@ -79,10 +101,24 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             {
                 break
             }
-            applyEffect(effect)
+            if !orderFrontIsSupersededByActivation(effect) {
+                applyEffect(effect)
+            }
             ackOneEffect()
         }
         orderedKeys = snapshotOrderedWindowKeys().filter { realizations[$0] != nil }
+    }
+
+    /// Cross-window navigation publishes product focus and an OrderFront
+    /// projection before the retryable activation effect. Defer that raise
+    /// until activation succeeds so a bounded failure leaves AppKit on the
+    /// previous live host while Rust's committed focus remains authoritative.
+    private func orderFrontIsSupersededByActivation(_ effect: SeyalAppNativeEffect) -> Bool {
+        guard effect.kind == UInt16(SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY) else { return false }
+        let next = seyal_app_native_effect(appHandle, 1)
+        return next.kind == UInt16(SEYAL_APP_EFFECT_WINDOW_ACTIVATION)
+            && next.window_lo == effect.window_lo
+            && next.window_hi == effect.window_hi
     }
 
     private func applyEffect(_ effect: SeyalAppNativeEffect) {
@@ -94,6 +130,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             destroyRealization(key)
         case UInt16(SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY):
             orderFrontMakeKey(key)
+        case UInt16(SEYAL_APP_EFFECT_WINDOW_ACTIVATION):
+            realizeWindowActivation(key)
         default:
             break
         }
@@ -106,22 +144,19 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         if !orderedKeys.contains(key) {
             orderedKeys.append(key)
         }
-        // One live Metal leaf: install live host only for the product-active window.
+        // Install the live Pane surfaces only in Rust's product-active window.
         if isProductActive(key) {
             installLiveHost(in: window, key: key)
         } else {
             window.contentView = InactiveWindowPlaceholderView(frame: window.contentLayoutRect)
         }
-        if isProductActive(key) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            // Realizing the snapshot must not synthesize native focus changes:
-            // only Rust's explicit OrderFrontMakeKey effect activates a window.
-            window.orderFront(nil)
-        }
+        window.makeKeyAndOrderFront(nil)
     }
 
     private func destroyRealization(_ key: WindowKey) {
+        if pendingActivationKey == key {
+            cancelPendingActivation()
+        }
         guard let window = realizations.removeValue(forKey: key) else { return }
         orderedKeys.removeAll { $0 == key }
         if liveKey == key {
@@ -135,10 +170,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             }
         }
         window.contentView = nil
-        // `windowShouldClose` must veto AppKit's synchronous user request per
-        // ADR-018 §2.5. The effect still owns this destruction; defer its
-        // AppKit close until that delegate call has returned, otherwise the
-        // in-flight veto swallows `close()` and the NSWindow stays on screen.
+        // `windowShouldClose` vetoes AppKit's synchronous user request.
+        // Defer `close()` until that call returns, or the veto swallows it.
         if appKitCloseRequestsInFlight.contains(key) {
             DispatchQueue.main.async { [window] in
                 Self.finishAppKitClose(window)
@@ -150,11 +183,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Drop the native realization from AppKit's window list.
     ///
-    /// `isReleasedWhenClosed = false` orders the window out but, on current
-    /// AppKit, leaves it in `NSApp.windows` and preserves `windowNumber` for
-    /// as long as Swift retains the object. Releasing on close is what
-    /// removes it. The extra retain balances AppKit's release so ARC remains
-    /// the owner until the host and any test drop their references.
+    /// `isReleasedWhenClosed = false` orders the window out but leaves it in
+    /// `NSApp.windows`. Releasing on close removes it. The extra retain
+    /// balances AppKit's release so ARC stays the owner.
     private static func finishAppKitClose(_ window: NSWindow) {
         window.delegate = nil
         window.isReleasedWhenClosed = true
@@ -168,6 +199,142 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             installLiveHost(in: window, key: key)
         }
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Remaining injected failures for the next `WindowActivation` (tests).
+    var activationFailBudget: Int = 0
+    /// Replaces AppKit's activation request to exercise OS refusal in tests.
+    var activationRequestForTests: ((NSWindow) -> Void)?
+    /// Provides AppKit's key-state observation when tests need deterministic success.
+    var keyWindowStatusForTests: ((NSWindow) -> Bool)?
+    /// Observes completion without depending on XCTest's foreground activation state.
+    var activationCompletionForTests: ((Bool) -> Void)?
+    /// Attempts spent on the last `WindowActivation` effect (tests).
+    private(set) var lastActivationAttempts: Int = 0
+    /// Captures the native failure report at its synchronous FFI boundary (tests).
+    private(set) var lastActivationFailureReportForTests: (result: Int32, error: Int32)?
+    private static let activationAcknowledgementDelay: TimeInterval = 0.05
+    private var activationGeneration: UInt64 = 0
+    private var activationWorkItem: DispatchWorkItem?
+    private var pendingActivationKey: WindowKey?
+
+    /// Realize SPEC-022 WindowActivation: only the named window, bounded asynchronous retry.
+    private func realizeWindowActivation(_ key: WindowKey) {
+        cancelPendingActivation()
+        let generation = activationGeneration
+        lastActivationAttempts = 0
+        lastActivationFailureReportForTests = nil
+        pendingActivationKey = key
+        scheduleActivationAttempt(key, generation: generation)
+    }
+
+    private func scheduleActivationAttempt(_ key: WindowKey, generation: UInt64, after delay: TimeInterval = 0) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.attemptNamedWindowActivation(key, generation: generation)
+        }
+        activationWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func attemptNamedWindowActivation(_ key: WindowKey, generation: UInt64) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        guard let window = realizations[key] else {
+            completeWindowActivation(key, generation: generation, succeeded: false)
+            return
+        }
+
+        lastActivationAttempts += 1
+        if activationFailBudget > 0 {
+            activationFailBudget -= 1
+            retryOrFailWindowActivation(key, generation: generation)
+            return
+        }
+
+        // Host must not pick a different window than the effect names.
+        if let activationRequestForTests {
+            activationRequestForTests(window)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
+
+        // AppKit can complete key-window activation on a later event turn.
+        // A bounded delayed acknowledgement avoids both a false immediate
+        // failure and a nested event loop that could reenter effect draining.
+        let acknowledgement = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.pendingActivationKey == key,
+                  self.activationGeneration == generation
+            else { return }
+            guard let target = self.realizations[key] else {
+                self.completeWindowActivation(key, generation: generation, succeeded: false)
+                return
+            }
+            if self.isKeyWindow(target) {
+                self.completeWindowActivation(key, generation: generation, succeeded: true)
+            } else {
+                self.retryOrFailWindowActivation(key, generation: generation)
+            }
+        }
+        activationWorkItem = acknowledgement
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.activationAcknowledgementDelay,
+            execute: acknowledgement
+        )
+    }
+
+    private func retryOrFailWindowActivation(_ key: WindowKey, generation: UInt64) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        if lastActivationAttempts >= Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS) {
+            completeWindowActivation(key, generation: generation, succeeded: false)
+        } else {
+            scheduleActivationAttempt(
+                key,
+                generation: generation,
+                after: Self.activationAcknowledgementDelay
+            )
+        }
+    }
+
+    private func completeWindowActivation(_ key: WindowKey, generation: UInt64, succeeded: Bool) {
+        guard pendingActivationKey == key, activationGeneration == generation else { return }
+        activationWorkItem?.cancel()
+        activationWorkItem = nil
+        pendingActivationKey = nil
+
+        if succeeded, let window = realizations[key], liveKey != key {
+            installLiveHost(in: window, key: key)
+        } else if !succeeded {
+            reportActivationFailed(key)
+        }
+        activationCompletionForTests?(succeeded)
+    }
+
+    private func cancelPendingActivation() {
+        activationGeneration &+= 1
+        activationWorkItem?.cancel()
+        activationWorkItem = nil
+        pendingActivationKey = nil
+    }
+
+    private func isKeyWindow(_ window: NSWindow) -> Bool {
+        if let keyWindowStatusForTests {
+            return keyWindowStatusForTests(window)
+        }
+        return window.isKeyWindow && NSApp.keyWindow === window
+    }
+
+    private func reportActivationFailed(_ key: WindowKey) {
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_REPORT_WINDOW_EVENT.rawValue)
+        action.target_execution_lo = key.lo
+        action.target_execution_hi = key.hi
+        action.reserved = SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED
+        let result = seyal_app_apply(appHandle, &action)
+        lastActivationFailureReportForTests = (result, seyal_app_last_error(appHandle))
     }
 
     private func installLiveHost(in window: NSWindow, key: WindowKey) {
@@ -209,25 +376,36 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         return shell.active_window_lo == key.lo && shell.active_window_hi == key.hi
     }
 
+    private var initialWindowSize: NSSize {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            return NSSize(width: 1100, height: 760)
+        }
+        #endif
+        return NSSize(width: 1280, height: 800)
+    }
+
     private func makeSeyalWindow(for key: WindowKey) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+            contentRect: NSRect(origin: .zero, size: initialWindowSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        // NSWindow defaults to releasing itself when closed. ARC owns the
-        // realization after close, so AppKit must not release it as well.
         window.isReleasedWhenClosed = false
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
-        window.tabbingMode = .disallowed
-        window.identifier = NSUserInterfaceItemIdentifier("seyal-window-\(key.lo)-\(key.hi)")
-        // The traffic-light control is the real close button. Stamp it so
-        // headed tests can find it without depending on the system AX label,
-        // which is not reliably "Close".
         window.standardWindowButton(.closeButton)?
             .setAccessibilityIdentifier("seyal-window-close")
+        #if DEBUG
+        // A restored frame wider than the display puts the resize corner
+        // off-screen, so the hosted two-pane resize drag never starts.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            window.isRestorable = false
+        }
+        #endif
+        window.tabbingMode = .disallowed
+        window.identifier = NSUserInterfaceItemIdentifier("seyal-window-\(key.lo)-\(key.hi)")
         window.delegate = self
         let platform = NSApp.effectiveAppearance
         NativeThemeRealization.surfaceColdDiagnosticsOnce(for: platform)
@@ -290,6 +468,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     }
 
     func performQuitCleanup() {
+        cancelPendingActivation()
         liveHost.detachForTermination()
         for key in Array(realizations.keys) {
             destroyRealization(key)
@@ -313,9 +492,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     // MARK: - Typed actions (menus)
 
-    /// File → New Window / ⌘⇧N: always the target-free New Window intent.
-    /// Rust resolves Workspace (ADR-018 §2.2 / §3.3a). Never ActivateWorkspace.
     @objc func createWindow(_: Any?) {
+        // ADR-018 §2.2 / §3.3a: target-free New Window — Rust resolves Workspace.
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
@@ -324,7 +502,12 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
     }
 
-    /// Dock reopen: always forward ActivateWorkspace{last_active_workspace}.
+    @objc func createTab(_: Any?) {
+        liveHost.createTab()
+        applyPendingEffectsAndReconcile()
+    }
+
+    /// Dock reopen: forward ActivateWorkspace for the last active workspace.
     func handleDockReopen() {
         let shell = seyal_app_shell(appHandle)
         var action = SeyalAppAction()
@@ -337,13 +520,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
     }
 
-    @objc func createTab(_: Any?) {
-        liveHost.createTab()
-        applyPendingEffectsAndReconcile()
-    }
-
     /// ⌘W hierarchical close: ClosePane on the focused Pane. Rust peels
-    /// Pane → Tab → Window. No keyDown path.
+    /// Pane → Tab → Window.
     @objc func hierarchicalClose(_: Any?) {
         let shell = seyal_app_shell(appHandle)
         guard shell.window_count > 0 else { return }
@@ -358,7 +536,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
     }
 
-    /// Title-bar / system close: forward CloseWindow; never destroy locally.
+    /// Title-bar close: forward CloseWindow. Destruction comes from Rust.
     func forwardCloseWindow(_ key: WindowKey) {
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -414,29 +592,16 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.target_execution_lo = key.lo
         action.target_execution_hi = key.hi
         action.reserved = event
-        let result = seyal_app_apply(appHandle, &action)
-        if result == 0, event == SEYAL_APP_WINDOW_EVENT_BECAME_KEY {
-            // AppKit is already key. Rust commits product selection and focus
-            // history from this typed event; move the one live host into that
-            // Rust-selected realization without asking AppKit to key it again.
-            installLiveHost(in: window, key: key)
-            liveHost.reconcileChrome()
-            liveHost.routeFocus()
-        }
+        _ = seyal_app_apply(appHandle, &action)
     }
 
     private func key(for window: NSWindow) -> WindowKey? {
         realizations.first(where: { $0.value === window })?.key
     }
 
-    func realizedWindow(for key: WindowKey) -> NSWindow? {
-        realizations[key]
-    }
-
     // MARK: - NSWindowDelegate (forward only; no product decisions)
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // ADR-018 §2.5: refuse local destroy; Rust emits DestroyWindowRealization.
         if let key = key(for: sender) {
             appKitCloseRequestsInFlight.insert(key)
             defer { appKitCloseRequestsInFlight.remove(key) }
@@ -447,7 +612,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        if let key = key(for: window), pendingActivationKey == key, isKeyWindow(window) {
+            completeWindowActivation(key, generation: activationGeneration, succeeded: true)
+        }
         reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_BECAME_KEY)
+        if let key = key(for: window), isProductActive(key), liveKey != key {
+            installLiveHost(in: window, key: key)
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -467,11 +638,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        var event = SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED
-        if !window.occlusionState.contains(.visible) {
-            event |= SEYAL_APP_WINDOW_EVENT_OCCLUSION_HIDDEN
-        }
-        reportWindowEvent(window: window, event: event)
+        reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED)
     }
 
     func windowDidMiniaturize(_ notification: Notification) {
@@ -503,6 +670,69 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         guard let window = notification.object as? NSWindow else { return }
         reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED)
     }
+
+    func windowWillStartLiveResize(_ notification: Notification) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            compactClampArmed = false
+        }
+        #endif
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        #if DEBUG
+        guard compactClampArmed,
+              !applyingCompactFrame,
+              ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1",
+              let window = notification.object as? NSWindow,
+              !window.inLiveResize,
+              let screen = window.screen ?? NSScreen.main,
+              window.frame.width > screen.visibleFrame.width - 40
+        else { return }
+        // AppKit forbids setFrame inside the resize notification that layout
+        // is still posting. Clamp on the next turn, and only while the frame
+        // is too wide for the resize corner to stay on screen.
+        applyingCompactFrame = true
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.placeCompactResizeWindow(window)
+        }
+        #endif
+    }
+
+    #if DEBUG
+    private func placeCompactResizeWindow(_ window: NSWindow) {
+        applyingCompactFrame = true
+        defer { applyingCompactFrame = false; compactClampArmed = false }
+        if let content = window.contentView {
+            relaxWideConstraints(in: content)
+        }
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame
+        let width = min(1100, max(960, (visible?.width ?? 1100) - 220))
+        let height = min(760, max(640, (visible?.height ?? 760) - 80))
+        var frame = window.frameRect(
+            forContentRect: NSRect(x: 0, y: 0, width: width, height: height))
+        guard let visible else {
+            window.setFrame(frame, display: true)
+            window.center()
+            return
+        }
+        frame.origin.x = visible.minX + 8
+        frame.origin.y = max(visible.minY + 8, visible.maxY - frame.height - 8)
+        window.setFrame(frame, display: true)
+    }
+
+    /// Autoresizing masks inside the pane layout become required widths.
+    /// A stale wide one keeps a restored frame from accepting the compact size.
+    private func relaxWideConstraints(in view: NSView) {
+        for constraint in view.constraints where constraint.firstAttribute == .width && constraint.constant > 700 {
+            constraint.priority = .defaultLow
+        }
+        for child in view.subviews {
+            relaxWideConstraints(in: child)
+        }
+    }
+    #endif
 }
 
 enum QuitForwardError: Error {

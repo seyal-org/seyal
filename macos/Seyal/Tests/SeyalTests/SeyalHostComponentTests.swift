@@ -40,7 +40,12 @@ final class SeyalHostComponentTests: XCTestCase {
         let theme = seyal_app_theme(0)
         XCTAssertNotEqual(theme.canvas, theme.text)
         XCTAssertEqual(MemoryLayout<SeyalAppComposer>.size, 40)
-        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 16)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.size, 32)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.revision), 0)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_low), 8)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.attachment_id_high), 16)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.eligibility), 24)
+        XCTAssertEqual(MemoryLayout<SeyalComposerStatus>.offset(of: \.reserved), 25)
         XCTAssertEqual(MemoryLayout<SeyalAppChrome>.size, 24)
         XCTAssertEqual(MemoryLayout<SeyalAppShell>.size, 120)
         XCTAssertEqual(MemoryLayout<SeyalAppRow>.size, 112)
@@ -129,7 +134,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
@@ -189,7 +194,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
@@ -224,7 +229,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -260,7 +265,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             relayComposerStatus(
@@ -277,7 +282,7 @@ final class SeyalHostComponentTests: XCTestCase {
         setDraft.size = bind.size
         setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         setDraft.applySnapshotFence(seyal_app_snapshot(handle))
-        setDraft.target_generation = seyal_app_composer(handle).epoch
+        setDraft.target_pty_generation = seyal_app_composer(handle).epoch
         draft.withUnsafeBufferPointer { buffer in
             setDraft.payload = buffer.baseAddress
             setDraft.payload_len = UInt32(buffer.count)
@@ -288,7 +293,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(seyal_app_snapshot(handle))
-        submit.target_generation = seyal_app_composer(handle).epoch
+        submit.target_pty_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         let requestID = seyal_app_composer(handle).request_id
         XCTAssertNotEqual(requestID, 0)
@@ -380,59 +385,27 @@ final class SeyalHostComponentTests: XCTestCase {
     func testShellCompositionControlsFollowRustPolicyForTabsAndSplits() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
         view.reconcileChrome()
-        // W2b enables hierarchical close, including the final Tab/Pane that
-        // collapses the containing Window. These capabilities remain Rust-owned.
+        // C2b/C3 enable production tab creation and pane splitting. With a sole
+        // Tab/Pane, close controls remain omitted.
         let shell = seyal_app_shell(view.pane.appHandle)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION), 0)
         XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING), 0)
-        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE), 0)
-        XCTAssertNotEqual(shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE), 0)
+        for bit in [
+            SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE,
+            SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE,
+        ] {
+            XCTAssertEqual(shell.flags & UInt16(bit), 0)
+        }
         let newTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-new-tab"))
         XCTAssertFalse(newTab.isHidden, "seyal-new-tab is shown when Rust allows CreateTab")
         for identifier in ["seyal-split-right", "seyal-split-down"] {
             let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
             XCTAssertFalse(control.isHidden, "\(identifier) is shown when Rust allows SplitFocused")
         }
-        let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
-        let closePane = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-pane"))
-        XCTAssertFalse(closeTab.isHidden, "Rust permits hierarchical tab close")
-        XCTAssertFalse(closePane.isHidden, "Rust permits hierarchical pane close")
-        XCTAssertEqual(view.closeTabButton.containmentGeneration, shell.containment_generation)
-        XCTAssertEqual(view.closePaneButton.containmentGeneration, shell.containment_generation)
-    }
-
-    @MainActor
-    func testCloseTabUsesSnapshotContainmentFence() throws {
-        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
-        view.reconcileChrome()
-        let handle = view.pane.appHandle
-        var create = SeyalAppAction()
-        create.version = UInt16(SEYAL_APP_ABI_VERSION)
-        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
-        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
-        view.reconcileChrome()
-
-        let shell = seyal_app_shell(handle)
-        XCTAssertEqual(shell.tab_count, 2)
-        let currentGeneration = shell.containment_generation
-        XCTAssertEqual(view.closeTabButton.containmentGeneration, currentGeneration)
-
-        view.closeTabButton.containmentGeneration = currentGeneration &- 1
-        view.closeActiveTab(view.closeTabButton)
-        XCTAssertEqual(
-            seyal_app_shell(handle).tab_count,
-            2,
-            "a stale close control must not remove the current Tab"
-        )
-
-        view.closeTabButton.containmentGeneration = currentGeneration
-        view.closeActiveTab(view.closeTabButton)
-        XCTAssertEqual(
-            seyal_app_shell(handle).tab_count,
-            1,
-            "a current close control carries the exact Rust containment fence"
-        )
+        for identifier in ["seyal-close-tab", "seyal-close-pane"] {
+            let control = try XCTUnwrap(accessibilityChild(view, identifier: identifier), identifier)
+            XCTAssertTrue(control.isHidden, "\(identifier) is omitted when Rust disallows the action")
+        }
     }
 
     @MainActor
@@ -476,6 +449,7 @@ final class SeyalHostComponentTests: XCTestCase {
     @MainActor
     func testProductionPaneTreeProjectsOneLiveFocusedRegion() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneRegion>.size, 40)
+        XCTAssertEqual(MemoryLayout<SeyalAppPaneBinding>.size, 48)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         view.reconcileChrome()
         view.layoutSubtreeIfNeeded()
@@ -486,6 +460,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(region.pane_hi, shell.focused_pane_hi)
         XCTAssertEqual(region.flags, UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE))
         XCTAssertEqual(seyal_app_pane_region(view.pane.appHandle, 1).size, 0, "out of range fails closed")
+        let binding = seyal_app_pane_binding(view.pane.appHandle, 0)
+        XCTAssertEqual(binding.pane_lo, region.pane_lo)
+        XCTAssertEqual(binding.pane_hi, region.pane_hi)
+        XCTAssertEqual(seyal_app_pane_binding(view.pane.appHandle, 1).size, 0)
 
         let regionView = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0"))
         XCTAssertEqual(regionView.accessibilityValue() as? String, "focused")
@@ -496,6 +474,155 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(live.isHidden)
         XCTAssertEqual(live.frame, regionView.frame)
         XCTAssertGreaterThan(live.frame.width, 0)
+    }
+
+    @MainActor
+    func testBoundAndFocusedLeavesAreSimultaneouslyLive() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.pane_count, 2)
+        let first = seyal_app_pane_region(handle, 0)
+        let second = seyal_app_pane_region(handle, 1)
+        XCTAssertNotEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0, "bound sibling stays live")
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_LIVE), 0, "focused landing leaf is live")
+        XCTAssertNotEqual(second.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
+        XCTAssertEqual(first.flags & UInt16(SEYAL_APP_PANE_REGION_FOCUSED), 0)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-0"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        // Focused chrome container follows the focused LIVE region.
+        let focusedRegion = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertTrue(focusedRegion.isAccessibilityEnabled())
+        let live = try XCTUnwrap(view.pane.superview)
+        XCTAssertFalse(live.isHidden)
+        XCTAssertEqual(live.frame, focusedRegion.frame.insetBy(dx: 1, dy: 1))
+    }
+
+    @MainActor
+    func testSecondaryLiveSurfaceHasVisibleFrameAndOwnsPaneHitTarget() throws {
+        let layout = PaneLayoutView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+        let focused = PaneLayoutView.Region(
+            paneLo: 1, paneHi: 1,
+            rect: CGRect(x: 0, y: 0, width: 0.5, height: 1),
+            focused: true, live: true, title: "Focused"
+        )
+        let secondary = PaneLayoutView.Region(
+            paneLo: 2, paneHi: 2,
+            rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+            focused: false, live: true, title: "Secondary"
+        )
+        layout.apply([focused, secondary], dividers: [])
+        layout.reconcileSecondaryLiveHosts(bindings: [
+            (paneLo: 1, paneHi: 1, displayHandle: 0, focused: true, live: true),
+            (paneLo: 2, paneHi: 2, displayHandle: 42, focused: false, live: true),
+        ])
+        layout.layoutSubtreeIfNeeded()
+
+        let host = try XCTUnwrap(layout.secondaryHost(displayHandle: 42))
+        XCTAssertGreaterThan(host.frame.width, 0)
+        XCTAssertGreaterThan(host.frame.height, 0)
+        XCTAssertTrue(host.isAccessibilityEnabled())
+        XCTAssertEqual(host.accessibilityRole(), .button)
+        XCTAssertEqual(host.accessibilityLabel(), "Focus secondary terminal pane")
+        XCTAssertTrue(layout.hitTest(NSPoint(x: 375, y: 150)) === host)
+    }
+
+    @MainActor
+    func testSecondaryPaneRecoveryPlaceholderOffersExactRetryableTarget() throws {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = UInt16(SEYAL_APP_ABI_VERSION)
+        target.size = UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+        target.flags = UInt16(SEYAL_APP_PANE_RECOVERY_RETRYABLE)
+        target.pane_lo = 0x11
+        target.pane_hi = 0x12
+        target.execution_lo = 0x21
+        target.execution_hi = 0x22
+        target.binding_generation = 31
+        target.recovery_generation = 41
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
+        let parent = NSView(frame: NSRect(x: 24, y: 32, width: 640, height: 420))
+        container.addSubview(parent)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = container
+        let host = SecondaryLivePaneHost(
+            appHandle: 0,
+            paneLo: target.pane_lo,
+            paneHi: target.pane_hi,
+            displayHandle: 0,
+            recoveryTarget: target
+        )
+        host.frame = NSRect(x: 100, y: 80, width: 320, height: 220)
+        parent.addSubview(host)
+        window.makeKeyAndOrderFront(nil)
+        parent.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        defer {
+            host.removeFromSuperview()
+            window.close()
+        }
+        var retried: SeyalAppPaneRecoveryTarget?
+        host.onRetryRecovery = { retried = $0 }
+
+        let status = try XCTUnwrap(
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-status") as? NSTextField
+        )
+        XCTAssertEqual(status.stringValue, "Terminal disconnected")
+        let retry = try XCTUnwrap(
+            accessibilityChild(host, identifier: "seyal-secondary-pane-recovery-retry") as? NSButton
+        )
+        XCTAssertFalse(retry.isHidden)
+        let retryCenterInContainer = retry.convert(
+            NSPoint(x: retry.bounds.midX, y: retry.bounds.midY),
+            to: container
+        )
+        XCTAssertTrue(
+            parent.hitTest(retryCenterInContainer) === retry,
+            "superview-coordinate hit testing must reach Retry when the recovery host has a nonzero origin"
+        )
+        retry.performClick(nil)
+        let retryTarget = try XCTUnwrap(retried)
+        XCTAssertEqual(retryTarget.pane_lo, target.pane_lo)
+        XCTAssertEqual(retryTarget.pane_hi, target.pane_hi)
+        XCTAssertEqual(retryTarget.execution_lo, target.execution_lo)
+        XCTAssertEqual(retryTarget.execution_hi, target.execution_hi)
+        XCTAssertEqual(retryTarget.binding_generation, target.binding_generation)
+        XCTAssertEqual(retryTarget.recovery_generation, target.recovery_generation)
+
+        target.flags = UInt16(SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE)
+        host.updateRecoveryTarget(target)
+        XCTAssertEqual(status.stringValue, "Reconnecting terminal…")
+        XCTAssertTrue(retry.isHidden, "automatic recovery must not show an explicit retry button")
     }
 
     @MainActor
@@ -535,7 +662,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -577,7 +704,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -588,7 +715,7 @@ final class SeyalHostComponentTests: XCTestCase {
         begin.version = bind.version
         begin.size = bind.size
         begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
-        begin.target_generation = 0
+        begin.target_pty_generation = 0
         XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
         let generation = seyal_app_snapshot(handle).recovery_generation
 
@@ -597,7 +724,7 @@ final class SeyalHostComponentTests: XCTestCase {
         ended.size = bind.size
         ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
         ended.target_execution_lo = generation
-        ended.target_generation = 1
+        ended.target_pty_generation = 1
         ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
@@ -767,9 +894,64 @@ final class SeyalHostComponentTests: XCTestCase {
         #endif
     }
 
+    func testUiTestShellConfigReachesTheHelperOnlyWhileForwarding() throws {
+        let key = "SEYAL_UI_TEST_RUNTIME_CONFIG"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "seyal-936-shell-\(UUID().uuidString).toml")
+        try "[shell]\nprogram = \"/bin/zsh\"\n".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let blocked = try BundledRuntimeLauncher.launchEnvironment(inherited: [key: url.path])
+        XCTAssertNil(blocked["SEYAL_CONFIG"])
+        #if DEBUG
+            XCTAssertEqual(BundledRuntimeLauncher.uiTestRuntimeConfigEnvironmentKey, key)
+            let forwarded = try BundledRuntimeLauncher.launchEnvironment(inherited: [
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1",
+                key: url.path,
+            ])
+            XCTAssertEqual(forwarded["SEYAL_CONFIG"], url.path)
+            let missing = try BundledRuntimeLauncher.launchEnvironment(inherited: [
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1",
+                key: "/tmp/seyal-936-missing-shell-config.toml",
+            ])
+            XCTAssertNil(missing["SEYAL_CONFIG"])
+        #endif
+    }
+
     @MainActor
     func testNativeKeyClassifierAndActionIDs() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
+    }
+
+    @MainActor
+    func testSuppressedBridgeRecoveryKeepsSecondaryMetalPresentationEnabled() {
+        let view = VisibleMetalSurfaceForPresentationTest(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            paneID: "secondary-live-test",
+            allowsImplicitExecutionBootstrap: false
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        view.bridge?.stop()
+        view.bridge = nil
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 160, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.orderFrontRegardless()
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+
+        view.updateVisibility()
+
+        XCTAssertTrue(view.renderer.visible, "recovery suppression must not hide an attached live surface")
+        XCTAssertNotNil(view.metalDisplayLinkLease, "secondary live surface must keep its Metal presenter")
+        XCTAssertNil(view.bridge, "secondary host presentation must not create a Runtime bridge")
     }
 
     @MainActor
@@ -924,7 +1106,9 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         let capture = captureDirectory.appendingPathComponent("committed.bin")
-        let window = try XCTUnwrap(liveProductWindow(), "no visible product window")
+        let window = try XCTUnwrap(NSApp.windows.first {
+            $0.contentView is ProductChromeHostView
+        })
         let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
         let pane = host.pane
         let view = pane.inputSurface
@@ -978,14 +1162,8 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        let connectedResult = await XCTWaiter.fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce, connectedResult == .completed else {
-            let snap = seyal_app_snapshot(pane.appHandle)
-            XCTFail(
-                "projection did not connect; bridge=\(view.terminalBridgeIsConnected) frame=\(view.terminalCurrentFrame() != nil) eligibility=\(snap.eligibility) recovery=\(snap.recovery_stage) attempts=\(snap.recovery_attempts) visible=\(window.occlusionState.contains(.visible)) key=\(window.isKeyWindow)"
-            )
-            return
-        }
+        await fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce else { return }
         connectPoll.invalidate()
 
         // A bounded real PTY child records bytes; no input bridge is mocked.
@@ -1119,6 +1297,29 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(text.contains("ComposerRequestCorrelation"))
     }
 
+    /// #1250: Runtime revisions are execution-scoped; equal revisions from
+    /// distinct focused attachments each need to reach the native composer.
+    func testComposerStatusRelayDeduplicatesByFocusedAttachmentAndRevision() {
+        var tracker = ComposerStatusRelayTracker()
+        XCTAssertTrue(tracker.shouldRelay(revision: 7, attachmentIDLow: 11, attachmentIDHigh: 1))
+        XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 11, attachmentIDHigh: 1))
+        XCTAssertTrue(
+            tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2),
+            "the same Runtime revision on another focused attachment must be relayed"
+        )
+        XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2))
+        XCTAssertTrue(tracker.shouldRelay(revision: 8, attachmentIDLow: 22, attachmentIDHigh: 2))
+        XCTAssertFalse(tracker.shouldRelay(revision: 0, attachmentIDLow: 33, attachmentIDHigh: 3))
+        XCTAssertTrue(tracker.shouldRelay(revision: 9, attachmentIDLow: 22, attachmentIDHigh: 2))
+        tracker.abandonClaim()
+        XCTAssertTrue(
+            tracker.shouldRelay(revision: 9, attachmentIDLow: 22, attachmentIDHigh: 2),
+            "a rejected host apply must not consume the Runtime fact"
+        )
+        XCTAssertTrue(tracker.clear())
+        XCTAssertFalse(tracker.clear())
+    }
+
     @MainActor
     func testXtermButtonMapDropsButtonsBeyondRight() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
@@ -1151,93 +1352,6 @@ final class SeyalHostComponentTests: XCTestCase {
         )
         XCTAssertEqual(interactive.accessibilityIdentifier(), "terminal-input")
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
-    }
-
-    @MainActor
-    func testHiddenProductTierReleasesDedicatedGpu() throws {
-        guard MTLCreateSystemDefaultDevice() != nil else {
-            throw XCTSkip("Metal unavailable")
-        }
-        let handle = seyal_app_create()
-        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
-        let view = InteractiveMetalSurfaceView(
-            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
-            appHandle: handle
-        )
-        view.suppressesAutomaticBridgeRecovery = true
-        let window = NSWindow(
-            contentRect: NSRect(x: 40, y: 40, width: 320, height: 200),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
-        window.contentView = view
-        defer {
-            view.removeFromSuperview()
-            window.close()
-        }
-        window.makeKeyAndOrderFront(nil)
-        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
-        // Drive one visible-frame update through the production renderer. The
-        // component harness does not own a desktop occlusion surface, so it
-        // explicitly models the focused renderer visibility transition.
-        view.renderer.setVisible(true)
-
-        var cell = SeyalPreparedCell()
-        cell.scalar = UInt32(ascii: "A")
-        cell.foreground = 0xffff_ffff
-        cell.background = 0xff10_0d0b
-        var damage = DamageMask()
-        damage.markAll(rows: 1)
-        XCTAssertEqual(
-            try [cell].withUnsafeBufferPointer { cells in
-                try view.renderer.update(
-                    frame: NativePreparedFrame(
-                        cells: cells,
-                        generation: 1,
-                        rows: 1,
-                        columns: 1,
-                        damage: damage
-                    ),
-                    backingScale: 1,
-                    forceFullRebuild: true
-                )
-            },
-            .updated
-        )
-        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
-        XCTAssertGreaterThan(view.renderer.estimatedDedicatedGPUBytes, 0)
-
-        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_HIDDEN))
-        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
-        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
-        XCTAssertFalse(view.shouldRender)
-
-        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_FOCUSED))
-        view.renderer.setVisible(true)
-        XCTAssertEqual(
-            try [cell].withUnsafeBufferPointer { cells in
-                try view.renderer.update(
-                    frame: NativePreparedFrame(
-                        cells: cells,
-                        generation: 2,
-                        rows: 1,
-                        columns: 1,
-                        damage: damage
-                    ),
-                    backingScale: 1,
-                    forceFullRebuild: true
-                )
-            },
-            .updated
-        )
-        XCTAssertTrue(view.renderer.hasDedicatedSurfaceResources)
-
-        view.applyProductPresentationTier(UInt16(SEYAL_APP_TIER_UNPRESENTED))
-        XCTAssertFalse(view.renderer.hasDedicatedSurfaceResources)
-        XCTAssertEqual(view.renderer.estimatedDedicatedGPUBytes, 0)
-        XCTAssertFalse(view.shouldRender)
     }
 
     /// Steady-state Candidate-D frames must not call `seyal_app_snapshot`
@@ -1321,6 +1435,54 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testPrimaryAndPaneRecoveryTimersRemainIndependentWhenRescheduled() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        defer {
+            view.recoveryTimer?.invalidate()
+            view.paneRecoveryTimer?.invalidate()
+        }
+
+        let panePin = PaneRecoveryPin(makePaneRecoveryTarget(recoveryGeneration: 41))
+        let replacementPanePin = PaneRecoveryPin(makePaneRecoveryTarget(recoveryGeneration: 42))
+
+        view.schedulePaneRecoveryTimer(pin: panePin, delayMs: 60_000)
+        let originalPaneTimer = try XCTUnwrap(view.paneRecoveryTimer)
+        view.scheduleRecoveryTimer(generation: 7, delayMs: 60_000)
+        let originalPrimaryTimer = try XCTUnwrap(view.recoveryTimer)
+
+        // Replacing the primary retry must leave the pane callback armed.
+        view.scheduleRecoveryTimer(generation: 8, delayMs: 60_000)
+        let replacementPrimaryTimer = try XCTUnwrap(view.recoveryTimer)
+        XCTAssertFalse(originalPrimaryTimer.isValid)
+        XCTAssertTrue(originalPaneTimer.isValid)
+        XCTAssertTrue(view.paneRecoveryTimer === originalPaneTimer)
+        XCTAssertEqual(view.paneRecoveryTimerPin, panePin)
+
+        // Replacing the pane retry must leave the latest primary callback armed.
+        view.schedulePaneRecoveryTimer(pin: replacementPanePin, delayMs: 60_000)
+        let replacementPaneTimer = try XCTUnwrap(view.paneRecoveryTimer)
+        XCTAssertFalse(originalPaneTimer.isValid)
+        XCTAssertTrue(replacementPaneTimer.isValid)
+        XCTAssertTrue(replacementPrimaryTimer.isValid)
+        XCTAssertTrue(view.recoveryTimer === replacementPrimaryTimer)
+        XCTAssertEqual(view.recoveryTimerGeneration, 8)
+        XCTAssertEqual(view.paneRecoveryTimerPin, replacementPanePin)
+    }
+
+    private func makePaneRecoveryTarget(recoveryGeneration: UInt64) -> SeyalAppPaneRecoveryTarget {
+        var target = SeyalAppPaneRecoveryTarget()
+        target.version = UInt16(SEYAL_APP_ABI_VERSION)
+        target.size = UInt16(MemoryLayout<SeyalAppPaneRecoveryTarget>.size)
+        target.pane_lo = 0x11
+        target.pane_hi = 0x12
+        target.execution_lo = 0x21
+        target.execution_hi = 0x22
+        target.binding_generation = 31
+        target.recovery_generation = recoveryGeneration
+        return target
+    }
+
+    @MainActor
     func testRecoveryFocusRestartsOnlyAfterEligibilityChanges() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -1342,6 +1504,8 @@ final class SeyalHostComponentTests: XCTestCase {
         await fulfillment(of: [exhausted], timeout: 5)
         XCTAssertEqual(attempts, 8)
 
+        // Repeated presentation advances during persistent failure do not
+        // reopen the retry budget; activation or palette dismissal does.
         for _ in 0..<3 {
             XCTAssertFalse(view.requestComposerFocusForRecovery(
                 focus: {
@@ -1354,6 +1518,63 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(attempts, 8)
 
         view.windowActivationChanged()
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testRecoveryFocusRestartsWhenSurfaceBecomesRenderable() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        let activationSettled = expectation(description: "initial window activation settled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            activationSettled.fulfill()
+        }
+        await fulfillment(of: [activationSettled], timeout: 1)
+
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "initial bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        // Model an AppKit visibility/occlusion transition without another
+        // key-window notification. Becoming renderable opens one fresh,
+        // bounded attempt burst for pending restoration.
+        view.renderable = false
+        view.updateVisibility()
+        XCTAssertTrue(view.renderable)
         XCTAssertTrue(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1
@@ -1398,6 +1619,133 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testComposerEligibilityChangeBeforeRecoveryPendingResetsNextFocusBurst() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "prior bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        view.recoveryPresentationPending = false
+        view.composerFocusEligibilityDidChange() // readiness arrives before adoption
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testWindowActivationBeforeRecoveryPendingResetsNextFocusBurst() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "prior bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        view.recoveryPresentationPending = false
+        view.windowActivationChanged() // key notification arrives before adoption
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testApplicationActivationRestartsDeferredRecoveryFocus() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.suppressesAutomaticBridgeRecovery = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer {
+            view.removeFromSuperview()
+            window.close()
+        }
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        view.recoveryPresentationPending = false
+        let activationHandled = expectation(description: "application activation observed")
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        DispatchQueue.main.async {
+            activationHandled.fulfill()
+        }
+        await fulfillment(of: [activationHandled], timeout: 1)
+
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.advanceRecoveryPresentationIfReady())
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
     func testComposerEligibilityCallbackDropsStaleReconcileTransition() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -1412,7 +1760,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         let composer = ComposerBridgeView(appHandle: handle)
@@ -1435,42 +1783,113 @@ final class SeyalHostComponentTests: XCTestCase {
         staleCallback.isInverted = true
         composer.onFocusEligibilityChanged = { callbacks += 1; staleCallback.fulfill() }
 
-        XCTAssertEqual(
-            relayComposerStatus(
-                handle,
-                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE.rawValue),
-                revision: 1
-            ),
-            0
-        )
-        composer.reconcile()
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+        composer.reconcile() // hidden -> available queues a callback
         XCTAssertTrue(composer.isFocusEligibleForRecovery)
-        XCTAssertEqual(
-            relayComposerStatus(
-                handle,
-                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_BUSY.rawValue),
-                revision: 2
-            ),
-            0
-        )
-        composer.reconcile()
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
+        composer.reconcile() // available -> busy invalidates that callback before delivery
         XCTAssertFalse(composer.isFocusEligibleForRecovery)
         await fulfillment(of: [staleCallback], timeout: 0.2)
         XCTAssertEqual(callbacks, 0)
 
         let currentCallback = expectation(description: "current available transition is delivered")
         composer.onFocusEligibilityChanged = { callbacks += 1; currentCallback.fulfill() }
-        XCTAssertEqual(
-            relayComposerStatus(
-                handle,
-                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE.rawValue),
-                revision: 3
-            ),
-            0
-        )
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 3), 0)
         composer.reconcile()
         await fulfillment(of: [currentCallback], timeout: 1)
         XCTAssertEqual(callbacks, 1)
+    }
+
+    @MainActor
+    func testComposerEligibilityCallbackFiresWhenAlreadyAvailableViewAttachesToWindow() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_pty_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+        XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
+
+        let composer = ComposerBridgeView(appHandle: handle)
+        let attached = expectation(description: "already-available composer becomes window-focusable")
+        composer.onFocusEligibilityChanged = { attached.fulfill() }
+        composer.reconcile()
+        XCTAssertFalse(composer.isFocusEligibleForRecovery, "an unattached view cannot accept first responder")
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = composer
+        defer {
+            composer.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+
+        await fulfillment(of: [attached], timeout: 1)
+        XCTAssertTrue(composer.isFocusEligibleForRecovery)
+    }
+
+    @MainActor
+    func testRecoveryFocusRetryFromPriorGenerationIsDiscarded() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let staleRetry = expectation(description: "stale retry must not run")
+        staleRetry.isInverted = true
+        var oldGenerationAttempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                oldGenerationAttempts += 1
+                if oldGenerationAttempts > 1 { staleRetry.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(oldGenerationAttempts, 1)
+
+        view.resetComposerRecoveryFocusRetries()
+        view.recoveryPresentationPending = false
+        view.recoveryPresentationPending = true
+        XCTAssertTrue(view.requestComposerFocusForRecovery(focus: { true }, onAccepted: {}))
+
+        await fulfillment(of: [staleRetry], timeout: 0.2)
+        XCTAssertEqual(oldGenerationAttempts, 1)
+    }
+
+    @MainActor
+    func testPaletteFocusAcceptanceAdvancesPendingRecoveryImmediately() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        var advances = 0
+
+        XCTAssertTrue(view.advanceRecoveryAfterPaletteFocus(
+            requestFocus: { true },
+            advanceRecovery: { advances += 1 }
+        ))
+        XCTAssertEqual(advances, 1)
+
+        XCTAssertFalse(view.advanceRecoveryAfterPaletteFocus(
+            requestFocus: { false },
+            advanceRecovery: { advances += 1 }
+        ))
+        XCTAssertEqual(advances, 1)
     }
 
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
@@ -1604,7 +2023,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
@@ -1615,7 +2034,7 @@ final class SeyalHostComponentTests: XCTestCase {
             draft.size = bind.size
             draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
             draft.applySnapshotFence(bound)
-            draft.target_generation = composer.epoch
+            draft.target_pty_generation = composer.epoch
             let utf8 = Array(command.utf8)
             utf8.withUnsafeBufferPointer { buffer in
                 draft.payload = buffer.baseAddress
@@ -1627,7 +2046,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_generation = composer.epoch
+            submit.target_pty_generation = composer.epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -1675,7 +2094,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var composer = seyal_app_composer(handle)
@@ -1744,7 +2163,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -1752,6 +2171,7 @@ final class SeyalHostComponentTests: XCTestCase {
         let editor = try XCTUnwrap(
             accessibilityChild(view, identifier: "seyal-composer-editor") as? NSTextView)
         XCTAssertEqual(composer.accessibilityValue() as? String, "available")
+        XCTAssertTrue(editor.isEditable, "Available composer must accept native text input")
 
         // Native typing is the source of the draft: the editor already holds
         // the text and the host commits it to Rust (SetDraft) as it changes.
@@ -1762,7 +2182,7 @@ final class SeyalHostComponentTests: XCTestCase {
         draft.size = bind.size
         draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         draft.applySnapshotFence(bound)
-        draft.target_generation = seyal_app_composer(handle).epoch
+        draft.target_pty_generation = seyal_app_composer(handle).epoch
         let draftBytes = Array("sleep 2".utf8)
         draftBytes.withUnsafeBufferPointer { buffer in
             draft.payload = buffer.baseAddress
@@ -1777,12 +2197,13 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(bound)
-        submit.target_generation = seyal_app_composer(handle).epoch
+        submit.target_pty_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         // Runtime's Busy flip arrives before the correlated result.
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
         view.reconcileChrome()
         XCTAssertEqual(composer.accessibilityValue() as? String, "busy")
+        XCTAssertFalse(editor.isEditable, "Busy composer must reject further native text input")
         XCTAssertEqual(editor.string, "sleep 2", "draft is kept while the request is in flight")
 
         var result = SeyalAppAction()
@@ -1803,6 +2224,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 3), 0)
         view.reconcileChrome()
         XCTAssertEqual(composer.accessibilityValue() as? String, "available")
+        XCTAssertTrue(editor.isEditable, "composer becomes editable again when Runtime reports Available")
         XCTAssertEqual(editor.string, "")
     }
 
@@ -1814,7 +2236,7 @@ final class SeyalHostComponentTests: XCTestCase {
         action.kind = kind
         action.applySnapshotFence(snap)
         action.reserved = reserved
-        action.target_generation = seyal_app_composer(handle).epoch
+        action.target_pty_generation = seyal_app_composer(handle).epoch
         let utf8 = Array((payload ?? "").utf8)
         return utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress
@@ -1968,7 +2390,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(seyal_app_composer(handle).block_count, 0, "no Runtime timeline in a unit test")
@@ -2263,7 +2685,9 @@ final class SeyalHostComponentTests: XCTestCase {
     /// last geometry proposal. Headed overflow scroll is covered by XCUI.
     @MainActor
     func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() async throws {
-        let window = try XCTUnwrap(liveProductWindow(), "no visible product window")
+        let window = try XCTUnwrap(NSApp.windows.first {
+            $0.contentView is ProductChromeHostView
+        })
         let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
         let pane = host.pane
         let view = pane.inputSurface
@@ -2304,14 +2728,8 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        let connectedResult = await XCTWaiter.fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce, connectedResult == .completed else {
-            let snap = seyal_app_snapshot(pane.appHandle)
-            XCTFail(
-                "Flow projection did not connect; bridge=\(view.terminalBridgeIsConnected) frame=\(view.terminalCurrentFrame() != nil) eligibility=\(snap.eligibility) recovery=\(snap.recovery_stage) attempts=\(snap.recovery_attempts) visible=\(window.occlusionState.contains(.visible)) key=\(window.isKeyWindow)"
-            )
-            return
-        }
+        await fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce else { return }
         connectPoll.invalidate()
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
@@ -2624,7 +3042,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_generation = 1
+        bind.target_pty_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -2819,19 +3237,13 @@ final class SeyalHostComponentTests: XCTestCase {
 
 }
 
-/// The headed test host keeps the launched product window. Private hosts in
-/// the same process can leave a detached `ProductChromeHostView` earlier in
-/// `NSApp.windows`. Live projection checks must use the visible key window.
+/// NSWindow occlusion depends on the host's WindowServer state, which is not a
+/// stable input in hosted XCTest. Keep the component test focused on the
+/// visibility branch by providing an attached view whose effective visibility
+/// is deterministic; the real NSWindow and CAMetalLayer are still exercised.
 @MainActor
-private func liveProductWindow() -> NSWindow? {
-    let product: (NSWindow) -> Bool = { window in
-        guard window.isVisible, let host = window.contentView as? ProductChromeHostView else {
-            return false
-        }
-        return !host.pane.inputSurface.isDetachingRuntimeConnection
-    }
-    return NSApp.windows.first { $0.isKeyWindow && product($0) }
-        ?? NSApp.windows.first(where: product)
+private final class VisibleMetalSurfaceForPresentationTest: MetalSurfaceView {
+    override var shouldRender: Bool { true }
 }
 
 @discardableResult

@@ -4,7 +4,7 @@ use crate::local::ClientError;
 use crate::LocalDisplayClient;
 
 use super::{
-    error_code, with_active_client, with_active_client_mut, with_client_mut, with_display_client,
+    error_code, with_active_client, with_active_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
     SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
     SeyalHistorySidecar, SeyalPreparedFrame,
@@ -184,21 +184,26 @@ pub extern "C" fn seyal_bridge_composer_result() -> SeyalComposerResult {
         .unwrap_or_else(SeyalComposerResult::empty)
 }
 
-/// Copies the latest Runtime composer eligibility for the active client into
-/// a typed C value. Revision 0 / eligibility 0 means nothing published yet.
-/// The host relays it verbatim; Rust remains the only reader of its meaning.
+/// Copies the latest Runtime composer eligibility and its attachment identity
+/// for the focused display client into a typed C value. Revision 0 / eligibility
+/// 0 means nothing published yet. Rust remains the only reader of its meaning.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_composer_status() -> SeyalComposerStatus {
     with_display_client(|client| client.composer_status())
         .flatten()
-        .map(|status| SeyalComposerStatus {
-            revision: status.revision,
-            eligibility: match status.eligibility {
-                ComposerEligibility::Available => 1,
-                ComposerEligibility::Busy => 2,
-                ComposerEligibility::Unsupported => 3,
-            },
-            reserved: [0; 7],
+        .map(|status| {
+            let attachment = status.attachment_id.to_bytes();
+            SeyalComposerStatus {
+                revision: status.revision,
+                attachment_id_low: u64::from_le_bytes(attachment[..8].try_into().unwrap()),
+                attachment_id_high: u64::from_le_bytes(attachment[8..].try_into().unwrap()),
+                eligibility: match status.eligibility {
+                    ComposerEligibility::Available => 1,
+                    ComposerEligibility::Busy => 2,
+                    ComposerEligibility::Unsupported => 3,
+                },
+                reserved: [0; 7],
+            }
         })
         .unwrap_or_else(SeyalComposerStatus::empty)
 }
@@ -305,6 +310,19 @@ pub extern "C" fn seyal_bridge_ensure_prepared() -> i32 {
     }
 }
 
+/// Ensure prepared surface for one registry handle without changing focus.
+///
+/// Used by non-focused live Metal leaves (#936) so sibling Controllers can
+/// present without stealing [`super::display_handle`].
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_ensure_prepared_for(handle: u64) -> i32 {
+    match super::with_client_mut(handle, |client| client.ensure_prepared_surface()) {
+        Some(Ok(_)) => 0,
+        Some(Err(error)) => error_code(error),
+        None => -1,
+    }
+}
+
 /// Returns 1 only while bounded nonblocking client→Runtime bytes remain.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_wants_write() -> i32 {
@@ -373,7 +391,22 @@ pub extern "C" fn seyal_bridge_request_history_range(
 /// # Panic policy
 ///
 /// Panics abort the process; they never unwind into Swift.
-fn frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_frame() -> SeyalPreparedFrame {
+    with_display_client_mut(prepared_frame_from_client).unwrap_or_else(SeyalPreparedFrame::empty)
+}
+
+/// Borrow the prepared surface for one registry handle (#936 multi-live Metal).
+///
+/// Does not change the focused display/input client. Pointer borrow rules match
+/// [`seyal_bridge_frame`]: copy cells before returning to the run loop.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_frame_for(handle: u64) -> SeyalPreparedFrame {
+    super::with_client_mut(handle, prepared_frame_from_client)
+        .unwrap_or_else(SeyalPreparedFrame::empty)
+}
+
+fn prepared_frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
     if client.ensure_prepared_surface().is_err() {
         return SeyalPreparedFrame::empty();
     }
@@ -411,17 +444,4 @@ fn frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
         grapheme_utf8_len,
         reserved2: 0,
     }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_bridge_frame() -> SeyalPreparedFrame {
-    with_display_client_mut(frame_from_client).unwrap_or_else(SeyalPreparedFrame::empty)
-}
-
-/// Prepared surface for one adopted client. Does not retarget the focused
-/// display route, so a pane can render its own grid while another tab is
-/// focused and unbound.
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_bridge_frame_for(handle: u64) -> SeyalPreparedFrame {
-    with_client_mut(handle, frame_from_client).unwrap_or_else(SeyalPreparedFrame::empty)
 }

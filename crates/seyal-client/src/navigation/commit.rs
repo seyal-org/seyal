@@ -1,11 +1,13 @@
-//! Atomic `Navigate(address)` commit (SPEC-022 §4) with optional history record.
+//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5), with optional history.
 //!
 //! Resolve with the N1 resolver, then apply workspace/tab/pane focus in one
 //! transition. Rejection leaves shell focus unchanged. User-initiated commits
 //! record Pane-granularity history behind this path (R4.1 / R6.5); traversal
-//! apply-only does not.
+//! apply-only does not. When the hosting window is not product-active, emit
+//! exactly one [`crate::shell::ShellNativeEffect::WindowActivation`]. No
+//! presentation, binding, or PTY mutation.
 
-use crate::shell::ShellState;
+use crate::shell::{ShellNativeEffect, ShellState};
 
 use super::history::FocusHistory;
 use super::{
@@ -54,14 +56,15 @@ pub fn navigate(
         tab,
         pane,
     };
-
+    let previous_window = shell.product_window_id().ok();
     let before = shell.focus_checkpoint();
     if before.active_workspace == workspace
         && before.active_tab == tab
         && before.focused_pane == pane
     {
         // Already active: success no-op for focus (R4.4); history still sees
-        // the commit so cursor-equality dedup applies (R6.4).
+        // the commit so cursor-equality dedup applies (R6.4). No activation
+        // effect is needed because the target window is already active.
         record_if_needed(history, pane_address);
         return Ok(target);
     }
@@ -89,6 +92,11 @@ pub fn navigate(
         .commit_focus(workspace, tab, pane)
         .expect("composition re-validated immediately above");
     record_if_needed(history, pane_address);
+    if let Some(window) = shell.window_of_tab(tab)
+        && previous_window != Some(window)
+    {
+        shell.push_effect(ShellNativeEffect::WindowActivation { window });
+    }
     Ok(target)
 }
 

@@ -58,10 +58,11 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::ActionUnavailable => 50,
         AppError::NavigationStaleHistoryCursor => 51,
         AppError::NavigationHistoryUnavailable => 52,
-        AppError::CrossWorkspaceAdopt => 53,
-        AppError::ExecutionNotUnpresented => 54,
-        AppError::UnknownWindow => 55,
-        AppError::WindowCreationUnavailable => 56,
-        AppError::DeliveryControlFailed => 57,
+        AppError::WindowActivationFailed => 53,
+        AppError::UnknownWindow => 54,
+        AppError::WindowCreationUnavailable => 55,
+        AppError::CrossWorkspaceAdopt => 56,
+        AppError::ExecutionNotUnpresented => 57,
+        AppError::DeliveryControlFailed => 58,
     }
 }

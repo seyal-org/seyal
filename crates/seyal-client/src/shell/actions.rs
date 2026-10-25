@@ -25,13 +25,19 @@ impl ShellState {
     /// queue bounded under same-window selection).
     pub(super) fn activate_window(&mut self, window: WindowId) -> Result<(), ShellError> {
         let previous_product = self.product_active_window().map(|window| window.id);
-        self.activate_window_from(window, previous_product)
+        self.activate_window_from(window, previous_product, true)
+    }
+
+    pub(super) fn observe_window_became_key(&mut self, window: WindowId) -> Result<(), ShellError> {
+        let previous_product = self.product_active_window().map(|window| window.id);
+        self.activate_window_from(window, previous_product, false)
     }
 
     fn activate_window_from(
         &mut self,
         window: WindowId,
         previous_product: Option<WindowId>,
+        request_native_activation: bool,
     ) -> Result<(), ShellError> {
         let workspace_id = self
             .find_window(window)
@@ -44,7 +50,7 @@ impl ShellState {
         workspace.active_window = Some(window);
         self.last_active_workspace = workspace_id;
         self.record_window_focus(window)?;
-        if previous_product != Some(window) {
+        if request_native_activation && previous_product != Some(window) {
             self.push_effect(ShellNativeEffect::OrderFrontMakeKey { window });
         }
         Ok(())
@@ -175,7 +181,7 @@ impl ShellState {
             self.find_tab_location(id).ok_or(ShellError::UnknownTab)?;
         let previous_product = self.product_active_window().map(|window| window.id);
         self.workspace_mut(workspace_id)?.select_tab(id)?;
-        self.activate_window_from(window_id, previous_product)
+        self.activate_window_from(window_id, previous_product, true)
     }
 
     pub(super) fn cycle_window(&mut self, direction: CycleDirection) -> Result<(), ShellError> {
@@ -291,7 +297,7 @@ impl ShellState {
         }
         self.workspace_mut(source_workspace)?
             .insert_tab_before(window, removed, before)?;
-        self.activate_window_from(window, previous_product)?;
+        self.activate_window_from(window, previous_product, true)?;
         self.bump_containment_generation();
         Ok(())
     }
@@ -331,7 +337,7 @@ impl ShellState {
             .expect("moved tab forms a valid window");
         self.workspace_mut(workspace_id)?.push_window(window);
         self.push_effect(ShellNativeEffect::RealizeWindow { window: new_id });
-        self.activate_window_from(new_id, previous_product)?;
+        self.activate_window_from(new_id, previous_product, true)?;
         self.bump_containment_generation();
         Ok(())
     }
@@ -382,6 +388,7 @@ impl ShellState {
             } => self.move_tab_to_new_window(tab, containment_generation),
             ShellAction::SelectWindow { id, .. } => self.select_window(id),
             ShellAction::NativeWindowBecameKey { id, .. } => self.native_window_became_key(id),
+            ShellAction::ObserveWindowBecameKey { id } => self.observe_window_became_key(id),
             ShellAction::SelectTab { id, .. } => self.select_tab_identity(id),
             ShellAction::CycleWindow { direction, .. } => self.cycle_window(direction),
             ShellAction::CycleTab { direction, .. } => self.cycle_tab(direction),

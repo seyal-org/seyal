@@ -199,13 +199,6 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             )?),
             containment_generation: action.target_generation,
         }),
-        67 => Ok(AppAction::CloseWindow {
-            id: WindowId::from_bytes(id16(
-                action.target_execution_lo,
-                action.target_execution_hi,
-            )?),
-            containment_generation: action.target_generation,
-        }),
         40 => Ok(AppAction::OpenComposerHistory { fence }),
         41 => Ok(AppAction::SetComposerHistoryFilter {
             fence,
@@ -322,40 +315,6 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
-        68 => Ok(AppAction::SelectWindow {
-            id: WindowId::from_bytes(id16(
-                action.target_execution_lo,
-                action.target_execution_hi,
-            )?),
-        }),
-        69 => Ok(AppAction::CycleWindow {
-            direction: if action.reserved == 0 {
-                crate::shell::CycleDirection::Next
-            } else {
-                crate::shell::CycleDirection::Previous
-            },
-        }),
-        70 => Ok(AppAction::CreateWindow),
-        71 => {
-            const OCCLUSION_HIDDEN: u32 = 0x100;
-            const WINDOW_EVENT_MASK: u32 = 0xff;
-            if action.reserved & !(WINDOW_EVENT_MASK | OCCLUSION_HIDDEN) != 0 {
-                return Err(-6);
-            }
-            let event = decode_window_event(action.reserved & WINDOW_EVENT_MASK)?;
-            let occluded = action.reserved & OCCLUSION_HIDDEN != 0;
-            if occluded && event != crate::app::WindowNativeEvent::OcclusionChanged {
-                return Err(-6);
-            }
-            Ok(AppAction::ReportWindowEvent {
-                window: WindowId::from_bytes(id16(
-                    action.target_execution_lo,
-                    action.target_execution_hi,
-                )?),
-                event,
-                occluded,
-            })
-        }
         // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
         // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
         // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
@@ -378,12 +337,50 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 observed: decode_focus_seq(action.payload, action.payload_len)?,
             })
         }
+        // W4a window host intents (ADR-018 §2.2 / §2.3), following N3.
+        65 => Ok(AppAction::SelectWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        66 => Ok(AppAction::CycleWindow {
+            direction: if action.reserved == 0 {
+                crate::shell::CycleDirection::Next
+            } else {
+                crate::shell::CycleDirection::Previous
+            },
+        }),
+        67 => Ok(AppAction::CreateWindow),
+        68 => {
+            const OCCLUSION_HIDDEN: u32 = 0x100;
+            const WINDOW_EVENT_MASK: u32 = 0xff;
+            if action.reserved & !(WINDOW_EVENT_MASK | OCCLUSION_HIDDEN) != 0 {
+                return Err(-6);
+            }
+            let event = decode_window_event(action.reserved & WINDOW_EVENT_MASK)?;
+            let occluded = action.reserved & OCCLUSION_HIDDEN != 0;
+            if occluded && event != crate::app::WindowNativeEvent::OcclusionChanged {
+                return Err(-6);
+            }
+            Ok(AppAction::ReportWindowEvent {
+                window: WindowId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?),
+                event,
+                occluded,
+            })
+        }
+        69 => Ok(AppAction::CloseWindow {
+            id: WindowId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            containment_generation: action.target_generation,
+        }),
         _ => Err(-6),
     }
-}
-
-fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
-    crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
 }
 
 fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i32> {
@@ -399,8 +396,13 @@ fn decode_window_event(reserved: u32) -> Result<crate::app::WindowNativeEvent, i
         7 => EnteredFullscreen,
         8 => ExitedFullscreen,
         9 => ScreenOrScaleChanged,
+        10 => ActivationFailed,
         _ => return Err(-6),
     })
+}
+
+fn decode_goto_scope(reserved: u32) -> Result<crate::goto::GotoScope, i32> {
+    crate::goto::GotoScope::from_u8(reserved as u8).ok_or(-6)
 }
 
 fn decode_focus_seq(

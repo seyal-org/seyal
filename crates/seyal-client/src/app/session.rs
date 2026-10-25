@@ -3,6 +3,12 @@
 use super::*;
 
 #[cfg(target_os = "macos")]
+pub(super) type QuitProbeAttachment = (
+    crate::ffi::ClientRegistryHandle,
+    std::os::unix::net::UnixStream,
+);
+
+#[cfg(target_os = "macos")]
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
         self.release_live_attachments();
@@ -28,7 +34,7 @@ impl ApplicationRoot {
     /// Does not insert into `CLIENTS`; the handle must already be present from
     /// bridge adopt / a prior sole registration (#1066 locked design §3).
     pub fn attach_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
-        let Some((evidence, output)) = crate::ffi::with_client(handle, |client| {
+        let Some((evidence, output, runtime_id)) = crate::ffi::with_client(handle, |client| {
             let evidence = BindingEvidence {
                 execution: client.execution_id(),
                 attachment: client.attachment_id(),
@@ -39,7 +45,11 @@ impl ApplicationRoot {
                 pty_generation: client.cache().generation.max(1),
                 alternate_screen: client.cache().alternate_screen,
             };
-            (evidence, project_cache_text(client.cache()))
+            (
+                evidence,
+                project_cache_text(client.cache()),
+                client.runtime_id(),
+            )
         }) else {
             return self.fail(AppError::NoLiveClient);
         };
@@ -52,6 +62,7 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -66,27 +77,21 @@ impl ApplicationRoot {
     /// After FFI `Bind`, name the already-adopted bridge client as the create
     /// Controller so production CreateTab can admit type-36.
     pub fn adopt_bridge_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
-        if crate::ffi::with_client(handle, |_| ()).is_none() {
+        let Some(runtime_id) = crate::ffi::with_client(handle, |client| client.runtime_id()) else {
             return self.fail(AppError::NoLiveClient);
-        }
+        };
         if self
             .client_handle
             .as_ref()
             .is_some_and(|owned| owned.raw() == handle)
         {
-            // Repeat bind after the display focus was cleared (registry loss,
-            // quit fixture, recovery). The execution is already installed;
-            // the focused pane still has to read this client's frame.
-            self.pane_client_raws.insert(fence.pane, handle);
-            if self.shell.snapshot().focused_pane == fence.pane {
-                crate::ffi::set_focused_display_handle(handle);
-            }
             return Ok(());
         }
         if self.client_handle.is_none() {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -114,6 +119,7 @@ impl ApplicationRoot {
             pty_generation: client.cache().generation.max(1),
             alternate_screen: client.cache().alternate_screen,
         };
+        let runtime_id = client.runtime_id();
         let output = project_cache_text(client.cache());
         let registered = match crate::ffi::register_app_client(client) {
             Ok(handle) => handle,
@@ -130,6 +136,7 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
@@ -237,7 +244,7 @@ impl ApplicationRoot {
             let tag = u8::try_from(index + 1).map_err(|_| ())?;
             let execution = ExecutionId::from_bytes([tag; 16]);
             let attachment = AttachmentId::from_bytes([tag; 16]);
-            let client = crate::local::try_reconstruction_probe_client(
+            let (client, peer) = crate::local::try_reconstruction_probe_client_with_peer(
                 Role::Controller,
                 24,
                 80,
@@ -246,7 +253,7 @@ impl ApplicationRoot {
                 attachment,
             )?;
             let registered = crate::ffi::register_app_client(client).map_err(|_| ())?;
-            self.live_attachments.push(registered);
+            self.live_attachments.push((registered, peer));
         }
         Ok(())
     }
@@ -257,7 +264,7 @@ impl ApplicationRoot {
             raws.push(handle.raw());
         }
         for handle in &self.live_attachments {
-            let raw = handle.raw();
+            let raw = handle.0.raw();
             if !raws.contains(&raw) {
                 raws.push(raw);
             }
@@ -275,8 +282,6 @@ impl ApplicationRoot {
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
-        #[cfg(target_os = "macos")]
-        self.poll_unpresented_inventory_refresh();
         let display_handle = self
             .authority
             .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
@@ -331,25 +336,11 @@ impl ApplicationRoot {
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;
         self.poll_unfocused_pane_clients();
-        self.poll_dispose_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;
         self.snapshot_generation = self.snapshot_generation.saturating_add(1);
         Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    fn poll_dispose_clients(&mut self) {
-        let lost: Vec<_> = self
-            .dispose_clients
-            .iter_mut()
-            .filter_map(|(owner, client)| client.poll_prepare().is_err().then_some(*owner))
-            .collect();
-        for owner in lost {
-            self.dispose_clients.remove(&owner);
-            self.provisioning.on_connection_lost(owner, None);
-        }
     }
 
     /// Ensure the create connection has flushed/read control frames when it is
@@ -477,6 +468,8 @@ impl ApplicationRoot {
             pty_generation: evidence.pty_generation,
         };
         self.pane_authorities.insert(fence.pane, authority);
+        self.bind_pane_recovery(fence.pane, evidence.execution);
+        self.remember_primary_pane(fence.pane);
         self.authority = Some(authority);
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();
@@ -578,7 +571,7 @@ impl ApplicationRoot {
 
     pub(super) fn quit(&mut self) -> Result<(), AppError> {
         self.frozen = true;
-        let deadline_ms = crate::app::QUIT_CLEANUP_DEADLINE_MS;
+        let deadline_ms = crate::app::native_effect::QUIT_CLEANUP_DEADLINE_MS;
         self.quit_deadline =
             Some(std::time::Instant::now() + std::time::Duration::from_millis(deadline_ms));
         self.pending_effects
@@ -591,11 +584,12 @@ impl ApplicationRoot {
     }
 
     pub(super) fn ack_effect(&mut self) -> Result<(), AppError> {
-        if !self.pending_effects.is_empty() {
-            let removed = self.pending_effects.remove(0);
-            if let NativeEffect::BoundedDetachThenTerminate { deadline_ms } = removed {
-                self.complete_bounded_detach(deadline_ms);
-            }
+        if self.pending_effects.is_empty() {
+            return Ok(());
+        }
+        let removed = self.pending_effects.remove(0);
+        if let NativeEffect::BoundedDetachThenTerminate { deadline_ms } = removed {
+            self.complete_bounded_detach(deadline_ms);
         }
         Ok(())
     }
@@ -616,7 +610,7 @@ impl ApplicationRoot {
             let primary = self.client_handle.take().map(|handle| handle.raw());
             let extras = std::mem::take(&mut self.live_attachments);
             let mut raws = Vec::new();
-            for handle in extras {
+            for (handle, _) in &extras {
                 raws.push(handle.raw());
             }
             for (_, handle) in self.extra_pane_clients.drain() {
@@ -631,7 +625,9 @@ impl ApplicationRoot {
                 }
             }
             self.pane_client_raws.clear();
-            if let Some(raw) = primary.filter(|raw| !raws.contains(raw)) {
+            if let Some(raw) = primary
+                && !raws.contains(&raw)
+            {
                 raws.push(raw);
             }
             let mut released = 0;
@@ -657,6 +653,10 @@ impl ApplicationRoot {
             if matches!(native, NativeEffect::OrderFrontMakeKey { .. }) {
                 self.pending_effects
                     .retain(|pending| !matches!(pending, NativeEffect::OrderFrontMakeKey { .. }));
+            }
+            if matches!(native, NativeEffect::WindowActivation { .. }) {
+                self.pending_effects
+                    .retain(|pending| !matches!(pending, NativeEffect::WindowActivation { .. }));
             }
             self.pending_effects.push(native);
         }

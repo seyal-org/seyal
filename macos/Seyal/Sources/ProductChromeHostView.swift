@@ -38,11 +38,13 @@ final class ProductChromeHostView: NSView {
     var liveContent: NSView { centerColumn.liveContent }
     var recoveryTimer: Timer?
     var recoveryTimerGeneration: UInt64 = 0
+    var paneRecoveryTimer: Timer?
+    var paneRecoveryTimerPin: PaneRecoveryPin?
     /// Rust recovery generation whose PerformAttempt is open on the lifecycle
     /// queue or still completing on MainActor (adopt + CompleteRecovery).
     /// Held across adopt so frame → reconcile → `driveRecovery` cannot start a
     /// second open while PerformAttempt remains the pending Rust effect.
-    var recoveryAttemptInFlight: UInt64?
+    var recoveryAttemptInFlight: RecoveryAttemptIdentity?
     /// Blocking hello/attach runs here so the AppKit actor never becomes the
     /// lifecycle I/O executor.
     let recoveryLifecycleQueue = DispatchQueue(
@@ -357,8 +359,12 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         pane.inputSurface.onComposerStatusChanged = { [weak self] status in
-            self?.relayComposerStatus(status)
-            self?.reconcileChrome()
+            guard let self else { return false }
+            let accepted = self.relayComposerStatus(status)
+            if accepted {
+                self.reconcileChrome()
+            }
+            return accepted
         }
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
@@ -422,6 +428,12 @@ final class ProductChromeHostView: NSView {
     }
 
     func performChromeReconcile() {
+        // Focus, split, and attach reconcile while the primary PTY is idle.
+        // Arm a newly registered Controller fd and relay eligibility already
+        // cached for the focused attachment; composer mode stays Busy until
+        // that fact is applied.
+        pane.inputSurface.bridge?.armAuxiliaryReadSources()
+        pane.inputSurface.bridge?.publishComposerStatus()
         var snapshot = seyal_app_snapshot(pane.appHandle)
         let bound = (lo: snapshot.execution_lo, hi: snapshot.execution_hi)
         if snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION) != 0,
@@ -455,7 +467,7 @@ final class ProductChromeHostView: NSView {
         rebuildLeft(shell: shell, leftPanel: chrome.left_panel)
         rebuildInspector(chrome)
         rebuildTabStrip(shell: shell)
-        centerColumn.reconcile(paneCount: Int(shell.pane_count))
+        reconcilePaneHosts(paneCount: Int(shell.pane_count))
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         if !direct {
@@ -471,7 +483,6 @@ final class ProductChromeHostView: NSView {
             routeFocus()
         }
         applyTheme()
-        applyPresentationTierFromSnapshot()
     }
 
     /// Global keyboard-first command palette (#932): the menu action target.
@@ -587,8 +598,11 @@ final class ProductChromeHostView: NSView {
         splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
         splitDownButton.isHidden = splitRightButton.isHidden
         closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
+        closeTabButton.idLo = shell.active_tab_lo
+        closeTabButton.idHi = shell.active_tab_hi
         closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
-        configureCloseButtons(shell: shell)
+        closePaneButton.idLo = shell.focused_pane_lo
+        closePaneButton.idHi = shell.focused_pane_hi
     }
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {
@@ -748,23 +762,6 @@ final class ProductChromeHostView: NSView {
         )
         coldVisualProbe.setAccessibilityLabel(
             "Cold-start visual configuration: \(appearanceToken) appearance, UI font \(Int(theme.uiFontSize)), terminal font \(Int(theme.terminalFontSize)), window padding \(Int(theme.windowPadding)), terminal padding \(Int(theme.terminalPadding)), \(materialToken) utility material"
-        )
-    }
-}
-
-extension ProductChromeHostView: NSMenuItemValidation {
-    /// R6.4.2: enabled state comes only from the Rust shortcut projection.
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        guard let commandId = menuItem.representedObject as? UInt16 else {
-            return true
-        }
-        return KeybindingShortcutRealization.isEnabled(
-            appHandle: pane.appHandle,
-            commandId: commandId,
-            ordinal: commandId == KeybindingShortcutRealization.windowSelectOrdinal
-                ? UInt8(menuItem.tag)
-                : 0,
-            composerFocused: false
         )
     }
 }

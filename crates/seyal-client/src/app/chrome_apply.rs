@@ -101,12 +101,11 @@ impl ApplicationRoot {
             self.drain_shell_effects();
         }
         if let Some(tab) = effect.select_tab {
-            self.shell
-                .apply(ShellAction::SelectTab {
-                    id: tab,
-                    containment_generation: self.shell.containment_generation(),
-                })
-                .map_err(|_| AppError::UnknownChromeTab)?;
+            self.apply_shell(ShellAction::SelectTab {
+                id: tab,
+                containment_generation: self.shell.containment_generation(),
+            })
+            .map_err(|_| AppError::UnknownChromeTab)?;
         }
         if effect.select_workspace.is_some() || effect.select_tab.is_some() {
             self.activate_focused_pane_authority();
@@ -123,6 +122,7 @@ impl ApplicationRoot {
         self.shell
             .apply_activate_workspace(id)
             .map_err(|_| AppError::UnknownChromeWorkspace)?;
+        self.drain_shell_effects();
         self.activate_focused_pane_authority();
         self.record_focused_pane_commit();
         let _ = self
@@ -173,6 +173,15 @@ impl ApplicationRoot {
     /// target clears the active input route without deleting sibling bindings.
     pub(super) fn activate_focused_pane_authority(&mut self) {
         let focused = self.shell.snapshot().focused_pane;
+        if self.pane_recovery.expectations.contains_key(&focused) {
+            self.authority = None;
+            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+            self.sync_composer_presentation();
+            self.output_utf8.clear();
+            #[cfg(target_os = "macos")]
+            self.clear_focused_display_handle_if_owned();
+            return;
+        }
         let Some(authority) = self.pane_authorities.get(&focused).copied() else {
             self.authority = None;
             let _ = self.presentation.apply(PresentationAction::ClearIdentity);
@@ -400,6 +409,10 @@ impl ApplicationRoot {
                 self.shell
                     .set_window_miniaturized(window, false)
                     .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::ActivationFailed => {
+                self.last_window_event = Some((window, event));
+                return Err(AppError::WindowActivationFailed);
             }
             WindowNativeEvent::OcclusionChanged => {
                 self.shell

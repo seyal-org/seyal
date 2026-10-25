@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "62dd78f33923f48554e3787978ca57adc1f8fce4"
+          "fingerprint": "cdf8b2743fa36dd76389b292fd1eeebf80991351"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "62dd78f33923f48554e3787978ca57adc1f8fce4"
+          "fingerprint": "cdf8b2743fa36dd76389b292fd1eeebf80991351"
         }
       ],
       "relationships": [
@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "4cf8f9a35ef0c184d71a327e0a8aefeae1025bf5"
+          "fingerprint": "d31c096f3acda899c2adac3346fbd3562ea6637e"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -138,7 +138,7 @@
         },
         {
           "path": "docs/specs/SPEC-009-M001-DETACH-RECONNECT.md",
-          "fingerprint": "ac7f93f29278c7cbc54d74544ef16cdc82e5ef17"
+          "fingerprint": "4a5d416ff851818ca4710fc701f202fe7a4e068d"
         },
         {
           "path": "docs/architecture/ADR-015-RUST-PRODUCT-UI-THIN-SWIFT-HOST.md",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "4cf8f9a35ef0c184d71a327e0a8aefeae1025bf5"
+          "fingerprint": "d31c096f3acda899c2adac3346fbd3562ea6637e"
         }
       ],
       "relationships": [

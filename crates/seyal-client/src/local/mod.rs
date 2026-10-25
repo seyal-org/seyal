@@ -6,27 +6,31 @@ mod display_apply;
 mod input_resize;
 mod poll;
 mod provisioning_wire;
+#[cfg(any(test, target_os = "macos"))]
+mod quit_probe;
 mod viewport_line_ids;
 
 use std::{
     collections::{HashMap, VecDeque},
+    io::Read,
     net::Shutdown,
     os::{fd::AsRawFd, unix::net::UnixStream},
 };
 
 use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
-    display::DisplayCache,
+    display::{decode_chunk, DisplayCache},
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
-        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
-        Lifecycle, MessageType, Role, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader, HistoryRangeRequest,
+        HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult, Role,
+        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
-    pass8::BlockState,
+    pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
     AttachmentId, ExecutionId,
 };
 
-use crate::block_cache::{quarantine_epoch, BlockCache};
+use crate::block_cache::{quarantine_epoch, BlockApply, BlockCache};
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{
@@ -36,8 +40,13 @@ use seyal_runtime::local_ipc::framing::{
 pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
 pub use input_resize::{
-    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
+    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, LayoutMetrics,
+    ResizeFailure,
 };
+#[cfg(test)]
+pub(crate) use quit_probe::reconstruction_probe_client;
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) use quit_probe::try_reconstruction_probe_client_with_peer;
 
 pub(crate) const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_BUFFERED_BYTES: usize = (MAX_FRAME_PAYLOAD as usize + HEADER_LEN) * 2;
@@ -114,6 +123,7 @@ pub struct LocalDisplayClient {
     pub(crate) needs_initial_prepare: bool,
     pub(crate) next_resize_request_id: u64,
     pub(crate) desired_geometry: Option<GridGeometry>,
+    pub(crate) last_layout_metrics: Option<input_resize::LayoutMetrics>,
     pub(crate) committed_geometry: GridGeometry,
     pub(crate) unresolved_resizes: VecDeque<input_resize::ResizeRecord>,
     pub(crate) applied_awaiting_projection: Option<input_resize::AppliedFence>,
@@ -368,43 +378,6 @@ pub(crate) fn validate_composer_status(
         && current.is_none_or(|current| status.revision > current.revision)
 }
 
-/// In-process client for reconstruction-fact tests. Rows and columns are the
-/// same gate `finish_attach` uses for a committed snapshot (`> 0`).
-#[cfg(any(test, target_os = "macos"))]
-pub(crate) fn try_reconstruction_probe_client(
-    role: Role,
-    rows: u16,
-    columns: u16,
-    runtime_id: u128,
-    execution_id: ExecutionId,
-    attachment_id: AttachmentId,
-) -> Result<LocalDisplayClient, ()> {
-    let (stream, _peer) = UnixStream::pair().map_err(|_| ())?;
-    Ok(reconstruction_probe_client_with_stream(
-        stream,
-        role,
-        rows,
-        columns,
-        runtime_id,
-        execution_id,
-        attachment_id,
-    ))
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[allow(dead_code)] // fallible path is preferred; keep expect wrapper for call sites.
-pub(crate) fn reconstruction_probe_client(
-    role: Role,
-    rows: u16,
-    columns: u16,
-    runtime_id: u128,
-    execution_id: ExecutionId,
-    attachment_id: AttachmentId,
-) -> LocalDisplayClient {
-    try_reconstruction_probe_client(role, rows, columns, runtime_id, execution_id, attachment_id)
-        .expect("probe socket")
-}
-
 #[cfg(any(test, target_os = "macos"))]
 fn reconstruction_probe_client_with_stream(
     stream: UnixStream,
@@ -444,6 +417,7 @@ fn reconstruction_probe_client_with_stream(
         needs_initial_prepare: false,
         next_resize_request_id: 1,
         desired_geometry: None,
+        last_layout_metrics: None,
         committed_geometry: GridGeometry {
             rows: 1,
             columns: 1,

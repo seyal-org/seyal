@@ -65,11 +65,6 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SPLIT_FOCUSED = 25,
     SEYAL_APP_ACTION_CLOSE_PANE = 26,
     /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
-    SEYAL_APP_ACTION_CLOSE_WINDOW = 67,
-    SEYAL_APP_ACTION_SELECT_WINDOW = 68,
-    SEYAL_APP_ACTION_CYCLE_WINDOW = 69,
-    SEYAL_APP_ACTION_CREATE_WINDOW = 70,
-    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 71,
     /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
@@ -169,7 +164,20 @@ enum SeyalAppActionKind {
      * Numbers 63/64 follow N4 OpenGoto/SetGotoScope (61/62).
      */
     SEYAL_APP_ACTION_HISTORY_BACK = 63,
-    SEYAL_APP_ACTION_HISTORY_FORWARD = 64
+    SEYAL_APP_ACTION_HISTORY_FORWARD = 64,
+    /*
+     * W4a multi-window host intents (ADR-018 §2.2 / §2.3).
+     * SELECT_WINDOW / REPORT_WINDOW_EVENT: target_execution_lo/hi = WindowId.
+     * CYCLE_WINDOW: reserved = 0 next, nonzero 0 previous.
+     * CREATE_WINDOW: target-free; Rust resolves Workspace. Error 55 =
+     * WindowCreationUnavailable while admission is off.
+     */
+    SEYAL_APP_ACTION_SELECT_WINDOW = 65,
+    SEYAL_APP_ACTION_CYCLE_WINDOW = 66,
+    SEYAL_APP_ACTION_CREATE_WINDOW = 67,
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 68,
+    /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
+    SEYAL_APP_ACTION_CLOSE_WINDOW = 69
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -184,6 +192,7 @@ enum SeyalAppActionKind {
 #define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
 /* Bit 8 of REPORT_WINDOW_EVENT reserved: Window is fully occluded. */
 #define SEYAL_APP_WINDOW_EVENT_OCCLUSION_HIDDEN 0x100u
+#define SEYAL_APP_WINDOW_EVENT_ACTIVATION_FAILED 10u
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
 enum SeyalAppGotoScope {
@@ -587,7 +596,7 @@ typedef struct SeyalAppPaneTreeNode {
  * ADR-018 §2.4 native effects in commit order.
  * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
  *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
- *       7 QuitCleanupComplete.
+ *       5 QuitCleanupComplete, 6 WindowActivation (SPEC-022 §5).
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -602,7 +611,9 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
-#define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 7u
+#define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 5u
+#define SEYAL_APP_EFFECT_WINDOW_ACTIVATION 6u
+#define SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS 3u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u
@@ -613,13 +624,12 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_RECORD_NATIVE_EFFECT 5u
 
 /*
- * Pane regions (#923): one per leaf of the active Tab's PaneTree, index
+ * Pane regions (#923 / #936): one per leaf of the active Tab's PaneTree, index
  * 0..<SeyalAppShell.pane_count in the same order as SEYAL_APP_ROW_PANE rows.
  * x/y/width/height are unit fractions of the Tab's center area, origin
- * top-left; hosts position regions and never derive geometry. LIVE marks the
- * single region that hosts the live terminal/Metal/composer surface; no region
- * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
- * indices return size == 0.
+ * top-left; hosts position regions and never derive geometry. LIVE marks every
+ * execution-bound leaf plus the focused bind-landing leaf so multiple Metal
+ * surfaces can present simultaneously. Out-of-range indices return size == 0.
  */
 #define SEYAL_APP_PANE_REGION_FOCUSED 1u
 #define SEYAL_APP_PANE_REGION_LIVE 2u
@@ -636,6 +646,55 @@ typedef struct SeyalAppPaneRegion {
     float width;
     float height;
 } SeyalAppPaneRegion;
+
+/*
+ * Pane bindings (#936): same index order as seyal_app_pane_region. Exposes the
+ * Runtime-owned ExecutionId and registry display handle for each leaf so the
+ * thin host can attach Metal surfaces without inventing executions (ADR-017).
+ * Out-of-range indices return size == 0.
+ */
+#define SEYAL_APP_PANE_BINDING_HAS_EXECUTION 1u
+#define SEYAL_APP_PANE_BINDING_HAS_DISPLAY 2u
+
+typedef struct SeyalAppPaneBinding {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+    uint64_t display_handle;
+} SeyalAppPaneBinding;
+
+/* Exact Pane-scoped recovery target. size == 0 means none is available. */
+#define SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE 1u
+#define SEYAL_APP_PANE_RECOVERY_RETRYABLE 2u
+typedef struct SeyalAppPaneRecoveryTarget {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+    uint64_t binding_generation;
+    uint64_t recovery_generation;
+} SeyalAppPaneRecoveryTarget;
+
+/* Pane-scoped effect stream. kind: 0 none, 1 attempt, 2 schedule,
+ * 3 launch helper, 4 dispose handle. This stream is independent of the
+ * application-primary recovery effects in SeyalAppSnapshot. */
+typedef struct SeyalAppPaneRecoveryEffect {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t reserved;
+    uint64_t generation;
+    uint64_t parameter;
+} SeyalAppPaneRecoveryEffect;
 
 /*
  * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
@@ -818,6 +877,45 @@ SeyalAppNativeEffect seyal_app_native_effect(uint64_t handle, uint32_t index);
  */
 int32_t seyal_app_record_compatible(uint16_t version, uint16_t size, uint16_t kind);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
+SeyalAppPaneBinding seyal_app_pane_binding(uint64_t handle, uint32_t index);
+SeyalAppPaneRecoveryTarget seyal_app_active_pane_recovery_target(uint64_t handle);
+SeyalAppPaneRecoveryTarget seyal_app_pane_recovery_target_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
+SeyalAppPaneRecoveryTarget seyal_app_begin_next_pane_recovery(uint64_t handle, uint64_t now_ms);
+SeyalAppPaneRecoveryEffect seyal_app_pane_recovery_effect(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_ack_pane_recovery_effect(uint64_t handle, SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_fire_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint64_t now_ms);
+int32_t seyal_app_complete_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint32_t outcome,
+    uint32_t launch,
+    uint64_t registry_handle,
+    uint64_t now_ms);
+int32_t seyal_app_retry_pane_recovery(uint64_t handle, SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_commit_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint64_t registry_handle);
+/* Propose view metrics for an active Pane; Rust validates the Pane and routes
+ * the derived correlated resize through its bound Controller client. */
+int32_t seyal_app_propose_pane_geometry(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    double viewport_width,
+    double viewport_height,
+    double horizontal_insets,
+    double vertical_insets,
+    double cell_width,
+    double cell_height);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);

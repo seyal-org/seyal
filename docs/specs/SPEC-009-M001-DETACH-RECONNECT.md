@@ -12,6 +12,7 @@
 - **Pass 9 authority:** #719 closed Done; PR #743 / PR #745; review candidate `1005bc42397aac485b1aeff08cafd0f67790d969`
 - **Numbering note:** SPEC-008 is already the active M003 command-Blocks/composer specification and is intentionally not a Pass 9 dependency historically. SPEC-008 governs presentation selection/routing when this reconnect contract is used by Flow/Raw/TUI.
 - **Accepted M003 amendment:** §8.2.1 multi-execution resolution under Issue #994; **normative on ADR-017 acceptance** and not implemented.
+- **M003 multi-live amendment:** §8.2.2 same-session Pane attachment loss under Issue #1363. Production consumption is #936 / PR #1250 and does not author this section.
 
 ## 0. Presentation-mode applicability of the accepted ADR-009 amendment
 
@@ -369,6 +370,50 @@ rather than exceptional. Resolution therefore becomes:
 - closing a Pane, Tab or window remains §6 detach. Ending an execution is the
   explicitly requested, Controller-fenced operation in SPEC-004 §18 and is never
   a consequence of closing presentation.
+
+#### 8.2.2 Same-session Pane attachment loss in a multi-live layout
+
+When one Pane loses its client attachment while its Seyal session and other
+Panes remain live, Rust-owned portable Pane state is the recovery authority.
+Recovery MUST be scoped to that Pane's exact `ExecutionId` and its current
+Pane-to-execution binding generation. It MUST NOT resolve by choosing another
+eligible execution, provision a replacement execution, or change a sibling
+Pane's attachment, Controller, focus, input route or presentation state.
+
+Each automatic recovery episode is bounded and follows the existing bounded
+Runtime discovery and Controller-reacquisition rules in §§8.1 and 8.3 as
+applicable. Before the recovered Pane becomes `Usable`, Runtime/client state
+MUST validate the same `ExecutionId`, a fresh `AttachmentId` with Controller
+authority for that execution, and a complete current snapshot committed for
+that attachment. Failure, mismatch, or exhaustion leaves only the affected
+Pane non-usable and exposes a recoverable non-secret state; it does not revoke
+or suspend healthy siblings.
+
+A valid current snapshot MAY be committed and its frame published while its
+Pane is unfocused. Snapshot/frame publication MUST NOT focus or activate that
+Pane, change the focused Pane, or grant it input authority. Focus and input
+remain owned by the currently selected Pane/presentation until an explicit
+current user/layout transition grants them to another Pane.
+
+Every asynchronous recovery completion MUST be fenced by the captured
+`ExecutionId`, fresh `AttachmentId`, Pane binding generation and current
+snapshot generation. A completion whose Pane was removed, rebound, or whose
+captured generation is stale MUST be discarded; it MUST NOT restore stale
+display state, focus, accessibility focus, IME, mouse or input ownership. A
+Pane that is still present may start a new bounded episode for its current
+binding.
+
+Required deterministic tests:
+
+- loss and recovery of one Pane attaches to its exact `ExecutionId` with a
+  fresh Controller attachment and current snapshot, while a live sibling keeps
+  its execution, attachment, focus and input authority;
+- a recovered but unfocused Pane publishes its current frame without taking
+  focus or accepting input;
+- stale completions after Pane removal, rebinding, or a newer snapshot cannot
+  restore display or interaction state;
+- persistent attach/snapshot failure exhausts the bounded episode, leaves no
+  retry active, and does not interrupt sibling output, input or resize work.
 
 ### 8.3 Controller reacquisition race
 

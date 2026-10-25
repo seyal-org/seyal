@@ -14,7 +14,8 @@ extension ProductChromeHostView {
 
     /// Relay Runtime's composer eligibility into the Rust root unchanged
     /// (#978). Rust decides what the composer shows; this only carries it.
-    func relayComposerStatus(_ status: NativeComposerStatus) {
+    @discardableResult
+    func relayComposerStatus(_ status: NativeComposerStatus) -> Bool {
         let snapshot = seyal_app_snapshot(pane.appHandle)
         var action = SeyalAppAction()
         action.version = UInt16(SEYAL_APP_ABI_VERSION)
@@ -23,7 +24,7 @@ extension ProductChromeHostView {
         action.applySnapshotFence(snapshot)
         action.reserved = UInt32(status.eligibility)
         action.target_execution_lo = status.revision
-        _ = seyal_app_apply(pane.appHandle, &action)
+        return seyal_app_apply(pane.appHandle, &action) == 0
     }
 
     func applyTranscriptPresentation(_ snapshot: SeyalAppSnapshot) {

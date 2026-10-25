@@ -6,7 +6,7 @@ use seyal_runtime::local_ipc::framing::{
 };
 
 use crate::{
-    local::{cell_from_point, derive_grid_geometry},
+    local::{cell_from_point, derive_grid_geometry, LayoutMetrics},
     LocalDisplayClient,
 };
 
@@ -298,7 +298,6 @@ pub extern "C" fn seyal_bridge_propose_geometry(
     vertical_insets: f64,
     cell_width: f64,
     cell_height: f64,
-    meaningful_layout_epoch: u8,
 ) -> i32 {
     let Some(geometry) = derive_grid_geometry(
         viewport_width,
@@ -310,10 +309,16 @@ pub extern "C" fn seyal_bridge_propose_geometry(
     ) else {
         return -17;
     };
-    with_display_client_mut(|client| {
-        client.set_desired_geometry_for_layout(geometry, meaningful_layout_epoch != 0)
-    })
-    .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
+    let metrics = LayoutMetrics::new(
+        viewport_width,
+        viewport_height,
+        horizontal_insets,
+        vertical_insets,
+        cell_width,
+        cell_height,
+    );
+    with_display_client_mut(|client| client.set_desired_geometry_for_layout(geometry, metrics))
+        .map_or(-1, |result| result.map_or_else(error_code, |_| 0))
 }
 
 #[unsafe(no_mangle)]

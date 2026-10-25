@@ -6,7 +6,7 @@ final class RustDisplayBridge {
   typealias TimelineHandler = @MainActor () -> Void
   typealias HistoryHandler = @MainActor (NativeHistoryRange) -> Void
   typealias ComposerResultHandler = @MainActor (NativeComposerResult) -> Void
-  typealias ComposerStatusHandler = @MainActor (NativeComposerStatus) -> Void
+  typealias ComposerStatusHandler = @MainActor (NativeComposerStatus) -> Bool
   typealias ErrorHandler = @MainActor (Int32) -> Void
   typealias StatusHandler = @MainActor () -> Void
 
@@ -71,6 +71,9 @@ final class RustDisplayBridge {
   let onError: ErrorHandler
   var onStatusChanged: StatusHandler
   var onCopiedText: ((String) -> Void)?
+  /// Notifies the multi-live host after a non-primary registry handle is polled
+  /// (#936) so a secondary Metal surface can present without changing focus.
+  var onRegistryHandlePolled: ((UInt64) -> Void)?
   var readSource: DispatchSourceRead?
   var writeSource: DispatchSourceWrite?
   var auxiliaryWriteSources: [UInt64: DispatchSourceWrite] = [:]
@@ -101,7 +104,7 @@ final class RustDisplayBridge {
   var historyContinuations:
     [PaneHistoryRequestKey: (startUnit: UInt32, range: NativeHistoryRange)] = [:]
   var lastComposerResultRequestID: UInt64 = 0
-  var lastComposerStatusRevision: UInt64 = 0
+  var composerStatusRelayTracker = ComposerStatusRelayTracker()
 
   init(
     onFrame: @escaping FrameHandler,
@@ -110,7 +113,7 @@ final class RustDisplayBridge {
     onTimeline: @escaping TimelineHandler = {},
     onHistory: @escaping HistoryHandler = { _ in },
     onComposerResult: @escaping ComposerResultHandler = { _ in },
-    onComposerStatus: @escaping ComposerStatusHandler = { _ in },
+    onComposerStatus: @escaping ComposerStatusHandler = { _ in false },
     paneID: String = "unbound",
     executionIdentity: String? = nil,
     allowsImplicitExecutionBootstrap: Bool = true
@@ -259,6 +262,9 @@ final class RustDisplayBridge {
     synchronizeWriteReadinessSource()
     armAuxiliaryReadSources()
     armProvisioningWakeupSource()
+    // The initial snapshot can already carry composer eligibility. Relay it
+    // before the shell goes idle; a later PTY read is not guaranteed.
+    publishComposerStatus()
     onStatusChanged()
     return true
   }
@@ -435,8 +441,10 @@ final class RustDisplayBridge {
             self.onStatusChanged()
             return
           }
+          self.onRegistryHandlePolled?(handle)
           _ = self.selectClient()
           self.publishCurrentFrame()
+          self.publishComposerStatus()
           self.synchronizeWriteReadinessSource()
         }
       }
@@ -465,6 +473,7 @@ final class RustDisplayBridge {
         _ = seyal_bridge_poll()
         self.armAuxiliaryReadSources()
         self.publishCurrentFrame()
+        self.publishComposerStatus()
         self.synchronizeWriteReadinessSource()
       }
     }
