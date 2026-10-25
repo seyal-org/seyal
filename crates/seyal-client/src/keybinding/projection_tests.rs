@@ -56,6 +56,10 @@ keys = "cmd+t"
 action = "none"
 
 [[keybindings]]
+keys = "cmd+n"
+action = "none"
+
+[[keybindings]]
 keys = "cmd+shift+t>n"
 action = "tab.create"
 "#;
@@ -160,9 +164,9 @@ fn goto_open_projects_with_stable_menu_id() {
     assert!(round_trip.ordinal.is_none());
 }
 
-/// Focus-history remains key-only in M003 (not a menu-visible K5 row).
+/// Focus-history stays out of the menu catalog until N3 / tip B (K8 review risk).
 #[test]
-fn focus_history_omitted_from_menu_projection() {
+fn focus_history_omitted_from_menu_projection_until_n3() {
     let table = load_keybinding_table(None);
     let route = route_context_set(false, PresentationMode::Flow, false);
     let projection = project_shortcuts(&table, route);
@@ -190,6 +194,10 @@ fn unbind_projected_command_keeps_title_and_route_enablement() {
     let toml = r#"
 [[keybindings]]
 keys = "cmd+t"
+action = "none"
+
+[[keybindings]]
+keys = "cmd+n"
 action = "none"
 "#;
     let table = load_keybinding_table(Some(toml));

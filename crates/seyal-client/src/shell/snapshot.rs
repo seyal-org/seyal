@@ -31,7 +31,7 @@ pub struct WindowTabSnapshot {
     pub layout: LayoutDescription,
 }
 
-/// One Pane leaf with presentation tier and execution binding.
+/// One Pane leaf with presentation mode/tier and execution binding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneLeafSnapshot {
     pub id: PaneId,
@@ -39,16 +39,22 @@ pub struct PaneLeafSnapshot {
     pub execution: Option<ExecutionId>,
     pub allows_implicit_bootstrap: bool,
     pub presentation_tier: PresentationTier,
+    pub presentation_mode: crate::presentation::PresentationMode,
 }
 
 impl ShellState {
     pub(super) fn build_snapshot(&self) -> ShellSnapshot {
-        let product_window = self.product_active_window();
+        let product_window = self.product_active_window().map(|window| window.id);
+        let active_workspace = self.active_workspace_id();
         let workspace = self
-            .workspace(self.active_workspace)
+            .workspace(active_workspace)
             .expect("active Workspace must exist");
         let window = workspace
-            .active_window()
+            .window(product_window.unwrap_or_else(|| {
+                workspace
+                    .active_window
+                    .expect("retained Workspace must have an active Window")
+            }))
             .expect("product-active Window must exist for snapshot");
         let tab = workspace
             .tab(window.active_tab)
@@ -65,8 +71,8 @@ impl ShellState {
                     tab_count: item.tab_count(),
                 })
                 .collect(),
-            windows: self.ordered_window_snapshots(product_window),
-            active_workspace: self.active_workspace,
+            windows: self.ordered_window_snapshots(window.id),
+            active_workspace,
             last_active_workspace: self.last_active_workspace,
             active_window: window.id,
             containment_generation: self.containment_generation,
@@ -81,6 +87,7 @@ impl ShellState {
                 .collect(),
             active_tab: window.active_tab,
             focused_pane: tab.focused,
+            zoomed: tab.zoomed,
             panes: tab
                 .root
                 .pane_ids()
@@ -103,13 +110,6 @@ impl ShellState {
             allows_tab_close: workspace.allows_tab_close(),
             allows_pane_close: tab.allows_focused_pane_close(),
         }
-    }
-
-    pub(super) fn product_active_window(&self) -> WindowId {
-        self.workspace(self.active_workspace)
-            .ok()
-            .and_then(|workspace| workspace.active_window)
-            .expect("product-active Window must exist")
     }
 
     fn ordered_window_snapshots(&self, product_window: WindowId) -> Vec<WindowSnapshot> {
@@ -181,6 +181,7 @@ fn leaf_snapshot(
         execution: pane.execution,
         allows_implicit_bootstrap: pane.allows_implicit_execution_bootstrap,
         presentation_tier: tier_for_leaf(pane.id, tab, window, product_window),
+        presentation_mode: pane.presentation_mode,
     }
 }
 
@@ -222,7 +223,10 @@ impl ShellError {
             Self::StaleContainment => 14,
             Self::MoveWouldNotChangeContainment => 15,
             Self::CrossWorkspaceMove => 16,
-            Self::WindowCreationUnavailable => 19,
+            Self::NotZoomed => 18,
+            Self::InvalidMoveTarget => 19,
+            Self::NoDirectionalNeighbor => 20,
+            Self::WindowCreationUnavailable => 21,
         }
     }
 }

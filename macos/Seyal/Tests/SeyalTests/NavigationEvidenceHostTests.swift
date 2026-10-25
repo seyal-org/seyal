@@ -3,9 +3,9 @@ import XCTest
 @testable import Seyal
 
 /// N6 headed host evidence (SPEC-022 §12 items 31–33) using the existing
-/// SeyalTests FFI harness. Headed CreateWindow admission is off on the W4a/N5
-/// stack, so a second Pane comes from `seyal_app_test_seed_windows_only`.
-/// Real PTY multi-pane executions remain harness-limited; see
+/// SeyalTests FFI harness. Headed CreateWindow admission is off, so a second
+/// Pane comes from `seyal_app_test_seed_windows_only`. Real PTY multi-pane
+/// executions remain harness-limited; see
 /// `docs/evidence/m003-n6-navigation-1156.md`.
 final class NavigationEvidenceHostTests: XCTestCase {
     private func makeHandle() -> UInt64 {
@@ -195,11 +195,17 @@ final class NavigationEvidenceHostTests: XCTestCase {
         let back = seyal_app_snapshot(handle)
         XCTAssertEqual(back.execution_lo, 0xA11E)
         XCTAssertEqual(back.execution_hi, 0xA11E)
-        XCTAssertEqual(back.epoch, bound.epoch, "Navigate must not restart presentation identity")
+        XCTAssertEqual(back.attachment_lo, bound.attachment_lo)
+        XCTAssertEqual(back.attachment_hi, bound.attachment_hi)
+        XCTAssertGreaterThan(
+            back.epoch,
+            bound.epoch,
+            "unbound focus clears the live route; return rebinds the same execution"
+        )
     }
 
-    /// Item 33 (host path): HistoryBack/Forward use N3 actions (codes 67/68).
-    /// FocusSeq starts at 1 on a fresh store; cursor is not a C ABI snapshot field.
+    /// Item 33 (host path): HistoryBack/Forward use master's N3 actions 63/64.
+    /// The published cursor is `seyal_app_focus_history_seq`, not a snapshot field.
     func testHistoryBackForwardTraverseRecordedTargets() {
         let handle = makeHandle()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
@@ -209,7 +215,11 @@ final class NavigationEvidenceHostTests: XCTestCase {
         let paneB = otherWindowPane(handle)
 
         navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi)
+        let seqPaneA = seyal_app_focus_history_seq(handle)
+        XCTAssertNotEqual(seqPaneA, 0)
         navigateGotoToPane(handle, paneLo: paneB.lo, paneHi: paneB.hi)
+        let seqPaneB = seyal_app_focus_history_seq(handle)
+        XCTAssertNotEqual(seqPaneB, seqPaneA)
         XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
         XCTAssertEqual(focusedPane(handle).hi, paneB.hi)
 
@@ -217,7 +227,7 @@ final class NavigationEvidenceHostTests: XCTestCase {
             apply(
                 handle,
                 kind: UInt16(SEYAL_APP_ACTION_HISTORY_BACK.rawValue),
-                payload: focusSeqPayload(2)
+                payload: focusSeqPayload(seqPaneB)
             ),
             0
         )
@@ -225,12 +235,13 @@ final class NavigationEvidenceHostTests: XCTestCase {
         let afterBack = focusedPane(handle)
         XCTAssertEqual(afterBack.lo, paneA.lo)
         XCTAssertEqual(afterBack.hi, paneA.hi)
+        XCTAssertEqual(seyal_app_focus_history_seq(handle), seqPaneA)
 
         XCTAssertEqual(
             apply(
                 handle,
                 kind: UInt16(SEYAL_APP_ACTION_HISTORY_FORWARD.rawValue),
-                payload: focusSeqPayload(1)
+                payload: focusSeqPayload(seqPaneA)
             ),
             0
         )
@@ -238,6 +249,7 @@ final class NavigationEvidenceHostTests: XCTestCase {
         let afterForward = focusedPane(handle)
         XCTAssertEqual(afterForward.lo, paneB.lo)
         XCTAssertEqual(afterForward.hi, paneB.hi)
+        XCTAssertEqual(seyal_app_focus_history_seq(handle), seqPaneB)
 
         XCTAssertEqual(
             apply(
@@ -247,49 +259,12 @@ final class NavigationEvidenceHostTests: XCTestCase {
             ),
             -4
         )
-        XCTAssertEqual(seyal_app_last_error(handle), 54)
+        XCTAssertEqual(seyal_app_last_error(handle), 51, "StaleHistoryCursor")
         XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
+        XCTAssertEqual(seyal_app_focus_history_seq(handle), seqPaneB)
     }
 
-    /// K8 / #1132: cmd+[ / cmd+] route through the catalog and dispatch N3
-    /// HistoryBack/Forward (ABI 67/68) with the committed FocusSeq. The N6
-    /// SeyalTests harness can observe focused Pane; headed XCUI cannot because
-    /// CreateWindow admission is still off and AX has no second-pane identity.
-    func testCmdBracketsDispatchHistoryBackAndForward() {
-        let handle = makeHandle()
-        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
-        _ = seedSecondWindow(handle)
-        bindSyntheticExecution(handle)
-        let paneA = focusedPane(handle)
-        let paneB = otherWindowPane(handle)
-
-        navigateGotoToPane(handle, paneLo: paneA.lo, paneHi: paneA.hi)
-        navigateGotoToPane(handle, paneLo: paneB.lo, paneHi: paneB.hi)
-        XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
-        XCTAssertEqual(focusedPane(handle).hi, paneB.hi)
-
-        let bracketOpen: UInt32 = 0x5b // '['
-        let bracketClose: UInt32 = 0x5d // ']'
-        XCTAssertEqual(
-            seyal_app_route_keystroke(handle, 1, 0, bracketOpen, 0, 0, 0),
-            1,
-            "cmd+[ must match focus_history.back"
-        )
-        ackPendingEffects(handle)
-        XCTAssertEqual(focusedPane(handle).lo, paneA.lo)
-        XCTAssertEqual(focusedPane(handle).hi, paneA.hi)
-
-        XCTAssertEqual(
-            seyal_app_route_keystroke(handle, 1, 0, bracketClose, 0, 0, 0),
-            1,
-            "cmd+] must match focus_history.forward"
-        )
-        ackPendingEffects(handle)
-        XCTAssertEqual(focusedPane(handle).lo, paneB.lo)
-        XCTAssertEqual(focusedPane(handle).hi, paneB.hi)
-    }
-
-    /// Cross-window Navigate still emits one WindowActivation (N5 path on this stack).
+    /// Cross-window Navigate still emits one WindowActivation.
     func testCrossWindowGotoEmitsWindowActivation() {
         let handle = makeHandle()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }

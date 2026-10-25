@@ -92,6 +92,53 @@ impl PaneTree {
         }
     }
 
+    /// Set every `Split.ratio` under this node to [`SplitRatio::HALF`]
+    /// (SPEC-025 §5.6 `EqualizeTab` / P3). Topology is unchanged.
+    pub(super) fn equalize_all(&mut self) {
+        match self {
+            Self::Leaf(_) => {}
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                *ratio = SplitRatio::HALF;
+                first.equalize_all();
+                second.equalize_all();
+            }
+        }
+    }
+
+    /// Equalize ratios in the subtree rooted at the nearest ancestor `Split`
+    /// of `focused` (SPEC-025 §5.6 `EqualizeFocused`). A single-leaf root is
+    /// a successful ratio no-op. Returns false when `focused` is not a leaf
+    /// in this tree.
+    pub(super) fn equalize_focused_scope(&mut self, focused: PaneId) -> bool {
+        match self {
+            Self::Leaf(id) => *id == focused,
+            Self::Split {
+                first,
+                second,
+                ratio,
+                ..
+            } => {
+                let focused_is_direct_child = matches!(**first, Self::Leaf(id) if id == focused)
+                    || matches!(**second, Self::Leaf(id) if id == focused);
+                if focused_is_direct_child {
+                    // This is the nearest ancestor Split; normalize its subtree.
+                    *ratio = SplitRatio::HALF;
+                    first.equalize_all();
+                    second.equalize_all();
+                    return true;
+                }
+                // Search each nested branch at most once. This keeps focused
+                // lookup plus normalization O(leaves) even for skewed trees.
+                first.equalize_focused_scope(focused) || second.equalize_focused_scope(focused)
+            }
+        }
+    }
+
     pub(crate) fn last_pane(&self) -> PaneId {
         match self {
             Self::Leaf(id) => *id,
@@ -99,10 +146,25 @@ impl PaneTree {
         }
     }
 
-    pub(super) fn first_pane(&self) -> Option<PaneId> {
+    /// Pre-order first leaf; used by PT1 regression against sibling-first close.
+    pub(crate) fn first_pane(&self) -> Option<PaneId> {
         match self {
             Self::Leaf(id) => Some(*id),
             Self::Split { first, second, .. } => first.first_pane().or_else(|| second.first_pane()),
+        }
+    }
+
+    /// Pre-order first leaf of the surviving sibling of `closing` (SPEC-025 §5.2).
+    pub(super) fn sibling_first_leaf(&self, closing: PaneId) -> Option<PaneId> {
+        match self {
+            Self::Leaf(_) => None,
+            Self::Split { first, second, .. } => match (&**first, &**second) {
+                (Self::Leaf(id), _) if *id == closing => second.first_pane(),
+                (_, Self::Leaf(id)) if *id == closing => first.first_pane(),
+                _ => first
+                    .sibling_first_leaf(closing)
+                    .or_else(|| second.sibling_first_leaf(closing)),
+            },
         }
     }
 
@@ -123,6 +185,26 @@ impl PaneTree {
             Self::Split { first, second, .. } => {
                 first.contains_leaf(pane) || second.contains_leaf(pane)
             }
+        }
+    }
+
+    /// Exchange leaf `PaneId`s in place (SPEC-025 §5.3). Topology nodes unchanged.
+    pub(super) fn swapping_leaves(&self, a: PaneId, b: PaneId) -> PaneTree {
+        match self {
+            Self::Leaf(id) if *id == a => Self::Leaf(b),
+            Self::Leaf(id) if *id == b => Self::Leaf(a),
+            Self::Leaf(_) => self.clone(),
+            Self::Split {
+                axis,
+                first,
+                second,
+                ratio,
+            } => Self::Split {
+                axis: *axis,
+                first: Box::new(first.swapping_leaves(a, b)),
+                second: Box::new(second.swapping_leaves(a, b)),
+                ratio: *ratio,
+            },
         }
     }
 

@@ -313,38 +313,49 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
-        // W4a window host intents (ADR-018 §2.2 / §2.3). Numbers follow tip A goto.
-        63 => Ok(AppAction::SelectWindow {
+        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
+        // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
+        // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
+        // ActionUnavailable (50).
+        63 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryBack {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
+        64 => {
+            if action.reserved != 0 {
+                return Err(-6);
+            }
+            Ok(AppAction::HistoryForward {
+                fence,
+                observed: decode_focus_seq(action.payload, action.payload_len)?,
+            })
+        }
+        // W4a window host intents (ADR-018 §2.2 / §2.3), following N3.
+        65 => Ok(AppAction::SelectWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
         }),
-        64 => Ok(AppAction::CycleWindow {
+        66 => Ok(AppAction::CycleWindow {
             direction: if action.reserved == 0 {
                 crate::shell::CycleDirection::Next
             } else {
                 crate::shell::CycleDirection::Previous
             },
         }),
-        65 => Ok(AppAction::CreateWindow),
-        66 => Ok(AppAction::ReportWindowEvent {
+        67 => Ok(AppAction::CreateWindow),
+        68 => Ok(AppAction::ReportWindowEvent {
             window: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
             event: decode_window_event(action.reserved)?,
-        }),
-        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
-        // as little-endian u64; empty payload is invalid. Numbers 67/68 follow
-        // W4a 63–66. Error codes 54/55 follow WindowActivationFailed (53).
-        67 => Ok(AppAction::HistoryBack {
-            fence,
-            observed: decode_focus_seq(action.payload, action.payload_len)?,
-        }),
-        68 => Ok(AppAction::HistoryForward {
-            fence,
-            observed: decode_focus_seq(action.payload, action.payload_len)?,
         }),
         _ => Err(-6),
     }

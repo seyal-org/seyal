@@ -24,6 +24,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     var onHistoryOpened: (() -> Void)?
     /// A table match changed product chrome (palette, tabs, presentation).
     var onCommandConsumed: (() -> Void)?
+    var onFocusEligibilityChanged: (() -> Void)?
 
     private let appHandle: UInt64
     private let textView = ComposerTextView()
@@ -32,8 +33,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private let history = NSButton(title: "", target: nil, action: nil)
     private var heightConstraint: NSLayoutConstraint!
     private var lastEpoch: UInt64 = 0
+    private var focusEligibilityGeneration: UInt64 = 0
+    private var hasReconciledComposerState = false
     private var theme: NativeTheme?
     private var editing = false
+
+    var isFocusEligibleForRecovery: Bool {
+        hasReconciledComposerState && !isHidden && textView.isEditable && window != nil
+    }
 
     init(appHandle: UInt64) {
         self.appHandle = appHandle
@@ -126,8 +133,16 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         fatalError("ComposerBridgeView is programmatic")
     }
 
-    func focusEditor() {
-        window?.makeFirstResponder(textView)
+    @discardableResult
+    func focusEditor() -> Bool {
+        window?.makeFirstResponder(textView) ?? false
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        focusEligibilityGeneration &+= 1
+        guard isFocusEligibleForRecovery else { return }
+        enqueueFocusEligibilityChange(generation: focusEligibilityGeneration)
     }
 
     func apply(theme: NativeTheme) {
@@ -144,12 +159,21 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     func reconcile() {
         let composer = seyal_app_composer(appHandle)
         let snapshot = seyal_app_snapshot(appHandle)
+        let wasFocusEligible = isFocusEligibleForRecovery
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
-        isHidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        let hidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
+        // Presentation/epoch transitions revoke composer IME ownership: cancel
+        // uncommitted marked text without submitting (SPEC-008 / #866).
+        if (direct || hidden || composer.epoch != lastEpoch), hasMarkedText() {
+            textView.inputContext?.discardMarkedText()
+        }
+        isHidden = hidden
         let available = composer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available
+        hasReconciledComposerState = true
+        let isNowFocusEligible = isFocusEligibleForRecovery
         execute.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_EXECUTE))
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0
         let recall = seyal_app_composer_history(appHandle)
@@ -175,6 +199,22 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         placeholder.isHidden = !textView.string.isEmpty
         expandToDraft()
         paintChrome()
+        if !isNowFocusEligible, wasFocusEligible {
+            focusEligibilityGeneration &+= 1
+        } else if isNowFocusEligible, !wasFocusEligible {
+            focusEligibilityGeneration &+= 1
+            enqueueFocusEligibilityChange(generation: focusEligibilityGeneration)
+        }
+    }
+
+    private func enqueueFocusEligibilityChange(generation: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.focusEligibilityGeneration == generation,
+                  self.isFocusEligibleForRecovery
+            else { return }
+            self.onFocusEligibilityChanged?()
+        }
     }
 
     func textDidBeginEditing(_ notification: Notification) {
@@ -370,6 +410,24 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.reserved = accepted ? 1 : 0
         _ = seyal_app_apply(appHandle, &action)
         reconcile()
+    }
+
+    /// Native projection of a failed Runtime admission. Rust keeps the draft;
+    /// the host only announces the failure (no secret-bearing text).
+    func presentAdmissionFailure(_ code: NativeComposerResult.Code) {
+        let message: String
+        switch code {
+        case .busy:
+            message = "Command not accepted: shell is busy."
+        case .backpressure:
+            message = "Command not accepted: terminal is busy. Retry."
+        case .invalid:
+            message = "Command not accepted."
+        case .accepted, .unsupported:
+            return
+        }
+        setAccessibilityValue(message)
+        SeyalAccessibilityAnnouncement.post(message, element: self)
     }
 }
 

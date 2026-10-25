@@ -204,7 +204,7 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         commandPalette.onDismissed = { [weak self] in
-            self?.routeFocus()
+            self?.commandPaletteDidDismiss()
         }
 
         pane.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -272,13 +272,13 @@ final class ProductChromeHostView: NSView {
 
             centerColumn.bottomAnchor.constraint(equalTo: bottomAnchor),
             transcript.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 20),
-            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20),
+            transcript.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -20).yieldingToPaneRegion(),
             transcript.topAnchor.constraint(equalTo: liveContent.topAnchor, constant: 16),
             transcript.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
             composer.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor, constant: 24),
-            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24),
+            composer.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor, constant: -24).yieldingToPaneRegion(),
             composer.topAnchor.constraint(equalTo: transcript.bottomAnchor, constant: 12),
-            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16),
+            composer.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor, constant: -16).yieldingToPaneRegion(),
             historyOverlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
             historyOverlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
             historyOverlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
@@ -302,9 +302,9 @@ final class ProductChromeHostView: NSView {
         ]
         paneFillsCenter = [
             pane.leadingAnchor.constraint(equalTo: liveContent.leadingAnchor),
-            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor),
+            pane.trailingAnchor.constraint(equalTo: liveContent.trailingAnchor).yieldingToPaneRegion(),
             pane.topAnchor.constraint(equalTo: liveContent.topAnchor),
-            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor),
+            pane.bottomAnchor.constraint(equalTo: liveContent.bottomAnchor).yieldingToPaneRegion(),
         ]
         NSLayoutConstraint.activate(paneFollowsTranscript)
         applyShellChrome(seyal_app_chrome(pane.appHandle))
@@ -316,7 +316,11 @@ final class ProductChromeHostView: NSView {
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
         }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
-            self?.composer.focusEditor()
+            self?.requestComposerFocusIfPaletteAllows() ?? false
+        }
+        composer.onFocusEligibilityChanged = { [weak self] in
+            guard let self, self.composer.isFocusEligibleForRecovery else { return }
+            self.pane.inputSurface.composerFocusEligibilityDidChange()
         }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
@@ -347,6 +351,9 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onComposerResultChanged = { [weak self] result in
             let accepted = result.code == .accepted || result.code == .unsupported
             self?.composer.applyComposerResult(requestID: result.requestID, accepted: accepted)
+            if !accepted {
+                self?.composer.presentAdmissionFailure(result.code)
+            }
             self?.reconcileChrome()
         }
         pane.inputSurface.onComposerStatusChanged = { [weak self] status in
@@ -562,6 +569,9 @@ final class ProductChromeHostView: NSView {
         // An open palette owns focus; eligibility-driven routing resumes
         // only after it closes (see `onDismissed`).
         guard !commandPalette.isOpen else { return }
+        // Revoke Metal IME/AX before focusing the composer so Flow never keeps
+        // a competing terminal first responder (#866).
+        inputSurface.syncInputRoutePresentation()
         let snapshot = seyal_app_snapshot(pane.appHandle)
         let composerSnap = seyal_app_composer(pane.appHandle)
         if snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue),

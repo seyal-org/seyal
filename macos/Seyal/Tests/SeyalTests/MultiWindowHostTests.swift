@@ -31,11 +31,30 @@ final class MultiWindowHostTests: XCTestCase {
     func testSeedWindowsOnlyInstallsSnapshotWindows() {
         let handle = seyal_app_create()
         defer { _ = seyal_app_destroy(handle) }
-        // Headed XCTest shares the process CLIENTS TLS with the live AppDelegate
-        // host; probe-client registration is covered by Rust
-        // `install_quit_fixture_attaches_probe_clients` instead.
+        // Probe-client registration with three windows is covered by Rust
+        // `install_quit_fixture_attaches_probe_clients`.
         XCTAssertEqual(seyal_app_test_seed_windows_only(handle, 3), 0)
         XCTAssertEqual(seyal_app_shell(handle).window_count, 3)
+    }
+
+    func testQuitWithThreeWindowsAndAttachmentsRepliesOnce() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        XCTAssertEqual(seyal_app_test_seed_quit_case(host.appHandle, 3), 0)
+        XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 3)
+        host.applyPendingEffectsAndReconcile()
+        XCTAssertEqual(host.orderedKeys.count, 3)
+        let replies = QuitReplyCounter()
+        let reply = host.quitCoordinatorForTests.beginTerminateLater(
+            forwardRequestQuit: { host.forwardRequestQuit() },
+            performNativeCleanup: { host.performQuitCleanup() },
+            ackUntilCleanupComplete: { host.ackUntilQuitCleanupComplete() },
+            reply: { replies.increment() }
+        )
+        XCTAssertEqual(reply, .terminateLater)
+        XCTAssertEqual(replies.count, 1)
+        XCTAssertEqual(host.quitCoordinatorForTests.replyCount, 1)
+        XCTAssertEqual(seyal_app_test_live_attachment_count(host.appHandle), 0)
     }
 
     func testTerminateLaterRepliesOnceOnCleanupComplete() {
@@ -153,23 +172,20 @@ final class MultiWindowHostTests: XCTestCase {
     }
 
     func testEventForwardingReportsBecameKey() {
-        let host = MultiWindowHostController()
+        let host = seededQuitHost(windows: 2)
         defer { host.performQuitCleanup() }
-        host.bootstrapAfterLaunch()
-        guard let key = host.orderedKeys.first else {
-            return XCTFail("expected bootstrap window")
+        let target = host.orderedKeys[1]
+        guard let targetWindow = host.realizedWindowForTests(target) else {
+            return XCTFail("expected second realized window")
         }
-        // Drive the typed event path directly (same as NSWindowDelegate).
-        var action = SeyalAppAction()
-        action.version = UInt16(SEYAL_APP_ABI_VERSION)
-        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
-        action.kind = UInt16(SEYAL_APP_ACTION_REPORT_WINDOW_EVENT.rawValue)
-        action.target_execution_lo = key.lo
-        action.target_execution_hi = key.hi
-        action.reserved = SEYAL_APP_WINDOW_EVENT_BECAME_KEY
-        XCTAssertEqual(seyal_app_apply(host.appHandle, &action), 0)
-        // Host derives no product state: window count unchanged.
-        XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 1)
+        host.windowDidBecomeKey(
+            Notification(name: NSWindow.didBecomeKeyNotification, object: targetWindow)
+        )
+        let shell = seyal_app_shell(host.appHandle)
+        XCTAssertEqual(shell.window_count, 2)
+        XCTAssertEqual(shell.active_window_lo, target.lo)
+        XCTAssertEqual(shell.active_window_hi, target.hi)
+        XCTAssertTrue(host.liveHost.window === targetWindow)
     }
 
     func testHostHasNoWritableWindowModelTypes() {
@@ -216,8 +232,16 @@ final class MultiWindowHostTests: XCTestCase {
                 .appendingPathComponent("Sources/AppDelegate.swift"),
             encoding: .utf8
         )
+        XCTAssertTrue(source.contains("projectedItem("))
+        XCTAssertTrue(source.contains("KeybindingShortcutRealization.tabCreate"))
         XCTAssertTrue(source.contains("keyEquivalent: \"n\""))
-        XCTAssertTrue(source.contains("keyEquivalent: \"t\""))
+        XCTAssertTrue(source.contains("newWindow.keyEquivalentModifierMask = [.command, .shift]"))
+        for command in [
+            "paneSplitRight", "paneSplitDown", "presentationToggleRaw",
+            "presentationToggleTui", "gotoOpen", "tabSelectPrevious", "tabSelectNext"
+        ] {
+            XCTAssertTrue(source.contains("KeybindingShortcutRealization.\(command)"))
+        }
         XCTAssertTrue(source.contains("[.command, .option]"))
         XCTAssertFalse(source.contains("keyDown"))
     }
@@ -251,8 +275,14 @@ final class MultiWindowHostTests: XCTestCase {
         defer { host.performQuitCleanup() }
         let target = seyal_app_window(host.appHandle, 1)
         XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
-        host.applyPendingEffectsAndReconcile()
         let expectedId = "seyal-window-\(target.window_lo)-\(target.window_hi)"
+        // XCTest's hosted app is not foregrounded, so supply the key-state
+        // acknowledgement while still asserting the requested WindowId.
+        host.activationRequestForTests = { window in
+            XCTAssertEqual(window.identifier?.rawValue, expectedId)
+        }
+        host.keyWindowStatusForTests = { $0.identifier?.rawValue == expectedId }
+        applyAndWaitForActivation(host, reconcile: true)
         XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
         let windows = host.snapshotOrderedWindowKeys()
         XCTAssertEqual(windows.count, 2)
@@ -267,13 +297,90 @@ final class MultiWindowHostTests: XCTestCase {
         let liveBefore = host.liveHost.window
         XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
         host.activationFailBudget = 8
-        host.applyPendingEffects()
+        applyAndWaitForActivation(host)
         XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.result, -4)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.error, 53)
         let after = seyal_app_window(host.appHandle, 1)
         XCTAssertNotEqual(after.flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE), 0)
         XCTAssertTrue(host.liveHost.window === liveBefore)
         XCTAssertEqual(host.activationFailBudget, 8 - Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+    }
+
+    func testWindowActivationDetectsAppKitRefusingToKeyNamedWindow() {
+        let host = seededQuitHost(windows: 2)
+        defer { host.performQuitCleanup() }
+        let target = seyal_app_window(host.appHandle, 1)
+        let sourceWindow = host.liveHost.window
+        XCTAssertNotNil(sourceWindow)
+        let keyWindowBefore = NSApp.keyWindow
+
+        XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
+        var requests = 0
+        var targetWasKeyAfterRequest: Bool?
+        host.activationRequestForTests = { requestedWindow in
+            XCTAssertEqual(
+                requestedWindow.identifier?.rawValue,
+                "seyal-window-\(target.window_lo)-\(target.window_hi)"
+            )
+            requests += 1
+            // Model AppKit refusing the request: the named window stays non-key.
+            targetWasKeyAfterRequest = requestedWindow.isKeyWindow
+        }
+        applyAndWaitForActivation(host)
+
+        XCTAssertEqual(requests, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+        XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        XCTAssertEqual(targetWasKeyAfterRequest, false)
+        XCTAssertTrue(NSApp.keyWindow === keyWindowBefore)
+        XCTAssertTrue(host.liveHost.window === sourceWindow)
+        XCTAssertNotEqual(
+            seyal_app_window(host.appHandle, 1).flags & UInt16(SEYAL_APP_WINDOW_PRODUCT_ACTIVE),
+            0,
+            "portable focus remains committed after native activation failure"
+        )
+    }
+
+    func testWindowActivationWaitsForDelayedNamedWindowKeyAcknowledgement() {
+        let host = seededQuitHost(windows: 2)
+        defer { host.performQuitCleanup() }
+        let target = seyal_app_window(host.appHandle, 1)
+        let expectedId = "seyal-window-\(target.window_lo)-\(target.window_hi)"
+        XCTAssertEqual(navigateToActiveTab(of: target, handle: host.appHandle), 0)
+
+        let delayedKeyAcknowledgement = expectation(description: "named window becomes key")
+        var targetBecameKey = false
+        var requests = 0
+        host.activationRequestForTests = { window in
+            XCTAssertEqual(window.identifier?.rawValue, expectedId)
+            requests += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                targetBecameKey = true
+                delayedKeyAcknowledgement.fulfill()
+            }
+        }
+        host.keyWindowStatusForTests = { _ in targetBecameKey }
+
+        applyAndWaitForActivation(host)
+        wait(for: [delayedKeyAcknowledgement], timeout: 1.0)
+
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(host.lastActivationAttempts, 1)
+        XCTAssertNil(host.lastActivationFailureReportForTests)
+        XCTAssertEqual(host.liveHost.window?.identifier?.rawValue, expectedId)
+    }
+
+    private func applyAndWaitForActivation(_ host: MultiWindowHostController, reconcile: Bool = false) {
+        let activationSettled = expectation(description: "window activation settles")
+        host.activationCompletionForTests = { _ in activationSettled.fulfill() }
+        if reconcile {
+            host.applyPendingEffectsAndReconcile()
+        } else {
+            host.applyPendingEffects()
+        }
+        wait(for: [activationSettled], timeout: 1.0)
+        host.activationCompletionForTests = nil
     }
 
     func testCreateWindowRejectedDoesNotMoveLiveHost() {
@@ -284,7 +391,7 @@ final class MultiWindowHostTests: XCTestCase {
         let liveWindow = host.liveHost.window
         XCTAssertNotNil(liveWindow)
         host.createWindow(nil)
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 52, "WindowCreationUnavailable")
+        XCTAssertEqual(seyal_app_last_error(host.appHandle), 55, "WindowCreationUnavailable")
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
         XCTAssertTrue(host.liveHost.window === liveWindow)
         XCTAssertEqual(host.orderedKeys.count, Int(beforeCount))
@@ -306,7 +413,7 @@ final class MultiWindowHostTests: XCTestCase {
             action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
             action.kind = UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue)
             XCTAssertEqual(seyal_app_apply(host.appHandle, &action), -4)
-            XCTAssertEqual(seyal_app_last_error(host.appHandle), 52, "WindowCreationUnavailable")
+            XCTAssertEqual(seyal_app_last_error(host.appHandle), 55, "WindowCreationUnavailable")
             host.applyPendingEffectsAndReconcile()
             XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, beforeCount)
             XCTAssertTrue(host.liveHost.window === liveWindow)

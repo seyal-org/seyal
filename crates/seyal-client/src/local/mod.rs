@@ -3,6 +3,8 @@ mod discovery;
 mod display_apply;
 mod input_resize;
 mod provisioning_wire;
+#[cfg(any(test, target_os = "macos"))]
+mod quit_probe;
 mod viewport_line_ids;
 
 use std::{
@@ -37,6 +39,10 @@ pub use discovery::DiscoveryFailure;
 pub use input_resize::{
     cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
 };
+#[cfg(test)]
+pub(crate) use quit_probe::reconstruction_probe_client;
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) use quit_probe::try_reconstruction_probe_client_with_peer;
 
 pub(crate) const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_BUFFERED_BYTES: usize = (MAX_FRAME_PAYLOAD as usize + HEADER_LEN) * 2;
@@ -626,43 +632,6 @@ pub(crate) fn validate_composer_status(
     status.attachment_id == attachment_id
         && status.revision != 0
         && current.is_none_or(|current| status.revision > current.revision)
-}
-
-/// In-process client for reconstruction-fact tests. Rows and columns are the
-/// same gate `finish_attach` uses for a committed snapshot (`> 0`).
-#[cfg(any(test, target_os = "macos"))]
-pub(crate) fn try_reconstruction_probe_client(
-    role: Role,
-    rows: u16,
-    columns: u16,
-    runtime_id: u128,
-    execution_id: ExecutionId,
-    attachment_id: AttachmentId,
-) -> Result<LocalDisplayClient, ()> {
-    let (stream, _peer) = UnixStream::pair().map_err(|_| ())?;
-    Ok(reconstruction_probe_client_with_stream(
-        stream,
-        role,
-        rows,
-        columns,
-        runtime_id,
-        execution_id,
-        attachment_id,
-    ))
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[allow(dead_code)] // fallible path is preferred; keep expect wrapper for call sites.
-pub(crate) fn reconstruction_probe_client(
-    role: Role,
-    rows: u16,
-    columns: u16,
-    runtime_id: u128,
-    execution_id: ExecutionId,
-    attachment_id: AttachmentId,
-) -> LocalDisplayClient {
-    try_reconstruction_probe_client(role, rows, columns, runtime_id, execution_id, attachment_id)
-        .expect("probe socket")
 }
 
 #[cfg(any(test, target_os = "macos"))]

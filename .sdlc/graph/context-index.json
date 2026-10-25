@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "8f6470f4c96b3edbe24c6dbd96746fb5910bb026"
+          "fingerprint": "cdf8b2743fa36dd76389b292fd1eeebf80991351"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "8f6470f4c96b3edbe24c6dbd96746fb5910bb026"
+          "fingerprint": "cdf8b2743fa36dd76389b292fd1eeebf80991351"
         }
       ],
       "relationships": [
@@ -126,7 +126,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "4cf8f9a35ef0c184d71a327e0a8aefeae1025bf5"
+          "fingerprint": "d31c096f3acda899c2adac3346fbd3562ea6637e"
         },
         {
           "path": "docs/specs/SPEC-006-M001-NATIVE-INPUT-RESIZE.md",
@@ -209,7 +209,7 @@
       "sources": [
         {
           "path": "docs/architecture/ADR-009-COMMAND-BLOCKS-COMPOSER-AND-TUI.md",
-          "fingerprint": "4cf8f9a35ef0c184d71a327e0a8aefeae1025bf5"
+          "fingerprint": "d31c096f3acda899c2adac3346fbd3562ea6637e"
         }
       ],
       "relationships": [
@@ -281,7 +281,7 @@
       "sources": [
         {
           "path": "docs/engineering/REPOSITORY-STRUCTURE.md",
-          "fingerprint": "4e71416e6c8de07eefd52d037d570b4bbd188757"
+          "fingerprint": "a55b2028baa8160bfe449d3dc40b23ccd6ac290d"
         }
       ],
       "relationships": [

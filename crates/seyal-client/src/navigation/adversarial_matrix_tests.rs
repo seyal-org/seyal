@@ -1,9 +1,11 @@
 //! N6 adversarial matrix (SPEC-022 §12 items 31–33 lifecycle adjacency).
 //!
-//! Orthogonal facts: {execution alive/exited} × {pane present/destroyed} ×
-//! {window active/inactive} × {attached/detached}. Independent axes are not
-//! collapsed into one lifecycle enum. Navigate must never spawn, terminate,
-//! bind, or unbind an execution (R4.3).
+//! Sampled cells, not the full cross product: execution alive/exited, pane
+//! present/destroyed, window active/inactive, and shell-bound versus unbound.
+//! Attachment is ApplicationRoot authority, not a separate Navigate address
+//! axis. Navigate must never spawn, terminate, bind, or unbind an execution
+//! (R4.3). Uncovered combinations are listed in
+//! `docs/evidence/m003-n6-navigation-1156.md`.
 
 use std::collections::HashMap;
 
@@ -205,7 +207,21 @@ fn root_away_and_back_keeps_authority_and_refuses_rebind() {
     })
     .expect("away");
     assert_eq!(root.snapshot().shell.focused_pane, pane_b);
-    assert_eq!(root.snapshot().execution, Some(bound.execution));
+    assert_eq!(
+        root.snapshot().execution,
+        None,
+        "unbound focus fail-closes the live route"
+    );
+    assert_eq!(
+        root.snapshot()
+            .shell
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_a)
+            .and_then(|pane| pane.execution),
+        Some(bound.execution),
+        "Navigate must keep the left-behind Pane binding"
+    );
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
@@ -236,6 +252,7 @@ fn destroyed_pane_fails_closed_no_retarget() {
         .apply(ShellAction::SplitPane {
             id: pane_a,
             axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
         })
         .expect("split");
     let sibling = shell
@@ -246,7 +263,10 @@ fn destroyed_pane_fails_closed_no_retarget() {
         .find(|id| *id != pane_a && *id != pane_b)
         .expect("sibling");
     shell
-        .apply(ShellAction::ClosePane { id: pane_a })
+        .apply(ShellAction::ClosePane {
+            id: pane_a,
+            containment_generation: shell.containment_generation(),
+        })
         .expect("destroy unbound pane_a");
     let focus_before = shell.snapshot().focused_pane;
     let active_before = shell.snapshot().active_window;
@@ -490,6 +510,11 @@ fn history_back_forward_traverse_recorded_surface_targets() {
         },
     })
     .expect("p1");
+    let seq_pane_a = root
+        .snapshot()
+        .focus_history_seq
+        .expect("surface cursor for A");
+    assert_eq!(root.snapshot().shell.focused_pane, pane_a);
     root.apply(AppAction::Navigate {
         fence: root.fence(),
         address: ResourceAddress::Pane {
@@ -499,21 +524,34 @@ fn history_back_forward_traverse_recorded_surface_targets() {
         },
     })
     .expect("p2");
+    let seq_pane_b = root
+        .snapshot()
+        .focus_history_seq
+        .expect("surface cursor for B");
+    assert_ne!(seq_pane_b, seq_pane_a);
     assert_eq!(root.snapshot().shell.focused_pane, pane_b);
-    let seq_head = root.snapshot().focus_history_seq.expect("cursor");
     root.apply(AppAction::HistoryBack {
         fence: root.fence(),
-        observed: seq_head,
+        observed: seq_pane_b,
     })
     .expect("back");
     assert_eq!(root.snapshot().shell.focused_pane, pane_a);
-    let seq_mid = root.snapshot().focus_history_seq.expect("mid");
+    assert_eq!(
+        root.snapshot().focus_history_seq,
+        Some(seq_pane_a),
+        "Back must restore the cursor the surface published for pane A"
+    );
     root.apply(AppAction::HistoryForward {
         fence: root.fence(),
-        observed: seq_mid,
+        observed: seq_pane_a,
     })
     .expect("forward");
     assert_eq!(root.snapshot().shell.focused_pane, pane_b);
+    assert_eq!(
+        root.snapshot().focus_history_seq,
+        Some(seq_pane_b),
+        "Forward must restore the cursor the surface published for pane B"
+    );
 }
 
 /// Orthogonal matrix sample: alive+bound+present+inactive-window succeeds;

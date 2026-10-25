@@ -2,20 +2,22 @@
 
 use std::collections::HashMap;
 
+use crate::presentation::PresentationMode;
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use super::tree::PaneTree;
 use super::ShellError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Pane {
     pub(super) id: PaneId,
     pub(super) title: String,
     pub(super) execution: Option<ExecutionId>,
     pub(super) allows_implicit_execution_bootstrap: bool,
+    pub(super) presentation_mode: PresentationMode,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Tab {
     pub(super) id: TabId,
     pub(super) title: String,
@@ -23,10 +25,12 @@ pub(super) struct Tab {
     pub(super) panes: HashMap<PaneId, Pane>,
     pub(super) root: PaneTree,
     pub(super) focused: PaneId,
+    /// Tab-scoped presentation overlay; never a second layout authority (ADR-021 §3).
+    pub(super) zoomed: Option<PaneId>,
 }
 
 /// One Window inside a Workspace. `workspace_id` is fixed at construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Window {
     pub(super) id: WindowId,
     /// Stored with the window. Shell tests read it; the library build does not.
@@ -36,7 +40,7 @@ pub(super) struct Window {
     pub(super) active_tab: TabId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
     pub(super) name: String,
@@ -120,6 +124,7 @@ impl Workspace {
                         allows_implicit_execution_bootstrap: tab
                             .pane
                             .allows_implicit_execution_bootstrap,
+                        presentation_mode: PresentationMode::Flow,
                     };
                     let mut composed = Tab::with_pane(tab.id, tab.title, pane);
                     composed.attention = tab.attention;
@@ -333,6 +338,26 @@ impl Workspace {
     }
 }
 
+impl super::ShellState {
+    pub(crate) fn set_presentation_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode: PresentationMode,
+    ) -> Result<(), ShellError> {
+        for workspace in &mut self.workspaces {
+            for window in &mut workspace.windows {
+                for tab in &mut window.tabs {
+                    if let Some(pane) = tab.panes.get_mut(&pane_id) {
+                        pane.presentation_mode = mode;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(ShellError::UnknownPane)
+    }
+}
+
 impl Tab {
     pub(super) fn with_pane(id: TabId, title: String, pane: Pane) -> Self {
         let pane_id = pane.id;
@@ -345,6 +370,7 @@ impl Tab {
             panes,
             root: PaneTree::Leaf(pane_id),
             focused: pane_id,
+            zoomed: None,
         }
     }
 
@@ -368,6 +394,7 @@ impl Tab {
             panes: HashMap::new(),
             root: PaneTree::Leaf(PaneId::new()),
             focused: PaneId::new(),
+            zoomed: None,
         }
     }
 }

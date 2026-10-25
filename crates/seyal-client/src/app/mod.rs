@@ -29,6 +29,8 @@ pub use native_effect::NativeEffect;
 mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod pane_provisioning_tests;
 #[cfg(test)]
 mod presentation_tests;
 #[cfg(test)]
@@ -46,17 +48,15 @@ use std::time::Duration;
 use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
-    LeftPanelMode,
+    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
 use crate::composer::{
-    ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
-    RuntimeComposerEligibility,
+    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord, RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
 use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
-use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
+use crate::palette::{PaletteSnapshot, PaletteState};
 use crate::pane_layout::{self, PaneRegion, SplitPosition};
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
@@ -66,13 +66,13 @@ use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{ShellAction, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
-pub const APP_ABI_VERSION: u16 = 1;
+pub const APP_ABI_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppError {
@@ -125,16 +125,14 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
-    /// Stale FocusSeq on HistoryBack/Forward. ABI 54.
     NavigationStaleHistoryCursor,
-    /// History cursor missing or at an end. ABI 55.
     NavigationHistoryUnavailable,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
-    /// Unknown WindowId for select/cycle/report (W4a). ABI 51.
+    /// Unknown WindowId for select/cycle/report (W4a). ABI 54.
     UnknownWindow,
-    /// Extra Window create rejected until close exists (W4a). ABI 52.
+    /// Extra Window create rejected until close exists (W4a). ABI 55.
     WindowCreationUnavailable,
     /// Native WindowActivation failed after bounded retry. ABI 53.
     WindowActivationFailed,
@@ -554,9 +552,9 @@ pub struct ApplicationRoot {
     last_window_event: Option<(WindowId, WindowNativeEvent)>,
     /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
     quit_deadline: Option<std::time::Instant>,
-    /// Extra live display attachments owned by this root (quit detaches all).
+    /// Extra live display attachments and probe peers owned through quit cleanup.
     #[cfg(target_os = "macos")]
-    live_attachments: Vec<crate::ffi::ClientRegistryHandle>,
+    live_attachments: Vec<session::QuitProbeAttachment>,
 }
 
 impl Default for ApplicationRoot {
@@ -725,7 +723,19 @@ impl ApplicationRoot {
     /// `Bind` will land); it is shown only while that Pane is focused.
     pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let shell = self.shell.snapshot();
-        pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
+        let focused = shell.focused_pane;
+        let live_pane =
+            if self.pane_authorities.contains_key(&focused) || self.pane_authorities.is_empty() {
+                focused
+            } else {
+                // Unbound focus while another leaf remains bound: no live surface.
+                self.pane_authorities
+                    .keys()
+                    .copied()
+                    .next()
+                    .expect("non-empty pane_authorities")
+            };
+        pane_layout::project(&shell.tree, focused, live_pane)
     }
 
     pub fn fence(&self) -> AppFence {
@@ -766,9 +776,8 @@ impl ApplicationRoot {
         let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
             generation: self.snapshot_generation,
-            // The fence Pane, not the focused one: host actions fenced from
-            // this snapshot must keep reaching the bound execution while
-            // another split leaf is focused.
+            // The fence Pane when bound; the focused Pane when fail-closed
+            // unbound (N3). Hosts must not send input to another Pane's execution.
             pane: self.fence().pane,
             execution: self.authority.map(|bound| bound.execution),
             attachment: self.authority.map(|bound| bound.attachment),
@@ -1037,48 +1046,6 @@ impl ApplicationRoot {
     }
 }
 
-pub(super) fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub(super) fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub(super) fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub(super) fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub(super) fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
-        }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
-    }
-}
+pub(super) use chrome_apply::{
+    chrome_error, close_pane_error, close_tab_error, composer_error, palette_error,
+};

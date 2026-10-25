@@ -1,11 +1,11 @@
-//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5) with optional history.
+//! Atomic `Navigate(address)` commit (SPEC-022 §4 / §5), with optional history.
 //!
 //! Resolve with the N1 resolver, then apply workspace/tab/pane focus in one
-//! transition. When the hosting window is not product-active, emit exactly one
-//! [`crate::shell::ShellNativeEffect::WindowActivation`]. User-initiated
-//! commits record Pane-granularity history (R4.1 / R6.5); traversal apply-only
-//! does not. Rejection leaves focus unchanged. No presentation, binding, or
-//! PTY mutation.
+//! transition. Rejection leaves shell focus unchanged. User-initiated commits
+//! record Pane-granularity history behind this path (R4.1 / R6.5); traversal
+//! apply-only does not. When the hosting window is not product-active, emit
+//! exactly one [`crate::shell::ShellNativeEffect::WindowActivation`]. No
+//! presentation, binding, or PTY mutation.
 
 use crate::shell::{ShellNativeEffect, ShellState};
 
@@ -51,21 +51,20 @@ pub fn navigate(
         } => (workspace, tab, pane),
     };
 
-    let previous_window = shell.product_window_id().ok();
     let pane_address = ResourceAddress::Pane {
         workspace,
         tab,
         pane,
     };
-
+    let previous_window = shell.product_window_id().ok();
     let before = shell.focus_checkpoint();
     if before.active_workspace == workspace
         && before.active_tab == tab
         && before.focused_pane == pane
     {
-        // Already active: success no-op for focus (R4.4); no extra activation
-        // (R5.2). History still sees the commit so cursor-equality dedup
-        // applies (R6.4).
+        // Already active: success no-op for focus (R4.4); history still sees
+        // the commit so cursor-equality dedup applies (R6.4). No activation
+        // effect is needed because the target window is already active.
         record_if_needed(history, pane_address);
         return Ok(target);
     }
@@ -92,12 +91,12 @@ pub fn navigate(
     shell
         .commit_focus(workspace, tab, pane)
         .expect("composition re-validated immediately above");
+    record_if_needed(history, pane_address);
     if let Some(window) = shell.window_of_tab(tab)
         && previous_window != Some(window)
     {
         shell.push_effect(ShellNativeEffect::WindowActivation { window });
     }
-    record_if_needed(history, pane_address);
     Ok(target)
 }
 
@@ -152,6 +151,36 @@ pub fn history_forward(
 fn record_if_needed(history: NavigateHistory<'_>, pane_address: ResourceAddress) {
     if let NavigateHistory::Record(store) = history {
         store.record_user_commit(pane_address);
+    }
+}
+
+/// Exact-target Attention jump (SPEC-028 §4.1 / §12.15). Missing or rejected
+/// targets retain details; this never fabricates an Execution or AgentRun.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttentionReveal {
+    Focused(ResolvedTarget),
+    RetainedDetails,
+}
+
+pub fn reveal_attention_target(
+    packed: &[u8],
+    shell: &mut ShellState,
+    inventory: &impl ExecutionInventory,
+    principal: NavigationPrincipal<'_>,
+    history: &mut FocusHistory,
+) -> AttentionReveal {
+    let Ok(address) = super::unpack_resource_address(packed) else {
+        return AttentionReveal::RetainedDetails;
+    };
+    match navigate(
+        address,
+        shell,
+        inventory,
+        principal,
+        NavigateHistory::Record(history),
+    ) {
+        Ok(target) => AttentionReveal::Focused(target),
+        Err(_) => AttentionReveal::RetainedDetails,
     }
 }
 

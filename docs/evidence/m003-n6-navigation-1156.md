@@ -5,36 +5,41 @@ Slice evidence only. Does **not** mark the M003 navigation milestone row Done.
 | Field | Value |
 |---|---|
 | Owning Issue | #1156 |
-| Stack | N5 PR #1262 (`mahboobmonnamd/issue/1144` on W4a #1251) **merged with** N3 PR #1237 (`mahboobmonnamd/issue/1117`) so headed Back/Forward can drive the N3 history actions |
+| Base | `master` after N3 (#1237) and W4a (#1251, which includes cross-window `WindowActivation`) |
 | Authority | SPEC-022 §12 items 31–33 (Accepted on PR #1084); ADR-015 / ADR-019 |
 | Decomposition | `docs/engineering/M003-NAVIGATION-ADDRESSING-DECOMPOSITION.md` section N6 |
 
-N3 is included because item 33 and headed HistoryBack/Forward require the N3 store and ABI actions. History kinds are **67/68** so they do not collide with W4a window intents 63–66. History errors are **54/55** after WindowActivationFailed (53).
+History actions are master's N3 numbers **63/64**. `StaleHistoryCursor` is **51**. `WindowCreationUnavailable` remains **55**. This note does not renumber the ABI.
+
+K8 catalog chords (`cmd+[` / `cmd+]`, #1132) are not part of this slice.
 
 ## SPEC-022 §12 items 31–33
 
 | Item | Status | Evidence |
 |---|---|---|
-| **31** Palette/goto selection focuses the intended Pane with real executions | **Harness-limited** (`PLATFORM_LIMITED`) | Rust + headed FFI prove goto address → Navigate focuses the selected Pane. `NavigationEvidenceHostTests.testGotoSelectionFocusesIntendedPane` uses `seyal_app_test_seed_windows_only` (headed CreateWindow admission is off until W4b) and a synthetic `Bind` ExecutionId. The SeyalTests harness does not attach a live Runtime/PTY per Pane on this branch. |
-| **32** Navigating away and back preserves live execution; does not restart it | **Proven (Rust); headed host path with synthetic Bind** | `navigation::adversarial_matrix_tests`: away-and-back keeps the same `ExecutionId` on the Pane binding; ApplicationRoot refuses replacement `Bind`. Headed: `testNavigateAwayAndBackPreservesExecutionIdentity`. |
-| **33** Back/forward traverse the same history the surface shows | **Proven (Rust); headed via N3 actions 67/68** | Rust matrix + N3 integration: `HistoryBack` / `HistoryForward` move through recorded Pane addresses. Headed: `testHistoryBackForwardTraverseRecordedTargets`. `FocusSeq` is not a field on the C `SeyalAppSnapshot`; the host test uses the deterministic empty-store sequence (1, then 2) on a fresh handle. XCUI keyboard (`cmd+[` / `cmd+]`) is not wired as a default chord on this branch (catalog rows live on K8 / #1132); that keyboard path is harness-limited here. |
+| **31** Palette/goto selection focuses the intended Pane with real executions | **Harness-limited** (`PLATFORM_LIMITED`) | Rust + headed FFI prove goto address → Navigate focuses the selected Pane. `NavigationEvidenceHostTests.testGotoSelectionFocusesIntendedPane` uses `seyal_app_test_seed_windows_only` (headed CreateWindow admission is off) and a synthetic `Bind` ExecutionId. The SeyalTests harness does not attach a live Runtime/PTY per Pane. |
+| **32** Navigating away and back preserves live execution; does not restart it | **Proven (Rust); headed host path with synthetic Bind** | `navigation::adversarial_matrix_tests`: away-and-back keeps the same `ExecutionId` on the left-behind Pane. Focus on an unbound Pane clears the live route; return restores that same execution and attachment and refuses a replacement `Bind`. Presentation epoch advances across that clear/rebind. It does not allocate a new execution. Headed: `testNavigateAwayAndBackPreservesExecutionIdentity`. |
+| **33** Back/forward traverse the same history the surface shows | **Proven against the published cursor** | Rust: `history_back_forward_traverse_recorded_surface_targets` reads `focus_history_seq` after each Navigate and requires Back/Forward to restore that same cursor and Pane. Headed: `testHistoryBackForwardTraverseRecordedTargets` reads `seyal_app_focus_history_seq` (actions 63/64). The entry list is not a second host projection. Keyboard chords stay on K8 / #1132. |
 
 ## Adversarial matrix
 
-Orthogonal axes (not collapsed into one lifecycle enum):
-
-`{execution alive/exited} × {pane present/destroyed} × {window active/inactive} × {attached/detached}`
-
-Covered in `crates/seyal-client/src/navigation/adversarial_matrix_tests.rs`:
+Sampled cells in `crates/seyal-client/src/navigation/adversarial_matrix_tests.rs`. These axes are not one lifecycle enum, and this file does not enumerate the full cross product.
 
 | Cell / case | Result |
 |---|---|
-| Alive + bound + present + inactive window | Navigate commits target Pane; one `WindowActivation`; binding unchanged |
+| Alive + shell-bound + present + inactive window | Navigate commits target Pane; one `WindowActivation`; binding unchanged |
 | Exited execution address | `TargetTerminated`; focus unchanged |
 | Destroyed pane address | `UnknownPane`; focus unchanged; no retarget |
-| Detached (live unbound) execution address | `TargetUnbound`; no implicit attach |
+| Live execution with no shell binding | `TargetUnbound`; no implicit attach |
 | Inactive window + `ActivationFailed` | Committed focus survives; Rust does not enqueue extra activations (host retry budget remains `WINDOW_ACTIVATION_MAX_ATTEMPTS` = 3) |
 | Concurrent `ClosePane` while activation pending | Focus follows destroy successor; pending activation still names the original `WindowId`; no retarget into the other window |
+| History Back/Forward | Restores the Pane and the `focus_history_seq` the surface published for that commit |
+
+Not covered here, and not claimed:
+
+- An exited execution that is still shell-bound to a Pane in an inactive window.
+- Attachment absent while a shell binding exists. Shell `BindExecution` records an execution on a Pane. Attachment and controller live on ApplicationRoot and are not a separate Navigate address input, so this suite does not treat "attached" as a fourth Navigate axis.
+- The other unlisted combinations of alive/exited, present/destroyed, and active/inactive.
 
 ### Concurrent destruction during host activation
 

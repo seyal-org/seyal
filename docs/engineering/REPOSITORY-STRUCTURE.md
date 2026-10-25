@@ -40,7 +40,7 @@ Independent Agent Backend crates are a separate ownership plane from the termina
 
 ```text
 crates/
-├─ seyal-agent-core/       # portable WorkScope/WorkItem/Attempt/AgentRun domain types
+├─ seyal-agent-core/       # portable WorkScope/WorkItem/Attempt/AgentRun/ActionIntent domain types
 ├─ seyal-agent-protocol/   # agent harness framing
 ├─ seyal-agent-store/      # durable agent-domain persistence (incl. rebuildable context index metadata)
 ├─ seyal-agent-context/    # Local Context Engine discovery/index + ContextBundle/SelectionTrace (SPEC-013 #1271/#1272)
@@ -48,7 +48,7 @@ crates/
 └─ seyal-agent-client/     # agent client
 ```
 
-`seyal-agent-context` consumes existing WorkScope / bound-root identity; it does not invent a second WorkspaceStore. MemoryStore lifecycle is sibling Issue #1273, not this crate. Contributor orientation: `docs/engineering/LOCAL-CONTEXT-ENGINE-DISCOVERY.md` and `docs/engineering/LOCAL-CONTEXT-ENGINE-BUNDLE.md`.
+`seyal-agent-context` consumes existing WorkScope / bound-root identity; it does not invent a second WorkspaceStore. MemoryStore lifecycle is sibling Issue #1273, not this crate. Durable ActionId/ActionIntent preparation is `docs/engineering/ACTION-INTENT.md` (#1309). ApprovalRequest/Decision recording is `docs/engineering/APPROVAL-BINDING.md` (#1308). Dispatch fencing / exact approval consumption is `docs/engineering/ACTION-DISPATCH.md` (#1310). Contributor orientation: `docs/engineering/LOCAL-CONTEXT-ENGINE-DISCOVERY.md` and `docs/engineering/LOCAL-CONTEXT-ENGINE-BUNDLE.md`.
 
 ## Current physical native macOS layout
 

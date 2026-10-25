@@ -5,7 +5,7 @@ use crate::navigation::{
     navigate, EmptyExecutionInventory, NavigateHistory, NavigationPrincipal, NavigationRejection,
     ResourceAddress,
 };
-use crate::palette::{PaletteAction, PaletteCommand, PaletteRunTarget};
+use crate::palette::{PaletteAction, PaletteCommand, PaletteError, PaletteRunTarget};
 
 impl ApplicationRoot {
     pub(super) fn open_palette(&mut self, fence: AppFence) -> Result<(), AppError> {
@@ -116,6 +116,7 @@ impl ApplicationRoot {
         )
         .map_err(navigation_error)?;
         self.drain_shell_effects();
+        self.activate_focused_pane_authority();
         let _ = self
             .chrome
             .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
@@ -140,6 +141,7 @@ impl ApplicationRoot {
             PaletteCommand::OpenAttention(id) => self.open_attention(fence, id),
             PaletteCommand::FocusAgent(id) => self.select_agent(fence, id),
             PaletteCommand::SelectResting { raw } => self.select_resting_presentation(fence, raw),
+            PaletteCommand::TerminateExecution => self.terminate_execution(fence),
         }
     }
 }

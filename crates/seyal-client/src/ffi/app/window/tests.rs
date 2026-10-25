@@ -5,9 +5,11 @@ use std::{mem::size_of, slice};
 use seyal_core::{ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
 use crate::app::{AppAction, ApplicationRoot, APP_ABI_VERSION};
+use crate::pane_layout::SplitRatio;
+use crate::presentation::PresentationMode;
 use crate::shell::{
-    PresentationTier, ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState, ShellTabSeed,
-    ShellWindowSeed, ShellWorkspaceSeed,
+    PaneTree, PresentationTier, ShellAction, ShellNativeEffect, ShellPaneSeed, ShellState,
+    ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed, SplitAxis,
 };
 
 use super::super::{
@@ -57,7 +59,7 @@ fn seed_n_windows(n: usize) -> ShellState {
             active_window: active,
         }],
         workspace,
-        false,
+        true,
         true,
         true,
     )
@@ -77,7 +79,10 @@ fn apply_on_handle(handle: u64, action: ShellAction) {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let state = apps.get_mut(&handle).expect("handle");
-        state.root.apply_shell(action).expect("shell action");
+        state
+            .root
+            .apply_shell_for_test(action)
+            .expect("shell action");
     });
 }
 
@@ -177,6 +182,91 @@ fn round_trip_windows(n: usize) {
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
+#[test]
+fn pane_tree_split_ratio_round_trips_through_ffi() {
+    let workspace = WorkspaceId::m001_default();
+    let window = WindowId::new();
+    let tab = TabId::new();
+    let leading_pane = PaneId::new();
+    let mut shell = ShellState::from_workspaces(
+        vec![ShellWorkspaceSeed {
+            id: workspace,
+            name: "Local".to_owned(),
+            detail: Some("local".to_owned()),
+            attention: false,
+            active_window: window,
+            windows: vec![ShellWindowSeed {
+                id: window,
+                active_tab: tab,
+                tabs: vec![ShellTabSeed {
+                    id: tab,
+                    title: "Terminal".to_owned(),
+                    attention: false,
+                    pane: ShellPaneSeed {
+                        id: leading_pane,
+                        title: "Pane 1".to_owned(),
+                        allows_implicit_execution_bootstrap: true,
+                    },
+                }],
+            }],
+        }],
+        workspace,
+        true,
+        true,
+        false,
+    )
+    .expect("splittable shell");
+    let initial = shell.snapshot();
+    assert_eq!(initial.focused_pane, leading_pane);
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: leading_pane,
+            ratio: SplitRatio::from_fraction(0.65).unwrap(),
+        })
+        .unwrap();
+    let nested_leading_pane = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Down,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    shell
+        .apply(ShellAction::SetSplitRatio {
+            pane: nested_leading_pane,
+            ratio: SplitRatio::from_fraction(0.4).unwrap(),
+        })
+        .unwrap();
+    let expected_ratios = match &shell.snapshot().windows[0].tabs[0].tree {
+        PaneTree::Split { ratio, .. } => ratio.fraction(),
+        PaneTree::Leaf(_) => panic!("split action must create a PaneTree split"),
+    };
+
+    let handle = seyal_app_create();
+    install_shell(handle, shell);
+    let tab = seyal_app_tab(handle, 0, 0);
+    assert_eq!(tab.tree_node_count, 5);
+    let split = seyal_app_tab_tree_node(handle, 0, 0, 0);
+    assert_eq!(split.kind, 1, "the root node must preserve its split axis");
+    assert!((split.ratio - expected_ratios).abs() < f32::EPSILON);
+    assert_eq!(split.reserved2, 0);
+    assert_eq!(seyal_app_tab_tree_node(handle, 0, 0, 1).ratio, 0.0);
+    let nested = seyal_app_tab_tree_node(handle, 0, 0, 2);
+    assert_eq!(
+        nested.kind, 2,
+        "the nested node must preserve its split axis"
+    );
+    assert!((nested.ratio - 0.4).abs() < f32::EPSILON);
+    assert_eq!(nested.reserved2, 0);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
 fn split(bytes: [u8; 16]) -> (u64, u64) {
     (
         u64::from_le_bytes(bytes[..8].try_into().unwrap()),
@@ -220,6 +310,16 @@ fn version_and_size_mismatch_fail_closed() {
     );
     assert_eq!(seyal_app_record_compatible(APP_ABI_VERSION, 4, 1), -3);
     assert_eq!(
+        seyal_app_record_compatible(1, 56, 3),
+        -2,
+        "pre-mode W3 leaf record must be rejected"
+    );
+    assert_eq!(
+        seyal_app_record_compatible(APP_ABI_VERSION, 32, 4),
+        -3,
+        "pre-ratio pane-tree node size must fail closed"
+    );
+    assert_eq!(
         seyal_app_record_compatible(APP_ABI_VERSION, size_of::<SeyalAppNativeEffect>() as u16, 5),
         0
     );
@@ -236,18 +336,20 @@ fn version_and_size_mismatch_fail_closed() {
 fn generation_is_monotonic_across_commits() {
     let handle = seyal_app_create();
     install_shell(handle, seed_n_windows(1));
-    let first = seyal_app_shell(handle).containment_generation;
+    let first = seyal_app_shell(handle);
+    assert!(first.shell_generation > 0);
     let workspace = WorkspaceId::m001_default();
     apply_on_handle(
         handle,
         ShellAction::CreateWindow {
             workspace,
-            containment_generation: first,
+            containment_generation: first.containment_generation,
         },
     );
     let second = seyal_app_shell(handle);
     assert_eq!(second.window_count, 2);
-    assert!(second.containment_generation > first);
+    assert!(second.containment_generation > first.containment_generation);
+    assert!(second.shell_generation > first.shell_generation);
     apply_on_handle(
         handle,
         ShellAction::CreateWindow {
@@ -255,8 +357,9 @@ fn generation_is_monotonic_across_commits() {
             containment_generation: second.containment_generation,
         },
     );
-    let third = seyal_app_shell(handle).containment_generation;
-    assert!(third > second.containment_generation);
+    let third = seyal_app_shell(handle);
+    assert!(third.containment_generation > second.containment_generation);
+    assert!(third.shell_generation > second.shell_generation);
     assert_eq!(seyal_app_destroy(handle), 0);
 }
 
@@ -344,6 +447,178 @@ fn bindings_and_focused_tier_round_trip() {
 }
 
 #[test]
+fn per_leaf_presentation_mode_round_trips_for_inactive_leaves_and_windows() {
+    let handle = seyal_app_create();
+    let mut shell = seed_n_windows(2);
+    let first_pane = shell.snapshot().focused_pane;
+    shell
+        .apply(ShellAction::SplitFocused {
+            axis: SplitAxis::Right,
+            containment_generation: shell.containment_generation(),
+        })
+        .unwrap();
+    let second_pane = shell.snapshot().focused_pane;
+    let panes = shell
+        .snapshot()
+        .windows
+        .iter()
+        .map(|window| window.tabs[0].panes[0].id)
+        .collect::<Vec<_>>();
+    shell
+        .set_presentation_mode(second_pane, PresentationMode::Raw)
+        .unwrap();
+    shell
+        .set_presentation_mode(panes[1], PresentationMode::Tui)
+        .unwrap();
+    assert_eq!(shell.snapshot().windows[0].tabs[0].panes[0].id, first_pane);
+    let expected = shell.snapshot();
+    install_shell(handle, shell);
+
+    for (window, pane, mode) in [(0, 0, 0), (0, 1, 1), (1, 0, 2)] {
+        let record = seyal_app_pane_leaf(handle, window, 0, pane);
+        assert_eq!(record.version, APP_ABI_VERSION);
+        assert_eq!(record.size as usize, size_of::<SeyalAppPaneLeaf>());
+        assert_eq!(record.presentation_mode, mode);
+    }
+    assert_eq!(
+        expected.windows[0].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Flow
+    );
+    assert_eq!(
+        expected.windows[0].tabs[0].panes[1].presentation_mode,
+        PresentationMode::Raw
+    );
+    assert_eq!(
+        expected.windows[1].tabs[0].panes[0].presentation_mode,
+        PresentationMode::Tui
+    );
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn shell_generation_advances_for_selection_without_containment_change() {
+    let handle = seyal_app_create();
+    let shell = seed_n_windows(2);
+    let expected = shell.snapshot();
+    let target = expected.windows[1].id;
+    install_shell(handle, shell);
+    let first = seyal_app_shell(handle);
+    apply_on_handle(
+        handle,
+        ShellAction::SelectWindow {
+            id: target,
+            containment_generation: first.containment_generation,
+        },
+    );
+    let second = seyal_app_shell(handle);
+    assert_eq!(second.containment_generation, first.containment_generation);
+    assert!(second.shell_generation > first.shell_generation);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn indexed_reads_reuse_one_encode_and_keep_title_borrow() {
+    let handle = seyal_app_create();
+    install_shell(handle, seed_n_windows(2));
+    let header = seyal_app_shell(handle);
+    assert_eq!(header.window_count, 2);
+    let first = seyal_app_window(handle, 0);
+    let title_ptr = first.title;
+    let title = borrowed(first.title, first.title_len).to_owned();
+    let _ = seyal_app_window(handle, 1);
+    let _ = seyal_app_tab(handle, 0, 0);
+    let _ = seyal_app_pane_leaf(handle, 0, 0, 0);
+    let again = seyal_app_window(handle, 0);
+    assert_eq!(again.title, title_ptr);
+    assert_eq!(borrowed(again.title, again.title_len), title);
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let state = apps.get(&handle).expect("handle");
+        assert_eq!(state.window_scratch.encode_count(), 1);
+    });
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn shell_header_refreshes_after_rejected_and_successful_actions() {
+    use crate::app::AppAction;
+
+    let handle = seyal_app_create();
+    install_shell(handle, seed_n_windows(2));
+    assert_eq!(seyal_app_shell(handle).shell_last_error, 0);
+
+    let unknown_tab = TabId::new();
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        assert!(state
+            .root
+            .apply(AppAction::SelectTab { id: unknown_tab })
+            .is_err());
+        assert!(state.root.snapshot().last_error.is_some());
+    });
+    let rejected = seyal_app_shell(handle);
+    assert_ne!(
+        rejected.shell_last_error, 0,
+        "rejection must refresh cached header"
+    );
+
+    let valid_tab = APPS.with(|apps| {
+        let apps = apps.borrow();
+        apps.get(&handle)
+            .expect("handle")
+            .root
+            .snapshot()
+            .shell
+            .windows[0]
+            .tabs[0]
+            .id
+    });
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let state = apps.get_mut(&handle).expect("handle");
+        state
+            .root
+            .apply(AppAction::SelectTab { id: valid_tab })
+            .expect("valid selection clears prior error");
+        assert!(state.root.snapshot().last_error.is_none());
+    });
+    assert_eq!(seyal_app_shell(handle).shell_last_error, 0);
+    assert_eq!(seyal_app_destroy(handle), 0);
+}
+
+#[test]
+fn navigate_to_other_window_tab_emits_window_activation() {
+    use crate::app::AppAction;
+    use crate::navigation::ResourceAddress;
+
+    let shell = seed_n_windows(2);
+    let workspace = WorkspaceId::m001_default();
+    let other_tab = shell.snapshot().windows[1].tabs[0].id;
+    let other_window = shell.snapshot().windows[1].id;
+    let mut root = ApplicationRoot::with_shell(shell);
+    while !root.snapshot().pending_effects.is_empty() {
+        root.apply(AppAction::AckEffect).unwrap();
+    }
+    root.apply(AppAction::Navigate {
+        fence: root.fence(),
+        address: ResourceAddress::Tab {
+            workspace,
+            tab: other_tab,
+        },
+    })
+    .expect("navigate");
+    assert_eq!(root.snapshot().shell.active_window, other_window);
+    assert_eq!(
+        root.snapshot().pending_effects,
+        [crate::app::NativeEffect::WindowActivation {
+            window: other_window,
+        }],
+        "Navigate must emit exactly one typed WindowActivation"
+    );
+}
+
+#[test]
 fn navigate_encodes_one_window_activation_effect() {
     use crate::app::{AppAction, NativeEffect};
     use crate::navigation::ResourceAddress;
@@ -381,83 +656,20 @@ fn navigate_encodes_one_window_activation_effect() {
                 .count(),
             1
         );
-        assert!(
-            effects.iter().any(|effect| {
-                *effect
-                    == NativeEffect::WindowActivation {
-                        window: target_window,
-                    }
-            }),
-            "Navigate must emit WindowActivation, got {effects:?}"
+        assert_eq!(
+            effects.last(),
+            Some(&NativeEffect::WindowActivation {
+                window: target_window
+            })
         );
     });
     let header = seyal_app_shell(handle);
-    assert!(header.effect_count >= 1);
-    let mut found_activation = false;
-    for index in 0..header.effect_count {
-        let effect = seyal_app_native_effect(handle, u32::from(index));
-        if effect.kind == 6 {
-            found_activation = true;
-            assert_eq!(
-                (effect.window_lo, effect.window_hi),
-                split(target_window.to_bytes())
-            );
-        }
-    }
-    assert!(found_activation, "FFI must encode WindowActivation");
-    assert_eq!(seyal_app_destroy(handle), 0);
-}
-
-#[test]
-fn indexed_reads_reuse_one_encode_and_keep_title_borrow() {
-    let handle = seyal_app_create();
-    install_shell(handle, seed_n_windows(2));
-    let header = seyal_app_shell(handle);
-    assert_eq!(header.window_count, 2);
-    let first = seyal_app_window(handle, 0);
-    let title_ptr = first.title;
-    let title = borrowed(first.title, first.title_len).to_owned();
-    let _ = seyal_app_window(handle, 1);
-    let _ = seyal_app_tab(handle, 0, 0);
-    let _ = seyal_app_pane_leaf(handle, 0, 0, 0);
-    let again = seyal_app_window(handle, 0);
-    assert_eq!(again.title, title_ptr);
-    assert_eq!(borrowed(again.title, again.title_len), title);
-    APPS.with(|apps| {
-        let apps = apps.borrow();
-        let state = apps.get(&handle).expect("handle");
-        assert_eq!(state.window_scratch.encode_count(), 1);
-    });
-    assert_eq!(seyal_app_destroy(handle), 0);
-}
-
-#[test]
-fn navigate_to_other_window_tab_emits_window_activation() {
-    use crate::app::AppAction;
-    use crate::navigation::ResourceAddress;
-
-    let shell = seed_n_windows(2);
-    let workspace = WorkspaceId::m001_default();
-    let other_tab = shell.snapshot().windows[1].tabs[0].id;
-    let other_window = shell.snapshot().windows[1].id;
-    let mut root = ApplicationRoot::with_shell(shell);
-    while !root.snapshot().pending_effects.is_empty() {
-        root.apply(AppAction::AckEffect).unwrap();
-    }
-    root.apply(AppAction::Navigate {
-        fence: root.fence(),
-        address: ResourceAddress::Tab {
-            workspace,
-            tab: other_tab,
-        },
-    })
-    .expect("navigate");
-    assert_eq!(root.snapshot().shell.active_window, other_window);
+    assert_eq!(header.effect_count, 1);
+    let effect = seyal_app_native_effect(handle, 0);
+    assert_eq!(effect.kind, 6, "WindowActivation");
     assert_eq!(
-        root.snapshot().pending_effects,
-        [crate::app::NativeEffect::WindowActivation {
-            window: other_window,
-        }],
-        "Navigate must emit exactly one typed WindowActivation"
+        (effect.window_lo, effect.window_hi),
+        split(target_window.to_bytes())
     );
+    assert_eq!(seyal_app_destroy(handle), 0);
 }

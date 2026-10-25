@@ -78,6 +78,9 @@ pub use seyal_agent_core::{
     PresenceSourceTier,
 };
 pub use seyal_agent_protocol::ProtocolVersion;
-pub use seyal_agent_store::{AgentRunId, AttemptId, WorkItemId, WorkScopeId};
+pub use seyal_agent_store::{
+    ActionError, ActionId, ActionIntent, AgentRunId, AttemptId, PrepareOutcome, WorkItemId,
+    WorkScopeId,
+};
 #[cfg(unix)]
 pub use standalone_process_host::{HostError, StandaloneProcessConfig, StandaloneProcessHost};

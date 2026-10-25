@@ -226,6 +226,9 @@ pub extern "C" fn seyal_bridge_connect_first() -> i32 {
         return -6;
     }
     if seyal_bridge_adopt_handle(handle) == 0 {
+        if FOCUSED_DISPLAY_HANDLE.with(|focused| focused.get()) == 0 {
+            FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
+        }
         0
     } else {
         seyal_bridge_disconnect_handle(handle);
@@ -376,9 +379,10 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
         clients.borrow_mut().insert(handle, pending.client);
     });
     ACTIVE_HANDLE.with(|active| active.set(handle));
-    // Bootstrap/recovery: display/input follow the adopted Controller until
-    // ApplicationRoot CreateTab/select fails closed or rebinds focus.
-    FOCUSED_DISPLAY_HANDLE.with(|focused| focused.set(handle));
+    // Poll/readiness may follow the adopted Controller. Display/input stay on
+    // the focused pane: an unbound focused tab must keep fail-closed (do not
+    // steal FOCUSED_DISPLAY_HANDLE). Bootstrap `seyal_bridge_connect_first`
+    // claims display only when nothing is focused yet.
     0
 }
 

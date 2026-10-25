@@ -4,6 +4,8 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private let appHandle: UInt64
     private let optionAsAlt: Bool
     private var composition = CompositionDocument()
+    /// When true, `unmarkText` clears preedit without PTY admission (#866).
+    private var discardingMark = false
     private var interpretingEscape = false
     private var escapeNeedsTerminalEncoding = false
     private var nextKeyboardActionID: UInt32 = 1
@@ -11,12 +13,18 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     private var heldKeyboardKinds: [UInt16: TerminalNativeKeyV2] = [:]
     static let maxHeldKeyboardKinds = 256
     var onBridgeBecameUsable: (() -> Void)?
-    var onRequestComposerFocus: (() -> Void)?
+    var onRequestComposerFocus: (() -> Bool)?
     /// A Rust table match already changed product state. The chrome host projects it.
     var onCommandConsumed: (() -> Void)?
     var observedAlternateScreen = false
     private var announcedBridgeUsable = false
     private var mouseTrackingArea: NSTrackingArea?
+    private var composerRecoveryFocusRetryScheduled = false
+    private var composerRecoveryFocusAttempts = 0
+    private var composerRecoveryFocusGeneration: UInt64 = 0
+    private var composerFocusEligibilityChangedBeforeRecovery = false
+    private var activationRecoveryNotificationScheduled = false
+    private static let maxComposerRecoveryFocusAttempts = 8
 
     init(frame frameRect: NSRect, appHandle: UInt64) {
         self.appHandle = appHandle
@@ -24,18 +32,120 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         super.init(frame: frameRect, paneID: "m001-pane")
         wantsLayer = true
         setAccessibilityIdentifier("terminal-input")
-        setAccessibilityRole(.textArea)
-        setAccessibilityElement(true)
+        // Flow/unbound: composer owns IME. Raw/TUI uses a textArea role.
+        // The identifier stays in the AX tree so attach diagnostics remain
+        // observable (`connection=usable`) without becoming an IME target.
+        syncInputRoutePresentation()
     }
 
     override var recoveryAppHandle: UInt64 { appHandle }
 
+    override func updateVisibility() {
+        if shouldRender, !renderable, recoveryPresentationPending { resetComposerRecoveryFocusRetries() }
+        super.updateVisibility()
+    }
+
+    func composerFocusEligibilityDidChange() {
+        recoveryFocusReadinessDidChange { [weak self] in
+            _ = self?.advanceRecoveryPresentationIfReady()
+        }
+    }
+
+    func recoveryFocusReadinessDidChange(advance: () -> Void) {
+        guard recoveryPresentationPending else {
+            composerFocusEligibilityChangedBeforeRecovery = true
+            return
+        }
+        resetComposerRecoveryFocusRetries()
+        advance()
+    }
+
+    func consumeComposerFocusEligibilityChangeBeforeRecovery() {
+        guard composerFocusEligibilityChangedBeforeRecovery else { return }
+        composerFocusEligibilityChangedBeforeRecovery = false
+        resetComposerRecoveryFocusRetries()
+    }
+
+    override func windowActivationChanged() {
+        let wasRecoveryPending = recoveryPresentationPending
+        super.windowActivationChanged()
+        if recoveryPresentationPending || !wasRecoveryPending {
+            recoveryFocusReadinessDidChange { [weak self] in
+                _ = self?.advanceRecoveryPresentationIfReady()
+            }
+        }
+    }
+
+    override func windowActivationNotificationReceived() {
+        guard !activationRecoveryNotificationScheduled else { return }
+        activationRecoveryNotificationScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.activationRecoveryNotificationScheduled = false
+            self.windowActivationChanged()
+        }
+    }
+
     override func restoreNativeInteractionAfterRendererReady() -> Bool {
-        if seyal_app_snapshot(appHandle).eligibility == UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue) {
-            onRequestComposerFocus?()
-            return true
+        syncInputRoutePresentation()
+        if !allowsDirectTerminalInput {
+            discardUncommittedMark()
+            return requestComposerFocusForRecovery()
         }
         return window?.makeFirstResponder(self) ?? false
+    }
+
+    @discardableResult
+    func requestComposerFocusForRecovery() -> Bool {
+        requestComposerFocusForRecovery(
+            focus: { [weak self] in self?.onRequestComposerFocus?() ?? false },
+            onAccepted: { [weak self] in
+                guard let self else { return }
+                _ = self.advanceRecoveryPresentationIfReady()
+            }
+        )
+    }
+
+    @discardableResult
+    func requestComposerFocusForRecovery(
+        focus: @escaping () -> Bool,
+        onAccepted: @escaping () -> Void
+    ) -> Bool {
+        guard recoveryPresentationPending else { return focus() }
+        guard !composerRecoveryFocusRetryScheduled,
+            composerRecoveryFocusAttempts < Self.maxComposerRecoveryFocusAttempts
+        else { return false }
+
+        composerRecoveryFocusAttempts += 1
+        let focused = focus()
+        guard !focused else { return true }
+        guard composerRecoveryFocusAttempts < Self.maxComposerRecoveryFocusAttempts else {
+            return false
+        }
+
+        // A recovery callback can run during chrome reconciliation, before
+        // AppKit has completed the current responder/layout transaction. Retry
+        // on a bounded backoff so the window and composer can finish becoming
+        // key and laid out; never claim Usable until focus is accepted.
+        composerRecoveryFocusRetryScheduled = true
+        let delay = min(0.05 * Double(1 << (composerRecoveryFocusAttempts - 1)), 0.5)
+        let generation = composerRecoveryFocusGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            guard self.composerRecoveryFocusGeneration == generation else { return }
+            self.composerRecoveryFocusRetryScheduled = false
+            guard self.recoveryPresentationPending else { return }
+            if self.requestComposerFocusForRecovery(focus: focus, onAccepted: onAccepted) {
+                onAccepted()
+            }
+        }
+        return false
+    }
+
+    func resetComposerRecoveryFocusRetries() {
+        composerRecoveryFocusGeneration &+= 1
+        composerRecoveryFocusAttempts = 0
+        composerRecoveryFocusRetryScheduled = false
     }
 
     override func terminalBridgeStatusDidChange() {
@@ -50,18 +160,40 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
             heldKeyboardKinds.removeAll(keepingCapacity: true)
             nextKeyboardActionID = 1
             nextMouseActionID = 1
-            composition.clear()
+            discardUncommittedMark()
         }
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    /// Consumes Rust eligibility: Metal is first-responder/IME/AX only for
+    /// Raw/TUI direct route. Flow and unbound keep the Pane composer exclusive.
+    func syncInputRoutePresentation() {
+        let direct = allowsDirectTerminalInput
+        setAccessibilityElement(true)
+        setAccessibilityRole(direct ? .textArea : .group)
+        if !direct {
+            discardUncommittedMark()
+            if window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { allowsDirectTerminalInput }
 
     override func becomeFirstResponder() -> Bool {
+        guard allowsDirectTerminalInput else { return false }
         let became = super.becomeFirstResponder()
         if became {
             inputContext?.activate()
         }
         return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        if !allowsDirectTerminalInput {
+            discardUncommittedMark()
+        }
+        return super.resignFirstResponder()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -307,7 +439,19 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
         guard composition.hasMarkedText else { return }
         let text = composition.text
         composition.clear()
-        submitIfAllowed(text)
+        if !discardingMark {
+            submitIfAllowed(text)
+        }
+        inputContext?.invalidateCharacterCoordinates()
+    }
+
+    /// Cancel marked/preedit without PTY submission. Used when Rust revokes
+    /// the direct-terminal route (Flow/unbound/transition) or the bridge drops.
+    func discardUncommittedMark() {
+        discardingMark = true
+        composition.clear()
+        inputContext?.discardMarkedText()
+        discardingMark = false
         inputContext?.invalidateCharacterCoordinates()
     }
 

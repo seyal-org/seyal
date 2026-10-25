@@ -19,21 +19,9 @@ hard_loc = 1000
 # sibling-type and harness extraction (E1 dual-recovery deletion remains
 # architecture-gated under #882 and was not touched).
 
-# Grandfathered handwritten production debt at the #1021 freeze tip.
-# Increasing ceiling_loc requires a narrowly scoped [[exception]] tied to an owning Issue.
-# Reducing a grandfathered or [[exception]] file requires lowering ceiling_loc (or
-# removing the entry once <= hard_loc) in the same change — silent headroom is rejected.
-# [[cohesion_acknowledgement]] rows require acknowledged_loc in review_loc..hard_loc;
-# growth past acknowledged_loc needs a fresh re-ack, and an ack is stale below review_loc.
-# Generated/fixture exclusions use directory rules, `_generated`/`_test(s)` suffixes, or
-# path-specific [[excluded]] rows with a reason — never rename to escape the gate.
-# Do not add skip=true escapes. Split by responsibility — never part1/part2 fragments,
-# foo_1/foo_2 siblings, or partN/ directories (review-rejected even when the detector misses).
+# #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
+# and relocated unit-test modules land in the cohesion-review band by design.
 
-# #1020 macOS Swift responsibility split: former #1021 grandfathered surface /
-# renderer / bridge / chrome / validation sources cleared hard_loc via
-# sibling-type and harness extraction (E1 dual-recovery deletion remains
-# architecture-gated under #882 and was not touched).
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
 acknowledged_loc = 877
@@ -46,16 +34,17 @@ acknowledged_loc = 800
 issue = 1020
 reason = "Metal update/present lifecycle stays one main-queue presenter after types, encode/rebuild, and GPU-completion self-test extraction; further fragmentation would separate tightly coupled in-flight/deferred-history authority. Ceiling matches post-split LOC."
 
-# #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
-# and relocated unit-test modules land in the cohesion-review band by design.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/navigation/history.rs"
+acknowledged_loc = 834
+issue = 1117
+reason = "SPEC-022 §6 focus history store and its state-transition proofs stay together as one cohesive reducer. #1117 adds generated navigation and destruction sequences checked after every operation against an independent reference model; further splitting would separate invariants from the behavior they verify."
 
-# #1020 seyal-client responsibility split: ApplicationRoot façade, FFI ABI surface,
-# and relocated unit-test modules land in the cohesion-review band by design.
 [[exception]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1084
-issue = 1156
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1156 stacks N3 HistoryBack/HistoryForward and focus_history_seq onto the N5 WindowActivationFailed apply table without splitting it."
+ceiling_loc = 1051
+issue = 1123
+responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, and #1144 adds activation-failure routing beside the existing action table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
@@ -65,9 +54,9 @@ reason = "Portable provisioning reducer stays one cold-path authority; #1175 add
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/provisioning_apply.rs"
-acknowledged_loc = 778
-issue = 1156
-reason = "Create/close/terminate wire adapter stays next to ApplicationRoot; #1156 keeps the N3 Pane/Tab destroy history purge beside W3 drain of Realize/OrderFront after CreateTab."
+acknowledged_loc = 832
+issue = 1092
+reason = "Create/close/terminate/split wire adapter stays next to ApplicationRoot; #1217 adds SplitFocused on the C1 create→attach→bind path, #1092 threads ADR-018 containment_generation through CloseTab rollback and host action dispatch, #1175 adds owning-Controller terminate routing and §6.3 attach-failure dispatch, #1122 adds containment fencing on ClosePane, #1108 drains native window realization effects without adding a second provisioning authority, and #1117 adds split rollback plus close-path focus-history lifecycle hooks and active-close successor authority restoration through focus_history_apply.rs."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/tests.rs"
@@ -77,15 +66,15 @@ reason = "ADR-017 §7 and Issue #1136 acceptance matrix for portable provisionin
 
 [[exception]]
 path = "crates/seyal-client/src/app/tests.rs"
-ceiling_loc = 1091
+ceiling_loc = 1095
 issue = 1123
-responsibility = "App quit/native-effect proofs stay with window seeds; #1123 drains bootstrap Realize/OrderFront before BoundedDetachThenTerminate and QuitCleanupComplete ack ordering, plus install_quit_fixture probe-detach evidence."
+responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay with window seeds; #1217 adds SplitFocused enablement assertions, #1108 retains effect queue coverage, and #1123 covers bootstrap effect ordering, probe-detach evidence, and the fail-closed two-window fixture."
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1076
+ceiling_loc = 1091
 issue = 1123
-responsibility = "Published C ABI entry points stay one thin façade; #1123 adds seed_quit_case/seed_windows_only/live_attachment_count harnesses with APPS extract-mutate-restore so headed XCTest cannot BorrowMut-abort under Metal."
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures and #1144 extends activation-failure event wiring while preserving the typed Rust authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -98,10 +87,6 @@ path = "crates/seyal-client/src/composer/tests.rs"
 acknowledged_loc = 856
 issue = 1020
 reason = "Former composer/mod.rs #[cfg(test)] suite relocated as a sibling tests module without behavioral change; production composer reducer stays under review_loc. Ceiling matches rustfmt-normalized LOC after the split."
-
-
-# #1020 HistoryStore responsibility split: wrap occupancy math and the former
-# in-file unit-test module land in the cohesion-review band by design.
 
 # #1020 HistoryStore responsibility split: wrap occupancy math and the former
 # in-file unit-test module land in the cohesion-review band by design.
@@ -120,10 +105,6 @@ reason = "Former history.rs #[cfg(test)] suite relocated as a sibling tests modu
 # #1020 Screen responsibility split: edit/scroll/cursor mutations land in the
 # cohesion-review band by design; resize planner and Screen façade stay under
 # review_loc.
-
-# #1020 Screen responsibility split: edit/scroll/cursor mutations land in the
-# cohesion-review band by design; resize planner and Screen façade stay under
-# review_loc.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-terminal/src/screen/ops.rs"
 acknowledged_loc = 881
@@ -131,10 +112,8 @@ issue = 1020
 reason = "Cursor/edit/scroll/SGR/history-seal mutations stay one cohesive Screen impl block after the resize-planner extraction; further fragmentation would separate tightly coupled DECSTBM region helpers. Ceiling matches rustfmt-normalized LOC after the split."
 
 # #1020 TerminalCore VT performer split (finding A4): former monolithic vt.rs
-# partitioned into print / execute / csi / osc siblings; all landed ≤ review_loc,
+# partitioned into print / execute / csi / osc siblings; all landed <= review_loc,
 # so no [[exception]] or [[cohesion_acknowledgement]] remains for this surface.
-
-# #1067 docs-only ownership note on the protocol DisplayCache module (review band).
 
 # #1067 docs-only ownership note on the protocol DisplayCache module (review band).
 [[cohesion_acknowledgement]]
@@ -163,11 +142,13 @@ reason = "Connect/attach/bootstrap create stay one cold-path attach module; #117
 # #1181 adds §10 output-ref encode consumers, partial-segment merge, and
 # materialize_output_ref beside append_output_event.
 # #1271 adds rebuildable context_index_cache re-export beside existing open paths.
+# #1312 collocates Action persist-pause write-fault cells with existing store
+# write-fault instrumentation; pause policy methods live in action_persist.rs.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/mod.rs"
-acknowledged_loc = 891
-issue = 1271
-reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1271 adds a one-line ContextIndexRecord re-export for the rebuildable SPEC-013 index table without a second store façade."
+acknowledged_loc = 906
+issue = 1312
+reason = "SQLite aggregate append/replay/snapshot ownership stays one module; #1312 adds Action persist-pause Atomic/Mutex cells beside writes_before_fault without a second store façade."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-store/src/sqlite/catalog.rs"
@@ -181,15 +162,9 @@ acknowledged_loc = 711
 issue = 1300
 reason = "MemoryStore SPEC-012/014/015 fixtures stay one suite beside MemoryAuthority; #1300 adds the scope-wide revocation use-time denial regression without a second test façade or partN split."
 
-# #1224 SPEC-027 composition: HelloAck host-kind advertisement and catalog
-# generation sit on the daemon handshake façade; session façade grows
-# ServerCapabilities projection. Tests stay beside those façades.
-[[cohesion_acknowledgement]]
-path = "crates/seyal-agent-backend/src/daemon/mod.rs"
-acknowledged_loc = 709
-issue = 1224
-reason = "Daemon bind/listen/handshake stay one process façade; #1224 threads composed ExecutionHostKind and adapter_catalog_generation into HelloAck without splitting listen from handshake."
-
+# #1343 extracted secure singleton bootstrap from daemon/mod.rs, shrinking
+# that façade below the structural threshold. Preserve only the separate
+# #1224 acknowledgement for the existing cohesive process-boundary test suite.
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/daemon/tests.rs"
 acknowledged_loc = 714
@@ -198,9 +173,9 @@ reason = "Daemon process-façade proofs stay beside AgentDaemon; #1224 adds Hell
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-backend/src/session/mod.rs"
-acknowledged_loc = 920
-issue = 1252
-reason = "IntegrationService remains the Agent Backend session façade; #1252 adds grant-gated admin.adapters install/enable beside CancelRun (#1255), WorkScope.bindings, StartAgentRun, and the #1253 fixture-11 hook without a second session authority or client Command."
+acknowledged_loc = 930
+issue = 1309
+reason = "IntegrationService remains the Agent Backend session façade; #1309 adds hostless prepare_action for immutable ActionIntent persistence beside admin.adapters, CancelRun, and StartAgentRun without a second session authority."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-agent-protocol/src/command/mod.rs"
@@ -240,40 +215,44 @@ reason = "Session façade regressions stay beside IntegrationService; #1255 exte
 # test module (resolver rejections beside the Navigate commits they feed).
 [[exception]]
 path = "crates/seyal-client/src/navigation/tests.rs"
-ceiling_loc = 1151
-issue = 1117
-responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module so each rejection is asserted beside the address that produced it. #1117 threads NavigateHistory::ApplyOnly through N2 regressions; N3 history coverage lives in sibling history test modules. W4a fixture shells pass allows_window_creation=false."
+ceiling_loc = 1155
+issue = 1122
+responsibility = "SPEC-022 §12 N1 address/resolver and N2 Navigate commit proofs stay one navigation tests module; #1122 threads containment_generation through Split/Close, W2a adds Window-aware fixtures, #1117 records history policy and integration tests, and #1123 adds W4a fixture admission coverage."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/palette.rs"
-acknowledged_loc = 855
-issue = 1123
-reason = "Palette fixture shells pass allows_window_creation=false for W4a admission defaults (#1123); projection authority unchanged."
+acknowledged_loc = 880
+issue = 1092
+reason = "Command palette query, frozen rows, and run dispatch stay one reducer; #1092 carries containment generation through window-aware actions, #1175 adds the P4 Terminate Execution verb, and #1123 keeps W4a fixture admission policy in the Rust shell."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 886
-issue = 1144
-reason = "ShellState grows window_of_tab placement lookup for SPEC-022 R5.1 (#1144) beside W4a allows_window_creation and #1108 OrderFront from Navigate/commit_focus; no second window model."
+acknowledged_loc = 956
+issue = 1218
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, and #1218 adds two equalize dispatch arms. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 770
-issue = 1106
-reason = "Thin AppKit chrome host stays one cold-path façade; #1106 adds R6.2.1 performKeyEquivalent routing, projected WorkspaceCommand invoke/validation, and compositionActiveForKeyRouting covering composer, metal, and palette/goto field editors so Command chord prefixes cannot activate during IME marked text (R8.4)."
+acknowledged_loc = 780
+issue = 1218
+reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift."
 
-# #1106 tip C / #1132: SPEC-024 §14 K2 acceptance matrix stays one keybinding
-# tests module; admitting cmd+[ / cmd+] builtins dropped this file under the
-# 700-line cohesion acknowledgement floor, so the entry is removed.
+# #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
+[[cohesion_acknowledgement]]
+path = "crates/seyal-client/src/keybinding/tests.rs"
+acknowledged_loc = 701
+issue = 1106
+reason = "SPEC-024 §14 K2 defaults/reserved/conflict/unbind proofs stay one keybinding table-load test module beside the builtins they assert; tip C drops dead FocusHistory builtins and keeps the matrix under one authority rather than inventing partN splits."
+
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 728
-issue = 1156
-reason = "ABI action decode stays one match surface; #1156 stacks HistoryBack/HistoryForward kinds 67/68 after W4a window intents 63–66 without splitting the versioned kind table."
+acknowledged_loc = 739
+issue = 1123
+reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, and #1144 adds the ActivationFailed event without splitting the ABI table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
 acknowledged_loc = 747
 issue = 1123
-reason = "LocalDisplayClient stays one attach/poll client; #1123 adds request_bounded_detach and fallible try_reconstruction_probe_client for ADR-018 §4 quit fixtures without waiting on Detached."
+reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach and a fallible probe client for ADR-018 §4 quit fixtures without waiting on Detached."

@@ -3,6 +3,12 @@
 use super::*;
 
 #[cfg(target_os = "macos")]
+pub(super) type QuitProbeAttachment = (
+    crate::ffi::ClientRegistryHandle,
+    std::os::unix::net::UnixStream,
+);
+
+#[cfg(target_os = "macos")]
 impl Drop for ApplicationRoot {
     fn drop(&mut self) {
         self.release_live_attachments();
@@ -52,7 +58,9 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
-        crate::ffi::set_focused_display_handle(handle);
+        if self.shell.snapshot().focused_pane == fence.pane {
+            crate::ffi::set_focused_display_handle(handle);
+        }
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
         // Bind ran before the handle was installed, so re-seed now that the
@@ -229,7 +237,7 @@ impl ApplicationRoot {
             let tag = u8::try_from(index + 1).map_err(|_| ())?;
             let execution = ExecutionId::from_bytes([tag; 16]);
             let attachment = AttachmentId::from_bytes([tag; 16]);
-            let client = crate::local::try_reconstruction_probe_client(
+            let (client, peer) = crate::local::try_reconstruction_probe_client_with_peer(
                 Role::Controller,
                 24,
                 80,
@@ -238,7 +246,7 @@ impl ApplicationRoot {
                 attachment,
             )?;
             let registered = crate::ffi::register_app_client(client).map_err(|_| ())?;
-            self.live_attachments.push(registered);
+            self.live_attachments.push((registered, peer));
         }
         Ok(())
     }
@@ -249,7 +257,7 @@ impl ApplicationRoot {
             raws.push(handle.raw());
         }
         for handle in &self.live_attachments {
-            let raw = handle.raw();
+            let raw = handle.0.raw();
             if !raws.contains(&raw) {
                 raws.push(raw);
             }
@@ -593,7 +601,7 @@ impl ApplicationRoot {
             let primary = self.client_handle.take().map(|handle| handle.raw());
             let extras = std::mem::take(&mut self.live_attachments);
             let mut raws = Vec::new();
-            for handle in extras {
+            for (handle, _) in &extras {
                 raws.push(handle.raw());
             }
             for (_, handle) in self.extra_pane_clients.drain() {
@@ -646,17 +654,21 @@ impl ApplicationRoot {
     }
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub(crate) fn window_encode_key(&self) -> (u64, u16, u64) {
+    pub(crate) fn window_encode_key(&self) -> (u64, u16, u64, u32) {
         (
             self.snapshot_generation,
             self.pending_effects.len() as u16,
             self.shell.containment_generation(),
+            self.shell
+                .last_error()
+                .map(crate::shell::ShellError::error_number)
+                .unwrap_or(0),
         )
     }
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
+pub(crate) fn project_cache_text(cache: &seyal_runtime::display::DisplayCache) -> String {
     use seyal_runtime::display::DisplayCellRole;
     let mut text = String::new();
     for (index, cell) in cache.cells.iter().enumerate() {
