@@ -120,6 +120,13 @@ final class PaneLayoutView: NSView {
     private var dividerViews: [PaneDividerView] = []
     private var secondaryLiveHosts: [PaneKey: SecondaryLivePaneHost] = [:]
     private var theme: NativeTheme?
+    /// Owns the focused chrome frame. A translates-on autoresizing mask freezes
+    /// the last manual width, so the focused Metal surface misses later resizes.
+    private var liveOriginX: NSLayoutConstraint!
+    private var liveOriginY: NSLayoutConstraint!
+    private var liveWidth: NSLayoutConstraint!
+    private var liveHeight: NSLayoutConstraint!
+    private var applyingLiveFrame = false
 
     private struct PaneKey: Hashable {
         let lo: UInt64
@@ -130,10 +137,16 @@ final class PaneLayoutView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        liveContent.translatesAutoresizingMaskIntoConstraints = true
-        // Track the Tab's bounds until the first projection sets a region frame.
-        liveContent.autoresizingMask = [.width, .height]
+        // Explicit frame constraints, updated from the focused region. An
+        // autoresizing mask turns the manual frame into a required constant
+        // width, so a later window resize never reaches the focused surface.
+        liveContent.translatesAutoresizingMaskIntoConstraints = false
         addSubview(liveContent)
+        liveOriginX = liveContent.leadingAnchor.constraint(equalTo: leadingAnchor)
+        liveOriginY = liveContent.topAnchor.constraint(equalTo: topAnchor)
+        liveWidth = liveContent.widthAnchor.constraint(equalToConstant: 1)
+        liveHeight = liveContent.heightAnchor.constraint(equalToConstant: 1)
+        NSLayoutConstraint.activate([liveOriginX, liveOriginY, liveWidth, liveHeight])
     }
 
     /// Registry handle → secondary host lookup for shared bridge poll routing.
@@ -363,17 +376,30 @@ final class PaneLayoutView: NSView {
     }
 
     override func layout() {
+        let liveFrame = focusedLiveFrame()
+        if !applyingLiveFrame,
+           liveFrame.width > 1,
+           liveFrame.height > 1,
+           (
+               abs(liveOriginX.constant - liveFrame.minX) > 0.5
+                   || abs(liveOriginY.constant - liveFrame.minY) > 0.5
+                   || abs(liveWidth.constant - liveFrame.width) > 0.5
+                   || abs(liveHeight.constant - liveFrame.height) > 0.5
+           )
+        {
+            liveOriginX.constant = liveFrame.minX
+            liveOriginY.constant = liveFrame.minY
+            liveWidth.constant = liveFrame.width
+            liveHeight.constant = liveFrame.height
+            applyingLiveFrame = true
+            layoutSubtreeIfNeeded()
+            applyingLiveFrame = false
+        }
         super.layout()
+        let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
         for (view, region) in zip(regionViews, regions) {
             view.frame = scaled(region.rect)
         }
-        let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
-        // Focused chrome (composer/transcript/primary Metal) follows the
-        // focused LIVE region; fall back to the first LIVE region, then full Tab.
-        let focusedLive = regions.first(where: { $0.live && $0.focused })?.rect
-            ?? regions.first(where: \.live)?.rect
-            ?? CGRect(x: 0, y: 0, width: 1, height: 1)
-        liveContent.frame = scaled(focusedLive).insetBy(dx: inset, dy: inset)
         for region in regions where region.live && !region.focused {
             let key = PaneKey(lo: region.paneLo, hi: region.paneHi)
             secondaryLiveHosts[key]?.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
@@ -389,6 +415,16 @@ final class PaneLayoutView: NSView {
                 : CGRect(x: area.minX, y: (divider.line.y * bounds.height).rounded() - half,
                          width: area.width, height: PaneDividerView.thickness)
         }
+    }
+
+    /// Focused chrome (composer/transcript/primary Metal) follows the focused
+    /// LIVE region; fall back to the first LIVE region, then the full Tab.
+    private func focusedLiveFrame() -> CGRect {
+        let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
+        let focusedLive = regions.first(where: { $0.live && $0.focused })?.rect
+            ?? regions.first(where: \.live)?.rect
+            ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+        return scaled(focusedLive).insetBy(dx: inset, dy: inset)
     }
 
     private func scaled(_ unit: CGRect) -> CGRect {

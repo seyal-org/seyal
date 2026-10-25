@@ -359,8 +359,12 @@ final class ProductChromeHostView: NSView {
             self?.reconcileChrome()
         }
         pane.inputSurface.onComposerStatusChanged = { [weak self] status in
-            self?.relayComposerStatus(status)
-            self?.reconcileChrome()
+            guard let self else { return false }
+            let accepted = self.relayComposerStatus(status)
+            if accepted {
+                self.reconcileChrome()
+            }
+            return accepted
         }
         pane.onProductChanged = { [weak self] in
             self?.reconcileChrome()
@@ -424,6 +428,12 @@ final class ProductChromeHostView: NSView {
     }
 
     func performChromeReconcile() {
+        // Focus, split, and attach reconcile while the primary PTY is idle.
+        // Arm a newly registered Controller fd and relay eligibility already
+        // cached for the focused attachment; composer mode stays Busy until
+        // that fact is applied.
+        pane.inputSurface.bridge?.armAuxiliaryReadSources()
+        pane.inputSurface.bridge?.publishComposerStatus()
         var snapshot = seyal_app_snapshot(pane.appHandle)
         let bound = (lo: snapshot.execution_lo, hi: snapshot.execution_hi)
         if snapshot.flags & UInt16(SEYAL_APP_SNAP_HAS_EXECUTION) != 0,

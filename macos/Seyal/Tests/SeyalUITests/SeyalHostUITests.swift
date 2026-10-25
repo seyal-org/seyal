@@ -253,6 +253,23 @@ final class SeyalHostUITests: XCTestCase {
         )
     }
 
+    /// Reads AX values only when the element is still in the tree. A hidden
+    /// composer is absent, and `.value` then throws instead of reporting why.
+    private func paneProbeDiagnostics(_ app: XCUIApplication) -> String {
+        func text(_ identifier: String) -> String {
+            let element = app.descendants(matching: .any)[identifier].firstMatch
+            guard element.exists else { return "\(identifier)=missing" }
+            let value = (element.value as? String) ?? "nil"
+            return "\(identifier)=\(value) enabled=\(element.isEnabled)"
+        }
+        return [
+            text("seyal-composer"),
+            text("seyal-composer-editor"),
+            text("seyal-recovery"),
+            text("terminal-input"),
+        ].joined(separator: "; ")
+    }
+
     /// #936: a real outer-window resize reaches both independent PTYs. The
     /// Pane 0 stays unfocused while its secondary host receives new geometry.
     func testWindowResizeUpdatesBothLivePanePtyGeometries() throws {
@@ -583,13 +600,11 @@ final class SeyalHostUITests: XCTestCase {
             startedFile: secondStartedFile,
             probeScript: secondProbeScript
         ) else {
-            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
-            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             let shellPID = (try? String(contentsOf: secondShellPIDFile, encoding: .utf8)) ?? "missing"
             let watcherPID = (try? String(contentsOf: secondWatcherPIDFile, encoding: .utf8)) ?? "missing"
             let probe = (try? String(contentsOf: secondFile, encoding: .utf8)) ?? "missing"
             XCTFail(
-                "second Pane PTY must report initial stty size; region=\(secondRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: secondStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
+                "second Pane PTY must report initial stty size; \(paneProbeDiagnostics(app)), region=\(secondRegion.value ?? "nil"), startupSentinel=\(FileManager.default.fileExists(atPath: secondStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), enabled=\(secondaryHost.isEnabled), hittable=\(secondaryHost.isHittable)"
             )
             return
         }
@@ -605,13 +620,11 @@ final class SeyalHostUITests: XCTestCase {
             startedFile: firstStartedFile,
             probeScript: firstProbeScript
         ) else {
-            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
-            let editor = app.descendants(matching: .any)["seyal-composer-editor"].firstMatch
             let shellPID = (try? String(contentsOf: firstShellPIDFile, encoding: .utf8)) ?? "missing"
             let watcherPID = (try? String(contentsOf: firstWatcherPIDFile, encoding: .utf8)) ?? "missing"
             let probe = (try? String(contentsOf: firstFile, encoding: .utf8)) ?? "missing"
             XCTFail(
-                "first Pane PTY must report initial stty size; region=\(firstRegion.value ?? "nil"), composer=\(composer.value ?? "nil"), editorAXEnabled=\(editor.isEnabled), startupSentinel=\(FileManager.default.fileExists(atPath: firstStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), regionFrame=\(firstRegion.frame)"
+                "first Pane PTY must report initial stty size; \(paneProbeDiagnostics(app)), region=\(firstRegion.value ?? "nil"), startupSentinel=\(FileManager.default.fileExists(atPath: firstStartedFile.path)), shellPID=\(shellPID), probe=\(probe), watcherPID=\(watcherPID), regionFrame=\(firstRegion.frame)"
             )
             return
         }
@@ -625,17 +638,29 @@ final class SeyalHostUITests: XCTestCase {
             "each Pane must run its command in a distinct live shell execution"
         )
         // runSize(firstRegion) focused Pane 0 so its command could be
-        // submitted. Restore Pane 1 before associating live-surface
-        // projections with the two PTY samples: the primary surface follows
-        // focus, and the secondary host represents the other Pane.
-        app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        // submitted. The unfocused Pane's secondary host is the focus target;
+        // click it so the primary surface follows Pane 1 again.
+        if (secondRegion.value as? String) != "focused" {
+            // The secondary host covers the region, and on a smaller display
+            // the pane center can sit off screen. Click its left edge, which
+            // stays inside the window.
+            let restoreFocus = app.descendants(matching: .any)["seyal-secondary-live-pane"].firstMatch
+            XCTAssertTrue(
+                restoreFocus.waitForExistence(timeout: 5),
+                "Pane 1 secondary host missing; regionFrame=\(secondRegion.frame)"
+            )
+            restoreFocus.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).click()
+        }
         let secondPaneFocused = expectation(
             for: NSPredicate(format: "value == 'focused'"),
             evaluatedWith: secondRegion,
             handler: nil
         )
         guard XCTWaiter.wait(for: [secondPaneFocused], timeout: 5) == .completed else {
-            XCTFail("Pane 1 must regain focus before associating live projections with PTY samples")
+            XCTFail(
+                "Pane 1 must regain focus before associating live projections with PTY samples; "
+                    + "region0=\(firstRegion.value ?? "nil") region1=\(secondRegion.value ?? "nil")"
+            )
             return
         }
         let firstPaneUnfocused = expectation(
@@ -673,12 +698,16 @@ final class SeyalHostUITests: XCTestCase {
         // and a real native resize gesture.
         let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
             .withOffset(CGVector(dx: -3, dy: -3))
-        corner.click(forDuration: 0.15, thenDragTo: corner.withOffset(CGVector(dx: 120, dy: 0)))
+        corner.click(forDuration: 0.15, thenDragTo: corner.withOffset(CGVector(dx: 240, dy: 0)))
         let resizeDeadline = Date().addingTimeInterval(5)
         while Date() < resizeDeadline, window.frame.width <= oldWidth + 20 {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
-        XCTAssertGreaterThan(window.frame.width, oldWidth + 20, "window must resize")
+        XCTAssertGreaterThan(
+            window.frame.width,
+            oldWidth + 20,
+            "window must resize; before=\(oldWidth) frame=\(window.frame)"
+        )
 
         func waitForResizedSize(
             in region: XCUIElement,
@@ -689,8 +718,11 @@ final class SeyalHostUITests: XCTestCase {
             requireUnfocused: Bool
         ) -> (rows: Int, columns: Int, shellPID: Int)? {
             let deadline = Date().addingTimeInterval(10)
+            var lastProbe = "missing"
+            var lastProjection = "unavailable"
             while Date() < deadline {
                 if let output = try? String(contentsOf: file, encoding: .utf8) {
+                    lastProbe = output.trimmingCharacters(in: .whitespacesAndNewlines)
                     let fields = output.split(whereSeparator: \.isWhitespace)
                     let shellPIDValue = try? String(contentsOf: shellPIDFile, encoding: .utf8)
                     let shellPID = shellPIDValue.flatMap {
@@ -716,9 +748,16 @@ final class SeyalHostUITests: XCTestCase {
                         }
                         return (rows, columns, previous.shellPID)
                     }
+                    lastProjection = String(describing: projectedSize(from: displayElement))
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             }
+            XCTFail(
+                "PTY did not follow the resize; surface=\(displayElement.identifier) "
+                    + "previous=\(previous.rows) \(previous.columns) pid=\(previous.shellPID) "
+                    + "lastPTY=\(lastProbe) lastProjection=\(lastProjection) "
+                    + "region=\(region.value ?? "nil") window=\(window.frame)"
+            )
             return nil
         }
 

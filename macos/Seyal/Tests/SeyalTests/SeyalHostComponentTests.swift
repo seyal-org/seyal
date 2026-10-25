@@ -1287,6 +1287,12 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(tracker.shouldRelay(revision: 7, attachmentIDLow: 22, attachmentIDHigh: 2))
         XCTAssertTrue(tracker.shouldRelay(revision: 8, attachmentIDLow: 22, attachmentIDHigh: 2))
         XCTAssertFalse(tracker.shouldRelay(revision: 0, attachmentIDLow: 33, attachmentIDHigh: 3))
+        XCTAssertTrue(tracker.shouldRelay(revision: 9, attachmentIDLow: 22, attachmentIDHigh: 2))
+        tracker.abandonClaim()
+        XCTAssertTrue(
+            tracker.shouldRelay(revision: 9, attachmentIDLow: 22, attachmentIDHigh: 2),
+            "a rejected host apply must not consume the Runtime fact"
+        )
         XCTAssertTrue(tracker.clear())
         XCTAssertFalse(tracker.clear())
     }

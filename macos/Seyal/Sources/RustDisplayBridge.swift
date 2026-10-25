@@ -6,7 +6,7 @@ final class RustDisplayBridge {
   typealias TimelineHandler = @MainActor () -> Void
   typealias HistoryHandler = @MainActor (NativeHistoryRange) -> Void
   typealias ComposerResultHandler = @MainActor (NativeComposerResult) -> Void
-  typealias ComposerStatusHandler = @MainActor (NativeComposerStatus) -> Void
+  typealias ComposerStatusHandler = @MainActor (NativeComposerStatus) -> Bool
   typealias ErrorHandler = @MainActor (Int32) -> Void
   typealias StatusHandler = @MainActor () -> Void
 
@@ -113,7 +113,7 @@ final class RustDisplayBridge {
     onTimeline: @escaping TimelineHandler = {},
     onHistory: @escaping HistoryHandler = { _ in },
     onComposerResult: @escaping ComposerResultHandler = { _ in },
-    onComposerStatus: @escaping ComposerStatusHandler = { _ in },
+    onComposerStatus: @escaping ComposerStatusHandler = { _ in false },
     paneID: String = "unbound",
     executionIdentity: String? = nil,
     allowsImplicitExecutionBootstrap: Bool = true
@@ -262,6 +262,9 @@ final class RustDisplayBridge {
     synchronizeWriteReadinessSource()
     armAuxiliaryReadSources()
     armProvisioningWakeupSource()
+    // The initial snapshot can already carry composer eligibility. Relay it
+    // before the shell goes idle; a later PTY read is not guaranteed.
+    publishComposerStatus()
     onStatusChanged()
     return true
   }

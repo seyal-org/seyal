@@ -91,19 +91,19 @@ final class SecondaryLivePaneHost: NSView {
     /// A secondary pane has no keyboard authority, but it is the visible
     /// hit target for moving Rust-owned focus to that pane.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if displayHandle == 0 {
-            return super.hitTest(point)
-        }
         let localPoint = convert(point, from: superview)
-        return bounds.contains(localPoint) ? self : nil
+        guard bounds.contains(localPoint) else { return nil }
+        if displayHandle == 0, super.hitTest(point) === retryButton {
+            return retryButton
+        }
+        return self
     }
 
     override func mouseDown(with event: NSEvent) {
-        if displayHandle != 0 { onFocus?() }
+        onFocus?()
     }
 
     override func accessibilityPerformPress() -> Bool {
-        guard displayHandle != 0 else { return false }
         onFocus?()
         return true
     }

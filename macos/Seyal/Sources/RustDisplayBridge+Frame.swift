@@ -25,6 +25,11 @@ struct ComposerStatusRelayTracker {
     lastKey = nil
     return true
   }
+
+  /// Drop the last claim so a rejected host apply can be retried.
+  mutating func abandonClaim() {
+    lastKey = nil
+  }
 }
 
 @MainActor
@@ -108,9 +113,12 @@ extension RustDisplayBridge {
       attachmentIDHigh: status.attachment_id_high
     )
     guard shouldRelay else { return }
-    onComposerStatus(
+    let accepted = onComposerStatus(
       NativeComposerStatus(eligibility: status.eligibility, revision: status.revision)
     )
+    if !accepted {
+      composerStatusRelayTracker.abandonClaim()
+    }
   }
 
   /// Transport lost: the relayed fact no longer describes a live attachment.

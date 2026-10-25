@@ -48,8 +48,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
                 guard let self,
                       let window = self.realizations.values.first(where: { $0.contentView === self.liveHost })
                 else { return }
-                window.setContentSize(NSSize(width: 1100, height: 760))
-                window.center()
+                self.placeCompactResizeWindow(window)
             }
         }
         #endif
@@ -61,6 +60,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         refreshTitlesFromSnapshot()
         liveHost.reconcileChrome()
     }
+
+    #if DEBUG
+    /// Once the hosted test drags the window, leave that size alone.
+    private var compactClampArmed = true
+    /// Re-entrancy fence for the hosted resize fixture's on-screen clamp.
+    private var applyingCompactFrame = false
+    #endif
 
     /// UI order equals snapshot order (ADR-018 §1.3 / W4a).
     func snapshotOrderedWindowKeys() -> [WindowKey] {
@@ -370,6 +376,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         )
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
+        #if DEBUG
+        // A restored frame wider than the display puts the resize corner
+        // off-screen, so the hosted two-pane resize drag never starts.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            window.isRestorable = false
+        }
+        #endif
         window.tabbingMode = .disallowed
         window.identifier = NSUserInterfaceItemIdentifier("seyal-window-\(key.lo)-\(key.hi)")
         window.delegate = self
@@ -590,6 +603,67 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         guard let window = notification.object as? NSWindow else { return }
         reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED)
     }
+
+    func windowWillStartLiveResize(_ notification: Notification) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            compactClampArmed = false
+        }
+        #endif
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        #if DEBUG
+        guard compactClampArmed,
+              !applyingCompactFrame,
+              ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1",
+              let window = notification.object as? NSWindow,
+              !window.inLiveResize,
+              let screen = window.screen ?? NSScreen.main,
+              window.frame.width > screen.visibleFrame.width - 40
+        else { return }
+        // AppKit forbids setFrame inside the resize notification that layout
+        // is still posting. Clamp on the next turn, and only while the frame
+        // is too wide for the resize corner to stay on screen.
+        applyingCompactFrame = true
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.placeCompactResizeWindow(window)
+        }
+        #endif
+    }
+
+    #if DEBUG
+    private func placeCompactResizeWindow(_ window: NSWindow) {
+        applyingCompactFrame = true
+        defer { applyingCompactFrame = false }
+        if let content = window.contentView {
+            relaxWideConstraints(in: content)
+        }
+        let content = NSSize(width: 1100, height: 760)
+        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: content))
+        guard let screen = window.screen ?? NSScreen.main else {
+            window.setFrame(frame, display: true)
+            window.center()
+            return
+        }
+        let visible = screen.visibleFrame
+        frame.origin.x = visible.minX + 8
+        frame.origin.y = visible.maxY - frame.height - 8
+        window.setFrame(frame, display: true)
+    }
+
+    /// Autoresizing masks inside the pane layout become required widths.
+    /// A stale wide one keeps a restored frame from accepting the compact size.
+    private func relaxWideConstraints(in view: NSView) {
+        for constraint in view.constraints where constraint.firstAttribute == .width && constraint.constant > 700 {
+            constraint.priority = .defaultLow
+        }
+        for child in view.subviews {
+            relaxWideConstraints(in: child)
+        }
+    }
+    #endif
 }
 
 enum QuitForwardError: Error {

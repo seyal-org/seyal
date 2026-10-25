@@ -116,6 +116,9 @@ extension ProductChromeHostView {
     }
 
     func driveRecovery() {
+        // A detached projection host has no window and must not open or launch
+        // a Runtime. In-process tests construct those hosts beside the live window.
+        guard window != nil else { return }
         let paneTarget = seyal_app_begin_next_pane_recovery(
             pane.appHandle,
             runtimeRecoveryNowMillis()
