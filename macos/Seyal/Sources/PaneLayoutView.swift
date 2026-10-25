@@ -562,15 +562,3 @@ private final class PaneDividerView: NSView {
         onDrag?(parent.convert(event.locationInWindow, from: nil))
     }
 }
-
-extension NSLayoutConstraint {
-    /// Trailing/bottom attachments of live content to `liveContent` yield to
-    /// the Rust-projected region: the priority sits below the window's
-    /// stay-put size, so content wider/taller than the region is clipped
-    /// instead of growing the window (ADR-015; #928). It stays above default
-    /// hugging, so content still fills a region that is large enough.
-    func yieldingToPaneRegion() -> NSLayoutConstraint {
-        priority = .dragThatCannotResizeWindow
-        return self
-    }
-}
