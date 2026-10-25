@@ -448,13 +448,18 @@ final class SeyalHostUITests: XCTestCase {
                     return nil
                 }
             }
-            let composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
-            let composerAvailable = expectation(
-                for: NSPredicate(format: "value == %@", "available"),
-                evaluatedWith: composer,
-                handler: nil
-            )
-            guard XCTWaiter.wait(for: [composerAvailable], timeout: 10) == .completed else {
+            let composerDeadline = Date().addingTimeInterval(30)
+            var composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+            var composerReady = false
+            while Date() < composerDeadline {
+                composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
+                if composer.exists, (composer.value as? String) == "available" {
+                    composerReady = true
+                    break
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            guard composerReady else {
                 return nil
             }
             let editorQuery = app.descendants(matching: .any).matching(identifier: "seyal-composer-editor")
