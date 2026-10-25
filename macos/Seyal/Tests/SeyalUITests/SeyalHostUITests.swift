@@ -1198,6 +1198,27 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(app.menuBars.menuBarItems["Window"].waitForExistence(timeout: 5))
     }
 
+    /// W5: presentation-tier chrome keeps tab and window admission available.
+    func testPresentationTierChromeKeepsNewTabAndWindowAvailable() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertEqual(app.windows.count, 1)
+        let chrome = app.descendants(matching: .any)["seyal-product-chrome"].firstMatch
+        XCTAssertTrue(chrome.waitForExistence(timeout: 5))
+        let newTab = app.descendants(matching: .any)["seyal-new-tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5), "C2b CreateTab chrome stays visible")
+        XCTAssertTrue(newTab.isHittable)
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5))
+        newWindow.click()
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, app.windows.count != 2 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(app.windows.count, 2, "W4b+ CreateWindow must realize a second window")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
     /// W4b: production window admission + last-window-close stay-alive.
     func testNewWindowAdmissionCreatesSecondWindowAndLastCloseDoesNotQuit() throws {
         let app = hostedApp()

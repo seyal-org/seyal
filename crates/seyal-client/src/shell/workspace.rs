@@ -38,6 +38,10 @@ pub(super) struct Window {
     pub(super) workspace_id: WorkspaceId,
     pub(super) tabs: Vec<Tab>,
     pub(super) active_tab: TabId,
+    /// Host-forwarded occlusion (fully occluded Window → Hidden leaves).
+    pub(super) occluded: bool,
+    /// Host-forwarded miniaturize (Dock minimize → Hidden leaves).
+    pub(super) miniaturized: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +105,8 @@ impl Window {
             workspace_id,
             tabs,
             active_tab,
+            occluded: false,
+            miniaturized: false,
         })
     }
 

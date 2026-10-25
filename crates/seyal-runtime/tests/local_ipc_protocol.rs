@@ -5,6 +5,7 @@
 //! display cache; it never maps canonical/runtime memory or reparses PTY bytes.
 
 use std::{
+    collections::{HashMap, VecDeque},
     io::{Read, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
@@ -15,10 +16,12 @@ use seyal_exec::{CommandSpec, WindowSize};
 use seyal_runtime::{
     display::{decode_chunk, empty_cache, DecodedDisplayChunk, DisplayCache},
     local_ipc::framing::{
-        encode_frame, Attach, Attached, ClientHello, ErrorCode, ErrorMessage, FrameHeader,
-        InputRef, MessageType, Resize as WireResize, Role, ServerHello, HEADER_LEN,
+        decode_presentation_envelope, encode_frame, Attach, Attached, ClientHello, ErrorCode,
+        ErrorMessage, FrameHeader, InputRef, MessageType, Resize as WireResize, ResumeDelivery,
+        Resync, Role, ServerHello, SuspendDelivery, ViewportLineIds,
+        CAP_ATTACHMENT_DELIVERY_CONTROL, CAP_VIEWPORT_LINE_IDS, HEADER_LEN,
     },
-    ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
+    AttachmentId, ExecutionId, LocalIpcMode, Runtime, RuntimeConfig,
 };
 
 fn unique_suffix() -> u64 {
@@ -46,6 +49,14 @@ fn size() -> WindowSize {
 struct Client {
     stream: UnixStream,
     buffered: Vec<u8>,
+    delivery_control: bool,
+    attachment_id: Option<AttachmentId>,
+    resume_sequence: u64,
+    presentation_sequences: HashMap<AttachmentId, u64>,
+    expected_presentation_attachment: Option<AttachmentId>,
+    /// Park presentation frames until the next non-presentation control frame.
+    park_presentation: bool,
+    deferred_presentation_frames: HashMap<AttachmentId, VecDeque<(u16, Vec<u8>)>>,
 }
 
 struct Harness {
@@ -89,6 +100,13 @@ impl Harness {
                     return Client {
                         stream,
                         buffered: Vec::new(),
+                        delivery_control: false,
+                        attachment_id: None,
+                        resume_sequence: 0,
+                        presentation_sequences: HashMap::new(),
+                        expected_presentation_attachment: None,
+                        park_presentation: false,
+                        deferred_presentation_frames: HashMap::new(),
                     };
                 }
                 Err(_) => {
@@ -100,6 +118,13 @@ impl Harness {
     }
 
     fn send(&mut self, client: &mut Client, kind: MessageType, payload: &[u8]) {
+        if kind == MessageType::ResumeDelivery {
+            let resume = ResumeDelivery::decode(payload).expect("valid resume request");
+            client.resume_sequence = resume.resume_sequence;
+            client
+                .presentation_sequences
+                .insert(resume.attachment_id, resume.resume_sequence);
+        }
         let frame = encode_frame(kind, payload);
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut sent = 0;
@@ -117,13 +142,54 @@ impl Harness {
 
     fn expect_frame(&mut self, client: &mut Client, deadline: Instant) -> (u16, Vec<u8>) {
         loop {
+            if let Some(attachment_id) = client.expected_presentation_attachment
+                && let Some(queue) = client.deferred_presentation_frames.get_mut(&attachment_id)
+                && let Some(frame) = queue.pop_front()
+            {
+                return frame;
+            }
             if client.buffered.len() >= HEADER_LEN {
                 let header =
                     FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("valid header");
                 let total = HEADER_LEN + header.payload_len as usize;
                 if client.buffered.len() >= total {
                     let frame = client.buffered.drain(..total).collect::<Vec<_>>();
-                    return (header.message_type, frame[HEADER_LEN..].to_vec());
+                    let payload = if client.delivery_control
+                        && matches!(header.message_type, 12 | 13 | 21 | 26 | 27 | 28 | 35)
+                    {
+                        let envelope = decode_presentation_envelope(&frame)
+                            .expect("negotiated presentation envelope");
+                        let accept =
+                            client.expected_presentation_attachment == Some(envelope.attachment_id);
+                        let park = !accept
+                            && (client.park_presentation
+                                || client.expected_presentation_attachment.is_some());
+                        if park {
+                            if let Some(sequence) =
+                                client.presentation_sequences.get(&envelope.attachment_id)
+                            {
+                                assert_eq!(
+                                    sequence, &envelope.resume_sequence,
+                                    "frame must carry the identity and epoch of its logical attachment"
+                                );
+                            }
+                            client
+                                .deferred_presentation_frames
+                                .entry(envelope.attachment_id)
+                                .or_default()
+                                .push_back((header.message_type, envelope.payload.to_vec()));
+                            continue;
+                        }
+                        assert_eq!(
+                            client.presentation_sequences.get(&envelope.attachment_id),
+                            Some(&envelope.resume_sequence),
+                            "frame must carry the identity and epoch of its logical attachment"
+                        );
+                        envelope.payload.to_vec()
+                    } else {
+                        frame[HEADER_LEN..].to_vec()
+                    };
+                    return (header.message_type, payload);
                 }
             }
 
@@ -139,11 +205,16 @@ impl Harness {
     }
 
     fn hello(&mut self, client: &mut Client) {
+        self.hello_caps(client, 0);
+    }
+
+    fn hello_caps(&mut self, client: &mut Client, client_capabilities: u32) {
+        client.delivery_control = client_capabilities & CAP_ATTACHMENT_DELIVERY_CONTROL != 0;
         self.send(
             client,
             MessageType::ClientHello,
             &ClientHello {
-                client_capabilities: 0,
+                client_capabilities,
             }
             .encode(),
         );
@@ -172,10 +243,26 @@ impl Harness {
             .encode(),
         );
         let deadline = Instant::now() + Duration::from_secs(3);
+        // A live attachment can emit display frames before this Attach's
+        // control frame. Park those until Attached arrives.
+        client.park_presentation = true;
         let (kind, payload) = self.expect_frame(client, deadline);
+        client.park_presentation = false;
         assert_eq!(kind, MessageType::Attached as u16);
         let attached = Attached::decode(&payload).expect("Attached");
-        let chunks = self.expect_display_batch(client, MessageType::DisplaySnapshot, deadline);
+        client.attachment_id = Some(attached.attachment_id);
+        client
+            .presentation_sequences
+            .insert(attached.attachment_id, 0);
+        // Another attachment on this connection can emit a delta before this
+        // attachment's snapshot. Read by attachment id instead of assuming the
+        // next frame on the socket belongs to the attach that just completed.
+        let chunks = self.expect_display_batch_for(
+            client,
+            attached.attachment_id,
+            MessageType::DisplaySnapshot,
+            deadline,
+        );
         let mut cache = empty_cache();
         cache.apply_chunks(&chunks).expect("initial snapshot apply");
         assert_eq!(cache.generation, attached.current_generation);
@@ -189,6 +276,17 @@ impl Harness {
         deadline: Instant,
     ) -> Vec<DecodedDisplayChunk> {
         let (kind, payload) = self.expect_frame(client, deadline);
+        self.finish_display_batch(client, kind, payload, expected_kind, deadline)
+    }
+
+    fn finish_display_batch(
+        &mut self,
+        client: &mut Client,
+        kind: u16,
+        payload: Vec<u8>,
+        expected_kind: MessageType,
+        deadline: Instant,
+    ) -> Vec<DecodedDisplayChunk> {
         assert_eq!(kind, expected_kind as u16);
         let first_frame = encode_frame(expected_kind, &payload);
         let first = decode_chunk(&first_frame).expect("display chunk");
@@ -201,6 +299,69 @@ impl Harness {
                 .push(decode_chunk(&encode_frame(expected_kind, &payload)).expect("display chunk"));
         }
         chunks
+    }
+
+    fn expect_display_batch_for(
+        &mut self,
+        client: &mut Client,
+        attachment_id: AttachmentId,
+        expected_kind: MessageType,
+        deadline: Instant,
+    ) -> Vec<DecodedDisplayChunk> {
+        client.expected_presentation_attachment = Some(attachment_id);
+        let result = if expected_kind == MessageType::DisplaySnapshot {
+            // The same attachment can emit a delta, or ViewportLineIds, before
+            // its snapshot reaches the socket. The snapshot is the initial
+            // state; hold earlier viewport frames for the next reader.
+            let mut parked_viewport = VecDeque::new();
+            let chunks = loop {
+                let (kind, payload) = self.expect_frame(client, deadline);
+                if kind == MessageType::DisplaySnapshot as u16 {
+                    break self.finish_display_batch(
+                        client,
+                        kind,
+                        payload,
+                        expected_kind,
+                        deadline,
+                    );
+                }
+                if kind == MessageType::ViewportLineIds as u16 {
+                    parked_viewport.push_back((kind, payload));
+                    continue;
+                }
+                if kind == MessageType::DisplayDelta as u16 {
+                    continue;
+                }
+                panic!("attachment {attachment_id:?} expected DisplaySnapshot, got message type {kind}");
+            };
+            if !parked_viewport.is_empty() {
+                let queue = client
+                    .deferred_presentation_frames
+                    .entry(attachment_id)
+                    .or_default();
+                for frame in parked_viewport.into_iter().rev() {
+                    queue.push_front(frame);
+                }
+            }
+            chunks
+        } else {
+            self.expect_display_batch(client, expected_kind, deadline)
+        };
+        client.expected_presentation_attachment = None;
+        result
+    }
+
+    fn expect_viewport_line_ids_for(
+        &mut self,
+        client: &mut Client,
+        attachment_id: AttachmentId,
+        deadline: Instant,
+    ) -> ViewportLineIds {
+        client.expected_presentation_attachment = Some(attachment_id);
+        let result = self.expect_frame(client, deadline);
+        client.expected_presentation_attachment = None;
+        assert_eq!(result.0, MessageType::ViewportLineIds as u16);
+        ViewportLineIds::decode(&result.1).expect("ViewportLineIds")
     }
 
     fn apply_next_display(&mut self, client: &mut Client, cache: &mut DisplayCache) {
@@ -222,6 +383,70 @@ impl Harness {
             );
         }
         cache.apply_chunks(&chunks).expect("display apply");
+    }
+
+    fn assert_no_display_for(&mut self, client: &mut Client, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            self.pump();
+            let mut chunk = [0u8; 4096];
+            match client.stream.read(&mut chunk) {
+                Ok(0) => panic!("connection closed while delivery was suspended"),
+                Ok(count) => client.buffered.extend_from_slice(&chunk[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("client read failed: {error}"),
+            }
+            while client.buffered.len() >= HEADER_LEN {
+                let header = FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                let total = HEADER_LEN + header.payload_len as usize;
+                if client.buffered.len() < total {
+                    break;
+                }
+                assert_ne!(header.message_type, MessageType::DisplaySnapshot as u16);
+                assert_ne!(header.message_type, MessageType::DisplayDelta as u16);
+                client.buffered.drain(..total);
+            }
+        }
+    }
+
+    fn assert_no_display_for_attachment(
+        &mut self,
+        client: &mut Client,
+        attachment_id: AttachmentId,
+        duration: Duration,
+    ) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            self.pump();
+            let mut chunk = [0u8; 4096];
+            match client.stream.read(&mut chunk) {
+                Ok(0) => panic!("connection closed while delivery was suspended"),
+                Ok(count) => client.buffered.extend_from_slice(&chunk[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("client read failed: {error}"),
+            }
+            while client.buffered.len() >= HEADER_LEN {
+                let header = FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                let total = HEADER_LEN + header.payload_len as usize;
+                if client.buffered.len() < total {
+                    break;
+                }
+                let frame = client.buffered.drain(..total).collect::<Vec<_>>();
+                if matches!(header.message_type, 12 | 13) {
+                    let envelope = decode_presentation_envelope(&frame)
+                        .expect("negotiated display presentation envelope");
+                    assert_ne!(
+                        envelope.attachment_id, attachment_id,
+                        "suspended attachment received display data"
+                    );
+                    client
+                        .deferred_presentation_frames
+                        .entry(envelope.attachment_id)
+                        .or_default()
+                        .push_back((header.message_type, envelope.payload.to_vec()));
+                }
+            }
+        }
     }
 
     fn wait_for_row(
@@ -515,5 +740,463 @@ fn finalized_execution_cannot_be_attached() {
     assert_eq!(
         ErrorMessage::decode(&payload).unwrap().error_code,
         ErrorCode::InvalidExecution as u16
+    );
+}
+
+#[test]
+fn suspend_delivery_drops_deltas_keeps_attachment_and_pty_progress() {
+    let mut harness = Harness::new("w5-suspend");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, mut cache) = harness.attach(&mut client, execution_id, Role::Controller);
+    let attachment = attached.attachment_id;
+
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attachment,
+        }
+        .encode(),
+    );
+
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: attachment,
+            bytes: b"HID",
+        }
+        .encode(),
+    );
+    let quiet_until = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < quiet_until {
+        harness.pump();
+        let mut chunk = [0u8; 4096];
+        match client.stream.read(&mut chunk) {
+            Ok(0) => panic!("connection closed while Hidden"),
+            Ok(count) => {
+                client.buffered.extend_from_slice(&chunk[..count]);
+                while client.buffered.len() >= HEADER_LEN {
+                    let header =
+                        FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                    let total = HEADER_LEN + header.payload_len as usize;
+                    if client.buffered.len() < total {
+                        break;
+                    }
+                    let kind = header.message_type;
+                    let _ = client.buffered.drain(..total);
+                    assert_ne!(
+                        kind,
+                        MessageType::DisplayDelta as u16,
+                        "Runtime must not write DisplayDelta for a suspended attachment"
+                    );
+                    assert_ne!(
+                        kind,
+                        MessageType::DisplaySnapshot as u16,
+                        "Runtime must not write DisplaySnapshot for a suspended attachment"
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("client read failed: {error}"),
+        }
+    }
+
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attachment,
+            resume_sequence: 1,
+        }
+        .encode(),
+    );
+    let chunks = harness.expect_display_batch(
+        &mut client,
+        MessageType::DisplaySnapshot,
+        Instant::now() + Duration::from_secs(3),
+    );
+    cache.apply_chunks(&chunks).unwrap();
+    assert!(
+        first_row_text(&cache).contains("HID"),
+        "reveal resync must include PTY progress accumulated while Hidden"
+    );
+    assert_eq!(attached.attachment_id, attachment);
+}
+
+#[test]
+fn resync_does_not_resume_suspended_delivery() {
+    let mut harness = Harness::new("w5-resync-stays-suspended");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Observer);
+
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.send(
+        &mut client,
+        MessageType::Resync,
+        &Resync {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::Error as u16);
+    let error = ErrorMessage::decode(&payload).expect("suspended Resync error");
+    assert_eq!(error.error_code, ErrorCode::InvalidState as u16);
+    assert_eq!(error.offending_message_type, MessageType::Resync as u16);
+    harness.assert_no_display_for(&mut client, Duration::from_millis(150));
+
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attached.attachment_id,
+            resume_sequence: 1,
+        }
+        .encode(),
+    );
+    harness.expect_display_batch(
+        &mut client,
+        MessageType::DisplaySnapshot,
+        Instant::now() + Duration::from_secs(3),
+    );
+}
+
+#[test]
+fn suspended_attachment_cannot_be_duplicated_for_same_execution() {
+    let mut harness = Harness::new("w5-same-execution-attach");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _) = harness.attach(&mut client, execution_id, Role::Observer);
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.send(
+        &mut client,
+        MessageType::Attach,
+        &Attach {
+            execution_id,
+            requested_role: Role::Observer,
+        }
+        .encode(),
+    );
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::Error as u16);
+    let error = ErrorMessage::decode(&payload).expect("duplicate attach error");
+    assert_eq!(error.error_code, ErrorCode::InvalidState as u16);
+    assert_eq!(error.offending_message_type, MessageType::Attach as u16);
+}
+
+#[test]
+fn resume_advances_sequence_and_always_schedules_snapshot() {
+    let mut harness = Harness::new("w5-resume-sequence");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Observer);
+
+    for resume_sequence in [1, 2] {
+        harness.send(
+            &mut client,
+            MessageType::ResumeDelivery,
+            &ResumeDelivery {
+                attachment_id: attached.attachment_id,
+                resume_sequence,
+            }
+            .encode(),
+        );
+        harness.expect_display_batch(
+            &mut client,
+            MessageType::DisplaySnapshot,
+            Instant::now() + Duration::from_secs(3),
+        );
+    }
+
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attached.attachment_id,
+            resume_sequence: 2,
+        }
+        .encode(),
+    );
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::Error as u16);
+    let error = ErrorMessage::decode(&payload).unwrap();
+    assert_eq!(error.error_code, ErrorCode::InvalidState as u16);
+    assert_eq!(
+        error.offending_message_type,
+        MessageType::ResumeDelivery as u16
+    );
+}
+
+#[test]
+fn negotiated_viewport_line_ids_carry_attachment_and_sequence_envelope() {
+    let mut harness = Harness::new("w5-line-ids-envelope");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(
+        &mut client,
+        CAP_ATTACHMENT_DELIVERY_CONTROL | CAP_VIEWPORT_LINE_IDS,
+    );
+    let (attached, cache) = harness.attach(&mut client, execution_id, Role::Observer);
+    let (kind, payload) =
+        harness.expect_frame(&mut client, Instant::now() + Duration::from_secs(2));
+    assert_eq!(kind, MessageType::ViewportLineIds as u16);
+    let line_ids = ViewportLineIds::decode(&payload).expect("ViewportLineIds");
+    assert_eq!(line_ids.generation, cache.generation);
+    assert_eq!(line_ids.line_ids.len(), usize::from(cache.rows));
+    assert!(line_ids.line_ids.iter().all(|line_id| *line_id != 0));
+    assert_eq!(client.attachment_id, Some(attached.attachment_id));
+    assert_eq!(client.resume_sequence, 0);
+}
+
+#[test]
+fn resume_then_suspend_before_publication_sends_no_snapshot() {
+    let mut harness = Harness::new("w5-resume-suspend-before-publish");
+    let execution_id = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Observer);
+
+    // Deliver both controls in one client write and one Runtime poll so the
+    // pending recovery cannot be serviced between ResumeDelivery and Suspend.
+    let mut controls = encode_frame(
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: attached.attachment_id,
+            resume_sequence: 1,
+        }
+        .encode(),
+    );
+    controls.extend_from_slice(&encode_frame(
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    ));
+    client.stream.write_all(&controls).expect("write controls");
+    harness.pump();
+
+    harness.assert_no_display_for(&mut client, Duration::from_millis(150));
+}
+
+#[test]
+fn negotiated_connection_routes_multiple_attachments_independently() {
+    let mut harness = Harness::new("w5-resume-connection-demux");
+    let first_execution = harness.spawn(CommandSpec::new("/bin/cat"));
+    let second_execution = harness.spawn(CommandSpec::new("/bin/cat"));
+    let mut client = harness.connect();
+    harness.hello_caps(
+        &mut client,
+        CAP_ATTACHMENT_DELIVERY_CONTROL | CAP_VIEWPORT_LINE_IDS,
+    );
+    let (first, _) = harness.attach(&mut client, first_execution, Role::Controller);
+    harness.expect_viewport_line_ids_for(
+        &mut client,
+        first.attachment_id,
+        Instant::now() + Duration::from_secs(2),
+    );
+    let (second, _) = harness.attach(&mut client, second_execution, Role::Controller);
+    harness.expect_viewport_line_ids_for(
+        &mut client,
+        second.attachment_id,
+        Instant::now() + Duration::from_secs(2),
+    );
+    assert_ne!(first.attachment_id, second.attachment_id);
+
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: first.attachment_id,
+            bytes: b"first\n",
+        }
+        .encode(),
+    );
+    harness.expect_display_batch_for(
+        &mut client,
+        first.attachment_id,
+        MessageType::DisplayDelta,
+        Instant::now() + Duration::from_secs(2),
+    );
+    harness.expect_viewport_line_ids_for(
+        &mut client,
+        first.attachment_id,
+        Instant::now() + Duration::from_secs(2),
+    );
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: second.attachment_id,
+            bytes: b"second\n",
+        }
+        .encode(),
+    );
+    harness.expect_display_batch_for(
+        &mut client,
+        second.attachment_id,
+        MessageType::DisplayDelta,
+        Instant::now() + Duration::from_secs(2),
+    );
+    harness.expect_viewport_line_ids_for(
+        &mut client,
+        second.attachment_id,
+        Instant::now() + Duration::from_secs(2),
+    );
+
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: first.attachment_id,
+        }
+        .encode(),
+    );
+    harness.assert_no_display_for_attachment(
+        &mut client,
+        first.attachment_id,
+        Duration::from_millis(100),
+    );
+
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: second.attachment_id,
+            bytes: b"second\n",
+        }
+        .encode(),
+    );
+    harness.expect_display_batch_for(
+        &mut client,
+        second.attachment_id,
+        MessageType::DisplayDelta,
+        Instant::now() + Duration::from_secs(2),
+    );
+
+    harness.send(
+        &mut client,
+        MessageType::ResumeDelivery,
+        &ResumeDelivery {
+            attachment_id: first.attachment_id,
+            resume_sequence: 1,
+        }
+        .encode(),
+    );
+    harness.expect_display_batch_for(
+        &mut client,
+        first.attachment_id,
+        MessageType::DisplaySnapshot,
+        Instant::now() + Duration::from_secs(2),
+    );
+    harness.expect_viewport_line_ids_for(
+        &mut client,
+        first.attachment_id,
+        Instant::now() + Duration::from_secs(2),
+    );
+}
+
+#[test]
+fn negotiated_connection_retains_one_hundred_attachments() {
+    let mut harness = Harness::new("w5-one-hundred-attachments-one-connection");
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+
+    let mut attachment_ids = std::collections::HashSet::new();
+    for count in 1..=100 {
+        let execution_id = harness.spawn(CommandSpec::new("/bin/sh").args(["-c", "sleep 120"]));
+        let (attached, _) = harness.attach(&mut client, execution_id, Role::Observer);
+        assert!(
+            attachment_ids.insert(attached.attachment_id),
+            "each retained leaf has a distinct AttachmentId at count {count}"
+        );
+        if matches!(count, 1 | 10 | 50 | 100) {
+            assert_eq!(attachment_ids.len(), count);
+        }
+    }
+}
+
+#[test]
+fn child_exit_while_hidden_still_finalizes() {
+    let mut harness = Harness::new("w5-exit-hidden");
+    let execution_id = harness
+        .spawn(CommandSpec::new("/bin/sh").args(["-c", "IFS= read -r _; printf bye; exit 0"]));
+    let mut client = harness.connect();
+    harness.hello_caps(&mut client, CAP_ATTACHMENT_DELIVERY_CONTROL);
+    let (attached, _cache) = harness.attach(&mut client, execution_id, Role::Controller);
+    harness.send(
+        &mut client,
+        MessageType::SuspendDelivery,
+        &SuspendDelivery {
+            attachment_id: attached.attachment_id,
+        }
+        .encode(),
+    );
+    harness.send(
+        &mut client,
+        MessageType::Input,
+        &InputRef {
+            attachment_id: attached.attachment_id,
+            bytes: b"exit\n",
+        }
+        .encode(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut saw_final = false;
+    while Instant::now() < deadline {
+        harness.pump();
+        let mut chunk = [0u8; 8192];
+        match client.stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => {
+                client.buffered.extend_from_slice(&chunk[..count]);
+                while client.buffered.len() >= HEADER_LEN {
+                    let header =
+                        FrameHeader::decode(&client.buffered[..HEADER_LEN]).expect("header");
+                    let total = HEADER_LEN + header.payload_len as usize;
+                    if client.buffered.len() < total {
+                        break;
+                    }
+                    let kind = header.message_type;
+                    let _ = client.buffered.drain(..total);
+                    if kind == MessageType::Lifecycle as u16 {
+                        saw_final = true;
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("{error}"),
+        }
+        if saw_final {
+            break;
+        }
+    }
+    assert!(
+        saw_final,
+        "SPEC-009 §11.3 final drain must still reach a Hidden attachment"
     );
 }

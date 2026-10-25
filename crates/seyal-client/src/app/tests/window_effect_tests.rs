@@ -23,6 +23,7 @@ fn native_key_activation_commits_selection_and_window_focus_history() {
     root.apply(AppAction::ReportWindowEvent {
         window: first,
         event: WindowNativeEvent::BecameKey,
+        occluded: false,
     })
     .unwrap();
 
@@ -41,6 +42,7 @@ fn native_key_activation_commits_selection_and_window_focus_history() {
     root.apply(AppAction::ReportWindowEvent {
         window: second,
         event: WindowNativeEvent::BecameKey,
+        occluded: false,
     })
     .unwrap();
     let containment_generation = root.snapshot().shell.containment_generation;

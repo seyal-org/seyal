@@ -557,6 +557,7 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
             .expect("first Controller");
     let mut root = ApplicationRoot::new();
     let first_pane = root.snapshot().shell.focused_pane;
+    let first_tab = root.snapshot().shell.windows[0].active_tab;
     root.attach_client(root.fence(), first).expect("bind first");
     let first_handle = root.pane_client_raw(first_pane).expect("first handle");
     let nonce = format!("C2B-OUT-{}", std::process::id());
@@ -570,8 +571,19 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
         0,
         "first Controller must still accept input while second attach is gated"
     );
-    let nonce_deadline = Instant::now() + Duration::from_secs(8);
-    while Instant::now() < nonce_deadline {
+    let hidden_deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < hidden_deadline {
+        let _ = seyal_bridge_poll_for(first_handle);
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !ffi_test_registry_cache_contains(first_handle, &nonce),
+        "Hidden delivery must stay suspended while the second attach is gated"
+    );
+    root.apply(AppAction::SelectTab { id: first_tab })
+        .expect("reveal first Controller while second attach is gated");
+    let reveal_deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < reveal_deadline {
         let _ = seyal_bridge_poll_for(first_handle);
         if ffi_test_registry_cache_contains(first_handle, &nonce) {
             break;
@@ -580,7 +592,7 @@ fn create_tab_gated_attach_keeps_first_controller_polling() {
     }
     assert!(
         ffi_test_registry_cache_contains(first_handle, &nonce),
-        "first client's cache must receive bytes while the second attach is gated"
+        "resuming the revealed first Controller must restore output while the second attach is gated"
     );
     for _ in 0..25 {
         let _ = root.poll_client(root.fence());

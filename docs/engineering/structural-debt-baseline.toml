@@ -24,9 +24,9 @@ hard_loc = 1000
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalSurfaceView.swift"
-acknowledged_loc = 877
-issue = 1065
-reason = "CAMetalLayer surface and terminal-bridge forwarding stay one thin host type after recovery-state, display-link and Rust-recovery host extraction; #1065 deleted the Swift recovery coordinator so the file only ratchets down."
+acknowledged_loc = 886
+issue = 1220
+reason = "CAMetalLayer surface stays one thin host type; #1220 applies Rust-authored Hidden/Unpresented GPU release on the same visibility path as AppKit occlusion and reconciles bounded reveal recovery."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MetalTerminalRenderer.swift"
@@ -44,10 +44,9 @@ reason = "SPEC-022 §6 focus history store and its state-transition proofs stay 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-acknowledged_loc = 825
-issue = 1158
-reason = "ApplicationRoot keeps product-state ownership and cross-domain action dispatch together; #1153 extracts the public AppAction vocabulary and hierarchical close lifecycle into focused siblings, while #1158 adds W4a window-action dispatch, typed event recording, and Rust-owned realization effects."
-
+acknowledged_loc = 900
+issue = 1220
+reason = "ApplicationRoot keeps product-state ownership and cross-domain action dispatch together; #1153 extracts the public AppAction vocabulary and close lifecycle, #1158 adds Rust-owned window realization effects, and #1220 synchronizes Hidden delivery after presentation changes."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/tests.rs"
 acknowledged_loc = 999
@@ -56,9 +55,9 @@ reason = "The app-level action regression suite stays together around product-st
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 746
-issue = 1158
-reason = "The versioned ABI action decoder remains one fail-closed boundary; W4a appends window select/cycle/create/event action kinds after the current focus-history action range and decodes native presentation events there."
+acknowledged_loc = 759
+issue = 1220
+reason = "The versioned ABI action decoder remains one fail-closed boundary; #1158 appends window select/cycle/create/event action kinds, while #1220 packs occlusion-hidden into REPORT_WINDOW_EVENT and rejects unknown or misplaced flag bits so Rust computes Hidden without host-owned tier state."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/provisioning/mod.rs"
 acknowledged_loc = 884
@@ -131,9 +130,15 @@ reason = "Wire/value validation, decoder, and the sole DisplayCache type remain 
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/attach/mod.rs"
-acknowledged_loc = 940
-issue = 1175
-reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1175 adds harness_probe=false on live finish_attach so CreateTab's second-Controller driver can distinguish Runtime clients from in-process unit-test probes without splitting the Ready-stream lifecycle."
+acknowledged_loc = 951
+issue = 1220
+reason = "Connect/attach/bootstrap create stay one cold-path attach module; #1220 records SPEC-004 §19 delivery-control negotiation beside the existing ServerHello capability bits."
+
+[[cohesion_acknowledgement]]
+path = "crates/seyal-runtime/src/local_ipc/connection/outbound.rs"
+acknowledged_loc = 838
+issue = 1220
+reason = "The existing connection writer remains the single owner of bounded control enqueue, display supersession, and legacy flush ordering; #1220 adds negotiated attachment-scoped metadata and separate optional type-35 accounting without introducing another writer authority."
 
 # #1179 AB-1.3: per-connection handshake and session serve moved to
 # daemon/serve.rs; daemon/mod.rs landed below review_loc, so no
@@ -241,24 +246,15 @@ reason = "Command palette query, frozen rows, and run dispatch remain one reduce
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
 acknowledged_loc = 944
-issue = 1092
-reason = "ShellState composition and snapshots stay in the reducer façade; #1092 moves typed host action values into action_types.rs, carries the ADR-018 containment fence, and records close-focus successors so the recency-derived active Workspace remains correct; #1108 drains native effects and emits OrderFrontMakeKey on cross-window selection; #1131 owns identity-preserving swaps/moves, while #1142 adds FocusDirection dispatch and NoDirectionalNeighbor in focus_direction.rs."
-
+issue = 1220
+reason = "ShellState composition and snapshots stay in the reducer façade; #1092 carries containment fences and close-focus successors, #1108 emits cross-window realization effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1158 adds W4a/W4b window dispatch, and #1220 adds presentation occlusion state."
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 776
-issue = 866
-reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and projects failed composer admission as a native announcement without moving draft/admission policy into Swift."
-
-# #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
+acknowledged_loc = 774
+issue = 1220
+reason = "Thin AppKit chrome host stays one cold-path façade; #1220 reconciles Rust-authored Hidden/Unpresented presentation tiers onto the live Metal surface after chrome apply and forwards native occlusion state."
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/keybinding/tests.rs"
 acknowledged_loc = 702
 issue = 1158
 reason = "SPEC-024 §14 K2 matrix stays one keybinding table-load test module; #1158 admits §5.0 window/hierarchical-close builtins beside existing defaults."
-
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 747
-issue = 1123
-reason = "LocalDisplayClient stays one attach/poll client; #1123 adds request_bounded_detach and fallible try_reconstruction_probe_client for ADR-018 §4 quit fixtures without waiting on Detached."

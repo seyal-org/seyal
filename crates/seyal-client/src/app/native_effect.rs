@@ -4,7 +4,12 @@ use seyal_core::WindowId;
 
 use crate::shell::ShellNativeEffect;
 
-/// Relative quit-cleanup deadline in milliseconds. See ADR-018 §4.
+/// Relative quit-cleanup deadline (ms) carried by [`NativeEffect::BoundedDetachThenTerminate`].
+///
+/// Derived from SPEC-009 detach cleanup p99 (250µs) with 2000× headroom for
+/// renderer/GPU release across up to 16 attachments: 250µs × 2000 = 500ms.
+/// ADR-018 §4 leaves the absolute value to the implementation child under the
+/// performance-gate skill; revise only with recorded measurement.
 pub const QUIT_CLEANUP_DEADLINE_MS: u64 = 500;
 
 /// Typed native effect returned to the host after a committed product transition.

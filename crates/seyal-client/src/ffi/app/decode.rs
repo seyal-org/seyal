@@ -336,13 +336,26 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
             },
         }),
         70 => Ok(AppAction::CreateWindow),
-        71 => Ok(AppAction::ReportWindowEvent {
-            window: WindowId::from_bytes(id16(
-                action.target_execution_lo,
-                action.target_execution_hi,
-            )?),
-            event: decode_window_event(action.reserved)?,
-        }),
+        71 => {
+            const OCCLUSION_HIDDEN: u32 = 0x100;
+            const WINDOW_EVENT_MASK: u32 = 0xff;
+            if action.reserved & !(WINDOW_EVENT_MASK | OCCLUSION_HIDDEN) != 0 {
+                return Err(-6);
+            }
+            let event = decode_window_event(action.reserved & WINDOW_EVENT_MASK)?;
+            let occluded = action.reserved & OCCLUSION_HIDDEN != 0;
+            if occluded && event != crate::app::WindowNativeEvent::OcclusionChanged {
+                return Err(-6);
+            }
+            Ok(AppAction::ReportWindowEvent {
+                window: WindowId::from_bytes(id16(
+                    action.target_execution_lo,
+                    action.target_execution_hi,
+                )?),
+                event,
+                occluded,
+            })
+        }
         // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
         // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
         // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow

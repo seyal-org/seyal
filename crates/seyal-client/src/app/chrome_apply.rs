@@ -3,9 +3,7 @@
 use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 
 use super::*;
-use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, InspectorMode, LeftPanelMode,
-};
+use crate::chrome::{AgentId, AttentionId, ChromeAction, InspectorMode, LeftPanelMode};
 use crate::navigation::ResourceAddress;
 use crate::pane_layout::{self, SplitPosition};
 use crate::presentation::{PresentationAction, PresentationIdentity};
@@ -366,6 +364,7 @@ impl ApplicationRoot {
         &mut self,
         window: WindowId,
         event: WindowNativeEvent,
+        occluded: bool,
     ) -> Result<(), AppError> {
         if !self
             .shell
@@ -376,22 +375,39 @@ impl ApplicationRoot {
         {
             return Err(AppError::UnknownWindow);
         }
-        if event == WindowNativeEvent::BecameKey {
-            // ADR-018 §1.3: native key activation is an input to Rust-owned
-            // product selection and its single application-scoped focus
-            // history. The native realization is already key, so this action
-            // commits the identity-validated selection without echoing an
-            // OrderFrontMakeKey effect back to AppKit.
-            self.apply_shell(ShellAction::NativeWindowBecameKey {
-                id: window,
-                containment_generation: self.shell.containment_generation(),
-            })
-            .map_err(|_| AppError::UnknownWindow)?;
-            let _ = self
-                .chrome
-                .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+        match event {
+            WindowNativeEvent::BecameKey => {
+                // ADR-018 §1.3: native key activation is an input to Rust-owned
+                // product selection and its single application-scoped focus
+                // history. The native realization is already key, so this action
+                // commits the identity-validated selection without echoing an
+                // OrderFrontMakeKey effect back to AppKit.
+                self.apply_shell(ShellAction::NativeWindowBecameKey {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                })
+                .map_err(|_| AppError::UnknownWindow)?;
+                let _ = self
+                    .chrome
+                    .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+            }
+            WindowNativeEvent::Miniaturized => {
+                self.shell
+                    .set_window_miniaturized(window, true)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::Deminiaturized => {
+                self.shell
+                    .set_window_miniaturized(window, false)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            WindowNativeEvent::OcclusionChanged => {
+                self.shell
+                    .set_window_occluded(window, occluded)
+                    .map_err(|_| AppError::UnknownWindow)?;
+            }
+            _ => {}
         }
-        // Other native events are disposable presentation input only.
         self.last_window_event = Some((window, event));
         Ok(())
     }
@@ -402,12 +418,59 @@ impl ApplicationRoot {
     }
 }
 
-pub fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
+#[cfg(target_os = "macos")]
+impl ApplicationRoot {
+    pub(super) fn sync_attachment_delivery(&mut self) -> bool {
+        use crate::shell::PresentationTier;
+        let snap = self.shell.snapshot();
+        let mut hidden = std::collections::HashMap::new();
+        for window in &snap.windows {
+            for tab in &window.tabs {
+                for pane in &tab.panes {
+                    hidden.insert(
+                        pane.id,
+                        matches!(
+                            pane.presentation_tier,
+                            PresentationTier::Hidden | PresentationTier::Unpresented
+                        ),
+                    );
+                }
+            }
+        }
+        let handles: Vec<_> = self
+            .pane_client_raws
+            .iter()
+            .map(|(pane, raw)| (*pane, *raw))
+            .collect();
+        let mut all_admitted = true;
+        for (pane, handle) in handles {
+            let suspend = hidden.get(&pane).copied().unwrap_or(true);
+            match crate::ffi::with_client_mut(handle, |client| {
+                client.set_delivery_suspended(suspend)
+            }) {
+                Some(Ok(())) => {}
+                Some(Err(_)) | None => all_admitted = false,
+            }
+        }
+        if let Some(client) = self.wire_client.as_mut() {
+            let execution = client.execution_id();
+            let suspend = snap
+                .windows
+                .iter()
+                .flat_map(|window| window.tabs.iter())
+                .flat_map(|tab| tab.panes.iter())
+                .find(|pane| pane.execution == Some(execution))
+                .map(|pane| {
+                    matches!(
+                        pane.presentation_tier,
+                        PresentationTier::Hidden | PresentationTier::Unpresented
+                    )
+                })
+                .unwrap_or(false);
+            if client.set_delivery_suspended(suspend).is_err() {
+                all_admitted = false;
+            }
+        }
+        all_admitted
     }
 }
