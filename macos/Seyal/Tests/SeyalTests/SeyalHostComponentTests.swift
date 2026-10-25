@@ -894,6 +894,29 @@ final class SeyalHostComponentTests: XCTestCase {
         #endif
     }
 
+    func testUiTestShellConfigReachesTheHelperOnlyWhileForwarding() throws {
+        let key = "SEYAL_UI_TEST_RUNTIME_CONFIG"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "seyal-936-shell-\(UUID().uuidString).toml")
+        try "[shell]\nprogram = \"/bin/zsh\"\n".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let blocked = try BundledRuntimeLauncher.launchEnvironment(inherited: [key: url.path])
+        XCTAssertNil(blocked["SEYAL_CONFIG"])
+        #if DEBUG
+            XCTAssertEqual(BundledRuntimeLauncher.uiTestRuntimeConfigEnvironmentKey, key)
+            let forwarded = try BundledRuntimeLauncher.launchEnvironment(inherited: [
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1",
+                key: url.path,
+            ])
+            XCTAssertEqual(forwarded["SEYAL_CONFIG"], url.path)
+            let missing = try BundledRuntimeLauncher.launchEnvironment(inherited: [
+                "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND": "1",
+                key: "/tmp/seyal-936-missing-shell-config.toml",
+            ])
+            XCTAssertNil(missing["SEYAL_CONFIG"])
+        #endif
+    }
+
     @MainActor
     func testNativeKeyClassifierAndActionIDs() {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
