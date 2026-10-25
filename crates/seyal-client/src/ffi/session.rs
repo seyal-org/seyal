@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     ffi::{c_char, CStr, OsString},
     os::unix::ffi::OsStringExt,
     path::PathBuf,
@@ -380,10 +381,34 @@ pub extern "C" fn seyal_bridge_adopt_handle(handle: u64) -> i32 {
     });
     ACTIVE_HANDLE.with(|active| active.set(handle));
     // Poll/readiness may follow the adopted Controller. Display/input stay on
-    // the focused pane: an unbound focused tab must keep fail-closed (do not
-    // steal FOCUSED_DISPLAY_HANDLE). Bootstrap `seyal_bridge_connect_first`
-    // claims display only when nothing is focused yet.
+    // the focused pane: do not steal a live focused client. Claim only when
+    // nothing live is focused, matching `seyal_bridge_connect_first`.
+    claim_focused_display_if_unset(handle);
     0
+}
+
+/// Name `handle` as the focused display client when it is the Controller for
+/// `execution`. A leftover active handle from another pane does not match.
+pub(crate) fn adopt_focused_bridge(
+    root: &mut crate::app::ApplicationRoot,
+    fence: crate::app::AppFence,
+    execution: ExecutionId,
+) -> bool {
+    let live = active_handle();
+    let matches =
+        live != 0 && super::with_client(live, |client| client.execution_id()) == Some(execution);
+    if matches {
+        let _ = root.adopt_bridge_handle(fence, live);
+    }
+    matches
+}
+
+fn claim_focused_display_if_unset(handle: u64) {
+    let focused = FOCUSED_DISPLAY_HANDLE.with(Cell::get);
+    let live = focused != 0 && CLIENTS.with(|clients| clients.borrow().contains_key(&focused));
+    if !live {
+        FOCUSED_DISPLAY_HANDLE.with(|slot| slot.set(handle));
+    }
 }
 
 /// Selects the client used by readiness-driven poll/flush for `handle`'s fd.

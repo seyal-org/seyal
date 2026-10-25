@@ -633,6 +633,14 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     bridge?.isConnected == true
   }
 
+  /// Point bridge reads at this surface's client before Bind samples execution
+  /// identity. `seyal_bridge_execution_id_*` follows the active handle, which
+  /// another test can leave on a different client.
+  @discardableResult
+  func selectTerminalBridge() -> Bool {
+    bridge?.selectClient() ?? false
+  }
+
   @discardableResult
   func terminalSubmitCommittedText(_ text: String) -> Int32 {
     bridge?.submitCommittedText(text) ?? -10
