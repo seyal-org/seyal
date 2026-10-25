@@ -636,20 +636,22 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     #if DEBUG
     private func placeCompactResizeWindow(_ window: NSWindow) {
         applyingCompactFrame = true
-        defer { applyingCompactFrame = false }
+        defer { applyingCompactFrame = false; compactClampArmed = false }
         if let content = window.contentView {
             relaxWideConstraints(in: content)
         }
-        let content = NSSize(width: 1100, height: 760)
-        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: content))
-        guard let screen = window.screen ?? NSScreen.main else {
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame
+        let width = min(1100, max(960, (visible?.width ?? 1100) - 220))
+        let height = min(760, max(640, (visible?.height ?? 760) - 80))
+        var frame = window.frameRect(
+            forContentRect: NSRect(x: 0, y: 0, width: width, height: height))
+        guard let visible else {
             window.setFrame(frame, display: true)
             window.center()
             return
         }
-        let visible = screen.visibleFrame
         frame.origin.x = visible.minX + 8
-        frame.origin.y = visible.maxY - frame.height - 8
+        frame.origin.y = max(visible.minY + 8, visible.maxY - frame.height - 8)
         window.setFrame(frame, display: true)
     }
 

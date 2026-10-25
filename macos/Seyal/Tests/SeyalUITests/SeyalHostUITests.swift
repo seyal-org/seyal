@@ -703,7 +703,8 @@ final class SeyalHostUITests: XCTestCase {
         // and a real native resize gesture.
         let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
             .withOffset(CGVector(dx: -3, dy: -3))
-        corner.click(forDuration: 0.15, thenDragTo: corner.withOffset(CGVector(dx: 240, dy: 0)))
+        // 120pt stays inside the 220pt margin the compact fixture leaves on CI displays.
+        corner.click(forDuration: 0.15, thenDragTo: corner.withOffset(CGVector(dx: 120, dy: 0)))
         let resizeDeadline = Date().addingTimeInterval(5)
         while Date() < resizeDeadline, window.frame.width <= oldWidth + 20 {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
