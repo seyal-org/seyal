@@ -17,6 +17,6 @@ Apply only these Seyal-specific deltas:
 4. Preserve Seyal architecture and hot-path invariants. A remediation that requires a new product/architecture/security authority decision stops and routes to that authority instead of being improvised in code.
 5. Re-run the narrow affected checks and then all invalidated repository/domain evidence, including `make check` and any applicable conformance/fuzz/performance/security/native/docs gates.
 6. Re-fetch comments, checks and exact head before handoff. Known material findings must be resolved or explicitly blocked with evidence.
-7. Handoff the **entire current candidate** to full `pr-review`. If the stage is discovered to be `IMPLEMENTATION_IN_PROGRESS`, return to `implement-issue`; if `UNKNOWN`, stop and reconcile.
+7. Confirm the recorded findings against the diff since the reviewed head, and rerun the checks this fix invalidated. When those findings are resolved and the diff adds no new material blocker, record that confirmation on the same pull request. Do not start another full `pr-review`. Start a new full `pr-review` only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the previous review relied on. If the stage is `IMPLEMENTATION_IN_PROGRESS`, return to `implement-issue`. If `UNKNOWN`, stop and reconcile.
 
 Human Issue ownership remains authoritative throughout remediation. Coding agents may assist but never become Seyal work owners or independent human reviewers.

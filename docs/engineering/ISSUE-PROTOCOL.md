@@ -169,7 +169,7 @@ When accepted scope is complete and no pull request exists, `implement-issue` op
 
 If a draft pull request already exists, leave it a draft until accepted scope is complete, then mark that same pull request ready for review. Do not open a second pull request. Only `implement-issue` may open the pull request or change it from draft to ready for review.
 
-`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then handed back to one full `pr-review`. A decision blocker names the other pull request and keeps this one.
+`CLOSED_UNMERGED` stays the candidate. Reopen or rebase that head. Do not start a new plan or a second pull request. Review findings on `IN_REVIEW` or `CLOSED_UNMERGED` are fixed on that same pull request through `address-pr-review`, then confirmed against the diff since the reviewed head. A second full `pr-review` starts only when that fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on. A decision blocker names the other pull request and keeps this one.
 
 `REJECTED` is not resumed.
 

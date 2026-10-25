@@ -9,6 +9,14 @@ Follow the canonical generic merge-readiness procedure in `.sdlc/framework/skill
 
 This is Seyal's single user-facing PR review and re-review entrypoint. The generic procedure reviews implementation correctness and merge readiness over the full current candidate, consumes exact-revision `verification`, and invokes only specialist reviews required by risk and project policy. There is no separate generic or Seyal `code-review` discovery surface.
 
+## One review cycle
+
+The first review of a candidate reads the whole pull request once and lists every material blocker in that pass. Do not stop at the first finding and leave the rest for a later cycle.
+
+`address-pr-review` fixes that recorded set on the same pull request. The follow-up confirms those findings and the diff since the reviewed head. That confirmation stays in this review. It does not start a second full-candidate review, a new verification, or a new specialist pass.
+
+Start a new full review only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence this review relied on. Core and high-risk work still needs an independent human reviewer. The implementer does not self-approve.
+
 ## Mandatory cross-platform UI ownership gate
 
 For every PR that adds, changes, moves, or depends on product/UI behavior, explicitly trace ownership before considering merge readiness.
