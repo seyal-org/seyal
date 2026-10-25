@@ -24,11 +24,23 @@ Backlog → Refinement → Ready → In Progress → In Review → Validation �
                          ↘ Blocked ↗
 ```
 
-Only **Ready** items may be picked up by implementation agents.
+Only **Ready** items may be picked up for implementation.
+
+## Contributor queues
+
+GitHub labels are how a contributor finds work. The full open-issue list is not a queue. Historical issues labeled `historical-evidence` are not current work.
+
+- `help wanted` — development. The issue is open, unassigned, and **Ready**. Implement it.
+- `needs-refinement` — refinement. The issue is open and unassigned. Refine it in one pass. That pass sets **Ready**, removes `needs-refinement`, and adds `help wanted`, or sets **Blocked on #N**, removes `needs-refinement`, and adds `blocked`.
+- `blocked` — a named issue, pull request, or unaccepted ADR still owns the dependency. It is not a pickup.
+
+A finished plan does not stay in Refinement. The same pass that finishes the plan publishes `help wanted` or `blocked`.
+
+An unassigned issue in either queue is claimed by the human who starts it. If GitHub allows assignment, assign that person. If it does not, comment `Owner: @login` and continue. That comment is the claim. Wait for a maintainer only when another human already owns the issue or two claims disagree.
 
 ## Active implementation claim
 
-Seyal implementation work is exclusively owned while active. The single human owner record — sole GitHub assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` claim — is the human-visible cross-contributor ownership lock. The deterministic human-namespaced implementation branch is only that owner's audit/resume backstop.
+Seyal implementation work is exclusively owned while active. The single human owner record — sole GitHub assignee when assignable, otherwise an `Owner: @login` claim on an unassigned queue issue — is the human-visible cross-contributor ownership lock. The deterministic human-namespaced implementation branch is only that owner's audit/resume backstop.
 
 The pickup contract is:
 
@@ -49,7 +61,7 @@ Rules:
 - Production implementation of a GitHub Issue must enter through `.agents/skills/implement-issue/SKILL.md`.
 - Resolve the authenticated **human GitHub owner** from project-approved GitHub tooling and the fresh Issue owner-record state. Never infer ownership from git author configuration, local username, chat name, an agent/bot account, or repository ownership.
 - Fetch the complete owner-record state fresh immediately before pickup: assignees plus any maintainer-acknowledged `Owner: @login` claim. Cached context is not ownership authority.
-- For an assignable contributor, assign the Ready Issue only to the authenticated **human** owner and re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning, record `Owner: @login` in an Issue comment and require a maintainer acknowledgement before branch/worktree creation. A coding-agent/bot identity must never be the owner record.
+- For an assignable contributor, assign the issue only to the authenticated **human** owner and re-fetch to verify sole assignment. For an external contributor GitHub will not permit assigning. On an unassigned `help wanted` or `needs-refinement` issue, comment `Owner: @login` and continue; that comment is the claim. A maintainer acknowledgement is required only when another owner record already exists or two claims disagree. A coding-agent/bot identity must never be the owner record.
 - If the unique human owner record names a different contributor — by sole assignee or acknowledged external-owner claim — the Issue is already taken. Report that owner and stop before planning, worktree/branch creation, or production edits.
 - Multiple assignees, multiple acknowledged external-owner claims, or disagreement between assignment and acknowledged owner claim are ownership collisions. Stop and require explicit resolution.
 - If owner identity, owner-record write, or fresh verification is unavailable/ambiguous, fail closed. Do not code first and repair metadata later.
@@ -177,7 +189,7 @@ An Issue is Ready only when all are true:
 - [ ] the mergeable implementation is a permanent production path, not a POC/spike/temporary parallel implementation
 - [ ] the Issue body states the goal, scope, acceptance criteria, tests, and dependencies. A chat outline is not a substitute. A separate plan comment is not required
 
-If any item is false, return the Issue to Refinement or Blocked. An agent must not silently fill the gap.
+If any item is false, keep or set `needs-refinement` while the plan is still open, or set `blocked` when a named dependency or unaccepted ADR remains. Remove `help wanted` in either case. An agent must not silently fill the gap or leave a finished plan unlabeled.
 
 ## Definition of Done
 

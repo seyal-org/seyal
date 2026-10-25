@@ -9,6 +9,17 @@ This is the mandatory entrypoint for production implementation of a Seyal GitHub
 
 Follow the canonical generic procedure in `.sdlc/framework/skills/implementation/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
+## Finding work
+
+When someone asks what to develop, what to refine, or which issue to pick up, use the contributor queues in `CONTRIBUTING.md` and `docs/engineering/ISSUE-PROTOCOL.md`. Do not scan the full open-issue list and do not report that list as blocked.
+
+- Development: open, unassigned, label `help wanted`. These issues are Ready. Pick one up through this skill.
+- Refinement: open, unassigned, label `needs-refinement`. Route to `issue-refinement`. Do not implement them.
+- `blocked` names the issue, pull request, or ADR that still has to land. Report that dependency.
+- `historical-evidence` is not current work.
+
+If the requested issue is `needs-refinement`, stop implementation and refine it. If it is `blocked`, name the blocking issue and stop. An unassigned queue issue is claimed by assigning the human owner, or by commenting `Owner: @login` when GitHub will not assign an external contributor. That comment is the claim. Wait for a maintainer only when another human already owns the issue or two claims disagree.
+
 ## Exclusive GitHub Issue claim
 
 Claiming the Issue is a coordination preflight, not implementation permission. Implementation planning happens before final readiness and does not claim ownership. Perform the human-owner claim before implementation branch/worktree creation, generated files, or production edits.
@@ -17,16 +28,16 @@ Claiming the Issue is a coordination preflight, not implementation permission. I
 2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for owner-record state.
 3. Verify the Issue is still open and **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Readiness and ownership are separate gates.
 4. Inspect the complete **human owner-record state**: assignees plus maintainer-acknowledged `Owner: @login` claims.
-   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login` and require a maintainer acknowledgement before continuing.
+   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login`. On an unassigned `help wanted` or `needs-refinement` issue, that comment is the claim and work continues. Require a maintainer acknowledgement only when another owner record already exists or two claims disagree.
    - **Exactly the current human owner:** treat this only as a potential resume; continue the deterministic-branch checks below.
    - **Exactly another human owner:** stop before planning or edits and report `Issue #N is already taken by @login` with the Issue URL.
    - **Agent/bot owner record:** stop as `BLOCKED`; Seyal work ownership must be transferred to a human before implementation.
    - **Conflicting records:** multiple assignees, multiple acknowledged owner claims, or disagreement between assignee and acknowledged claim is an ownership collision. Seyal implementation Issues have exactly one active human owner.
-5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and a maintainer-acknowledged `Owner: @login` claim names that human. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
+5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and exactly one `Owner: @login` comment names that human. On an unassigned `help wanted` or `needs-refinement` issue, that comment is enough. A maintainer acknowledgement is required only when another owner record already exists. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
 6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. A **planning/umbrella parent is not an ownership lock** for an independently scoped child. Stop with `BLOCKED` only when parent and child overlap the same implementation slice or the parent explicitly owns/releases that slice. After the child claim write and again after creating `<human-login>/issue/<number>`, re-fetch both parent and child and verify there is no duplicate ownership of the same slice.
 7. Do not clear, replace, or steal another human's owner record. Ownership transfer requires an explicit human-to-human handoff under `ISSUE-PROTOCOL.md`.
 
-The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
+The human ownership claim is the sole assignee when assignable. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor's `Owner: @login` comment is the claim. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
 
 ## Human owner and agent delegation
 
