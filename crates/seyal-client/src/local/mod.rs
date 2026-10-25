@@ -37,7 +37,8 @@ use seyal_runtime::local_ipc::framing::{
 pub use attach::force_bootstrap_attach_failure_for_test;
 pub use discovery::DiscoveryFailure;
 pub use input_resize::{
-    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, ResizeFailure,
+    cell_from_point, derive_grid_geometry, GridGeometry, InputAdmissionFailure, LayoutMetrics,
+    ResizeFailure,
 };
 #[cfg(test)]
 pub(crate) use quit_probe::reconstruction_probe_client;
@@ -119,6 +120,7 @@ pub struct LocalDisplayClient {
     pub(crate) needs_initial_prepare: bool,
     pub(crate) next_resize_request_id: u64,
     pub(crate) desired_geometry: Option<GridGeometry>,
+    pub(crate) last_layout_metrics: Option<input_resize::LayoutMetrics>,
     pub(crate) committed_geometry: GridGeometry,
     pub(crate) unresolved_resizes: VecDeque<input_resize::ResizeRecord>,
     pub(crate) applied_awaiting_projection: Option<input_resize::AppliedFence>,
@@ -673,6 +675,7 @@ fn reconstruction_probe_client_with_stream(
         needs_initial_prepare: false,
         next_resize_request_id: 1,
         desired_geometry: None,
+        last_layout_metrics: None,
         committed_geometry: GridGeometry {
             rows: 1,
             columns: 1,

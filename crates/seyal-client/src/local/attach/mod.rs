@@ -848,6 +848,7 @@ impl LocalDisplayClient {
             needs_initial_prepare: true,
             next_resize_request_id: 1,
             desired_geometry: None,
+            last_layout_metrics: None,
             committed_geometry,
             unresolved_resizes: VecDeque::new(),
             applied_awaiting_projection: None,

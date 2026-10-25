@@ -400,14 +400,16 @@ impl SeyalComposerResult {
     }
 }
 
-/// Runtime-published composer eligibility for the active client (#978).
+/// Runtime-published composer eligibility for the focused display client (#978).
 /// `eligibility` uses `SeyalAppComposerEligibility` (0 = none published yet).
-/// `revision` is Runtime's monotonic fence; the host relays both unchanged
-/// through `SEYAL_APP_ACTION_APPLY_COMPOSER_STATUS`.
+/// `revision` is scoped to the Runtime execution; the attachment identity lets
+/// the host deduplicate without conflating equal revisions from other clients.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct SeyalComposerStatus {
     pub revision: u64,
+    pub attachment_id_low: u64,
+    pub attachment_id_high: u64,
     pub eligibility: u8,
     pub reserved: [u8; 7],
 }
@@ -416,9 +418,29 @@ impl SeyalComposerStatus {
     pub(crate) const fn empty() -> Self {
         Self {
             revision: 0,
+            attachment_id_low: 0,
+            attachment_id_high: 0,
             eligibility: 0,
             reserved: [0; 7],
         }
+    }
+}
+
+#[cfg(test)]
+mod composer_status_abi_tests {
+    use std::mem::{align_of, offset_of, size_of};
+
+    use super::SeyalComposerStatus;
+
+    #[test]
+    fn composer_status_c_abi_includes_its_attachment_identity() {
+        assert_eq!(size_of::<SeyalComposerStatus>(), 32);
+        assert_eq!(align_of::<SeyalComposerStatus>(), 8);
+        assert_eq!(offset_of!(SeyalComposerStatus, revision), 0);
+        assert_eq!(offset_of!(SeyalComposerStatus, attachment_id_low), 8);
+        assert_eq!(offset_of!(SeyalComposerStatus, attachment_id_high), 16);
+        assert_eq!(offset_of!(SeyalComposerStatus, eligibility), 24);
+        assert_eq!(offset_of!(SeyalComposerStatus, reserved), 25);
     }
 }
 

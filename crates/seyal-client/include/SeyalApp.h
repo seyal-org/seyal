@@ -615,13 +615,12 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_RECORD_NATIVE_EFFECT 5u
 
 /*
- * Pane regions (#923): one per leaf of the active Tab's PaneTree, index
+ * Pane regions (#923 / #936): one per leaf of the active Tab's PaneTree, index
  * 0..<SeyalAppShell.pane_count in the same order as SEYAL_APP_ROW_PANE rows.
  * x/y/width/height are unit fractions of the Tab's center area, origin
- * top-left; hosts position regions and never derive geometry. LIVE marks the
- * single region that hosts the live terminal/Metal/composer surface; no region
- * is LIVE while the focused Pane is not the execution's Pane. Out-of-range
- * indices return size == 0.
+ * top-left; hosts position regions and never derive geometry. LIVE marks every
+ * execution-bound leaf plus the focused bind-landing leaf so multiple Metal
+ * surfaces can present simultaneously. Out-of-range indices return size == 0.
  */
 #define SEYAL_APP_PANE_REGION_FOCUSED 1u
 #define SEYAL_APP_PANE_REGION_LIVE 2u
@@ -638,6 +637,55 @@ typedef struct SeyalAppPaneRegion {
     float width;
     float height;
 } SeyalAppPaneRegion;
+
+/*
+ * Pane bindings (#936): same index order as seyal_app_pane_region. Exposes the
+ * Runtime-owned ExecutionId and registry display handle for each leaf so the
+ * thin host can attach Metal surfaces without inventing executions (ADR-017).
+ * Out-of-range indices return size == 0.
+ */
+#define SEYAL_APP_PANE_BINDING_HAS_EXECUTION 1u
+#define SEYAL_APP_PANE_BINDING_HAS_DISPLAY 2u
+
+typedef struct SeyalAppPaneBinding {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+    uint64_t display_handle;
+} SeyalAppPaneBinding;
+
+/* Exact Pane-scoped recovery target. size == 0 means none is available. */
+#define SEYAL_APP_PANE_RECOVERY_TARGET_ACTIVE 1u
+#define SEYAL_APP_PANE_RECOVERY_RETRYABLE 2u
+typedef struct SeyalAppPaneRecoveryTarget {
+    uint16_t version;
+    uint16_t size;
+    uint16_t flags;
+    uint16_t reserved;
+    uint64_t pane_lo;
+    uint64_t pane_hi;
+    uint64_t execution_lo;
+    uint64_t execution_hi;
+    uint64_t binding_generation;
+    uint64_t recovery_generation;
+} SeyalAppPaneRecoveryTarget;
+
+/* Pane-scoped effect stream. kind: 0 none, 1 attempt, 2 schedule,
+ * 3 launch helper, 4 dispose handle. This stream is independent of the
+ * application-primary recovery effects in SeyalAppSnapshot. */
+typedef struct SeyalAppPaneRecoveryEffect {
+    uint16_t version;
+    uint16_t size;
+    uint16_t kind;
+    uint16_t reserved;
+    uint64_t generation;
+    uint64_t parameter;
+} SeyalAppPaneRecoveryEffect;
 
 /*
  * Split dividers (#928): exactly SeyalAppShell.pane_count - 1, pre-order
@@ -820,6 +868,45 @@ SeyalAppNativeEffect seyal_app_native_effect(uint64_t handle, uint32_t index);
  */
 int32_t seyal_app_record_compatible(uint16_t version, uint16_t size, uint16_t kind);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
+SeyalAppPaneBinding seyal_app_pane_binding(uint64_t handle, uint32_t index);
+SeyalAppPaneRecoveryTarget seyal_app_active_pane_recovery_target(uint64_t handle);
+SeyalAppPaneRecoveryTarget seyal_app_pane_recovery_target_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
+SeyalAppPaneRecoveryTarget seyal_app_begin_next_pane_recovery(uint64_t handle, uint64_t now_ms);
+SeyalAppPaneRecoveryEffect seyal_app_pane_recovery_effect(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_ack_pane_recovery_effect(uint64_t handle, SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_fire_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint64_t now_ms);
+int32_t seyal_app_complete_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint32_t outcome,
+    uint32_t launch,
+    uint64_t registry_handle,
+    uint64_t now_ms);
+int32_t seyal_app_retry_pane_recovery(uint64_t handle, SeyalAppPaneRecoveryTarget target);
+int32_t seyal_app_commit_pane_recovery(
+    uint64_t handle,
+    SeyalAppPaneRecoveryTarget target,
+    uint64_t registry_handle);
+/* Propose view metrics for an active Pane; Rust validates the Pane and routes
+ * the derived correlated resize through its bound Controller client. */
+int32_t seyal_app_propose_pane_geometry(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi,
+    double viewport_width,
+    double viewport_height,
+    double horizontal_insets,
+    double vertical_insets,
+    double cell_width,
+    double cell_height);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);
 SeyalAppRow seyal_app_block_row(uint64_t handle, uint32_t index);

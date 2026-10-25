@@ -45,6 +45,8 @@ final class BundledRuntimeLauncher {
     /// trailing helper-command argv from the app launch path.
     static let uiTestForwardRuntimeCommandEnvironmentKey =
       "SEYAL_UI_TEST_FORWARD_RUNTIME_COMMAND"
+    /// Absolute path of a fixture config the helper should read as `SEYAL_CONFIG`.
+    static let uiTestRuntimeConfigEnvironmentKey = "SEYAL_UI_TEST_RUNTIME_CONFIG"
 
     /// Debug/XCUI only. Pass `allowUiTestOverride: false` to assert Release
     /// semantics from Debug component tests.
@@ -164,6 +166,19 @@ final class BundledRuntimeLauncher {
         result[key] = value
       }
     }
+    // Debug UI tests point profile 0 at `/bin/zsh` through the existing
+    // `[shell].program` config. Release never reads this variable. The app
+    // process keeps its own `SEYAL_CONFIG`; only the helper receives it.
+    #if DEBUG
+      if uiTestRequestsHelperCommand(environment: inherited),
+        let config = inherited[uiTestRuntimeConfigEnvironmentKey],
+        config.hasPrefix("/"),
+        !config.unicodeScalars.contains(where: CharacterSet.newlines.contains),
+        FileManager.default.fileExists(atPath: config)
+      {
+        result["SEYAL_CONFIG"] = config
+      }
+    #endif
     return result
   }
 

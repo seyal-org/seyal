@@ -127,6 +127,19 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(replies, 1)
     }
 
+    func testMultiWindowHostPreservesProductFrameRefreshHook() {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        let before = host.liveHost.transcriptFrameRevision
+
+        // No Rust snapshot change: the multi-window reconciliation returns
+        // early, so only ProductChromeHostView's original frame hook advances
+        // the projected PRIMARY_CLIP revision.
+        host.liveHost.pane.onProductChanged?()
+
+        XCTAssertGreaterThan(host.liveHost.transcriptFrameRevision, before)
+    }
+
     func testBootstrapRealizesOneWindowWithTabbingDisallowed() {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
