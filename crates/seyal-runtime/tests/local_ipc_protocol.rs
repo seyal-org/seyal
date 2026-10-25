@@ -236,7 +236,15 @@ impl Harness {
         client
             .presentation_sequences
             .insert(attached.attachment_id, 0);
-        let chunks = self.expect_display_batch(client, MessageType::DisplaySnapshot, deadline);
+        // Another attachment on this connection can emit a delta before this
+        // attachment's snapshot. Read by attachment id instead of assuming the
+        // next frame on the socket belongs to the attach that just completed.
+        let chunks = self.expect_display_batch_for(
+            client,
+            attached.attachment_id,
+            MessageType::DisplaySnapshot,
+            deadline,
+        );
         let mut cache = empty_cache();
         cache.apply_chunks(&chunks).expect("initial snapshot apply");
         assert_eq!(cache.generation, attached.current_generation);
