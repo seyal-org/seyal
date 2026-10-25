@@ -129,7 +129,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(snap.eligibility, UInt16(SEYAL_APP_ELIGIBILITY_FLOW.rawValue))
@@ -189,7 +189,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             seyal_app_snapshot(handle).eligibility,
@@ -224,7 +224,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -260,7 +260,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(
             relayComposerStatus(
@@ -277,7 +277,7 @@ final class SeyalHostComponentTests: XCTestCase {
         setDraft.size = bind.size
         setDraft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         setDraft.applySnapshotFence(seyal_app_snapshot(handle))
-        setDraft.target_pty_generation = seyal_app_composer(handle).epoch
+        setDraft.target_generation = seyal_app_composer(handle).epoch
         draft.withUnsafeBufferPointer { buffer in
             setDraft.payload = buffer.baseAddress
             setDraft.payload_len = UInt32(buffer.count)
@@ -288,7 +288,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(seyal_app_snapshot(handle))
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         let requestID = seyal_app_composer(handle).request_id
         XCTAssertNotEqual(requestID, 0)
@@ -535,7 +535,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         view.reconcileChrome()
         let composer = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-composer"))
@@ -577,7 +577,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = initial.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -588,7 +588,7 @@ final class SeyalHostComponentTests: XCTestCase {
         begin.version = bind.version
         begin.size = bind.size
         begin.kind = UInt16(SEYAL_APP_ACTION_BEGIN_RECOVERY.rawValue)
-        begin.target_pty_generation = 0
+        begin.target_generation = 0
         XCTAssertEqual(seyal_app_apply(handle, &begin), 0)
         let generation = seyal_app_snapshot(handle).recovery_generation
 
@@ -597,7 +597,7 @@ final class SeyalHostComponentTests: XCTestCase {
         ended.size = bind.size
         ended.kind = UInt16(SEYAL_APP_ACTION_COMPLETE_RECOVERY.rawValue)
         ended.target_execution_lo = generation
-        ended.target_pty_generation = 1
+        ended.target_generation = 1
         ended.reserved = UInt32(SEYAL_APP_RECOVERY_EXECUTION_ENDED_OUTCOME.rawValue)
         XCTAssertEqual(seyal_app_apply(handle, &ended), 0)
 
@@ -924,9 +924,7 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         let capture = captureDirectory.appendingPathComponent("committed.bin")
-        let window = try XCTUnwrap(NSApp.windows.first {
-            $0.contentView is ProductChromeHostView
-        })
+        let window = try XCTUnwrap(liveProductWindow(), "no visible product window")
         let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
         let pane = host.pane
         let view = pane.inputSurface
@@ -980,8 +978,14 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce else { return }
+        let connectedResult = await XCTWaiter.fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce, connectedResult == .completed else {
+            let snap = seyal_app_snapshot(pane.appHandle)
+            XCTFail(
+                "projection did not connect; bridge=\(view.terminalBridgeIsConnected) frame=\(view.terminalCurrentFrame() != nil) eligibility=\(snap.eligibility) recovery=\(snap.recovery_stage) attempts=\(snap.recovery_attempts) visible=\(window.occlusionState.contains(.visible)) key=\(window.isKeyWindow)"
+            )
+            return
+        }
         connectPoll.invalidate()
 
         // A bounded real PTY child records bytes; no input bridge is mocked.
@@ -1195,7 +1199,7 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
-    func testRecoveryRetriesDeferredComposerFocusOnNextAppKitTurn() async throws {
+    func testRecoveryRetriesDeferredComposerFocusUntilAccepted() async throws {
         let handle = seyal_app_create()
         defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
         let view = InteractiveMetalSurfaceView(
@@ -1208,13 +1212,178 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(view.requestComposerFocusForRecovery(
             focus: {
                 attempts += 1
-                return attempts == 2
+                return attempts == 8
             },
             onAccepted: { accepted.fulfill() }
         ))
-        await fulfillment(of: [accepted], timeout: 1)
-        XCTAssertEqual(attempts, 2)
+        await fulfillment(of: [accepted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
         XCTAssertTrue(view.recoveryPresentationPending)
+    }
+
+    @MainActor
+    func testStaleRecoveryTimerCallbackIsDiscardedBeforeRustAction() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 560))
+        let generation = seyal_app_snapshot(view.pane.appHandle).recovery_generation &+ 1
+        view.recoveryTimerGeneration = generation
+
+        view.fireRecovery(generation: generation)
+
+        XCTAssertEqual(seyal_app_last_error(view.pane.appHandle), 0)
+        XCTAssertEqual(view.recoveryTimerGeneration, 0)
+    }
+
+    @MainActor
+    func testRecoveryFocusRestartsOnlyAfterEligibilityChanges() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        for _ in 0..<3 {
+            XCTAssertFalse(view.requestComposerFocusForRecovery(
+                focus: {
+                    attempts += 1
+                    return false
+                },
+                onAccepted: {}
+            ))
+        }
+        XCTAssertEqual(attempts, 8)
+
+        view.windowActivationChanged()
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testRecoveryFocusRestartsWhenComposerBecomesEligible() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let view = InteractiveMetalSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
+            appHandle: handle
+        )
+        view.recoveryPresentationPending = true
+        let exhausted = expectation(description: "initial bounded focus burst exhausted")
+        var attempts = 0
+        XCTAssertFalse(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                if attempts == 8 { exhausted.fulfill() }
+                return false
+            },
+            onAccepted: {}
+        ))
+        await fulfillment(of: [exhausted], timeout: 5)
+        XCTAssertEqual(attempts, 8)
+
+        view.composerFocusEligibilityDidChange()
+        XCTAssertTrue(view.requestComposerFocusForRecovery(
+            focus: {
+                attempts += 1
+                return true
+            },
+            onAccepted: {}
+        ))
+        XCTAssertEqual(attempts, 9)
+    }
+
+    @MainActor
+    func testComposerEligibilityCallbackDropsStaleReconcileTransition() async throws {
+        let handle = seyal_app_create()
+        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
+        let initial = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = initial.pane_lo
+        bind.fence_pane_hi = initial.pane_hi
+        bind.fence_epoch = initial.epoch
+        bind.target_execution_lo = 1
+        bind.target_attachment_lo = 2
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        let composer = ComposerBridgeView(appHandle: handle)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = composer
+        defer {
+            composer.removeFromSuperview()
+            window.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        composer.reconcile()
+        var callbacks = 0
+        let staleCallback = expectation(description: "busy composer invalidates queued callback")
+        staleCallback.isInverted = true
+        composer.onFocusEligibilityChanged = { callbacks += 1; staleCallback.fulfill() }
+
+        XCTAssertEqual(
+            relayComposerStatus(
+                handle,
+                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE.rawValue),
+                revision: 1
+            ),
+            0
+        )
+        composer.reconcile()
+        XCTAssertTrue(composer.isFocusEligibleForRecovery)
+        XCTAssertEqual(
+            relayComposerStatus(
+                handle,
+                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_BUSY.rawValue),
+                revision: 2
+            ),
+            0
+        )
+        composer.reconcile()
+        XCTAssertFalse(composer.isFocusEligibleForRecovery)
+        await fulfillment(of: [staleCallback], timeout: 0.2)
+        XCTAssertEqual(callbacks, 0)
+
+        let currentCallback = expectation(description: "current available transition is delivered")
+        composer.onFocusEligibilityChanged = { callbacks += 1; currentCallback.fulfill() }
+        XCTAssertEqual(
+            relayComposerStatus(
+                handle,
+                eligibility: UInt32(SEYAL_APP_COMPOSER_ELIGIBILITY_AVAILABLE.rawValue),
+                revision: 3
+            ),
+            0
+        )
+        composer.reconcile()
+        await fulfillment(of: [currentCallback], timeout: 1)
+        XCTAssertEqual(callbacks, 1)
     }
 
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
@@ -1348,7 +1517,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         for command in commands {
@@ -1359,7 +1528,7 @@ final class SeyalHostComponentTests: XCTestCase {
             draft.size = bind.size
             draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
             draft.applySnapshotFence(bound)
-            draft.target_pty_generation = composer.epoch
+            draft.target_generation = composer.epoch
             let utf8 = Array(command.utf8)
             utf8.withUnsafeBufferPointer { buffer in
                 draft.payload = buffer.baseAddress
@@ -1371,7 +1540,7 @@ final class SeyalHostComponentTests: XCTestCase {
             submit.size = bind.size
             submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
             submit.applySnapshotFence(bound)
-            submit.target_pty_generation = composer.epoch
+            submit.target_generation = composer.epoch
             XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
             var result = SeyalAppAction()
             result.version = bind.version
@@ -1419,7 +1588,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
 
         var composer = seyal_app_composer(handle)
@@ -1488,7 +1657,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 1, revision: 1), 0)
         view.reconcileChrome()
@@ -1506,7 +1675,7 @@ final class SeyalHostComponentTests: XCTestCase {
         draft.size = bind.size
         draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         draft.applySnapshotFence(bound)
-        draft.target_pty_generation = seyal_app_composer(handle).epoch
+        draft.target_generation = seyal_app_composer(handle).epoch
         let draftBytes = Array("sleep 2".utf8)
         draftBytes.withUnsafeBufferPointer { buffer in
             draft.payload = buffer.baseAddress
@@ -1521,7 +1690,7 @@ final class SeyalHostComponentTests: XCTestCase {
         submit.size = bind.size
         submit.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         submit.applySnapshotFence(bound)
-        submit.target_pty_generation = seyal_app_composer(handle).epoch
+        submit.target_generation = seyal_app_composer(handle).epoch
         XCTAssertEqual(seyal_app_apply(handle, &submit), 0)
         // Runtime's Busy flip arrives before the correlated result.
         XCTAssertEqual(relayComposerStatus(handle, eligibility: 2, revision: 2), 0)
@@ -1558,7 +1727,7 @@ final class SeyalHostComponentTests: XCTestCase {
         action.kind = kind
         action.applySnapshotFence(snap)
         action.reserved = reserved
-        action.target_pty_generation = seyal_app_composer(handle).epoch
+        action.target_generation = seyal_app_composer(handle).epoch
         let utf8 = Array((payload ?? "").utf8)
         return utf8.withUnsafeBufferPointer { buffer in
             action.payload = payload == nil ? nil : buffer.baseAddress
@@ -1712,7 +1881,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         XCTAssertEqual(seyal_app_composer(handle).block_count, 0, "no Runtime timeline in a unit test")
@@ -2007,9 +2176,7 @@ final class SeyalHostComponentTests: XCTestCase {
     /// last geometry proposal. Headed overflow scroll is covered by XCUI.
     @MainActor
     func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() async throws {
-        let window = try XCTUnwrap(NSApp.windows.first {
-            $0.contentView is ProductChromeHostView
-        })
+        let window = try XCTUnwrap(liveProductWindow(), "no visible product window")
         let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
         let pane = host.pane
         let view = pane.inputSurface
@@ -2050,8 +2217,14 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce else { return }
+        let connectedResult = await XCTWaiter.fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce, connectedResult == .completed else {
+            let snap = seyal_app_snapshot(pane.appHandle)
+            XCTFail(
+                "Flow projection did not connect; bridge=\(view.terminalBridgeIsConnected) frame=\(view.terminalCurrentFrame() != nil) eligibility=\(snap.eligibility) recovery=\(snap.recovery_stage) attempts=\(snap.recovery_attempts) visible=\(window.occlusionState.contains(.visible)) key=\(window.isKeyWindow)"
+            )
+            return
+        }
         connectPoll.invalidate()
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
@@ -2364,7 +2537,7 @@ final class SeyalHostComponentTests: XCTestCase {
         bind.fence_epoch = snap.epoch
         bind.target_execution_lo = 1
         bind.target_attachment_lo = 2
-        bind.target_pty_generation = 1
+        bind.target_generation = 1
         XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
         snap = seyal_app_snapshot(handle)
         var refresh = SeyalAppAction()
@@ -2557,6 +2730,21 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
     }
 
+}
+
+/// The headed test host keeps the launched product window. Private hosts in
+/// the same process can leave a detached `ProductChromeHostView` earlier in
+/// `NSApp.windows`. Live projection checks must use the visible key window.
+@MainActor
+private func liveProductWindow() -> NSWindow? {
+    let product: (NSWindow) -> Bool = { window in
+        guard window.isVisible, let host = window.contentView as? ProductChromeHostView else {
+            return false
+        }
+        return !host.pane.inputSurface.isDetachingRuntimeConnection
+    }
+    return NSApp.windows.first { $0.isKeyWindow && product($0) }
+        ?? NSApp.windows.first(where: product)
 }
 
 @discardableResult

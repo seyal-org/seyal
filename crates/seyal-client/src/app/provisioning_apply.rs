@@ -46,6 +46,7 @@ impl ApplicationRoot {
         self.shell
             .apply_product_create_tab()
             .map_err(|_| AppError::TabCreationUnavailable)?;
+        self.drain_shell_effects();
         let snap = self.shell.snapshot();
         let pane = snap.focused_pane;
         let tab = snap.active_tab;

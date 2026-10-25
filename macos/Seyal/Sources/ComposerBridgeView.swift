@@ -24,6 +24,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     var onHistoryOpened: (() -> Void)?
     /// A table match changed product chrome (palette, tabs, presentation).
     var onCommandConsumed: (() -> Void)?
+    var onFocusEligibilityChanged: (() -> Void)?
 
     private let appHandle: UInt64
     private let textView = ComposerTextView()
@@ -32,8 +33,14 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     private let history = NSButton(title: "", target: nil, action: nil)
     private var heightConstraint: NSLayoutConstraint!
     private var lastEpoch: UInt64 = 0
+    private var focusEligibilityGeneration: UInt64 = 0
+    private var hasReconciledComposerState = false
     private var theme: NativeTheme?
     private var editing = false
+
+    var isFocusEligibleForRecovery: Bool {
+        hasReconciledComposerState && !isHidden && textView.isEditable && window != nil
+    }
 
     init(appHandle: UInt64) {
         self.appHandle = appHandle
@@ -131,6 +138,13 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(textView) ?? false
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        focusEligibilityGeneration &+= 1
+        guard isFocusEligibleForRecovery else { return }
+        enqueueFocusEligibilityChange(generation: focusEligibilityGeneration)
+    }
+
     func apply(theme: NativeTheme) {
         self.theme = theme
         placeholder.textColor = theme.muted
@@ -145,6 +159,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
     func reconcile() {
         let composer = seyal_app_composer(appHandle)
         let snapshot = seyal_app_snapshot(appHandle)
+        let wasFocusEligible = isFocusEligibleForRecovery
         let direct = snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_RAW.rawValue)
             || snapshot.eligibility == UInt16(SEYAL_APP_ELIGIBILITY_TUI.rawValue)
         let hidden = direct || composer.mode == UInt16(SEYAL_APP_COMPOSER_HIDDEN.rawValue)
@@ -157,6 +172,8 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         let available = composer.mode == UInt16(SEYAL_APP_COMPOSER_AVAILABLE.rawValue)
         let busy = composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue)
         textView.isEditable = available
+        hasReconciledComposerState = true
+        let isNowFocusEligible = isFocusEligibleForRecovery
         execute.title = copyString(UInt16(SEYAL_APP_COPY_COMPOSER_EXECUTE))
         execute.isEnabled = composer.flags & UInt16(SEYAL_APP_COMPOSER_CAN_SUBMIT) != 0
         let recall = seyal_app_composer_history(appHandle)
@@ -182,6 +199,22 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         placeholder.isHidden = !textView.string.isEmpty
         expandToDraft()
         paintChrome()
+        if !isNowFocusEligible, wasFocusEligible {
+            focusEligibilityGeneration &+= 1
+        } else if isNowFocusEligible, !wasFocusEligible {
+            focusEligibilityGeneration &+= 1
+            enqueueFocusEligibilityChange(generation: focusEligibilityGeneration)
+        }
+    }
+
+    private func enqueueFocusEligibilityChange(generation: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.focusEligibilityGeneration == generation,
+                  self.isFocusEligibleForRecovery
+            else { return }
+            self.onFocusEligibilityChanged?()
+        }
     }
 
     func textDidBeginEditing(_ notification: Notification) {
@@ -330,7 +363,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
         action.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
         action.applySnapshotFence(snapshot)
-        action.target_pty_generation = composer.epoch
+        action.target_generation = composer.epoch
         let utf8 = Array(textView.string.utf8)
         utf8.withUnsafeBufferPointer { buffer in
             action.payload = buffer.baseAddress
@@ -350,7 +383,7 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
         action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
         action.kind = UInt16(SEYAL_APP_ACTION_SUBMIT_COMPOSER.rawValue)
         action.applySnapshotFence(snapshot)
-        action.target_pty_generation = composer.epoch
+        action.target_generation = composer.epoch
         guard seyal_app_apply(appHandle, &action) == 0 else { return }
         var status = onSubmitComposer?(command) ?? -10
         if status == -12 {

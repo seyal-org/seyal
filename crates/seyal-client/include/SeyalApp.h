@@ -52,12 +52,13 @@ enum SeyalAppActionKind {
      * stays fail-closed until C3. CLOSE_TAB/CLOSE_PANE:
      * target_execution_lo/hi = TabId/PaneId; close actions carry the
      * containment_generation observed in the shell snapshot in
-     * target_pty_generation. SPLIT_FOCUSED: reserved = 0
+     * target_generation. SPLIT_FOCUSED: reserved = 0
      * (Right) or 1 (Down). Error codes: 28 = TabCreationUnavailable,
      * 29 = PaneSplitUnavailable, 31 = CannotCloseLastTab,
      * 32 = CannotCloseLastPane, 33 = CannotCloseBoundPane (ABI retained),
      * 34 = NoSplitDivider (MOVE_SPLIT_DIVIDER),
-     * 35 = ProvisioningRejected, 36 = ProvisioningCapacityExceeded.
+     * 35 = ProvisioningRejected, 36 = ProvisioningCapacityExceeded,
+     * 55 = UnknownWindow, 56 = WindowCreationUnavailable.
      */
     SEYAL_APP_ACTION_CREATE_TAB = 23,
     SEYAL_APP_ACTION_CLOSE_TAB = 24,
@@ -65,11 +66,15 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_CLOSE_PANE = 26,
     /** ADR-018 structural close; target_execution_lo/hi = WindowId. */
     SEYAL_APP_ACTION_CLOSE_WINDOW = 67,
+    SEYAL_APP_ACTION_SELECT_WINDOW = 68,
+    SEYAL_APP_ACTION_CYCLE_WINDOW = 69,
+    SEYAL_APP_ACTION_CREATE_WINDOW = 70,
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 71,
     /*
      * Composer history recall (#933).
      * SET_COMPOSER_HISTORY_FILTER: payload = UTF-8 query.
      * MOVE_COMPOSER_HISTORY_SELECTION: reserved = signed row delta (int32).
-     * SELECT_COMPOSER_HISTORY: target_pty_generation = composer epoch.
+     * SELECT_COMPOSER_HISTORY: target_generation = composer epoch.
      */
     SEYAL_APP_ACTION_OPEN_COMPOSER_HISTORY = 40,
     SEYAL_APP_ACTION_SET_COMPOSER_HISTORY_FILTER = 41,
@@ -154,7 +159,7 @@ enum SeyalAppActionKind {
      * reserved = SeyalAppGotoScope. Projects through seyal_app_palette with
      * SEYAL_APP_PALETTE_GOTO; SetPaletteQuery/Move/Run/Close route to goto
      * while open. Error codes 47-49.
-     */
+    */
     SEYAL_APP_ACTION_OPEN_GOTO = 61,
     SEYAL_APP_ACTION_SET_GOTO_SCOPE = 62,
     /**
@@ -166,6 +171,17 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_HISTORY_BACK = 63,
     SEYAL_APP_ACTION_HISTORY_FORWARD = 64
 };
+
+#define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_KEY 1u
+#define SEYAL_APP_WINDOW_EVENT_BECAME_MAIN 2u
+#define SEYAL_APP_WINDOW_EVENT_RESIGNED_MAIN 3u
+#define SEYAL_APP_WINDOW_EVENT_OCCLUSION_CHANGED 4u
+#define SEYAL_APP_WINDOW_EVENT_MINIATURIZED 5u
+#define SEYAL_APP_WINDOW_EVENT_DEMINIATURIZED 6u
+#define SEYAL_APP_WINDOW_EVENT_ENTERED_FULLSCREEN 7u
+#define SEYAL_APP_WINDOW_EVENT_EXITED_FULLSCREEN 8u
+#define SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED 9u
 
 /* SEYAL_APP_ACTION_OPEN_GOTO / SET_GOTO_SCOPE reserved values. */
 enum SeyalAppGotoScope {
@@ -203,11 +219,11 @@ enum SeyalAppEligibility {
 
 /*
  * Recovery actions keep the 120-byte SeyalAppAction record.
- * BEGIN/FIRE: target_pty_generation = host clock milliseconds.
+ * BEGIN/FIRE: target_generation = host clock milliseconds.
  * COMPLETE: target_execution_lo = episode generation,
  *           reserved = outcome | (launch << 8),
  *           target_attachment_lo = opened handle,
- *           target_pty_generation = host clock milliseconds.
+ *           target_generation = host clock milliseconds.
  */
 enum SeyalAppRecoveryStage {
     SEYAL_APP_RECOVERY_DISCONNECTED = 0,
@@ -270,7 +286,8 @@ typedef struct SeyalAppAction {
     uint64_t target_execution_hi;
     uint64_t target_attachment_lo;
     uint64_t target_attachment_hi;
-    uint64_t target_pty_generation;
+    /* Kind-specific target generation (PTY, containment, composer epoch, etc.). */
+    uint64_t target_generation;
     const uint8_t *payload;
     uint32_t payload_len;
     uint32_t reserved;
@@ -566,8 +583,9 @@ typedef struct SeyalAppPaneTreeNode {
 
 /*
  * ADR-018 §2.4 native effects in commit order.
- * kind: 1 BoundedDetachThenTerminate, 2 RealizeWindow,
- *       3 DestroyWindowRealization, 4 OrderFrontMakeKey.
+ * kind: 1 BoundedDetachThenTerminate (window_lo = relative deadline_ms),
+ *       2 RealizeWindow, 3 DestroyWindowRealization, 4 OrderFrontMakeKey,
+ *       7 QuitCleanupComplete.
  */
 typedef struct SeyalAppNativeEffect {
     uint16_t version;
@@ -582,6 +600,7 @@ typedef struct SeyalAppNativeEffect {
 #define SEYAL_APP_EFFECT_REALIZE_WINDOW 2u
 #define SEYAL_APP_EFFECT_DESTROY_WINDOW_REALIZATION 3u
 #define SEYAL_APP_EFFECT_ORDER_FRONT_MAKE_KEY 4u
+#define SEYAL_APP_EFFECT_QUIT_CLEANUP_COMPLETE 7u
 
 /* seyal_app_record_compatible kind values. */
 #define SEYAL_APP_RECORD_SHELL 0u
@@ -699,6 +718,13 @@ typedef struct SeyalAppPalette {
 
 uint64_t seyal_app_create(void);
 int32_t seyal_app_destroy(uint64_t handle);
+
+/** Test harness: install N windows + N live attachments; admission stays off. */
+int32_t seyal_app_test_seed_quit_case(uint64_t handle, uint32_t windows);
+int32_t seyal_app_test_seed_windows_only(uint64_t handle, uint32_t windows);
+/** Test harness: live display attachments still registered for handle. */
+uint32_t seyal_app_test_live_attachment_count(uint64_t handle);
+
 uint8_t seyal_app_option_as_alt(uint64_t handle);
 
 /*
@@ -771,6 +797,24 @@ SeyalAppComposer seyal_app_composer(uint64_t handle);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
+SeyalAppWindow seyal_app_window(uint64_t handle, uint32_t index);
+SeyalAppTab seyal_app_tab(uint64_t handle, uint32_t window_index, uint32_t tab_index);
+SeyalAppPaneLeaf seyal_app_pane_leaf(
+    uint64_t handle,
+    uint32_t window_index,
+    uint32_t tab_index,
+    uint32_t pane_index);
+SeyalAppPaneTreeNode seyal_app_tab_tree_node(
+    uint64_t handle,
+    uint32_t window_index,
+    uint32_t tab_index,
+    uint32_t node_index);
+SeyalAppNativeEffect seyal_app_native_effect(uint64_t handle, uint32_t index);
+/**
+ * Fail-closed version/size check for W3 records.
+ * Returns 0 when compatible; -1 unknown kind; -2 version; -3 size.
+ */
+int32_t seyal_app_record_compatible(uint16_t version, uint16_t size, uint16_t kind);
 SeyalAppPaneRegion seyal_app_pane_region(uint64_t handle, uint32_t index);
 SeyalAppPaneDivider seyal_app_pane_divider(uint64_t handle, uint32_t index);
 SeyalAppRow seyal_app_chrome_row(uint64_t handle, uint16_t kind, uint32_t index);

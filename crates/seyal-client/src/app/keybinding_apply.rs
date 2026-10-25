@@ -166,6 +166,31 @@ impl ApplicationRoot {
                 self.history_forward(observed)
             }
             WorkspaceCommandId::AppQuit => self.quit(),
+            WorkspaceCommandId::AppCloseFocused => {
+                let shell = self.shell.snapshot();
+                self.close_pane(shell.focused_pane, shell.containment_generation)
+            }
+            WorkspaceCommandId::WindowNew => self.create_window(),
+            WorkspaceCommandId::WindowClose => {
+                let shell = self.shell.snapshot();
+                let id = shell.active_window.ok_or(AppError::ActionUnavailable)?;
+                self.close_window(id, shell.containment_generation)
+            }
+            WorkspaceCommandId::WindowCycleNext => {
+                self.cycle_window(crate::shell::CycleDirection::Next)
+            }
+            WorkspaceCommandId::WindowCyclePrevious => {
+                self.cycle_window(crate::shell::CycleDirection::Previous)
+            }
+            WorkspaceCommandId::WindowSelectOrdinal => {
+                let windows = self.shell.snapshot().windows;
+                let ordinal = command.ordinal.ok_or(AppError::ActionUnavailable)?.get();
+                let id = windows
+                    .get((ordinal as usize).saturating_sub(1))
+                    .map(|window| window.id)
+                    .ok_or(AppError::ActionUnavailable)?;
+                self.select_window(id)
+            }
         }
     }
 

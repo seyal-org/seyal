@@ -318,6 +318,10 @@ final class ProductChromeHostView: NSView {
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
             self?.requestComposerFocusIfPaletteAllows() ?? false
         }
+        composer.onFocusEligibilityChanged = { [weak self] in
+            guard let self, self.composer.isFocusEligibleForRecovery else { return }
+            self.pane.inputSurface.composerFocusEligibilityDidChange()
+        }
         pane.inputSurface.onRecoveryEffectsPending = { [weak self] in
             self?.reconcileChrome()
         }
@@ -475,17 +479,6 @@ final class ProductChromeHostView: NSView {
         commandPalette.requestOpen()
     }
 
-
-    /// SPEC-024 §11 / R6.4.1: menu or key-equivalent dispatch of a projected
-    /// WorkspaceCommand. Rust re-validates against the current route context.
-    @objc func invokeProjectedWorkspaceCommand(_ sender: NSMenuItem) {
-        guard let commandId = sender.representedObject as? UInt16 else { return }
-        let code = seyal_app_invoke_workspace_command(pane.appHandle, commandId, 0, 0)
-        if code == 0 {
-            reconcileChrome()
-            routeFocus()
-        }
-    }
 
     /// R6.2.1: route Command through Rust before AppKit menu key-equivalents.
     /// Matched / cross-context projected steals consume; §6.2 step 2c miss and
@@ -767,6 +760,9 @@ extension ProductChromeHostView: NSMenuItemValidation {
         return KeybindingShortcutRealization.isEnabled(
             appHandle: pane.appHandle,
             commandId: commandId,
+            ordinal: commandId == KeybindingShortcutRealization.windowSelectOrdinal
+                ? UInt8(menuItem.tag)
+                : 0,
             composerFocused: false
         )
     }

@@ -2,6 +2,56 @@ import AppKit
 import Foundation
 
 extension MetalSurfaceView {
+  func addWindowLifecycleObservers(for window: NSWindow) {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowActivationNotificationReceived),
+      name: NSApplication.didBecomeActiveNotification,
+      object: NSApp
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowOcclusionChanged),
+      name: NSWindow.didChangeOcclusionStateNotification,
+      object: window
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowActivationNotificationReceived),
+      name: NSWindow.didBecomeKeyNotification,
+      object: window
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowActivationNotificationReceived),
+      name: NSWindow.didBecomeMainNotification,
+      object: window
+    )
+  }
+
+  func removeWindowLifecycleObservers(from window: NSWindow) {
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSApplication.didBecomeActiveNotification,
+      object: NSApp
+    )
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSWindow.didChangeOcclusionStateNotification,
+      object: window
+    )
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSWindow.didBecomeKeyNotification,
+      object: window
+    )
+    NotificationCenter.default.removeObserver(
+      self,
+      name: NSWindow.didBecomeMainNotification,
+      object: window
+    )
+  }
+
   /// Recovery remains pinned to the accepted execution after its transport
   /// disconnects. An implicit first attach is only a bootstrap; its accepted
   /// identity must not be forgotten and replaced with whichever execution is
@@ -33,6 +83,7 @@ extension MetalSurfaceView {
   func cancelBridgeReconnect() {
     guard recoveryAppHandle != 0 else { return }
     recoveryPresentationPending = false
+    (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
     _ = applyRuntimeRecoveryAction(recoveryAppHandle, kind: SEYAL_APP_ACTION_CANCEL_RECOVERY)
     onRecoveryEffectsPending?()
   }
@@ -95,7 +146,7 @@ extension MetalSurfaceView {
     guard recoveryAppHandle != 0 else { return }
     let now = runtimeRecoveryNowMillis()
     _ = applyRuntimeRecoveryAction(recoveryAppHandle, kind: SEYAL_APP_ACTION_BEGIN_RECOVERY) {
-      $0.target_pty_generation = now
+      $0.target_generation = now
     }
     onRecoveryEffectsPending?()
   }
@@ -106,6 +157,7 @@ extension MetalSurfaceView {
     let adopted = bridge?.adoptRecoveredHandle(opened) ?? false
     if adopted {
       recoveryPresentationPending = true
+      (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
     }
     return adopted
   }
@@ -117,6 +169,7 @@ extension MetalSurfaceView {
   @discardableResult
   func advanceRecoveryPresentationIfReady() -> Bool {
     guard recoveryPresentationPending else { return true }
+    (self as? InteractiveMetalSurfaceView)?.consumeComposerFocusEligibilityChangeBeforeRecovery()
     guard recoveryAppHandle != 0,
       bridge?.isConnected == true,
       hasPreparedState
@@ -138,6 +191,7 @@ extension MetalSurfaceView {
     guard shouldRender else {
       if afterRestore == UInt16(SEYAL_APP_RECOVERY_USABLE.rawValue) {
         recoveryPresentationPending = false
+        (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
       }
       return true
     }
@@ -152,6 +206,7 @@ extension MetalSurfaceView {
       $0.reserved = UInt32(SEYAL_APP_RECOVERY_USABLE.rawValue)
     }
     recoveryPresentationPending = false
+    (self as? InteractiveMetalSurfaceView)?.resetComposerRecoveryFocusRetries()
     refreshRecoveryAccessibilityValue()
     onRecoveryEffectsPending?()
     return true
