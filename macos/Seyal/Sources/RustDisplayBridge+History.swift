@@ -113,10 +113,10 @@ extension RustDisplayBridge {
     let count = UInt32(byteCount)
     let result =
       text.utf8.withContiguousStorageIfAvailable { buffer -> Int32 in
-        seyal_bridge_submit_utf8(buffer.baseAddress, count)
+        seyal_bridge_submit_utf8_for(clientHandle, buffer.baseAddress, count)
       }
       ?? Array(text.utf8).withUnsafeBufferPointer { buffer in
-        seyal_bridge_submit_utf8(buffer.baseAddress, count)
+        seyal_bridge_submit_utf8_for(clientHandle, buffer.baseAddress, count)
       }
     return finishMutation(result)
   }
