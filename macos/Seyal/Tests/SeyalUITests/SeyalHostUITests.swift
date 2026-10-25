@@ -448,7 +448,12 @@ final class SeyalHostUITests: XCTestCase {
                     return nil
                 }
             }
-            let composerDeadline = Date().addingTimeInterval(30)
+            // The argv `/bin/zsh` only seeds the first execution. Split Right
+            // creates profile 0, which is the account shell. Hosted runners
+            // use bash, so that pane stays Raw and the composer stays hidden
+            // (ADR-009). A zsh pane still submits through the composer.
+            let command = "/bin/bash \(probeScript.path)"
+            let composerDeadline = Date().addingTimeInterval(12)
             var composer = app.descendants(matching: .any)["seyal-composer"].firstMatch
             var composerReady = false
             while Date() < composerDeadline {
@@ -457,54 +462,73 @@ final class SeyalHostUITests: XCTestCase {
                     composerReady = true
                     break
                 }
+                let surface = app.descendants(matching: .any)["terminal-input"].firstMatch
+                let paint = (surface.value as? String) ?? ""
+                if !composer.exists,
+                   paint.contains("flow-paint=n/a"),
+                   paint.contains("cursor-visible=true"),
+                   !paint.contains("cursor=0,0")
+                {
+                    break
+                }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             }
-            guard composerReady else {
-                return nil
-            }
-            let editorQuery = app.descendants(matching: .any).matching(identifier: "seyal-composer-editor")
-            guard editorQuery.firstMatch.waitForExistence(timeout: 5) else { return nil }
-            // The editor is projected inside the focused Pane's live chrome,
-            // while Pane regions and liveContent are AX siblings. Resolve the
-            // editor by its current frame instead of relying on firstMatch,
-            // so typing is attempted in the editor owned by this region.
-            let editor = editorQuery.allElementsBoundByIndex.first {
-                $0.frame != .zero && region.frame.insetBy(dx: -2, dy: -2).contains($0.frame)
-            }
-            guard let editor else {
-                let candidates = editorQuery.allElementsBoundByIndex.map {
-                    "id=\($0.identifier) enabled=\($0.isEnabled) frame=\($0.frame)"
-                }.joined(separator: "; ")
-                XCTFail(
-                    "no composer editor is inside the focused Pane region; "
-                        + "region=\(region.identifier) regionFrame=\(region.frame) "
-                        + "composer=\(composer.value ?? "nil") editorCount=\(editorQuery.count) "
-                        + "candidates=[\(candidates)]"
+            if composerReady {
+                let editorQuery = app.descendants(matching: .any).matching(identifier: "seyal-composer-editor")
+                guard editorQuery.firstMatch.waitForExistence(timeout: 5) else { return nil }
+                // The editor is projected inside the focused Pane's live chrome,
+                // while Pane regions and liveContent are AX siblings. Resolve the
+                // editor by its current frame instead of relying on firstMatch,
+                // so typing is attempted in the editor owned by this region.
+                let editor = editorQuery.allElementsBoundByIndex.first {
+                    $0.frame != .zero && region.frame.insetBy(dx: -2, dy: -2).contains($0.frame)
+                }
+                guard let editor else {
+                    let candidates = editorQuery.allElementsBoundByIndex.map {
+                        "id=\($0.identifier) enabled=\($0.isEnabled) frame=\($0.frame)"
+                    }.joined(separator: "; ")
+                    XCTFail(
+                        "no composer editor is inside the focused Pane region; "
+                            + "region=\(region.identifier) regionFrame=\(region.frame) "
+                            + "composer=\(composer.value ?? "nil") editorCount=\(editorQuery.count) "
+                            + "candidates=[\(candidates)]"
+                    )
+                    return nil
+                }
+                // AX enabled state and NSTextView editability are distinct. Prove
+                // the actual input path by typing and waiting for the command's
+                // live PTY probe below instead of treating AXEnabled as the
+                // product editability contract.
+                editor.click()
+                editor.typeText(command)
+                let draftMatchesCommand = expectation(
+                    for: NSPredicate(format: "value == %@", command),
+                    evaluatedWith: editor,
+                    handler: nil
                 )
-                return nil
+                guard XCTWaiter.wait(for: [draftMatchesCommand], timeout: 5) == .completed else {
+                    XCTFail(
+                        "composer editor did not expose the submitted fixture command before Return; "
+                            + "region=\(region.identifier) regionFrame=\(region.frame) "
+                            + "editorFrame=\(editor.frame) expectedDraft=\(command) "
+                            + "observedDraft=\(editor.value ?? "nil") composer=\(composer.value ?? "nil")"
+                    )
+                    return nil
+                }
+                editor.typeKey("\r", modifierFlags: [])
+            } else {
+                let terminal = app.descendants(matching: .any)["terminal-input"].firstMatch
+                guard terminal.waitForExistence(timeout: 5) else {
+                    XCTFail(
+                        "focused pane has neither an available composer nor a terminal surface; "
+                            + paneProbeDiagnostics(app)
+                    )
+                    return nil
+                }
+                terminal.click()
+                app.typeText(command)
+                app.typeKey(.return, modifierFlags: [])
             }
-            // AX enabled state and NSTextView editability are distinct. Prove
-            // the actual input path by typing and waiting for the command's
-            // live PTY probe below instead of treating AXEnabled as the
-            // product editability contract.
-            editor.click()
-            let command = "/bin/bash \(probeScript.path)"
-            editor.typeText(command)
-            let draftMatchesCommand = expectation(
-                for: NSPredicate(format: "value == %@", command),
-                evaluatedWith: editor,
-                handler: nil
-            )
-            guard XCTWaiter.wait(for: [draftMatchesCommand], timeout: 5) == .completed else {
-                XCTFail(
-                    "composer editor did not expose the submitted fixture command before Return; "
-                        + "region=\(region.identifier) regionFrame=\(region.frame) "
-                        + "editorFrame=\(editor.frame) expectedDraft=\(command) "
-                        + "observedDraft=\(editor.value ?? "nil") composer=\(composer.value ?? "nil")"
-                )
-                return nil
-            }
-            editor.typeKey("\r", modifierFlags: [])
             let deadline = Date().addingTimeInterval(10)
             while Date() < deadline {
                 if FileManager.default.fileExists(atPath: startedFile.path),
