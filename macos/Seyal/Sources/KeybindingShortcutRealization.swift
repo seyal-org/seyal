@@ -13,6 +13,8 @@ enum KeybindingShortcutRealization {
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
     static let gotoOpen: UInt16 = 21
+    static let chromeToggleLeftPanel: UInt16 = 22
+    static let chromeToggleInspector: UInt16 = 23
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
@@ -67,6 +69,12 @@ enum KeybindingShortcutRealization {
         case gotoOpen: return "Go to…"
         default: return "Command"
         }
+    }
+
+    /// SPEC-024 R5.6.2: live title from Rust product state; nil keeps the cold title.
+    static func liveTitle(appHandle: UInt64, commandId: UInt16) -> String? {
+        let title = seyal_app_shortcut_title(appHandle, commandId, 0)
+        return copyUTF8(title.title, title.title_len)
     }
 
     static func isEnabled(appHandle: UInt64, commandId: UInt16, composerFocused: Bool) -> Bool {

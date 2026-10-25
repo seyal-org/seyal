@@ -3,9 +3,9 @@
 use crate::composer::ComposerAction;
 use crate::goto::GotoScope;
 use crate::keybinding::{
-    process_keybinding_table, resolve_tab_ordinal, route_context_set, route_keystroke,
-    validate_workspace_command, BindingContext, InvokeError, NormalizedStroke, RouteOutcome,
-    WorkspaceCommand, WorkspaceCommandId,
+    command_title, process_keybinding_table, resolve_tab_ordinal, route_context_set,
+    route_keystroke, validate_workspace_command, BindingContext, InvokeError, NormalizedStroke,
+    RouteOutcome, WorkspaceCommand, WorkspaceCommandId,
 };
 use crate::presentation::{PresentationAction, PresentationMode};
 use crate::shell::SplitAxis;
@@ -165,7 +165,39 @@ impl ApplicationRoot {
                     .ok_or(AppError::NavigationHistoryUnavailable)?;
                 self.history_forward(observed)
             }
+            // SPEC-024 §5.6: invert one field of the current visibility, keep the rest.
+            WorkspaceCommandId::ChromeToggleLeftPanel => {
+                let (left, inspector, tab_strip) = self.chrome.shell_visibility();
+                self.set_shell_visibility(!left, inspector, tab_strip)
+            }
+            WorkspaceCommandId::ChromeToggleInspector => {
+                let (left, inspector, tab_strip) = self.chrome.shell_visibility();
+                self.set_shell_visibility(left, !inspector, tab_strip)
+            }
             WorkspaceCommandId::AppQuit => self.quit(),
+        }
+    }
+
+    /// Menu title for `command` from current product state (SPEC-024 R5.6.2):
+    /// the chrome toggles name the action a press would take now.
+    pub fn live_menu_title(&self, command: WorkspaceCommand) -> &'static str {
+        let (left, inspector, _) = self.chrome.shell_visibility();
+        match command.id {
+            WorkspaceCommandId::ChromeToggleLeftPanel => {
+                if left {
+                    "Hide Sidebar"
+                } else {
+                    "Show Sidebar"
+                }
+            }
+            WorkspaceCommandId::ChromeToggleInspector => {
+                if inspector {
+                    "Hide Inspector"
+                } else {
+                    "Show Inspector"
+                }
+            }
+            _ => command_title(command),
         }
     }
 

@@ -766,6 +766,20 @@ uint8_t seyal_app_shortcut_enabled(
     uint16_t command_id,
     uint8_t ordinal,
     uint8_t composer_focused);
+/*
+ * SPEC-024 R5.6.2 live menu title from current product state (for example
+ * "Hide Sidebar" / "Show Sidebar"). `title` is static UTF-8 valid until process
+ * exit; title_len 0 for an unknown handle or command keeps the cold title.
+ */
+typedef struct SeyalAppShortcutTitle {
+    const uint8_t *title;
+    uint32_t title_len;
+} SeyalAppShortcutTitle;
+
+SeyalAppShortcutTitle seyal_app_shortcut_title(
+    uint64_t handle,
+    uint16_t command_id,
+    uint8_t ordinal);
 /* R6.4.1: menu-invoked WorkspaceCommand; 0 ok, negative = -AppError. */
 int32_t seyal_app_invoke_workspace_command(
     uint64_t handle,

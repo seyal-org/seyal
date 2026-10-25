@@ -169,7 +169,8 @@ impl BindingContext {
 
 /// Closed WorkspaceCommandId catalog currently admitted at load (SPEC-024 §5).
 /// Gated ids (window.*, ADR-021 pane verbs) stay out until their typed actions
-/// land (R5.0.1 / R5.1.3). `goto.open` and focus-history Back/Forward are admitted.
+/// land (R5.0.1 / R5.1.3). `goto.open`, focus-history Back/Forward and the §5.6
+/// chrome visibility toggles are admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkspaceCommandId {
     CommandPaletteOpen,
@@ -193,6 +194,8 @@ pub enum WorkspaceCommandId {
     GotoOpen,
     FocusHistoryBack,
     FocusHistoryForward,
+    ChromeToggleLeftPanel,
+    ChromeToggleInspector,
     AppQuit,
 }
 
@@ -220,6 +223,8 @@ impl WorkspaceCommandId {
             Self::GotoOpen => "goto.open",
             Self::FocusHistoryBack => "focus_history.back",
             Self::FocusHistoryForward => "focus_history.forward",
+            Self::ChromeToggleLeftPanel => "chrome.toggle_left_panel",
+            Self::ChromeToggleInspector => "chrome.toggle_inspector",
             Self::AppQuit => "app.quit",
         }
     }
@@ -247,6 +252,8 @@ impl WorkspaceCommandId {
             "goto.open" => Self::GotoOpen,
             "focus_history.back" => Self::FocusHistoryBack,
             "focus_history.forward" => Self::FocusHistoryForward,
+            "chrome.toggle_left_panel" => Self::ChromeToggleLeftPanel,
+            "chrome.toggle_inspector" => Self::ChromeToggleInspector,
             "app.quit" => Self::AppQuit,
             _ => return None,
         })

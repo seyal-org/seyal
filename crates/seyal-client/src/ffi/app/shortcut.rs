@@ -174,6 +174,43 @@ pub extern "C" fn seyal_app_shortcut_enabled(
     })
 }
 
+/// Live menu title (SPEC-024 R5.6.2). `title` points at static UTF-8 that is
+/// valid until process exit; `title_len` is 0 for an unknown handle or command,
+/// and the host then keeps the cold title.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SeyalAppShortcutTitle {
+    pub title: *const u8,
+    pub title_len: u32,
+}
+
+/// Title for a projected WorkspaceCommand from current product state.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_shortcut_title(
+    handle: u64,
+    command_id: u16,
+    ordinal: u8,
+) -> SeyalAppShortcutTitle {
+    let empty = SeyalAppShortcutTitle {
+        title: std::ptr::null(),
+        title_len: 0,
+    };
+    let Some(command) = workspace_command_from_ffi_id(command_id, ordinal) else {
+        return empty;
+    };
+    APPS.with(|apps| {
+        let apps = apps.borrow();
+        let Some(state) = apps.get(&handle) else {
+            return empty;
+        };
+        let title = state.root.live_menu_title(command);
+        SeyalAppShortcutTitle {
+            title: title.as_ptr(),
+            title_len: title.len() as u32,
+        }
+    })
+}
+
 /// R6.4.1 menu path: re-validate and invoke a WorkspaceCommand (zero PTY).
 /// Returns 0 on success, negative `-AppError` otherwise (50 = ActionUnavailable).
 #[unsafe(no_mangle)]
@@ -309,5 +346,38 @@ mod tests {
             }
         }
         assert!(saw_palette && saw_tab);
+    }
+
+    #[test]
+    fn live_title_follows_visibility_and_fails_closed_for_unknown_input() {
+        use super::super::{seyal_app_create, seyal_app_destroy};
+
+        let read = |title: SeyalAppShortcutTitle| -> String {
+            if title.title_len == 0 {
+                return String::new();
+            }
+            // SAFETY: Rust returns a pointer to a static str of `title_len` bytes.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(title.title, title.title_len as usize) };
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        let left = workspace_command_ffi_id(WorkspaceCommandId::ChromeToggleLeftPanel);
+        let handle = seyal_app_create();
+        assert_eq!(
+            read(seyal_app_shortcut_title(handle, left, 0)),
+            "Hide Sidebar"
+        );
+        assert_eq!(
+            seyal_app_invoke_workspace_command(handle, left, 0, 0),
+            0,
+            "menu toggle"
+        );
+        assert_eq!(
+            read(seyal_app_shortcut_title(handle, left, 0)),
+            "Show Sidebar"
+        );
+        assert_eq!(seyal_app_shortcut_title(handle, 999, 0).title_len, 0);
+        assert_eq!(seyal_app_destroy(handle), 0);
+        assert_eq!(seyal_app_shortcut_title(handle, left, 0).title_len, 0);
     }
 }
