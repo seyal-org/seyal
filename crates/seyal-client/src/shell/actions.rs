@@ -156,6 +156,20 @@ impl ShellState {
         self.activate_window(id)
     }
 
+    pub(super) fn native_window_became_key(&mut self, id: WindowId) -> Result<(), ShellError> {
+        let workspace_id = self
+            .find_window(id)
+            .map(|workspace| workspace.id)
+            .ok_or(ShellError::UnknownWindow)?;
+        let workspace = self.workspace_mut(workspace_id)?;
+        if workspace.window(id).is_none() {
+            return Err(ShellError::UnknownWindow);
+        }
+        workspace.active_window = Some(id);
+        self.last_active_workspace = workspace_id;
+        self.record_window_focus(id)
+    }
+
     pub(super) fn select_tab_identity(&mut self, id: TabId) -> Result<(), ShellError> {
         let (workspace_id, window_id, _) =
             self.find_tab_location(id).ok_or(ShellError::UnknownTab)?;
@@ -367,6 +381,7 @@ impl ShellState {
                 containment_generation,
             } => self.move_tab_to_new_window(tab, containment_generation),
             ShellAction::SelectWindow { id, .. } => self.select_window(id),
+            ShellAction::NativeWindowBecameKey { id, .. } => self.native_window_became_key(id),
             ShellAction::SelectTab { id, .. } => self.select_tab_identity(id),
             ShellAction::CycleWindow { direction, .. } => self.cycle_window(direction),
             ShellAction::CycleTab { direction, .. } => self.cycle_tab(direction),

@@ -1229,10 +1229,14 @@ final class SeyalHostUITests: XCTestCase {
         XCTAssertTrue(newWindow.isEnabled, "W4b turns CreateWindow admission on")
         newWindow.click()
         waitForWindowCount(app, 2, message: "CreateWindow must realize a second headed window")
+        let fileMenu = app.menuBars.menuBarItems["File"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
+        fileMenu.click()
         let close = app.menuItems["Close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.click()
         waitForWindowCount(app, 1, message: "hierarchical close of the extra window returns to one")
+        fileMenu.click()
         close.click()
         waitForWindowCount(app, 0, message: "last-window close must leave zero windows")
         // NSWindow close can enqueue AppKit Touch Bar work for the next display
@@ -1244,7 +1248,25 @@ final class SeyalHostUITests: XCTestCase {
             "File → New Window stays available after the last window closes"
         )
         XCTAssertTrue(newWindow.isEnabled, "zero-window re-entry remains admitted")
+        fileMenu.click()
         newWindow.click()
         waitForWindowCount(app, 1, message: "File → New Window must re-enter from zero windows")
+    }
+
+    func testTitleBarCloseForwardsThroughWindowCloseDelegate() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        let newWindow = app.menuItems["New Window"]
+        XCTAssertTrue(newWindow.waitForExistence(timeout: 5))
+        newWindow.click()
+        waitForWindowCount(app, 2, message: "New Window creates a second headed window")
+
+        // The system AX label of the traffic-light control is not reliably
+        // "Close". The host stamps the real `standardWindowButton(.closeButton)`.
+        let closeButton = app.buttons["seyal-window-close"].firstMatch
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5), "window has its native close control")
+        closeButton.click()
+        waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")
+        XCTAssertEqual(app.state, .runningForeground, "closing a non-final window must not quit")
     }
 }

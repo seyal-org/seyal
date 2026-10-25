@@ -10,12 +10,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
 
     /// Derived realization map keyed by WindowId; order follows the snapshot.
     private var realizations: [WindowKey: NSWindow] = [:]
-    /// Closed windows remain strongly held while AppKit finishes close-time
-    /// callbacks. Window ownership stays with Swift ARC; AppKit's default
-    /// release-on-close must be disabled in `makeSeyalWindow`.
-    private var closingWindows: [NSWindow] = []
     /// Snapshot order of realized WindowIds (AppKit z-order is not authority).
     private(set) var orderedKeys: [WindowKey] = []
+    /// Guards AppKit's synchronous close callback so its Destroy effect can
+    /// finish the native close after the delegate has returned.
+    private var appKitCloseRequestsInFlight: Set<WindowKey> = []
 
     let liveHost: ProductChromeHostView
     private let quitCoordinator = ApplicationQuitCoordinator()
@@ -29,7 +28,9 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         super.init()
         // Chain after ProductChromeHostView's own pane hook so window effects
         // apply whenever Rust commits a product transition.
+        let forwardProductChange = liveHost.pane.onProductChanged
         liveHost.pane.onProductChanged = { [weak self] in
+            forwardProductChange?()
             guard let self else { return }
             self.liveHost.reconcileChrome()
             self.applyPendingEffects()
@@ -111,7 +112,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         } else {
             window.contentView = InactiveWindowPlaceholderView(frame: window.contentLayoutRect)
         }
-        window.makeKeyAndOrderFront(nil)
+        if isProductActive(key) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            // Realizing the snapshot must not synthesize native focus changes:
+            // only Rust's explicit OrderFrontMakeKey effect activates a window.
+            window.orderFront(nil)
+        }
     }
 
     private func destroyRealization(_ key: WindowKey) {
@@ -127,23 +134,32 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
                 installLiveHost(in: hostWindow, key: next)
             }
         }
-        window.delegate = nil
         window.contentView = nil
-        if NSApp.delegate is AppDelegate {
-            // In production AppDelegate keeps Seyal running after the last
-            // window closes. Remove the NSWindow from AppKit's window list so
-            // last-window-close and Dock reopen observe the true zero-window state.
-            closingWindows.append(window)
-            window.close()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak window] in
-                guard let self, let window else { return }
-                self.closingWindows.removeAll { $0 === window }
+        // `windowShouldClose` must veto AppKit's synchronous user request per
+        // ADR-018 §2.5. The effect still owns this destruction; defer its
+        // AppKit close until that delegate call has returned, otherwise the
+        // in-flight veto swallows `close()` and the NSWindow stays on screen.
+        if appKitCloseRequestsInFlight.contains(key) {
+            DispatchQueue.main.async { [window] in
+                Self.finishAppKitClose(window)
             }
         } else {
-            // Some component-test hosts lack AppDelegate; ordering out avoids
-            // XCTest termination while still removing the realization.
-            window.orderOut(nil)
+            Self.finishAppKitClose(window)
         }
+    }
+
+    /// Drop the native realization from AppKit's window list.
+    ///
+    /// `isReleasedWhenClosed = false` orders the window out but, on current
+    /// AppKit, leaves it in `NSApp.windows` and preserves `windowNumber` for
+    /// as long as Swift retains the object. Releasing on close is what
+    /// removes it. The extra retain balances AppKit's release so ARC remains
+    /// the owner until the host and any test drop their references.
+    private static func finishAppKitClose(_ window: NSWindow) {
+        window.delegate = nil
+        window.isReleasedWhenClosed = true
+        _ = Unmanaged.passRetained(window)
+        window.close()
     }
 
     private func orderFrontMakeKey(_ key: WindowKey) {
@@ -200,14 +216,18 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        // NSWindow defaults to releasing itself when closed. Apple documents
-        // that ARC clients must disable this to avoid over-release; this host
-        // owns each window through `realizations` / `closingWindows` instead.
+        // NSWindow defaults to releasing itself when closed. ARC owns the
+        // realization after close, so AppKit must not release it as well.
         window.isReleasedWhenClosed = false
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
         window.tabbingMode = .disallowed
         window.identifier = NSUserInterfaceItemIdentifier("seyal-window-\(key.lo)-\(key.hi)")
+        // The traffic-light control is the real close button. Stamp it so
+        // headed tests can find it without depending on the system AX label,
+        // which is not reliably "Close".
+        window.standardWindowButton(.closeButton)?
+            .setAccessibilityIdentifier("seyal-window-close")
         window.delegate = self
         let platform = NSApp.effectiveAppearance
         NativeThemeRealization.surfaceColdDiagnosticsOnce(for: platform)
@@ -394,7 +414,15 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         action.target_execution_lo = key.lo
         action.target_execution_hi = key.hi
         action.reserved = event
-        _ = seyal_app_apply(appHandle, &action)
+        let result = seyal_app_apply(appHandle, &action)
+        if result == 0, event == SEYAL_APP_WINDOW_EVENT_BECAME_KEY {
+            // AppKit is already key. Rust commits product selection and focus
+            // history from this typed event; move the one live host into that
+            // Rust-selected realization without asking AppKit to key it again.
+            installLiveHost(in: window, key: key)
+            liveHost.reconcileChrome()
+            liveHost.routeFocus()
+        }
     }
 
     private func key(for window: NSWindow) -> WindowKey? {
@@ -410,6 +438,8 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         // ADR-018 §2.5: refuse local destroy; Rust emits DestroyWindowRealization.
         if let key = key(for: sender) {
+            appKitCloseRequestsInFlight.insert(key)
+            defer { appKitCloseRequestsInFlight.remove(key) }
             forwardCloseWindow(key)
         }
         return false

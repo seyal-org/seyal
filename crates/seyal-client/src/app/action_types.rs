@@ -270,8 +270,9 @@ pub enum AppAction {
     },
 }
 
-/// Typed native window inputs (ADR-018 §2.3). Recorded without changing
-/// product state.
+/// Typed native window inputs (ADR-018 §2.3). `BecameKey` commits the native
+/// activation as Rust-owned product selection; other events remain disposable
+/// presentation input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub enum WindowNativeEvent {

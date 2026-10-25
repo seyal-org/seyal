@@ -376,6 +376,21 @@ impl ApplicationRoot {
             return Err(AppError::UnknownWindow);
         }
         match event {
+            WindowNativeEvent::BecameKey => {
+                // ADR-018 §1.3: native key activation is an input to Rust-owned
+                // product selection and its single application-scoped focus
+                // history. The native realization is already key, so this action
+                // commits the identity-validated selection without echoing an
+                // OrderFrontMakeKey effect back to AppKit.
+                self.apply_shell(ShellAction::NativeWindowBecameKey {
+                    id: window,
+                    containment_generation: self.shell.containment_generation(),
+                })
+                .map_err(|_| AppError::UnknownWindow)?;
+                let _ = self
+                    .chrome
+                    .apply(ChromeAction::ContextNavigated, &self.shell.snapshot());
+            }
             WindowNativeEvent::Miniaturized => {
                 self.shell
                     .set_window_miniaturized(window, true)
