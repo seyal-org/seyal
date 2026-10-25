@@ -141,6 +141,9 @@ final class PaneLayoutView: NSView {
         // autoresizing mask turns the manual frame into a required constant
         // width, so a later window resize never reaches the focused surface.
         liveContent.translatesAutoresizingMaskIntoConstraints = false
+        // Rust's region is the only size authority: content larger than the
+        // region is clipped rather than drawn over a neighbouring Pane.
+        liveContent.clipsToBounds = true
         addSubview(liveContent)
         liveOriginX = liveContent.leadingAnchor.constraint(equalTo: leadingAnchor)
         liveOriginY = liveContent.topAnchor.constraint(equalTo: topAnchor)
@@ -330,14 +333,24 @@ final class PaneLayoutView: NSView {
 
     func apply(_ next: [Region], dividers nextDividers: [Divider]) {
         guard next != regions || nextDividers != dividers else { return }
-        let rebuild = next.map(\.identity) != regions.map(\.identity)
-            || nextDividers.map(\.identity) != dividers.map(\.identity)
+        let rebuildRegions = next.map(\.identity) != regions.map(\.identity)
+        let rebuildDividers = nextDividers.map(\.identity) != dividers.map(\.identity)
         regions = next
         dividers = nextDividers
         needsLayout = true
-        // Geometry-only change (a ratio drag): keep the views, including the
-        // divider being dragged, and just relayout.
-        guard rebuild else { return }
+        // Geometry-only change (a ratio drag): keep the views and relayout.
+        // Regions and dividers rebuild independently, so a Region change
+        // mid-gesture (focus, live binding, title) never detaches the divider
+        // AppKit is delivering the drag to.
+        if rebuildRegions {
+            rebuildRegionViews(next)
+        }
+        if rebuildDividers {
+            rebuildDividerViews(nextDividers)
+        }
+    }
+
+    private func rebuildRegionViews(_ next: [Region]) {
         regionViews.forEach { $0.removeFromSuperview() }
         let split = next.count > 1
         regionViews = next.enumerated().map { index, region in
@@ -353,6 +366,9 @@ final class PaneLayoutView: NSView {
         // Focused chrome container stays visible while any leaf is LIVE; it is
         // positioned on the focused LIVE region (or the sole LIVE region).
         liveContent.isHidden = !next.contains(where: \.live)
+    }
+
+    private func rebuildDividerViews(_ nextDividers: [Divider]) {
         dividerViews.forEach { $0.removeFromSuperview() }
         dividerViews = nextDividers.enumerated().map { index, divider in
             let view = PaneDividerView(index: index, vertical: divider.vertical)
@@ -544,5 +560,17 @@ private final class PaneDividerView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let parent = superview else { return }
         onDrag?(parent.convert(event.locationInWindow, from: nil))
+    }
+}
+
+extension NSLayoutConstraint {
+    /// Trailing/bottom attachments of live content to `liveContent` yield to
+    /// the Rust-projected region: the priority sits below the window's
+    /// stay-put size, so content wider/taller than the region is clipped
+    /// instead of growing the window (ADR-015; #928). It stays above default
+    /// hugging, so content still fills a region that is large enough.
+    func yieldingToPaneRegion() -> NSLayoutConstraint {
+        priority = .dragThatCannotResizeWindow
+        return self
     }
 }
