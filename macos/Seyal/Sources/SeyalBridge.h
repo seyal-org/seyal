@@ -277,6 +277,7 @@ int32_t seyal_bridge_retry_resize(void);
 int32_t seyal_bridge_input_failure(void);
 int32_t seyal_bridge_resize_failure(void);
 SeyalPreparedFrame seyal_bridge_frame(void);
+SeyalPreparedFrame seyal_bridge_frame_for(uint64_t handle);
 uint64_t seyal_bridge_block_timeline_revision(void);
 uint64_t seyal_bridge_next_composer_request_id(void);
 uint32_t seyal_bridge_block_count(void);

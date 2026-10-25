@@ -4,7 +4,7 @@ use crate::local::ClientError;
 use crate::LocalDisplayClient;
 
 use super::{
-    error_code, with_active_client, with_active_client_mut, with_display_client,
+    error_code, with_active_client, with_active_client_mut, with_client_mut, with_display_client,
     with_display_client_mut, SeyalBlockRecord, SeyalComposerResult, SeyalComposerStatus,
     SeyalExecutionBlockMetadata, SeyalHistoryCell, SeyalHistoryRange, SeyalHistoryRow,
     SeyalHistorySidecar, SeyalPreparedFrame,
@@ -373,46 +373,55 @@ pub extern "C" fn seyal_bridge_request_history_range(
 /// # Panic policy
 ///
 /// Panics abort the process; they never unwind into Swift.
+fn frame_from_client(client: &mut LocalDisplayClient) -> SeyalPreparedFrame {
+    if client.ensure_prepared_surface().is_err() {
+        return SeyalPreparedFrame::empty();
+    }
+    let prepared = client.prepared_surface();
+    let cells = prepared.prepared_cells();
+    let Ok(cell_count) = u32::try_from(cells.len()) else {
+        return SeyalPreparedFrame::empty();
+    };
+    let result = client.last_preparation();
+    let cursor = prepared.cursor();
+    let damage = result.rebuilt_rows.words();
+    let grapheme = prepared.grapheme_bytes();
+    let Ok(grapheme_utf8_len) = u32::try_from(grapheme.len()) else {
+        return SeyalPreparedFrame::empty();
+    };
+    SeyalPreparedFrame {
+        cells: cells.as_ptr(),
+        cell_count,
+        generation: prepared.generation().unwrap_or_default(),
+        rows: prepared.rows(),
+        columns: prepared.columns(),
+        cursor_row: cursor.row,
+        cursor_column: cursor.column,
+        cursor_visible: u8::from(cursor.visible),
+        alternate_screen: u8::from(prepared.alternate_screen()),
+        full_rebuild: u8::from(result.full_rebuild),
+        reserved0: 0,
+        rebuilt_row_count: u16::try_from(result.rebuilt_row_count).unwrap_or(u16::MAX),
+        reserved1: 0,
+        damage_word0: damage[0],
+        damage_word1: damage[1],
+        damage_word2: damage[2],
+        damage_word3: damage[3],
+        grapheme_utf8: grapheme.as_ptr(),
+        grapheme_utf8_len,
+        reserved2: 0,
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_bridge_frame() -> SeyalPreparedFrame {
-    with_display_client_mut(|client| {
-        if client.ensure_prepared_surface().is_err() {
-            return SeyalPreparedFrame::empty();
-        }
-        let prepared = client.prepared_surface();
-        let cells = prepared.prepared_cells();
-        let Ok(cell_count) = u32::try_from(cells.len()) else {
-            return SeyalPreparedFrame::empty();
-        };
-        let result = client.last_preparation();
-        let cursor = prepared.cursor();
-        let damage = result.rebuilt_rows.words();
-        let grapheme = prepared.grapheme_bytes();
-        let Ok(grapheme_utf8_len) = u32::try_from(grapheme.len()) else {
-            return SeyalPreparedFrame::empty();
-        };
-        SeyalPreparedFrame {
-            cells: cells.as_ptr(),
-            cell_count,
-            generation: prepared.generation().unwrap_or_default(),
-            rows: prepared.rows(),
-            columns: prepared.columns(),
-            cursor_row: cursor.row,
-            cursor_column: cursor.column,
-            cursor_visible: u8::from(cursor.visible),
-            alternate_screen: u8::from(prepared.alternate_screen()),
-            full_rebuild: u8::from(result.full_rebuild),
-            reserved0: 0,
-            rebuilt_row_count: u16::try_from(result.rebuilt_row_count).unwrap_or(u16::MAX),
-            reserved1: 0,
-            damage_word0: damage[0],
-            damage_word1: damage[1],
-            damage_word2: damage[2],
-            damage_word3: damage[3],
-            grapheme_utf8: grapheme.as_ptr(),
-            grapheme_utf8_len,
-            reserved2: 0,
-        }
-    })
-    .unwrap_or_else(SeyalPreparedFrame::empty)
+    with_display_client_mut(frame_from_client).unwrap_or_else(SeyalPreparedFrame::empty)
+}
+
+/// Prepared surface for one adopted client. Does not retarget the focused
+/// display route, so a pane can render its own grid while another tab is
+/// focused and unbound.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_bridge_frame_for(handle: u64) -> SeyalPreparedFrame {
+    with_client_mut(handle, frame_from_client).unwrap_or_else(SeyalPreparedFrame::empty)
 }
