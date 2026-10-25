@@ -179,13 +179,13 @@ extension ProductChromeHostView {
     private func drivePaneRecovery(_ target: SeyalAppPaneRecoveryTarget) {
         let effect = seyal_app_pane_recovery_effect(pane.appHandle, target)
         switch effect.kind {
-        case 1:
+        case UInt16(SEYAL_APP_RECOVERY_EFFECT_PERFORM_ATTEMPT.rawValue):
             performPaneRecoveryAttempt(target: target, remainingMs: effect.parameter)
-        case 2:
+        case UInt16(SEYAL_APP_RECOVERY_EFFECT_SCHEDULE.rawValue):
             let pin = PaneRecoveryPin(target)
             schedulePaneRecoveryTimer(pin: pin, delayMs: effect.parameter)
             _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
-        case 3:
+        case UInt16(SEYAL_APP_RECOVERY_EFFECT_LAUNCH_HELPER.rawValue):
             let launched = pane.inputSurface.bridge?.launchBundledRuntime() ?? false
             _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
             if !launched {
@@ -196,7 +196,7 @@ extension ProductChromeHostView {
                 )
             }
             driveRecovery()
-        case 4:
+        case UInt16(SEYAL_APP_RECOVERY_EFFECT_DISPOSE_HANDLE.rawValue):
             disposeRecoveryHandle(effect.parameter)
             _ = seyal_app_ack_pane_recovery_effect(pane.appHandle, target)
             driveRecovery()

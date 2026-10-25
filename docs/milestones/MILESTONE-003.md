@@ -193,7 +193,7 @@ Umbrellas **#674 / #675 / #676** remain **Open** and are never pickups. Live Git
 |---|---|---|
 | C2b enable `CreateTab` with live second Controller | #1175 | **Open** — @mahboobmonnamd; C1 + C2a already closed |
 | C3 enable pane splitting, one execution per leaf | #1217 | **Open** — @mahboobmonnamd |
-| Multiple live Metal surfaces per Tab | #936 | **Open** — unassigned; **Blocked** on #923 plus C3 through accepted ADR-017 |
+| Multiple live Metal surfaces per Tab | #936 | **Open** — Ready, @mahboobmonnamd; #923 / #994 / #1080 / #1238 have landed. Implementation is PR #1250. Not Blocked. |
 
 **Lane B — windows/tabs (ADR-018; user close gated on W6)**
 
