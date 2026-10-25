@@ -174,4 +174,104 @@ final class KeybindingEvidenceTests: XCTestCase {
             XCTAssertEqual(code, 0, "arrow named=\(named) must fall through")
         }
     }
+
+    // MARK: - SPEC-024 §5.6 chrome visibility toggles (#922)
+
+    private func commandKey(_ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: flags,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: flags.contains(.option) ? "º" : "0",
+            charactersIgnoringModifiers: "0",
+            isARepeat: false,
+            keyCode: 29 // kVK_ANSI_0
+        ))
+    }
+
+    /// §14 item 23 / R11.2: the View-menu toggles carry the projected keys.
+    func testChromeToggleMenuItemsRealizeProjectedKeyEquivalents() throws {
+        let rows: [(UInt16, NSEvent.ModifierFlags)] = [
+            (KeybindingShortcutRealization.chromeToggleLeftPanel, [.command]),
+            (KeybindingShortcutRealization.chromeToggleInspector, [.command, .option]),
+        ]
+        for (commandId, mask) in rows {
+            let row = try XCTUnwrap(KeybindingShortcutRealization.item(commandId: commandId))
+            XCTAssertEqual(row.has_key_equivalent, 1)
+            XCTAssertEqual(row.key_base, UInt32(UnicodeScalar("0").value))
+            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            KeybindingShortcutRealization.realize(item, commandId: commandId)
+            XCTAssertEqual(item.keyEquivalent, "0")
+            XCTAssertEqual(item.keyEquivalentModifierMask, mask)
+        }
+    }
+
+    /// R5.6.2: titles come from Rust visibility, refreshed at menu validation.
+    @MainActor
+    func testChromeToggleMenuTitlesFollowRustVisibility() {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        let sidebar = NSMenuItem(
+            title: "",
+            action: #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:)),
+            keyEquivalent: ""
+        )
+        sidebar.target = view
+        KeybindingShortcutRealization.realize(
+            sidebar, commandId: KeybindingShortcutRealization.chromeToggleLeftPanel
+        )
+        let inspector = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        KeybindingShortcutRealization.realize(
+            inspector, commandId: KeybindingShortcutRealization.chromeToggleInspector
+        )
+        XCTAssertTrue(view.validateMenuItem(sidebar))
+        XCTAssertTrue(view.validateMenuItem(inspector))
+        XCTAssertEqual(sidebar.title, "Hide Sidebar")
+        XCTAssertEqual(inspector.title, "Hide Inspector")
+
+        view.invokeProjectedWorkspaceCommand(sidebar)
+        XCTAssertTrue(view.validateMenuItem(sidebar))
+        XCTAssertTrue(view.validateMenuItem(inspector))
+        XCTAssertEqual(sidebar.title, "Show Sidebar")
+        XCTAssertEqual(inspector.title, "Hide Inspector")
+        XCTAssertTrue(view.left.isHidden)
+    }
+
+    /// #922 "visibility toggles reclaim layout": ⌘0 and ⌥⌘0 through the real
+    /// key path hide one column each, the center column takes its space, and a
+    /// second press restores the original layout.
+    @MainActor
+    func testCommandZeroTogglesReclaimCenterLayoutAndRestore() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+        let original = view.centerColumn.frame
+        XCTAssertFalse(view.left.isHidden)
+        XCTAssertFalse(view.inspectorColumn.isHidden)
+
+        XCTAssertTrue(view.performKeyEquivalent(with: try commandKey(.command)))
+        view.layoutSubtreeIfNeeded()
+        let withoutLeft = view.centerColumn.frame
+        XCTAssertTrue(view.left.isHidden)
+        XCTAssertFalse(view.inspectorColumn.isHidden)
+        XCTAssertLessThan(withoutLeft.minX, original.minX, "center takes the sidebar space")
+        XCTAssertEqual(withoutLeft.maxX, original.maxX, accuracy: 0.5)
+
+        XCTAssertTrue(view.performKeyEquivalent(with: try commandKey([.command, .option])))
+        view.layoutSubtreeIfNeeded()
+        let centerOnly = view.centerColumn.frame
+        XCTAssertTrue(view.inspectorColumn.isHidden)
+        XCTAssertGreaterThan(centerOnly.maxX, withoutLeft.maxX, "center takes the inspector space")
+        XCTAssertEqual(centerOnly.minX, withoutLeft.minX, accuracy: 0.5)
+
+        XCTAssertTrue(view.performKeyEquivalent(with: try commandKey(.command)))
+        XCTAssertTrue(view.performKeyEquivalent(with: try commandKey([.command, .option])))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(view.left.isHidden)
+        XCTAssertFalse(view.inspectorColumn.isHidden)
+        XCTAssertEqual(view.centerColumn.frame, original, "second presses restore the layout")
+        XCTAssertEqual(seyal_app_shell(view.pane.appHandle).tab_count, 1, "no tab side effect")
+    }
 }

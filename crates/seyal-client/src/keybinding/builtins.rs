@@ -1,7 +1,7 @@
 //! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open`.
 //!
 //! Excludes ADR-021 pane rows (K7) and ADR-018 `window.new` (R5.0.1).
-//! Includes §5.4 `ctrl+r` and §5.5 `goto.open` (K8/N4).
+//! Includes §5.4 `ctrl+r`, §5.5 `goto.open` (K8/N4) and the §5.6 chrome toggles.
 //! Focus-history Back/Forward builtins wait for N3 / tip B (no dead catalog rows).
 
 use super::keys::parse_keys;
@@ -151,6 +151,18 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         BuiltinRow {
             keys_notation: "cmd+shift+o",
             id: WorkspaceCommandId::GotoOpen,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+0",
+            id: WorkspaceCommandId::ChromeToggleLeftPanel,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: "cmd+opt+0",
+            id: WorkspaceCommandId::ChromeToggleInspector,
             ordinal: None,
             context: APP,
         },

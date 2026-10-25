@@ -766,15 +766,11 @@ final class ProductChromeHostView: NSView {
 }
 
 extension ProductChromeHostView: NSMenuItemValidation {
-    /// R6.4.2: enabled state comes only from the Rust shortcut projection.
+    /// R6.4.2 / R5.6.2: enabled state and the live title come only from Rust.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard let commandId = menuItem.representedObject as? UInt16 else {
             return true
         }
-        return KeybindingShortcutRealization.isEnabled(
-            appHandle: pane.appHandle,
-            commandId: commandId,
-            composerFocused: false
-        )
+        return KeybindingShortcutRealization.validate(menuItem, commandId: commandId, appHandle: pane.appHandle)
     }
 }

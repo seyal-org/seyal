@@ -49,7 +49,9 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneSplitDown
         | WorkspaceCommandId::PresentationToggleRaw
         | WorkspaceCommandId::PresentationToggleTui
-        | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
+        | WorkspaceCommandId::GotoOpen
+        | WorkspaceCommandId::ChromeToggleLeftPanel
+        | WorkspaceCommandId::ChromeToggleInspector => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
         // Focus-history is key-only in M003 (K8); not a K5 menu row.
         WorkspaceCommandId::TabSelectOrdinal
@@ -80,6 +82,9 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
+        // Stateless titles; menus show the live Hide/Show title (R5.6.2).
+        WorkspaceCommandId::ChromeToggleLeftPanel => "Toggle Sidebar",
+        WorkspaceCommandId::ChromeToggleInspector => "Toggle Inspector",
         // Focus-history remains key-only in M003 (K8); not a K5 menu title.
         other => other.as_str(),
     }
@@ -98,6 +103,8 @@ fn menu_visible_commands() -> impl Iterator<Item = WorkspaceCommand> {
         WorkspaceCommandId::PresentationToggleRaw,
         WorkspaceCommandId::PresentationToggleTui,
         WorkspaceCommandId::GotoOpen,
+        WorkspaceCommandId::ChromeToggleLeftPanel,
+        WorkspaceCommandId::ChromeToggleInspector,
     ]
     .into_iter()
     .map(|id| WorkspaceCommand { id, ordinal: None })
@@ -238,6 +245,8 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::FocusHistoryBack => 19,
         WorkspaceCommandId::FocusHistoryForward => 20,
         WorkspaceCommandId::GotoOpen => 21,
+        WorkspaceCommandId::ChromeToggleLeftPanel => 22,
+        WorkspaceCommandId::ChromeToggleInspector => 23,
     }
 }
 
@@ -265,6 +274,8 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         19 => WorkspaceCommandId::FocusHistoryBack,
         20 => WorkspaceCommandId::FocusHistoryForward,
         21 => WorkspaceCommandId::GotoOpen,
+        22 => WorkspaceCommandId::ChromeToggleLeftPanel,
+        23 => WorkspaceCommandId::ChromeToggleInspector,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

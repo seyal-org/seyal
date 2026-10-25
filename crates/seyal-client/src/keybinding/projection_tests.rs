@@ -323,3 +323,58 @@ fn unmatched_command_menu_steal_only_for_inactive_projected_equivalent() {
         "composer Cmd+Left must remain native text editing"
     );
 }
+
+/// SPEC-024 §5.6 / R5.6.2: both chrome toggles are menu-visible `app`
+/// commands with the builtin key equivalents and stable FFI ids.
+#[test]
+fn chrome_toggles_project_builtin_key_equivalents_and_stable_ids() {
+    let table = load_keybinding_table(None);
+    let route = route_context_set(false, PresentationMode::Raw, false);
+    let projection = project_shortcuts(&table, route);
+    for (id, keys, ffi_id) in [
+        (WorkspaceCommandId::ChromeToggleLeftPanel, "cmd+0", 22),
+        (WorkspaceCommandId::ChromeToggleInspector, "cmd+opt+0", 23),
+    ] {
+        let item = item_for(id, &projection);
+        assert_eq!(item.key_equivalent_notation.as_deref(), Some(keys));
+        assert!(
+            item.enabled,
+            "{} permitted in Raw (app context)",
+            id.as_str()
+        );
+        let binding = table
+            .bindings
+            .iter()
+            .find(|binding| binding.action.id == id)
+            .expect("builtin row");
+        assert_eq!(binding.context, BindingContext::APP);
+        assert_eq!(WorkspaceCommandId::parse(id.as_str()), Some(id));
+        assert_eq!(workspace_command_ffi_id(id), ffi_id);
+        assert_eq!(
+            workspace_command_from_ffi_id(ffi_id, 0).map(|c| c.id),
+            Some(id)
+        );
+    }
+}
+
+/// §14 item 23: a user rebind moves the key equivalent; unbinding keeps the item.
+#[test]
+fn chrome_toggle_rebind_moves_key_equivalent_and_unbind_keeps_item() {
+    let toml = r#"
+[[keybindings]]
+keys = "cmd+shift+s"
+action = "chrome.toggle_left_panel"
+
+[[keybindings]]
+keys = "cmd+opt+0"
+action = "none"
+"#;
+    let table = load_keybinding_table(Some(toml));
+    let route = route_context_set(false, PresentationMode::Flow, false);
+    let projection = project_shortcuts(&table, route);
+    let left = item_for(WorkspaceCommandId::ChromeToggleLeftPanel, &projection);
+    assert_eq!(left.key_equivalent_notation.as_deref(), Some("cmd+shift+s"));
+    let inspector = item_for(WorkspaceCommandId::ChromeToggleInspector, &projection);
+    assert_eq!(inspector.key_equivalent, None);
+    assert!(inspector.enabled);
+}

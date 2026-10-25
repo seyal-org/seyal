@@ -81,9 +81,9 @@ pub use app::{
     seyal_app_palette_row, seyal_app_pane_divider, seyal_app_pane_leaf, seyal_app_pane_region,
     seyal_app_record_compatible, seyal_app_recovery_param, seyal_app_route_keystroke,
     seyal_app_shell, seyal_app_shell_row, seyal_app_shortcut_count, seyal_app_shortcut_enabled,
-    seyal_app_shortcut_item, seyal_app_snapshot, seyal_app_tab, seyal_app_tab_tree_node,
-    seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
-    seyal_app_visual_warning, seyal_app_window,
+    seyal_app_shortcut_item, seyal_app_shortcut_title, seyal_app_snapshot, seyal_app_tab,
+    seyal_app_tab_tree_node, seyal_app_test_reload_ui_configuration, seyal_app_theme,
+    seyal_app_visual, seyal_app_visual_warning, seyal_app_window,
 };
 #[allow(unused_imports)]
 pub(crate) use attach_wakeup::{clone_attach_wakeup_writer, signal_attach_wakeup_on};
