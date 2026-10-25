@@ -334,7 +334,7 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertNotEqual(window.windowNumber, -1)
         XCTAssertTrue(host.orderedKeys.isEmpty)
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
-        assertWindowEventuallyCloses(window)
+        assertWindowRealizationDestroyed(window)
     }
 
     func testComponentHostDestroysWindowThroughAppKitClosePath() {
@@ -345,24 +345,18 @@ final class MultiWindowHostTests: XCTestCase {
             return XCTFail("expected bootstrap window")
         }
 
-        // Start from AppKit's real close request. The delegate must veto the
-        // local close, forward CloseWindow, and let Rust's effect close it.
+        // Start from AppKit's real close request. The delegate vetoes local
+        // destroy and forwards CloseWindow. `performClose` can drain the
+        // effect's deferred AppKit close before it returns, so the proof is
+        // the end state: Rust removed the window and AppKit dropped it.
         window.performClose(nil)
 
-        XCTAssertTrue(
-            NSApp.windows.contains { $0 === window },
-            "AppKit request is vetoed synchronously"
-        )
-        XCTAssertNotEqual(window.windowNumber, -1)
         XCTAssertTrue(
             host.orderedKeys.isEmpty,
             "Rust's DestroyWindowRealization removes the host entry"
         )
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
-        assertWindowEventuallyCloses(window)
-
-        XCTAssertFalse(NSApp.windows.contains { $0 === window })
-        XCTAssertEqual(window.windowNumber, -1)
+        assertWindowRealizationDestroyed(window)
     }
 
     func testProjectedCloseCommandDrainsRustWindowDestroyEffect() {
@@ -381,7 +375,7 @@ final class MultiWindowHostTests: XCTestCase {
 
         XCTAssertEqual(seyal_app_shell(host.appHandle).window_count, 0)
         XCTAssertNil(host.realizedWindow(for: key))
-        XCTAssertEqual(window.windowNumber, -1)
+        assertWindowRealizationDestroyed(window)
     }
 
     func testNativeKeyActivationUpdatesRustTargetBeforeHierarchicalClose() {
@@ -446,7 +440,11 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
     }
 
-    private func assertWindowEventuallyCloses(
+    /// Rust's destroy effect must take the realization off screen and out of
+    /// `NSApp.windows`. Current AppKit keeps `windowNumber` for a living
+    /// `NSWindow` after `close` when Swift still holds the object, so the
+    /// window number is not the destruction signal.
+    private func assertWindowRealizationDestroyed(
         _ window: NSWindow,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -454,7 +452,7 @@ final class MultiWindowHostTests: XCTestCase {
         let closed = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
                 MainActor.assumeIsolated {
-                    !NSApp.windows.contains { $0 === window } && window.windowNumber == -1
+                    !window.isVisible && !NSApp.windows.contains { $0 === window }
                 }
             },
             object: nil
@@ -462,6 +460,7 @@ final class MultiWindowHostTests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [closed], timeout: 2),
             .completed,
+            "Rust destroy must order the NSWindow out and drop it from NSApp.windows",
             file: file,
             line: line
         )

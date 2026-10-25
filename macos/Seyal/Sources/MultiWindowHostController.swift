@@ -134,23 +134,32 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
                 installLiveHost(in: hostWindow, key: next)
             }
         }
-        window.delegate = nil
         window.contentView = nil
-        // Use AppKit's production close path in every host. The application
-        // delegate owns stay-alive policy; component tests install the same
-        // `applicationShouldTerminateAfterLastWindowClosed` safeguard.
-        // `isReleasedWhenClosed = false` keeps ownership with Swift ARC.
+        // `windowShouldClose` must veto AppKit's synchronous user request per
+        // ADR-018 §2.5. The effect still owns this destruction; defer its
+        // AppKit close until that delegate call has returned, otherwise the
+        // in-flight veto swallows `close()` and the NSWindow stays on screen.
         if appKitCloseRequestsInFlight.contains(key) {
-            // `windowShouldClose` must veto AppKit's synchronous request per
-            // ADR-018 §2.5. The effect still owns this destruction; defer its
-            // AppKit close until the delegate has unwound; the captured
-            // NSWindow stays retained until close completes.
             DispatchQueue.main.async { [window] in
-                window.close()
+                Self.finishAppKitClose(window)
             }
         } else {
-            window.close()
+            Self.finishAppKitClose(window)
         }
+    }
+
+    /// Drop the native realization from AppKit's window list.
+    ///
+    /// `isReleasedWhenClosed = false` orders the window out but, on current
+    /// AppKit, leaves it in `NSApp.windows` and preserves `windowNumber` for
+    /// as long as Swift retains the object. Releasing on close is what
+    /// removes it. The extra retain balances AppKit's release so ARC remains
+    /// the owner until the host and any test drop their references.
+    private static func finishAppKitClose(_ window: NSWindow) {
+        window.delegate = nil
+        window.isReleasedWhenClosed = true
+        _ = Unmanaged.passRetained(window)
+        window.close()
     }
 
     private func orderFrontMakeKey(_ key: WindowKey) {
@@ -214,6 +223,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 960, height: 640)
         window.tabbingMode = .disallowed
         window.identifier = NSUserInterfaceItemIdentifier("seyal-window-\(key.lo)-\(key.hi)")
+        // The traffic-light control is the real close button. Stamp it so
+        // headed tests can find it without depending on the system AX label,
+        // which is not reliably "Close".
+        window.standardWindowButton(.closeButton)?
+            .setAccessibilityIdentifier("seyal-window-close")
         window.delegate = self
         let platform = NSApp.effectiveAppearance
         NativeThemeRealization.surfaceColdDiagnosticsOnce(for: platform)

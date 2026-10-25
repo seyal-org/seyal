@@ -1240,11 +1240,9 @@ final class SeyalHostUITests: XCTestCase {
         newWindow.click()
         waitForWindowCount(app, 2, message: "New Window creates a second headed window")
 
-        // XCUI does not promise that app.windows order follows Seyal's snapshot
-        // order. Match the native window control across the app instead.
-        let closeButton = app.windows.descendants(matching: .button)
-            .matching(NSPredicate(format: "label == %@", "Close"))
-            .firstMatch
+        // The system AX label of the traffic-light control is not reliably
+        // "Close". The host stamps the real `standardWindowButton(.closeButton)`.
+        let closeButton = app.buttons["seyal-window-close"].firstMatch
         XCTAssertTrue(closeButton.waitForExistence(timeout: 5), "window has its native close control")
         closeButton.click()
         waitForWindowCount(app, 1, message: "title-bar close forwards the typed CloseWindow action")
