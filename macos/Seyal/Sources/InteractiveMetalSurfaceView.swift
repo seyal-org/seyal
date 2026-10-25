@@ -153,6 +153,11 @@ final class InteractiveMetalSurfaceView: MetalSurfaceView, @preconcurrency NSTex
     override func terminalBridgeStatusDidChange() {
         super.terminalBridgeStatusDidChange()
         let connected = terminalBridgeIsConnected
+        if connected, recoveryPresentationPending {
+            // A usable bridge is when the composer can accept first responder.
+            resetComposerRecoveryFocusRetries()
+            _ = advanceRecoveryPresentationIfReady()
+        }
         if connected {
             guard !announcedBridgeUsable else { return }
             announcedBridgeUsable = true

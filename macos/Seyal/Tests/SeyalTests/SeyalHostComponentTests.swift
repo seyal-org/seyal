@@ -924,9 +924,7 @@ final class SeyalHostComponentTests: XCTestCase {
             }
         }
         let capture = captureDirectory.appendingPathComponent("committed.bin")
-        let window = try XCTUnwrap(NSApp.windows.first {
-            $0.contentView is ProductChromeHostView
-        })
+        let window = try XCTUnwrap(liveProductWindow(), "no visible product window")
         let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
         let pane = host.pane
         let view = pane.inputSurface
@@ -980,8 +978,14 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce else { return }
+        let connectedResult = await XCTWaiter.fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce, connectedResult == .completed else {
+            let snap = seyal_app_snapshot(pane.appHandle)
+            XCTFail(
+                "projection did not connect; bridge=\(view.terminalBridgeIsConnected) frame=\(view.terminalCurrentFrame() != nil) eligibility=\(snap.eligibility) recovery=\(snap.recovery_stage) attempts=\(snap.recovery_attempts) visible=\(window.occlusionState.contains(.visible)) key=\(window.isKeyWindow)"
+            )
+            return
+        }
         connectPoll.invalidate()
 
         // A bounded real PTY child records bytes; no input bridge is mocked.
@@ -2172,9 +2176,7 @@ final class SeyalHostComponentTests: XCTestCase {
     /// last geometry proposal. Headed overflow scroll is covered by XCUI.
     @MainActor
     func testFlowTranscriptScrollDoesNotMutatePtySizeOrCursor() async throws {
-        let window = try XCTUnwrap(NSApp.windows.first {
-            $0.contentView is ProductChromeHostView
-        })
+        let window = try XCTUnwrap(liveProductWindow(), "no visible product window")
         let host = try XCTUnwrap(window.contentView as? ProductChromeHostView)
         let pane = host.pane
         let view = pane.inputSurface
@@ -2215,8 +2217,14 @@ final class SeyalHostComponentTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         host.activateAfterWindowPresentation()
         checkConnected()
-        await fulfillment(of: [connected], timeout: 30)
-        guard connectedOnce else { return }
+        let connectedResult = await XCTWaiter.fulfillment(of: [connected], timeout: 30)
+        guard connectedOnce, connectedResult == .completed else {
+            let snap = seyal_app_snapshot(pane.appHandle)
+            XCTFail(
+                "Flow projection did not connect; bridge=\(view.terminalBridgeIsConnected) frame=\(view.terminalCurrentFrame() != nil) eligibility=\(snap.eligibility) recovery=\(snap.recovery_stage) attempts=\(snap.recovery_attempts) visible=\(window.occlusionState.contains(.visible)) key=\(window.isKeyWindow)"
+            )
+            return
+        }
         connectPoll.invalidate()
 
         // Wait until prepared geometry/cursor stop moving so a later PTY
@@ -2722,6 +2730,21 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertNotEqual(palette.flags & UInt16(SEYAL_APP_PALETTE_GOTO), 0)
     }
 
+}
+
+/// The headed test host keeps the launched product window. Private hosts in
+/// the same process can leave a detached `ProductChromeHostView` earlier in
+/// `NSApp.windows`. Live projection checks must use the visible key window.
+@MainActor
+private func liveProductWindow() -> NSWindow? {
+    let product: (NSWindow) -> Bool = { window in
+        guard window.isVisible, let host = window.contentView as? ProductChromeHostView else {
+            return false
+        }
+        return !host.pane.inputSurface.isDetachingRuntimeConnection
+    }
+    return NSApp.windows.first { $0.isKeyWindow && product($0) }
+        ?? NSApp.windows.first(where: product)
 }
 
 @discardableResult
