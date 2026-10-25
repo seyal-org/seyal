@@ -74,6 +74,13 @@ impl ApplicationRoot {
             .as_ref()
             .is_some_and(|owned| owned.raw() == handle)
         {
+            // Repeat bind after the display focus was cleared (registry loss,
+            // quit fixture, recovery). The execution is already installed;
+            // the focused pane still has to read this client's frame.
+            self.pane_client_raws.insert(fence.pane, handle);
+            if self.shell.snapshot().focused_pane == fence.pane {
+                crate::ffi::set_focused_display_handle(handle);
+            }
             return Ok(());
         }
         if self.client_handle.is_none() {
