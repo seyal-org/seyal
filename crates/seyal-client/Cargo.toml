@@ -49,8 +49,3 @@ harness = false
 [[bench]]
 name = "m003_provisioning"
 harness = false
-
-[[bench]]
-name = "m003_presentation_qualification"
-harness = false
-required-features = ["benchmark-instrumentation"]
