@@ -1,0 +1,44 @@
+{
+  "verified_at_utc": "2026-10-26T16:18:48Z",
+  "source_head": "d2f025ed981c7bc0034f78502fa5f0e50cd58183",
+  "source_toolchain_file": "[toolchain]\nchannel = \"1.98.0\"\nprofile = \"minimal\"\ncomponents = [\"rustfmt\", \"clippy\"]\n",
+  "compiler_in_exact_build_cwd": {
+    "stdout": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
+    "stderr": "",
+    "cwd": "${SOURCE_ROOT}"
+  },
+  "cargo_in_exact_build_cwd": {
+    "stdout": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+    "stderr": "",
+    "cwd": "${SOURCE_ROOT}"
+  },
+  "probe_shell_default_compiler": {
+    "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "stderr": "",
+    "cwd": "${EVIDENCE_ROOT}"
+  },
+  "dedicated_target_rustc_cache": {
+    "rustc_fingerprint": 6919445576331408088,
+    "outputs": {
+      "7971740275564407648": {
+        "success": true,
+        "status": "",
+        "code": 0,
+        "stdout": "___\nlib___.rlib\nlib___.dylib\nlib___.dylib\nlib___.a\nlib___.dylib\n${RUSTUP_HOME}/toolchains/1.98.0-aarch64-apple-darwin\noff\npacked\nunpacked\n___\ndebug_assertions\npanic=\"unwind\"\nproc_macro\ntarget_abi=\"\"\ntarget_arch=\"aarch64\"\ntarget_endian=\"little\"\ntarget_env=\"\"\ntarget_family=\"unix\"\ntarget_feature=\"aes\"\ntarget_feature=\"crc\"\ntarget_feature=\"dit\"\ntarget_feature=\"dotprod\"\ntarget_feature=\"dpb\"\ntarget_feature=\"dpb2\"\ntarget_feature=\"fcma\"\ntarget_feature=\"fhm\"\ntarget_feature=\"flagm\"\ntarget_feature=\"fp16\"\ntarget_feature=\"frintts\"\ntarget_feature=\"jsconv\"\ntarget_feature=\"lor\"\ntarget_feature=\"lse\"\ntarget_feature=\"neon\"\ntarget_feature=\"paca\"\ntarget_feature=\"pacg\"\ntarget_feature=\"pan\"\ntarget_feature=\"pmuv3\"\ntarget_feature=\"ras\"\ntarget_feature=\"rcpc\"\ntarget_feature=\"rcpc2\"\ntarget_feature=\"rdm\"\ntarget_feature=\"sb\"\ntarget_feature=\"sha2\"\ntarget_feature=\"sha3\"\ntarget_feature=\"ssbs\"\ntarget_feature=\"vh\"\ntarget_has_atomic=\"128\"\ntarget_has_atomic=\"16\"\ntarget_has_atomic=\"32\"\ntarget_has_atomic=\"64\"\ntarget_has_atomic=\"8\"\ntarget_has_atomic=\"ptr\"\ntarget_has_atomic_primitive_alignment=\"128\"\ntarget_has_atomic_primitive_alignment=\"16\"\ntarget_has_atomic_primitive_alignment=\"32\"\ntarget_has_atomic_primitive_alignment=\"64\"\ntarget_has_atomic_primitive_alignment=\"8\"\ntarget_has_atomic_primitive_alignment=\"ptr\"\ntarget_os=\"macos\"\ntarget_pointer_width=\"64\"\ntarget_vendor=\"apple\"\nunix\n",
+        "stderr": ""
+      },
+      "13636704241570481030": {
+        "success": true,
+        "status": "",
+        "code": 0,
+        "stdout": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+        "stderr": ""
+      }
+    },
+    "successes": {}
+  },
+  "dedicated_target_rustc_cache_sha256": "af20e19376f94fb988bb8c5bd16ec751634443280e73dcd0b66cdf004f891d6f",
+  "measured_binary_sha256": "9e7ef5ee878186f27dedaf0b2618717489b35050738935b0a4f5489361a1d875",
+  "original_final_metadata_sha256": "c27d70d6582c34043c3e32a29896e2d1787ef6486178ebd139f0a6f27e3362cd",
+  "conclusion": "Measured release binary was built with source-pinned rustc 1.98.0. Original metadata rustc=1.97.1 describes probe-shell default, because its subprocess omitted cwd. Original raw metadata retained unchanged. No measurement rerun or binary rebuild was needed."
+}

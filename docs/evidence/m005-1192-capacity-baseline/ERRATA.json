@@ -1,0 +1,22 @@
+{
+  "superseded_run": "run-/20261026T161113Z",
+  "final_run": "run-/20261026T161240Z",
+  "reasons": [
+    "Initial cpu_total_ns fields contain unconverted macOS mach ticks. Multiply by 125/3 for nanoseconds on this recorded host. Do not interpret the original label literally.",
+    "Initial active measurements sampled resources after a five-round ResumeSession burst. Corrected active measurements sample after each round with 50 ms spacing."
+  ],
+  "raw_data_policy": "All original raw rows and failed preflights retained. Final summary uses every row in schema-v2 final run, without best-trial selection.",
+  "failed_preflights": {
+    "20261026T161035Z": "Sandbox blocked private UDS listener publication: publish listener failed: Io. No measurements fabricated.",
+    "20261026T161049Z": "Probe initially required 29-byte HelloAck, but valid optional catalog generation makes it 37 bytes. Decoder corrected; no daemon source changes."
+  },
+  "cpu_unit_authority": "https://github.com/apple-oss-distributions/xnu/blob/main/tests/recount/recount_perf_tests.c#L163-L167",
+  "toolchain_metadata_erratum": {
+    "affected": "run-/20261026T161240Z/metadata.json rustc field (also earlier runs)",
+    "reason": "rustc metadata subprocess inherited probe cwd rather than build source cwd",
+    "build_compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "probe_shell_default": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "supporting_evidence": "TOOLCHAIN-SUPPLEMENT.json: source toolchain pin, exact-source-cwd compiler output, dedicated target rustc cache, unchanged measured binary SHA256",
+    "raw_metadata": "Preserved unchanged. The existing rustc field must not be interpreted as binary build compiler."
+  }
+}
