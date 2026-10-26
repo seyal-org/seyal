@@ -413,6 +413,15 @@ final class RustDisplayBridge {
     return seyal_bridge_select(clientHandle) == 0
   }
 
+  /// Identity reads for the frame this window is showing. Restores the
+  /// readiness client afterward so poll stays on this bridge's own fd.
+  @discardableResult
+  func selectPresentedClient() -> Bool {
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    guard isConnected, handle != 0 else { return false }
+    return seyal_bridge_select(handle) == 0
+  }
+
   /// One DispatchSourceRead per live Controller fd. CreateTab's second
   /// client must not steal the first connection's readiness handler.
   func armAuxiliaryReadSources() {

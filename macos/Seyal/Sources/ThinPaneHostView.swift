@@ -95,7 +95,9 @@ final class ThinPaneHostView: NSView {
 
     private func bindFromBridgeIfNeeded(force: Bool = false) {
         guard inputSurface.terminalBridgeIsConnected else { return }
-        guard inputSurface.selectTerminalBridge() else { return }
+        // Bind samples the client whose frame this window is showing.
+        guard let bridge = inputSurface.bridge, bridge.selectPresentedClient() else { return }
+        defer { _ = bridge.selectClient() }
         let executionLow = seyal_bridge_execution_id_low()
         let executionHigh = seyal_bridge_execution_id_high()
         let attachmentLow = seyal_bridge_attachment_id_low()
