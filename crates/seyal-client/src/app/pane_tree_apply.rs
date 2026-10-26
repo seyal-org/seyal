@@ -14,6 +14,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::ZoomPane { id })
             .map_err(pane_tree_error)?;
+        self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         self.note_context_navigated()
     }
 
@@ -58,8 +60,8 @@ impl ApplicationRoot {
         self.shell
             .apply(ShellAction::FocusDirection { direction })
             .map_err(pane_tree_error)?;
-        #[cfg(target_os = "macos")]
         self.activate_focused_pane_authority();
+        self.record_focused_pane_commit();
         self.note_context_navigated()
     }
 

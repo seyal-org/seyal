@@ -625,6 +625,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(retry.isHidden, "automatic recovery must not show an explicit retry button")
     }
 
+    @MainActor
     func testPaneTreeHostVerbsFailClosedAndZoomOverlayUsesRustFlags() throws {
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         view.reconcileChrome()
@@ -677,6 +678,45 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(seyal_app_last_error(handle), 58, "NoDirectionalNeighbor")
         view.equalizeTab()
         XCTAssertEqual(seyal_app_last_error(handle), 0)
+    }
+
+    @MainActor
+    func testZoomOverlayFillsTabWithoutSplitInsetAndHidesOccludedLeaf() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let live = try XCTUnwrap(view.pane.superview)
+        let layout = try XCTUnwrap(live.superview)
+        let splitFrame = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(live.frame, splitFrame.insetBy(dx: 1, dy: 1))
+
+        let shell = seyal_app_shell(handle)
+        view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        view.layoutSubtreeIfNeeded()
+        let zoomed = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertTrue(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
+        XCTAssertFalse(zoomed.isHidden)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(zoomed.frame.width, layout.bounds.width, accuracy: 1)
+        XCTAssertEqual(zoomed.frame.height, layout.bounds.height, accuracy: 1)
+        XCTAssertEqual(live.frame, zoomed.frame, "zoomed leaf is full-Tab with no split inset")
+
+        view.unzoomPane()
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame, splitFrame)
+        XCTAssertEqual(live.frame, splitFrame.insetBy(dx: 1, dy: 1))
     }
 
     @MainActor

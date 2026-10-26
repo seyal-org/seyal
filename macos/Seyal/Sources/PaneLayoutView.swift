@@ -214,7 +214,7 @@ final class PaneLayoutView: NSView {
             // installs the host. Waiting for a later parent layout pass leaves
             // the AX button at its initial zero frame and unhittable to XCUI.
             if let region = regions.first(where: { $0.paneLo == key.lo && $0.paneHi == key.hi }) {
-                let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
+                let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
                 host.frame = scaled(region.rect).insetBy(dx: inset, dy: inset)
             }
         }
@@ -360,10 +360,14 @@ final class PaneLayoutView: NSView {
         }
     }
 
+    /// Borders and the live-surface inset must agree, so both use the visible leaf count.
+    private static func showsSplitChrome(_ regions: [Region]) -> Bool {
+        regions.filter { !$0.occluded }.count > 1
+    }
+
     private func rebuildRegionViews(_ next: [Region]) {
         regionViews.forEach { $0.removeFromSuperview() }
-        let visible = next.filter { !$0.occluded }
-        let split = visible.count > 1
+        let split = Self.showsSplitChrome(next)
         regionViews = next.enumerated().map { index, region in
             let view = PaneRegionView(region: region, index: index, split: split)
             view.isHidden = region.occluded
@@ -424,7 +428,7 @@ final class PaneLayoutView: NSView {
             applyingLiveFrame = false
         }
         super.layout()
-        let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
+        let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
         for (view, region) in zip(regionViews, regions) {
             view.frame = scaled(region.rect)
         }
@@ -448,7 +452,7 @@ final class PaneLayoutView: NSView {
     /// Focused chrome (composer/transcript/primary Metal) follows the focused
     /// LIVE region; fall back to the first LIVE region, then the full Tab.
     private func focusedLiveFrame() -> CGRect {
-        let inset: CGFloat = regions.count > 1 ? PaneRegionView.borderWidth : 0
+        let inset: CGFloat = Self.showsSplitChrome(regions) ? PaneRegionView.borderWidth : 0
         let focusedLive = regions.first(where: { $0.live && $0.focused })?.rect
             ?? regions.first(where: \.live)?.rect
             ?? CGRect(x: 0, y: 0, width: 1, height: 1)

@@ -4,7 +4,7 @@ import XCTest
 /// Right/Down projects one region per Rust leaf, clicking a region focuses that
 /// Pane, closing a non-last Pane removes its region, the last Pane offers no
 /// close, and exactly one live terminal surface exists, inside the focused
-/// region.
+/// region. This file also covers #1219 zoom.
 @MainActor
 final class SeyalPaneSplitUITests: XCTestCase {
     override func setUp() {
@@ -64,6 +64,41 @@ final class SeyalPaneSplitUITests: XCTestCase {
         assertSingleLiveSurface(in: app, focusedRegion: 0)
     }
 
+    /// #1219 headed evidence: ⌘⇧↩ (`pane.zoom_toggle`) shows the focused leaf
+    /// full-Tab without destroying its sibling; a second ⌘⇧↩ restores the split.
+    func testZoomToggleFillsTabAndRestoresSplit() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-pane-divider-0").exists)
+        if element(app, "seyal-pane-region-1").value as? String != "focused" {
+            app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        }
+        waitForFocus(app, region: 1)
+        let sibling = element(app, "seyal-secondary-live-pane")
+        XCTAssertTrue(sibling.waitForExistence(timeout: 12), "bound sibling has a live surface before zoom")
+        let tab = element(app, "seyal-pane-region-0").frame.union(element(app, "seyal-pane-region-1").frame)
+        let splitFrame = element(app, "seyal-pane-region-1").frame
+
+        app.typeKey("\r", modifierFlags: [.command, .shift])
+        waitForAbsence(element(app, "seyal-pane-region-0"), "zoom hides the occluded region")
+        waitForAbsence(sibling, "the occluded leaf presents no surface")
+        XCTAssertFalse(element(app, "seyal-pane-divider-0").exists, "no divider while zoomed")
+        XCTAssertEqual(element(app, "seyal-pane-region-1").value as? String, "focused")
+        assertFrame(element(app, "seyal-pane-region-1").frame, matches: tab, "zoomed leaf fills the Tab")
+        assertSingleLiveSurface(in: app, focusedRegion: 1)
+        XCTAssertEqual(app.state, .runningForeground)
+
+        app.typeKey("\r", modifierFlags: [.command, .shift])
+        XCTAssertTrue(element(app, "seyal-pane-region-0").waitForExistence(timeout: 8), "unzoom restores the sibling region")
+        XCTAssertTrue(element(app, "seyal-pane-divider-0").waitForExistence(timeout: 8))
+        XCTAssertTrue(sibling.waitForExistence(timeout: 12), "the sibling execution survived zoom")
+        XCTAssertEqual(try focusedRegionIndex(app, count: 2), 1)
+        assertFrame(element(app, "seyal-pane-region-1").frame, matches: splitFrame, "split ratio unchanged")
+        waitForUsablePty(in: app)
+    }
+
     // MARK: - Assertions
 
     private func focusedRegionIndex(_ app: XCUIApplication, count: Int) throws -> Int {
@@ -115,5 +150,17 @@ final class SeyalPaneSplitUITests: XCTestCase {
         let result = XCTWaiter.wait(for: [arrived], timeout: timeout)
         XCTAssertEqual(app.state, .runningForeground, "Seyal.app crashed while waiting for PTY attach")
         XCTAssertEqual(result, .completed, "PTY/runtime never became usable; terminal AX=\(terminal.value ?? "nil")")
+    }
+
+    private func waitForAbsence(_ element: XCUIElement, _ message: String) {
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element, handler: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 8), .completed, message)
+    }
+
+    private func assertFrame(_ actual: CGRect, matches expected: CGRect, _ message: String) {
+        XCTAssertEqual(actual.minX, expected.minX, accuracy: 1, message)
+        XCTAssertEqual(actual.minY, expected.minY, accuracy: 1, message)
+        XCTAssertEqual(actual.width, expected.width, accuracy: 1, message)
+        XCTAssertEqual(actual.height, expected.height, accuracy: 1, message)
     }
 }
