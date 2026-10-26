@@ -13,12 +13,12 @@ enum KeybindingShortcutRealization {
     static let presentationToggleRaw: UInt16 = 15
     static let presentationToggleTui: UInt16 = 16
     static let gotoOpen: UInt16 = 21
-    static let appCloseFocused: UInt16 = 22
-    static let windowNew: UInt16 = 23
-    static let windowClose: UInt16 = 24
-    static let windowCycleNext: UInt16 = 25
-    static let windowCyclePrevious: UInt16 = 26
-    static let windowSelectOrdinal: UInt16 = 27
+    static let appCloseFocused: UInt16 = 37
+    static let windowNew: UInt16 = 38
+    static let windowClose: UInt16 = 39
+    static let windowCycleNext: UInt16 = 40
+    static let windowCyclePrevious: UInt16 = 41
+    static let windowSelectOrdinal: UInt16 = 42
 
     static func item(commandId: UInt16) -> SeyalAppShortcutItem? {
         let count = seyal_app_shortcut_count()
