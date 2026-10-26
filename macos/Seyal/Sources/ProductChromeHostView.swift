@@ -483,6 +483,7 @@ final class ProductChromeHostView: NSView {
             routeFocus()
         }
         applyTheme()
+        applyPresentationTierFromSnapshot()
     }
 
     /// Global keyboard-first command palette (#932): the menu action target.
@@ -598,11 +599,8 @@ final class ProductChromeHostView: NSView {
         splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
         splitDownButton.isHidden = splitRightButton.isHidden
         closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
-        closeTabButton.idLo = shell.active_tab_lo
-        closeTabButton.idHi = shell.active_tab_hi
         closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
-        closePaneButton.idLo = shell.focused_pane_lo
-        closePaneButton.idHi = shell.focused_pane_hi
+        configureCloseButtons(shell: shell)
     }
 
     func rebuildLeft(shell: SeyalAppShell, leftPanel: UInt16) {

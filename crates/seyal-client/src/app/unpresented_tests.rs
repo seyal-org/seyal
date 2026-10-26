@@ -413,3 +413,18 @@ fn failed_unpresented_record_does_not_change_provisioning_ledger() {
         "a rejected catalog update must not leave a phantom unreferenced ledger entry"
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn poll_client_drains_runtime_inventory_before_live_client_lookup() {
+    let mut root = ApplicationRoot::new();
+    let live = ExecutionId::from_bytes([0x61; 16]);
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    tx.send(Ok(vec![live])).unwrap();
+    root.pending_unpresented_inventory = Some(rx);
+
+    assert_eq!(root.poll_client(root.fence()), Err(AppError::NoLiveClient));
+
+    assert!(root.pending_unpresented_inventory.is_none());
+    assert_eq!(root.live_unpresented(), vec![live]);
+}

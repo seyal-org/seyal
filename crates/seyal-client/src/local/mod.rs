@@ -12,25 +12,23 @@ mod viewport_line_ids;
 
 use std::{
     collections::{HashMap, VecDeque},
-    io::Read,
     net::Shutdown,
     os::{fd::AsRawFd, unix::net::UnixStream},
 };
 
 use seyal_render::{PreparationResult, PreparedSurface, RowDamage};
 use seyal_runtime::{
-    display::{decode_chunk, DisplayCache},
+    display::DisplayCache,
     local_ipc::framing::{
         encode_frame, BlockTimeline, ComposerResult, ComposerResultCode, ComposerStatus,
-        CreateExecutionResult, ErrorCode, ExecutionList, FrameHeader, HistoryRangeRequest,
-        HistoryRangeSnapshot, InputRef, Lifecycle, MessageType, ResizeResult, Role,
-        TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
+        CreateExecutionResult, ErrorCode, ExecutionList, HistoryRangeRequest, HistoryRangeSnapshot,
+        Lifecycle, MessageType, Role, TerminateExecutionResult, HEADER_LEN, MAX_FRAME_PAYLOAD,
     },
-    pass8::{BlockLifecycle, BlockState, BLOCK_STATE_MESSAGE_TYPE},
+    pass8::BlockState,
     AttachmentId, ExecutionId,
 };
 
-use crate::block_cache::{quarantine_epoch, BlockApply, BlockCache};
+use crate::block_cache::{quarantine_epoch, BlockCache};
 
 #[cfg(test)]
 use seyal_runtime::local_ipc::framing::{

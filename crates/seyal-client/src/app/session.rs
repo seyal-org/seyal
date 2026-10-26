@@ -282,6 +282,8 @@ impl ApplicationRoot {
     pub fn poll_client(&mut self, fence: AppFence) -> Result<(), AppError> {
         self.require_fence(fence)
             .or_else(|error| self.fail(error))?;
+        #[cfg(target_os = "macos")]
+        self.poll_unpresented_inventory_refresh();
         let display_handle = self
             .authority
             .and_then(|bound| self.pane_client_raws.get(&bound.pane).copied())
@@ -336,6 +338,7 @@ impl ApplicationRoot {
         // from the focused display Controller after a second-tab attach).
         self.poll_create_client_prepare()?;
         self.poll_unfocused_pane_clients();
+        self.poll_dispose_clients();
         while self.absorb_wire_create_result()?.is_some() {}
         let _ = self.absorb_wire_terminate_result(true)?;
         self.last_error = None;

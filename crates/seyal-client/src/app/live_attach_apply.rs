@@ -275,6 +275,18 @@ impl ApplicationRoot {
         self.dispatch_live_provisioning_effects(effects)
     }
 
+    pub(super) fn poll_dispose_clients(&mut self) {
+        let lost: Vec<_> = self
+            .dispose_clients
+            .iter_mut()
+            .filter_map(|(owner, client)| client.poll_prepare().is_err().then_some(*owner))
+            .collect();
+        for owner in lost {
+            self.dispose_clients.remove(&owner);
+            self.provisioning.on_connection_lost(owner, None);
+        }
+    }
+
     /// Install or replace per-pane Controller authority; activate when focused.
     pub(super) fn install_pane_authority(
         &mut self,

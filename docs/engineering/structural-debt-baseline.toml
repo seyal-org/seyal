@@ -259,6 +259,6 @@ reason = "The existing connection writer remains the single owner of bounded con
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/MultiWindowHostController.swift"
-acknowledged_loc = 765
+acknowledged_loc = 769
 issue = 1158
-reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here."
+reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here. The W5 occlusion-hidden forwarding was restored by this landing."
