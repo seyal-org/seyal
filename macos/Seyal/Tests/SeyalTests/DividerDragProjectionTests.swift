@@ -218,7 +218,7 @@ final class DividerDragProjectionTests: XCTestCase {
         XCTAssertEqual(seyal_app_pane_region(handle, 0).width, 1.0, "rejected drag changes nothing")
         XCTAssertEqual(seyal_app_shell(handle).pane_count, 1)
         let closePane = try XCTUnwrap(button(view, "seyal-close-pane"))
-        XCTAssertTrue(closePane.isHidden, "the last Pane still offers no Close Pane")
+        XCTAssertFalse(closePane.isHidden, "the surviving Pane still offers hierarchical Close Pane")
     }
 
     // MARK: - Helpers

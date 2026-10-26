@@ -36,7 +36,10 @@ struct ComposerStatusRelayTracker {
 extension RustDisplayBridge {
   func currentFrame() -> SeyalPreparedFrame? {
     guard isConnected, clientHandle != 0 else { return nil }
-    let frame = seyal_bridge_frame_for(clientHandle)
+    // Geometry and keys already follow the focused Pane. The prepared frame
+    // must too, without seyal_bridge_select moving this bridge's readiness fd.
+    let handle = windowFocusedDisplayHandle != 0 ? windowFocusedDisplayHandle : clientHandle
+    let frame = seyal_bridge_frame_for(handle)
     guard frame.cells != nil, frame.cell_count > 0 else { return nil }
     return frame
   }
