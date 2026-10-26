@@ -285,7 +285,7 @@ Policy may rebuild context or create one new RoutingDecision within a bounded re
 
 ## 17. SPEC-030 frozen task-to-harness request reconciliation (conditional acceptance via PR #1340)
 
-This candidate amendment under [#1327](https://github.com/seyal-org/seyal/issues/1327) preserves §§1–16 and the three `RequestAssemblyAuthority` classifications. §17 is Proposed until independent non-author APPROVE plus explicit user-authorized non-author merge of PR #1340; only after both conditions is this extension Accepted.
+This candidate amendment under [#1327](https://github.com/seyal-org/seyal/issues/1327) preserves §§1–16 and the three `RequestAssemblyAuthority` classifications. §17 is Proposed until ADR-024 is Accepted under #1327 and an independent non-author maintainer approves and an authorized non-author maintainer merges PR #1340; only after those conditions is this extension Accepted.
 
 ```text
 authorized WorkItemInputVersion + Attempt snapshot
