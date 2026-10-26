@@ -171,7 +171,20 @@ enum SeyalAppActionKind {
     SEYAL_APP_ACTION_SELECT_WINDOW = 65,
     SEYAL_APP_ACTION_CYCLE_WINDOW = 66,
     SEYAL_APP_ACTION_CREATE_WINDOW = 67,
-    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 68
+    SEYAL_APP_ACTION_REPORT_WINDOW_EVENT = 68,
+    /*
+     * PT5 pane-tree verbs. Hosts name identities only; Rust owns zoom/layout.
+     * Numbers follow the W4a window actions. ZOOM_PANE target is a PaneId.
+     * SWAP_PANES / MOVE_PANE_BESIDE use target_attachment_* for the second Pane.
+     * MOVE_PANE_BESIDE and FOCUS_DIRECTION reserved: 0 Left, 1 Right, 2 Above/Up, 3 Below/Down.
+     */
+    SEYAL_APP_ACTION_ZOOM_PANE = 69,
+    SEYAL_APP_ACTION_UNZOOM = 70,
+    SEYAL_APP_ACTION_SWAP_PANES = 71,
+    SEYAL_APP_ACTION_MOVE_PANE_BESIDE = 72,
+    SEYAL_APP_ACTION_FOCUS_DIRECTION = 73,
+    SEYAL_APP_ACTION_EQUALIZE_FOCUSED = 74,
+    SEYAL_APP_ACTION_EQUALIZE_TAB = 75
 };
 
 #define SEYAL_APP_WINDOW_EVENT_BECAME_KEY 0u
@@ -620,10 +633,14 @@ typedef struct SeyalAppNativeEffect {
  * x/y/width/height are unit fractions of the Tab's center area, origin
  * top-left; hosts position regions and never derive geometry. LIVE marks every
  * execution-bound leaf plus the focused bind-landing leaf so multiple Metal
- * surfaces can present simultaneously. Out-of-range indices return size == 0.
+ * surfaces can present simultaneously. ZOOMED marks the overlay leaf
+ * (full-Tab rect); OCCLUDED leaves remain in the tree with a zero rect.
+ * Hosts must not invent zoom geometry. Out-of-range indices return size == 0.
  */
 #define SEYAL_APP_PANE_REGION_FOCUSED 1u
 #define SEYAL_APP_PANE_REGION_LIVE 2u
+#define SEYAL_APP_PANE_REGION_ZOOMED 4u
+#define SEYAL_APP_PANE_REGION_OCCLUDED 8u
 
 typedef struct SeyalAppPaneRegion {
     uint16_t version;

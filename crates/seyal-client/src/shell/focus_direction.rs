@@ -350,17 +350,6 @@ fn choose_neighbor(
     best.map(|(id, _, _)| id)
 }
 
-/// True when `candidate` is a §5.7 geometric neighbor of `focused` in `direction`.
-#[cfg(test)]
-pub(super) fn is_geometric_neighbor(
-    tree: &PaneTree,
-    focused: PaneId,
-    candidate: PaneId,
-    direction: FocusDirection,
-) -> bool {
-    geometric_neighbor(tree, focused, direction) == Some(candidate)
-}
-
 /// Exact shared-edge neighbor, or `None`.
 #[cfg(test)]
 pub(super) fn geometric_neighbor(
@@ -372,6 +361,27 @@ pub(super) fn geometric_neighbor(
 }
 
 impl ShellState {
+    /// SPEC-025 §5.7 neighbor of the focused leaf (focus-relative keybinding targets).
+    ///
+    /// Read-only: does not change focus or zoom. Used by K7 swap/move dispatch so
+    /// those catalog ids call the existing `SwapPanes` / `MovePaneBeside` reducers
+    /// with the same neighbor selection as [`ShellAction::FocusDirection`].
+    pub(crate) fn directional_neighbor_of_focused(
+        &self,
+        direction: FocusDirection,
+    ) -> Result<PaneId, ShellError> {
+        let workspace = self.workspace(self.active_workspace_id())?;
+        let tab = workspace
+            .tab(workspace.active_tab_id()?)
+            .ok_or(ShellError::UnknownTab)?;
+        let focused = tab.focused;
+        if !tab.panes.contains_key(&focused) {
+            return Err(ShellError::UnknownPane);
+        }
+        let leaves = leaf_rects(&tab.root);
+        choose_neighbor(&leaves, focused, direction).ok_or(ShellError::NoDirectionalNeighbor)
+    }
+
     pub(super) fn focus_direction(&mut self, direction: FocusDirection) -> Result<(), ShellError> {
         let workspace_id = self.active_workspace_id();
         let chosen = {

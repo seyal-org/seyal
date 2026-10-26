@@ -626,6 +626,100 @@ final class SeyalHostComponentTests: XCTestCase {
     }
 
     @MainActor
+    func testPaneTreeHostVerbsFailClosedAndZoomOverlayUsesRustFlags() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.pane_count, 1)
+
+        view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        var region = seyal_app_pane_region(handle, 0)
+        XCTAssertEqual(
+            region.flags,
+            UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE | SEYAL_APP_PANE_REGION_ZOOMED)
+        )
+        XCTAssertEqual(region.width, 1.0)
+        XCTAssertEqual(region.height, 1.0)
+        XCTAssertEqual(seyal_app_pane_divider(handle, 0).size, 0)
+
+        view.zoomPane(lo: 1, hi: 2)
+        XCTAssertEqual(seyal_app_last_error(handle), 1, "stale zoom PaneId fails closed")
+        XCTAssertEqual(
+            seyal_app_pane_region(handle, 0).flags,
+            UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE | SEYAL_APP_PANE_REGION_ZOOMED)
+        )
+
+        view.equalizeFocused()
+        region = seyal_app_pane_region(handle, 0)
+        XCTAssertEqual(
+            region.flags,
+            UInt16(SEYAL_APP_PANE_REGION_FOCUSED | SEYAL_APP_PANE_REGION_LIVE),
+            "equalize clears zoom overlay without a second host model"
+        )
+
+        view.unzoomPane()
+        XCTAssertEqual(seyal_app_last_error(handle), 56, "NotZoomed")
+
+        view.swapPanes(
+            aLo: shell.focused_pane_lo, aHi: shell.focused_pane_hi,
+            bLo: 9, bHi: 9
+        )
+        XCTAssertEqual(seyal_app_last_error(handle), 1)
+
+        view.movePaneBeside(
+            paneLo: shell.focused_pane_lo, paneHi: shell.focused_pane_hi,
+            neighborLo: shell.focused_pane_lo, neighborHi: shell.focused_pane_hi,
+            side: 1
+        )
+        XCTAssertEqual(seyal_app_last_error(handle), 57, "InvalidMoveTarget")
+
+        view.focusDirection(1)
+        XCTAssertEqual(seyal_app_last_error(handle), 58, "NoDirectionalNeighbor")
+        view.equalizeTab()
+        XCTAssertEqual(seyal_app_last_error(handle), 0)
+    }
+
+    @MainActor
+    func testZoomOverlayFillsTabWithoutSplitInsetAndHidesOccludedLeaf() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let live = try XCTUnwrap(view.pane.superview)
+        let layout = try XCTUnwrap(live.superview)
+        let splitFrame = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(live.frame, splitFrame.insetBy(dx: 1, dy: 1))
+
+        let shell = seyal_app_shell(handle)
+        view.zoomPane(lo: shell.focused_pane_lo, hi: shell.focused_pane_hi)
+        view.layoutSubtreeIfNeeded()
+        let zoomed = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1"))
+        XCTAssertTrue(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
+        XCTAssertFalse(zoomed.isHidden)
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(zoomed.frame.width, layout.bounds.width, accuracy: 1)
+        XCTAssertEqual(zoomed.frame.height, layout.bounds.height, accuracy: 1)
+        XCTAssertEqual(live.frame, zoomed.frame, "zoomed leaf is full-Tab with no split inset")
+
+        view.unzoomPane()
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-0")).isHidden)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-pane-divider-0"))
+        XCTAssertEqual(try XCTUnwrap(accessibilityChild(view, identifier: "seyal-pane-region-1")).frame, splitFrame)
+        XCTAssertEqual(live.frame, splitFrame.insetBy(dx: 1, dy: 1))
+    }
+
+    @MainActor
     func testSinglePaneProjectsNoSplitDividerAndDividerDragFailsClosed() throws {
         XCTAssertEqual(MemoryLayout<SeyalAppPaneDivider>.size, 56)
         let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
