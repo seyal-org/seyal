@@ -825,14 +825,19 @@ mod tests {
         let (_, run, generation) = seeded_run();
 
         // ~48 KiB of stdout in small host chunks → multiple append batches.
+        // Generate with dd|tr. `/usr/bin/python3` on macOS runners can sit
+        // past the poll deadline with an empty environment and yield one batch.
         let config = StandaloneProcessConfig::new(700).unwrap();
         let mut host = StandaloneProcessHost::new(config);
         let HostStartOutcome::Started(handle) = host.start(
             run,
             generation,
             descriptor(
-                "/usr/bin/python3",
-                ["-c", "import sys; sys.stdout.write('x' * (48 * 1024))"],
+                "/bin/sh",
+                [
+                    "-c",
+                    "PATH=/bin:/usr/bin; dd if=/dev/zero bs=49152 count=1 2>/dev/null | tr '\\0' x",
+                ],
             ),
         ) else {
             panic!("expected spawn evidence");
@@ -847,7 +852,10 @@ mod tests {
                 output_batches += 1;
             }
         }
-        assert!(output_batches > 1, "cross-batch streaming required");
+        assert!(
+            output_batches > 1,
+            "cross-batch streaming required, batches={output_batches}"
+        );
         let segments = store.output_segment_count(run).unwrap();
         assert_eq!(segments, (48 * 1024) / OUTPUT_SEGMENT_LEN as u64);
         assert!(segments < output_batches, "no one-row-per-token regression");
