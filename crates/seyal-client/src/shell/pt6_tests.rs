@@ -75,6 +75,7 @@ fn seed_splittable() -> ShellState {
         first,
         true,
         true,
+        false,
     )
     .expect("fixture")
 }
@@ -153,7 +154,12 @@ fn assert_no_terminate_or_provision(shell: &mut ShellState) {
 
 fn assert_native_effect_surface(effect: NativeEffect) {
     match effect {
-        NativeEffect::None | NativeEffect::BoundedDetachThenTerminate => {}
+        NativeEffect::BoundedDetachThenTerminate { .. }
+        | NativeEffect::RealizeWindow { .. }
+        | NativeEffect::DestroyWindowRealization { .. }
+        | NativeEffect::OrderFrontMakeKey { .. }
+        | NativeEffect::WindowActivation { .. }
+        | NativeEffect::QuitCleanupComplete => {}
     }
 }
 
@@ -546,8 +552,8 @@ fn spec025_p3_equalize_blocked_on_issue_928() {
 
 #[test]
 fn spec025_p8_native_effect_surface_has_no_provision_variant() {
-    assert_native_effect_surface(NativeEffect::None);
-    assert_native_effect_surface(NativeEffect::BoundedDetachThenTerminate);
+    assert_native_effect_surface(NativeEffect::QuitCleanupComplete);
+    assert_native_effect_surface(NativeEffect::BoundedDetachThenTerminate { deadline_ms: 500 });
 }
 
 #[test]

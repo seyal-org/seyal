@@ -370,7 +370,7 @@ impl ShellState {
         &self,
         direction: FocusDirection,
     ) -> Result<PaneId, ShellError> {
-        let workspace = self.workspace(self.active_workspace)?;
+        let workspace = self.workspace(self.active_workspace_id())?;
         let tab = workspace
             .tab(workspace.active_tab_id()?)
             .ok_or(ShellError::UnknownTab)?;

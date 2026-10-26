@@ -40,15 +40,15 @@ acknowledged_loc = 834
 issue = 1117
 reason = "SPEC-022 §6 focus history store and its state-transition proofs stay together as one cohesive reducer. #1117 adds generated navigation and destruction sequences checked after every operation against an independent reference model; further splitting would separate invariants from the behavior they verify."
 
-[[exception]]
+[[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/app/mod.rs"
-ceiling_loc = 1040
-issue = 1123
-responsibility = "ApplicationRoot types, snapshot, and apply dispatch stay one product-state façade; #1217 registers pane provisioning, #1123 adds W4a window actions, native events, quit deadline and live-attachment fixtures, #1144 adds activation-failure routing beside the existing action table, and #936 moves Pane projection and recovery state to cohesive modules."
+acknowledged_loc = 871
+issue = 1219
+reason = "ApplicationRoot types and snapshot stay one product-state façade; #1219 moves apply dispatch to app/apply.rs and pane-tree verbs to pane_tree_apply.rs so PT5 zoom/move/equalize does not keep a second action table in this file."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/pane_layout.rs"
-acknowledged_loc = 736
+acknowledged_loc = 774
 issue = 1219
 reason = "Host Pane region/divider projection stays one layout module; #1219 adds zoom overlay host projection beside #923/#928 geometry without a second layout engine."
 
@@ -233,9 +233,9 @@ reason = "Command palette query, frozen rows, and run dispatch stay one reducer;
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/shell/mod.rs"
-acknowledged_loc = 956
-issue = 1218
-reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, and #1218 adds two equalize dispatch arms. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
+acknowledged_loc = 958
+issue = 1167
+reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, #1218 adds two equalize dispatch arms, and #1167 only declares the PT6 suite module. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
@@ -252,9 +252,9 @@ reason = "SPEC-024 §14 K2 matrix plus #1145 zoom/swap/move, #1150 directional f
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/decode.rs"
-acknowledged_loc = 739
-issue = 1123
-reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, and #1144 adds the ActivationFailed event without splitting the ABI table."
+acknowledged_loc = 790
+issue = 1219
+reason = "ABI action decoding remains one versioned match surface; #1123 adds window host actions after N3 history actions, #1144 adds the ActivationFailed event, and #1219 adds PT5 zoom/swap/move/directional/equalize kinds after those codes without splitting the ABI table."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/local/mod.rs"
