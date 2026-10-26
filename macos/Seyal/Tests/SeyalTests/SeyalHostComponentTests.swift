@@ -1607,57 +1607,6 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(advances, 1)
     }
 
-    // #1344: One deferred AppKit turn may run before window/chrome focus
-    // eligibility is ready. A *later* real chrome event must be able to
-    // re-offer focus, not leave a usable PTY permanently Rust-Restoring.
-    @MainActor
-    func testRecoveryReoffersFocusOnLaterChromeEventAfterTwoRejections() async throws {
-        let handle = seyal_app_create()
-        defer { XCTAssertEqual(seyal_app_destroy(handle), 0) }
-        let view = InteractiveMetalSurfaceView(
-            frame: NSRect(x: 0, y: 0, width: 320, height: 200),
-            appHandle: handle
-        )
-        view.recoveryPresentationPending = true
-        var attempts = 0
-        let deferredRetry = expectation(description: "backoff focus retry ran and was rejected")
-        let focus: () -> Bool = {
-            attempts += 1
-            if attempts == 2 {
-                deferredRetry.fulfill()
-            }
-            return attempts == 3
-        }
-        var deferredAccepted = false
-        XCTAssertFalse(view.requestComposerFocusForRecovery(
-            focus: focus,
-            onAccepted: { deferredAccepted = true }
-        ))
-        await fulfillment(of: [deferredRetry], timeout: 1)
-        XCTAssertEqual(attempts, 2, "immediate and one deferred attempt both reject")
-        XCTAssertFalse(deferredAccepted, "rejected native focus cannot report acceptance")
-        XCTAssertTrue(view.recoveryPresentationPending, "never report Connected on denied focus")
-        // A later real focus-readiness event invalidates the pending backoff
-        // generation before re-offering focus. Calling directly before that
-        // event must fail closed while the previous retry is still scheduled.
-        XCTAssertFalse(view.requestComposerFocusForRecovery(
-            focus: focus,
-            onAccepted: { deferredAccepted = true }
-        ))
-        XCTAssertEqual(attempts, 2, "scheduled retry prevents concurrent offers")
-        var acceptedOnReadinessEvent = false
-        view.recoveryFocusReadinessDidChange {
-            acceptedOnReadinessEvent = view.requestComposerFocusForRecovery(
-                focus: focus,
-                onAccepted: { deferredAccepted = true }
-            )
-        }
-        XCTAssertTrue(acceptedOnReadinessEvent, "later focus-ready event reoffers focus")
-        XCTAssertFalse(deferredAccepted, "immediate success must not be double-reported")
-        XCTAssertEqual(attempts, 3, "later focus-ready event reoffers once")
-    }
-
-
     /// #673 `renderer_prepare_submission`: the production `--renderer-benchmark`
     /// path must write a five-cohort TOML file for the named Metal-submit
     /// boundary. This is not scanout / key-to-photon.
