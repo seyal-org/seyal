@@ -179,13 +179,23 @@ impl LocalDisplayClient {
     /// One nonblocking `Detach` write. Does not wait for `Detached` (SPEC-009 §6)
     /// and does not retry. The caller drops the client immediately after.
     pub fn request_bounded_detach(&mut self) {
+        let _ = self.stream.set_nonblocking(true);
+        self.write_detach_frame();
+    }
+
+    /// Release this connection's Controller attachment and keep the socket so a
+    /// later create can be admitted without a lease on the closed execution.
+    pub fn release_controller_keep_connection(&mut self) {
+        self.write_detach_frame();
+    }
+
+    fn write_detach_frame(&mut self) {
         use std::io::Write;
         let payload = seyal_runtime::local_ipc::framing::Detach {
             attachment_id: self.attachment_id,
         }
         .encode();
         let frame = encode_frame(MessageType::Detach, &payload);
-        let _ = self.stream.set_nonblocking(true);
         let _ = self.stream.write_all(&frame);
     }
 

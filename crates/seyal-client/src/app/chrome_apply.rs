@@ -481,7 +481,7 @@ impl ApplicationRoot {
                         PresentationTier::Hidden | PresentationTier::Unpresented
                     )
                 })
-                .unwrap_or(false);
+                .unwrap_or(true);
             if client.set_delivery_suspended(suspend).is_err() {
                 all_admitted = false;
             }

@@ -558,9 +558,9 @@ impl ApplicationRoot {
                     self.admit_terminate(effect, request_id, execution, attachment)?;
                 }
                 ProvisioningEffect::Detach { .. } => {
-                    // Detach-only (ADR-017 §6.1): never terminate. Observed so
-                    // tab/pane close cannot drop SendTerminate; the shared
-                    // LocalDisplayClient stays for other panes' create/terminate.
+                    // Detach-only (ADR-017 §6.1): never terminate. The Controller
+                    // lease is released in `release_presentation_controller`
+                    // before this dispatch; this arm must not become SendTerminate.
                 }
                 ProvisioningEffect::BindPane { pane, execution } => {
                     self.shell

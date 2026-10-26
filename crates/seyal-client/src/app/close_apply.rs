@@ -126,6 +126,8 @@ impl ApplicationRoot {
                 "presentation removal must not terminate a bound execution"
             );
             effects.extend(pane_effects);
+            #[cfg(target_os = "macos")]
+            self.release_presentation_controller(pane, released);
             self.clear_authority_for_pane(pane);
             if let Some(execution) = released {
                 self.record_unpresented(execution, workspace)?;

@@ -380,6 +380,52 @@ impl ApplicationRoot {
             let _ = crate::ffi::unregister_client(handle.raw());
         }
     }
+
+    /// Presentation close releases the closed execution's Controller (ADR-018
+    /// §3.2) and keeps a remaining pane's socket for create admission.
+    pub(super) fn release_presentation_controller(
+        &mut self,
+        pane: PaneId,
+        execution: Option<ExecutionId>,
+    ) {
+        if let Some(raw) = self.pane_client_raws.get(&pane).copied() {
+            let primary = self
+                .client_handle
+                .as_ref()
+                .is_some_and(|handle| handle.raw() == raw);
+            if let Some(mut client) = crate::ffi::unregister_client(raw) {
+                client.request_bounded_detach();
+            }
+            self.pane_client_raws.remove(&pane);
+            if primary {
+                self.client_handle = None;
+                if let Some(sibling) = self.extra_pane_clients.keys().next().copied()
+                    && let Some(handle) = self.extra_pane_clients.remove(&sibling)
+                {
+                    self.client_handle = Some(handle);
+                }
+            } else {
+                self.extra_pane_clients.remove(&pane);
+            }
+        }
+        if let Some(execution) = execution
+            && !self.execution_is_presented(execution)
+            && let Some(client) = self.wire_client.as_mut()
+            && client.execution_id() == execution
+        {
+            client.release_controller_keep_connection();
+        }
+    }
+
+    fn execution_is_presented(&self, execution: ExecutionId) -> bool {
+        self.shell.snapshot().windows.iter().any(|window| {
+            window.tabs.iter().any(|tab| {
+                tab.panes
+                    .iter()
+                    .any(|pane| pane.execution == Some(execution))
+            })
+        })
+    }
 }
 
 fn map_client_error(error: ClientError) -> AppError {
