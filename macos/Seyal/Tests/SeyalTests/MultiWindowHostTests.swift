@@ -344,7 +344,8 @@ final class MultiWindowHostTests: XCTestCase {
 
         XCTAssertEqual(requests, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
         XCTAssertEqual(host.lastActivationAttempts, Int(SEYAL_APP_WINDOW_ACTIVATION_MAX_ATTEMPTS))
-        XCTAssertEqual(seyal_app_last_error(host.appHandle), 53)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.result, -4)
+        XCTAssertEqual(host.lastActivationFailureReportForTests?.error, 53)
         XCTAssertEqual(targetWasKeyAfterRequest, false)
         XCTAssertTrue(NSApp.keyWindow === keyWindowBefore)
         XCTAssertTrue(host.liveHost.window === sourceWindow)
