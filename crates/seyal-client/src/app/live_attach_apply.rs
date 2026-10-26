@@ -172,6 +172,7 @@ impl ApplicationRoot {
             pty_generation: client.cache().generation.max(1),
             alternate_screen: client.cache().alternate_screen,
         };
+        let runtime_id = client.runtime_id();
         let registered = match crate::ffi::register_app_client(client) {
             Ok(handle) => handle,
             Err(()) => return Err(AppError::AlreadyBound),
@@ -183,6 +184,7 @@ impl ApplicationRoot {
             self.extra_pane_clients.insert(pane, registered);
         }
         self.pane_client_raws.insert(pane, raw);
+        self.remember_pane_runtime(pane, runtime_id);
 
         let attach = self.complete_create_attach_and_bind(request_id, evidence.attachment);
         match attach {
@@ -252,6 +254,8 @@ impl ApplicationRoot {
         if self.shell.pane_execution(pane).ok().flatten() != Some(evidence.execution) {
             return Err(AppError::StaleExecution);
         }
+        self.bind_pane_recovery(pane, evidence.execution);
+        self.remember_primary_pane(pane);
         let authority = PaneAuthority {
             pane,
             execution: evidence.execution,
@@ -281,69 +285,6 @@ impl ApplicationRoot {
         Ok(())
     }
 
-    /// Switch active authority/presentation to the focused tab's bound pane.
-    /// When the focused pane has no live authority (attach in flight or failed),
-    /// fail closed: clear prior authority/display handle so input cannot reach
-    /// another tab's execution while chrome shows the unbound tab.
-    pub(super) fn activate_focused_pane_authority(&mut self) {
-        let focused = self.shell.snapshot().focused_pane;
-        let Some(authority) = self.pane_authorities.get(&focused).copied() else {
-            self.authority = None;
-            let _ = self.presentation.apply(PresentationAction::ClearIdentity);
-            self.sync_composer_presentation();
-            self.output_utf8.clear();
-            self.clear_focused_display_handle_if_owned();
-            return;
-        };
-        if self.authority == Some(authority) {
-            if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
-                crate::ffi::set_focused_display_handle(raw);
-            }
-            return;
-        }
-        let Some(identity) =
-            PresentationIdentity::new(authority.execution, authority.pty_generation)
-        else {
-            return;
-        };
-        let _ = self.presentation.apply(PresentationAction::ClearIdentity);
-        let _ = self
-            .presentation
-            .apply(PresentationAction::BindIdentity(identity));
-        self.authority = Some(authority);
-        let alternate = self
-            .pane_client_raws
-            .get(&focused)
-            .and_then(|handle| {
-                crate::ffi::with_client(*handle, |client| client.cache().alternate_screen)
-            })
-            .unwrap_or(false);
-        let _ = self.derive_presentation(alternate);
-        self.sync_composer_presentation();
-        self.refresh_output_from_pane_client(focused);
-        if let Some(raw) = self.pane_client_raws.get(&focused).copied() {
-            crate::ffi::set_focused_display_handle(raw);
-        }
-    }
-
-    /// Fail-closed input is process-wide TLS. Only the root that owns the
-    /// current display handle may clear it — a second XCTest `ApplicationRoot`
-    /// CreateTab must not blank the launched surface's frame/eligibility.
-    fn clear_focused_display_handle_if_owned(&self) {
-        let focused = crate::ffi::focused_registry_handle();
-        if focused == 0 {
-            return;
-        }
-        let owned = self.pane_client_raws.values().any(|raw| *raw == focused)
-            || self
-                .client_handle
-                .as_ref()
-                .is_some_and(|handle| handle.raw() == focused);
-        if owned {
-            crate::ffi::set_focused_display_handle(0);
-        }
-    }
-
     /// Drop a lost registry client without unbinding the pane.
     /// Socket EOF is not CloseTab: keep shell/provisioning identity so terminate
     /// can retry after reconnect. Fail-closed input uses a zero display handle
@@ -356,6 +297,7 @@ impl ApplicationRoot {
             .map(|(pane, _)| *pane)
             .collect();
         for pane in panes {
+            self.note_pane_attachment_loss(pane, handle);
             self.unregister_extra_pane_client(pane);
             if self
                 .client_handle
@@ -365,10 +307,18 @@ impl ApplicationRoot {
                 self.client_handle = None;
                 self.pane_client_raws.remove(&pane);
             }
+            if self.shell.snapshot().focused_pane == pane {
+                self.authority = None;
+                let _ = self.presentation.apply(PresentationAction::ClearIdentity);
+                self.sync_composer_presentation();
+                if crate::ffi::focused_registry_handle() == 0 {
+                    crate::ffi::set_focused_display_handle(0);
+                }
+            }
         }
     }
 
-    fn refresh_output_from_pane_client(&mut self, pane: PaneId) {
+    pub(super) fn refresh_output_from_pane_client(&mut self, pane: PaneId) {
         let Some(handle) = self.pane_client_raws.get(&pane).copied() else {
             return;
         };

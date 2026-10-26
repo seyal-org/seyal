@@ -26,16 +26,18 @@
 		A10000000000000000000027 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000027 /* Security.framework */; };
 		A1000000000000000000002C /* SeyalAccessibilityAnnouncement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */; };
 		A10000000000000000000080 /* AttentionOsNotificationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000080 /* AttentionOsNotificationAdapter.swift */; };
-		C1000000000000000000000A /* AttentionOsNotificationAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */; };
+		C10000000000000000000012 /* AttentionOsNotificationAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000012 /* AttentionOsNotificationAdapterTests.swift */; };
 		A10000000000000000000040 /* NativeFontSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* NativeFontSpec.swift */; };
 		A10000000000000000000041 /* ThinPaneHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* ThinPaneHostView.swift */; };
 		A1000000000000000000004A /* PaneLayoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* PaneLayoutView.swift */; };
+		A1000000000000000000004B /* SecondaryLivePaneHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004B /* SecondaryLivePaneHost.swift */; };
 		A10000000000000000000048 /* CommandPaletteOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000048 /* CommandPaletteOverlayView.swift */; };
 		A10000000000000000000042 /* InteractiveMetalSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* InteractiveMetalSurfaceView.swift */; };
 		A10000000000000000000043 /* RendererPresentationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* RendererPresentationPlan.swift */; };
 		A10000000000000000000044 /* ComposerBridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ComposerBridgeView.swift */; };
 		A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000047 /* ComposerHistoryOverlayView.swift */; };
 		A10000000000000000000045 /* ProductChromeHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* ProductChromeHostView.swift */; };
+		A10000000000000000000081 /* ProductChromePaneProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000081 /* ProductChromePaneProjection.swift */; };
 		A10000000000000000000046 /* NativeThemeRealization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000046 /* NativeThemeRealization.swift */; };
 		A1000000000000000000006C /* LaunchPolicyProductCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000006C /* LaunchPolicyProductCopy.swift */; };
 		C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* SeyalHostComponentTests.swift */; };
@@ -43,7 +45,12 @@
 		C10000000000000000000005 /* SeyalHostHistoryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* SeyalHostHistoryUITests.swift */; };
 		C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */; };
 		C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000008 /* KeybindingEvidenceTests.swift */; };
+		C1000000000000000000000E /* DividerDragProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000E /* DividerDragProjectionTests.swift */; };
 		C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009 /* SeyalKeybindingUITests.swift */; };
+		C1000000000000000000000F /* SeyalDividerDragUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000F /* SeyalDividerDragUITests.swift */; };
+		C1000000000000000000000B /* SeyalC2bCreateTabUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B /* SeyalC2bCreateTabUITests.swift */; };
+		C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C /* PaneRegionProjectionTests.swift */; };
+		C1000000000000000000000D /* SeyalPaneSplitUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D /* SeyalPaneSplitUITests.swift */; };
 		C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007 /* IsolatedHostedRuntime.swift */; };
 		A10000000000000000000050 /* TerminalCompositionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000050 /* TerminalCompositionDocument.swift */; };
 		A10000000000000000000051 /* TerminalNativeKeyClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000051 /* TerminalNativeKeyClassifier.swift */; };
@@ -74,6 +81,10 @@
 		A10000000000000000000067 /* RustDisplayBridge+Input.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000067 /* RustDisplayBridge+Input.swift */; };
 		A10000000000000000000068 /* RustDisplayBridge+Frame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000068 /* RustDisplayBridge+Frame.swift */; };
 		A10000000000000000000069 /* MetalSurfaceView+Recovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000069 /* MetalSurfaceView+Recovery.swift */; };
+		A1000000000000000000008C /* ApplicationQuitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000008C /* ApplicationQuitCoordinator.swift */; };
+		A1000000000000000000008D /* MultiWindowHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000008D /* MultiWindowHostController.swift */; };
+		C1000000000000000000000A /* MultiWindowHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* MultiWindowHostTests.swift */; };
+		C10000000000000000000011 /* NavigationEvidenceAbiTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,7 +121,12 @@
 		C20000000000000000000005 /* SeyalHostHistoryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostHistoryUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalHostWorkloadUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000008 /* KeybindingEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingEvidenceTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000E /* DividerDragProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerDragProjectionTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000009 /* SeyalKeybindingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalKeybindingUITests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000F /* SeyalDividerDragUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalDividerDragUITests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000B /* SeyalC2bCreateTabUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalC2bCreateTabUITests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000C /* PaneRegionProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneRegionProjectionTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000D /* SeyalPaneSplitUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalPaneSplitUITests.swift; sourceTree = "<group>"; };
 		C20000000000000000000007 /* IsolatedHostedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedHostedRuntime.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* RustDisplayBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustDisplayBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* GlyphAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphAtlas.swift; sourceTree = "<group>"; };
@@ -123,19 +139,21 @@
 		A20000000000000000000025 /* RuntimeRecoveryGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeRecoveryGlue.swift; sourceTree = "<group>"; };
 		A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalAccessibilityAnnouncement.swift; sourceTree = "<group>"; };
 		A20000000000000000000080 /* AttentionOsNotificationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionOsNotificationAdapter.swift; sourceTree = "<group>"; };
-		C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionOsNotificationAdapterTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000012 /* AttentionOsNotificationAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionOsNotificationAdapterTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* BundledRuntimeLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledRuntimeLauncher.swift; sourceTree = "<group>"; };
 		A20000000000000000000049 /* IsolatedRuntimeDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedRuntimeDirectory.swift; sourceTree = "<group>"; };
 		A20000000000000000000027 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		A20000000000000000000040 /* NativeFontSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFontSpec.swift; sourceTree = "<group>"; };
 		A20000000000000000000041 /* ThinPaneHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinPaneHostView.swift; sourceTree = "<group>"; };
 		A2000000000000000000004A /* PaneLayoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutView.swift; sourceTree = "<group>"; };
+		A2000000000000000000004B /* SecondaryLivePaneHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryLivePaneHost.swift; sourceTree = "<group>"; };
 		A20000000000000000000048 /* CommandPaletteOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteOverlayView.swift; sourceTree = "<group>"; };
 		A20000000000000000000042 /* InteractiveMetalSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveMetalSurfaceView.swift; sourceTree = "<group>"; };
 		A20000000000000000000043 /* RendererPresentationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererPresentationPlan.swift; sourceTree = "<group>"; };
 		A20000000000000000000044 /* ComposerBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBridgeView.swift; sourceTree = "<group>"; };
 		A20000000000000000000047 /* ComposerHistoryOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHistoryOverlayView.swift; sourceTree = "<group>"; };
 		A20000000000000000000045 /* ProductChromeHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromeHostView.swift; sourceTree = "<group>"; };
+		A20000000000000000000081 /* ProductChromePaneProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductChromePaneProjection.swift; sourceTree = "<group>"; };
 		A20000000000000000000046 /* NativeThemeRealization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeThemeRealization.swift; sourceTree = "<group>"; };
 		A2000000000000000000006C /* LaunchPolicyProductCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPolicyProductCopy.swift; sourceTree = "<group>"; };
 		A20000000000000000000050 /* TerminalCompositionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCompositionDocument.swift; sourceTree = "<group>"; };
@@ -167,6 +185,10 @@
 		A20000000000000000000067 /* RustDisplayBridge+Input.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RustDisplayBridge+Input.swift"; sourceTree = "<group>"; };
 		A20000000000000000000068 /* RustDisplayBridge+Frame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RustDisplayBridge+Frame.swift"; sourceTree = "<group>"; };
 		A20000000000000000000069 /* MetalSurfaceView+Recovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalSurfaceView+Recovery.swift"; sourceTree = "<group>"; };
+		A2000000000000000000008C /* ApplicationQuitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationQuitCoordinator.swift; sourceTree = "<group>"; };
+		A2000000000000000000008D /* MultiWindowHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowHostController.swift; sourceTree = "<group>"; };
+		C2000000000000000000000A /* MultiWindowHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWindowHostTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationEvidenceAbiTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -216,10 +238,14 @@
 			children = (
 				A20000000000000000000001 /* Main.swift */,
 				A20000000000000000000002 /* AppDelegate.swift */,
+				A2000000000000000000008C /* ApplicationQuitCoordinator.swift */,
+				A2000000000000000000008D /* MultiWindowHostController.swift */,
 				A20000000000000000000041 /* ThinPaneHostView.swift */,
 				A2000000000000000000004A /* PaneLayoutView.swift */,
+				A2000000000000000000004B /* SecondaryLivePaneHost.swift */,
 				A20000000000000000000048 /* CommandPaletteOverlayView.swift */,
 				A20000000000000000000045 /* ProductChromeHostView.swift */,
+				A20000000000000000000081 /* ProductChromePaneProjection.swift */,
 				A20000000000000000000044 /* ComposerBridgeView.swift */,
 				A20000000000000000000047 /* ComposerHistoryOverlayView.swift */,
 				A20000000000000000000046 /* NativeThemeRealization.swift */,
@@ -309,8 +335,12 @@
 			isa = PBXGroup;
 			children = (
 				C20000000000000000000003 /* SeyalHostComponentTests.swift */,
+				C2000000000000000000000A /* MultiWindowHostTests.swift */,
+				C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */,
 				C20000000000000000000008 /* KeybindingEvidenceTests.swift */,
-				C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */,
+				C2000000000000000000000E /* DividerDragProjectionTests.swift */,
+				C20000000000000000000012 /* AttentionOsNotificationAdapterTests.swift */,
+				C2000000000000000000000C /* PaneRegionProjectionTests.swift */,
 			);
 			path = SeyalTests;
 			sourceTree = "<group>";
@@ -323,6 +353,9 @@
 				C20000000000000000000006 /* SeyalHostWorkloadUITests.swift */,
 				C20000000000000000000007 /* IsolatedHostedRuntime.swift */,
 				C20000000000000000000009 /* SeyalKeybindingUITests.swift */,
+				C2000000000000000000000F /* SeyalDividerDragUITests.swift */,
+				C2000000000000000000000B /* SeyalC2bCreateTabUITests.swift */,
+				C2000000000000000000000D /* SeyalPaneSplitUITests.swift */,
 			);
 			path = SeyalUITests;
 			sourceTree = "<group>";
@@ -442,10 +475,14 @@
 			files = (
 				A10000000000000000000001 /* Main.swift in Sources */,
 				A10000000000000000000002 /* AppDelegate.swift in Sources */,
+				A1000000000000000000008C /* ApplicationQuitCoordinator.swift in Sources */,
+				A1000000000000000000008D /* MultiWindowHostController.swift in Sources */,
 				A10000000000000000000041 /* ThinPaneHostView.swift in Sources */,
 				A1000000000000000000004A /* PaneLayoutView.swift in Sources */,
+				A1000000000000000000004B /* SecondaryLivePaneHost.swift in Sources */,
 				A10000000000000000000048 /* CommandPaletteOverlayView.swift in Sources */,
 				A10000000000000000000045 /* ProductChromeHostView.swift in Sources */,
+				A10000000000000000000081 /* ProductChromePaneProjection.swift in Sources */,
 				A10000000000000000000044 /* ComposerBridgeView.swift in Sources */,
 				A10000000000000000000047 /* ComposerHistoryOverlayView.swift in Sources */,
 				A10000000000000000000046 /* NativeThemeRealization.swift in Sources */,
@@ -518,8 +555,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				C10000000000000000000001 /* SeyalHostComponentTests.swift in Sources */,
+				C1000000000000000000000A /* MultiWindowHostTests.swift in Sources */,
+				C10000000000000000000011 /* NavigationEvidenceAbiTests.swift in Sources */,
 				C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */,
-				C1000000000000000000000A /* AttentionOsNotificationAdapterTests.swift in Sources */,
+				C1000000000000000000000E /* DividerDragProjectionTests.swift in Sources */,
+				C10000000000000000000012 /* AttentionOsNotificationAdapterTests.swift in Sources */,
+				C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -532,6 +573,9 @@
 				C10000000000000000000006 /* SeyalHostWorkloadUITests.swift in Sources */,
 				C10000000000000000000007 /* IsolatedHostedRuntime.swift in Sources */,
 				C10000000000000000000009 /* SeyalKeybindingUITests.swift in Sources */,
+				C1000000000000000000000F /* SeyalDividerDragUITests.swift in Sources */,
+				C1000000000000000000000B /* SeyalC2bCreateTabUITests.swift in Sources */,
+				C1000000000000000000000D /* SeyalPaneSplitUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

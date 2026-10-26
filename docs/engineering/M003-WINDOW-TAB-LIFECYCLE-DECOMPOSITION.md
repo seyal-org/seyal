@@ -55,8 +55,9 @@ composition, so the headed app never shows a Window or Tab the user cannot close
 W5 needs the split-tree host projection (#923) and the accepted S1 SPEC-004
 amendment (ADR-018 §5.1). W7 closes the set and feeds `MILESTONE-003.md` §8.2.
 
-`#936` (multiple live Metal leaves) stays blocked on #923 plus #994 and is not
-part of this decomposition. `#928` (split drag ratios) is unaffected.
+`#936` (multiple live Metal leaves) is Ready and is not part of this
+decomposition. Its earlier hold on #923 plus #994 has landed. `#928` (split
+drag ratios) is unaffected.
 
 ## W1 — Rust window containment and `WindowId`
 
@@ -174,8 +175,9 @@ unknown version or size mismatch fails closed.
 **Acceptance.**
 
 - Snapshot carries ordered windows, per-window ordered tabs and active tab, the
-  product-active window, per-tab pane tree and focused pane, per-leaf presentation
-  tier and execution binding, titles, attention flags, capability flags,
+  product-active window, per-tab pane tree (including split ratios) and focused
+  pane, per-leaf presentation tier and execution binding, titles, attention
+  flags, capability flags,
   `last_error` and the monotonic generation.
 - Borrow policy is unchanged: pointer-bearing fields are valid only until the next
   mutating bridge call; the host copies synchronously (ADR-015).

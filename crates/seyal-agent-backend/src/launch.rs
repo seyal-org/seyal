@@ -213,7 +213,7 @@ pub fn serve(
         });
     }
 
-    let mut daemon = match AgentDaemon::bind_integration(
+    let mut daemon = match AgentDaemon::prepare_integration(
         &options.directory,
         IntegrationConfig {
             store_path: options.directory.join("agent.db"),
@@ -228,7 +228,6 @@ pub fn serve(
     if let Some(host) = host {
         daemon.install_execution_host(host);
     }
-    let _ = ACCEPT_SOCKET.set(options.directory.join("agent.sock"));
     // Qualification-only, and only when the caller explicitly asks: seed one
     // enabled, non-TTY adapter + offering so SPEC-027 §4.3 unpinned
     // resolution has a Singleton target and §7 step 5's `adapter.execute`
@@ -245,13 +244,27 @@ pub fn serve(
     #[cfg(not(feature = "fixture-host"))]
     let _ = seed_test_catalog;
 
-    if let Some(fd) = daemon.listener_raw_fd() {
-        install_termination_wakeup(fd);
-    }
-
     let exits = daemon.install_exit_report();
     let limit = options.max_connections;
     let supervisor = thread::spawn(move || supervise(exits, limit));
+
+    // A listener accepts connects as soon as bind() returns, even before the
+    // server calls accept(). With a max_connections limit, a premature Hello
+    // can exhaust the one allowed admission. Do not publish until all required
+    // initialization, host/catalog composition and exit supervision is ready.
+    if ACCEPT_SHUTDOWN.load(Ordering::SeqCst) {
+        stop_with_host_reap(&mut daemon, ACCEPT_EXIT_CODE.load(Ordering::SeqCst));
+    }
+    if let Err(error) = daemon.publish_listener() {
+        eprintln!("seyal-agent-backend: publish listener failed: {error:?}");
+        drop(daemon);
+        process::exit(1);
+    }
+    let _ = ACCEPT_SOCKET.set(daemon.socket_path());
+    if let Some(fd) = daemon.listener_raw_fd() {
+        install_termination_wakeup(fd);
+    }
+    eprintln!("seyal-agent-backend: ready for connections");
 
     let mut accepted = 0u64;
     loop {

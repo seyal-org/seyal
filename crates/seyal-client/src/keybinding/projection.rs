@@ -51,12 +51,27 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PresentationToggleTui
         | WorkspaceCommandId::GotoOpen => command.ordinal.is_none(),
         // Ordinal tabs are key-only; not separate menu rows in M003.
-        // Focus-history menus land with N3 / tip B (no dead catalog entries).
+        // Focus-history is key-only in M003 (K8); not a K5 menu row.
         WorkspaceCommandId::TabSelectOrdinal
         | WorkspaceCommandId::CommandPaletteClose
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneFocusLeft
+        | WorkspaceCommandId::PaneFocusRight
+        | WorkspaceCommandId::PaneFocusUp
+        | WorkspaceCommandId::PaneFocusDown
+        | WorkspaceCommandId::PaneZoomToggle
+        | WorkspaceCommandId::PaneSwapLeft
+        | WorkspaceCommandId::PaneSwapRight
+        | WorkspaceCommandId::PaneSwapUp
+        | WorkspaceCommandId::PaneSwapDown
+        | WorkspaceCommandId::PaneMoveLeft
+        | WorkspaceCommandId::PaneMoveRight
+        | WorkspaceCommandId::PaneMoveUp
+        | WorkspaceCommandId::PaneMoveDown
+        | WorkspaceCommandId::PaneEqualizeFocused
+        | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
         | WorkspaceCommandId::PresentationSetFlow
@@ -80,7 +95,7 @@ pub fn command_title(command: WorkspaceCommand) -> &'static str {
         WorkspaceCommandId::PresentationToggleRaw => "Toggle Raw",
         WorkspaceCommandId::PresentationToggleTui => "Toggle TUI",
         WorkspaceCommandId::GotoOpen => "Go to…",
-        // Focus-history titles land with N3 / tip B; keep out of the menu catalog until then.
+        // Focus-history remains key-only in M003 (K8); not a K5 menu title.
         other => other.as_str(),
     }
 }
@@ -238,6 +253,21 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::FocusHistoryBack => 19,
         WorkspaceCommandId::FocusHistoryForward => 20,
         WorkspaceCommandId::GotoOpen => 21,
+        WorkspaceCommandId::PaneZoomToggle => 22,
+        WorkspaceCommandId::PaneSwapLeft => 23,
+        WorkspaceCommandId::PaneSwapRight => 24,
+        WorkspaceCommandId::PaneSwapUp => 25,
+        WorkspaceCommandId::PaneSwapDown => 26,
+        WorkspaceCommandId::PaneMoveLeft => 27,
+        WorkspaceCommandId::PaneMoveRight => 28,
+        WorkspaceCommandId::PaneMoveUp => 29,
+        WorkspaceCommandId::PaneMoveDown => 30,
+        WorkspaceCommandId::PaneFocusLeft => 31,
+        WorkspaceCommandId::PaneFocusRight => 32,
+        WorkspaceCommandId::PaneFocusUp => 33,
+        WorkspaceCommandId::PaneFocusDown => 34,
+        WorkspaceCommandId::PaneEqualizeFocused => 35,
+        WorkspaceCommandId::PaneEqualizeTab => 36,
     }
 }
 
@@ -265,6 +295,21 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         19 => WorkspaceCommandId::FocusHistoryBack,
         20 => WorkspaceCommandId::FocusHistoryForward,
         21 => WorkspaceCommandId::GotoOpen,
+        22 => WorkspaceCommandId::PaneZoomToggle,
+        23 => WorkspaceCommandId::PaneSwapLeft,
+        24 => WorkspaceCommandId::PaneSwapRight,
+        25 => WorkspaceCommandId::PaneSwapUp,
+        26 => WorkspaceCommandId::PaneSwapDown,
+        27 => WorkspaceCommandId::PaneMoveLeft,
+        28 => WorkspaceCommandId::PaneMoveRight,
+        29 => WorkspaceCommandId::PaneMoveUp,
+        30 => WorkspaceCommandId::PaneMoveDown,
+        31 => WorkspaceCommandId::PaneFocusLeft,
+        32 => WorkspaceCommandId::PaneFocusRight,
+        33 => WorkspaceCommandId::PaneFocusUp,
+        34 => WorkspaceCommandId::PaneFocusDown,
+        35 => WorkspaceCommandId::PaneEqualizeFocused,
+        36 => WorkspaceCommandId::PaneEqualizeTab,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

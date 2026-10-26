@@ -7,22 +7,37 @@
 //! the native composer editor; this crate owns draft/submit/Block projection.
 
 mod accessibility;
+mod apply;
 mod chrome_apply;
 mod composer_apply;
+mod focus_history_apply;
 mod goto_apply;
 mod keybinding_apply;
 #[cfg(target_os = "macos")]
 mod live_attach_apply;
+mod native_effect;
 mod palette_apply;
+mod pane_projection;
+mod pane_recovery;
+mod pane_tree_apply;
 mod presentation_apply;
 mod provisioning_apply;
 mod recovery_apply;
 mod session;
 
+#[cfg(target_os = "macos")]
+pub(crate) use pane_recovery::PaneRecoveryTarget;
+
 use accessibility::accessibility_nodes;
 
+pub use native_effect::NativeEffect;
+
+#[cfg(test)]
+mod focus_history_tests;
 #[cfg(test)]
 mod keybinding_apply_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod pane_provisioning_tests;
 #[cfg(test)]
 mod presentation_tests;
 #[cfg(test)]
@@ -37,21 +52,20 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WorkspaceId};
+use seyal_core::{AttachmentId, BlockId, ExecutionId, PaneId, TabId, WindowId, WorkspaceId};
 
+use crate::app::pane_recovery::PaneRecoveryQueue;
 use crate::chrome::{
-    AgentId, AttentionId, ChromeAction, ChromeError, ChromeSnapshot, ChromeState, InspectorMode,
-    LeftPanelMode,
+    AgentId, AttentionId, ChromeAction, ChromeSnapshot, ChromeState, InspectorMode, LeftPanelMode,
 };
 use crate::composer::{
-    ComposerAction, ComposerError, ComposerSnapshot, ComposerState, RuntimeBlockRecord,
-    RuntimeComposerEligibility,
+    ComposerAction, ComposerSnapshot, ComposerState, RuntimeBlockRecord, RuntimeComposerEligibility,
 };
 use crate::goto::{GotoScope, GotoSnapshot, GotoState};
 use crate::keybinding::ChordPrefixState;
-use crate::navigation::ResourceAddress;
-use crate::palette::{PaletteError, PaletteSnapshot, PaletteState};
-use crate::pane_layout::{self, PaneRegion, SplitPosition};
+use crate::navigation::{FocusHistory, FocusSeq, ResourceAddress};
+use crate::palette::{PaletteSnapshot, PaletteState};
+use crate::pane_layout::SplitPosition;
 use crate::presentation::{
     InputRoute, PresentationAction, PresentationIdentity, PresentationMode, PresentationSession,
 };
@@ -60,13 +74,13 @@ use crate::recovery::{
     AttemptOutcome, ContinuityIdentity, LaunchResult, ReconstructionState, RecoveryCoordinator,
     RecoveryEffect, RecoveryStage,
 };
-use crate::shell::{ShellAction, ShellError, ShellSnapshot, ShellState, SplitAxis};
+use crate::shell::{FocusDirection, MoveSide, ShellAction, ShellSnapshot, ShellState, SplitAxis};
 
 #[cfg(target_os = "macos")]
 use crate::local::LocalDisplayClient;
 
 /// Published host-contract version for versioned, size-tagged records.
-pub const APP_ABI_VERSION: u16 = 1;
+pub const APP_ABI_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppError {
@@ -119,9 +133,25 @@ pub enum AppError {
     NavigationTargetTerminated,
     NavigationTargetUnbound,
     NavigationAmbiguousTarget,
+    NavigationStaleHistoryCursor,
+    NavigationHistoryUnavailable,
     /// SPEC-024 §10 / R6.4.1: command not permitted for the current route.
     /// ABI numeric code 50 (after tip A goto errors 47-49).
     ActionUnavailable,
+    /// Unknown WindowId for select/cycle/report (W4a). ABI 54.
+    UnknownWindow,
+    /// Extra Window create rejected until close exists (W4a). ABI 55.
+    WindowCreationUnavailable,
+    /// Native WindowActivation failed after bounded retry. ABI 53.
+    WindowActivationFailed,
+    /// `Unzoom` while the active Tab has no zoom overlay. ABI 56.
+    NotZoomed,
+    /// Swap/move target is the same leaf or not a same-Tab leaf. ABI 57.
+    InvalidMoveTarget,
+    /// SPEC-024 §5.1 / SPEC-025 §5.7: no geometric neighbor in that direction. ABI 58.
+    NoDirectionalNeighbor,
+    /// Structural pane action carried a stale ADR-018 `containment_generation`. ABI 59.
+    StaleContainment,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,12 +160,6 @@ pub enum PresentationEligibility {
     Flow,
     Raw,
     Tui,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NativeEffect {
-    None,
-    BoundedDetachThenTerminate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -280,6 +304,25 @@ pub enum AppAction {
     FocusPane {
         id: PaneId,
     },
+    /// Tab-scoped zoom overlay; does not destroy other leaves (PT1 / PT5).
+    ZoomPane {
+        id: PaneId,
+    },
+    Unzoom,
+    SwapPanes {
+        a: PaneId,
+        b: PaneId,
+    },
+    MovePaneBeside {
+        pane: PaneId,
+        neighbor: PaneId,
+        side: MoveSide,
+    },
+    FocusDirection {
+        direction: FocusDirection,
+    },
+    EqualizeFocused,
+    EqualizeTab,
     /// Drag the divider that `pane` leads to a pointer position (#928).
     MoveSplitDivider {
         pane: PaneId,
@@ -333,6 +376,16 @@ pub enum AppAction {
         fence: AppFence,
         address: ResourceAddress,
     },
+    /// Focus-history Back (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryBack {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
+    /// Focus-history Forward (SPEC-022 §6 / N3). `observed` must match cursor.
+    HistoryForward {
+        fence: AppFence,
+        observed: FocusSeq,
+    },
     ClosePalette {
         fence: AppFence,
     },
@@ -372,6 +425,38 @@ pub enum AppAction {
     ClearBlockSelection {
         fence: AppFence,
     },
+    /// ADR-018 §2.2 window selection (W4a).
+    SelectWindow {
+        id: WindowId,
+    },
+    CycleWindow {
+        direction: crate::shell::CycleDirection,
+    },
+    /// Target-free New Window (ADR-018 §2.2 / §3.3a): Rust resolves Workspace.
+    CreateWindow,
+    /// Forwarded native window presentation input; host derives no product state.
+    ReportWindowEvent {
+        window: WindowId,
+        event: WindowNativeEvent,
+    },
+}
+
+/// Typed native window inputs (ADR-018 §2.3). Recorded; no product mutation in W4a.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum WindowNativeEvent {
+    BecameKey = 0,
+    ResignedKey = 1,
+    BecameMain = 2,
+    ResignedMain = 3,
+    OcclusionChanged = 4,
+    Miniaturized = 5,
+    Deminiaturized = 6,
+    EnteredFullscreen = 7,
+    ExitedFullscreen = 8,
+    ScreenOrScaleChanged = 9,
+    /// Host exhausted bounded WindowActivation retries (SPEC-022 R5.4).
+    ActivationFailed = 10,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -408,7 +493,7 @@ pub struct AppSnapshot {
     pub composer_eligible: bool,
     pub frozen: bool,
     pub last_error: Option<AppError>,
-    pub pending_effect: NativeEffect,
+    pub pending_effects: Vec<NativeEffect>,
     pub output_utf8: String,
     pub shell: ShellSnapshot,
     pub accessibility: Vec<AccessibilityNode>,
@@ -420,6 +505,9 @@ pub struct AppSnapshot {
     pub chrome: ChromeSnapshot,
     pub palette: PaletteSnapshot,
     pub goto: GotoSnapshot,
+    /// Cursor `FocusSeq` for Back/Forward requests (SPEC-022 R6.8), or `None`
+    /// when history is empty.
+    pub focus_history_seq: Option<FocusSeq>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -451,10 +539,11 @@ pub struct ApplicationRoot {
     output_utf8: String,
     snapshot_generation: u64,
     last_error: Option<AppError>,
-    pending_effect: NativeEffect,
+    pending_effects: Vec<NativeEffect>,
     frozen: bool,
     recovery: RecoveryCoordinator,
     pending_recovery: Vec<RecoveryEffect>,
+    pane_recovery: PaneRecoveryQueue,
     reconstruction: ReconstructionState,
     composer: ComposerState,
     chrome: ChromeState,
@@ -462,6 +551,8 @@ pub struct ApplicationRoot {
     /// SPEC-024 §8 chord prefix wait (product UI state; never VT / TerminalState).
     pub(crate) chord_prefix: ChordPrefixState,
     goto: GotoState,
+    /// Application-scoped focus history (SPEC-022 §6 / N3).
+    focus_history: FocusHistory,
     /// Last canonical alternate-screen evidence. TUI while this is set.
     alternate_screen: bool,
     /// Flow or Raw used while alternate screen is off.
@@ -493,6 +584,13 @@ pub struct ApplicationRoot {
     /// Test gate: worker waits before `connect_execution_id`.
     #[cfg(target_os = "macos")]
     live_attach_gate: Option<std::sync::mpsc::Receiver<()>>,
+    /// Last forwarded window presentation event (not product state).
+    last_window_event: Option<(WindowId, WindowNativeEvent)>,
+    /// Monotonic instant when quit cleanup must have reported (ADR-018 §4).
+    quit_deadline: Option<std::time::Instant>,
+    /// Extra live display attachments and probe peers owned through quit cleanup.
+    #[cfg(target_os = "macos")]
+    live_attachments: Vec<session::QuitProbeAttachment>,
 }
 
 impl Default for ApplicationRoot {
@@ -515,7 +613,8 @@ impl ApplicationRoot {
     }
 
     pub(crate) fn with_shell(shell: ShellState) -> Self {
-        let pane = shell.snapshot().focused_pane;
+        let snap = shell.snapshot();
+        let pane = snap.focused_pane;
         let mut composer = ComposerState::new();
         let _ = composer.apply(ComposerAction::EnsurePane { pane });
         let _ = composer.apply(ComposerAction::ApplyPresentation {
@@ -523,6 +622,17 @@ impl ApplicationRoot {
             mode: PresentationMode::Flow,
             input_route: InputRoute::Frozen,
         });
+        // W4a: host may construct NSWindow only from a Rust effect (ADR-018 §2.4).
+        let mut pending_effects = Vec::new();
+        for window in &snap.windows {
+            pending_effects.push(NativeEffect::RealizeWindow { window: window.id });
+        }
+        if !snap.windows.is_empty() {
+            pending_effects.push(NativeEffect::OrderFrontMakeKey {
+                window: snap.active_window,
+            });
+        }
+        let pane_recovery = PaneRecoveryQueue::from_shell_snapshot(&snap);
         Self {
             presentation: PresentationSession::new(None, PresentationMode::Flow),
             shell,
@@ -535,16 +645,18 @@ impl ApplicationRoot {
             output_utf8: String::new(),
             snapshot_generation: 1,
             last_error: None,
-            pending_effect: NativeEffect::None,
+            pending_effects,
             frozen: false,
             recovery: RecoveryCoordinator::default(),
             pending_recovery: Vec::new(),
+            pane_recovery,
             reconstruction: ReconstructionState::default(),
             composer,
             chrome: ChromeState::new(),
             palette: PaletteState::new(),
             chord_prefix: ChordPrefixState::new(),
             goto: GotoState::new(),
+            focus_history: FocusHistory::new(),
             alternate_screen: false,
             resting: PresentationMode::Flow,
             explicit_raw: false,
@@ -563,6 +675,10 @@ impl ApplicationRoot {
             queued_live_attaches: VecDeque::new(),
             #[cfg(target_os = "macos")]
             live_attach_gate: None,
+            last_window_event: None,
+            quit_deadline: None,
+            #[cfg(target_os = "macos")]
+            live_attachments: Vec::new(),
         }
     }
 
@@ -640,14 +756,6 @@ impl ApplicationRoot {
         &mut self.provisioning
     }
 
-    /// Active Tab's Pane regions (#923). The one live surface belongs to the
-    /// execution-bound Pane, or before any bind to the focused Pane (where
-    /// `Bind` will land); it is shown only while that Pane is focused.
-    pub fn pane_regions(&self) -> Vec<PaneRegion> {
-        let shell = self.shell.snapshot();
-        pane_layout::project(&shell.tree, shell.focused_pane, self.fence().pane)
-    }
-
     pub fn fence(&self) -> AppFence {
         let snap = self.shell.snapshot();
         match self.authority {
@@ -686,9 +794,8 @@ impl ApplicationRoot {
         let composer_eligible = self.composer_eligible_for(eligibility);
         AppSnapshot {
             generation: self.snapshot_generation,
-            // The fence Pane, not the focused one: host actions fenced from
-            // this snapshot must keep reaching the bound execution while
-            // another split leaf is focused.
+            // The fence Pane when bound; the focused Pane when fail-closed
+            // unbound (N3). Hosts must not send input to another Pane's execution.
             pane: self.fence().pane,
             execution: self.authority.map(|bound| bound.execution),
             attachment: self.authority.map(|bound| bound.attachment),
@@ -698,7 +805,7 @@ impl ApplicationRoot {
             composer_eligible,
             frozen: self.frozen,
             last_error: self.last_error,
-            pending_effect: self.pending_effect,
+            pending_effects: self.pending_effects.clone(),
             output_utf8: self.output_utf8.clone(),
             accessibility: accessibility_nodes(
                 &shell,
@@ -715,190 +822,7 @@ impl ApplicationRoot {
             chrome,
             palette,
             goto,
-        }
-    }
-
-    pub fn apply(&mut self, action: AppAction) -> Result<(), AppError> {
-        if self.frozen
-            && !matches!(
-                action,
-                AppAction::AckEffect
-                    | AppAction::AckRecoveryEffect
-                    | AppAction::CancelRecovery
-                    | AppAction::DisconnectReconstruction
-                    | AppAction::Quit
-            )
-        {
-            return self.fail(AppError::Frozen);
-        }
-        let result = match action {
-            AppAction::Focus { fence } => self.focus(fence),
-            AppAction::Bind { fence, evidence } => self.bind(fence, evidence),
-            AppAction::Refresh {
-                fence,
-                alternate_screen,
-            } => self.refresh(fence, alternate_screen),
-            AppAction::SubmitInput { fence, text } => self.submit_input(fence, &text),
-            AppAction::Quit => self.quit(),
-            AppAction::AckEffect => self.ack_effect(),
-            AppAction::BeginRecovery { now } => self.begin_recovery(now),
-            AppAction::CompleteRecovery {
-                generation,
-                outcome,
-                now,
-                launch,
-            } => self.complete_recovery(generation, outcome, now, launch),
-            AppAction::FireScheduledRecovery { generation, now } => {
-                self.fire_scheduled_recovery(generation, now)
-            }
-            AppAction::AckRecoveryEffect => self.ack_recovery_effect(),
-            AppAction::CancelRecovery => self.cancel_recovery(),
-            AppAction::AdvanceRecoveryStage { stage } => self.advance_recovery_stage(stage),
-            AppAction::BeginReconstructionAttempt => self.begin_reconstruction_attempt(),
-            AppAction::CommitReconstruction {
-                runtime,
-                execution,
-                attachment,
-                controller_authority_committed,
-                authoritative_snapshot_committed,
-            } => self.commit_reconstruction(
-                runtime,
-                execution,
-                attachment,
-                controller_authority_committed,
-                authoritative_snapshot_committed,
-            ),
-            AppAction::DisconnectReconstruction => self.disconnect_reconstruction(),
-            AppAction::SetComposerDraft {
-                fence,
-                text,
-                composer_epoch,
-            } => self.set_composer_draft(fence, text, composer_epoch),
-            AppAction::SubmitComposer {
-                fence,
-                composer_epoch,
-            } => self.submit_composer(fence, composer_epoch),
-            AppAction::ApplyComposerResult {
-                fence,
-                request_id,
-                accepted,
-            } => self.apply_composer_result(fence, request_id, accepted),
-            AppAction::ApplyRuntimeBlocks { fence, records } => {
-                self.apply_runtime_blocks(fence, records)
-            }
-            AppAction::ApplyRuntimeComposerStatus {
-                fence,
-                eligibility,
-                revision,
-            } => self.apply_runtime_composer_status(fence, eligibility, revision),
-            AppAction::SelectRestingPresentation { fence, raw } => {
-                self.select_resting_presentation(fence, raw)
-            }
-            AppAction::OpenComposerHistory { fence } => {
-                self.composer_history(fence, ComposerAction::OpenHistory { pane: fence.pane })
-            }
-            AppAction::SetComposerHistoryFilter { fence, query } => self.composer_history(
-                fence,
-                ComposerAction::SetHistoryFilter {
-                    pane: fence.pane,
-                    query,
-                },
-            ),
-            AppAction::MoveComposerHistorySelection { fence, delta } => self.composer_history(
-                fence,
-                ComposerAction::MoveHistorySelection {
-                    pane: fence.pane,
-                    delta,
-                },
-            ),
-            AppAction::SelectComposerHistory {
-                fence,
-                composer_epoch,
-            } => self.composer_history(
-                fence,
-                ComposerAction::SelectHistory {
-                    pane: fence.pane,
-                    epoch: composer_epoch,
-                },
-            ),
-            AppAction::CloseComposerHistory { fence } => {
-                self.composer_history(fence, ComposerAction::CloseHistory { pane: fence.pane })
-            }
-            AppAction::SetLeftPanel { mode } => self.set_left_panel(mode),
-            AppAction::SetInspectorMode { mode } => self.set_inspector_mode(mode),
-            AppAction::SelectAgent { fence, id } => self.select_agent(fence, id),
-            AppAction::OpenAttention { fence, id } => self.open_attention(fence, id),
-            AppAction::ReplaceChrome {
-                fence,
-                agents,
-                attention,
-            } => self.replace_chrome(fence, agents, attention),
-            AppAction::SelectBlock { fence, id } => self.select_block(fence, id),
-            AppAction::ClearBlockSelection { fence } => {
-                self.require_fence(fence)?;
-                let shell = self.shell.snapshot();
-                self.chrome
-                    .apply(ChromeAction::ClearBlockSelection, &shell)
-                    .map(|_| ())
-                    .map_err(chrome_error)
-            }
-            AppAction::SelectWorkspace { id } => self.select_workspace(id),
-            AppAction::SelectTab { id } => self.select_tab(id),
-            AppAction::CreateTab => {
-                // R6.4.1: menu/key-equivalent New Tab cannot bypass the palette modal.
-                if self.palette.is_open() {
-                    self.require_workspace_command_for_menu(
-                        crate::keybinding::WorkspaceCommandId::TabCreate,
-                    )?;
-                }
-                self.create_tab()
-            }
-            AppAction::CloseTab { id } => self.close_tab(id),
-            AppAction::TerminateExecution { fence } => self.terminate_execution(fence),
-            AppAction::SplitFocused { axis } => self.split_focused(axis),
-            AppAction::ClosePane { id } => self.close_pane(id),
-            AppAction::FocusPane { id } => self.focus_pane(id),
-            AppAction::MoveSplitDivider { pane, position } => {
-                self.move_split_divider(pane, position)
-            }
-            AppAction::SetShellVisibility {
-                left,
-                inspector,
-                tab_strip,
-            } => self.set_shell_visibility(left, inspector, tab_strip),
-            AppAction::OpenPalette { fence } => {
-                if self.palette.is_open() {
-                    self.require_workspace_command_for_menu(
-                        crate::keybinding::WorkspaceCommandId::CommandPaletteOpen,
-                    )?;
-                }
-                self.open_palette(fence)
-            }
-            AppAction::SetPaletteQuery { fence, query } => self.set_palette_query(fence, query),
-            AppAction::MovePaletteSelection { fence, delta } => {
-                self.move_palette_selection(fence, delta)
-            }
-            AppAction::RunPalette { fence, address } => self.run_palette(fence, address),
-            AppAction::Navigate { fence, address } => {
-                self.require_fence(fence)?;
-                self.navigate_address(address)
-            }
-            AppAction::ClosePalette { fence } => self.close_palette(fence),
-            AppAction::OpenGoto { fence, scope } => self.open_goto(fence, scope),
-            AppAction::SetGotoScope { fence, scope } => self.set_goto_scope(fence, scope),
-            AppAction::CycleGotoScope { fence } => self.cycle_goto_scope(fence),
-            AppAction::SetGotoQuery { fence, query } => self.set_goto_query(fence, query),
-            AppAction::MoveGotoSelection { fence, delta } => self.move_goto_selection(fence, delta),
-            AppAction::RunGoto { fence, address } => self.run_goto(fence, address),
-            AppAction::CloseGoto { fence } => self.close_goto(fence),
-        };
-        match result {
-            Ok(()) => {
-                self.last_error = None;
-                self.snapshot_generation = self.snapshot_generation.saturating_add(1);
-                Ok(())
-            }
-            Err(error) => self.fail(error),
+            focus_history_seq: self.focus_history.cursor_seq(),
         }
     }
 
@@ -942,48 +866,6 @@ impl ApplicationRoot {
     }
 }
 
-pub(super) fn chrome_error(error: ChromeError) -> AppError {
-    match error {
-        ChromeError::UnknownAgent => AppError::UnknownAgent,
-        ChromeError::UnknownAttention => AppError::UnknownAttention,
-        ChromeError::UnknownWorkspace => AppError::UnknownChromeWorkspace,
-        ChromeError::UnknownTab => AppError::UnknownChromeTab,
-        ChromeError::UnknownBlock => AppError::UnknownBlock,
-    }
-}
-
-pub(super) fn close_tab_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastTab => AppError::CannotCloseLastTab,
-        _ => AppError::UnknownChromeTab,
-    }
-}
-
-pub(super) fn close_pane_error(error: ShellError) -> AppError {
-    match error {
-        ShellError::CannotCloseLastPane => AppError::CannotCloseLastPane,
-        ShellError::CannotCloseBoundPane => AppError::CannotCloseBoundPane,
-        _ => AppError::UnknownPane,
-    }
-}
-
-pub(super) fn palette_error(error: PaletteError) -> AppError {
-    match error {
-        PaletteError::NotOpen => AppError::PaletteNotOpen,
-        PaletteError::NoSelection => AppError::PaletteNoSelection,
-    }
-}
-
-pub(super) fn composer_error(error: ComposerError) -> AppError {
-    match error {
-        ComposerError::UnknownPane => AppError::UnknownPane,
-        ComposerError::EmptyDraft | ComposerError::SubmitDisabled => {
-            AppError::ComposerSubmitDisabled
-        }
-        ComposerError::StaleRequest => AppError::StaleComposerRequest,
-        ComposerError::StaleEpoch => AppError::StaleComposerEpoch,
-        ComposerError::HistoryUnavailable => AppError::ComposerHistoryUnavailable,
-        ComposerError::HistoryClosed => AppError::ComposerHistoryClosed,
-        ComposerError::HistoryNoSelection => AppError::ComposerHistoryNoSelection,
-    }
-}
+pub(super) use chrome_apply::{
+    chrome_error, close_pane_error, close_tab_error, composer_error, palette_error,
+};

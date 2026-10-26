@@ -1,6 +1,4 @@
-//! Versioned one-Pane application-root C ABI.
-//!
-//! C entry points stay here; decode/encode/pane_region/visual siblings keep each
+//! Versioned one-Pane application-root C ABI. Focused siblings keep each
 //! responsibility reviewable without changing published symbols.
 
 mod block_projection;
@@ -8,9 +6,11 @@ mod decode;
 mod encode;
 mod error_code;
 mod loss;
+pub mod pane_recovery;
 mod pane_region;
 mod shortcut;
 mod visual;
+mod window;
 
 use error_code::error_number;
 
@@ -34,12 +34,12 @@ use super::allocate_handle;
 use decode::decode_action;
 use encode::{
     chrome_visibility_flags, encode_accessibility, encode_block_rows, encode_chrome_rows,
-    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot, split_id,
+    encode_history_rows, encode_palette_rows, encode_shell_rows, encode_snapshot,
 };
 
 pub use block_projection::seyal_app_block_projection;
 pub(crate) use loss::note_application_roots_client_loss;
-pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
+pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item,
@@ -47,6 +47,12 @@ pub use shortcut::{
 pub use visual::{
     seyal_app_test_reload_ui_configuration, seyal_app_theme, seyal_app_visual,
     seyal_app_visual_warning,
+};
+#[allow(unused_imports)] // size/layout tests and C ABI consumers
+pub use window::{
+    seyal_app_native_effect, seyal_app_pane_leaf, seyal_app_record_compatible, seyal_app_shell,
+    seyal_app_tab, seyal_app_tab_tree_node, seyal_app_window, SeyalAppNativeEffect,
+    SeyalAppPaneLeaf, SeyalAppPaneTreeNode, SeyalAppTab, SeyalAppWindow,
 };
 
 const FLAG_HAS_EXECUTION: u16 = 1;
@@ -56,10 +62,10 @@ const FLAG_ALTERNATE_SCREEN: u16 = 8;
 const FLAG_TARGET_CONTROLLER: u16 = 16;
 const HISTORY_OPEN: u16 = 1;
 const HISTORY_HAS_ENTRIES: u16 = 2;
-const SHELL_FLAG_ALLOWS_TAB_CREATION: u16 = 1;
-const SHELL_FLAG_ALLOWS_PANE_SPLITTING: u16 = 2;
-const SHELL_FLAG_ALLOWS_TAB_CLOSE: u16 = 4;
-const SHELL_FLAG_ALLOWS_PANE_CLOSE: u16 = 8;
+pub(super) const SHELL_FLAG_ALLOWS_TAB_CREATION: u16 = 1;
+pub(super) const SHELL_FLAG_ALLOWS_PANE_SPLITTING: u16 = 2;
+pub(super) const SHELL_FLAG_ALLOWS_TAB_CLOSE: u16 = 4;
+pub(super) const SHELL_FLAG_ALLOWS_PANE_CLOSE: u16 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -270,8 +276,8 @@ impl SeyalAppRow {
     }
 }
 
-struct AppHandle {
-    root: ApplicationRoot,
+pub(super) struct AppHandle {
+    pub(super) root: ApplicationRoot,
     output: Vec<u8>,
     composer_draft: Vec<u8>,
     ax_nodes: Vec<SeyalAppAxNode>,
@@ -289,10 +295,11 @@ struct AppHandle {
     block_rows: Vec<SeyalAppRow>,
     history_rows: Vec<SeyalAppRow>,
     palette_rows: Vec<SeyalAppRow>,
+    pub(super) window_scratch: window::WindowEncodeScratch,
 }
 
 thread_local! {
-    static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
+    pub(super) static APPS: RefCell<HashMap<u64, AppHandle>> = RefCell::new(HashMap::new());
 }
 
 /// Drive ApplicationRoot create/attach only while provisioning work is outstanding.
@@ -386,10 +393,113 @@ pub extern "C" fn seyal_app_create() -> u64 {
                 block_rows: Vec::new(),
                 history_rows: Vec::new(),
                 palette_rows: Vec::new(),
+                window_scratch: window::WindowEncodeScratch::new(),
             },
         );
     });
     handle
+}
+
+/// Test harness: install N windows and N live attachments for quit evidence.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_quit_case(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        // Take the root out of APPS before mutating. The headed host's Metal /
+        // chrome callbacks also borrow APPS; nesting install work under
+        // borrow_mut aborts (panic=abort + RefCell BorrowMutError).
+        let extracted = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle)?;
+            Some(std::mem::take(&mut state.root))
+        });
+        let Some(mut root) = extracted else {
+            return -2;
+        };
+        let installed = root.install_quit_fixture(windows as usize);
+        let put_back = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            state.root = root;
+            0
+        });
+        if put_back != 0 {
+            return put_back;
+        }
+        match installed {
+            Ok(()) => 0,
+            Err(()) => -3,
+        }
+    }
+}
+
+/// Test harness: live display attachments still registered for `handle`.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_live_attachment_count(handle: u64) -> u32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handle;
+        0
+    }
+    #[cfg(target_os = "macos")]
+    {
+        APPS.with(|apps| {
+            apps.borrow()
+                .get(&handle)
+                .map(|state| state.root.live_attachment_count() as u32)
+                .unwrap_or(0)
+        })
+    }
+}
+
+/// Test harness: install N windows without probe attachments.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_test_seed_windows_only(handle: u64, windows: u32) -> i32 {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, windows);
+        return -1;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !(1..=16).contains(&windows) {
+            return -1;
+        }
+        let extracted = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let state = apps.get_mut(&handle)?;
+            Some(std::mem::take(&mut state.root))
+        });
+        let Some(mut root) = extracted else {
+            return -2;
+        };
+        let installed = root.install_quit_fixture_windows_only(windows as usize);
+        let put_back = APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            let Some(state) = apps.get_mut(&handle) else {
+                return -2;
+            };
+            state.root = root;
+            0
+        });
+        if put_back != 0 {
+            return put_back;
+        }
+        match installed {
+            Ok(()) => 0,
+            Err(()) => -3,
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -467,6 +577,19 @@ pub extern "C" fn seyal_app_snapshot(handle: u64) -> SeyalAppSnapshot {
         let snap = state.root.snapshot();
         state.output = snap.output_utf8.as_bytes().to_vec();
         encode_snapshot(&snap, &state.output)
+    })
+}
+
+/// Return the current focus-history cursor sequence for Back/Forward actions.
+/// Zero means the application has no history entries or the handle is invalid.
+/// This additive scalar accessor preserves the v1 return-by-value snapshot layout.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_focus_history_seq(handle: u64) -> u64 {
+    APPS.with(|apps| {
+        apps.borrow()
+            .get(&handle)
+            .and_then(|state| state.root.snapshot().focus_history_seq)
+            .map_or(0, |seq| seq.get())
     })
 }
 
@@ -604,17 +727,25 @@ pub struct SeyalAppShell {
     pub tab_count: u16,
     pub pane_count: u16,
     pub flags: u16,
-    pub reserved: u32,
+    pub window_count: u16,
+    pub effect_count: u16,
+    pub shell_last_error: u32,
     pub active_workspace_lo: u64,
     pub active_workspace_hi: u64,
     pub active_tab_lo: u64,
     pub active_tab_hi: u64,
     pub focused_pane_lo: u64,
     pub focused_pane_hi: u64,
+    pub containment_generation: u64,
+    pub active_window_lo: u64,
+    pub active_window_hi: u64,
+    pub last_active_workspace_lo: u64,
+    pub last_active_workspace_hi: u64,
+    pub shell_generation: u64,
 }
 
 impl SeyalAppShell {
-    const fn empty() -> Self {
+    pub(super) const fn empty() -> Self {
         Self {
             version: APP_ABI_VERSION,
             size: 0,
@@ -622,58 +753,26 @@ impl SeyalAppShell {
             tab_count: 0,
             pane_count: 0,
             flags: 0,
-            reserved: 0,
+            window_count: 0,
+            effect_count: 0,
+            shell_last_error: 0,
             active_workspace_lo: 0,
             active_workspace_hi: 0,
             active_tab_lo: 0,
             active_tab_hi: 0,
             focused_pane_lo: 0,
             focused_pane_hi: 0,
+            containment_generation: 0,
+            active_window_lo: 0,
+            active_window_hi: 0,
+            last_active_workspace_lo: 0,
+            last_active_workspace_hi: 0,
+            shell_generation: 0,
         }
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn seyal_app_shell(handle: u64) -> SeyalAppShell {
-    APPS.with(|apps| {
-        let apps = apps.borrow();
-        let Some(state) = apps.get(&handle) else {
-            return SeyalAppShell::empty();
-        };
-        let shell = state.root.snapshot().shell;
-        let workspace = split_id(shell.active_workspace.to_bytes());
-        let tab = split_id(shell.active_tab.to_bytes());
-        let pane = split_id(shell.focused_pane.to_bytes());
-        let mut flags = 0u16;
-        if shell.allows_tab_creation {
-            flags |= SHELL_FLAG_ALLOWS_TAB_CREATION;
-        }
-        if shell.allows_pane_splitting {
-            flags |= SHELL_FLAG_ALLOWS_PANE_SPLITTING;
-        }
-        if shell.allows_tab_close {
-            flags |= SHELL_FLAG_ALLOWS_TAB_CLOSE;
-        }
-        if shell.allows_pane_close {
-            flags |= SHELL_FLAG_ALLOWS_PANE_CLOSE;
-        }
-        SeyalAppShell {
-            version: APP_ABI_VERSION,
-            size: size_of::<SeyalAppShell>() as u16,
-            workspace_count: shell.workspaces.len() as u16,
-            tab_count: shell.tabs.len() as u16,
-            pane_count: shell.panes.len() as u16,
-            flags,
-            reserved: 0,
-            active_workspace_lo: workspace.0,
-            active_workspace_hi: workspace.1,
-            active_tab_lo: tab.0,
-            active_tab_hi: tab.1,
-            focused_pane_lo: pane.0,
-            focused_pane_hi: pane.1,
-        }
-    })
-}
+// seyal_app_shell lives in window/ (W3 multi-window header + encode).
 
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_shell_row(handle: u64, kind: u16, index: u32) -> SeyalAppRow {
@@ -956,7 +1055,7 @@ pub extern "C" fn seyal_app_last_error(handle: u64) -> i32 {
     })
 }
 
-fn push_text(buf: &mut Vec<u8>, text: &str) -> (usize, u32) {
+pub(super) fn push_text(buf: &mut Vec<u8>, text: &str) -> (usize, u32) {
     let start = buf.len();
     buf.extend_from_slice(text.as_bytes());
     buf.push(0);
@@ -975,5 +1074,17 @@ fn optional_id(present: bool, lo: u64, hi: u64) -> Result<Option<[u8; 16]>, i32>
         Ok(Some(id16(lo, hi)?))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod seed_quit_ffi_tests {
+    #[test]
+    fn ffi_seed_quit_case_roundtrip() {
+        let handle = super::seyal_app_create();
+        assert_ne!(handle, 0);
+        assert_eq!(super::seyal_app_test_seed_quit_case(handle, 3), 0);
+        assert_eq!(super::seyal_app_test_live_attachment_count(handle), 3);
+        assert_eq!(super::seyal_app_destroy(handle), 0);
     }
 }

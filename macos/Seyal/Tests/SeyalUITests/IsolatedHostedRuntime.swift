@@ -29,9 +29,40 @@ enum IsolatedHostedRuntime {
 
   /// `/bin/zsh` is the helper command so Flow tests run with trusted
   /// integration. The account `pw_shell` on hosted runners is bash, which
-  /// SPEC-008 presents as full-pane Raw.
+  /// SPEC-008 presents as full-pane Raw. The argv command only seeds the
+  /// first execution; profile 0 (Split Right) reads `[shell].program`.
   static func makeLaunchArguments(shell: String = "/bin/zsh") -> [String] {
     [flag, makeDirectory(), shell]
+  }
+
+  static let runtimeConfigEnvironmentKey = "SEYAL_UI_TEST_RUNTIME_CONFIG"
+
+  /// Fixture `[shell].program` so every profile-0 execution uses `program`.
+  /// A missing file must fail the test; the helper ignores a path that is not on disk
+  /// and would otherwise fall back to the account shell.
+  static func writeShellConfig(program: String = "/bin/zsh") -> String {
+    let url = URL(fileURLWithPath: "/tmp").appendingPathComponent(
+      "s936-shell-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8)).toml"
+    )
+    let text: String
+    if program.hasPrefix("/"),
+      !program.contains("\""),
+      !program.unicodeScalars.contains(where: CharacterSet.newlines.contains)
+    {
+      text = "[shell]\nprogram = \"\(program)\"\n"
+    } else {
+      XCTFail("profile-0 shell fixture path is not a single absolute program: \(program)")
+      text = "[shell]\nprogram = \"/bin/zsh\"\n"
+    }
+    do {
+      try text.write(to: url, atomically: true, encoding: .utf8)
+    } catch {
+      XCTFail("profile-0 shell fixture was not written: \(error)")
+    }
+    if !FileManager.default.fileExists(atPath: url.path) {
+      XCTFail("profile-0 shell fixture is missing at \(url.path)")
+    }
+    return url.path
   }
 }
 
@@ -49,6 +80,10 @@ extension XCUIApplication {
       launchEnvironment[key] = value
     }
     launchEnvironment[IsolatedHostedRuntime.forwardCommandEnvironmentKey] = "1"
+    if launchEnvironment[IsolatedHostedRuntime.runtimeConfigEnvironmentKey] == nil {
+      launchEnvironment[IsolatedHostedRuntime.runtimeConfigEnvironmentKey] =
+        IsolatedHostedRuntime.writeShellConfig(program: shell)
+    }
     launch()
     return self
   }

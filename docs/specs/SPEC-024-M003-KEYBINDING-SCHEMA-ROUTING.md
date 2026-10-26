@@ -2,6 +2,7 @@
 
 - **Status:** Accepted on merge of PR #1208 by a non-author maintainer under #1002 (refinement output of #1002; not an implemented-behavior claim)
 - **Date:** 2026-09-25
+- **Amended:** §5.6 chrome-visibility commands under #1352 (accepted on merge of its PR by a non-author maintainer; gated per R5.6.3).
 - **Architecture authority:** ADR-015 (Rust product UI / thin native host); Foundation §5.1 / §13 (cold precompiled keybinding lookup; TOML canonical static config). **No new ADR:** see §0.
 - **Preserved contracts:** SPEC-006 (native input classification, Command reservation, IME/composition order, presentation-route fencing); SPEC-006 §21.3 immutable `input.option_as_alt`; SPEC-008 / ADR-009 (Flow/Raw/TUI mutual exclusion and input ownership); ADR-015 menu/command forwarding.
 - **Issue:** #1002 — parent umbrella #676, epic #665
@@ -287,6 +288,8 @@ when §4.2 / §7 permit:
 | `ctrl+r` | `composer.history_search.open` | `composer` |
 | `cmd+[` / `cmd+]` | `focus_history.back` / `focus_history.forward` | `app` |
 | `cmd+shift+o` | `goto.open` | `app` |
+| `cmd+0` | `chrome.toggle_left_panel` | `app` |
+| `cmd+opt+0` | `chrome.toggle_inspector` | `app` |
 
 **Product defaults (PO decision for PR #1208 / #1000 / #1002):** `cmd+n`
 and `cmd+t` both create a Tab (`tab.create`); `cmd+shift+n` creates a Window
@@ -309,7 +312,7 @@ step 3), like the Edit actions below, and are not rebindable in M003. Making
 them rebindable requires amending SPEC-008 §4 first.
 
 The `ctrl+r`, `cmd+[` / `cmd+]` and `cmd+shift+o` rows are gated per §5.4 and
-§5.5.
+§5.5; the `cmd+0` / `cmd+opt+0` rows per §5.6.
 
 `command_palette.close` uses the `palette` context so it is live only while the
 palette is open (§6.4). Escape is terminal-capable, so it must never carry
@@ -429,6 +432,8 @@ composer.history_search.open   # focus-relative (§5.4)
 focus_history.back             # SPEC-022 gated (§5.5)
 focus_history.forward          # SPEC-022 gated (§5.5)
 goto.open                      # SPEC-022 gated (§5.5)
+chrome.toggle_left_panel       # visibility toggle (§5.6)
+chrome.toggle_inspector        # visibility toggle (§5.6)
 app.quit                    # still subject to reserved Cmd-Q path; explicit bind of app.quit to non-reserved keys is allowed
 ```
 
@@ -593,6 +598,39 @@ only after SPEC-022 is Accepted. Before that the id is `UnknownAction` at load.
 R5.5.4 If SPEC-022 acceptance renames or removes one of these actions, this
 table must be updated before a keybinding child that includes it is marked
 Ready.
+
+### 5.6 Chrome visibility commands (owned here)
+
+This specification owns the keyboard and menu toggles for the left context
+panel and the Inspector. Rust owns visibility in `ChromeState`
+(`SetShellVisibility`, ADR-015); the scaffold keys
+(`M001-UI-SHELL-SCAFFOLD.md`: `⌘0` sidebar, `⌥⌘0` Inspector) are adopted here
+as M003 builtins.
+
+| WorkspaceCommandId | Rust action at invoke time | Builtin key (M003) |
+|---|---|---|
+| `chrome.toggle_left_panel` | `SetShellVisibility` that inverts `left_visible` and keeps every other visibility field, read from the same authoritative snapshot as the dispatch | `cmd+0` |
+| `chrome.toggle_inspector` | `SetShellVisibility` that inverts `inspector_visible` and keeps every other visibility field, same snapshot rule | `cmd+opt+0` |
+
+R5.6.1 A toggle changes visibility only. Workspace/Tab/Pane selection and
+focus, the left-panel mode (Workspaces/Tabs), the Inspector mode and composer
+drafts are unchanged, and toggling the same id twice restores the prior
+visibility.
+
+R5.6.2 Both ids are menu-visible (R11.1) and are projected into the View menu
+with titles derived from the current visibility (for example "Hide Sidebar" /
+"Show Sidebar"). Native realizes the items only from the projection (R11.2);
+there is no hardcoded native toggle shortcut.
+
+R5.6.3 Gating is the R5.1.3 rule: each id and its builtin row enter the
+production catalog only in the same or a later PR that lands its typed Rust
+toggle. Before that the id is `UnknownAction` at load and `cmd+0` /
+`cmd+opt+0` are ordinary unbound Command strokes (§6.2 step 2c).
+
+R5.6.4 The ids are not identity-bearing (R5.3.1) and carry no payload; users
+may rebind or unbind them like any catalog id (§3, §7). Both strokes are
+Command strokes in the `app` context, so they never reach the PTY (R4.2.1) and
+Raw/TUI non-interception (§6.3) is unaffected.
 
 ## 6. Routing precedence and Raw/TUI non-interception
 
@@ -1048,6 +1086,12 @@ Production Issues derived from this specification must include measurable cases:
 22. Config selection: `SEYAL_CONFIG` unset, set to a path, and set to the empty
     string select the same file for keybindings as for `input.option_as_alt`
     (§2.2).
+23. Chrome visibility (§5.6, in the child that lands the toggles): `cmd+0` and
+    `cmd+opt+0` each invert exactly one visibility field and leave selection,
+    focus, left-panel mode, Inspector mode and drafts unchanged; a second press
+    restores the prior state; the View-menu items carry the projected key
+    equivalents and visibility-derived titles; a user rebind moves the key
+    equivalent; before the toggles land both ids are `UnknownAction`.
 
 ## 15. Acceptance criteria (refinement)
 

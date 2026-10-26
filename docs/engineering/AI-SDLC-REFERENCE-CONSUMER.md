@@ -46,9 +46,11 @@ development-readiness
 implement-issue
   → NEW, or the same authorized candidate, including CLOSED_UNMERGED
 pr-review
-  → full current-candidate review
+  → one full current-candidate review, complete blocker list
   ├─ READY_TO_MERGE
-  ├─ CHANGES_REQUIRED → address-pr-review → full pr-review
+  ├─ CHANGES_REQUIRED → address-pr-review → confirm that recorded set on the diff
+  │     └─ full pr-review again only when the fix changes scope, architecture,
+  │        the hot path, or evidence the review relied on
   └─ BLOCKED_BY_DECISION → resolve the other decision, keep this candidate
 ```
 
@@ -74,11 +76,11 @@ A correct implementation handoff is implemented-for-review on a concrete candida
 
 ## Reference scenario 3 — PR review and remediation
 
-`pr-review` is the only review/re-review entrypoint. Every pass reviews the full current candidate, not just the latest delta, and continues after blockers to report the complete material blocker set found in that pass.
+`pr-review` is the only review/re-review entrypoint. The first pass reviews the full current candidate once and reports the complete material blocker set in that pass.
 
 For Seyal it additionally enforces terminal/runtime ownership, hot-path constraints, permanent production architecture, tests/evidence, measurements, security/domain gates and truthful Issue/PR state.
 
-When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories all unresolved review findings and failing required checks, batches root-cause remediation on the same candidate, reruns affected evidence, then returns the **entire current candidate** to `pr-review`.
+When changes are required on an `IN_REVIEW` candidate, `address-pr-review` inventories the unresolved findings and failing required checks from that pass, fixes them on the same candidate, and reruns the evidence that fix invalidated. The follow-up confirms those findings and the diff since the reviewed head. A new full `pr-review` starts only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the previous review relied on.
 
 ## Reference scenario 4 — verification
 
