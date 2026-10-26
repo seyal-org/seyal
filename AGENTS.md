@@ -67,7 +67,7 @@ Seyal uses an exclusive active-work claim:
 ```text
 fresh Ready Issue
 → authenticated **human** GitHub owner
-→ exactly one human owner (sole assignee when assignable; otherwise maintainer-acknowledged `Owner: @login` claim)
+→ exactly one human owner (sole assignee when assignable; otherwise `Owner: @login` on an unassigned queue issue)
 → Issue body is the plan
 → deterministic remote branch <human-login>/issue/<number>
 → coding agent may act only as delegated tool/co-author
@@ -85,13 +85,13 @@ New implementation branches are named `<human-login>/issue/<number>`; agent/vend
 ## Before changing code
 
 1. For a production GitHub Issue, invoke `implement-issue` and pass its exclusive GitHub ownership/branch preflight before editing code.
-2. Read the Issue and verify Project status is **Ready**.
+2. Read the Issue and verify it is **Ready** or labeled `help wanted`. `needs-refinement` is refinement work, and `blocked` waits on the named dependency.
 3. When the task needs broader project context than the Issue links provide, use the `project-context` skill to load the smallest relevant node/relationship set, validate it, then read the returned authoritative sources. Do not broadly reread the repository or trust the index summary as authority.
 4. Read every linked/retrieved architecture/spec/milestone document that materially governs the work.
 5. Verify dependencies are complete and ownership/module boundary is explicit.
 6. If architecture is missing or contradictory: **STOP** and use the `architecture-change` skill. Do not invent a workaround. Never amend an ADR inside an implementation PR; ADR create/amendment is always a separate PR.
 7. Confirm the requested work is production implementation rather than a spike/POC. If it is exploratory, isolate it on a non-mergeable path and do not open a mergeable production PR from that code.
-8. Use one Issue → one sole **human GitHub owner** → one isolated worktree → one deterministic `<human-login>/issue/<number>` branch → one PR. Use the sole assignee when assignable; otherwise use a maintainer-acknowledged human owner claim for external contributors. Coding agents may implement on that human owner's behalf and may be credited as co-authors; they never become the ownership identity.
+8. Use one Issue → one sole **human GitHub owner** → one isolated worktree → one deterministic `<human-login>/issue/<number>` branch → one PR. Use the sole assignee when assignable. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor's `Owner: @login` comment is the claim. Coding agents may implement on that human owner's behalf and may be credited as co-authors; they never become the ownership identity.
 9. Core behavior is test-first. Do not weaken tests to make code pass.
 10. Do not refactor unrelated code. Create/link another Issue instead.
 11. If an approved screenshot/mockup is visual authority for native UI, run the `image-to-code` skill before implementation. Complete its forensic design/component inventory and issue plan first; split the work into multiple Issues when the visual spans independently reviewable boundaries.

@@ -35,6 +35,10 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   /// Pass 9 native_ready probe so it does not open a second client alongside
   /// the qualification soak bridge.
   var suppressesAutomaticBridgeRecovery = false
+  /// A SPEC-009 interaction probe is a keyboard / AX host only. Unlike a
+  /// production live surface with recovery suppressed, it must not present a
+  /// Metal renderer or allocate full-size drawables.
+  var isNativeInteractionProbe: Bool { installation == .nativeInteractionProbe }
   var forceNextFrame = false
   var hasPreparedState = false
   var presentationState = PresentationRecoveryState()
@@ -148,7 +152,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
           self?.onComposerResultChanged?(result)
         },
         onComposerStatus: { [weak self] status in
-          self?.onComposerStatusChanged?(status)
+          self?.onComposerStatusChanged?(status) ?? false
         },
         paneID: paneID,
         executionIdentity: executionIdentity,
@@ -301,7 +305,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
 
   override func layout() {
     super.layout()
-    if suppressesAutomaticBridgeRecovery {
+    if isNativeInteractionProbe {
       // SPEC §10 probe: keep a 1×1 drawable so key-window/first-responder
       // restore does not allocate full-size CAMetalLayer backings each cycle.
       if let metalLayer = layer as? CAMetalLayer {
@@ -431,9 +435,9 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     let renderable = shouldRender
     let becameRenderable = renderable && !self.renderable
     self.renderable = renderable
-    if suppressesAutomaticBridgeRecovery {
-      // SPEC §10 probe surfaces: first-responder / AX / IME only — no Metal
-      // display-link or automatic Runtime recovery alongside the soak bridge.
+    if isNativeInteractionProbe {
+      // SPEC §10 probes: first-responder / AX / IME only — no Metal display
+      // link or full-size drawable alongside the qualification soak bridge.
       invalidateMetalDisplayLink()
       renderer.setVisible(false)
       return
@@ -631,7 +635,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   var onHistoryRangeChanged: ((NativeHistoryRange) -> Void)?
   var onHistoryCopy: ((UInt64, String) -> Void)?
   var onComposerResultChanged: ((NativeComposerResult) -> Void)?
-  var onComposerStatusChanged: ((NativeComposerStatus) -> Void)?
+  var onComposerStatusChanged: ((NativeComposerStatus) -> Bool)?
 
   var terminalBridgeIsConnected: Bool {
     bridge?.isConnected == true
@@ -748,8 +752,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     horizontalInsets: Double,
     verticalInsets: Double,
     cellWidth: Double,
-    cellHeight: Double,
-    meaningfulLayoutEpoch: Bool
+    cellHeight: Double
   ) -> Int32 {
     bridge?.proposeGeometry(
       viewportWidth: viewportWidth,
@@ -757,8 +760,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
       horizontalInsets: horizontalInsets,
       verticalInsets: verticalInsets,
       cellWidth: cellWidth,
-      cellHeight: cellHeight,
-      meaningfulLayoutEpoch: meaningfulLayoutEpoch
+      cellHeight: cellHeight
     ) ?? -10
   }
 

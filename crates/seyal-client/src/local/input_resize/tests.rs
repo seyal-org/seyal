@@ -5,9 +5,81 @@ use seyal_runtime::{
     local_ipc::framing::{ComposerResult, ComposerResultCode, TerminalKeyKind},
     AttachmentId,
 };
+use std::{collections::HashMap, os::unix::net::UnixStream};
 
 fn geometry(rows: u16, columns: u16) -> GridGeometry {
     GridGeometry { rows, columns }
+}
+
+fn resize_client() -> (LocalDisplayClient, UnixStream) {
+    let (stream, peer) = UnixStream::pair().expect("test stream pair");
+    (
+        LocalDisplayClient {
+            stream,
+            buffered: Vec::new(),
+            read_offset: 0,
+            pending_batch: super::super::display_apply::PendingDisplayBatch::default(),
+            outbound: VecDeque::new(),
+            outbound_wire_bytes: 0,
+            runtime_id: 1,
+            execution_id: super::super::ExecutionId::from_bytes([1; 16]),
+            attachment_id: AttachmentId::from_bytes([2; 16]),
+            role: Role::Controller,
+            block_metadata_negotiated: false,
+            extended_terminal_key_supported: false,
+            block_cache: super::super::BlockCache::default(),
+            cache: seyal_runtime::display::empty_cache(),
+            prepared: seyal_render::PreparedSurface::default(),
+            last_preparation: seyal_render::PreparationResult {
+                generation: 0,
+                rebuilt_rows: seyal_render::RowDamage::none(),
+                rebuilt_row_count: 0,
+                rebuilt_cell_count: 0,
+                full_rebuild: false,
+            },
+            needs_initial_prepare: false,
+            next_resize_request_id: 1,
+            desired_geometry: None,
+            last_layout_metrics: None,
+            committed_geometry: geometry(24, 80),
+            unresolved_resizes: VecDeque::new(),
+            applied_awaiting_projection: None,
+            retry_suppression: None,
+            resync_needed: false,
+            input_failure: None,
+            resize_failure: None,
+            block_timeline: seyal_runtime::local_ipc::framing::BlockTimeline {
+                revision: 0,
+                records: Vec::new(),
+            },
+            command_blocks_supported: false,
+            last_composer_result: None,
+            composer_status: None,
+            pending_composer_requests: std::collections::HashSet::new(),
+            next_composer_request_id: 1,
+            history_ranges: HashMap::new(),
+            history_requests: HashMap::new(),
+            next_history_request_id: 1,
+            copied_text: Vec::new(),
+            history_copy_text: String::new(),
+            pending_block_copy: None,
+            completed_block_copy: None,
+            last_admitted_v2_action_id: 0,
+            last_sent_v2_action_id: 0,
+            highest_v2_error_id: 0,
+            last_admitted_mouse_action_id: 0,
+            execution_provisioning_negotiated: false,
+            next_provisioning_request_id: 1,
+            harness_probe: true,
+            pending_create_requests: std::collections::HashSet::new(),
+            pending_terminate_requests: std::collections::HashSet::new(),
+            last_create_result: VecDeque::new(),
+            last_terminate_result: None,
+            viewport_line_ids: Vec::new(),
+            viewport_line_ids_generation: 0,
+        },
+        peer,
+    )
 }
 
 #[test]
@@ -151,6 +223,151 @@ fn applied_fence_is_pending_until_authoritative_generation_catches_up() {
         newest_pending_geometry(&VecDeque::new(), Some(fence)),
         Some(desired)
     );
+}
+
+#[test]
+fn stale_attachment_and_unknown_resize_results_preserve_pending_identity_and_fence() {
+    let (mut client, _peer) = resize_client();
+    let target = geometry(30, 100);
+    client.desired_geometry = Some(target);
+    client.applied_awaiting_projection = Some(AppliedFence {
+        request_id: 8,
+        geometry: target,
+        applied_generation: 20,
+    });
+    client.unresolved_resizes.push_back(ResizeRecord {
+        request_id: 7,
+        geometry: geometry(28, 90),
+        phase: ResizePhase::SentWaitingResult,
+    });
+
+    let fence = client.applied_awaiting_projection;
+    let pending = client.unresolved_resizes.clone();
+    let stale_attachment = seyal_runtime::local_ipc::framing::ResizeResult {
+        attachment_id: AttachmentId::from_bytes([9; 16]),
+        request_id: 7,
+        result_code: ResizeResultCode::Applied,
+        detail_code: 0,
+        applied_generation: 21,
+    };
+    assert_eq!(
+        client.accept_resize_result(stale_attachment),
+        Err(ClientError::ResizeProtocolFailure)
+    );
+    assert_eq!(client.applied_awaiting_projection, fence);
+    assert_eq!(client.unresolved_resizes, pending);
+
+    let unknown_request = seyal_runtime::local_ipc::framing::ResizeResult {
+        attachment_id: client.attachment_id,
+        request_id: 99,
+        result_code: ResizeResultCode::Applied,
+        detail_code: 0,
+        applied_generation: 21,
+    };
+    assert_eq!(
+        client.accept_resize_result(unknown_request),
+        Err(ClientError::ResizeProtocolFailure)
+    );
+    assert_eq!(client.applied_awaiting_projection, fence);
+    assert_eq!(client.unresolved_resizes, pending);
+    assert_eq!(client.resize_failure, Some(ResizeFailure::Protocol));
+}
+
+#[test]
+fn older_rejected_resize_cannot_replace_newer_applied_projection_fence() {
+    let (mut client, _peer) = resize_client();
+    let newer_geometry = geometry(30, 100);
+    let fence = AppliedFence {
+        request_id: 8,
+        geometry: newer_geometry,
+        applied_generation: 20,
+    };
+    client.desired_geometry = Some(newer_geometry);
+    client.applied_awaiting_projection = Some(fence);
+    client.unresolved_resizes.push_back(ResizeRecord {
+        request_id: 7,
+        geometry: geometry(28, 90),
+        phase: ResizePhase::SentWaitingResult,
+    });
+
+    assert_eq!(
+        client.accept_resize_result(seyal_runtime::local_ipc::framing::ResizeResult {
+            attachment_id: client.attachment_id,
+            request_id: 7,
+            result_code: ResizeResultCode::Error(ErrorCode::CapacityExceeded),
+            detail_code: 0,
+            applied_generation: 0,
+        }),
+        Ok(())
+    );
+    assert_eq!(client.applied_awaiting_projection, Some(fence));
+    assert!(client.unresolved_resizes.is_empty());
+    assert_eq!(client.retry_suppression, None);
+    assert_eq!(
+        client.resize_failure,
+        Some(ResizeFailure::Apply(ErrorCode::CapacityExceeded))
+    );
+}
+
+#[test]
+fn rejected_current_resize_waits_for_meaningful_layout_recovery() {
+    let (mut client, _peer) = resize_client();
+    let target = geometry(30, 100);
+    let initial_layout = LayoutMetrics::new(500.0, 300.0, 0.0, 0.0, 5.0, 10.0);
+    client
+        .set_desired_geometry_for_layout(target, initial_layout)
+        .expect("initial layout is accepted");
+    // Seed the native layout sample without keeping the initial request; the
+    // remainder of this test injects the rejected Runtime result directly.
+    client.unresolved_resizes.clear();
+    client.outbound.clear();
+    client.desired_geometry = Some(target);
+    client.unresolved_resizes.push_back(ResizeRecord {
+        request_id: 1,
+        geometry: target,
+        phase: ResizePhase::SentWaitingResult,
+    });
+    client.next_resize_request_id = 2;
+
+    assert_eq!(
+        client.accept_resize_result(seyal_runtime::local_ipc::framing::ResizeResult {
+            attachment_id: client.attachment_id,
+            request_id: 1,
+            result_code: ResizeResultCode::Error(ErrorCode::CapacityExceeded),
+            detail_code: 0,
+            applied_generation: 0,
+        }),
+        Ok(())
+    );
+    assert_eq!(
+        client.resize_failure,
+        Some(ResizeFailure::Apply(ErrorCode::CapacityExceeded))
+    );
+    assert_eq!(
+        client.retry_suppression.map(|value| value.geometry),
+        Some(target)
+    );
+    assert!(client.unresolved_resizes.is_empty());
+    assert!(client.outbound.is_empty());
+
+    // Re-observing identical native metrics does not resend a rejected Runtime
+    // request. Rust recognizes changed viewport metrics as a new layout epoch,
+    // even when the derived rows/columns remain identical.
+    client
+        .set_desired_geometry_for_layout(target, initial_layout)
+        .expect("same layout remains suppressed");
+    assert!(client.unresolved_resizes.is_empty());
+    let changed_viewport_same_grid = LayoutMetrics::new(501.0, 300.0, 0.0, 0.0, 5.0, 10.0);
+    client
+        .set_desired_geometry_for_layout(target, changed_viewport_same_grid)
+        .expect("changed native metrics authorize layout recovery");
+    assert_eq!(client.unresolved_resizes.len(), 1);
+    assert_eq!(client.unresolved_resizes[0].request_id, 2);
+    assert_eq!(client.unresolved_resizes[0].geometry, target);
+    client
+        .set_desired_geometry_for_layout(target, changed_viewport_same_grid)
+        .expect("same recovery epoch does not duplicate request");
+    assert_eq!(client.unresolved_resizes.len(), 1);
 }
 
 #[test]

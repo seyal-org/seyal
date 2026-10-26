@@ -1,6 +1,4 @@
-//! Versioned one-Pane application-root C ABI.
-//!
-//! C entry points stay here; decode/encode/pane_region/visual siblings keep each
+//! Versioned one-Pane application-root C ABI. Focused siblings keep each
 //! responsibility reviewable without changing published symbols.
 
 mod block_actions;
@@ -9,6 +7,7 @@ mod decode;
 mod encode;
 mod error_code;
 mod loss;
+pub mod pane_recovery;
 mod pane_region;
 mod shortcut;
 mod visual;
@@ -45,7 +44,7 @@ pub use block_actions::{
 };
 pub use block_projection::seyal_app_block_projection;
 pub(crate) use loss::note_application_roots_client_loss;
-pub use pane_region::{seyal_app_pane_divider, seyal_app_pane_region};
+pub use pane_region::*;
 pub use shortcut::{
     seyal_app_invoke_workspace_command, seyal_app_route_keystroke, seyal_app_shortcut_count,
     seyal_app_shortcut_enabled, seyal_app_shortcut_item,

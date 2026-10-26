@@ -34,7 +34,7 @@ impl ApplicationRoot {
     /// Does not insert into `CLIENTS`; the handle must already be present from
     /// bridge adopt / a prior sole registration (#1066 locked design §3).
     pub fn attach_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
-        let Some((evidence, output)) = crate::ffi::with_client(handle, |client| {
+        let Some((evidence, output, runtime_id)) = crate::ffi::with_client(handle, |client| {
             let evidence = BindingEvidence {
                 execution: client.execution_id(),
                 attachment: client.attachment_id(),
@@ -45,7 +45,11 @@ impl ApplicationRoot {
                 pty_generation: client.cache().generation.max(1),
                 alternate_screen: client.cache().alternate_screen,
             };
-            (evidence, project_cache_text(client.cache()))
+            (
+                evidence,
+                project_cache_text(client.cache()),
+                client.runtime_id(),
+            )
         }) else {
             return self.fail(AppError::NoLiveClient);
         };
@@ -58,6 +62,7 @@ impl ApplicationRoot {
         }
         self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         self.pane_client_raws.insert(fence.pane, handle);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -72,9 +77,9 @@ impl ApplicationRoot {
     /// After FFI `Bind`, name the already-adopted bridge client as the create
     /// Controller so production CreateTab can admit type-36.
     pub fn adopt_bridge_handle(&mut self, fence: AppFence, handle: u64) -> Result<(), AppError> {
-        if crate::ffi::with_client(handle, |_| ()).is_none() {
+        let Some(runtime_id) = crate::ffi::with_client(handle, |client| client.runtime_id()) else {
             return self.fail(AppError::NoLiveClient);
-        }
+        };
         if self
             .client_handle
             .as_ref()
@@ -86,6 +91,7 @@ impl ApplicationRoot {
             self.client_handle = Some(crate::ffi::ClientRegistryHandle::new(handle));
         }
         self.pane_client_raws.insert(fence.pane, handle);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         if self.shell.snapshot().focused_pane == fence.pane {
             crate::ffi::set_focused_display_handle(handle);
         }
@@ -113,6 +119,7 @@ impl ApplicationRoot {
             pty_generation: client.cache().generation.max(1),
             alternate_screen: client.cache().alternate_screen,
         };
+        let runtime_id = client.runtime_id();
         let output = project_cache_text(client.cache());
         let registered = match crate::ffi::register_app_client(client) {
             Ok(handle) => handle,
@@ -129,6 +136,7 @@ impl ApplicationRoot {
         let raw = registered.raw();
         self.client_handle = Some(registered);
         self.pane_client_raws.insert(fence.pane, raw);
+        self.remember_pane_runtime(fence.pane, runtime_id);
         crate::ffi::set_focused_display_handle(raw);
         // R8.4 / #1124: detach/reconnect must not keep a chord prefix wait.
         self.clear_chord_prefix();
@@ -461,6 +469,8 @@ impl ApplicationRoot {
             pty_generation: evidence.pty_generation,
         };
         self.pane_authorities.insert(fence.pane, authority);
+        self.bind_pane_recovery(fence.pane, evidence.execution);
+        self.remember_primary_pane(fence.pane);
         self.authority = Some(authority);
         self.derive_presentation(evidence.alternate_screen)?;
         self.sync_composer_presentation();

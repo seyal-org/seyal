@@ -34,6 +34,7 @@ pub(super) fn test_client(stream: UnixStream) -> LocalDisplayClient {
         needs_initial_prepare: false,
         next_resize_request_id: 1,
         desired_geometry: None,
+        last_layout_metrics: None,
         committed_geometry: GridGeometry {
             rows: 1,
             columns: 1,

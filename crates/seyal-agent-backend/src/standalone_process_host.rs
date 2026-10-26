@@ -830,10 +830,7 @@ mod tests {
         let HostStartOutcome::Started(handle) = host.start(
             run,
             generation,
-            descriptor(
-                "/usr/bin/python3",
-                ["-c", "import sys; sys.stdout.write('x' * (48 * 1024))"],
-            ),
+            descriptor("/bin/sh", ["-c", "printf %49152s"]),
         ) else {
             panic!("expected spawn evidence");
         };
@@ -869,7 +866,7 @@ mod tests {
             rebuilt.extend(store.materialize_output_ref(run, &output).unwrap());
         }
         assert_eq!(rebuilt.len(), 48 * 1024);
-        assert!(rebuilt.iter().all(|b| *b == b'x'));
+        assert!(rebuilt.iter().all(|b| *b == b' '));
         let _ = std::fs::remove_dir_all(dir);
         let _ = host.reap(handle);
     }

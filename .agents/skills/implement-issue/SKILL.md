@@ -9,6 +9,17 @@ This is the mandatory entrypoint for production implementation of a Seyal GitHub
 
 Follow the canonical generic procedure in `.sdlc/framework/skills/implementation/SKILL.md`. If it is unavailable, run `make bootstrap-agents` first.
 
+## Finding work
+
+When someone asks what to develop, what to refine, or which issue to pick up, use the contributor queues in `CONTRIBUTING.md` and `docs/engineering/ISSUE-PROTOCOL.md`. Do not scan the full open-issue list and do not report that list as blocked.
+
+- Development: open, unassigned, label `help wanted`. These issues are Ready. Pick one up through this skill.
+- Refinement: open, unassigned, label `needs-refinement`. Route to `issue-refinement`. Do not implement them.
+- `blocked` names the issue, pull request, or ADR that still has to land. Report that dependency.
+- `historical-evidence` is not current work.
+
+If the requested issue is `needs-refinement`, stop implementation and refine it. If it is `blocked`, name the blocking issue and stop. An unassigned queue issue is claimed by assigning the human owner, or by commenting `Owner: @login` when GitHub will not assign an external contributor. That comment is the claim. Wait for a maintainer only when another human already owns the issue or two claims disagree.
+
 ## Exclusive GitHub Issue claim
 
 Claiming the Issue is a coordination preflight, not implementation permission. Implementation planning happens before final readiness and does not claim ownership. Perform the human-owner claim before implementation branch/worktree creation, generated files, or production edits.
@@ -17,16 +28,16 @@ Claiming the Issue is a coordination preflight, not implementation permission. I
 2. Fetch the owning GitHub Issue fresh from GitHub immediately before pickup. Cached project context, chat state, an earlier fetch, or the Issue body alone is not sufficient for owner-record state.
 3. Verify the Issue is still open and **Ready** under `docs/engineering/ISSUE-PROTOCOL.md`. Readiness and ownership are separate gates.
 4. Inspect the complete **human owner-record state**: assignees plus maintainer-acknowledged `Owner: @login` claims.
-   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login` and require a maintainer acknowledgement before continuing.
+   - **No active human owner record:** if the current human owner is assignable, assign exactly that owner and fetch again. If GitHub does not allow assigning this external contributor, post `Owner: @login`. On an unassigned `help wanted` or `needs-refinement` issue, that comment is the claim and work continues. Require a maintainer acknowledgement only when another owner record already exists or two claims disagree.
    - **Exactly the current human owner:** treat this only as a potential resume; continue the deterministic-branch checks below.
    - **Exactly another human owner:** stop before planning or edits and report `Issue #N is already taken by @login` with the Issue URL.
    - **Agent/bot owner record:** stop as `BLOCKED`; Seyal work ownership must be transferred to a human before implementation.
    - **Conflicting records:** multiple assignees, multiple acknowledged owner claims, or disagreement between assignee and acknowledged claim is an ownership collision. Seyal implementation Issues have exactly one active human owner.
-5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and a maintainer-acknowledged `Owner: @login` claim names that human. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
+5. Re-fetch the Issue and require exactly one human owner record: either the current human is the sole assignee, or there is no conflicting assignee and exactly one `Owner: @login` comment names that human. On an unassigned `help wanted` or `needs-refinement` issue, that comment is enough. A maintainer acknowledgement is required only when another owner record already exists. Any disagreement is `BLOCKED`. A failed write, overwritten assignment, multiple assignees, or ambiguous result is `BLOCKED`; never overwrite another valid claim to win a race.
 6. If the work item is a GitHub sub-issue, fetch its parent immediately before claiming or editing the child. A **planning/umbrella parent is not an ownership lock** for an independently scoped child. Stop with `BLOCKED` only when parent and child overlap the same implementation slice or the parent explicitly owns/releases that slice. After the child claim write and again after creating `<human-login>/issue/<number>`, re-fetch both parent and child and verify there is no duplicate ownership of the same slice.
 7. Do not clear, replace, or steal another human's owner record. Ownership transfer requires an explicit human-to-human handoff under `ISSUE-PROTOCOL.md`.
 
-The human ownership claim is the sole assignee when assignable, otherwise a maintainer-acknowledged `Owner: @login` Issue claim for an external contributor. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
+The human ownership claim is the sole assignee when assignable. On an unassigned `help wanted` or `needs-refinement` issue, an external contributor's `Owner: @login` comment is the claim. Cursor/Codex/Claude Code/Copilot or other agent identities are delegated tooling only and may never substitute for the **human owner record**. Project status such as `In Progress` is lifecycle metadata and must never substitute for the human-owner check.
 
 ## Human owner and agent delegation
 
@@ -48,7 +59,7 @@ Do not create or switch the implementation worktree/branch, generate files, or s
 4. Resolve the implementation candidate defined in `docs/engineering/ISSUE-PROTOCOL.md` before creating a branch/worktree. `Refs` and `Part of` do not make a pull request the candidate. Include a closed unmerged pull request on the Issue branch:
    - `NONE` → keep implementing on the branch. Do not open a pull request while accepted scope is incomplete. When it is complete, open one pull request ready for review;
    - same human owner + `IMPLEMENTATION_IN_PROGRESS` (an existing draft) → resume that exact candidate/branch; keep it a draft until accepted scope is complete, then mark that same PR ready for review;
-   - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review`, then full `pr-review`; do not open a second PR;
+   - `IN_REVIEW` (ready for review) + reviewer feedback or required-check remediation → use `address-pr-review` and confirm that recorded set on the same PR. Do not open a second PR and do not start a new full `pr-review` unless the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on;
    - `CLOSED_UNMERGED` → reopen or rebase that same head. Review findings use `address-pr-review`. Do not re-implement it and do not open a second PR. A decision blocker names the other pull request and keeps this one;
    - `REJECTED` → do not resume;
    - `UNKNOWN`, another owner, ambiguous ownership, or multiple active candidates → stop and reconcile; never create a second candidate.
@@ -110,7 +121,7 @@ Then apply only these Seyal-specific rules on top of the generic procedure:
 11. Every mergeable PR must name exactly one **owning Issue** in the PR's `## Issue` section. Use `Closes #N`, `Fixes #N`, or `Resolves #N` only when this PR, once merged, satisfies that owning Issue's acceptance criteria and Definition of Done. If the PR is refinement, evidence, a partial implementation, a prerequisite, or otherwise does not make the Issue Done, use a non-closing reference such as `Refs #N` or `Part of #N`. Never use a closing keyword merely because the PR works on the Issue.
 12. Before opening the PR, compare the final diff/evidence against the owning Issue. If acceptance criteria changed during implementation, update/refine the Issue first; do not make the PR description silently redefine Done.
 13. Open the PR with `.github/pull_request_template.md`, preserve the exact owning-Issue reference, and provide reproducible evidence. The implementation handoff is **implemented for review**, never final verification.
-14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, mark/resolve the candidate as `IN_REVIEW` and route to full `pr-review`; the generic review consumes exact-revision `verification` and applicable specialist evidence. Review-stage remediation routes through `address-pr-review` and then full `pr-review` again.
+14. Do not self-approve core/high-risk work. When accepted-scope implementation is complete, mark/resolve the candidate as `IN_REVIEW` and route to one `pr-review`. That review lists every material blocker in the same pass. Review-stage remediation routes through `address-pr-review` and confirms those findings on the diff. A second full `pr-review` starts only when the fix changes accepted scope, architecture or authority, the terminal hot path, or evidence the review relied on.
 15. At final verification/merge handoff, explicitly verify the owning Issue's state: a closing PR may close it only if all Done gates are evidenced; a non-closing PR must leave it open. Also correct stale Issue status/checklist text when it would contradict the verified state.
 
 ## Claim handoff and release

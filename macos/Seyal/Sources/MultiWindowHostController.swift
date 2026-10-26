@@ -23,9 +23,11 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
     override init() {
         liveHost = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         super.init()
-        // Chain after ProductChromeHostView's own pane hook so window effects
-        // apply whenever Rust commits a product transition.
+        // Preserve ProductChromeHostView's frame/block refresh hook, then add
+        // the multi-window realization work for the same Rust commit.
+        let refreshProductHost = liveHost.pane.onProductChanged
         liveHost.pane.onProductChanged = { [weak self] in
+            refreshProductHost?()
             guard let self else { return }
             self.liveHost.reconcileChrome()
             self.applyPendingEffects()
@@ -38,6 +40,18 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         applyPendingEffectsAndReconcile()
         liveHost.activateAfterWindowPresentation()
         NSApp.activate(ignoringOtherApps: true)
+        #if DEBUG
+        // Hosted resize acceptance needs enough room for both real Pane targets
+        // on smaller CI displays, even when AppKit restores a previous frame.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let window = self.realizations.values.first(where: { $0.contentView === self.liveHost })
+                else { return }
+                self.placeCompactResizeWindow(window)
+            }
+        }
+        #endif
     }
 
     func applyPendingEffectsAndReconcile() {
@@ -46,6 +60,13 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         refreshTitlesFromSnapshot()
         liveHost.reconcileChrome()
     }
+
+    #if DEBUG
+    /// Once the hosted test drags the window, leave that size alone.
+    private var compactClampArmed = true
+    /// Re-entrancy fence for the hosted resize fixture's on-screen clamp.
+    private var applyingCompactFrame = false
+    #endif
 
     /// UI order equals snapshot order (ADR-018 §1.3 / W4a).
     func snapshotOrderedWindowKeys() -> [WindowKey] {
@@ -121,7 +142,7 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         if !orderedKeys.contains(key) {
             orderedKeys.append(key)
         }
-        // One live Metal leaf: install live host only for the product-active window.
+        // Install the live Pane surfaces only in Rust's product-active window.
         if isProductActive(key) {
             installLiveHost(in: window, key: key)
         } else {
@@ -337,15 +358,31 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         return shell.active_window_lo == key.lo && shell.active_window_hi == key.hi
     }
 
+    private var initialWindowSize: NSSize {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            return NSSize(width: 1100, height: 760)
+        }
+        #endif
+        return NSSize(width: 1280, height: 800)
+    }
+
     private func makeSeyalWindow(for key: WindowKey) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+            contentRect: NSRect(origin: .zero, size: initialWindowSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Seyal"
         window.minSize = NSSize(width: 960, height: 640)
+        #if DEBUG
+        // A restored frame wider than the display puts the resize corner
+        // off-screen, so the hosted two-pane resize drag never starts.
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            window.isRestorable = false
+        }
+        #endif
         window.tabbingMode = .disallowed
         window.identifier = NSUserInterfaceItemIdentifier("seyal-window-\(key.lo)-\(key.hi)")
         window.delegate = self
@@ -566,6 +603,69 @@ final class MultiWindowHostController: NSObject, NSWindowDelegate {
         guard let window = notification.object as? NSWindow else { return }
         reportWindowEvent(window: window, event: SEYAL_APP_WINDOW_EVENT_SCREEN_OR_SCALE_CHANGED)
     }
+
+    func windowWillStartLiveResize(_ notification: Notification) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1" {
+            compactClampArmed = false
+        }
+        #endif
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        #if DEBUG
+        guard compactClampArmed,
+              !applyingCompactFrame,
+              ProcessInfo.processInfo.environment["SEYAL_UI_TEST_COMPACT_RESIZE_WINDOW"] == "1",
+              let window = notification.object as? NSWindow,
+              !window.inLiveResize,
+              let screen = window.screen ?? NSScreen.main,
+              window.frame.width > screen.visibleFrame.width - 40
+        else { return }
+        // AppKit forbids setFrame inside the resize notification that layout
+        // is still posting. Clamp on the next turn, and only while the frame
+        // is too wide for the resize corner to stay on screen.
+        applyingCompactFrame = true
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.placeCompactResizeWindow(window)
+        }
+        #endif
+    }
+
+    #if DEBUG
+    private func placeCompactResizeWindow(_ window: NSWindow) {
+        applyingCompactFrame = true
+        defer { applyingCompactFrame = false; compactClampArmed = false }
+        if let content = window.contentView {
+            relaxWideConstraints(in: content)
+        }
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame
+        let width = min(1100, max(960, (visible?.width ?? 1100) - 220))
+        let height = min(760, max(640, (visible?.height ?? 760) - 80))
+        var frame = window.frameRect(
+            forContentRect: NSRect(x: 0, y: 0, width: width, height: height))
+        guard let visible else {
+            window.setFrame(frame, display: true)
+            window.center()
+            return
+        }
+        frame.origin.x = visible.minX + 8
+        frame.origin.y = max(visible.minY + 8, visible.maxY - frame.height - 8)
+        window.setFrame(frame, display: true)
+    }
+
+    /// Autoresizing masks inside the pane layout become required widths.
+    /// A stale wide one keeps a restored frame from accepting the compact size.
+    private func relaxWideConstraints(in view: NSView) {
+        for constraint in view.constraints where constraint.firstAttribute == .width && constraint.constant > 700 {
+            constraint.priority = .defaultLow
+        }
+        for child in view.subviews {
+            relaxWideConstraints(in: child)
+        }
+    }
+    #endif
 }
 
 enum QuitForwardError: Error {

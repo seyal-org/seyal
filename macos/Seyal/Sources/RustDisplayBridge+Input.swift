@@ -180,24 +180,26 @@ extension RustDisplayBridge {
     horizontalInsets: Double,
     verticalInsets: Double,
     cellWidth: Double,
-    cellHeight: Double,
-    meaningfulLayoutEpoch: Bool
+    cellHeight: Double
   ) -> Int32 {
     guard isConnected, selectClient() else {
       onStatusChanged()
       return -10
     }
-    return finishMutation(
-      seyal_bridge_propose_geometry(
-        viewportWidth,
-        viewportHeight,
-        horizontalInsets,
-        verticalInsets,
-        cellWidth,
-        cellHeight,
-        meaningfulLayoutEpoch ? 1 : 0
-      )
+    // A rejected or not-yet-writable resize is not socket loss. `finishMutation`
+    // would stop this Controller, and a layout pass on every bounds change then
+    // drops the live session before Flow eligibility or a second Pane can attach.
+    let result = seyal_bridge_propose_geometry(
+      viewportWidth,
+      viewportHeight,
+      horizontalInsets,
+      verticalInsets,
+      cellWidth,
+      cellHeight
     )
+    synchronizeWriteReadinessSource()
+    onStatusChanged()
+    return result
   }
 
   @discardableResult
@@ -260,6 +262,10 @@ extension RustDisplayBridge {
       }
       if result == 1 {
         publishCurrentFrame()
+        // The primary read source is this bridge's own Controller. Auxiliary
+        // sources skip that handle, so an unfocused Pane that still owns it
+        // would otherwise keep the AX grid from host creation.
+        onRegistryHandlePolled?(clientHandle)
         armAuxiliaryReadSources()
         armProvisioningWakeupSource()
         continue

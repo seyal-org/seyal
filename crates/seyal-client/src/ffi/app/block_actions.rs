@@ -271,12 +271,12 @@ mod tests {
         );
 
         let bound = seyal_app_snapshot(handle);
-        let mut rerun = identity_fence(69, &bound);
+        let mut rerun = identity_fence(76, &bound);
         rerun.target_execution_lo = running.id_lo;
         rerun.target_execution_hi = running.id_hi;
         rerun.target_pty_generation = seyal_app_composer(handle).epoch;
         assert_eq!(unsafe { seyal_app_apply(handle, &rerun) }, -4);
-        assert_eq!(seyal_app_last_error(handle), 56, "BlockRunning");
+        assert_eq!(seyal_app_last_error(handle), 60, "BlockRunning");
 
         rerun.target_execution_lo = done.id_lo;
         rerun.target_execution_hi = done.id_hi;
@@ -287,7 +287,7 @@ mod tests {
         assert_eq!(draft, b"ls /");
 
         // Design §6: an occupied draft disables both Rerun rows, and the
-        // projection agrees with the reducer's ComposerDraftOccupied (58).
+        // projection agrees with the reducer's ComposerDraftOccupied (62).
         let rerun_rows = |block: u32| {
             (0..seyal_app_block_action_count(handle, block))
                 .map(|index| seyal_app_block_action_row(handle, block, index))
@@ -296,12 +296,12 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(rerun_rows(0), [false, false], "draft occupied");
-        let mut again = identity_fence(69, &seyal_app_snapshot(handle));
+        let mut again = identity_fence(76, &seyal_app_snapshot(handle));
         again.target_execution_lo = done.id_lo;
         again.target_execution_hi = done.id_hi;
         again.target_pty_generation = seyal_app_composer(handle).epoch;
         assert_eq!(unsafe { seyal_app_apply(handle, &again) }, -4);
-        assert_eq!(seyal_app_last_error(handle), 58, "ComposerDraftOccupied");
+        assert_eq!(seyal_app_last_error(handle), 62, "ComposerDraftOccupied");
         assert_eq!(
             seyal_app_composer(handle).draft_utf8_len,
             4,
