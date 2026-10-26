@@ -282,7 +282,7 @@ final class MultiWindowHostTests: XCTestCase {
             $0.action == #selector(ProductChromeHostView.invokeProjectedWorkspaceCommand(_:))
         })
 
-        let close = projectedItems.first { $0.representedObject as? UInt16 == 22 }
+        let close = projectedItems.first { $0.representedObject as? UInt16 == 37 }
         XCTAssertEqual(close?.keyEquivalent, "w")
         XCTAssertTrue(close?.keyEquivalentModifierMask.contains(.command) == true)
     }

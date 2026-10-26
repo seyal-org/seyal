@@ -16,7 +16,7 @@ impl ApplicationRoot {
             .panes
             .iter()
             .filter_map(|pane| pane.execution.map(|_| pane.id));
-        pane_layout::project(&shell.tree, shell.focused_pane, bound)
+        pane_layout::project_for_host(&shell.tree, shell.focused_pane, bound, shell.zoomed)
     }
 
     #[cfg(target_os = "macos")]

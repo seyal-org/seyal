@@ -5,7 +5,9 @@ use seyal_core::{PaneId, TabId, WindowId, WorkspaceId};
 use super::*;
 use crate::keybinding::{WorkspaceCommand, WorkspaceCommandId};
 use crate::navigation::{FocusSeq, ResourceAddress};
-use crate::shell::{ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed};
+use crate::shell::{
+    FocusDirection, ShellPaneSeed, ShellTabSeed, ShellWindowSeed, ShellWorkspaceSeed,
+};
 
 fn evidence(pty_generation: u64, controller: bool, alternate_screen: bool) -> BindingEvidence {
     BindingEvidence {
@@ -740,6 +742,52 @@ fn focus_pane_onto_unbound_leaf_clears_authority() {
     );
     root.apply(AppAction::FocusPane { id: p1 }).unwrap();
     assert!(root.snapshot().execution.is_some());
+}
+
+#[test]
+fn zoom_and_directional_focus_commit_focus_and_input_authority() {
+    let (mut root, workspace, tab, p1, p2) = two_pane_root();
+    let bound = root.snapshot().execution;
+    assert!(bound.is_some());
+
+    root.apply(AppAction::ZoomPane { id: p2 }).unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p2);
+    assert_eq!(root.snapshot().shell.zoomed, Some(p2));
+    assert!(
+        root.snapshot().execution.is_none(),
+        "zoom moves input authority with focus"
+    );
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane: p2
+        })
+    );
+    assert_eq!(
+        root.apply(AppAction::SubmitInput {
+            fence: root.fence(),
+            text: "must fail closed".into()
+        }),
+        Err(AppError::UnboundUnauthorized)
+    );
+
+    root.apply(AppAction::FocusDirection {
+        direction: FocusDirection::Left,
+    })
+    .unwrap();
+    assert_eq!(root.snapshot().shell.focused_pane, p1);
+    assert_eq!(root.snapshot().shell.zoomed, None);
+    assert_eq!(root.snapshot().execution, bound);
+    assert_eq!(
+        root.focus_history.cursor_target(),
+        Some(ResourceAddress::Pane {
+            workspace,
+            tab,
+            pane: p1
+        })
+    );
 }
 
 #[test]

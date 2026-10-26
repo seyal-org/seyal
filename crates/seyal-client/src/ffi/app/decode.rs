@@ -12,7 +12,7 @@ use crate::ffi::with_active_client;
 use crate::navigation::{decode_resource_address, ResourceAddress};
 use crate::pane_layout::SplitPosition;
 use crate::recovery::{AttemptOutcome, ContinuityIdentity, LaunchResult, RecoveryStage};
-use crate::shell::SplitAxis;
+use crate::shell::{FocusDirection, MoveSide, SplitAxis};
 
 use super::{
     id16, optional_id, SeyalAppAction, FLAG_ALTERNATE_SCREEN, FLAG_CONTROLLER, FLAG_HAS_ATTACHMENT,
@@ -315,10 +315,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 })
             }
         }
-        // Focus-history Back/Forward (SPEC-022 §6 / N3). Payload is FocusSeq
-        // as little-endian u64; empty payload is invalid. Numbers 63/64 leave
-        // 61/62 for N4 OpenGoto/SetGotoScope. Error codes 51/52 follow
-        // ActionUnavailable (50).
+        // Focus-history Back/Forward (SPEC-022 §6 / N3).
         63 => {
             if action.reserved != 0 {
                 return Err(-6);
@@ -337,7 +334,7 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 observed: decode_focus_seq(action.payload, action.payload_len)?,
             })
         }
-        // W4a window host intents (ADR-018 §2.2 / §2.3), following N3.
+        // W4a window host intents (ADR-018 §2.2 / §2.3).
         65 => Ok(AppAction::SelectWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
@@ -372,13 +369,67 @@ pub(super) fn decode_action(action: &SeyalAppAction) -> Result<AppAction, i32> {
                 occluded,
             })
         }
-        69 => Ok(AppAction::CloseWindow {
+        // PT5 pane-tree verbs. Numbers follow the window host actions.
+        69 => Ok(AppAction::ZoomPane {
+            id: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+        }),
+        70 => Ok(AppAction::Unzoom),
+        71 => Ok(AppAction::SwapPanes {
+            a: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            b: PaneId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
+        }),
+        72 => Ok(AppAction::MovePaneBeside {
+            pane: PaneId::from_bytes(id16(
+                action.target_execution_lo,
+                action.target_execution_hi,
+            )?),
+            neighbor: PaneId::from_bytes(id16(
+                action.target_attachment_lo,
+                action.target_attachment_hi,
+            )?),
+            side: decode_move_side(action.reserved)?,
+        }),
+        73 => Ok(AppAction::FocusDirection {
+            direction: decode_focus_direction(action.reserved)?,
+        }),
+        74 => Ok(AppAction::EqualizeFocused),
+        75 => Ok(AppAction::EqualizeTab),
+        76 => Ok(AppAction::CloseWindow {
             id: WindowId::from_bytes(id16(
                 action.target_execution_lo,
                 action.target_execution_hi,
             )?),
             containment_generation: action.target_generation,
         }),
+        _ => Err(-6),
+    }
+}
+
+fn decode_move_side(reserved: u32) -> Result<MoveSide, i32> {
+    match reserved {
+        0 => Ok(MoveSide::Left),
+        1 => Ok(MoveSide::Right),
+        2 => Ok(MoveSide::Above),
+        3 => Ok(MoveSide::Below),
+        _ => Err(-6),
+    }
+}
+
+fn decode_focus_direction(reserved: u32) -> Result<FocusDirection, i32> {
+    match reserved {
+        0 => Ok(FocusDirection::Left),
+        1 => Ok(FocusDirection::Right),
+        2 => Ok(FocusDirection::Up),
+        3 => Ok(FocusDirection::Down),
         _ => Err(-6),
     }
 }

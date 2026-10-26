@@ -61,8 +61,12 @@ pub(super) fn error_number(error: AppError) -> i32 {
         AppError::WindowActivationFailed => 53,
         AppError::UnknownWindow => 54,
         AppError::WindowCreationUnavailable => 55,
-        AppError::CrossWorkspaceAdopt => 56,
-        AppError::ExecutionNotUnpresented => 57,
-        AppError::DeliveryControlFailed => 58,
+        AppError::NotZoomed => 56,
+        AppError::InvalidMoveTarget => 57,
+        AppError::NoDirectionalNeighbor => 58,
+        AppError::StaleContainment => 59,
+        AppError::CrossWorkspaceAdopt => 60,
+        AppError::ExecutionNotUnpresented => 61,
+        AppError::DeliveryControlFailed => 62,
     }
 }

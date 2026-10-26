@@ -63,6 +63,21 @@ fn is_menu_visible(command: WorkspaceCommand) -> bool {
         | WorkspaceCommandId::PaneCloseFocused
         | WorkspaceCommandId::PaneFocusNext
         | WorkspaceCommandId::PaneFocusPrevious
+        | WorkspaceCommandId::PaneFocusLeft
+        | WorkspaceCommandId::PaneFocusRight
+        | WorkspaceCommandId::PaneFocusUp
+        | WorkspaceCommandId::PaneFocusDown
+        | WorkspaceCommandId::PaneZoomToggle
+        | WorkspaceCommandId::PaneSwapLeft
+        | WorkspaceCommandId::PaneSwapRight
+        | WorkspaceCommandId::PaneSwapUp
+        | WorkspaceCommandId::PaneSwapDown
+        | WorkspaceCommandId::PaneMoveLeft
+        | WorkspaceCommandId::PaneMoveRight
+        | WorkspaceCommandId::PaneMoveUp
+        | WorkspaceCommandId::PaneMoveDown
+        | WorkspaceCommandId::PaneEqualizeFocused
+        | WorkspaceCommandId::PaneEqualizeTab
         | WorkspaceCommandId::FocusHistoryBack
         | WorkspaceCommandId::FocusHistoryForward
         | WorkspaceCommandId::PresentationSetFlow
@@ -254,12 +269,27 @@ pub fn workspace_command_ffi_id(id: WorkspaceCommandId) -> u16 {
         WorkspaceCommandId::FocusHistoryBack => 19,
         WorkspaceCommandId::FocusHistoryForward => 20,
         WorkspaceCommandId::GotoOpen => 21,
-        WorkspaceCommandId::AppCloseFocused => 22,
-        WorkspaceCommandId::WindowNew => 23,
-        WorkspaceCommandId::WindowClose => 24,
-        WorkspaceCommandId::WindowCycleNext => 25,
-        WorkspaceCommandId::WindowCyclePrevious => 26,
-        WorkspaceCommandId::WindowSelectOrdinal => 27,
+        WorkspaceCommandId::PaneZoomToggle => 22,
+        WorkspaceCommandId::PaneSwapLeft => 23,
+        WorkspaceCommandId::PaneSwapRight => 24,
+        WorkspaceCommandId::PaneSwapUp => 25,
+        WorkspaceCommandId::PaneSwapDown => 26,
+        WorkspaceCommandId::PaneMoveLeft => 27,
+        WorkspaceCommandId::PaneMoveRight => 28,
+        WorkspaceCommandId::PaneMoveUp => 29,
+        WorkspaceCommandId::PaneMoveDown => 30,
+        WorkspaceCommandId::PaneFocusLeft => 31,
+        WorkspaceCommandId::PaneFocusRight => 32,
+        WorkspaceCommandId::PaneFocusUp => 33,
+        WorkspaceCommandId::PaneFocusDown => 34,
+        WorkspaceCommandId::PaneEqualizeFocused => 35,
+        WorkspaceCommandId::PaneEqualizeTab => 36,
+        WorkspaceCommandId::AppCloseFocused => 37,
+        WorkspaceCommandId::WindowNew => 38,
+        WorkspaceCommandId::WindowClose => 39,
+        WorkspaceCommandId::WindowCycleNext => 40,
+        WorkspaceCommandId::WindowCyclePrevious => 41,
+        WorkspaceCommandId::WindowSelectOrdinal => 42,
     }
 }
 
@@ -287,12 +317,27 @@ pub fn workspace_command_from_ffi_id(id: u16, ordinal: u8) -> Option<WorkspaceCo
         19 => WorkspaceCommandId::FocusHistoryBack,
         20 => WorkspaceCommandId::FocusHistoryForward,
         21 => WorkspaceCommandId::GotoOpen,
-        22 => WorkspaceCommandId::AppCloseFocused,
-        23 => WorkspaceCommandId::WindowNew,
-        24 => WorkspaceCommandId::WindowClose,
-        25 => WorkspaceCommandId::WindowCycleNext,
-        26 => WorkspaceCommandId::WindowCyclePrevious,
-        27 => WorkspaceCommandId::WindowSelectOrdinal,
+        22 => WorkspaceCommandId::PaneZoomToggle,
+        23 => WorkspaceCommandId::PaneSwapLeft,
+        24 => WorkspaceCommandId::PaneSwapRight,
+        25 => WorkspaceCommandId::PaneSwapUp,
+        26 => WorkspaceCommandId::PaneSwapDown,
+        27 => WorkspaceCommandId::PaneMoveLeft,
+        28 => WorkspaceCommandId::PaneMoveRight,
+        29 => WorkspaceCommandId::PaneMoveUp,
+        30 => WorkspaceCommandId::PaneMoveDown,
+        31 => WorkspaceCommandId::PaneFocusLeft,
+        32 => WorkspaceCommandId::PaneFocusRight,
+        33 => WorkspaceCommandId::PaneFocusUp,
+        34 => WorkspaceCommandId::PaneFocusDown,
+        35 => WorkspaceCommandId::PaneEqualizeFocused,
+        36 => WorkspaceCommandId::PaneEqualizeTab,
+        37 => WorkspaceCommandId::AppCloseFocused,
+        38 => WorkspaceCommandId::WindowNew,
+        39 => WorkspaceCommandId::WindowClose,
+        40 => WorkspaceCommandId::WindowCycleNext,
+        41 => WorkspaceCommandId::WindowCyclePrevious,
+        42 => WorkspaceCommandId::WindowSelectOrdinal,
         _ => return None,
     };
     let ordinal = if ordinal == 0 {

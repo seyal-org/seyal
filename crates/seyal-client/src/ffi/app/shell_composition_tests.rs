@@ -197,7 +197,7 @@ fn close_window_action_uses_observed_containment_generation() {
     }
     let shell = seyal_app_shell(handle);
     let snap = seyal_app_snapshot(handle);
-    let mut close = identity_fence(69, &snap);
+    let mut close = identity_fence(76, &snap);
     close.target_execution_lo = shell.active_window_lo;
     close.target_execution_hi = shell.active_window_hi;
     close.target_generation = shell.containment_generation;

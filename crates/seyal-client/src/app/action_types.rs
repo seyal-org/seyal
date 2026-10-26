@@ -166,6 +166,25 @@ pub enum AppAction {
     FocusPane {
         id: PaneId,
     },
+    /// Tab-scoped zoom overlay; does not destroy other leaves (PT1 / PT5).
+    ZoomPane {
+        id: PaneId,
+    },
+    Unzoom,
+    SwapPanes {
+        a: PaneId,
+        b: PaneId,
+    },
+    MovePaneBeside {
+        pane: PaneId,
+        neighbor: PaneId,
+        side: crate::shell::MoveSide,
+    },
+    FocusDirection {
+        direction: crate::shell::FocusDirection,
+    },
+    EqualizeFocused,
+    EqualizeTab,
     /// Drag the divider that `pane` leads to a pointer position (#928).
     MoveSplitDivider {
         pane: PaneId,

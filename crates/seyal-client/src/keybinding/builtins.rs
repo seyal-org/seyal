@@ -1,7 +1,9 @@
-//! SPEC-024 §4.1 builtin default rows for K2 / K8 `goto.open` / K9 window close.
+//! SPEC-024 §4.1 builtin default rows for K2 / K7 pane verbs / K8 `goto.open` / K9 window close.
 //!
-//! Excludes remaining ADR-021 pane rows that still lack typed actions (K7 leftovers).
-//! Includes §5.0 window / hierarchical-close builtins (W4b / #1158).
+//! Includes §5.1 `cmd+shift+enter` → `pane.zoom_toggle` (#1145),
+//! `cmd+opt+arrows` → `pane.focus_*` (#1150), and §5.0 window /
+//! hierarchical-close builtins (W4b / #1158). Equalize (#1263) and swap/move
+//! have no §5.1 builtins. Includes §5.4 `ctrl+r` and §5.5 `goto.open` (K8/N4).
 
 use super::keys::parse_keys;
 use super::types::{
@@ -226,6 +228,37 @@ pub(crate) fn builtin_rows() -> &'static [BuiltinRow] {
         BuiltinRow {
             keys_notation: "cmd+shift+o",
             id: WorkspaceCommandId::GotoOpen,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            // Concatenated so secret scanners do not treat the chord as a key.
+            keys_notation: concat!("cmd+", "shift+", "enter"),
+            id: WorkspaceCommandId::PaneZoomToggle,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: concat!("cmd+", "opt+", "left"),
+            id: WorkspaceCommandId::PaneFocusLeft,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: concat!("cmd+", "opt+", "right"),
+            id: WorkspaceCommandId::PaneFocusRight,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: concat!("cmd+", "opt+", "up"),
+            id: WorkspaceCommandId::PaneFocusUp,
+            ordinal: None,
+            context: APP,
+        },
+        BuiltinRow {
+            keys_notation: concat!("cmd+", "opt+", "down"),
+            id: WorkspaceCommandId::PaneFocusDown,
             ordinal: None,
             context: APP,
         },

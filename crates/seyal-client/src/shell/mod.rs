@@ -30,6 +30,8 @@ mod pt3_tests;
 #[cfg(test)]
 mod pt4_tests;
 #[cfg(test)]
+mod pt6_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unpresented_tests;
