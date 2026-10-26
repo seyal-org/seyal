@@ -1388,6 +1388,7 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(InteractiveMetalSurfaceView.pass7InputSelfTest())
     }
 
+    @MainActor
     func testHiddenProductTierReleasesDedicatedGpu() throws {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal unavailable")

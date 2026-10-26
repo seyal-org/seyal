@@ -154,9 +154,10 @@ final class MultiWindowHostTests: XCTestCase {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
-        createExtraWindows(on: host, count: 2)
+        host.createWindow(nil)
+        host.createWindow(nil)
         let snapshotOrder = host.snapshotOrderedWindowKeys()
-        XCTAssertEqual(snapshotOrder.count, 1)
+        XCTAssertEqual(snapshotOrder.count, 3)
         XCTAssertEqual(host.orderedKeys, snapshotOrder)
         let source = try! String(
             contentsOf: URL(fileURLWithPath: #filePath)
@@ -177,8 +178,8 @@ final class MultiWindowHostTests: XCTestCase {
         let host = MultiWindowHostController()
         defer { host.performQuitCleanup() }
         host.bootstrapAfterLaunch()
-        createExtraWindows(on: host, count: 1)
-        XCTAssertEqual(host.orderedKeys.count, 1)
+        host.createWindow(nil)
+        XCTAssertEqual(host.orderedKeys.count, 2)
         // Destroy-realization: quit cleanup applies destroy for every WindowId.
         host.performQuitCleanup()
         XCTAssertTrue(host.orderedKeys.isEmpty)
