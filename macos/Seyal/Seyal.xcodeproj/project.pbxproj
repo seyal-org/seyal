@@ -26,7 +26,7 @@
 		A10000000000000000000027 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000027 /* Security.framework */; };
 		A1000000000000000000002C /* SeyalAccessibilityAnnouncement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */; };
 		A10000000000000000000080 /* AttentionOsNotificationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000080 /* AttentionOsNotificationAdapter.swift */; };
-		C1000000000000000000000A /* AttentionOsNotificationAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */; };
+		C10000000000000000000012 /* AttentionOsNotificationAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000012 /* AttentionOsNotificationAdapterTests.swift */; };
 		A10000000000000000000040 /* NativeFontSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* NativeFontSpec.swift */; };
 		A10000000000000000000041 /* ThinPaneHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* ThinPaneHostView.swift */; };
 		A1000000000000000000004A /* PaneLayoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* PaneLayoutView.swift */; };
@@ -139,7 +139,7 @@
 		A20000000000000000000025 /* RuntimeRecoveryGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeRecoveryGlue.swift; sourceTree = "<group>"; };
 		A2000000000000000000002C /* SeyalAccessibilityAnnouncement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeyalAccessibilityAnnouncement.swift; sourceTree = "<group>"; };
 		A20000000000000000000080 /* AttentionOsNotificationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionOsNotificationAdapter.swift; sourceTree = "<group>"; };
-		C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionOsNotificationAdapterTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000012 /* AttentionOsNotificationAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionOsNotificationAdapterTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* BundledRuntimeLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledRuntimeLauncher.swift; sourceTree = "<group>"; };
 		A20000000000000000000049 /* IsolatedRuntimeDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedRuntimeDirectory.swift; sourceTree = "<group>"; };
 		A20000000000000000000027 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -339,7 +339,7 @@
 				C20000000000000000000011 /* NavigationEvidenceAbiTests.swift */,
 				C20000000000000000000008 /* KeybindingEvidenceTests.swift */,
 				C2000000000000000000000E /* DividerDragProjectionTests.swift */,
-				C2000000000000000000000A /* AttentionOsNotificationAdapterTests.swift */,
+				C20000000000000000000012 /* AttentionOsNotificationAdapterTests.swift */,
 				C2000000000000000000000C /* PaneRegionProjectionTests.swift */,
 			);
 			path = SeyalTests;
@@ -559,7 +559,7 @@
 				C10000000000000000000011 /* NavigationEvidenceAbiTests.swift in Sources */,
 				C10000000000000000000008 /* KeybindingEvidenceTests.swift in Sources */,
 				C1000000000000000000000E /* DividerDragProjectionTests.swift in Sources */,
-				C1000000000000000000000A /* AttentionOsNotificationAdapterTests.swift in Sources */,
+				C10000000000000000000012 /* AttentionOsNotificationAdapterTests.swift in Sources */,
 				C1000000000000000000000C /* PaneRegionProjectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
