@@ -27,6 +27,7 @@ final class ChromeContextRowView: NSView {
         detail: String?,
         identifier: String,
         selected: Bool,
+        showsAccent: Bool = true,
         target: AnyObject?,
         action: Selector,
         kind: UInt16,
@@ -44,17 +45,19 @@ final class ChromeContextRowView: NSView {
         button.kind = kind
         button.bezelStyle = .inline
         button.isBordered = false
+        button.setButtonType(.momentaryChange)
         button.title = ""
         button.setAccessibilityIdentifier(identifier)
         button.setAccessibilityLabel(
             detail.flatMap { $0.isEmpty ? nil : $0 }.map { "\(title), \($0)" } ?? title
         )
-        button.state = selected ? .on : .off
+        // Never use NSButton.state/.on — AppKit paints system selection blue over Adaptive Depth.
+        button.setAccessibilityValue(selected ? "selected" : "")
         button.translatesAutoresizingMaskIntoConstraints = false
 
         accent.wantsLayer = true
         accent.translatesAutoresizingMaskIntoConstraints = false
-        accent.isHidden = !selected
+        accent.isHidden = !(selected && showsAccent)
 
         titleField.stringValue = title
         titleField.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
@@ -111,8 +114,9 @@ final class ChromeContextRowView: NSView {
             weight: selected ? .semibold : .regular
         )
         detailField.font = .systemFont(ofSize: max(theme.uiFontSize - 3, 10), weight: .regular)
+        // VF §2.4: selected fill is a near-panel lift (UtilityElevated), not ColorRole::Selection.
         accent.layer?.backgroundColor = theme.blockFocus.cgColor
-        layer?.backgroundColor = selected ? theme.selection.cgColor : NSColor.clear.cgColor
+        layer?.backgroundColor = selected ? theme.elevated.cgColor : NSColor.clear.cgColor
     }
 }
 

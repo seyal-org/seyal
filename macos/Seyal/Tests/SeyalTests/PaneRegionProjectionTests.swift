@@ -217,7 +217,8 @@ final class PaneRegionProjectionTests: XCTestCase {
             )
             let rowButton = button(view, "seyal-pane-\(index)")
             XCTAssertNotNil(rowButton, "Pane row \(index) is shown", file: file, line: line)
-            XCTAssertEqual(rowButton?.state, isFocused ? .on : .off, "row \(index) selection", file: file, line: line)
+            let selected = (rowButton?.accessibilityValue() as? String) == "selected"
+            XCTAssertEqual(selected, isFocused, "row \(index) selection", file: file, line: line)
         }
     }
 

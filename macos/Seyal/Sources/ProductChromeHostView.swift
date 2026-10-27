@@ -147,8 +147,8 @@ final class ProductChromeHostView: NSView {
         tabsButton.translatesAutoresizingMaskIntoConstraints = false
 
         inspector.orientation = .vertical
-        inspector.alignment = .leading
-        inspector.spacing = 6
+        inspector.alignment = .width
+        inspector.spacing = 4
         inspector.translatesAutoresizingMaskIntoConstraints = false
         expose(inspector, identifier: "seyal-inspector")
         attention.orientation = .vertical
@@ -661,7 +661,9 @@ final class ProductChromeHostView: NSView {
         newTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CREATION) == 0
         splitRightButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_SPLITTING) == 0
         splitDownButton.isHidden = splitRightButton.isHidden
-        closeTabButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
+        // VF / M001-LEFT §4.3: hide Close when only one Tab remains.
+        closeTabButton.isHidden = shell.tab_count <= 1
+            || shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_TAB_CLOSE) == 0
         closePaneButton.isHidden = shell.flags & UInt16(SEYAL_APP_SHELL_ALLOWS_PANE_CLOSE) == 0
         configureCloseButtons(shell: shell)
     }
@@ -709,6 +711,7 @@ final class ProductChromeHostView: NSView {
                     detail: nil,
                     identifier: "seyal-pane-\(index)",
                     selected: row.flags & UInt16(SEYAL_APP_ROW_SELECTED) != 0,
+                    showsAccent: false,
                     action: #selector(focusPane(_:)),
                     kind: UInt16(SEYAL_APP_ACTION_FOCUS_PANE.rawValue),
                     idLo: row.id_lo,
@@ -766,11 +769,14 @@ final class ProductChromeHostView: NSView {
             caption.font = .systemFont(ofSize: 11, weight: .regular)
             caption.tag = 2
             caption.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            caption.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let body = NSTextField(labelWithString: value)
             body.font = .systemFont(ofSize: 11, weight: .regular)
             body.alignment = .right
             body.maximumNumberOfLines = 2
-            body.setContentHuggingPriority(.required, for: .horizontal)
+            body.lineBreakMode = .byTruncatingTail
+            body.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            body.setContentCompressionResistancePriority(.required, for: .horizontal)
             body.tag = 4
             rowStack.addArrangedSubview(caption)
             rowStack.addArrangedSubview(body)
@@ -884,6 +890,12 @@ final class ProductChromeHostView: NSView {
             right: theme.windowPadding
         )
         updateColdVisualProbe(theme)
+        let chrome = seyal_app_chrome(pane.appHandle)
+        applySwitcherAppearance(leftPanel: chrome.left_panel, theme: theme)
+        for button in [newTabButton, closeTabButton, splitRightButton, splitDownButton, closePaneButton] {
+            button.contentTintColor = theme.muted
+            button.font = .systemFont(ofSize: theme.uiFontSize, weight: .medium)
+        }
         composer.apply(theme: theme)
         historyOverlay.apply(theme: theme)
         commandPalette.apply(theme: theme)
