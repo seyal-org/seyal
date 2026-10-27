@@ -229,6 +229,49 @@ fn composer_eligibility_does_not_enter_or_leave_explicit_raw() {
 }
 
 #[test]
+fn view_toggle_raw_latches_explicit_raw_across_composer_status() {
+    use crate::keybinding::{BindingContext, WorkspaceCommand, WorkspaceCommandId};
+
+    let mut root = ApplicationRoot::new();
+    bind(&mut root, false);
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+
+    let route = root.keybinding_route_context(false);
+    root.invoke_workspace_command_for_menu(
+        WorkspaceCommand {
+            id: WorkspaceCommandId::PresentationToggleRaw,
+            ordinal: None,
+        },
+        route,
+    )
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Raw);
+
+    root.apply(AppAction::ApplyRuntimeComposerStatus {
+        fence: root.fence(),
+        eligibility: Some(RuntimeComposerEligibility::Available),
+        revision: 1,
+    })
+    .unwrap();
+    assert_eq!(
+        root.snapshot().eligibility,
+        PresentationEligibility::Raw,
+        "Toggle Raw must keep full-pane Metal after trusted prompt / OSC 133"
+    );
+
+    let route = BindingContext::APP.union(BindingContext::RAW);
+    root.invoke_workspace_command_for_menu(
+        WorkspaceCommand {
+            id: WorkspaceCommandId::PresentationToggleRaw,
+            ordinal: None,
+        },
+        route,
+    )
+    .unwrap();
+    assert_eq!(root.snapshot().eligibility, PresentationEligibility::Flow);
+}
+
+#[test]
 fn unbound_pane_cannot_select_raw() {
     let mut root = ApplicationRoot::new();
     assert_eq!(

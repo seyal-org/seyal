@@ -47,7 +47,18 @@ impl Default for UserUiSettings {
             ui_font_fallbacks: vec!["SF Pro Text".into(), "Helvetica Neue".into()],
             terminal_font_family: "Menlo".into(),
             terminal_font_size: 14.0,
-            terminal_font_fallbacks: vec!["SF Mono".into(), "Menlo".into(), "Courier".into()],
+            // Cascade after the primary family so Starship / Powerlevel10k /
+            // Nerd Font PUA glyphs resolve when those fonts are installed.
+            // CoreText system fallback alone does not cover Private Use Area.
+            terminal_font_fallbacks: vec![
+                "SF Mono".into(),
+                "Menlo".into(),
+                "JetBrainsMono NFM".into(),
+                "JetBrainsMono NF".into(),
+                "Symbols Nerd Font Mono".into(),
+                "MesloLGS Nerd Font Mono".into(),
+                "Courier".into(),
+            ],
             window_padding: 0.0,
             terminal_padding: 8.0,
             utility_opacity: 1.0,

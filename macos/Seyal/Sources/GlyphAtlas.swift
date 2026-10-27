@@ -96,15 +96,48 @@ final class TerminalFontResolver {
         let candidates = ([spec.family] + spec.fallbacks)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        for family in candidates {
+        for (index, family) in candidates.enumerated() {
             if let regular = font(named: family, size: spec.pointSize, bold: false) {
                 let bold = font(named: family, size: spec.pointSize, bold: true) ?? regular
-                return (regular, bold, family)
+                // Remaining candidates form the CoreText cascade so Nerd Font /
+                // PUA glyphs resolve without changing cell metrics authority
+                // (still measured from the primary monospace family).
+                let cascade = Array(candidates[(index + 1)...])
+                return (
+                    withCascade(regular, cascadeFamilies: cascade, size: spec.pointSize),
+                    withCascade(bold, cascadeFamilies: cascade, size: spec.pointSize),
+                    family
+                )
             }
         }
         let fallback = CTFontCreateWithName("Menlo" as CFString, spec.pointSize, nil)
         let bold = CTFontCreateWithName("Menlo-Bold" as CFString, spec.pointSize, nil)
-        return (fallback, bold, "Menlo")
+        let cascade = Array(candidates.dropFirst())
+        return (
+            withCascade(fallback, cascadeFamilies: cascade, size: spec.pointSize),
+            withCascade(bold, cascadeFamilies: cascade, size: spec.pointSize),
+            "Menlo"
+        )
+    }
+
+    private static func withCascade(
+        _ font: CTFont,
+        cascadeFamilies: [String],
+        size: CGFloat
+    ) -> CTFont {
+        let descriptors: [CTFontDescriptor] = cascadeFamilies.compactMap { family in
+            guard self.font(named: family, size: size, bold: false) != nil else { return nil }
+            return CTFontDescriptorCreateWithAttributes(
+                [kCTFontFamilyNameAttribute: family] as CFDictionary
+            )
+        }
+        guard !descriptors.isEmpty else { return font }
+        let base = CTFontCopyFontDescriptor(font)
+        let cascaded = CTFontDescriptorCreateCopyWithAttributes(
+            base,
+            [kCTFontCascadeListAttribute: descriptors] as CFDictionary
+        )
+        return CTFontCreateWithFontDescriptor(cascaded, size, nil)
     }
 
     private static func font(named family: String, size: CGFloat, bold: Bool) -> CTFont? {

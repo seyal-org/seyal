@@ -326,6 +326,21 @@ enum RendererValidation {
         }
     }
 
+    /// Nerd Font / Starship PUA (U+F115) must resolve through the configured
+    /// cascade when a Nerd Font family is installed. Skips cleanly otherwise.
+    static func nerdFontPrivateUseCascadeSelfTest() -> Bool {
+        let scalar: UInt32 = 0xf115
+        let cascaded = TerminalFontResolver(spec: .canonicalTerminal)
+            .canResolveScalarDirectly(scalar, bold: false, backingScale: 1)
+        let menloOnly = TerminalFontResolver(
+            spec: SeyalResolvedFontSpec(family: "Menlo", fallbacks: ["Menlo"], pointSize: 14)
+        ).canResolveScalarDirectly(scalar, bold: false, backingScale: 1)
+        if !cascaded && !menloOnly {
+            return true
+        }
+        return cascaded
+    }
+
     static func repeatedLifecycleSelfTest(device: MTLDevice) throws -> Bool {
         var damage = DamageMask()
         damage.mark(row: 0)

@@ -73,7 +73,7 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
     paneID: String,
     executionIdentity: String? = nil,
     allowsImplicitExecutionBootstrap: Bool = true,
-    terminalFont: SeyalResolvedFontSpec = .canonicalTerminal,
+    terminalFont: SeyalResolvedFontSpec = .fromProcessVisual(),
     installation: Installation = .fullDisplay
   ) {
     self.paneID = paneID

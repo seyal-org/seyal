@@ -319,11 +319,20 @@ impl ApplicationRoot {
         let Some(identity) = snap.identity else {
             return Err(AppError::ActionUnavailable);
         };
+        // View → Toggle Raw / Set Flow must update the resting latch. Without
+        // this, a later ApplyRuntimeComposerStatus recompute_resting() snaps
+        // back to Flow and drops Metal full-pane shell fidelity mid-session.
+        match mode {
+            PresentationMode::Raw => self.explicit_raw = true,
+            PresentationMode::Flow => self.explicit_raw = false,
+            PresentationMode::Tui => {}
+        }
+        self.recompute_resting();
         self.presentation
             .apply(PresentationAction::Transition {
                 mode,
                 identity,
-                explicit: true,
+                explicit: self.explicit_raw && mode == PresentationMode::Raw,
                 epoch: snap.epoch,
             })
             .map_err(|_| AppError::StalePresentationEpoch)?;

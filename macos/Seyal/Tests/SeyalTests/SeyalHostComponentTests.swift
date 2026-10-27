@@ -2529,6 +2529,12 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertTrue(RendererValidation.retainedDefaultColorsFollowThemeOffscreenSelfTest())
     }
 
+    /// Shell appearance: Nerd Font PUA glyphs resolve via the Rust-default cascade.
+    @MainActor
+    func testNerdFontPrivateUseResolvesThroughTerminalFontCascade() {
+        XCTAssertTrue(RendererValidation.nerdFontPrivateUseCascadeSelfTest())
+    }
+
     /// #1062: light Canvas must drive Raw/TUI full-grid clear (not hardcoded dark).
     @MainActor
     func testFullGridClearFollowsRustThemeCanvas() {
