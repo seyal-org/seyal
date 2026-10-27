@@ -56,6 +56,14 @@ pub struct SeyalAppTheme {
     pub block_border_hover: u32,
     pub success: u32,
     pub danger: u32,
+    /// Adaptive Depth chrome roles (#1375 / VF-1): host must not mix these.
+    pub utility: u32,
+    pub elevated: u32,
+    pub secondary: u32,
+    pub muted: u32,
+    pub seam: u32,
+    pub warning: u32,
+    pub selection: u32,
 }
 
 /// `SeyalAppTheme.flags`: motion is allowed after accessibility resolution.
@@ -187,6 +195,13 @@ pub extern "C" fn seyal_app_theme(appearance: u16, accessibility_flags: u16) -> 
         block_border_hover: pack_srgb(visual.colors.get(ColorRole::BlockBorderHover)),
         success: pack_srgb(visual.colors.get(ColorRole::Success)),
         danger: pack_srgb(visual.colors.get(ColorRole::Danger)),
+        utility: pack_srgb(visual.colors.get(ColorRole::UtilityReceded)),
+        elevated: pack_srgb(visual.colors.get(ColorRole::UtilityElevated)),
+        secondary: pack_srgb(visual.colors.get(ColorRole::TextSecondary)),
+        muted: pack_srgb(visual.colors.get(ColorRole::TextMuted)),
+        seam: pack_srgb(visual.colors.get(ColorRole::SeamRest)),
+        warning: pack_srgb(visual.colors.get(ColorRole::Warning)),
+        selection: pack_srgb(visual.colors.get(ColorRole::Selection)),
     }
 }
 

@@ -14,6 +14,8 @@ struct NativeTheme {
     let success: NSColor
     let warning: NSColor
     let danger: NSColor
+    /// Selected C04 row fill; Rust ColorRole::Selection (#1375).
+    let selection: NSColor
     /// Block Component roles (#1010), resolved by Rust.
     let blockFocus: NSColor
     let blockBorderRest: NSColor
@@ -95,20 +97,22 @@ enum NativeThemeRealization {
         // Block Component roles (#1010) remain on seyal_app_theme; both paths
         // resolve through Rust process UI configuration (ADR-015 / #993).
         let blockPacked = seyal_app_theme(packed.appearance, accessibilityFlags)
+        // Chrome + Block roles from Rust seyal_app_theme (ADR-015 / #993 / #1375).
+        // The host maps packed roles only — it does not invent Adaptive Depth mixes.
         return NativeTheme(
             canvas: canvas,
             container: container,
-            utility: mix(canvas, text, 0.08),
-            elevated: mix(canvas, text, 0.12),
+            utility: color(blockPacked.utility),
+            elevated: color(blockPacked.elevated),
             text: text,
-            secondary: mix(text, canvas, 0.32),
-            muted: mix(text, canvas, 0.52),
+            secondary: color(blockPacked.secondary),
+            muted: color(blockPacked.muted),
             accent: accent,
-            seam: mix(canvas, text, 0.16),
-            success: NSColor(srgbRed: 0.22, green: 0.83, blue: 0.62, alpha: 1),
-            warning: NSColor(srgbRed: 0.96, green: 0.65, blue: 0.14, alpha: 1),
-            danger: NSColor(srgbRed: 0.98, green: 0.44, blue: 0.40, alpha: 1),
-            // Block roles from Rust seyal_app_theme (same resolve_process_visual as #993).
+            seam: color(blockPacked.seam),
+            success: color(blockPacked.success),
+            warning: color(blockPacked.warning),
+            danger: color(blockPacked.danger),
+            selection: color(blockPacked.selection),
             blockFocus: color(blockPacked.block_focus),
             blockBorderRest: color(blockPacked.block_border_rest),
             blockBorderHover: color(blockPacked.block_border_hover),
@@ -243,16 +247,5 @@ enum NativeThemeRealization {
         let blue = CGFloat((packed >> 8) & 0xff) / 255
         let alpha = CGFloat(packed & 0xff) / 255
         return NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
-    }
-
-    private static func mix(_ a: NSColor, _ b: NSColor, _ amount: CGFloat) -> NSColor {
-        let src = a.usingColorSpace(.sRGB) ?? a
-        let dst = b.usingColorSpace(.sRGB) ?? b
-        return NSColor(
-            srgbRed: src.redComponent + (dst.redComponent - src.redComponent) * amount,
-            green: src.greenComponent + (dst.greenComponent - src.greenComponent) * amount,
-            blue: src.blueComponent + (dst.blueComponent - src.blueComponent) * amount,
-            alpha: 1
-        )
     }
 }

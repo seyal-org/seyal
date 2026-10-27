@@ -81,14 +81,21 @@ final class SeyalBlockComponentTests: XCTestCase {
 
     func testThemePacksRustBlockRoles() {
         let theme = seyal_app_theme(0, 0)
-        XCTAssertEqual(MemoryLayout<SeyalAppTheme>.size, 36)
+        XCTAssertEqual(MemoryLayout<SeyalAppTheme>.size, 64)
         XCTAssertNotEqual(theme.block_focus, theme.accent, "Block focus is its own Rust role")
         XCTAssertEqual(dark.blockFocus, NativeThemeRealization.color(theme.block_focus))
         XCTAssertEqual(dark.blockBorderRest, NativeThemeRealization.color(theme.block_border_rest))
         XCTAssertEqual(dark.blockBorderHover, NativeThemeRealization.color(theme.block_border_hover))
-        XCTAssertNotEqual(dark.blockBorderRest, dark.seam, "Block border is not the Swift-derived seam")
+        XCTAssertNotEqual(dark.blockBorderRest, dark.seam, "Block border is distinct from region seam")
         XCTAssertEqual(dark.blockSuccess, NativeThemeRealization.color(theme.success))
         XCTAssertEqual(dark.blockDanger, NativeThemeRealization.color(theme.danger))
+        XCTAssertEqual(dark.utility, NativeThemeRealization.color(theme.utility))
+        XCTAssertEqual(dark.elevated, NativeThemeRealization.color(theme.elevated))
+        XCTAssertEqual(dark.secondary, NativeThemeRealization.color(theme.secondary))
+        XCTAssertEqual(dark.muted, NativeThemeRealization.color(theme.muted))
+        XCTAssertEqual(dark.seam, NativeThemeRealization.color(theme.seam))
+        XCTAssertEqual(dark.warning, NativeThemeRealization.color(theme.warning))
+        XCTAssertEqual(dark.selection, NativeThemeRealization.color(theme.selection))
         XCTAssertEqual(theme.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), "default signals allow motion")
         let reduced = seyal_app_theme(0, 1)
         XCTAssertEqual(reduced.flags & UInt16(SEYAL_APP_THEME_ALLOWS_MOTION), 0, "reduce_motion clears allows_motion")
@@ -154,7 +161,8 @@ final class SeyalBlockComponentTests: XCTestCase {
             canvas: dark.canvas, container: dark.container, utility: dark.utility,
             elevated: dark.elevated, text: dark.text, secondary: dark.secondary, muted: dark.muted,
             accent: dark.accent, seam: dark.seam, success: dark.success, warning: dark.warning,
-            danger: dark.danger, blockFocus: dark.blockFocus, blockBorderRest: dark.blockBorderRest,
+            danger: dark.danger, selection: dark.selection, blockFocus: dark.blockFocus,
+            blockBorderRest: dark.blockBorderRest,
             blockBorderHover: dark.blockBorderHover, blockSuccess: dark.blockSuccess,
             blockDanger: dark.blockDanger, allowsMotion: false, appearance: dark.appearance,
             uiFontSize: dark.uiFontSize, terminalFontSize: dark.terminalFontSize,

@@ -511,6 +511,14 @@ typedef struct SeyalAppTheme {
     uint32_t block_border_hover;
     uint32_t success;
     uint32_t danger;
+    /* Adaptive Depth chrome roles (#1375 / VF-1). */
+    uint32_t utility;
+    uint32_t elevated;
+    uint32_t secondary;
+    uint32_t muted;
+    uint32_t seam;
+    uint32_t warning;
+    uint32_t selection;
 } SeyalAppTheme;
 
 #define SEYAL_APP_THEME_ALLOWS_MOTION 1u
