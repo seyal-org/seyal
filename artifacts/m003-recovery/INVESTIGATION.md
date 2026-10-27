@@ -36,7 +36,11 @@ Composer → PTY → Block status (Succeeded):
 - Headed: after Raw `clear` then Toggle Raw→Flow, composer can stick on **Busy / "Waiting for prompt..."** until a later Enter re-arms markers or eligibility is re-sampled. Mitigation: re-publish composer status when returning to Flow transcript presentation.
 - Flow Blocks intentionally retain history across `clear` (VT clear ≠ Block timeline clear).
 
-Still to verify interactively: history/Tab completion, Ctrl+C/D/L, vim/nvim, SSH, tmux, high-volume scroll.
+### Ctrl+C while Block Running (fixed)
+
+- Headed: Flow Composer Busy + `sleep 120` → Ctrl+C now yields Block **Failed** and composer **available** (`1369d438`: forward control scalars from Busy composer to PTY).
+
+Still to verify interactively: history/Tab completion, Ctrl+D/L, vim/nvim alternate-screen path (automation Toggle Raw flaky), SSH, tmux, high-volume scroll.
 
 ## Experiential gaps vs cmux (UX benchmark)
 
