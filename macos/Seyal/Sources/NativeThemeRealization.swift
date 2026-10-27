@@ -37,10 +37,79 @@ struct NativeTheme {
     /// Rust-resolved terminal defaults converted to Metal's little-byte RGBA packing.
     let terminalDefaultForeground: UInt32
     let terminalDefaultBackground: UInt32
+    /// C05 / VF-4 chip width band from Rust `Metrics` (cold path).
+    let tabMinWidth: CGFloat
+    let tabMaxWidth: CGFloat
 
     /// Utility chrome should show the host material effect (frosted, not reduced).
     var usesFrostedUtilityMaterial: Bool {
         utilityMaterial == 2 && !reduceMaterial
+    }
+
+    init(
+        canvas: NSColor,
+        container: NSColor,
+        utility: NSColor,
+        elevated: NSColor,
+        text: NSColor,
+        secondary: NSColor,
+        muted: NSColor,
+        accent: NSColor,
+        seam: NSColor,
+        success: NSColor,
+        warning: NSColor,
+        danger: NSColor,
+        selection: NSColor,
+        blockFocus: NSColor,
+        blockBorderRest: NSColor,
+        blockBorderHover: NSColor,
+        blockSuccess: NSColor,
+        blockDanger: NSColor,
+        allowsMotion: Bool,
+        appearance: NSAppearance,
+        uiFontSize: CGFloat,
+        terminalFontSize: CGFloat,
+        windowPadding: CGFloat,
+        terminalPadding: CGFloat,
+        reduceMaterial: Bool,
+        utilityMaterial: UInt16,
+        utilityOpacity: CGFloat,
+        terminalDefaultForeground: UInt32,
+        terminalDefaultBackground: UInt32,
+        tabMinWidth: CGFloat = 118,
+        tabMaxWidth: CGFloat = 190
+    ) {
+        self.canvas = canvas
+        self.container = container
+        self.utility = utility
+        self.elevated = elevated
+        self.text = text
+        self.secondary = secondary
+        self.muted = muted
+        self.accent = accent
+        self.seam = seam
+        self.success = success
+        self.warning = warning
+        self.danger = danger
+        self.selection = selection
+        self.blockFocus = blockFocus
+        self.blockBorderRest = blockBorderRest
+        self.blockBorderHover = blockBorderHover
+        self.blockSuccess = blockSuccess
+        self.blockDanger = blockDanger
+        self.allowsMotion = allowsMotion
+        self.appearance = appearance
+        self.uiFontSize = uiFontSize
+        self.terminalFontSize = terminalFontSize
+        self.windowPadding = windowPadding
+        self.terminalPadding = terminalPadding
+        self.reduceMaterial = reduceMaterial
+        self.utilityMaterial = utilityMaterial
+        self.utilityOpacity = utilityOpacity
+        self.terminalDefaultForeground = terminalDefaultForeground
+        self.terminalDefaultBackground = terminalDefaultBackground
+        self.tabMinWidth = tabMinWidth
+        self.tabMaxWidth = tabMaxWidth
     }
 }
 
@@ -130,7 +199,9 @@ enum NativeThemeRealization {
             utilityMaterial: packed.utility_material,
             utilityOpacity: CGFloat(packed.utility_opacity),
             terminalDefaultForeground: packed.text.byteSwapped,
-            terminalDefaultBackground: packed.canvas.byteSwapped
+            terminalDefaultBackground: packed.canvas.byteSwapped,
+            tabMinWidth: CGFloat(packed.tab_min_width),
+            tabMaxWidth: CGFloat(packed.tab_max_width)
         )
     }
 

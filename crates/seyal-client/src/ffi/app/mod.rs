@@ -607,64 +607,94 @@ pub extern "C" fn seyal_app_accessibility(handle: u64) -> SeyalAppAccessibility 
     })
 }
 
+fn encode_composer_snapshot(
+    state: &mut AppHandle,
+    composer: &crate::composer::ComposerSnapshot,
+) -> SeyalAppComposer {
+    state.composer_draft = composer.draft.as_bytes().to_vec();
+    let mut flags = 0u16;
+    if composer.can_submit {
+        flags |= 1;
+    }
+    if composer.allows_direct_terminal {
+        flags |= 2;
+    }
+    SeyalAppComposer {
+        version: APP_ABI_VERSION,
+        size: size_of::<SeyalAppComposer>() as u16,
+        mode: match composer.mode {
+            ComposerMode::Hidden => 0,
+            ComposerMode::Available => 1,
+            ComposerMode::Busy { .. } => 2,
+        },
+        flags,
+        epoch: composer.epoch,
+        request_id: composer.pending_request_id.unwrap_or(0),
+        draft_utf8: if state.composer_draft.is_empty() {
+            ptr::null()
+        } else {
+            state.composer_draft.as_ptr()
+        },
+        draft_utf8_len: state.composer_draft.len() as u32,
+        block_count: composer.blocks.len() as u32,
+    }
+}
+
+fn empty_composer(size_zero: bool) -> SeyalAppComposer {
+    SeyalAppComposer {
+        version: APP_ABI_VERSION,
+        size: if size_zero {
+            0
+        } else {
+            size_of::<SeyalAppComposer>() as u16
+        },
+        mode: 0,
+        flags: 0,
+        epoch: 0,
+        request_id: 0,
+        draft_utf8: ptr::null(),
+        draft_utf8_len: 0,
+        block_count: 0,
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_composer(handle: u64) -> SeyalAppComposer {
     APPS.with(|apps| {
         let mut apps = apps.borrow_mut();
         let Some(state) = apps.get_mut(&handle) else {
-            return SeyalAppComposer {
-                version: APP_ABI_VERSION,
-                size: 0,
-                mode: 0,
-                flags: 0,
-                epoch: 0,
-                request_id: 0,
-                draft_utf8: ptr::null(),
-                draft_utf8_len: 0,
-                block_count: 0,
-            };
+            return empty_composer(true);
         };
         let snap = state.root.snapshot();
         let Some(composer) = snap.composer else {
-            return SeyalAppComposer {
-                version: APP_ABI_VERSION,
-                size: size_of::<SeyalAppComposer>() as u16,
-                mode: 0,
-                flags: 0,
-                epoch: 0,
-                request_id: 0,
-                draft_utf8: ptr::null(),
-                draft_utf8_len: 0,
-                block_count: 0,
-            };
+            return empty_composer(false);
         };
-        state.composer_draft = composer.draft.as_bytes().to_vec();
-        let mut flags = 0u16;
-        if composer.can_submit {
-            flags |= 1;
-        }
-        if composer.allows_direct_terminal {
-            flags |= 2;
-        }
-        SeyalAppComposer {
-            version: APP_ABI_VERSION,
-            size: size_of::<SeyalAppComposer>() as u16,
-            mode: match composer.mode {
-                ComposerMode::Hidden => 0,
-                ComposerMode::Available => 1,
-                ComposerMode::Busy { .. } => 2,
-            },
-            flags,
-            epoch: composer.epoch,
-            request_id: composer.pending_request_id.unwrap_or(0),
-            draft_utf8: if state.composer_draft.is_empty() {
-                ptr::null()
-            } else {
-                state.composer_draft.as_ptr()
-            },
-            draft_utf8_len: state.composer_draft.len() as u32,
-            block_count: composer.blocks.len() as u32,
-        }
+        encode_composer_snapshot(state, &composer)
+    })
+}
+
+/// Pane-addressed composer snapshot (ADR-009 / M001 multipane). Returns an
+/// empty composer when the Pane is unknown. Draft pointer is invalidated by the
+/// next composer encode on this handle — hosts must copy immediately.
+#[unsafe(no_mangle)]
+pub extern "C" fn seyal_app_composer_for_pane(
+    handle: u64,
+    pane_lo: u64,
+    pane_hi: u64,
+) -> SeyalAppComposer {
+    APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(state) = apps.get_mut(&handle) else {
+            return empty_composer(true);
+        };
+        let Ok(id) = id16(pane_lo, pane_hi) else {
+            return empty_composer(false);
+        };
+        let pane = seyal_core::PaneId::from_bytes(id);
+        let Some(composer) = state.root.composer_for_pane(pane) else {
+            return empty_composer(false);
+        };
+        encode_composer_snapshot(state, &composer)
     })
 }
 

@@ -400,10 +400,193 @@ final class SeyalHostComponentTests: XCTestCase {
         }
         let closeTab = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
         let closePane = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-pane"))
-        XCTAssertFalse(closeTab.isHidden, "Rust permits hierarchical tab close")
+        XCTAssertFalse(
+            closeTab.isHidden,
+            "sole Tab still shows Close Tab so hierarchical Window removal stays reachable"
+        )
         XCTAssertFalse(closePane.isHidden, "Rust permits hierarchical pane close")
         XCTAssertEqual(view.closeTabButton.containmentGeneration, shell.containment_generation)
         XCTAssertEqual(view.closePaneButton.containmentGeneration, shell.containment_generation)
+    }
+
+    @MainActor
+    func testTabStripIsCenterScopedAndPerChipCloseTargetsTabIdentity() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.layoutSubtreeIfNeeded()
+        view.reconcileChrome()
+        XCTAssertEqual(
+            view.tabStrip.frame.minX,
+            view.centerColumn.frame.minX,
+            "C05 strip leading aligns with the center column"
+        )
+        XCTAssertEqual(view.tabStrip.frame.maxX, view.centerColumn.frame.maxX)
+        XCTAssertEqual(view.left.frame.maxY, view.bounds.maxY)
+        XCTAssertEqual(view.left.frame.minY, view.bounds.minY)
+        XCTAssertEqual(
+            view.tabScroll.frame.minX,
+            12,
+            "scrollable chip row uses a small content inset inside the strip (not the former 236 rail offset)"
+        )
+        XCTAssertLessThan(
+            view.tabScroll.frame.maxX,
+            view.tabTrailingCluster.frame.minX,
+            "+ / layout controls stay outside the horizontal scroll region"
+        )
+
+        let handle = view.pane.appHandle
+        var create = SeyalAppAction()
+        create.version = UInt16(SEYAL_APP_ABI_VERSION)
+        create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+        XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        view.reconcileChrome()
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 2)
+
+        let activeClose = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        let inactiveClose = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-tab-strip-close-0"))
+        XCTAssertFalse(activeClose.isHidden)
+        XCTAssertFalse(inactiveClose.isHidden)
+        let inactive = try XCTUnwrap(inactiveClose as? IdentityButton)
+        let closingLo = inactive.idLo
+        let closingHi = inactive.idHi
+        view.closeActiveTab(inactive)
+        view.reconcileChrome()
+        let after = seyal_app_shell(handle)
+        XCTAssertEqual(after.tab_count, 1)
+        XCTAssertFalse(
+            after.active_tab_lo == closingLo && after.active_tab_hi == closingHi,
+            "closing the inactive chip removes that Tab identity"
+        )
+        let soleClose = try XCTUnwrap(accessibilityChild(view, identifier: "seyal-close-tab"))
+        XCTAssertFalse(
+            soleClose.isHidden,
+            "sole remaining Tab keeps × so Close Tab can remove the Window"
+        )
+    }
+
+    @MainActor
+    func testTabStripCompressesThenOverflowsWithoutWrapping() throws {
+        // Narrow host so center-scoped C05 cannot fit min-width chips without overflow.
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 720, height: 560))
+        view.layoutSubtreeIfNeeded()
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        // Enough tabs that min-width chips exceed the scroll viewport.
+        for _ in 0..<8 {
+            var create = SeyalAppAction()
+            create.version = UInt16(SEYAL_APP_ABI_VERSION)
+            create.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+            create.kind = UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue)
+            XCTAssertEqual(seyal_app_apply(handle, &create), 0)
+        }
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let theme = NativeThemeRealization.theme(for: view.effectiveAppearance)
+        XCTAssertEqual(theme.tabMinWidth, 118, accuracy: 0.01)
+        XCTAssertEqual(theme.tabMaxWidth, 190, accuracy: 0.01)
+        let packed = seyal_app_visual(
+            NativeThemeRealization.platformAppearanceCode(for: view.effectiveAppearance)
+        )
+        XCTAssertEqual(packed.tab_min_width, 118, accuracy: 0.01)
+        XCTAssertEqual(packed.tab_max_width, 190, accuracy: 0.01)
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertGreaterThanOrEqual(shell.tab_count, 9)
+        let chips = view.tabButtons.arrangedSubviews.compactMap { $0 as? TabChipView }
+        XCTAssertEqual(chips.count, Int(shell.tab_count))
+        for chip in chips {
+            XCTAssertGreaterThanOrEqual(chip.frame.width, theme.tabMinWidth - 0.5)
+            XCTAssertLessThanOrEqual(chip.frame.width, theme.tabMaxWidth + 0.5)
+            XCTAssertEqual(chip.frame.minY, chips[0].frame.minY, accuracy: 0.5)
+        }
+        XCTAssertEqual(
+            view.tabButtons.frame.height,
+            ProductChromeAdaptiveDepth.tabChipHeight,
+            accuracy: 0.5,
+            "C05 stays a single row; chips must not wrap"
+        )
+        let gaps = view.tabButtons.spacing * CGFloat(max(chips.count - 1, 0))
+        let contentWidth = chips.reduce(CGFloat(0)) { $0 + $1.frame.width } + gaps
+        let viewportWidth = max(
+            view.tabScroll.contentView.bounds.width,
+            view.tabScroll.bounds.width
+        )
+        XCTAssertGreaterThan(
+            contentWidth,
+            viewportWidth + 1,
+            "when chips are at min width and still do not fit, the strip overflows horizontally"
+        )
+        XCTAssertLessThanOrEqual(
+            view.tabScroll.frame.maxX + 11,
+            view.tabTrailingCluster.frame.minX + 0.5,
+            "+ and layout controls remain outside the scroll region"
+        )
+        XCTAssertFalse(view.newTabButton.isHidden)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-new-tab"))
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tab-strip-scroll"))
+
+        let evidenceDir = URL(
+            fileURLWithPath: "/tmp/seyal-1375/artifacts/1375-tabs-panes",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: evidenceDir, withIntermediateDirectories: true)
+        if let image = tabStripEvidenceImage(view.tabStrip) {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "1375-tab-strip-overflow"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            writeTabStripEvidencePNG(
+                image,
+                to: evidenceDir.appendingPathComponent("1375-tab-strip-overflow.png")
+            )
+        }
+        let ax = """
+        tabCount=\(shell.tab_count) chipCount=\(chips.count) \
+        contentWidth=\(Int(contentWidth)) viewportWidth=\(Int(viewportWidth)) \
+        tabMin=\(Int(theme.tabMinWidth)) tabMax=\(Int(theme.tabMaxWidth)) \
+        scrollMaxX=\(Int(view.tabScroll.frame.maxX)) trailingMinX=\(Int(view.tabTrailingCluster.frame.minX)) \
+        newTabHidden=\(view.newTabButton.isHidden)
+
+        """ + tabStripAccessibilityDump(view.tabStrip)
+        try ax.write(
+            to: evidenceDir.appendingPathComponent("1375-tab-strip-overflow-ax.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let axAttach = XCTAttachment(string: ax)
+        axAttach.name = "1375-tab-strip-overflow-ax"
+        axAttach.lifetime = .keepAlways
+        add(axAttach)
+    }
+
+    @MainActor
+    func testChipCloseTabDrainsWindowDestroyAndPlusReenters() throws {
+        let host = MultiWindowHostController()
+        defer { host.performQuitCleanup() }
+        host.bootstrapAfterLaunch()
+        let handle = host.appHandle
+        XCTAssertEqual(seyal_app_shell(handle).window_count, 1)
+        host.liveHost.reconcileChrome()
+
+        let close = try XCTUnwrap(accessibilityChild(host.liveHost, identifier: "seyal-close-tab"))
+        XCTAssertFalse(close.isHidden, "sole Tab chip × is visible")
+        let button = try XCTUnwrap(close as? IdentityButton)
+        host.liveHost.closeActiveTab(button)
+
+        XCTAssertEqual(
+            seyal_app_shell(handle).window_count,
+            0,
+            "chip Close Tab must remove the Window through DestroyWindowRealization"
+        )
+        XCTAssertTrue(host.orderedKeys.isEmpty)
+
+        // Strip "+" re-enters from zero windows via CreateWindow.
+        host.liveHost.createTab()
+        XCTAssertEqual(seyal_app_shell(handle).window_count, 1)
+        XCTAssertEqual(seyal_app_shell(handle).tab_count, 1)
+        XCTAssertFalse(host.orderedKeys.isEmpty)
     }
 
     @MainActor
@@ -534,6 +717,183 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertFalse(live.isHidden)
         XCTAssertEqual(live.frame, regionView.frame)
         XCTAssertGreaterThan(live.frame.width, 0)
+    }
+
+    @MainActor
+    func testSplitWithoutBindingStillProjectsPerPaneSurfaceChrome() throws {
+        // Headed cold path may split before Runtime bind admits a secondary
+        // live host. B.1 still requires tab-like surface chrome on each leaf;
+        // composers/Metal appear only once the leaf is live.
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(seyal_app_shell(handle).tab_count, 1)
+        XCTAssertEqual(seyal_app_shell(handle).pane_count, 2)
+        XCTAssertEqual(
+            view.centerColumn.secondaryHosts.count,
+            0,
+            "unbound sibling is not live; no secondary Metal host yet"
+        )
+        let chromeBars = accessibilityChildren(view, identifier: "seyal-pane-chrome")
+        XCTAssertGreaterThanOrEqual(
+            chromeBars.count,
+            2,
+            "focused live strip + non-live placeholder strip after Split"
+        )
+        XCTAssertGreaterThanOrEqual(
+            accessibilityChildren(view, identifier: "seyal-pane-surface-chip").count,
+            2
+        )
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-surface-add"))
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-tab-strip-tab-1"),
+            "Split must not promote Panes onto C05"
+        )
+    }
+
+    @MainActor
+    func testSplitProjectsInTabPerPaneChromeWithoutNewTab() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        XCTAssertEqual(seyal_app_shell(handle).tab_count, 1)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-tab-strip-tab-0"))
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-tab-strip-tab-1"))
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-pane-chrome"),
+            "focused Pane always projects cmux-like surface strip"
+        )
+        XCTAssertNotNil(
+            accessibilityChild(view, identifier: "seyal-pane-surface-chip"),
+            "pane chrome leads with a surface chip (Rust pane title)"
+        )
+
+        // Secondary live hosts (and their chrome) require a bound sibling leaf.
+        var snap = seyal_app_snapshot(handle)
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        let shell = seyal_app_shell(handle)
+        XCTAssertEqual(shell.tab_count, 1, "Split stays inside the active Tab")
+        XCTAssertEqual(shell.pane_count, 2)
+        XCTAssertNil(
+            accessibilityChild(view, identifier: "seyal-tab-strip-tab-1"),
+            "Split must not create a second Tab chip"
+        )
+        XCTAssertEqual(view.centerColumn.secondaryHosts.count, 1)
+        let chromeBars = accessibilityChildren(view, identifier: "seyal-pane-chrome")
+        XCTAssertGreaterThanOrEqual(
+            chromeBars.count,
+            2,
+            "each in-Tab live Pane projects its own surface strip"
+        )
+        let surfaceChips = accessibilityChildren(view, identifier: "seyal-pane-surface-chip")
+        XCTAssertGreaterThanOrEqual(
+            surfaceChips.count,
+            2,
+            "each Pane surface strip has a leading title chip"
+        )
+        let closes = accessibilityChildren(view, identifier: "seyal-pane-chrome-close")
+        XCTAssertGreaterThanOrEqual(closes.count, 2)
+        XCTAssertFalse(view.focusedPaneChrome.isHidden)
+        // Architecture: no pane-local + inventing a second TerminalExecution.
+        XCTAssertNil(accessibilityChild(view, identifier: "seyal-pane-surface-add"))
+    }
+
+    @MainActor
+    func testSplitProjectsPerPaneComposersAndPreservesInactiveDraft() throws {
+        let view = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+        view.reconcileChrome()
+        let handle = view.pane.appHandle
+        var snap = seyal_app_snapshot(handle)
+        let firstLo = snap.pane_lo
+        let firstHi = snap.pane_hi
+
+        var bind = SeyalAppAction()
+        bind.version = UInt16(SEYAL_APP_ABI_VERSION)
+        bind.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        bind.kind = UInt16(SEYAL_APP_ACTION_BIND.rawValue)
+        bind.flags = UInt16(SEYAL_APP_FLAG_TARGET_CONTROLLER)
+        bind.fence_pane_lo = snap.pane_lo
+        bind.fence_pane_hi = snap.pane_hi
+        bind.fence_epoch = snap.epoch
+        bind.target_execution_lo = 0x1111_1111_1111_1111
+        bind.target_attachment_lo = 0x2222_2222_2222_2222
+        bind.target_generation = 1
+        XCTAssertEqual(seyal_app_apply(handle, &bind), 0)
+
+        var draft = SeyalAppAction()
+        draft.version = UInt16(SEYAL_APP_ABI_VERSION)
+        draft.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        draft.kind = UInt16(SEYAL_APP_ACTION_SET_COMPOSER_DRAFT.rawValue)
+        draft.applySnapshotFence(seyal_app_snapshot(handle))
+        draft.target_generation = seyal_app_composer(handle).epoch
+        let text = Array("keep-me".utf8)
+        text.withUnsafeBufferPointer { buffer in
+            draft.payload = buffer.baseAddress
+            draft.payload_len = UInt32(buffer.count)
+            XCTAssertEqual(seyal_app_apply(handle, &draft), 0)
+        }
+
+        var split = SeyalAppAction()
+        split.version = UInt16(SEYAL_APP_ABI_VERSION)
+        split.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        split.kind = UInt16(SEYAL_APP_ACTION_SPLIT_FOCUSED.rawValue)
+        split.reserved = 0
+        XCTAssertEqual(seyal_app_apply(handle, &split), 0)
+        view.reconcileChrome()
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(seyal_app_shell(handle).pane_count, 2)
+        XCTAssertNotNil(accessibilityChild(view, identifier: "seyal-composer"))
+        XCTAssertEqual(view.centerColumn.secondaryHosts.count, 1)
+        let secondary = try XCTUnwrap(view.centerColumn.secondaryHosts.first)
+        secondary.reconcileComposer()
+        XCTAssertFalse(secondary.composer.isHidden)
+        XCTAssertLessThan(secondary.composer.alphaValue, 1)
+        let preserved = seyal_app_composer_for_pane(handle, firstLo, firstHi)
+        XCTAssertEqual(preserved.draft_utf8_len, 7)
+        let bytes = UnsafeBufferPointer(start: preserved.draft_utf8, count: Int(preserved.draft_utf8_len))
+        XCTAssertEqual(String(decoding: bytes, as: UTF8.self), "keep-me")
+
+        // Focus the inactive leaf: secondary host moves, draft must survive.
+        view.focusPaneRegion(lo: firstLo, hi: firstHi)
+        view.reconcileChrome()
+        let afterFocus = seyal_app_composer_for_pane(handle, firstLo, firstHi)
+        let afterBytes = UnsafeBufferPointer(
+            start: afterFocus.draft_utf8,
+            count: Int(afterFocus.draft_utf8_len)
+        )
+        XCTAssertEqual(String(decoding: afterBytes, as: UTF8.self), "keep-me")
     }
 
     @MainActor
@@ -2715,6 +3075,10 @@ final class SeyalHostComponentTests: XCTestCase {
         XCTAssertEqual(theme.terminalFontSize, 18, accuracy: 0.01)
         XCTAssertEqual(theme.windowPadding, 12, accuracy: 0.01)
         XCTAssertEqual(theme.terminalPadding, 14, accuracy: 0.01)
+        XCTAssertEqual(theme.tabMinWidth, 118, accuracy: 0.01)
+        XCTAssertEqual(theme.tabMaxWidth, 190, accuracy: 0.01)
+        XCTAssertEqual(visual.tab_min_width, 118, accuracy: 0.01)
+        XCTAssertEqual(visual.tab_max_width, 190, accuracy: 0.01)
         XCTAssertTrue(theme.usesFrostedUtilityMaterial)
 
         let invalid = dir.appendingPathComponent("bad.toml")
@@ -3502,13 +3866,54 @@ private func utf8(_ row: SeyalAppRow) -> String {
 
 @MainActor
 private func accessibilityChild(_ root: NSView, identifier: String) -> NSView? {
+    accessibilityChildren(root, identifier: identifier).first
+}
+
+@MainActor
+private func accessibilityChildren(_ root: NSView, identifier: String) -> [NSView] {
+    var matches: [NSView] = []
     if root.accessibilityIdentifier() == identifier {
-        return root
+        matches.append(root)
     }
     for child in root.subviews {
-        if let found = accessibilityChild(child, identifier: identifier) {
-            return found
-        }
+        matches.append(contentsOf: accessibilityChildren(child, identifier: identifier))
     }
-    return nil
+    return matches
+}
+
+@MainActor
+private func tabStripEvidenceImage(_ view: NSView) -> NSImage? {
+    let size = view.bounds.size
+    guard size.width > 1, size.height > 1 else { return nil }
+    view.wantsLayer = true
+    guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+    view.cacheDisplay(in: view.bounds, to: rep)
+    let image = NSImage(size: size)
+    image.addRepresentation(rep)
+    return image
+}
+
+private func writeTabStripEvidencePNG(_ image: NSImage, to url: URL) {
+    guard let tiff = image.tiffRepresentation,
+        let rep = NSBitmapImageRep(data: tiff),
+        let png = rep.representation(using: .png, properties: [:])
+    else { return }
+    try? png.write(to: url)
+}
+
+@MainActor
+private func tabStripAccessibilityDump(_ root: NSView) -> String {
+    func line(_ view: NSView, depth: Int) -> [String] {
+        let indent = String(repeating: "  ", count: depth)
+        let role = view.accessibilityRole()?.rawValue ?? "?"
+        let label = view.accessibilityLabel() ?? ""
+        let id = view.accessibilityIdentifier() ?? ""
+        let hidden = view.isHidden ? " hidden" : ""
+        var rows = ["\(indent)role=\(role) id=\(id) label=\(label)\(hidden)"]
+        for child in view.subviews where !child.isHidden {
+            rows.append(contentsOf: line(child, depth: depth + 1))
+        }
+        return rows
+    }
+    return line(root, depth: 0).joined(separator: "\n") + "\n"
 }

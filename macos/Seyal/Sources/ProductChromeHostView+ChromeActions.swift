@@ -36,6 +36,12 @@ extension ProductChromeHostView {
     }
 
     @objc func createTab() {
+        // Zero-window re-entry is CreateWindow (ADR-018 / W4b), not CreateTab.
+        let shell = seyal_app_shell(pane.appHandle)
+        if shell.window_count == 0 {
+            applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_WINDOW.rawValue), reserved: 0)
+            return
+        }
         applyChromeKind(UInt16(SEYAL_APP_ACTION_CREATE_TAB.rawValue), reserved: 0)
     }
 
@@ -83,6 +89,20 @@ extension ProductChromeHostView {
         applyIdentity(UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue), button: sender)
     }
 
+    /// Close a named Pane leaf (in-Tab chrome ×). Uses the live containment fence.
+    func closePaneIdentity(lo: UInt64, hi: UInt64) {
+        let shell = seyal_app_shell(pane.appHandle)
+        var action = SeyalAppAction()
+        action.version = UInt16(SEYAL_APP_ABI_VERSION)
+        action.size = UInt16(MemoryLayout<SeyalAppAction>.size)
+        action.kind = UInt16(SEYAL_APP_ACTION_CLOSE_PANE.rawValue)
+        action.target_execution_lo = lo
+        action.target_execution_hi = hi
+        action.target_generation = shell.containment_generation
+        _ = seyal_app_apply(pane.appHandle, &action)
+        notifyProductChromeChanged()
+    }
+
     @objc func openAttention(_ sender: NSButton) {
         applyPayload(UInt16(SEYAL_APP_ACTION_OPEN_ATTENTION.rawValue), text: sender.identifier?.rawValue ?? "")
     }
@@ -98,7 +118,9 @@ extension ProductChromeHostView {
         action.kind = kind
         action.reserved = reserved
         _ = seyal_app_apply(pane.appHandle, &action)
-        reconcileChrome()
+        // CreateWindow / CloseTab→DestroyWindow must drain native effects via
+        // the multi-window host's onProductChanged wrapper (not chrome-only).
+        notifyProductChromeChanged()
     }
 
     func applyIdentity(_ kind: UInt16, button: NSButton) {
@@ -115,7 +137,17 @@ extension ProductChromeHostView {
             action.target_generation = tagged.containmentGeneration
         }
         _ = seyal_app_apply(pane.appHandle, &action)
-        reconcileChrome()
+        notifyProductChromeChanged()
+    }
+
+    /// Prefer the Pane's product-changed hook so MultiWindowHostController can
+    /// drain Realize/DestroyWindow effects before chrome rebuilds.
+    func notifyProductChromeChanged() {
+        if let onProductChanged = pane.onProductChanged {
+            onProductChanged()
+        } else {
+            reconcileChrome()
+        }
     }
 
     /// Block selection is Rust-owned (#935): the click only names the Block
@@ -160,7 +192,16 @@ extension ProductChromeHostView {
         styleSwitcher(tabsButton, identifier: "seyal-left-tabs", action: #selector(showTabs))
         // C05: compact layout chrome — short glyphs, full names stay in accessibility labels.
         styleCompactChrome(newTabButton, title: "+", label: "New Tab", id: "seyal-new-tab", action: #selector(createTab))
-        styleCompactChrome(closeTabButton, title: "×", label: "Close Tab", id: "seyal-close-tab", action: #selector(closeActiveTab(_:)))
+        // Global close is demoted; per-chip × carries `seyal-close-tab` on the
+        // active Tab. Keep the IdentityButton for containment fencing tests.
+        closeTabButton.title = "×"
+        closeTabButton.toolTip = "Close Tab"
+        closeTabButton.setAccessibilityLabel("Close Tab")
+        closeTabButton.setAccessibilityIdentifier("seyal-close-tab-legacy")
+        closeTabButton.setAccessibilityElement(false)
+        closeTabButton.target = self
+        closeTabButton.action = #selector(closeActiveTab(_:))
+        closeTabButton.isHidden = true
         styleCompactChrome(splitRightButton, title: "❘", label: "Split Right", id: "seyal-split-right", action: #selector(splitFocusedRight))
         styleCompactChrome(splitDownButton, title: "⎯", label: "Split Down", id: "seyal-split-down", action: #selector(splitFocusedDown))
         styleCompactChrome(closePaneButton, title: "✕", label: "Close Pane", id: "seyal-close-pane", action: #selector(closeFocusedPane(_:)))

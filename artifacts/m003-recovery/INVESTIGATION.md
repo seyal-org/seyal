@@ -1,0 +1,52 @@
+# M003 Terminal Experience Recovery — Independent Investigation
+
+Date: 2026-10-27  
+Branch: `mahboobmonnamd/issue/1375` · PR: https://github.com/seyal-org/seyal/pull/1377  
+Owning Issue: #1375 (VF consolidation). Full DoD below exceeds VF scope; out-of-scope items need Issue refinement or child Issues.
+
+## Evidence captured
+
+| Artifact | Path |
+|---|---|
+| Seyal current | `artifacts/m003-recovery/01-seyal-current.png` |
+| cmux benchmark | `artifacts/m003-recovery/02-cmux-current.webp` (+ `.png`) |
+| Seyal after smoke | `artifacts/m003-recovery/03-seyal-after-smoke.png` |
+| Geometry truth | `artifacts/m003-recovery/geometry-truth.txt` |
+
+## Terminal gate (headed, live PTY)
+
+Geometry (full AX value, not truncated dump):
+
+- `viewport=772x644 cell=8.500x16.500 scale=2.00` → **`rows=39 columns=90`**, `resize-fail=0`
+- Prior `columns=9` reading was a **false positive**: `/tmp/seyal-ax-dump` truncates long AX values mid-token (`columns=90` → `columns=9`).
+
+Composer → PTY → Block status (Succeeded):
+
+| Command | Result |
+|---|---|
+| `echo hello` | Succeeded |
+| `pwd` | Succeeded |
+| `cd /tmp && pwd` | Succeeded (real shell cwd) |
+| `printf` ANSI red | Succeeded |
+| `ls /tmp \| head -3` | Succeeded |
+
+Still to verify interactively: `clear`/`reset` vs Flow Blocks retention, history/Tab completion, Ctrl+C/D/L, vim/nvim, SSH, tmux, high-volume scroll.
+
+## Experiential gaps vs cmux (UX benchmark)
+
+cmux (live): dense left workspace list with path + activity summary; pane chrome with path tab + split actions; rich PTY prompt (Powerlevel10k/Nerd Font) filling the pane; minimal chrome waste.
+
+Seyal (live): Adaptive Depth chrome present (tabs underline, left Workspaces/Tabs, inspector, composer); Flow Blocks dominate center; pane chrome strip under tab; left lacks cwd/git density; vertical Local/Pane navigator adds width vs cmux.
+
+## Scope boundary
+
+#1375 acceptance is **Core Terminal Adaptive Depth VF**. Explicitly out of scope there: duration (#1043), shell context line (#1041/#1042), soft-wrap copy (#1357), VT/PTY product logic changes.
+
+User DoD 1–10 is a broader **terminal-experience recovery** program. This PR continues VF + in-scope regressions (“terminal functionality remains green”). Remaining Composer/Blocks/workspace product depth should refine #1375 or land as child Ready Issues without stealing #1044 / other owners.
+
+## Next slices
+
+1. Keep headed smoke + fix dump truncation in verify tooling.
+2. Raw-mode `clear`/`vim`/`Ctrl+C` path + regression tests.
+3. Workspace sidebar metadata density toward cmux within Workspace→Tab→Pane model.
+4. Blocks/Composer depth per M003 specs without duplicating #1044.

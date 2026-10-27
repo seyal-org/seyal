@@ -920,6 +920,12 @@ SeyalAppSnapshot seyal_app_snapshot(uint64_t handle);
 /* SPEC-022 R6.8 cursor for HISTORY_BACK/FORWARD; 0 = empty or invalid handle. */
 uint64_t seyal_app_focus_history_seq(uint64_t handle);
 SeyalAppComposer seyal_app_composer(uint64_t handle);
+/* Pane-addressed composer read; empty when Pane unknown. Draft ptr is
+ * invalidated by the next composer encode on this handle. */
+SeyalAppComposer seyal_app_composer_for_pane(
+    uint64_t handle,
+    uint64_t pane_lo,
+    uint64_t pane_hi);
 SeyalAppChrome seyal_app_chrome(uint64_t handle);
 SeyalAppShell seyal_app_shell(uint64_t handle);
 SeyalAppRow seyal_app_shell_row(uint64_t handle, uint16_t kind, uint32_t index);
@@ -1052,6 +1058,9 @@ typedef struct SeyalAppVisual {
     double terminal_font_size;
     double window_padding;
     double terminal_padding;
+    /* C05 / VF-4: chip compresses within [tab_min_width, tab_max_width], then scrolls. */
+    double tab_min_width;
+    double tab_max_width;
     double utility_opacity;
     uint32_t flags;
     uint16_t utility_material;

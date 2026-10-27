@@ -35,7 +35,10 @@ final class CommandBlockView: NSView {
     /// A chosen action's Rust kind (`SEYAL_APP_BLOCK_ACTION_*`).
     var onAction: ((UInt16) -> Void)?
 
-    private enum Metrics {
+    /// M003-BLOCK-COMPONENT-DESIGN §3 normalized tokens (pt). Host gap uses
+    /// `blockGap`; the view owns the rest so Swift invents no product metrics.
+    enum ChromeMetrics {
+        static let blockGap: CGFloat = 8
         static let insetH: CGFloat = 14
         static let insetBottom: CGFloat = 10
         static let radius: CGFloat = 6
@@ -43,6 +46,8 @@ final class CommandBlockView: NSView {
         static let focusBorder: CGFloat = 1.5
         static let minTopLine: CGFloat = 24
         static let statusSize: CGFloat = 14
+        static let seamActionSpacing: CGFloat = 2
+        static let seamStatusLeading: CGFloat = 8
     }
 
     private let row: CommandBlockRow
@@ -61,7 +66,9 @@ final class CommandBlockView: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.cornerRadius = Metrics.radius
+        layer?.cornerRadius = ChromeMetrics.radius
+        // Zero-chrome Adaptive Depth: no shadow; definition is border-only (§3/§9).
+        layer?.shadowOpacity = 0
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(row.command)
@@ -72,6 +79,7 @@ final class CommandBlockView: NSView {
         command.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         command.lineBreakMode = .byTruncatingTail
         command.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        command.setAccessibilityIdentifier("seyal-block-command")
         command.translatesAutoresizingMaskIntoConstraints = false
 
         statusIcon.imageScaling = .scaleProportionallyUpOrDown
@@ -94,7 +102,7 @@ final class CommandBlockView: NSView {
         spinner.setAccessibilityLabel(row.statusLabel)
 
         actions.orientation = .horizontal
-        actions.spacing = 2
+        actions.spacing = ChromeMetrics.seamActionSpacing
         actions.translatesAutoresizingMaskIntoConstraints = false
         for action in row.actions where action.placement == UInt16(SEYAL_APP_BLOCK_ACTION_SEAM) {
             actions.addArrangedSubview(seamButton(action))
@@ -114,30 +122,32 @@ final class CommandBlockView: NSView {
         bodyHeight = body.heightAnchor.constraint(
             equalToConstant: max(cellHeight, 1) * CGFloat(max(lines, 1)))
         NSLayoutConstraint.activate([
-            topLine.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.insetH),
-            topLine.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            topLine.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ChromeMetrics.insetH),
+            topLine.trailingAnchor.constraint(
+                equalTo: trailingAnchor, constant: -ChromeMetrics.insetH),
             topLine.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             topLine.heightAnchor.constraint(
-                equalToConstant: max(cellHeight, Metrics.minTopLine) + 4),
+                equalToConstant: max(cellHeight, ChromeMetrics.minTopLine) + 4),
             command.leadingAnchor.constraint(equalTo: topLine.leadingAnchor),
             command.centerYAnchor.constraint(equalTo: topLine.centerYAnchor),
             command.trailingAnchor.constraint(
                 lessThanOrEqualTo: actions.leadingAnchor, constant: -12),
-            actions.trailingAnchor.constraint(equalTo: statusIcon.leadingAnchor, constant: -8),
+            actions.trailingAnchor.constraint(
+                equalTo: statusIcon.leadingAnchor, constant: -ChromeMetrics.seamStatusLeading),
             actions.centerYAnchor.constraint(equalTo: topLine.centerYAnchor),
             statusIcon.trailingAnchor.constraint(equalTo: topLine.trailingAnchor),
             statusIcon.centerYAnchor.constraint(equalTo: topLine.centerYAnchor),
-            statusIcon.widthAnchor.constraint(equalToConstant: Metrics.statusSize),
-            statusIcon.heightAnchor.constraint(equalToConstant: Metrics.statusSize),
+            statusIcon.widthAnchor.constraint(equalToConstant: ChromeMetrics.statusSize),
+            statusIcon.heightAnchor.constraint(equalToConstant: ChromeMetrics.statusSize),
             spinner.centerXAnchor.constraint(equalTo: statusIcon.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: statusIcon.centerYAnchor),
-            spinner.widthAnchor.constraint(equalToConstant: Metrics.statusSize),
-            spinner.heightAnchor.constraint(equalToConstant: Metrics.statusSize),
-            body.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.insetH),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.insetH),
+            spinner.widthAnchor.constraint(equalToConstant: ChromeMetrics.statusSize),
+            spinner.heightAnchor.constraint(equalToConstant: ChromeMetrics.statusSize),
+            body.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ChromeMetrics.insetH),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ChromeMetrics.insetH),
             body.topAnchor.constraint(equalTo: topLine.bottomAnchor),
             bodyHeight,
-            body.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Metrics.insetBottom),
+            body.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -ChromeMetrics.insetBottom),
         ])
     }
 
@@ -237,12 +247,13 @@ final class CommandBlockView: NSView {
         body.layer?.backgroundColor = NSColor.clear.cgColor
         if row.isSelected {
             layer?.borderColor = theme.blockFocus.cgColor
-            layer?.borderWidth = Metrics.focusBorder
+            layer?.borderWidth = ChromeMetrics.focusBorder
         } else {
             layer?.borderColor = (isHovered ? theme.blockBorderHover : theme.blockBorderRest).cgColor
-            layer?.borderWidth = Metrics.border
+            layer?.borderWidth = ChromeMetrics.border
         }
-        command.textColor = theme.muted
+        // Design §3: staged command label uses TextSecondary (not TextMuted).
+        command.textColor = theme.secondary
         for case let button as NSButton in actions.arrangedSubviews {
             button.contentTintColor = button.isEnabled
                 ? theme.secondary : theme.muted.withAlphaComponent(0.5)
@@ -253,6 +264,7 @@ final class CommandBlockView: NSView {
     private func applyStatus(_ theme: NativeTheme) {
         guard row.state != UInt16(SEYAL_APP_BLOCK_STATE_RUNNING) else {
             statusIcon.isHidden = true
+            spinner.isHidden = false
             // Design §3/§8: the running spinner is tinted with Rust BlockFocus.
             spinner.contentFilters = Self.spinnerTint(theme.blockFocus)
             // Design §8: spinner stops under Reduce Motion (Rust-projected).
@@ -267,6 +279,7 @@ final class CommandBlockView: NSView {
         }
         spinner.stopAnimation(nil)
         spinner.isDisplayedWhenStopped = false
+        spinner.isHidden = true
         statusIcon.isHidden = false
         let (symbol, tint): (String, NSColor)
         switch row.state {
@@ -290,6 +303,46 @@ final class CommandBlockView: NSView {
         return [filter]
     }
 
+    /// Warp-style right-click: same Rust-projected leaf actions as the seam
+    /// (Copy rows, Rerun, then non-duplicate More rows such as Inspect).
+    /// M003 §6 / `composer::block_actions`; Swift invents no enablement.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        makeContextMenu()
+    }
+
+    /// Builds the Block context menu from Rust placements (testable without a click).
+    func makeContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for action in row.actions where action.placement == UInt16(SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU) {
+            menu.addItem(menuItem(action))
+        }
+        if let rerun = row.actions.first(where: {
+            $0.placement == UInt16(SEYAL_APP_BLOCK_ACTION_SEAM)
+                && $0.kind == UInt16(SEYAL_APP_BLOCK_ACTION_RERUN)
+        }) {
+            if menu.items.count > 0 { menu.addItem(.separator()) }
+            menu.addItem(menuItem(rerun))
+        }
+        // More duplicates Copy/Rerun for the seam kebab; right-click already
+        // listed those leaves, so only surface kinds not yet present (Inspect).
+        var listed = Set(
+            row.actions
+                .filter { $0.placement == UInt16(SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU) }
+                .map(\.kind))
+        listed.insert(UInt16(SEYAL_APP_BLOCK_ACTION_RERUN))
+        let moreExtras = row.actions.filter {
+            $0.placement == UInt16(SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU) && !listed.contains($0.kind)
+        }
+        if !moreExtras.isEmpty {
+            if menu.items.count > 0 { menu.addItem(.separator()) }
+            for action in moreExtras {
+                menu.addItem(menuItem(action))
+            }
+        }
+        return menu
+    }
+
     /// Seam buttons either open a Rust-listed menu or report their kind.
     @objc private func seamButtonClicked(_ sender: NSButton) {
         let kind = UInt16(sender.tag)
@@ -301,12 +354,18 @@ final class CommandBlockView: NSView {
             onAction?(kind)
             return
         }
+        let menu = makePlacementMenu(UInt16(placement))
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    /// Copy / More popup contents from one Rust placement (seam buttons).
+    func makePlacementMenu(_ placement: UInt16) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for action in row.actions where action.placement == UInt16(placement) {
+        for action in row.actions where action.placement == placement {
             menu.addItem(menuItem(action))
         }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+        return menu
     }
 
     @objc private func menuItemChosen(_ sender: NSMenuItem) {
@@ -322,6 +381,7 @@ final class CommandBlockView: NSView {
         item.tag = Int(action.kind)
         item.isEnabled = action.enabled
         item.image = NSImage(systemSymbolName: Self.symbol(action.kind), accessibilityDescription: nil)
+        item.setAccessibilityIdentifier("seyal-block-action-\(Self.identifier(action.kind))")
         return item
     }
 
@@ -361,8 +421,12 @@ final class CommandBlockView: NSView {
     private static func identifier(_ kind: UInt16) -> String {
         switch UInt32(kind) {
         case SEYAL_APP_BLOCK_ACTION_COPY_MENU: return "copy"
+        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND: return "copy-command"
+        case SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT: return "copy-output"
+        case SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT: return "copy-command-output"
         case SEYAL_APP_BLOCK_ACTION_RERUN: return "rerun"
         case SEYAL_APP_BLOCK_ACTION_MORE_MENU: return "more"
+        case SEYAL_APP_BLOCK_ACTION_INSPECT: return "inspect"
         default: return "\(kind)"
         }
     }

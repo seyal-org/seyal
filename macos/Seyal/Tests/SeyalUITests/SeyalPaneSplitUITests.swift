@@ -72,6 +72,103 @@ final class SeyalPaneSplitUITests: XCTestCase {
 
     /// #1219 headed evidence: ⌘⇧↩ (`pane.zoom_toggle`) shows the focused leaf
     /// full-Tab without destroying its sibling; a second ⌘⇧↩ restores the split.
+    func testSplitProjectsFocusedAndSecondaryComposers() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-composer").waitForExistence(timeout: 8))
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-secondary-live-pane").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-composer").exists, "focused Pane keeps seyal-composer")
+        // Pane-scoped secondary composer identifier embeds the PaneId.
+        let secondaryComposers = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "seyal-composer-")
+        )
+        let appeared = expectation(
+            for: NSPredicate(format: "count >= 1"),
+            evaluatedWith: secondaryComposers,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [appeared], timeout: 8),
+            .completed,
+            "inactive Pane projects a subdued composer"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// Workspace content: Split stays inside one Tab (cmux-like), never Create Tab.
+    func testSplitRightStaysInsideSingleTabWithPerPaneChrome() throws {
+        let app = hostedApp()
+        waitForUsablePty(in: app)
+        XCTAssertTrue(element(app, "seyal-tab-strip-tab-0").waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            element(app, "seyal-tab-strip-tab-1").exists,
+            "bootstrap has exactly one Tab before Split"
+        )
+
+        click(app, "seyal-split-right")
+        XCTAssertTrue(element(app, "seyal-pane-region-1").waitForExistence(timeout: 12))
+        XCTAssertTrue(element(app, "seyal-pane-divider-0").exists)
+        XCTAssertFalse(
+            element(app, "seyal-tab-strip-tab-1").exists,
+            "Split Right must not create a second Tab; panes live inside the active Tab"
+        )
+        XCTAssertTrue(element(app, "seyal-tab-strip-tab-0").exists)
+
+        let chromeBars = app.descendants(matching: .any).matching(identifier: "seyal-pane-chrome")
+        let chromeReady = expectation(
+            for: NSPredicate(format: "count >= 2"),
+            evaluatedWith: chromeBars,
+            handler: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [chromeReady], timeout: 8),
+            .completed,
+            "each in-Tab Pane projects its own surface strip"
+        )
+        let surfaceChips = app.descendants(matching: .any).matching(identifier: "seyal-pane-surface-chip")
+        XCTAssertGreaterThanOrEqual(surfaceChips.count, 2, "each Pane strip has a leading surface chip")
+        let closes = app.descendants(matching: .any).matching(identifier: "seyal-pane-chrome-close")
+        XCTAssertGreaterThanOrEqual(closes.count, 2, "each Pane surface chip has Close Pane")
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(identifier: "seyal-pane-surface-add").firstMatch.exists,
+            "no pane-local + (multi-surface-per-pane needs ADR)"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+
+        // Evidence: two pane surface strips + still one C05 Tab after Split Right.
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        shot.name = "1375-in-tab-multipane-chrome"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let evidenceDir = URL(fileURLWithPath: "/tmp/seyal-1375/artifacts/1375-tabs-panes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: evidenceDir, withIntermediateDirectories: true)
+        let pngURL = evidenceDir.appendingPathComponent("1375-in-tab-multipane-chrome.png")
+        if let tiff = app.windows.firstMatch.screenshot().image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:])
+        {
+            try? png.write(to: pngURL)
+        }
+        let axSummary = """
+        tab0=\(element(app, "seyal-tab-strip-tab-0").exists) tab1=\(element(app, "seyal-tab-strip-tab-1").exists) \
+        region0=\(element(app, "seyal-pane-region-0").exists) region1=\(element(app, "seyal-pane-region-1").exists) \
+        chromeCount=\(chromeBars.count) surfaceChipCount=\(surfaceChips.count) closeCount=\(closes.count) \
+        secondary=\(element(app, "seyal-secondary-live-pane").exists) \
+        paneSurfaceAdd=false
+        """
+        try? axSummary.write(
+            to: evidenceDir.appendingPathComponent("1375-in-tab-multipane-ax.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let axAttach = XCTAttachment(string: axSummary)
+        axAttach.name = "1375-in-tab-multipane-ax"
+        axAttach.lifetime = .keepAlways
+        add(axAttach)
+    }
+
     func testZoomToggleFillsTabAndRestoresSplit() throws {
         let app = hostedApp()
         waitForUsablePty(in: app)

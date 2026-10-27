@@ -88,6 +88,9 @@ pub struct SeyalAppVisual {
     pub terminal_font_size: f64,
     pub window_padding: f64,
     pub terminal_padding: f64,
+    /// C05 / VF-4: chip compresses within `[tab_min_width, tab_max_width]`, then scrolls.
+    pub tab_min_width: f64,
+    pub tab_max_width: f64,
     pub utility_opacity: f64,
     /// bit0 reduced transparency/material, bit1 full-default fallback, bit2 warnings present.
     pub flags: u32,
@@ -251,6 +254,8 @@ pub extern "C" fn seyal_app_visual(platform_appearance: u16) -> SeyalAppVisual {
         terminal_font_size: visual.terminal_font.point_size,
         window_padding: visual.metrics.window_padding,
         terminal_padding: visual.metrics.terminal_padding,
+        tab_min_width: visual.metrics.tab_min_width,
+        tab_max_width: visual.metrics.tab_max_width,
         utility_opacity: visual.settings.utility_opacity,
         flags,
         utility_material: material_code(visual.material(DepthLevel::RecededUtility).intent),
@@ -415,6 +420,19 @@ mod tests {
             0,
             "reduce_motion resolves allows_motion off"
         );
+    }
+
+    #[test]
+    fn visual_packs_c05_tab_width_tokens() {
+        use super::seyal_app_visual;
+        use crate::theme::Metrics;
+        let visual = seyal_app_visual(0);
+        let metrics = Metrics::default();
+        assert_eq!(visual.tab_min_width, metrics.tab_min_width);
+        assert_eq!(visual.tab_max_width, metrics.tab_max_width);
+        assert_eq!(visual.tab_min_width, 118.0);
+        assert_eq!(visual.tab_max_width, 190.0);
+        assert!(visual.tab_min_width <= visual.tab_max_width);
     }
 
     #[test]

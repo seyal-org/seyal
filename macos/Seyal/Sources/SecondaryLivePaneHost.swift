@@ -12,10 +12,16 @@ final class SecondaryLivePaneHost: NSView {
     let paneLo: UInt64
     let paneHi: UInt64
     var onFocus: (() -> Void)?
+    var onClosePane: (() -> Void)?
     var onRetryRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     private(set) var displayHandle: UInt64
     private var recoveryTarget: SeyalAppPaneRecoveryTarget
     private let surface: MetalSurfaceView
+    private let chromeBar = PaneChromeBarView()
+    private var chromeTitle = "Pane"
+    /// Inactive Pane still projects its own C09 composer (ADR-009); clicks focus
+    /// the Pane so liveContent becomes the editable authority.
+    private(set) var composer: ComposerBridgeView!
     private let statusLabel = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
 
@@ -36,6 +42,7 @@ final class SecondaryLivePaneHost: NSView {
             paneID: String(format: "live-%016llx%016llx", paneHi, paneLo),
             allowsImplicitExecutionBootstrap: false
         )
+        composer = ComposerBridgeView(appHandle: appHandle, paneLo: paneLo, paneHi: paneHi)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = true
         setAccessibilityElement(true)
@@ -64,14 +71,30 @@ final class SecondaryLivePaneHost: NSView {
                 self?.publishFrame()
             }
         }
+        composer.translatesAutoresizingMaskIntoConstraints = false
+        composer.alphaValue = 0.72
+        composer.onEnsureFocused = { [weak self] in
+            self?.onFocus?()
+        }
+        chromeBar.onClose = { [weak self] in
+            self?.onClosePane?()
+        }
+        addSubview(chromeBar)
         addSubview(surface)
+        addSubview(composer)
         addSubview(statusLabel)
         addSubview(retryButton)
         NSLayoutConstraint.activate([
+            chromeBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            chromeBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            chromeBar.topAnchor.constraint(equalTo: topAnchor),
             surface.leadingAnchor.constraint(equalTo: leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: trailingAnchor),
-            surface.topAnchor.constraint(equalTo: topAnchor),
-            surface.bottomAnchor.constraint(equalTo: bottomAnchor),
+            surface.topAnchor.constraint(equalTo: chromeBar.bottomAnchor),
+            surface.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+            composer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            composer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            composer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
             statusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -12),
             retryButton.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -93,9 +116,12 @@ final class SecondaryLivePaneHost: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let localPoint = convert(point, from: superview)
         guard bounds.contains(localPoint) else { return nil }
-        if displayHandle == 0, super.hitTest(point) === retryButton {
-            return retryButton
+        let hit = super.hitTest(point)
+        // Pane chrome Close and recovery Retry must receive the click.
+        if let hit, hit === retryButton || hit.isDescendant(of: chromeBar) || hit === chromeBar {
+            return hit
         }
+        // Composer/Metal hits focus this Pane so liveContent becomes editable.
         return self
     }
 
@@ -167,6 +193,23 @@ final class SecondaryLivePaneHost: NSView {
     /// Called when the shared primary bridge polls this registry handle.
     func noteRegistryPolled() {
         publishFrame()
+    }
+
+    func reconcileComposer() {
+        composer.reconcile()
+        // Inactive composers stay visible when Available/Busy; Hidden retracts.
+        composer.alphaValue = composer.isHidden ? 0 : 0.72
+    }
+
+    func updateChrome(title: String, allowsClose: Bool, theme: NativeTheme?, focused: Bool = false) {
+        chromeTitle = title
+        chromeBar.apply(title: title, theme: theme, focused: focused)
+        chromeBar.setCloseVisible(allowsClose)
+    }
+
+    func apply(theme: NativeTheme) {
+        composer.apply(theme: theme)
+        chromeBar.apply(title: chromeTitle, theme: theme, focused: false)
     }
 
     private func publishFrame() {

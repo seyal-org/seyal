@@ -83,7 +83,7 @@ pub use app::pane_recovery::{
 pub use app::{
     seyal_app_accessibility, seyal_app_apply, seyal_app_block_action_count,
     seyal_app_block_action_row, seyal_app_block_projection, seyal_app_block_row,
-    seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer,
+    seyal_app_block_span, seyal_app_chrome, seyal_app_chrome_row, seyal_app_composer, seyal_app_composer_for_pane,
     seyal_app_copy, seyal_app_create, seyal_app_destroy, seyal_app_invoke_workspace_command,
     seyal_app_last_error, seyal_app_native_effect, seyal_app_option_as_alt, seyal_app_palette,
     seyal_app_palette_row, seyal_app_pane_binding, seyal_app_pane_divider, seyal_app_pane_leaf,

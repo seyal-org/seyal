@@ -541,6 +541,11 @@ impl ApplicationRoot {
         }
     }
 
+    /// Pane-addressed composer projection for multipane hosts (ADR-009).
+    pub fn composer_for_pane(&self, pane: PaneId) -> Option<ComposerSnapshot> {
+        self.composer.snapshot(pane).ok()
+    }
+
     pub fn snapshot(&self) -> AppSnapshot {
         let shell = self.shell.snapshot();
         let composer = self.composer.snapshot(shell.focused_pane).ok();

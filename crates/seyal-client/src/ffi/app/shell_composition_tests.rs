@@ -218,3 +218,66 @@ fn close_window_action_uses_observed_containment_generation() {
     );
     assert_eq!(seyal_app_destroy(handle), 0);
 }
+
+#[test]
+fn composer_for_pane_isolates_sibling_drafts_across_split() {
+    let handle = seyal_app_create();
+    let first_pane_lo = seyal_app_snapshot(handle).pane_lo;
+    let first_pane_hi = seyal_app_snapshot(handle).pane_hi;
+
+    // Draft on the sole Pane before splitting.
+    let snap = seyal_app_snapshot(handle);
+    let epoch = seyal_app_composer(handle).epoch;
+    let draft = b"pane-a-draft";
+    let mut set = identity_fence(10, &snap);
+    set.target_generation = epoch;
+    set.payload = draft.as_ptr();
+    set.payload_len = draft.len() as u32;
+    assert_eq!(unsafe { seyal_app_apply(handle, &set) }, 0);
+
+    let mut split = identity_fence(25, &seyal_app_snapshot(handle));
+    split.reserved = 0; // SplitAxis::Right
+    assert_eq!(unsafe { seyal_app_apply(handle, &split) }, 0);
+    assert_eq!(seyal_app_shell(handle).pane_count, 2);
+
+    let focused = seyal_app_snapshot(handle);
+    assert!(
+        focused.pane_lo != first_pane_lo || focused.pane_hi != first_pane_hi,
+        "split focuses the new leaf"
+    );
+
+    let first = seyal_app_composer_for_pane(handle, first_pane_lo, first_pane_hi);
+    assert_eq!(first.size as usize, size_of::<SeyalAppComposer>());
+    assert_eq!(first.draft_utf8_len, draft.len() as u32);
+    let bytes = unsafe { slice::from_raw_parts(first.draft_utf8, first.draft_utf8_len as usize) };
+    assert_eq!(bytes, draft.as_slice());
+
+    let second = seyal_app_composer(handle);
+    assert_eq!(second.draft_utf8_len, 0, "new Pane starts with an empty draft");
+
+    // Mutating the focused composer must not clobber the sibling draft.
+    let epoch2 = second.epoch;
+    let other = b"pane-b-draft";
+    let mut set2 = identity_fence(10, &focused);
+    set2.target_generation = epoch2;
+    set2.payload = other.as_ptr();
+    set2.payload_len = other.len() as u32;
+    assert_eq!(unsafe { seyal_app_apply(handle, &set2) }, 0);
+
+    let first_after = seyal_app_composer_for_pane(handle, first_pane_lo, first_pane_hi);
+    let bytes = unsafe {
+        slice::from_raw_parts(first_after.draft_utf8, first_after.draft_utf8_len as usize)
+    };
+    assert_eq!(bytes, draft.as_slice());
+    let focused_after = seyal_app_composer(handle);
+    let bytes = unsafe {
+        slice::from_raw_parts(focused_after.draft_utf8, focused_after.draft_utf8_len as usize)
+    };
+    assert_eq!(bytes, other.as_slice());
+
+    let unknown = seyal_app_composer_for_pane(handle, 0, 0);
+    assert_eq!(unknown.draft_utf8_len, 0);
+    assert_eq!(unknown.mode, 0);
+
+    assert_eq!(seyal_app_destroy(handle), 0);
+}

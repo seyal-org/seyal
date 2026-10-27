@@ -1,0 +1,4 @@
+# Full AX terminal-input value (not truncated dump)
+# columns=90 for 772x644 @ Menlo 14 / scale 2 (cell 8.5x16.5)
+# Note: /tmp/seyal-ax-dump truncates long values so "columns=90" can appear as "columns=9".
+rows=39 columns=90 viewport≈772x644 cell=8.5x16.5 scale=2 resize-fail=0

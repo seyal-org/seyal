@@ -15,7 +15,8 @@ final class SeyalBlockComponentTests: XCTestCase {
     private var windows: [NSWindow] = []
 
     /// Sentinel labels prove the view draws Rust's rows and hardcodes none.
-    private func actions(canRerun: Bool) -> [CommandBlockActionRow] {
+    /// Shape mirrors `composer::block_actions` (seam + Copy menu + More).
+    private func actions(canRerun: Bool, hasOutput: Bool = true) -> [CommandBlockActionRow] {
         func row(_ kind: UInt32, _ placement: UInt32, _ label: String, _ shortcut: String = "",
             enabled: Bool = true) -> CommandBlockActionRow
         {
@@ -29,7 +30,17 @@ final class SeyalBlockComponentTests: XCTestCase {
             row(SEYAL_APP_BLOCK_ACTION_MORE_MENU, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:More"),
             row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
                 "Rust:Copy command"),
+            row(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
+                "Rust:Copy output", enabled: hasOutput),
+            row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
+                "Rust:Copy command + output", enabled: hasOutput),
             row(SEYAL_APP_BLOCK_ACTION_INSPECT, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU, "Rust:Inspect"),
+            row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU,
+                "Rust:Copy command"),
+            row(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU,
+                "Rust:Copy output", enabled: hasOutput),
+            row(SEYAL_APP_BLOCK_ACTION_RERUN, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU, "Rust:Rerun",
+                enabled: canRerun),
         ]
     }
 
@@ -104,19 +115,45 @@ final class SeyalBlockComponentTests: XCTestCase {
     func testRestBlockHidesActionsAndUsesRestBorder() {
         let view = block()
         XCTAssertFalse(view.actionsVisible, "actions are hidden at rest (board rule 3)")
-        XCTAssertEqual(view.layer?.borderWidth, 1)
+        XCTAssertEqual(view.layer?.borderWidth, CommandBlockView.ChromeMetrics.border)
         XCTAssertEqual(view.layer?.borderColor, dark.blockBorderRest.cgColor)
         XCTAssertEqual(view.layer?.backgroundColor, dark.canvas.cgColor, "surface equals Metal canvas")
+        XCTAssertEqual(view.layer?.cornerRadius, CommandBlockView.ChromeMetrics.radius)
+        XCTAssertEqual(view.layer?.shadowOpacity ?? 0, 0, "Adaptive Depth: no drop shadow")
         XCTAssertEqual(view.accessibilityValue() as? String, "")
+        let command = descendant(view, "seyal-block-command", as: NSTextField.self)
+        XCTAssertEqual(command?.textColor, dark.secondary, "staged command uses TextSecondary (§3)")
+        XCTAssertEqual(
+            view.body.frame.minX,
+            CommandBlockView.ChromeMetrics.insetH,
+            accuracy: 0.5,
+            "body respects block.inset.h"
+        )
+        XCTAssertEqual(
+            view.bounds.width - view.body.frame.maxX,
+            CommandBlockView.ChromeMetrics.insetH,
+            accuracy: 0.5,
+            "trailing inset matches leading"
+        )
     }
 
     func testSelectedBlockRevealsActionsWithFocusBorder() {
         let view = block(selected: true)
         XCTAssertTrue(view.actionsVisible)
-        XCTAssertEqual(view.layer?.borderWidth, 1.5)
+        XCTAssertEqual(view.layer?.borderWidth, CommandBlockView.ChromeMetrics.focusBorder)
         XCTAssertEqual(view.layer?.borderColor, dark.blockFocus.cgColor)
         XCTAssertEqual(view.accessibilityValue() as? String, "selected")
         XCTAssertEqual(view.accessibilityLabel(), "ls /")
+    }
+
+    func testTranscriptStackUsesDesignBlockGap() {
+        let host = ProductChromeHostView(frame: NSRect(x: 0, y: 0, width: 960, height: 640))
+        hosts.append(host)
+        XCTAssertEqual(
+            host.blocks.spacing,
+            CommandBlockView.ChromeMetrics.blockGap,
+            "transcript stack spacing is block.gap (§3)"
+        )
     }
 
     func testHoverRevealsActionsAndHoverBorder() {
@@ -246,10 +283,83 @@ final class SeyalBlockComponentTests: XCTestCase {
         XCTAssertEqual(CommandBlockView.keyEquivalent("").0, "")
     }
 
+    /// Warp-style right-click: flat Copy leaves + Rerun + Inspect (More extras).
+    func testContextMenuStructureMatchesRustProjection() {
+        let view = block(selected: true)
+        let menu = view.makeContextMenu()
+        let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
+        XCTAssertEqual(
+            titles,
+            [
+                "Rust:Copy command", "Rust:Copy output", "Rust:Copy command + output",
+                "Rust:Rerun", "Rust:Inspect",
+            ],
+            "context menu mirrors Warp flat copy + rerun + Inspect; no Filter/Pin")
+        XCTAssertTrue(menu.items.contains(where: \.isSeparatorItem))
+        // Duplicate More Copy/Rerun rows are not re-listed.
+        XCTAssertEqual(titles.filter { $0 == "Rust:Copy command" }.count, 1)
+        XCTAssertEqual(titles.filter { $0 == "Rust:Rerun" }.count, 1)
+        let viaEvent = view.menu(for: click)
+        XCTAssertEqual(viaEvent?.items.map(\.title), menu.items.map(\.title))
+    }
+
+    func testContextMenuAndSeamMenusRouteOnAction() throws {
+        let view = block(selected: true)
+        var kinds: [UInt16] = []
+        view.onAction = { kinds.append($0) }
+
+        let context = view.makeContextMenu()
+        let copyCommand = try XCTUnwrap(
+            context.items.first { $0.tag == Int(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND) })
+        XCTAssertTrue(NSApp.sendAction(copyCommand.action!, to: copyCommand.target, from: copyCommand))
+        XCTAssertEqual(kinds, [UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND)])
+
+        kinds.removeAll()
+        let copyPopup = view.makePlacementMenu(UInt16(SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU))
+        XCTAssertEqual(
+            copyPopup.items.map(\.title),
+            ["Rust:Copy command", "Rust:Copy output", "Rust:Copy command + output"])
+        let morePopup = view.makePlacementMenu(UInt16(SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU))
+        XCTAssertEqual(
+            morePopup.items.map(\.title),
+            ["Rust:Inspect", "Rust:Copy command", "Rust:Copy output", "Rust:Rerun"])
+        let inspect = try XCTUnwrap(
+            morePopup.items.first { $0.tag == Int(SEYAL_APP_BLOCK_ACTION_INSPECT) })
+        XCTAssertTrue(NSApp.sendAction(inspect.action!, to: inspect.target, from: inspect))
+        XCTAssertEqual(kinds, [UInt16(SEYAL_APP_BLOCK_ACTION_INSPECT)])
+    }
+
+    func testContextMenuHonorsRustEnablement() {
+        let view = CommandBlockView(
+            row: CommandBlockRow(
+                command: "ls /",
+                state: UInt16(SEYAL_APP_BLOCK_STATE_COMPLETED),
+                statusLabel: "Rust:Status",
+                isSelected: true,
+                actions: actions(canRerun: false, hasOutput: false)
+            ),
+            cellHeight: 16,
+            lines: 3
+        )
+        hosts.append(view)
+        view.apply(theme: dark)
+        let menu = view.makeContextMenu()
+        let byKind = Dictionary(
+            uniqueKeysWithValues: menu.items.filter { !$0.isSeparatorItem }.map {
+                (UInt16($0.tag), $0.isEnabled)
+            })
+        XCTAssertEqual(byKind[UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND)], true)
+        XCTAssertEqual(byKind[UInt16(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT)], false)
+        XCTAssertEqual(byKind[UInt16(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT)], false)
+        XCTAssertEqual(byKind[UInt16(SEYAL_APP_BLOCK_ACTION_RERUN)], false)
+        XCTAssertEqual(byKind[UInt16(SEYAL_APP_BLOCK_ACTION_INSPECT)], true)
+    }
+
     /// Visual-regression matrix (M003-BLOCK-COMPONENT-DESIGN §11) for the
     /// AppKit chrome in both Rust themes. The shipping window is pinned to
     /// dark (AppDelegate), so light is evidenced here, offscreen; Metal
     /// terminal rows are not part of this render.
+    /// Also writes PNG + AX evidence under `artifacts/1375-blocks/` for #1375.
     func testBlockChromeStateMatrixRendersInDarkAndLight() throws {
         let appearances: [(String, NSAppearance.Name)] = [("dark", .darkAqua), ("light", .aqua)]
         let states: [(String, UInt32, Bool, Bool)] = [
@@ -259,12 +369,17 @@ final class SeyalBlockComponentTests: XCTestCase {
             ("running", SEYAL_APP_BLOCK_STATE_RUNNING, false, false),
             ("failed", SEYAL_APP_BLOCK_STATE_FAILED, false, false),
         ]
+        let evidenceDir = URL(fileURLWithPath: "/tmp/seyal-1375/artifacts/1375-blocks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: evidenceDir, withIntermediateDirectories: true)
+        var axDump: String?
         for (appearanceName, name) in appearances {
             let appearance = try XCTUnwrap(NSAppearance(named: name))
             let theme = NativeThemeRealization.theme(for: appearance)
             var pixels: [CGColor] = []
             for (stateName, state, selected, hovered) in states {
                 let view = block(state: state, selected: selected, canRerun: state != SEYAL_APP_BLOCK_STATE_RUNNING)
+                view.setAccessibilityIdentifier("seyal-block-0")
+                view.body.setAccessibilityIdentifier("seyal-block-0-body")
                 let host = try XCTUnwrap(view.superview)
                 // A window makes AppKit actually draw the layer tree
                 // (icons, labels, border); it is never ordered on screen.
@@ -284,11 +399,42 @@ final class SeyalBlockComponentTests: XCTestCase {
                 attachment.name = "1010-matrix-\(appearanceName)-\(stateName)"
                 attachment.lifetime = .keepAlways
                 add(attachment)
+                writePNG(image, to: evidenceDir.appendingPathComponent("\(appearanceName)-\(stateName).png"))
+                if appearanceName == "dark", stateName == "selected", axDump == nil {
+                    axDump = accessibilityDump(view)
+                }
                 XCTAssertEqual(view.layer?.backgroundColor, theme.canvas.cgColor)
                 pixels.append(try XCTUnwrap(view.layer?.borderColor))
             }
             XCTAssertEqual(pixels[2], theme.blockFocus.cgColor, "\(appearanceName) selected border")
             XCTAssertEqual(pixels[1], theme.blockBorderHover.cgColor, "\(appearanceName) hover border")
+        }
+        // Context-menu action ids (Warp right-click path); menus are not rasterized.
+        let contextView = block(selected: true)
+        let contextMenu = contextView.makeContextMenu()
+        let contextLines = contextMenu.items.map { item -> String in
+            if item.isSeparatorItem { return "---" }
+            let id = item.accessibilityIdentifier() ?? ""
+            let enabled = item.isEnabled ? "enabled" : "disabled"
+            return "kind=\(item.tag) id=\(id) label=\(item.title) \(enabled)"
+        }
+        let contextDump =
+            "context-menu action ids (Rust-projected; Warp flat copy + rerun + Inspect)\n"
+            + contextLines.joined(separator: "\n") + "\n"
+        let contextURL = evidenceDir.appendingPathComponent("block-context-menu-ax.txt")
+        try contextDump.write(to: contextURL, atomically: true, encoding: .utf8)
+        let contextAttach = XCTAttachment(string: contextDump)
+        contextAttach.name = "1375-block-context-menu-ax"
+        contextAttach.lifetime = .keepAlways
+        add(contextAttach)
+
+        if let axDump {
+            let axURL = evidenceDir.appendingPathComponent("block-selected-ax.txt")
+            try axDump.write(to: axURL, atomically: true, encoding: .utf8)
+            let axAttach = XCTAttachment(string: axDump)
+            axAttach.name = "1375-block-selected-ax"
+            axAttach.lifetime = .keepAlways
+            add(axAttach)
         }
         XCTAssertNotEqual(
             NativeThemeRealization.theme(for: NSAppearance(named: .aqua)!).canvas,
@@ -309,5 +455,36 @@ final class SeyalBlockComponentTests: XCTestCase {
         layer.render(in: context)
         guard let cgImage = context.makeImage() else { return nil }
         return NSImage(cgImage: cgImage, size: size)
+    }
+
+    private func writePNG(_ image: NSImage, to url: URL) {
+        guard let tiff = image.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiff),
+            let png = rep.representation(using: .png, properties: [:])
+        else { return }
+        try? png.write(to: url)
+    }
+
+    /// Roles / labels / values / ids for a Block (design §6 VoiceOver contract).
+    private func accessibilityDump(_ root: NSView) -> String {
+        func line(_ view: NSView, depth: Int) -> [String] {
+            let indent = String(repeating: "  ", count: depth)
+            let role = view.accessibilityRole()?.rawValue ?? "?"
+            let label = view.accessibilityLabel() ?? ""
+            let value = view.accessibilityValue().map { "\($0)" } ?? ""
+            let id = view.accessibilityIdentifier() ?? ""
+            var rows = ["\(indent)role=\(role) id=\(id) label=\(label) value=\(value)"]
+            let children: [NSView]
+            if let explicit = view.accessibilityChildren() as? [NSView] {
+                children = explicit
+            } else {
+                children = view.subviews.filter { !$0.isHidden }
+            }
+            for child in children {
+                rows.append(contentsOf: line(child, depth: depth + 1))
+            }
+            return rows
+        }
+        return line(root, depth: 0).joined(separator: "\n") + "\n"
     }
 }

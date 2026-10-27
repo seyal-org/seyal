@@ -6,9 +6,171 @@ import AppKit
 enum ProductChromeAdaptiveDepth {
     static let regionSeamWidth: CGFloat = 1
     static let tabUnderlineHeight: CGFloat = 2
+    static let tabChipCornerRadius: CGFloat = 6
+    static let tabChipHeight: CGFloat = 28
     static let composerCornerRadius: CGFloat = 8
     static let contextAccentWidth: CGFloat = 2
     static let contextRowMinHeight: CGFloat = 36
+}
+
+/// Compact C05 tab chip: title + Close Tab × (ADR-018 hierarchical close).
+@MainActor
+final class TabChipView: NSStackView {
+    let titleButton: IdentityButton
+    let closeButton: IdentityButton
+    private let titleText: String
+    private(set) var isSelected = false
+    private var widthConstraint: NSLayoutConstraint?
+    private var minWidthConstraint: NSLayoutConstraint?
+    private var maxWidthConstraint: NSLayoutConstraint?
+
+    init(
+        title: String,
+        selected: Bool,
+        showClose: Bool,
+        tabIndex: Int,
+        idLo: UInt64,
+        idHi: UInt64,
+        containmentGeneration: UInt64,
+        target: AnyObject?,
+        selectAction: Selector,
+        closeAction: Selector
+    ) {
+        titleText = title
+        titleButton = IdentityButton(title: title, target: target, action: selectAction)
+        closeButton = IdentityButton(title: "×", target: target, action: closeAction)
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 2
+        edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 4)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = ProductChromeAdaptiveDepth.tabChipCornerRadius
+        layer?.cornerCurve = .continuous
+        isSelected = selected
+        setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        titleButton.idLo = idLo
+        titleButton.idHi = idHi
+        titleButton.kind = UInt16(SEYAL_APP_ACTION_SELECT_TAB.rawValue)
+        titleButton.bezelStyle = .inline
+        titleButton.isBordered = false
+        titleButton.setButtonType(.momentaryChange)
+        titleButton.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .regular)
+        titleButton.setAccessibilityIdentifier("seyal-tab-strip-tab-\(tabIndex)")
+        titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleButton.lineBreakMode = .byTruncatingTail
+        addArrangedSubview(titleButton)
+
+        closeButton.idLo = idLo
+        closeButton.idHi = idHi
+        closeButton.kind = UInt16(SEYAL_APP_ACTION_CLOSE_TAB.rawValue)
+        closeButton.containmentGeneration = containmentGeneration
+        closeButton.bezelStyle = .inline
+        closeButton.isBordered = false
+        closeButton.setButtonType(.momentaryChange)
+        closeButton.font = .systemFont(ofSize: 12, weight: .medium)
+        closeButton.toolTip = "Close Tab"
+        closeButton.setAccessibilityLabel("Close Tab")
+        closeButton.setAccessibilityIdentifier(
+            selected ? "seyal-close-tab" : "seyal-tab-strip-close-\(tabIndex)"
+        )
+        closeButton.isHidden = !showClose
+        closeButton.setContentHuggingPriority(.required, for: .horizontal)
+        closeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addArrangedSubview(closeButton)
+
+        heightAnchor.constraint(equalToConstant: ProductChromeAdaptiveDepth.tabChipHeight).isActive = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("TabChipView is programmatic")
+    }
+
+    /// Natural title+close width clamped into the Rust min…max band.
+    func preferredWidth(minWidth: CGFloat, maxWidth: CGFloat, fontSize: CGFloat) -> CGFloat {
+        let titleFont = NSFont.systemFont(
+            ofSize: fontSize,
+            weight: isSelected ? .semibold : .regular
+        )
+        let titleWidth = (titleText as NSString).size(withAttributes: [.font: titleFont]).width
+        let closeWidth: CGFloat = closeButton.isHidden ? 0 : 14
+        let chrome = edgeInsets.left + edgeInsets.right + (closeButton.isHidden ? 0 : spacing)
+        return min(max(titleWidth + closeWidth + chrome, minWidth), maxWidth)
+    }
+
+    func applyWidth(_ width: CGFloat, minWidth: CGFloat, maxWidth: CGFloat) {
+        let clamped = min(max(width, minWidth), maxWidth)
+        if let widthConstraint {
+            if abs(widthConstraint.constant - clamped) > 0.25 {
+                widthConstraint.constant = clamped
+            }
+        } else {
+            let constraint = widthAnchor.constraint(equalToConstant: clamped)
+            constraint.priority = .required
+            constraint.isActive = true
+            widthConstraint = constraint
+        }
+        if let minWidthConstraint {
+            if abs(minWidthConstraint.constant - minWidth) > 0.25 {
+                minWidthConstraint.constant = minWidth
+            }
+        } else {
+            let minConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth)
+            minConstraint.isActive = true
+            minWidthConstraint = minConstraint
+        }
+        if let maxWidthConstraint {
+            if abs(maxWidthConstraint.constant - maxWidth) > 0.25 {
+                maxWidthConstraint.constant = maxWidth
+            }
+        } else {
+            let maxConstraint = widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth)
+            maxConstraint.isActive = true
+            maxWidthConstraint = maxConstraint
+        }
+    }
+
+    func apply(theme: NativeTheme) {
+        // VF-4 / C05: active = typography + underline only; no pill fill.
+        let titleColor = isSelected ? theme.text : theme.muted
+        let titleFont = NSFont.systemFont(
+            ofSize: theme.uiFontSize,
+            weight: isSelected ? .semibold : .regular
+        )
+        titleButton.font = titleFont
+        titleButton.contentTintColor = titleColor
+        titleButton.attributedTitle = NSAttributedString(
+            string: titleText,
+            attributes: [
+                .font: titleFont,
+                .foregroundColor: titleColor,
+            ]
+        )
+        let closeFont = NSFont.systemFont(ofSize: max(theme.uiFontSize - 1, 11), weight: .medium)
+        closeButton.font = closeFont
+        closeButton.contentTintColor = theme.muted
+        closeButton.attributedTitle = NSAttributedString(
+            string: "×",
+            attributes: [
+                .font: closeFont,
+                .foregroundColor: theme.muted,
+            ]
+        )
+        layer?.backgroundColor = NSColor.clear.cgColor
+        applyWidth(
+            preferredWidth(
+                minWidth: theme.tabMinWidth,
+                maxWidth: theme.tabMaxWidth,
+                fontSize: theme.uiFontSize
+            ),
+            minWidth: theme.tabMinWidth,
+            maxWidth: theme.tabMaxWidth
+        )
+    }
 }
 
 /// Leading accent + two-line C04 context row. Selection fill is restrained tint.

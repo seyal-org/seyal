@@ -119,6 +119,8 @@ final class PaneLayoutView: NSView {
     /// Container for the focused Pane's chrome (transcript/composer/primary Metal).
     let liveContent = NSView()
     var onFocusPane: ((UInt64, UInt64) -> Void)?
+    /// Close a named leaf from non-live region surface chrome (B.1 strip).
+    var onClosePane: ((UInt64, UInt64) -> Void)?
     var onRetryPaneRecovery: ((SeyalAppPaneRecoveryTarget) -> Void)?
     /// Rust application root the projection is read from; 0 until wired.
     var appHandle: UInt64 = 0
@@ -163,6 +165,23 @@ final class PaneLayoutView: NSView {
     /// Registry handle → secondary host lookup for shared bridge poll routing.
     func secondaryHost(displayHandle: UInt64) -> SecondaryLivePaneHost? {
         secondaryLiveHosts.values.first { $0.displayHandle == displayHandle }
+    }
+
+    /// All secondary live hosts (Metal + subdued per-Pane composer).
+    var secondaryHosts: [SecondaryLivePaneHost] {
+        Array(secondaryLiveHosts.values)
+    }
+
+    func reconcileSecondaryComposers() {
+        for host in secondaryLiveHosts.values {
+            host.reconcileComposer()
+        }
+    }
+
+    func applyThemeToSecondaryHosts(_ theme: NativeTheme) {
+        for host in secondaryLiveHosts.values {
+            host.apply(theme: theme)
+        }
     }
 
     /// Ensure non-focused LIVE leaves with a display handle have Metal hosts.
@@ -374,6 +393,9 @@ final class PaneLayoutView: NSView {
             view.onFocus = { [weak self] in
                 self?.onFocusPane?(region.paneLo, region.paneHi)
             }
+            view.onClose = { [weak self] in
+                self?.onClosePane?(region.paneLo, region.paneHi)
+            }
             if let theme { view.apply(theme: theme) }
             // Regions sit under the live container so its content stays on top.
             addSubview(view, positioned: .below, relativeTo: liveContent)
@@ -405,6 +427,14 @@ final class PaneLayoutView: NSView {
         self.theme = theme
         regionViews.forEach { $0.apply(theme: theme) }
         dividerViews.forEach { $0.apply(theme: theme) }
+    }
+
+    /// Refresh non-live in-Tab surface strips (title / Close Pane visibility).
+    /// Live leaves keep chrome inside `liveContent` / `SecondaryLivePaneHost`.
+    func updatePlaceholderChrome(allowsClose: Bool, theme: NativeTheme?) {
+        for view in regionViews {
+            view.updatePlaceholderChrome(allowsClose: allowsClose, theme: theme)
+        }
     }
 
     override func layout() {
@@ -470,15 +500,19 @@ final class PaneLayoutView: NSView {
 }
 
 /// One Pane leaf. In a split it draws a focus-accented border and, when not
-/// live, the Pane title; clicking an unfocused region requests Rust focus.
+/// Region frame for one Tab leaf. LIVE leaves present Metal/composer via
+/// `liveContent` / `SecondaryLivePaneHost`. Non-live split leaves still expose
+/// B.1 pane surface chrome (title + Close) so Split is visually addressable
+/// even before Runtime bind admits a secondary live host.
 @MainActor
 private final class PaneRegionView: NSView {
     static let borderWidth: CGFloat = 1
 
     var onFocus: (() -> Void)?
+    var onClose: (() -> Void)?
     private let region: PaneLayoutView.Region
     private let split: Bool
-    private let title = NSTextField(labelWithString: "")
+    private let chromeBar = PaneChromeBarView()
 
     init(region: PaneLayoutView.Region, index: Int, split: Bool) {
         self.region = region
@@ -490,15 +524,21 @@ private final class PaneRegionView: NSView {
         setAccessibilityIdentifier("seyal-pane-region-\(index)")
         setAccessibilityLabel(region.title)
         setAccessibilityValue(region.focused ? "focused" : "")
-        title.stringValue = region.title
-        title.translatesAutoresizingMaskIntoConstraints = false
-        // Title placeholder only when the leaf has no live Metal host yet.
-        title.isHidden = !split || region.live
-        addSubview(title)
+        chromeBar.translatesAutoresizingMaskIntoConstraints = false
+        // Live hosts own the strip; placeholder leaves keep B.1 chrome here.
+        chromeBar.isHidden = !split || region.live
+        chromeBar.onClose = { [weak self] in
+            self?.onClose?()
+        }
+        addSubview(chromeBar)
+        let trailing = chromeBar.trailingAnchor.constraint(equalTo: trailingAnchor)
+        trailing.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            title.centerXAnchor.constraint(equalTo: centerXAnchor),
-            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chromeBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            trailing,
+            chromeBar.topAnchor.constraint(equalTo: topAnchor),
         ])
+        chromeBar.apply(title: region.title, theme: nil, focused: region.focused)
     }
 
     @available(*, unavailable)
@@ -509,14 +549,39 @@ private final class PaneRegionView: NSView {
     func apply(theme: NativeTheme) {
         layer?.borderWidth = split ? Self.borderWidth : 0
         layer?.borderColor = (region.focused ? theme.accent : theme.seam).cgColor
-        title.textColor = theme.muted
-        title.font = .systemFont(ofSize: theme.uiFontSize, weight: .regular)
+        guard split, !region.live else {
+            chromeBar.isHidden = true
+            return
+        }
+        chromeBar.isHidden = false
+        chromeBar.apply(title: region.title, theme: theme, focused: region.focused)
+    }
+
+    func updatePlaceholderChrome(allowsClose: Bool, theme: NativeTheme?) {
+        guard split, !region.live else {
+            chromeBar.isHidden = true
+            return
+        }
+        chromeBar.isHidden = false
+        chromeBar.apply(title: region.title, theme: theme, focused: region.focused)
+        chromeBar.setCloseVisible(allowsClose)
     }
 
     /// Pane regions route clicks to Rust focus. Keep the custom accessibility
     /// group enabled so assistive technology and XCUI can invoke that action.
     override func isAccessibilityEnabled() -> Bool {
         true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        let hit = super.hitTest(point)
+        // Close Pane on the placeholder strip must receive the click.
+        if let hit, hit.isDescendant(of: chromeBar) || hit === chromeBar {
+            return hit
+        }
+        return self
     }
 
     override func mouseDown(with event: NSEvent) {
