@@ -233,9 +233,9 @@ reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #
 
 [[cohesion_acknowledgement]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 780
-issue = 1218
-reason = "Thin AppKit chrome host stays one cold-path façade; #866 routes eligibility-driven focus through syncInputRoutePresentation so Flow never keeps a competing Metal IME/AX target, and #1218 reconnects Rust recovery presentation when the composer becomes focus-eligible without moving draft/admission policy into Swift."
+acknowledged_loc = 920
+issue = 1375
+reason = "Thin AppKit chrome host stays one cold-path façade; Adaptive Depth region seams/tabs/inspector section grammar (#1375) and Block/recovery wiring stay on the façade while C04 row painting lives in ProductChromeAdaptiveDepth.swift. Further region extraction tracks VF-1 decomposition without inventing parallel product authority."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]
@@ -262,9 +262,4 @@ acknowledged_loc = 769
 issue = 1158
 reason = "The macOS host stays one AppKit adapter. #1158 adds CloseWindow forwarding, deferred AppKit destruction, Dock reopen, and hierarchical close on the activation and resize host already owned here. The W5 occlusion-hidden forwarding was restored by this landing."
 
-[[cohesion_acknowledgement]]
-path = "crates/seyal-client/src/local/mod.rs"
-acknowledged_loc = 495
-issue = 1010
-reason = "LocalDisplayClient stays one attach/poll client; #1123 adds bounded detach; #1220 delivery fields; #1010 adds Block-copy state fields, history_range_text, and post-read advance_block_copy. Copy accumulation lives in local/block_copy.rs and text building in history_text.rs."
 
