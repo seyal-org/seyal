@@ -1,6 +1,6 @@
 # ADR-024 — Protected M005 Agent task-input storage
 
-- **Status:** Proposed; not implementation authority until accepted by a non-author maintainer.
+- **Status:** Accepted on merge of PR #1378 by a non-author maintainer under #1327. An author or agent comment is not acceptance.
 - **Date:** 2026-10-26
 - **Issue:** #1327
 - **Scope:** Protected storage and lifecycle for user-provided WorkItem task/media payloads before delivery to an Agent execution host.
