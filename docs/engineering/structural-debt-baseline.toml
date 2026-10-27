@@ -72,9 +72,9 @@ responsibility = "ApplicationRoot lifecycle and quit/native-effect proofs stay w
 
 [[exception]]
 path = "crates/seyal-client/src/ffi/app/mod.rs"
-ceiling_loc = 1076
-issue = 1123
-responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123 adds quit/window test fixtures, #1144 extends activation-failure event wiring, and #936 keeps Pane geometry in pane_region.rs and Pane recovery ABI in pane_recovery.rs."
+ceiling_loc = 1106
+issue = 1375
+responsibility = "Published C ABI entry points stay one façade after decode/encode/visual/window extraction; #1123/#1144/#936 prior ABI coverage remains, and #1375 adds composer_for_pane plus shell-row/chrome density ABI without inventing a second FFI façade. Further growth must extract by responsibility rather than raising this ceiling again."
 
 [[cohesion_acknowledgement]]
 path = "crates/seyal-client/src/ffi/app/tests.rs"
@@ -231,11 +231,11 @@ acknowledged_loc = 958
 issue = 1167
 reason = "ShellState remains the portable Workspace/Window/Tab/Pane authority; #1092 carries containment fencing and close successors, #1108 drains native effects, #1131 owns identity-preserving moves, #1142 adds directional focus, #1123 adds W4a admission handling, #1144 adds Tab-to-Window activation lookup, #1218 adds two equalize dispatch arms, and #1167 only declares the PT6 suite module. Snapshot encoding stays in shell/snapshot.rs; equalize dispatch lives in equalize.rs and tree recursion in tree.rs."
 
-[[cohesion_acknowledgement]]
+[[exception]]
 path = "macos/Seyal/Sources/ProductChromeHostView.swift"
-acknowledged_loc = 920
+ceiling_loc = 1142
 issue = 1375
-reason = "Thin AppKit chrome host stays one cold-path façade; Adaptive Depth region seams/tabs/inspector section grammar (#1375) and Block/recovery wiring stay on the façade while C04 row painting lives in ProductChromeAdaptiveDepth.swift. Further region extraction tracks VF-1 decomposition without inventing parallel product authority."
+responsibility = "Thin AppKit chrome host remains one cold-path façade for Adaptive Depth tabs/left/inspector/composer wiring (#1375 consolidation); Block/recovery/chrome-action extensions already live in ProductChromeHostView+*.swift and ProductChromeAdaptiveDepth.swift. Ceiling matches post-density LOC; further growth must extract by region responsibility rather than raising this ceiling again."
 
 # #1106 tip C: SPEC-024 §14 K2 acceptance matrix stays one keybinding tests module.
 [[cohesion_acknowledgement]]

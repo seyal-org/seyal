@@ -253,7 +253,10 @@ fn composer_for_pane_isolates_sibling_drafts_across_split() {
     assert_eq!(bytes, draft.as_slice());
 
     let second = seyal_app_composer(handle);
-    assert_eq!(second.draft_utf8_len, 0, "new Pane starts with an empty draft");
+    assert_eq!(
+        second.draft_utf8_len, 0,
+        "new Pane starts with an empty draft"
+    );
 
     // Mutating the focused composer must not clobber the sibling draft.
     let epoch2 = second.epoch;
@@ -271,7 +274,10 @@ fn composer_for_pane_isolates_sibling_drafts_across_split() {
     assert_eq!(bytes, draft.as_slice());
     let focused_after = seyal_app_composer(handle);
     let bytes = unsafe {
-        slice::from_raw_parts(focused_after.draft_utf8, focused_after.draft_utf8_len as usize)
+        slice::from_raw_parts(
+            focused_after.draft_utf8,
+            focused_after.draft_utf8_len as usize,
+        )
     };
     assert_eq!(bytes, other.as_slice());
 
