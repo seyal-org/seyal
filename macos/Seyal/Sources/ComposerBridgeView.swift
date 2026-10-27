@@ -20,6 +20,10 @@ private final class ComposerTextView: NSTextView {
 final class ComposerBridgeView: NSView, NSTextViewDelegate {
     var onSubmitComposer: ((String) -> Int32)?
     var onSubmitRaw: ((String) -> Int32)?
+    /// Busy Flow: forward terminal control scalars (e.g. Ctrl+C) to the PTY.
+    /// Composer is not editable while ineligible; interrupt must still reach
+    /// the foreground child (ADR-009 / Composer §11).
+    var onForwardTerminalControl: ((UInt32) -> Int32)?
     /// Rust accepted OpenComposerHistory; the host reconciles the overlay.
     var onHistoryOpened: (() -> Void)?
     /// A table match changed product chrome (palette, tabs, presentation).
@@ -332,8 +336,25 @@ final class ComposerBridgeView: NSView, NSTextViewDelegate {
             // (⌘←/⌘⌫/…); never PTY (this is the composer NSTextView).
             return false
         case .fallsThrough:
+            return forwardBusyTerminalControlIfNeeded(event)
+        }
+    }
+
+    /// While Composer is Busy (running Block / awaiting prompt), control
+    /// scalars such as Ctrl+C must reach the PTY. The NSTextView is not
+    /// editable in this mode, so without this forward the interrupt is lost.
+    private func forwardBusyTerminalControlIfNeeded(_ event: NSEvent) -> Bool {
+        let composer = readComposer()
+        guard composer.mode == UInt16(SEYAL_APP_COMPOSER_BUSY.rawValue) else {
             return false
         }
+        guard let scalar = TerminalNativeKeyClassifier.controlASCII(
+            modifierFlags: event.modifierFlags,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers
+        ) else {
+            return false
+        }
+        return (onForwardTerminalControl?(scalar) ?? -10) == 0
     }
 
     private func hasMarkedText() -> Bool {

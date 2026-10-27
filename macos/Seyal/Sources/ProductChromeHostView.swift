@@ -407,6 +407,12 @@ final class ProductChromeHostView: NSView {
         composer.onSubmitRaw = { [weak self] command in
             self?.pane.inputSurface.terminalSubmitCommittedText(command) ?? -10
         }
+        composer.onForwardTerminalControl = { [weak self] scalar in
+            self?.pane.inputSurface.terminalSubmitKey(
+                kind: TerminalKeyIntent.controlASCII.rawValue,
+                scalar: scalar
+            ) ?? -10
+        }
         pane.inputSurface.onRequestComposerFocus = { [weak self] in
             self?.requestComposerFocusIfPaletteAllows() ?? false
         }
