@@ -6,14 +6,28 @@ extension RustDisplayBridge {
     guard isConnected, selectClient(),
       blockID > 0, startLine > 0, endLine >= startLine
     else { return -4 }
+    // Rebuilds re-project every completed Block. Skip duplicates already in
+    // flight so Flow `clear` + follow-up output cannot flood Runtime's
+    // after-display queue, close the Controller (-3 Io), and strand Composer.
+    if requestedHistoryRanges.contains(where: { _, request in
+      request.blockID == blockID
+        && request.startLine == startLine
+        && request.endLine == endLine
+    }) {
+      return 0
+    }
     let requestID = seyal_bridge_next_history_request_id()
     guard requestID != 0 else { return -4 }
-    let result = finishMutation(
-      seyal_bridge_request_history_range(blockID, startLine, endLine, 512, 131_072, 0))
-    if result == 0 {
-      let requestKey = PaneHistoryRequestKey(paneID: paneID, requestID: requestID)
-      requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
-    }
+    let result = seyal_bridge_request_history_range(
+      blockID, startLine, endLine, 512, 131_072, 0)
+    // History projection is disposable. Failures must not tear down the
+    // Controller mid-command via `finishMutation` (clears prepared frame and
+    // leaves Flow Composer on Busy / "Waiting for prompt...").
+    synchronizeWriteReadinessSource()
+    onStatusChanged()
+    guard result == 0 else { return result }
+    let requestKey = PaneHistoryRequestKey(paneID: paneID, requestID: requestID)
+    requestedHistoryRanges[requestKey] = (blockID, startLine, endLine)
     return result
   }
 
@@ -95,9 +109,12 @@ extension RustDisplayBridge {
         let nextStart = (previous?.startUnit ?? 0) + leads
         let nextID = seyal_bridge_next_history_request_id()
         if nextID != 0 {
-          let continued = finishMutation(
-            seyal_bridge_request_history_range(
-              request.blockID, request.startLine, request.endLine, 512, 131_072, nextStart))
+          // Same non-fatal rule as the initial request: continuations must not
+          // `finishMutation` a disposable history write into a session drop.
+          let continued = seyal_bridge_request_history_range(
+            request.blockID, request.startLine, request.endLine, 512, 131_072, nextStart)
+          synchronizeWriteReadinessSource()
+          onStatusChanged()
           if continued == 0 {
             let nextKey = PaneHistoryRequestKey(paneID: paneID, requestID: nextID)
             requestedHistoryRanges[nextKey] = request

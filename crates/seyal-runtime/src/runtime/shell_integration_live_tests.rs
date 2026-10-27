@@ -577,6 +577,8 @@ fn raw_clear_rearms_composer_prompt_gate() {
 fn composer_clear_rearms_prompt_gate() {
     // Flow composer `clear` must complete its Block and return to AtPrompt /
     // Available so the next submission is not stranded on Busy.
+    // Headed: clear then a follow-up must not leave Composer on
+    // "Waiting for prompt..." after Blocks already show Succeeded.
     let mut h = spawn("flow-clear", PLAIN_RC, None);
     h.wait_at_prompt();
     assert!(matches!(h.submit("clear"), ComposerAdmission::Accepted(_)));
@@ -587,16 +589,43 @@ fn composer_clear_rearms_prompt_gate() {
         }
     );
     h.wait_at_prompt();
-    assert_eq!(h.published().0, Some(ComposerEligibility::Available));
-    assert!(
-        matches!(h.submit("pwd"), ComposerAdmission::Accepted(_)),
-        "composer must accept after Flow clear returns to prompt"
+    assert_eq!(
+        h.published().0,
+        Some(ComposerEligibility::Available),
+        "published eligibility must flip Available after clear"
     );
+    let clear = h.runtime.entries[&h.id]
+        .block_timeline
+        .records()
+        .next()
+        .cloned()
+        .expect("clear record");
+    assert!(
+        clear.end_line.is_some_and(|end| end >= clear.start_line),
+        "clear end_line {:?} must not precede start_line {}",
+        clear.end_line,
+        clear.start_line
+    );
+    assert!(matches!(
+        h.submit("printf 'AFTER_CLEAR\\n'"),
+        ComposerAdmission::Accepted(_)
+    ));
     assert_eq!(
         h.wait_block_completed(1),
         CommandBlockLifecycle::Completed {
             exit_status: Some(0)
         }
+    );
+    h.wait_at_prompt();
+    assert_eq!(
+        h.published().0,
+        Some(ComposerEligibility::Available),
+        "composer must re-arm after the post-clear command"
+    );
+    let body = h.block_body(1);
+    assert!(
+        body.contains("AFTER_CLEAR"),
+        "post-clear command body missing:\n{body}"
     );
 }
 

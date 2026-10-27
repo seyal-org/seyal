@@ -26,6 +26,16 @@ Composer → PTY → Block status (Succeeded):
 | `ls /tmp \| head -3` | Succeeded |
 
 ### `clear` / Composer Busy (reproduced)
+### Flow `clear` → Waiting for prompt (fixed 2026-10-27 terminal-correctness track)
+
+**Failure:** After Flow composer `clear` then a follow-up (often `ls`), Composer stuck on Busy / "Waiting for prompt...", AX showed `rows=0 columns=0`, attachment id bumped, recovery `restoring`.
+
+**Root cause:** Flow `rebuildBlocks` re-requests HistoryRange for every completed Block on each timeline tick. After `clear`, high-volume follow-up output + duplicate history requests fill Runtime's after-display outbound queue → Runtime `close_local_connection` → client `finishMutation` sees `-3` (Io) → `stop()` clears prepared frame / composer status → UI strands on Waiting while a Running Block may still be painted.
+
+**Fix:** Deduplicate in-flight and retained history range requests; do not route disposable history writes through `finishMutation` (same pattern as `proposeGeometry`). Runtime live test `composer_clear_rearms_prompt_gate` strengthened for post-clear Available + body.
+
+**Headed evidence (local only):** clear+ls stress kept `available` and non-zero geometry; no bridge `-3` log after fix.
+
 
 - Runtime live test `raw_clear_rearms_composer_prompt_gate` proves Raw `clear\r` returns to `AtPrompt` and accepts the next composer submit (must wait for `Running` first — pre-clear `AtPrompt` is a race).
 - Runtime live test `composer_clear_rearms_prompt_gate` proves Flow composer `clear` completes its Block, republishes **Available**, and admits the next submit.

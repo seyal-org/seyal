@@ -696,7 +696,18 @@ class MetalSurfaceView: NSView, CAMetalDisplayLinkDelegate {
   }
 
   func requestHistoryRange(startLine: UInt64, endLine: UInt64, blockID: UInt64) -> Int32 {
-    bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID) ?? -10
+    // Flow rebuilds re-apply every completed Block projection. Reusing a
+    // retained range avoids duplicate HistoryRangeRequests that can fill
+    // Runtime's outbound queue after `clear` and drop the Controller.
+    let key = PaneBlockKey(paneID: paneID, blockID: blockID)
+    if let existing = historyRanges[key],
+      existing.startLine == startLine,
+      existing.endLine == endLine
+    {
+      return 0
+    }
+    return bridge?.requestHistoryRange(startLine: startLine, endLine: endLine, blockID: blockID)
+      ?? -10
   }
 
   func retainHistoryRange(_ range: NativeHistoryRange) {
