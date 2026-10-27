@@ -124,6 +124,13 @@ extension RustDisplayBridge {
     }
   }
 
+  /// Presentation return to Flow: re-apply the current Runtime fact even when
+  /// the revision was already observed while the composer was hidden.
+  func forcePublishComposerStatus() {
+    composerStatusRelayTracker.abandonClaim()
+    publishComposerStatus()
+  }
+
   /// Transport lost: the relayed fact no longer describes a live attachment.
   func clearComposerStatus() {
     guard composerStatusRelayTracker.clear() else { return }

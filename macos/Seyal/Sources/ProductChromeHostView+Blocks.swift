@@ -46,6 +46,11 @@ extension ProductChromeHostView {
             pane.inputSurface.applyRendererPresentation(.flow())
             layoutSubtreeIfNeeded()
             publishBlockOutputFrame()
+            // Raw/TUI may have advanced Runtime composer eligibility while the
+            // Flow composer was hidden. Drop the dedupe claim and re-sample so
+            // "Waiting for prompt..." cannot stick after a Raw `clear` that
+            // already returned to a trusted prompt.
+            pane.inputSurface.bridge?.forcePublishComposerStatus()
         }
     }
 

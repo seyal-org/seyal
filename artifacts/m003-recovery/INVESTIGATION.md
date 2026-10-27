@@ -30,7 +30,13 @@ Composer → PTY → Block status (Succeeded):
 | `printf` ANSI red | Succeeded |
 | `ls /tmp \| head -3` | Succeeded |
 
-Still to verify interactively: `clear`/`reset` vs Flow Blocks retention, history/Tab completion, Ctrl+C/D/L, vim/nvim, SSH, tmux, high-volume scroll.
+### `clear` / Composer Busy (reproduced)
+
+- Runtime live test `raw_clear_rearms_composer_prompt_gate` proves Raw `clear\r` returns to `AtPrompt` and accepts the next composer submit (must wait for `Running` first — pre-clear `AtPrompt` is a race).
+- Headed: after Raw `clear` then Toggle Raw→Flow, composer can stick on **Busy / "Waiting for prompt..."** until a later Enter re-arms markers or eligibility is re-sampled. Mitigation: re-publish composer status when returning to Flow transcript presentation.
+- Flow Blocks intentionally retain history across `clear` (VT clear ≠ Block timeline clear).
+
+Still to verify interactively: history/Tab completion, Ctrl+C/D/L, vim/nvim, SSH, tmux, high-volume scroll.
 
 ## Experiential gaps vs cmux (UX benchmark)
 

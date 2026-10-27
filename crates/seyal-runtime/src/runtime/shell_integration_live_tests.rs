@@ -546,6 +546,37 @@ fn direct_input_closes_the_prompt_gate_at_admission_time() {
 }
 
 #[test]
+fn raw_clear_rearms_composer_prompt_gate() {
+    // Headed M003 recovery: Raw `clear` must not permanently strand Flow
+    // composer on Busy / "Waiting for prompt...". After DirectInputAdmitted
+    // closes the gate, the shell's next trusted prompt must reopen it.
+    let mut h = spawn("clear", PLAIN_RC, None);
+    h.wait_at_prompt();
+    h.direct(b"clear\r");
+    assert_eq!(h.submit("pwd"), ComposerAdmission::Busy);
+    // Do not treat the pre-clear AtPrompt as success: wait until direct
+    // admission leaves the prompt, then for the shell's next prompt.
+    h.pump_until(|runtime, id| {
+        runtime.entries[&id].integration == IntegrationState::Running { block: None }
+    });
+    h.wait_at_prompt();
+    assert!(
+        h.records().is_empty(),
+        "raw clear must not invent Blocks"
+    );
+    assert!(
+        matches!(h.submit("pwd"), ComposerAdmission::Accepted(_)),
+        "composer must accept after clear returns to prompt"
+    );
+    assert_eq!(
+        h.wait_block_completed(0),
+        CommandBlockLifecycle::Completed {
+            exit_status: Some(0)
+        }
+    );
+}
+
+#[test]
 fn foreground_stdin_reader_cannot_receive_a_composer_line() {
     let mut h = spawn("stdin", PLAIN_RC, None);
     h.wait_at_prompt();
