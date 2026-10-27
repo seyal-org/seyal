@@ -2,14 +2,17 @@ import AppKit
 import CoreImage
 
 /// One Rust-projected quick action (`seyal_app_block_action_row`, #1010).
-/// Rust owns the set, order, placement, label, shortcut hint and
-/// availability (ADR-015); the view only draws it and reports `kind` back.
+/// Rust owns the set, order, placement, label, shortcut/disabled-reason
+/// detail and availability (ADR-015); the view only draws it and reports
+/// `kind` back.
 struct CommandBlockActionRow: Equatable {
     let kind: UInt16
     let placement: UInt16
     let label: String
-    /// Portable hint such as `shift+cmd+c`; empty when none.
-    let shortcut: String
+    /// While enabled: portable shortcut hint such as `shift+cmd+c` (empty
+    /// until SPEC-024 binds Block copy). While disabled: Rust refusal reason
+    /// for tooltip / accessibility help (M003 §6).
+    let detail: String
     let enabled: Bool
 }
 
@@ -373,13 +376,15 @@ final class CommandBlockView: NSView {
     }
 
     private func menuItem(_ action: CommandBlockActionRow) -> NSMenuItem {
-        let (key, modifiers) = Self.keyEquivalent(action.shortcut)
+        let shortcut = action.enabled ? action.detail : ""
+        let (key, modifiers) = Self.keyEquivalent(shortcut)
         let item = NSMenuItem(
             title: action.label, action: #selector(menuItemChosen(_:)), keyEquivalent: key)
         item.keyEquivalentModifierMask = modifiers
         item.target = self
         item.tag = Int(action.kind)
         item.isEnabled = action.enabled
+        item.toolTip = Self.actionHelp(action)
         item.image = NSImage(systemSymbolName: Self.symbol(action.kind), accessibilityDescription: nil)
         item.setAccessibilityIdentifier("seyal-block-action-\(Self.identifier(action.kind))")
         return item
@@ -394,8 +399,12 @@ final class CommandBlockView: NSView {
         button.isEnabled = action.enabled
         button.isBordered = false
         button.imagePosition = .imageOnly
-        button.toolTip = action.label
+        let help = Self.actionHelp(action)
+        button.toolTip = help
         button.setAccessibilityLabel(action.label)
+        if !action.enabled, !action.detail.isEmpty {
+            button.setAccessibilityHelp(action.detail)
+        }
         button.setAccessibilityIdentifier("seyal-block-action-\(Self.identifier(action.kind))")
         // Selected Block actions stay in the key-view loop (design §6).
         button.refusesFirstResponder = false
@@ -406,6 +415,14 @@ final class CommandBlockView: NSView {
             button.heightAnchor.constraint(equalToConstant: 22),
         ])
         return button
+    }
+
+    /// Tooltip / help: label alone when enabled; label + Rust reason when not.
+    static func actionHelp(_ action: CommandBlockActionRow) -> String {
+        if action.enabled || action.detail.isEmpty {
+            return action.label
+        }
+        return "\(action.label) — \(action.detail)"
     }
 
     /// Platform presentation only: SF Symbol per Rust action kind.

@@ -18,8 +18,8 @@ use seyal_core::{BlockId, PaneId};
 use crate::presentation::{InputRoute, PresentationMode};
 
 pub use block_actions::{
-    block_actions, composer_admits_rerun, BlockActionKind, BlockActionPlacement,
-    BlockActionProjection,
+    block_actions, composer_admits_rerun, rerun_refusal, BlockActionKind, BlockActionPlacement,
+    BlockActionProjection, RerunRefusal,
 };
 use history::{HistoryOverlay, PaneHistory};
 pub use history::{HistoryOverlaySnapshot, HISTORY_CAPACITY, HISTORY_VISIBLE_ROWS};

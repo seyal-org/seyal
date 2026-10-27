@@ -312,7 +312,6 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
         return;
     };
     let selected = snapshot.chrome.selected_block;
-    let admits_rerun = crate::composer::composer_admits_rerun(&composer);
     for (index, block) in composer.blocks.iter().enumerate() {
         let mut flags: u16 = match block.state {
             crate::composer::BlockPresentationState::Running => 1,
@@ -325,11 +324,19 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
             flags |= BLOCK_SELECTED;
         }
         let first = state.block_actions.rows.len() as u32;
-        for action in crate::composer::block_actions(block, admits_rerun) {
+        for action in crate::composer::block_actions(block, &composer) {
             let mut action_flags = (action.placement as u16) << BLOCK_ACTION_PLACEMENT_SHIFT;
             if action.enabled {
                 action_flags |= BLOCK_ACTION_ENABLED;
             }
+            // detail: shortcut hint while enabled; disabled reason while not
+            // (M003-BLOCK-COMPONENT-DESIGN §6). Shortcuts are empty until
+            // SPEC-024 binds Block copy commands.
+            let detail = if action.enabled {
+                action.shortcut
+            } else {
+                action.disabled_reason
+            };
             push_row(
                 &mut state.block_actions.rows,
                 &mut state.block_actions.text,
@@ -339,7 +346,7 @@ pub(super) fn encode_block_rows(state: &mut AppHandle) {
                     id: block.id.to_bytes(),
                     flags: action_flags,
                     title: action.label,
-                    detail: action.shortcut,
+                    detail,
                     address: None,
                 },
             );

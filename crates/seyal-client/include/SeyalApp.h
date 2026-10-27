@@ -416,8 +416,10 @@ enum SeyalAppComposerMode {
 
 /*
  * Block quick actions (#1010), from seyal_app_block_action_row. Rust owns the
- * action set, order, labels (title), shortcut hints (detail, e.g. "cmd+c")
- * and availability; the host only draws them and routes `kind` back.
+ * action set, order, labels (title), availability, and detail text: shortcut
+ * hint while enabled (e.g. "cmd+c", empty until SPEC-024 binds Block copy) or
+ * disabled reason while not (M003-BLOCK-COMPONENT-DESIGN §6 tooltip / AX help).
+ * The host only draws them and routes `kind` back.
  * row.kind = SEYAL_APP_BLOCK_ACTION_*; row.flags = ENABLED bit plus placement
  * ((flags & PLACEMENT_MASK) >> PLACEMENT_SHIFT) = SEAM / COPY_MENU / MORE_MENU.
  */

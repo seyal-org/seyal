@@ -17,30 +17,39 @@ final class SeyalBlockComponentTests: XCTestCase {
     /// Sentinel labels prove the view draws Rust's rows and hardcodes none.
     /// Shape mirrors `composer::block_actions` (seam + Copy menu + More).
     private func actions(canRerun: Bool, hasOutput: Bool = true) -> [CommandBlockActionRow] {
-        func row(_ kind: UInt32, _ placement: UInt32, _ label: String, _ shortcut: String = "",
-            enabled: Bool = true) -> CommandBlockActionRow
-        {
+        let rerunReason = "Rerun is unavailable while this Block is running."
+        let outputReason = "No output history is available for this Block."
+        func row(
+            _ kind: UInt32, _ placement: UInt32, _ label: String, _ detail: String = "",
+            enabled: Bool = true
+        ) -> CommandBlockActionRow {
             CommandBlockActionRow(
                 kind: UInt16(kind), placement: UInt16(placement), label: label,
-                shortcut: shortcut, enabled: enabled)
+                detail: detail, enabled: enabled)
         }
         return [
             row(SEYAL_APP_BLOCK_ACTION_COPY_MENU, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:Copy"),
-            row(SEYAL_APP_BLOCK_ACTION_RERUN, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:Rerun", enabled: canRerun),
+            row(
+                SEYAL_APP_BLOCK_ACTION_RERUN, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:Rerun",
+                canRerun ? "" : rerunReason, enabled: canRerun),
             row(SEYAL_APP_BLOCK_ACTION_MORE_MENU, SEYAL_APP_BLOCK_ACTION_SEAM, "Rust:More"),
             row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
                 "Rust:Copy command"),
-            row(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
-                "Rust:Copy output", enabled: hasOutput),
-            row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
-                "Rust:Copy command + output", enabled: hasOutput),
+            row(
+                SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
+                "Rust:Copy output", hasOutput ? "" : outputReason, enabled: hasOutput),
+            row(
+                SEYAL_APP_BLOCK_ACTION_COPY_COMMAND_AND_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_COPY_MENU,
+                "Rust:Copy command + output", hasOutput ? "" : outputReason, enabled: hasOutput),
             row(SEYAL_APP_BLOCK_ACTION_INSPECT, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU, "Rust:Inspect"),
             row(SEYAL_APP_BLOCK_ACTION_COPY_COMMAND, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU,
                 "Rust:Copy command"),
-            row(SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU,
-                "Rust:Copy output", enabled: hasOutput),
-            row(SEYAL_APP_BLOCK_ACTION_RERUN, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU, "Rust:Rerun",
-                enabled: canRerun),
+            row(
+                SEYAL_APP_BLOCK_ACTION_COPY_OUTPUT, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU,
+                "Rust:Copy output", hasOutput ? "" : outputReason, enabled: hasOutput),
+            row(
+                SEYAL_APP_BLOCK_ACTION_RERUN, SEYAL_APP_BLOCK_ACTION_IN_MORE_MENU, "Rust:Rerun",
+                canRerun ? "" : rerunReason, enabled: canRerun),
         ]
     }
 
@@ -235,9 +244,30 @@ final class SeyalBlockComponentTests: XCTestCase {
     func testRerunAvailabilityIsProjectedFromRust() {
         let offered = descendant(block(selected: true), "seyal-block-action-rerun", as: NSButton.self)
         XCTAssertEqual(offered?.isEnabled, true)
+        XCTAssertEqual(offered?.toolTip, "Rust:Rerun")
         let withheld = descendant(
             block(selected: true, canRerun: false), "seyal-block-action-rerun", as: NSButton.self)
         XCTAssertEqual(withheld?.isEnabled, false)
+        let reason = "Rerun is unavailable while this Block is running."
+        XCTAssertEqual(withheld?.toolTip, "Rust:Rerun — \(reason)")
+        XCTAssertEqual(withheld?.accessibilityHelp(), reason)
+    }
+
+    func testDisabledActionHelpUsesRustDetail() {
+        let action = CommandBlockActionRow(
+            kind: UInt16(SEYAL_APP_BLOCK_ACTION_RERUN),
+            placement: UInt16(SEYAL_APP_BLOCK_ACTION_SEAM),
+            label: "Rerun",
+            detail: "Rerun is unavailable while the composer holds a draft.",
+            enabled: false)
+        XCTAssertEqual(
+            CommandBlockView.actionHelp(action),
+            "Rerun — Rerun is unavailable while the composer holds a draft.")
+        let enabled = CommandBlockActionRow(
+            kind: UInt16(SEYAL_APP_BLOCK_ACTION_RERUN),
+            placement: UInt16(SEYAL_APP_BLOCK_ACTION_SEAM),
+            label: "Rerun", detail: "", enabled: true)
+        XCTAssertEqual(CommandBlockView.actionHelp(enabled), "Rerun")
     }
 
     func testOnlyRealActionsAreShownAndLabelled() {

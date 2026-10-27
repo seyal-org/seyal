@@ -118,7 +118,7 @@ extension ProductChromeHostView {
                 placement: (row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_MASK))
                     >> UInt16(SEYAL_APP_BLOCK_ACTION_PLACEMENT_SHIFT),
                 label: productChromeCopyUTF8(row.title, row.title_len) ?? "",
-                shortcut: productChromeCopyUTF8(row.detail, row.detail_len) ?? "",
+                detail: productChromeCopyUTF8(row.detail, row.detail_len) ?? "",
                 enabled: row.flags & UInt16(SEYAL_APP_BLOCK_ACTION_ENABLED) != 0
             )
         }

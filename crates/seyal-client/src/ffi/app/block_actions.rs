@@ -55,7 +55,8 @@ pub extern "C" fn seyal_app_block_action_count(handle: u64, block_index: u32) ->
 }
 
 /// One Rust-projected quick action (#1010): `kind` = action, `flags` =
-/// enabled bit plus placement, `title` = label, `detail` = shortcut hint.
+/// enabled bit plus placement, `title` = label, `detail` = shortcut hint
+/// while enabled or the disabled reason (design §6) while not.
 /// Pointers stay valid until the root generation changes.
 #[unsafe(no_mangle)]
 pub extern "C" fn seyal_app_block_action_row(
