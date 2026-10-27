@@ -24,7 +24,7 @@ int main(void) {
     REQUIRE(sizeof(SeyalAppAccessibility) == 24);
     REQUIRE(sizeof(SeyalAppComposer) == 40);
     REQUIRE(sizeof(SeyalAppChrome) == 24);
-    REQUIRE(sizeof(SeyalAppTheme) == 36);
+    REQUIRE(sizeof(SeyalAppTheme) == 64);
     REQUIRE(sizeof(SeyalAppShell) == 120);
     REQUIRE(offsetof(SeyalAppShell, containment_generation) == 72);
     REQUIRE(offsetof(SeyalAppShell, shell_generation) == 112);
