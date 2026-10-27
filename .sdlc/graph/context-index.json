@@ -21,7 +21,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "cb5c5bbb8b6da1ba6cdac25e9dd5f70948f49f50"
+          "fingerprint": "2e426ca9b9a767044b9c1671dd9ffd5769ea3817"
         }
       ],
       "relationships": [
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "docs/architecture/README.md",
-          "fingerprint": "cb5c5bbb8b6da1ba6cdac25e9dd5f70948f49f50"
+          "fingerprint": "2e426ca9b9a767044b9c1671dd9ffd5769ea3817"
         }
       ],
       "relationships": [
@@ -321,7 +321,7 @@
       "id": "DEC-ADR-024",
       "kind": "decision",
       "title": "ADR-024 M005 protected Agent task-input storage",
-      "summary": "Proposed, not implementation authority: Agent Backend-owned protected task/media payload storage subordinate to WorkItemInputVersion metadata, with fail-closed macOS key handling and SPEC-015 dispatch fencing.",
+      "summary": "Accepted on merge of PR #1378 by a non-author maintainer under #1327; protected task/media storage remains subordinate to WorkItemInputVersion metadata with fail-closed macOS key handling and SPEC-015 dispatch fencing.",
       "tags": [
         "adr",
         "adr-024",
@@ -329,12 +329,12 @@
         "agent",
         "task-input",
         "storage",
-        "proposed"
+        "accepted"
       ],
       "sources": [
         {
           "path": "docs/architecture/ADR-024-M005-PROTECTED-AGENT-INPUT-STORE.md",
-          "fingerprint": "0a620fa1be6f6b90b30ace2353d7a41a46621614"
+          "fingerprint": "6fe6f6471f50011ad15d5d1991d58346034a9d18"
         }
       ],
       "relationships": []
